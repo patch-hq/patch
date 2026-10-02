@@ -2983,6 +2983,35 @@ async function startHost(
         logger.info({ chatId, preferredAccountId }, 'chat preferred account set');
         return;
       }
+      if (event.type === 'chat.effort_request') {
+        // spec/04 § Effort — run this chat at another thinking-effort level
+        // from its NEXT turn, or clear the override with `effort: null`.
+        const { chatId, effort } = event;
+        void daemon.setChatEffort(chatId, effort).then(
+          () => {
+            // The acknowledgement is the `chat.state` setChatEffort emits,
+            // which carries the new effort — that is also what makes every
+            // OTHER surface holding this chat converge on it.
+            logger.info({ chatId, effort }, 'chat effort changed');
+          },
+          (err: unknown) => {
+            // NO FALLBACK: a refused change leaves the chat's effort exactly
+            // as it was.
+            const code = (err as { code?: string }).code ?? 'chat_not_found';
+            logger.warn(
+              { chatId, effort, err: (err as Error).message },
+              'chat effort change refused',
+            );
+            sender({
+              type: 'chat.error',
+              chatId,
+              error: { code: code as ChatErrorCode, message: (err as Error).message },
+              seq: OUT_OF_BAND_SEQ,
+            });
+          },
+        );
+        return;
+      }
       void handleServerEvent(event, daemon, sender, logger, {
         buildAccountReport,
         heldAccounts: (model) =>

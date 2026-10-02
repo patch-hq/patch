@@ -912,6 +912,105 @@ describe('ChatRegistry model (top bar)', () => {
 });
 
 // spec/02 § Background task completions + spec/14 § Status badges. The host
+// spec/04 § Effort. Mirrors the model describe block above: `chat.spawned`
+// never carries an effort (a chat starts with none), and `chat.state` is how
+// a later change (or the Codex-backend "not applicable" case) travels.
+describe('ChatRegistry effort', () => {
+  it('chat.spawned always starts a chat with effort: null', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    reg.observe({
+      type: 'chat.spawned',
+      daemonId: 'd1',
+      chatId: 'c1',
+      folder: '/a',
+      model: 'claude-x',
+    });
+    expect(reg.get('c1')?.effort).toBeNull();
+  });
+
+  it('effort is preserved across a chat.state that carries none (an old daemon sends no effort)', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    reg.observe({
+      type: 'chat.spawned',
+      daemonId: 'd1',
+      chatId: 'c1',
+      folder: '/a',
+      model: 'claude-x',
+    });
+    reg.observe({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions',
+      chatId: 'c1',
+      activity: 'idle',
+      lastUpdated: 1,
+      status: 'archived',
+      folder: '/a',
+      effort: 'high',
+    });
+    reg.observe({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions',
+      chatId: 'c1',
+      activity: 'idle',
+      lastUpdated: 2,
+      folder: '/a',
+    });
+    expect(reg.get('c1')?.effort).toBe('high');
+  });
+
+  it('a chat.state carrying an effort updates it — that is how a mid-chat switch travels', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    reg.observe({
+      type: 'chat.spawned',
+      daemonId: 'd1',
+      chatId: 'c1',
+      folder: '/a',
+      model: 'claude-x',
+    });
+    reg.observe({
+      type: 'chat.state',
+      permissionMode: 'auto',
+      chatId: 'c1',
+      activity: 'idle',
+      lastUpdated: 2,
+      folder: '/a',
+      effort: 'low',
+    });
+    expect(reg.get('c1')?.effort).toBe('low');
+  });
+
+  it('a chat.state carrying effort: null clears it, same as model never does but effort can', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    reg.observe({
+      type: 'chat.spawned',
+      daemonId: 'd1',
+      chatId: 'c1',
+      folder: '/a',
+      model: 'claude-x',
+    });
+    reg.observe({
+      type: 'chat.state',
+      permissionMode: 'auto',
+      chatId: 'c1',
+      activity: 'idle',
+      lastUpdated: 2,
+      folder: '/a',
+      effort: 'low',
+    });
+    reg.observe({
+      type: 'chat.state',
+      permissionMode: 'auto',
+      chatId: 'c1',
+      activity: 'idle',
+      lastUpdated: 3,
+      folder: '/a',
+      effort: null,
+    });
+    expect(reg.get('c1')?.effort).toBeNull();
+  });
+});
+
+// spec/02 § Background task completions + spec/14 § Status badges. The daemon
 // counts each chat's still-running background commands and sub-agents; the
 // server mirrors the number so a surface that cold-starts over REST knows a
 // chat is still working before the next live `chat.state`. Without the mirror a

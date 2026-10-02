@@ -11,7 +11,12 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { taskNotificationSummary, type MessageCompaction, type RateLimitWindow } from '@patch/wire';
+import {
+  taskNotificationSummary,
+  type EffortLevel,
+  type MessageCompaction,
+  type RateLimitWindow,
+} from '@patch/wire';
 import {
   compactionFromSdkMetadata,
   compactionSummaryLine,
@@ -170,6 +175,11 @@ export interface SdkRunOptions {
   mcpServer?: { command: string; args: string[]; env: Record<string, string> };
   /** SDK `options.model` override (CLI `--model` pass-through; spec/13). */
   model?: string | undefined;
+  /**
+   * SDK `options.effort` — Claude's thinking-effort level (spec/04 § Effort).
+   * Only ever set for a Claude-backend turn; a Codex turn never carries one.
+   */
+  effort?: EffortLevel | undefined;
   /**
    * Per-host system prompt override (Task 3). When non-empty, passed as
    * `options.systemPrompt` to the SDK query, replacing the SDK default.
@@ -1773,6 +1783,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       ...forkOptsFor(opts),
       ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: live.mode,
       ...(opts.onPermissionRequest
         ? {
@@ -1939,6 +1950,7 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
       ...forkOptsFor(opts),
       ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: opts.permissionMode ?? 'auto',
       ...(opts.onPermissionRequest
         ? {

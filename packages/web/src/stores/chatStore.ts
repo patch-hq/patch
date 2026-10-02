@@ -12,6 +12,7 @@ import type {
   AttachmentRef,
   ChatBranch,
   ChatDelegateUpdateEvent,
+  EffortLevel,
   FinishedGoal,
   GoalProgress,
   MessageCompaction,
@@ -208,6 +209,7 @@ interface ChatState {
         | 'snoozedUntil'
         | 'jobId'
         | 'model'
+        | 'effort'
         | 'rateLimitResumingAt'
         | 'resumeKind'
         | 'lastUserActivity'
@@ -235,6 +237,8 @@ interface ChatState {
         // Optional, same reason as jobId: a caller that predates the model
         // top-bar label omits it, which PRESERVES whatever is already known.
         model?: string | null;
+        // Same reason as model: omitting it preserves the known effort.
+        effort?: EffortLevel | null;
         rateLimitResumingAt?: number | null;
         resumeKind?: 'rate_limit' | 'overloaded' | null;
         // Optional: an older server predates the field. Store-side merge falls
@@ -284,6 +288,7 @@ interface ChatState {
         | 'snoozedUntil'
         | 'jobId'
         | 'model'
+        | 'effort'
         | 'rateLimitResumingAt'
         | 'resumeKind'
         | 'lastUserActivity'
@@ -313,6 +318,8 @@ interface ChatState {
         // See `hydrate` above: optional so pre-model-label callers don't have
         // to know about it, and omitting it preserves the known value.
         model?: string | null;
+        // Same reason: omitting it preserves the known effort.
+        effort?: EffortLevel | null;
         rateLimitResumingAt?: number | null;
         resumeKind?: 'rate_limit' | 'overloaded' | null;
         // Optional: an older server predates the field. Store-side merge falls
@@ -940,6 +947,10 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     // then, and also correct forever if the spawning host has no model
     // catalogue support to report one.
     model: null,
+    // Unknown until `chat.state` first names it (spec/04 § Effort) — `null`
+    // until then, and also correct forever for a chat with no override or one
+    // on the Codex backend.
+    effort: null,
     // `null` until a rate-limit auto-resume is scheduled; cleared when it fires
     // or is cancelled (host's `rateLimitResumingAt` field in `chat.state`).
     rateLimitResumingAt: null,
@@ -1074,6 +1085,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // model is set once at spawn and never changes (spec/04 § Spawn) — same
       // fallback rule as jobId.
       const model = r.model !== undefined ? r.model : (existing?.model ?? null);
+      // See `hydrate`/`mergeChats` above: same rule for the effort override.
+      const effort = r.effort !== undefined ? r.effort : (existing?.effort ?? null);
       // rateLimitResumingAt can clear (timer fired) — `null` is meaningful.
       const rateLimitResumingAt =
         r.rateLimitResumingAt !== undefined
@@ -1131,6 +1144,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1158,6 +1172,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1208,6 +1223,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const jobId = r.jobId !== undefined ? r.jobId : (existing?.jobId ?? null);
       // See `hydrate` above.
       const model = r.model !== undefined ? r.model : (existing?.model ?? null);
+      // See `hydrate` above.
+      const effort = r.effort !== undefined ? r.effort : (existing?.effort ?? null);
       const rateLimitResumingAt =
         r.rateLimitResumingAt !== undefined
           ? r.rateLimitResumingAt
@@ -1250,6 +1267,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1277,6 +1295,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1714,6 +1733,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.preferredAccountId !== undefined
                 ? event.preferredAccountId
                 : row.preferredAccountId,
+            // spec/04 § Effort — same absent/null rule as `model` above: absent
+            // is "unchanged", and `null` is a real value (no override, or the
+            // chat is on the Codex backend) carried through as-is.
+            effort: event.effort !== undefined ? event.effort : row.effort,
             // spec/02 § Background task completions — how much of this chat's
             // work is still in flight now the turn has ended. `0` is meaningful
             // (the last task finished), so only an ABSENT field keeps the known

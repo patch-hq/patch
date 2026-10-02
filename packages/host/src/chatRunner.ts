@@ -81,6 +81,7 @@ import type {
   PermissionDecisionBy,
   TurnOutcome,
   McpServerConfig,
+  EffortLevel,
 } from '@patch/wire';
 
 import {
@@ -1237,6 +1238,7 @@ import {
   attachmentsDirFor,
 } from './chatMove.js';
 import { createClaudeSessionStore } from './claudeSessionStore.js';
+import { isCodexModel } from './codexAccounts.js';
 import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
@@ -1641,6 +1643,20 @@ export class UnknownModelError extends Error {
   constructor(hostId: string, model: string) {
     super(`machine ${hostId} offers no model with id: ${model}`);
     this.name = 'UnknownModelError';
+  }
+}
+
+/**
+ * A `chat.effort_request` landed on a chat whose current model is not on the
+ * Claude backend (spec/04 § Effort). NO FALLBACK: Codex has no equivalent
+ * option, so there is nothing to round the request to — the chat's effort is
+ * left exactly as it was.
+ */
+export class EffortNotSupportedError extends Error {
+  readonly code = 'effort_not_supported' as const;
+  constructor(chatId: string, model: string | undefined) {
+    super(`chat ${chatId} is on model ${model ?? '(none)'}, which has no Claude effort levels`);
+    this.name = 'EffortNotSupportedError';
   }
 }
 
@@ -3967,6 +3983,9 @@ export class Daemon {
       lastUpdated: now,
       claudeSessionId: undefined,
       model,
+      // A brand-new chat has no effort override of its own (spec/04 §
+      // Effort) — it runs at the model's own default until one is set.
+      effort: undefined,
       permissionMode,
       ...(req.preferredAccountId !== undefined
         ? { preferredAccountId: req.preferredAccountId }
@@ -7479,6 +7498,7 @@ export class Daemon {
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
       ...(state.model !== undefined ? { model: state.model } : {}),
+      ...(state.effort !== undefined ? { effort: state.effort } : {}),
       permissionMode: this.chatPermissionMode(chatId),
       disabledTools: state.disabledTools,
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
@@ -8895,6 +8915,7 @@ export class Daemon {
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
       ...(state.model !== undefined ? { model: state.model } : {}),
+      ...(state.effort !== undefined ? { effort: state.effort } : {}),
       permissionMode,
       // spec/02 § Native subagent dispatch — talking to the user is the
       // PARENT's job, so a subagent never gets the tools that do it, on top
@@ -14042,6 +14063,25 @@ export class Daemon {
   }
 
   /**
+   * Set this chat's Claude thinking-effort override from its NEXT turn
+   * (spec/04 § Effort), or clear it with `effort: null`. Unlike `setChatModel`
+   * there IS a clear reading — `null` is a real, requestable value meaning "no
+   * override, let the model decide" — so it is not required to carry a level.
+   *
+   * Refused when the chat's current model is not on the Claude backend
+   * (`EffortNotSupportedError`): Codex has no equivalent option, and the chat
+   * must not be left thinking it switched when it did not.
+   */
+  async setChatEffort(chatId: string, effort: EffortLevel | null): Promise<void> {
+    const s = this.chatState.get(chatId);
+    if (!s) throw new ChatNotFoundError(chatId);
+    if (isCodexModel(s.model)) throw new EffortNotSupportedError(chatId, s.model);
+    s.effort = effort ?? undefined;
+    this.opts.metaStore.update(chatId, (m) => ({ ...m, effort: effort ?? undefined }));
+    this.emitState(chatId);
+  }
+
+  /**
    * Preview what switching this chat to `targetModel` would cost, WITHOUT
    * doing it (spec/04 § History — show the cost in the switch confirmation:
    * the approximate tokens the target must re-read uncached — the full track
@@ -14236,6 +14276,11 @@ export class Daemon {
       // the chat has no model of its own; the surface must not read that as a
       // model, only as "unchanged, and don't guess".
       ...(s.model !== undefined ? { model: s.model } : {}),
+      // spec/04 § Effort — the Claude thinking-effort level the chat's NEXT
+      // turn will run at, carried on every emit for the same reason `model`
+      // is. Omitted for a chat on the Codex backend — effort does not apply
+      // there, and the field must not be read as "overridable but unset".
+      ...(isCodexModel(s.model) ? {} : { effort: s.effort ?? null }),
     };
     return ev;
   }

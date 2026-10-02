@@ -65,6 +65,7 @@ function rowFixture(overrides: Partial<ChatRow> = {}): RowFixture {
     lastUserActivity: Date.now(),
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
     ...overrides,

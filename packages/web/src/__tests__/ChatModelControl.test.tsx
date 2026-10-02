@@ -73,6 +73,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     lastSeq: 0,
     jobId: null,
     model: 'claude-sonnet-4-6',
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
     ...overrides,

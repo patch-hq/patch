@@ -17,6 +17,7 @@ function row(chatId: string, badge: 'working' | 'done', name = chatId): ChatRow 
     pendingWake: null,
     todos: [],
     snoozedUntil: null,
+    effort: null,
     chatId,
     hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,

@@ -169,6 +169,7 @@ export function ensureSpecialThreads(opts: EnsureSpecialThreadsOptions): void {
         lastUpdated: meta.updatedAt,
         claudeSessionId: meta.claudeSessionId,
         model: undefined,
+        effort: meta.effort,
         // A special thread carries its own mode like every other chat. An
         // existing one keeps what it was stamped with; a brand-new one takes
         // the host default now and keeps it (spec/02 § Permission mode).

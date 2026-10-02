@@ -24,6 +24,7 @@ import type { Logger } from 'pino';
 import type {
   ChatErrorCode,
   ChatStateEvent,
+  EffortLevel,
   PendingWake,
   TodoItem,
   PermissionMode,
@@ -156,6 +157,15 @@ export interface ChatSummary {
    * test one) — it spawned the chat without one to report.
    */
   model: string | null;
+  /**
+   * The Claude thinking-effort override this chat is running at (spec/04 §
+   * Effort), mirrored from `chat.state`. `null` means either no override is
+   * set or the chat is on the Codex backend — same as the daemon's own
+   * `ChatStateEvent.effort`, since a cold-start surface cannot tell the two
+   * apart from this alone and doesn't need to: either way there is no
+   * override to show.
+   */
+  effort: EffortLevel | null;
   /**
    * How many of this chat's backgrounded commands and sub-agents are still
    * running, as the host reported on `chat.state` (spec/02 § Background task
@@ -355,6 +365,7 @@ export class ChatRegistry {
         lastUserActivity: 0,
         jobId: this.jobChatLinks?.get(event.chatId) ?? null,
         model: event.model ?? null,
+        effort: null,
         // Nothing has reported on this chat's background work yet — unknown,
         // which is not the same as none.
         backgroundTasks: null,
@@ -457,6 +468,8 @@ export class ChatRegistry {
         // field), not "no model", so the existing value is carried forward
         // rather than being wiped to null.
         model: event.model !== undefined ? event.model : (existing?.model ?? null),
+        // spec/04 § Effort — same absent-means-unchanged rule as `model`.
+        effort: event.effort !== undefined ? event.effort : (existing?.effort ?? null),
         // spec/02 § Background task completions. `0` is meaningful (the last
         // task finished), so only an ABSENT field carries the known value
         // forward — a host too old to count them must not be read as

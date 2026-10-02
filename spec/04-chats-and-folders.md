@@ -159,6 +159,32 @@ reconstruction. No fallback: if the outgoing session can't produce a handoff,
 the switch fails loudly rather than silently doing the full reconstruction
 instead — the user asked for the cheap path specifically.
 
+## Effort
+
+A Claude-backend chat can carry a thinking-effort override (`low`, `medium`,
+`high`, `xhigh`, `max` — the SDK's own `EffortLevel`), changeable at any point
+in its life from any surface (`14-design-web.md` § Effort control), the same
+way its model is. `null` (no override) is itself a valid choice, meaning the
+model's own default governs — unlike the model, which always has some value,
+a chat can have no effort override at all.
+
+A change takes effect on the chat's NEXT turn, read as that turn starts, for
+the same reason a model change does: a running turn is left alone. The host
+persists the chosen value with the rest of the chat's state, so it survives a
+restart, and reports it on the chat's state so every surface holding the chat
+converges on it.
+
+Codex has no equivalent option. A chat on that backend has no effort to set;
+a request to set one is refused. A model change that moves a chat onto the
+Codex backend leaves its effort override in place but inert — it has nothing
+to apply to — and a move back onto Claude picks the stored value back up.
+
+Also reachable as a composer built-in: `/effort <level>` typed in the
+composer changes the chat's effort the same way the picker does. Unlike
+`/model`, a bare `/effort` is not a usage error — it clears the override,
+since "no override" is itself a value effort can hold. A level matching
+nothing is a usage error naming the offending text, and no change is sent.
+
 ## History
 
 - Location and format: a chat's own record is `~/.patch/chats/<chatId>/events.jsonl` — an append-only log, one record per message, tool call, result, artifact, permission decision, and turn or session boundary, independent of any harness (`principles.md` § History ownership). A tool result too large to keep inline, or one carrying an inline image, is moved out of line into a content-addressed blob store and replaced by a reference. The harness's own native session history (`~/.claude/projects/<encoded-folder>/...jsonl` for Claude) still exists on disk, but is a resumption cache the harness reads from, not the record.

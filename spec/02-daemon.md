@@ -104,6 +104,7 @@ Claude Code runs through `@anthropic-ai/claude-agent-sdk` against the host's ins
 Codex supports explicit approval, workspace edits, read-only planning and explicitly unrestricted execution. It does not offer Claude's automatic approval classifier. A new OpenAI chat inherits explicit approval when the host default is Claude's automatic mode.
 
 Codex history persists independently of Claude transcripts, including tool results and pending turn identities. On reconnect the host reconciles an outstanding provider turn before submitting another request. An uncertain outcome is reported and never silently retried. Branches fork at provider-supported turn boundaries; unsupported partial-turn branch points are refused.
+Claude also offers a per-chat thinking-effort override (`04-chats-and-folders.md` § Effort); Codex has no equivalent setting.
 
 The host provisions a backend the host lacks rather than reporting it as
 missing. For Claude Code it resolves the `claude` executable and passes it to the

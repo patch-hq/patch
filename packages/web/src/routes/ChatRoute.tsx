@@ -24,6 +24,7 @@ import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery } from '@tanstack/react-query';
 import {
   SPECIAL_THREAD_IDS,
+  harnessForModel,
   hasTaskNotification,
   isEditToolCall as isEditToolCallWire,
   isGroupableToolCall,
@@ -67,6 +68,7 @@ import { parseReminderCommand } from '../lib/reminderCommand.js';
 import { parseLoopCommand } from '../lib/loopCommand.js';
 import { parseClearCommand } from '../lib/clearCommand.js';
 import { parseModelCommand, matchModel } from '../lib/modelCommand.js';
+import { parseEffortCommand } from '../lib/effortCommand.js';
 import { getModelCatalog } from '../lib/models.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { HookBlockCard } from '../components/HookBlockCard.js';
@@ -1589,6 +1591,33 @@ export function ChatRoute({
         return;
       }
       ws.send({ type: 'chat.model_request', chatId, model: result.modelId });
+      return;
+    }
+    // spec/04-chats-and-folders.md § Effort — `/effort <level>` changes the
+    // chat's thinking-effort override INSTEAD of sending a chat turn, the same
+    // way the picker does (`chat.effort_request` on the live socket). A bare
+    // `/effort` clears the override; an unrecognised level is a usage error
+    // and sends nothing.
+    const parsedEffort = parseEffortCommand(message);
+    if (parsedEffort.isEffort) {
+      if (parsedEffort.unknown !== null) {
+        pushError(`unknown effort level: ${parsedEffort.unknown}`);
+        return;
+      }
+      if (
+        row?.model !== undefined &&
+        row.model !== null &&
+        harnessForModel(row.model) !== 'claude'
+      ) {
+        pushError('effort is not available on this chat’s model');
+        return;
+      }
+      if (parsedEffort.effort === row?.effort) return;
+      if (!ws) {
+        pushError('not connected');
+        return;
+      }
+      ws.send({ type: 'chat.effort_request', chatId, effort: parsedEffort.effort });
       return;
     }
     if (!ws) {

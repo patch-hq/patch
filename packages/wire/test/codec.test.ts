@@ -535,6 +535,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     chatId: 'c1',
     preferredAccountId: 'account-1',
   },
+  'chat.effort_request': {
+    type: 'chat.effort_request',
+    chatId: 'c1',
+    effort: 'high',
+  },
   'file.write': { type: 'file.write', chatId: 'c1', path: 'foo.txt', content: 'x' },
   'patch.file_changed': { type: 'patch.file_changed', chatId: 'c1', path: 'foo.txt' },
   'surface.heartbeat': { type: 'surface.heartbeat' },

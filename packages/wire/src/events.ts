@@ -268,6 +268,10 @@ export const ChatErrorCode = z.enum([
   // named a branch with no parent (the root), or one that has already sent
   // back once. Mirrors the refusal the `patch_send_back` tool itself gives.
   'send_back_failed',
+  // spec/04 § Effort — a `chat.effort_request` landed on a chat whose current
+  // model is not on the Claude backend. The chat's effort is unchanged; NEVER
+  // silently dropped.
+  'effort_not_supported',
 ]);
 export type ChatErrorCode = z.infer<typeof ChatErrorCode>;
 
@@ -462,6 +466,15 @@ export const PermissionMode = z.enum([
   'plan',
 ]);
 export type PermissionMode = z.infer<typeof PermissionMode>;
+
+/**
+ * Claude's thinking-effort levels (spec/02 § Agent backends, spec/04 §
+ * Effort), taken as-is from the SDK's own `EffortLevel`. Claude-backend only
+ * — Codex has no equivalent option on this wire, so a chat on that backend
+ * has no effort to set.
+ */
+export const EffortLevel = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
+export type EffortLevel = z.infer<typeof EffortLevel>;
 
 /**
  * The Claude Code backend's id (spec/02 § Agent backends: "The backend in use
@@ -1260,6 +1273,19 @@ export const ChatStateEvent = z
      * reason to invent one, so absent means "unchanged, and don't guess".
      */
     model: z.string().min(1).optional(),
+    /**
+     * The thinking-effort level the chat's NEXT turn will run at (spec/04 §
+     * Effort), Claude backend only. Carried on every state emit for the same
+     * reason `model` is — a surface that joins late or reconnects converges on
+     * it, and it doubles as the acknowledgement of a `chat.effort_request`.
+     *
+     * Three-valued like `model`/`permissionMode` are two-valued, but with an
+     * extra layer: absent means "unchanged, don't guess" (a daemon predating
+     * this field, or a backend with nothing to report); `null` means the chat
+     * genuinely has no override set and runs at the model's own default; a
+     * level means that override is in force.
+     */
+    effort: EffortLevel.nullable().optional(),
     /**
      * Who started the turn this state belongs to (spec/09 § Whose turn it was).
      * The server reads it on the running → idle edge to decide whether the turn
@@ -3938,6 +3964,31 @@ export const ChatAccountRequestEvent = z
   })
   .strict();
 export type ChatAccountRequestEvent = z.infer<typeof ChatAccountRequestEvent>;
+
+/**
+ * Surface → host thinking-effort change (spec/04 § Effort) — the same shape
+ * as `chat.model_request`, for Claude's effort levels. Runs the chat's NEXT
+ * turn at `effort`, read fresh as that turn starts so a turn already running
+ * is left alone.
+ *
+ * `effort` is REQUIRED but nullable: `null` is a real, requestable value —
+ * "no override, let the model decide" — not "no change" (unlike
+ * `chat.settings`' omitted-means-clear fields), so there is no absent case to
+ * confuse it with.
+ *
+ * Refused with `chat.error` when the chat's current model is not on the
+ * Claude backend (`effort_not_supported`) — Codex has no equivalent option.
+ * The daemon answers with the chat's state carrying the new `effort`
+ * (`ChatStateEvent.effort`), exactly as a model change is acknowledged.
+ */
+export const ChatEffortRequestEvent = z
+  .object({
+    type: z.literal('chat.effort_request'),
+    chatId: z.string().min(1),
+    effort: EffortLevel.nullable(),
+  })
+  .strict();
+export type ChatEffortRequestEvent = z.infer<typeof ChatEffortRequestEvent>;
 
 export const FileWriteEvent = z
   .object({
@@ -8212,6 +8263,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatLoopRequestEvent,
   ChatModelRequestEvent,
   ChatAccountRequestEvent,
+  ChatEffortRequestEvent,
   FileWriteEvent,
   PatchFileChangedEvent,
   PatchBrowserViewFrameEvent,
@@ -8489,6 +8541,7 @@ export const EVENT_SCHEMAS = {
   'chat.loop_request': ChatLoopRequestEvent,
   'chat.model_request': ChatModelRequestEvent,
   'chat.account_request': ChatAccountRequestEvent,
+  'chat.effort_request': ChatEffortRequestEvent,
   'file.write': FileWriteEvent,
   'patch.file_changed': PatchFileChangedEvent,
   'patch.browser_view.frame': PatchBrowserViewFrameEvent,

@@ -9,6 +9,7 @@ import type {
   ChatActivity,
   ChatStateEvent,
   ChatStatus,
+  EffortLevel,
   FinishedGoal,
   GoalProgress,
   PendingWake,
@@ -166,6 +167,13 @@ export interface ChatRow {
    * report one — a `null` here is "not known", never a model.
    */
   model: string | null;
+  /**
+   * The Claude thinking-effort override this chat is running at (spec/04 §
+   * Effort), mirrored the same way `model` is. `null` when no override is set
+   * or the chat is on the Codex backend — either way there is nothing to show
+   * beyond the picker reading "Default".
+   */
+  effort: EffortLevel | null;
   /**
    * ms-epoch when this chat's rate-limit auto-resume is scheduled, or `null`
    * when no retry is pending. Surfaced by the host when `autoResumeRateLimit`

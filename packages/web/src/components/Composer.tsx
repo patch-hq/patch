@@ -58,6 +58,7 @@ import {
 } from 'lucide-react';
 import { endMeeting, startMeeting } from '../lib/meetingControl.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
+import { EffortControl } from './EffortControl.js';
 import { CloseIcon } from './icons.js';
 import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
 import { ImageAnnotator } from './ImageAnnotator.js';
@@ -2272,6 +2273,7 @@ export const Composer = forwardRef(function Composer(
                 </div>
               )}
               <ChatModelControl chatId={chatId} />
+              <EffortControl chatId={chatId} />
               {/* spec/14 § Composer — context ring, immediately left of stop/send. */}
               <ContextRing chatId={chatId} />
             </>

@@ -64,6 +64,7 @@ function makeRow(
     pendingWake: null,
     todos: [],
     snoozedUntil: null,
+    effort: null,
     chatId,
     hostId,
     permissionMode: 'bypassPermissions' as const,

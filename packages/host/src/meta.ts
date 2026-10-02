@@ -19,7 +19,14 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import { ChatContextUsage, HarnessId, PermissionMode, SnoozeRecord, TurnOrigin } from '@patch/wire';
+import {
+  ChatContextUsage,
+  EffortLevel,
+  HarnessId,
+  PermissionMode,
+  SnoozeRecord,
+  TurnOrigin,
+} from '@patch/wire';
 
 export const ChatMeta = z
   .object({
@@ -121,6 +128,13 @@ export const ChatMeta = z
      * every chat that names none — means the host's strategy alone decides.
      */
     preferredAccountId: z.string().min(1).optional(),
+    /**
+     * Claude's thinking-effort override this chat runs at (spec/04 § Effort),
+     * Claude backend only. Persisted for the same reason `model` is: a choice
+     * made about THIS chat must survive a restart. Absent means no override —
+     * the chat runs at the model's own default.
+     */
+    effort: EffortLevel.optional(),
     /**
      * The chat's last context-window reading (spec/14 § Composer — context
      * ring). Absent until the chat has run a Claude turn.
