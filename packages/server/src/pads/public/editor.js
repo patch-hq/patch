@@ -635,7 +635,11 @@
     var r = sel.getBoundingClientRect();
     drag = { resize: true, el: sel, pos: pos, x0: e.clientX, y0: e.clientY, w: r.width, h: r.height };
     e.target.setPointerCapture(e.pointerId);
+    var moved = false;
     var move = function (ev) {
+      // A hand is never still: only a real drag is a resize, so a tap that lands on a handle isn't one.
+      if (!moved && Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) <= 6) return;
+      moved = true;
       var sx = (pos === 'ne' || pos === 'se') ? 1 : -1, sy = (pos === 'sw' || pos === 'se') ? 1 : -1;
       drag.nw = Math.max(4, drag.w + (ev.clientX - drag.x0) * sx);
       drag.nh = Math.max(4, drag.h + (ev.clientY - drag.y0) * sy);
@@ -645,6 +649,14 @@
     var up = function () {
       e.target.removeEventListener('pointermove', move); e.target.removeEventListener('pointerup', up);
       var d = drag; drag = null;
+      if (!moved) {
+        // A tap on a handle (small elements are mostly handle) still counts toward a double-tap to edit.
+        var now = Date.now();
+        if (lastTap && lastTap.el === d.el && now - lastTap.t < 380) { lastTap = null; editText(d.el); return; }
+        lastTap = { el: d.el, t: now };
+        draw();
+        return;
+      }
       if (d.nw) post({ kind: 'resize', target: target(d.el), fromWidth: Math.round(d.w), fromHeight: Math.round(d.h), width: Math.round(d.nw), height: Math.round(d.nh) });
       draw();
     };

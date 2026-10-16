@@ -108,6 +108,29 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   });
 
+  it('desktop: double-clicking a small element edits it, even when the 2nd click lands on a corner handle', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    const box = (await design.locator('#b').boundingBox())!;
+    const x = box.x + box.width - 2;
+    const y = box.y + box.height - 2;
+    await page.mouse.click(x, y); // selects; the handles now sit under this point
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 1, y + 1); // a hand never holds perfectly still
+    await page.mouse.up();
+    await expect.poll(() => design.locator('#b').getAttribute('contenteditable')).not.toBeNull();
+    const after = (await design.locator('#b').boundingBox())!;
+    expect(Math.round(after.width)).toBe(Math.round(box.width));
+    expect(Math.round(after.height)).toBe(Math.round(box.height));
+    expect((await pending(frameUrl)).map((c) => c.kind)).toEqual([]);
+    await ctx.close();
+  });
+
   it('desktop: + adds a blank screen, opens it, and every device sees it', async () => {
     const frameUrl = await newPad();
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
