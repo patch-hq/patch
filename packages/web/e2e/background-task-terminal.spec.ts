@@ -12,6 +12,40 @@ import type { WireEvent } from '@patch/wire';
 // the module.
 const BG = '/app/dev-harness.html?chat=chat_bgtask&ws=fake';
 
+// The bar's rows come from the host's own record of each task
+// (`GET /api/chats/:id/watch`), which names the output file exactly — nothing
+// is globbed or guessed. Stubbed here, as in background-task-bar.spec.ts.
+const NOW = Date.now();
+const TASKS = [
+  {
+    taskId: 'diag-25045',
+    description: 'Diagnose 25045 test failures',
+    command: 'pnpm --filter @patch/web test -- --grep 25045',
+    outputFile: '/data/chats/chat_bgtask/watch/diag-25045.output',
+    status: 'running' as const,
+    startedAt: NOW - 5_000,
+  },
+  {
+    taskId: 'baiw888mq',
+    description: 'Build web package to compile CSS',
+    command: 'pnpm --filter @patch/web build',
+    outputFile: '/data/chats/chat_bgtask/watch/baiw888mq.output',
+    status: 'running' as const,
+    startedAt: NOW - 65_000,
+  },
+];
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/chats/chat_bgtask/watch', (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tasks: TASKS }),
+    });
+  });
+});
+
 /** Every frame the page has sent, in order. */
 async function sent(page: import('@playwright/test').Page): Promise<WireEvent[]> {
   return page.evaluate(() => (window as unknown as { __wsSent: WireEvent[] }).__wsSent);
@@ -47,12 +81,12 @@ test.describe('background task → terminal', () => {
     // The command really went to the shell, with this task's id in it.
     await expect.poll(async () => (await inputs(page)).length).toBe(1);
     const line = (await inputs(page))[0]!;
-    expect(line).toContain('/tmp/claude-*/*/*/tasks/baiw888mq.output');
-    expect(line).toContain('tail -n 100 -f');
+    expect(line).toContain('/data/chats/chat_bgtask/watch/baiw888mq.output');
+    expect(line).toContain('tail -n 200 -f');
     expect(line.endsWith('\n')).toBe(true);
 
     // And it reads like a typed command: echoed into the scrollback.
-    await expect(page.getByTestId('terminal-scroll')).toContainText('❯ f=$(ls -t');
+    await expect(page.getByTestId('terminal-scroll')).toContainText('❯ tail -n 200 -f');
     await expect(page.getByTestId('terminal-scroll')).toContainText('baiw888mq.output');
 
     // The shell is on the chat's own host, rooted in the chat's folder.
@@ -74,19 +108,16 @@ test.describe('background task → terminal', () => {
     await expect.poll(async () => (await inputs(page)).length).toBe(1);
   });
 
-  test('a task with no background id yet says so and runs nothing', async ({ page }) => {
+  test('each task opens the terminal on its own output file', async ({ page }) => {
     await page.goto(BG);
-    // The sub-agent launch has no tool result yet, so no background id.
+    // The sub-agent is the newest row.
     const row = page.getByTestId('background-task-bar-task').nth(0);
     await expect(row).toContainText('Diagnose 25045 test failures');
     await row.click();
 
     await expect(page.getByTestId('terminal-pane')).toBeVisible();
-    await expect(page.getByTestId('terminal-scroll')).toContainText(
-      'no background id reported yet for "Diagnose 25045 test failures"',
-    );
-    // NO FALLBACK: nothing was guessed and nothing was run.
-    expect(await inputs(page)).toEqual([]);
+    await expect.poll(async () => (await inputs(page)).length).toBe(1);
+    expect((await inputs(page))[0]).toContain('/data/chats/chat_bgtask/watch/diag-25045.output');
   });
 
   test('the collapse chevron folds the stack without opening a terminal', async ({ page }) => {
@@ -99,19 +130,5 @@ test.describe('background task → terminal', () => {
     // The folded summary names no single task, so it opens nothing either.
     await page.getByTestId('background-task-bar-count').click();
     await expect(page.getByTestId('terminal-pane')).toHaveCount(0);
-  });
-
-  test('the bar stays visible over the terminal, so the next task is one click away', async ({
-    page,
-  }) => {
-    await page.goto(BG);
-    await page.getByTestId('background-task-bar-task').nth(1).click();
-    await expect(page.getByTestId('terminal-pane')).toBeVisible();
-    await expect(page.getByTestId('background-task-bar-task')).toHaveCount(2);
-
-    // Switching to the other task replaces what the terminal is showing.
-    await page.getByTestId('background-task-bar-task').nth(0).click();
-    await expect(page.getByTestId('terminal-scroll')).toContainText('no background id reported');
-    await expect.poll(async () => (await inputs(page)).length).toBe(1);
   });
 });

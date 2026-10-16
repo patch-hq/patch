@@ -28,7 +28,8 @@ async function asMacKeyboard(page: Page): Promise<void> {
 /** Open the second user turn's editor and return its field. */
 async function openEditor(page: Page) {
   const turn = page.locator('.msg-user').nth(1);
-  await turn.hover();
+  // The turn box spans the whole row; only the bubble itself takes the pointer.
+  await turn.getByTestId('msg-content').hover();
   await turn.getByTestId('msg-edit').click();
   const field = turn.getByTestId('msg-edit-input');
   await expect(field).toBeVisible();

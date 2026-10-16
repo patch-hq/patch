@@ -121,9 +121,9 @@ test.describe('the selection bar is pinned above the chat list', () => {
 
     // spec/14 § Sidebar → One column. Now the bar lives in the fixed band it
     // must line up with the fixed band's controls, which pay the scrollbar
-    // gutter as margin rather than out of their content box. The Chats/Batch
-    // strip is the top-band reference, not the Needs attention chip: that one
-    // is sized by its own label and is exempt from the shared right edge.
+    // gutter as margin rather than out of their content box. The chat search
+    // field is the top-band reference, not the view pill: that one is sized by
+    // its own label and is exempt from the shared right edge.
     const edges = await page.evaluate(() => {
       const read = (sel: string): { left: number; right: number } => {
         const el = document.querySelector(sel);
@@ -133,7 +133,7 @@ test.describe('the selection bar is pinned above the chat list', () => {
       };
       return {
         bar: read('[data-testid="selection-bar"]'),
-        tabs: read('.batch-tabs'),
+        tabs: read('[data-testid="chat-search"]'),
         nav: read('.nav-row'),
       };
     });

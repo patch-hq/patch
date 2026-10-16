@@ -68,19 +68,18 @@ async function stub(page: import('@playwright/test').Page): Promise<void> {
 }
 
 test.describe('job editor — model picker', () => {
-  test('starts on Account default and lists the chosen host’s models', async ({ page }) => {
+  test('starts on Job default and lists the chosen host’s models', async ({ page }) => {
     await stub(page);
     await page.goto(NEW_JOB);
 
     const model = page.getByTestId('job-spawn-model');
     await expect(model).toBeVisible();
-    // A new job pins nothing — it tracks the account setting rather than
-    // freezing an id that will eventually be retired.
+    // A new job pins nothing — it tracks the account's job default (Settings →
+    // Jobs) rather than freezing an id that will eventually be retired.
     await expect(model).toHaveValue('');
-    // The harness's seeded chat history puts d1 in as the MRU host on load,
-    // and d1 already has a default model mirrored to it — so the option
-    // names the model it actually is, not just that one exists.
-    await expect(model.locator('option[value=""]')).toHaveText('Account default (Opus 5)');
+    // The option names the model the job default actually is, read through the
+    // chosen host's catalogue, not just that one exists.
+    await expect(model.locator('option[value=""]')).toHaveText('Job default (Opus 5)');
 
     await page
       .getByTestId('job-spawn-folder')
@@ -105,9 +104,9 @@ test.describe('job editor — model picker', () => {
     await folder.selectOption(JSON.stringify(['d2', '/home/tom/beta']));
     await expect(model.locator('option[value="claude-sonnet-4-6"]')).toHaveCount(1);
     await expect(model.locator('option[value="claude-opus-5"]')).toHaveCount(0);
-    // d2 has never reported a default model to this surface, so the option
-    // stays unlabelled rather than carrying over d1's.
-    await expect(model.locator('option[value=""]')).toHaveText('Account default');
+    // The job default belongs to the account, not to a host, so it stays; d2's
+    // catalogue has no label for it, so it is named by its raw id.
+    await expect(model.locator('option[value=""]')).toHaveText('Job default (claude-opus-5)');
   });
 
   test('a message action has no model control at all', async ({ page }) => {

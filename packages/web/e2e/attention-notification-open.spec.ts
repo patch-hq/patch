@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseSidebarView } from './sidebarView';
 
 // Todoist: "a chat you are looking at should show in the needs attention view,
 // even if you clicked a notification etc." A notification/deep-link tap lands
@@ -20,7 +21,7 @@ test.describe('needs-attention hold survives a cold open', () => {
     await page.goto(HARNESS);
     await expect(page.getByTestId('chat-title')).toHaveText('July Seasonal Food');
 
-    await page.getByTestId('attention-toggle').click();
+    await chooseSidebarView(page, 'unread');
 
     const row = page.getByTestId('chat-row-chat_md');
     await expect(row).toBeVisible();

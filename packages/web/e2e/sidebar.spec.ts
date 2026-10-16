@@ -100,7 +100,7 @@ test.describe('sidebar', () => {
     // replaces the list with its error — so without this stub the harness's
     // absent backend answered 500 and the row under test vanished a moment
     // after it appeared. Same stub the Archived cases already carry.
-    await page.route('**/api/chats?deleted=only', (r) =>
+    await page.route('**/api/chats?deleted=only*', (r) =>
       r.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -250,7 +250,7 @@ test.describe('sidebar', () => {
   }) => {
     // The list belongs to the icon row that opened it: it must sit close under
     // that row. The chat list above runs right to the divider (no gap).
-    await page.route('**/api/chats?archived=include', (r) =>
+    await page.route('**/api/chats?archived=only*', (r) =>
       r.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -305,8 +305,7 @@ test.describe('sidebar', () => {
     const sidebar = page.getByTestId('sidebar');
     const brand = sidebar.locator('.sb-brand');
     const fab = page.getByTestId('new-chat-fab');
-    const tabs = page.getByTestId('batch-tabs');
-    const attention = page.getByTestId('attention-toggle');
+    const view = page.getByTestId('sidebar-view-trigger');
     const scroller = page.getByTestId('sb-scroll');
     const bottomNav = page.getByTestId('bottom-nav');
 
@@ -314,8 +313,7 @@ test.describe('sidebar', () => {
 
     const brandBox = (await brand.boundingBox())!;
     const fabBox = (await fab.boundingBox())!;
-    const tabsBox = (await tabs.boundingBox())!;
-    const attBox = (await attention.boundingBox())!;
+    const viewBox = (await view.boundingBox())!;
     const scBox = (await scroller.boundingBox())!;
     const navBox = (await bottomNav.boundingBox())!;
 
@@ -323,8 +321,7 @@ test.describe('sidebar', () => {
     expect(fabBox.y).toBeGreaterThanOrEqual(brandBox.y + brandBox.height - 1);
     expect(fabBox.y - (brandBox.y + brandBox.height)).toBeLessThan(24);
     // …and above every other sidebar band.
-    expect(fabBox.y).toBeLessThan(tabsBox.y);
-    expect(fabBox.y).toBeLessThan(attBox.y);
+    expect(fabBox.y).toBeLessThan(viewBox.y);
     expect(fabBox.y).toBeLessThan(scBox.y);
     expect(fabBox.y).toBeLessThan(navBox.y);
     // In the top quarter of the sidebar, not the bottom.
@@ -343,7 +340,7 @@ test.describe('sidebar', () => {
     // `aside` scrolled, so the Archived/Deleted controls and the + New chat
     // button scrolled off the bottom and had to be hunted for (spec/14 § Sidebar
     // → Scroll regions).
-    await page.setViewportSize({ width: 1280, height: 420 });
+    await page.setViewportSize({ width: 1280, height: 540 });
     await page.goto(HARNESS);
 
     const sidebar = page.getByTestId('sidebar');
@@ -475,7 +472,7 @@ test.describe('sidebar', () => {
   test('an EXPANDED archived list caps at half the sidebar and scrolls itself, nav still fixed', async ({
     page,
   }) => {
-    await page.route('**/api/chats?archived=include', (r) =>
+    await page.route('**/api/chats?archived=only*', (r) =>
       r.fulfill({
         status: 200,
         contentType: 'application/json',

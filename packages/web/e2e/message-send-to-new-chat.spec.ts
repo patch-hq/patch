@@ -56,7 +56,9 @@ test.describe('send to new chat', () => {
     await page.getByTestId('msg-context-menu-send-to-new-chat').click();
     const input = page.getByTestId('composer-input');
     await expect(input).toBeFocused();
-    await expect(input).toHaveValue('> beta\n\n');
+    // A quote is a chip above the field; the field itself holds only what is typed.
+    await expect(page.getByTestId('composer-quote')).toHaveText(/^beta/);
+    await expect(input).toHaveValue('');
   });
 
   test('right-click with no selection sends the whole message', async ({ page }) => {
@@ -65,7 +67,8 @@ test.describe('send to new chat', () => {
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
     await msg.locator('.content').click({ button: 'right' });
     await page.getByTestId('msg-context-menu-send-to-new-chat').click();
-    await expect(page.getByTestId('composer-input')).toHaveValue('> alpha beta gamma\n\n');
+    await expect(page.getByTestId('composer-quote')).toHaveText(/^alpha beta gamma/);
+    await expect(page.getByTestId('composer-input')).toHaveValue('');
   });
 
   test("Quote adds the whole message to this chat's composer and focuses it", async ({ page }) => {
@@ -75,7 +78,8 @@ test.describe('send to new chat', () => {
     await msg.locator('.content').click({ button: 'right' });
     await page.getByTestId('msg-context-menu-quote').click();
     const input = page.getByTestId('composer-input');
-    await expect(input).toHaveValue('> alpha beta gamma\n\n');
+    await expect(page.getByTestId('composer-quote')).toHaveText(/^alpha beta gamma/);
+    await expect(input).toHaveValue('');
     await expect(input).toBeFocused();
     expect(page.url()).toContain('chat=chat_bus');
   });

@@ -75,6 +75,7 @@ test.describe('a pending edit can be approved down to nothing', () => {
     expect(await permissionResponses(page)).toEqual([
       {
         type: 'chat.permission_response',
+        chatId: 'chat_bus',
         requestId: 'req-write-1',
         approve: true,
         decision: 'approve_with_edits',

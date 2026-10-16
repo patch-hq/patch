@@ -13,7 +13,7 @@ test.describe('tool-call deep link', () => {
     await page.goto(DEEPLINK);
     const row = page.locator('[data-testid="notify-box"][data-deeplink="true"]');
     await expect(row).toBeVisible();
-    await expect(row).toContainText('patch_notify');
+    await expect(row).toContainText('Patch notify');
 
     const link = row.getByTestId('tool-call-deeplink');
     await expect(link).toBeVisible();

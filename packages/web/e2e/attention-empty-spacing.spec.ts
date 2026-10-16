@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseSidebarView } from './sidebarView';
 
 // Todoist: "'Nothing needs attention' has no spacing." — the empty-state
 // message sat flush against the sidebar's left edge (2px in from `.empty-hint`
@@ -10,7 +11,7 @@ import { test, expect } from '@playwright/test';
 const HARNESS = '/app/dev-harness.html?chat=chat_md';
 
 test.describe('needs-attention empty state spacing', () => {
-  test('"Nothing needs attention." aligns with the toggle above it, not the sidebar edge', async ({
+  test('"Nothing needs attention." aligns with the Manager row above it, not the sidebar edge', async ({
     page,
   }) => {
     await page.goto(HARNESS);
@@ -50,14 +51,14 @@ test.describe('needs-attention empty state spacing', () => {
       // genuine empty state rather than the hold.
       w.__store.getState().setActiveChat(null);
     });
-    await page.getByTestId('attention-toggle').click();
+    await chooseSidebarView(page, 'unread');
 
     const empty = page.getByTestId('attention-empty');
     await expect(empty).toBeVisible();
     await expect(empty).toHaveText('Nothing needs attention.');
 
     const emptyBox = (await empty.boundingBox())!;
-    const toggleBox = (await page.getByTestId('attention-toggle').boundingBox())!;
+    const toggleBox = (await page.locator('.sb-row.special').first().boundingBox())!;
 
     // Left edge lines up with the toggle above it (both share the sidebar's
     // ~8px control inset), not the raw edge of the scroll region — the bug

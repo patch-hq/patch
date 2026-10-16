@@ -440,6 +440,20 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A run of tools whose AI summary failed — drives the failed-summary marker e2e.
+  {
+    chatId: 'chat_tools_failed',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'tools-failed-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // Words said in a call, user and assistant, for the call-mark e2e (spec/07).
   {
     chatId: 'chat_voice',

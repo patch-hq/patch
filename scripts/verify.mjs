@@ -23,8 +23,9 @@
 // skippable by env var, because a gate with an override is not a gate.
 //
 // TEMPORARY EXCEPTION, 2026-09-17, widened 2026-09-18 (the user's explicit call,
-// box-size workaround): the browser layer is skipped UNCONDITIONALLY by
-// default now — set PATCH_RUN_BROWSER_GATE=1 to run it for one invocation.
+// box-size workaround): on the dev box the browser layer is skipped
+// UNCONDITIONALLY by default — set PATCH_RUN_BROWSER_GATE=1 to run it for one
+// invocation. The release workflow sets it, so the layer gates every release.
 // See that flag's own comment below. Remove both once the box is upgraded.
 
 import { spawnSync } from 'node:child_process';
@@ -59,13 +60,26 @@ async function freePort() {
 // not one.
 const BROWSER_ENV = { ...process.env, PATCH_PW_PORT: String(await freePort()) };
 
+// The release workflow splits the browser layer across parallel runners:
+// PATCH_BROWSER_SHARD=2/4 runs the second quarter of the specs. Unset, the whole
+// layer runs. A malformed value is an error, never "run everything": a typo that
+// quietly ran (or skipped) the wrong slice would be a gate that lies.
+const BROWSER_SHARD = process.env['PATCH_BROWSER_SHARD'];
+if (BROWSER_SHARD !== undefined && !/^[1-9]\d*\/[1-9]\d*$/.test(BROWSER_SHARD)) {
+  console.error(`verify: PATCH_BROWSER_SHARD must look like 2/4, got "${BROWSER_SHARD}"`);
+  process.exit(1);
+}
+
 const ALL_STEPS = [
   { label: 'lint', argv: ['pnpm', 'run', 'lint'] },
   { label: 'types', argv: ['pnpm', 'run', 'typecheck'] },
   { label: 'unit + contract + integration', argv: ['pnpm', 'run', 'test'] },
   {
     label: 'browser',
-    argv: ['pnpm', '--filter', '@patch/web', 'run', 'test:ui'],
+    argv:
+      BROWSER_SHARD === undefined
+        ? ['pnpm', '--filter', '@patch/web', 'run', 'test:ui']
+        : ['pnpm', '--filter', '@patch/web', 'exec', 'playwright', 'test', `--shard=${BROWSER_SHARD}`],
     env: BROWSER_ENV,
     // The one step that is skippable, and only on the narrowest of grounds: it
     // exercises the SPA in a real browser, so a commit that cannot reach the SPA

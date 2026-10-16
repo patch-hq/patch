@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseSidebarView } from './sidebarView';
 
 // Todoist: "sidebar empty-state text is misaligned with every other row".
 // `.empty-hint`'s shared `padding: 8px 2px` put every sidebar placeholder
@@ -8,7 +9,7 @@ import { test, expect } from '@playwright/test';
 // so only a real browser can measure the painted geometry.
 //
 // `[data-testid='attention-empty']` is covered separately by
-// attention-empty-spacing.spec.ts — it aligns to the toggle above it (8px), not
+// attention-empty-spacing.spec.ts — it aligns to the Manager row above it, not
 // to the rows, and that difference is intentional.
 
 const HARNESS = '/app/dev-harness.html';
@@ -49,18 +50,18 @@ test.describe('sidebar empty-state inset', () => {
     }
   });
 
-  test('"No chats in the batch." lines up with the batch rows', async ({ page }) => {
+  test('"Nothing batched" lines up with the batch rows', async ({ page }) => {
     await page.goto(HARNESS);
     const rowBox = (await page.locator('.sb-row').first().boundingBox())!;
 
-    await page.getByTestId('batch-tab-batch').click();
+    await chooseSidebarView(page, 'batch');
 
     const empty = page.getByTestId('batch-empty');
     await expect(empty).toBeVisible();
     // This test owns the ALIGNMENT, not the wording — batch-empty-affordance
     // spec.ts is what pins the copy. Assert only enough to prove the right
     // element was measured.
-    await expect(empty).toContainText('No chats in the batch');
+    await expect(empty).toContainText('Nothing batched');
 
     const emptyBox = (await empty.boundingBox())!;
     expect(emptyBox.x).toBeGreaterThan(4);

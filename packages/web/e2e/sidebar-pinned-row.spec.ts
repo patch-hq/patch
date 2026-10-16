@@ -144,12 +144,7 @@ test.describe('pinned sidebar row', () => {
     // Hovering reveals all four actions, same as any other row, with the pin
     // reading as active.
     await row.hover();
-    for (const id of [
-      'batch-toggle-chat_bus',
-      'archive-btn-chat_bus',
-      'pin-btn-chat_bus',
-      'row-mic-chat_bus',
-    ]) {
+    for (const id of ['archive-btn-chat_bus', 'pin-btn-chat_bus', 'row-mic-chat_bus']) {
       await expect(row.getByTestId(id)).toBeVisible();
     }
     await expect(row.getByTestId('pin-btn-chat_bus')).toHaveClass(/is-pinned/);

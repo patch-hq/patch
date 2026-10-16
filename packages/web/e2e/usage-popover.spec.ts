@@ -134,7 +134,7 @@ test.describe('usage popover', () => {
     const ring = page.getByTestId('context-ring');
     await expect(ring).toBeVisible();
     await expect(ring).toHaveClass(/unknown/);
-    await expect(ring).toHaveAttribute('title', 'Usage details · context not measured yet');
+    await expect(ring).toHaveAttribute('title', 'Usage · context not measured');
     await ring.click();
     await expect(page.getByTestId('usage-popover')).toBeVisible();
     await expect(page.getByTestId('usage-pop-context')).toHaveCount(0);

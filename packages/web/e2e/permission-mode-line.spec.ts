@@ -40,7 +40,7 @@ test.describe('permission-mode change line', () => {
       const cs = getComputedStyle(el);
       return { size: parseFloat(cs.fontSize), bg: cs.backgroundColor };
     });
-    expect(style.size).toBeLessThanOrEqual(13);
+    expect(style.size).toBeLessThanOrEqual(14); // the app-wide floor (--text-min)
     expect(style.bg).toBe('rgba(0, 0, 0, 0)');
   });
 

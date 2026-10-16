@@ -22,7 +22,8 @@ test.describe('message hover extent', () => {
       store.getState().applyEvent({
         type: 'chat.message',
         chatId: 'chat_bus',
-        role: 'user',
+        // The meta strip (host, model, time) hangs off agent messages only.
+        role: 'assistant',
         content: 'short question',
         seq: 9300,
         createdAt,

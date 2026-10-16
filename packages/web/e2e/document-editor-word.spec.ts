@@ -35,8 +35,8 @@ test.describe('document editor — opening a .docx', () => {
     await expect(page.getByTestId('document-editor')).toBeVisible(EDITOR_OPEN);
     await expect(page.getByTestId('document-editor-content')).toHaveValue(/# Converted From Word/);
     await expect(page.getByTestId('browse-meta-name')).toHaveText('update.md');
-    // The file tree now shows the converted .md too, not just the original.
-    await expect(page.getByTestId('tree-row-assets/update.md')).toBeVisible();
+    // The editor takes the Files tab's place in the pane (spec/14 § Panes and
+    // tabs), so the tree is not on screen to show the new .md beside the original.
   });
 
   test('names what the conversion could not carry over', async ({ page }) => {

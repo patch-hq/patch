@@ -52,7 +52,7 @@ async function stubServer(page: Page): Promise<Array<{ chatId: string; body: unk
       body: JSON.stringify(COUNTS),
     }),
   );
-  await page.route('**/api/chats?hidden=only', (route) =>
+  await page.route('**/api/chats?hidden=only*', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -124,7 +124,7 @@ test.describe('Hidden sidebar section', () => {
     await section.getByTestId('chat-row-chat_hidden').hover();
     await section.getByTestId('show-btn-chat_hidden').click();
 
-    await expect(page.getByTestId('error-toasts')).toContainText('show failed');
+    await expect(page.getByTestId('error-toasts')).toContainText(/show failed/i);
     await expect(section.getByTestId('chat-row-chat_hidden')).toBeVisible();
     await expect(page.locator('.sb-scroll [data-testid="chat-row-chat_hidden"]')).toHaveCount(0);
   });

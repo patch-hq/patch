@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseSidebarView } from './sidebarView';
 
 // Todoist: "needs attention queue - updated things should be at the bottom
 // of the queue." The needs-attention list queues oldest-waiting first; a row
@@ -12,7 +13,7 @@ test.describe('needs-attention queue order', () => {
     page,
   }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('attention-toggle').click();
+    await chooseSidebarView(page, 'unread');
 
     // Two seeded chats sharing a folder: chat_long_text (lastUpdated: 0) is
     // older than chat_md (lastUpdated: 5).

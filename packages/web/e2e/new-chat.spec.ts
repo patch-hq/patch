@@ -5,6 +5,9 @@ const NEW = '/app/dev-harness.html?chat=new';
 
 type W = {
   __presenceStore: { getState: () => { setHostAccount: (e: unknown) => void } };
+  __preferencesStore: {
+    getState: () => { preferences: unknown; apply: (state: unknown) => void };
+  };
 };
 
 // Same shape usage-popover.spec.ts seeds a live chat's header with — here
@@ -22,6 +25,27 @@ async function seedUsage(page: Page): Promise<void> {
       usage: {
         session: { status: 'allowed', utilization: 0.42, resetsAt: Date.now() + 3_600_000 },
       },
+      accounts: [
+        {
+          id: 'a1',
+          label: 'Default',
+          connected: true,
+          usage: { session: { status: 'allowed', utilization: 0.42 } },
+        },
+      ],
+    });
+    // The popover lists the account's shared subscription accounts, each read
+    // off whichever host reported its usage.
+    const preferences = (window as unknown as W).__preferencesStore.getState();
+    preferences.apply({
+      version: 1,
+      settings: preferences.preferences,
+      secrets: {
+        claude: [{ id: 'a1', label: 'Default', connected: true, email: 'dev@example.com' }],
+        codex: [],
+        providerKeys: [],
+      },
+      hosts: [],
     });
   });
 }

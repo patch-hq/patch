@@ -107,7 +107,9 @@ test.describe('sidebar row context menu', () => {
   test('⏎ on a focused item runs it, so the menu never needs a mouse', async ({ page }) => {
     const id = await firstRowId(page);
     await page.getByTestId(`chat-row-${id}`).click({ button: 'right' });
-    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+    // Open to the side, Open in new window and Rename sit between the first
+    // item and Pin.
+    for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowDown');
     await expect(page.getByTestId(`chat-context-menu-${id}-pin`)).toBeFocused();
     await page.keyboard.press('Enter');
 

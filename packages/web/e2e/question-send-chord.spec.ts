@@ -87,8 +87,9 @@ test.describe('the Send answer button names the chord that sends', () => {
     expect(boxes.chord.top).toBeGreaterThanOrEqual(boxes.btn.top - 0.5);
     expect(boxes.chord.bottom).toBeLessThanOrEqual(boxes.btn.bottom + 0.5);
     expect(boxes.chord.right).toBeLessThanOrEqual(boxes.btn.right + 0.5);
-    // One line: the button is no taller than a single row of its own text.
-    expect(boxes.btn.height).toBeLessThan(40);
+    // One line: the button is no taller than a single row of its own text (a
+    // second line would roughly double its 40px).
+    expect(boxes.btn.height).toBeLessThan(48);
     // Set back from the label by being smaller, and it follows it.
     const sizes = await page.locator(SUBMIT).evaluate((btn) => {
       const chord = btn.querySelector('[data-testid="question-submit-chord"]') as HTMLElement;

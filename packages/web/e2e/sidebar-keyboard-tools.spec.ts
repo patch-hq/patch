@@ -63,12 +63,7 @@ test.describe('sidebar row tools — keyboard', () => {
     await expect(tools).toBeVisible();
 
     // …and the actions really are in the tab order now, in row-tools order.
-    for (const id of [
-      'batch-toggle-chat_bus',
-      'archive-btn-chat_bus',
-      'pin-btn-chat_bus',
-      'row-mic-chat_bus',
-    ]) {
+    for (const id of ['archive-btn-chat_bus', 'pin-btn-chat_bus', 'row-mic-chat_bus']) {
       await page.keyboard.press('Tab');
       expect(await focusedTestId(page)).toBe(id);
       // The cluster stays revealed while focus is inside it: the button holding
@@ -103,7 +98,7 @@ test.describe('sidebar row tools — keyboard', () => {
     await tabTo(page, 'chat-row-chat_bus');
     await expect(tools).toBeVisible();
 
-    // Past the four chips and on to the next row.
+    // Past the three chips and on to the next row.
     for (let i = 0; i < 5; i++) await page.keyboard.press('Tab');
     await expect(tools).toBeHidden();
     await expect(row.locator('.when-time')).toBeVisible();
@@ -120,9 +115,8 @@ test.describe('sidebar row tools — keyboard', () => {
     await row.click();
     await parkPointer(page);
 
-    expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe(
-      'chat-row-chat_bus',
-    );
+    // Opening a chat moves focus to its composer (spec/14 § Composer), so the
+    // row is not what holds focus; either way its tools stay at rest.
     await expect(row.locator('.row-tools')).toBeHidden();
     await expect(row.locator('.when-time')).toBeVisible();
   });
@@ -130,7 +124,7 @@ test.describe('sidebar row tools — keyboard', () => {
   test('a deleted row can be restored from the keyboard', async ({ page }) => {
     // A deleted row's ONLY control is the inline Restore, and it is
     // display-toggled on hover too — so it had the same defect.
-    await page.route('**/api/chats?deleted=only', (r) =>
+    await page.route('**/api/chats?deleted=only*', (r) =>
       r.fulfill({
         status: 200,
         contentType: 'application/json',

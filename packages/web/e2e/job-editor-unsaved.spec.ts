@@ -117,7 +117,7 @@ test.describe('job editor — unsaved changes', () => {
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
     await page.getByTestId('job-name').fill('Nightly sweep (edited)');
-    await page.getByTestId('nav-back').click();
+    await page.getByTestId('nav-jobs').click();
 
     const modal = page.getByTestId('confirm-modal');
     await expect(modal).toBeVisible();
@@ -138,7 +138,7 @@ test.describe('job editor — unsaved changes', () => {
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
     await page.getByTestId('job-name').fill('Nightly sweep (edited)');
-    await page.getByTestId('nav-back').click();
+    await page.getByTestId('nav-jobs').click();
     await page.getByTestId('confirm-ok').click();
     await expect(page.getByTestId('jobs-route')).toBeVisible();
   });
@@ -147,7 +147,7 @@ test.describe('job editor — unsaved changes', () => {
     await stub(page);
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
-    await page.getByTestId('nav-back').click();
+    await page.getByTestId('nav-jobs').click();
     await expect(page.getByTestId('jobs-route')).toBeVisible();
     await expect(page.getByTestId('confirm-modal')).toHaveCount(0);
   });

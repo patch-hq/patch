@@ -145,10 +145,28 @@ test.describe('Settings — desktop', () => {
     ]);
     await expect(
       page.getByTestId('settings-nav').locator('button[data-testid^="settings-nav-"]'),
-    ).toHaveText(PAGES.map((p) => p.title));
+    ).toHaveText([
+      'Usage',
+      'Agent',
+      'MCP',
+      'Memories',
+      'Manager',
+      'Goals',
+      'Voice',
+      'Hooks',
+      'Computer use',
+      'Activity',
+      'Hosts',
+      'Agent identity',
+      'Keys',
+      'Notifications',
+      'Devices',
+      'Updates',
+      'Account',
+    ]);
   });
 
-  test('the nav reaches all twelve pages, each at its own address', async ({ page }) => {
+  test('the nav reaches the pages below, each at its own address', async ({ page }) => {
     await page.goto(settingsUrl());
     for (const p of PAGES) {
       await page.getByTestId(`settings-nav-${p.id}`).click();

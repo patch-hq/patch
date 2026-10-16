@@ -30,8 +30,12 @@ for (const height of [600, 420, 340]) {
     expect(box.y).toBeGreaterThanOrEqual(head.y + head.height);
     expect(box.y + box.height).toBeLessThanOrEqual(height);
 
-    // Capped, so the list scrolls inside itself rather than being clipped.
-    const scrolls = await popup.evaluate((el) => el.scrollHeight > el.clientHeight);
-    expect(scrolls).toBe(true);
+    // Capped, so the list scrolls inside itself rather than being clipped. The
+    // picker offers only the five newest models, which a 600px window has room
+    // for outright; the shorter windows are the ones that must scroll.
+    if (height < 500) {
+      const scrolls = await popup.evaluate((el) => el.scrollHeight > el.clientHeight);
+      expect(scrolls).toBe(true);
+    }
   });
 }

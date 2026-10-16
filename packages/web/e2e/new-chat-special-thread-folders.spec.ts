@@ -31,7 +31,7 @@ test.describe('new chat folder pickers exclude special-thread folders', () => {
     // — the count alone stays 3 either way, the NAMES are the assertion.
     const quicks = setup.locator('[data-testid^="folder-quick-"]');
     await expect(quicks).toHaveCount(3);
-    await expect(quicks).toHaveText(['bus', 'portfolio', 'patch']);
+    await expect(quicks).toHaveText(['bus', 'portfolio', 'deploy-watch']);
 
     for (const folder of THREAD_FOLDERS) {
       await expect(page.getByTestId(`folder-quick-${folder}`)).toHaveCount(0);

@@ -175,9 +175,11 @@ test.describe('edit pencil on a user turn at phone width', () => {
     // And attached to it — a small gutter, not a stretch of empty row.
     expect(bubble.x - (pencil.x + pencil.width)).toBeLessThanOrEqual(12);
 
-    // The turn is no taller than its bubble now that nothing stacks under it.
+    // The turn is no taller than its bubble plus the 16px tail every message
+    // carries (spec/14 § Breathing room) — a pencil stacked on a line of its own
+    // would add its own ~20px on top of that.
     const turnBox = (await turn.boundingBox())!;
-    expect(turnBox.height).toBeLessThanOrEqual(bubble.height + 1);
+    expect(turnBox.height).toBeLessThanOrEqual(bubble.height + 16 + 1);
 
     // It stays a real tap target.
     expect(pencil.width).toBeGreaterThanOrEqual(16);

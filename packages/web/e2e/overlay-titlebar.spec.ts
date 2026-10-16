@@ -205,7 +205,9 @@ test.describe('overlay title bar', () => {
     const d = (await divider.boundingBox())!;
     await page.mouse.move(d.x + d.width / 2, d.y + 100);
     await page.mouse.down();
-    await page.mouse.move(10, d.y + 100, { steps: 10 });
+    // Below 140px the sidebar folds to the mini rail instead; 150 is the
+    // narrowest drag that still yields a full sidebar, clamped to its 200px floor.
+    await page.mouse.move(150, d.y + 100, { steps: 10 });
     await page.mouse.up();
 
     const sidebar = (await page.getByTestId('sidebar').boundingBox())!;
@@ -226,13 +228,16 @@ test('an offline banner clears the lights too, top edge and bottom edge alike', 
   await asDesktopWindow(page);
   await page.goto(HARNESS);
   await page.evaluate(() => {
-    (
+    // The banner is for a link that was up and dropped, never one still being made.
+    const presence = (
       window as unknown as {
-        __presenceStore: { getState: () => { setConnection: (s: string) => void } };
+        __presenceStore: {
+          getState: () => { noteWsOpen: (url: string) => void; setConnection: (s: string) => void };
+        };
       }
-    ).__presenceStore
-      .getState()
-      .setConnection('reconnecting');
+    ).__presenceStore.getState();
+    presence.noteWsOpen('ws://harness');
+    presence.setConnection('reconnecting');
   });
 
   const banner = page.getByTestId('offline-banner');

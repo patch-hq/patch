@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseSidebarView } from './sidebarView';
 
 // Todoist: "needs attention queue - should just grey out the one you click on
 // instead of immediately removing it. then once you navigate off it, it
@@ -14,7 +15,7 @@ test.describe('needs-attention hold', () => {
     page,
   }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('attention-toggle').click();
+    await chooseSidebarView(page, 'unread');
 
     // Two seeded chats sharing a folder, both fresh (unread) → both start in
     // the needs-attention list.

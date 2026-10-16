@@ -16,7 +16,7 @@ async function stubArchived(page: import('@playwright/test').Page): Promise<void
       body: JSON.stringify({ hidden: 0, archived: 2, snoozed: 0, deleted: 0, automations: 0 }),
     }),
   );
-  await page.route('**/api/chats?archived=include', (route) =>
+  await page.route('**/api/chats?archived=only*', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -93,7 +93,7 @@ test.describe('Open a cold-storage section in the main window', () => {
         body: JSON.stringify({ hidden: 0, archived: 0, snoozed: 0, deleted: 0, automations: 0 }),
       }),
     );
-    await page.route('**/api/chats?archived=include', (route) =>
+    await page.route('**/api/chats?archived=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -114,7 +114,7 @@ test.describe('Open a cold-storage section in the main window', () => {
         body: JSON.stringify({ hidden: 0, archived: 0, snoozed: 0, deleted: 0, automations: 0 }),
       }),
     );
-    await page.route('**/api/chats?archived=include', (route) =>
+    await page.route('**/api/chats?archived=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',

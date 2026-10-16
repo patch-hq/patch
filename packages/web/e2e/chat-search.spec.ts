@@ -75,17 +75,15 @@ async function stubSearch(
 }
 
 test.describe('sidebar chat search', () => {
-  test('shares the Needs attention row and costs the chat list no height', async ({ page }) => {
+  test('sits under the view pill and fills the rows’ shared edges', async ({ page }) => {
     await page.goto(HARNESS);
     await page.locator('.sb-row').first().waitFor();
-    const chip = (await page.getByTestId('attention-toggle').boundingBox())!;
+    const pill = (await page.getByTestId('sidebar-view-trigger').boundingBox())!;
     const field = (await page.getByTestId('chat-search').boundingBox())!;
     const row = (await page.locator('.sb-scroll .sb-row').first().boundingBox())!;
-    // Same row, same height as the chip.
-    expect(Math.abs(field.y - chip.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(field.height - chip.height)).toBeLessThanOrEqual(1);
-    // Chip on the left, field filling to the rows' shared right edge.
-    expect(field.x).toBeGreaterThan(chip.x + chip.width);
+    // Its own row, directly under the view pill.
+    expect(field.y).toBeGreaterThanOrEqual(pill.y + pill.height);
+    // Filling to the rows' shared right edge.
     expect(Math.abs(field.x + field.width - (row.x + row.width))).toBeLessThanOrEqual(1);
     // Wide enough to show its placeholder in full.
     const fits = await page.getByTestId('chat-search').evaluate((el) => {

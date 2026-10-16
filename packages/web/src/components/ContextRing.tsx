@@ -18,9 +18,7 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
   const ref = useRef<HTMLButtonElement>(null);
   const level = ctx?.level ?? 'unknown';
   const label = ctx ? `Context ${ctx.percent}` : 'Usage details';
-  const title = ctx
-    ? `Context ${ctx.percent} · ${ctx.tokens}`
-    : 'Usage details · context not measured yet';
+  const title = ctx ? `Context ${ctx.percent} · ${ctx.tokens}` : 'Usage · context not measured';
   return (
     <>
       <button

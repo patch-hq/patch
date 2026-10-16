@@ -31,23 +31,30 @@ test.describe('composer model', () => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     const model = page.getByTestId('chat-model');
     await expect(model).toBeVisible();
-    await expect(model).toContainText('claude-sonnet-4-6');
+    // Read as the catalogue's label; the raw id is the tooltip.
+    await expect(model).toContainText('Sonnet 4.6');
+    await expect(model).toHaveAttribute('title', 'claude-sonnet-4-6');
     await expect(page.getByTestId('chat-head').getByTestId('chat-model')).toHaveCount(0);
     await expect(page.locator('.composer-actions').getByTestId('chat-model')).toHaveCount(1);
 
     const mode = (await page.getByTestId('permission-mode').boundingBox())!;
     const modelBox = (await model.boundingBox())!;
-    const send = (await page.getByTestId('send-btn').boundingBox())!;
+    // chat_bus is mid-turn, so Send is Stop; either one is the row's right-hand pin.
+    const send = (await page
+      .locator('[data-testid="send-btn"], [data-testid="stop-btn"]')
+      .boundingBox())!;
     // After the approval mode, before Send, on the row's one centre line.
     expect(modelBox.x).toBeGreaterThanOrEqual(mode.x + mode.width);
     expect(modelBox.x + modelBox.width).toBeLessThanOrEqual(send.x);
     expect(Math.abs(modelBox.y + modelBox.height / 2 - (send.y + send.height / 2))).toBeLessThan(2);
   });
 
-  test('renders no model control for a chat with no known model', async ({ page }) => {
+  test('invites a choice for a chat with no known model, rather than naming one', async ({
+    page,
+  }) => {
     await page.goto('/app/dev-harness.html?chat=chat_md');
     await expect(page.getByTestId('chat-title')).toBeVisible();
-    await expect(page.getByTestId('chat-model')).toHaveCount(0);
+    await expect(page.getByTestId('chat-model')).toContainText('Choose a model');
   });
 
   test('it opens the model list upward, on top of everything', async ({ page }) => {
@@ -94,7 +101,7 @@ test.describe('composer model', () => {
     // The harness has no host to answer, so the pill stays visibly unsettled —
     // it reads the choice, marked pending, never as an accomplished switch.
     const pill = page.getByTestId('chat-model');
-    await expect(pill).toContainText('claude-opus-4-1');
+    await expect(pill).toContainText('Opus 4.1');
     await expect(pill).toHaveClass(/is-pending/);
   });
 });

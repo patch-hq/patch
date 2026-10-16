@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { chooseSidebarView } from './sidebarView';
 
 // spec/14 § Sidebar §4 — a project folds its chat rows away, leaving just its
 // header and a count of what is hidden, and stays folded across a reload.
@@ -79,13 +80,13 @@ test.describe('collapsing a project', () => {
 
     // Filtering is the user asking to see a set of chats: a fold that hid one
     // of the matches would read as the filter having missed it.
-    await page.getByTestId('state-filter').selectOption('working');
+    await chooseSidebarView(page, 'working');
     const matches = await folderRows(page, BUS).count();
     expect(matches).toBeGreaterThan(0);
     await expect(page.getByTestId(`folder-count-${BUS}`)).toHaveCount(0);
 
     // The fold is suspended, not cleared.
-    await page.getByTestId('state-filter').selectOption('all');
+    await chooseSidebarView(page, 'all');
     await expect(folderRows(page, BUS)).toHaveCount(0);
     await expect(page.getByTestId(`folder-count-${BUS}`)).toBeVisible();
   });

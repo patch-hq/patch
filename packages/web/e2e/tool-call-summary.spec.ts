@@ -16,14 +16,14 @@ test.describe('tool call summaries', () => {
 
     // The call carries its own description — that is the readable version of
     // what it is up to, so it wins over the raw command.
-    await expect(calls.nth(0)).toContainText('Bash Check the deploy log for errors');
+    await expect(calls.nth(0)).toContainText('Check the deploy log for errors');
     // No description: named by the file it read — its FILENAME, not the path
     // (spec/14 § Main chat panel), so the part that differs between rows is
     // the part that survives the row's one line.
-    await expect(calls.nth(1)).toContainText('Read poll.ts');
+    await expect(calls.nth(1)).toContainText('Reading poll.ts');
     await expect(calls.nth(1)).not.toContainText('src/poll.ts');
-    // Nothing nameable: the bare tool name, unchanged.
-    await expect(calls.nth(2)).toContainText('TodoWrite');
+    // Nothing nameable: a plain phrase for the kind of work.
+    await expect(calls.nth(2)).toContainText('Updating the todo list');
 
     // None of them is grouped — this is the ungrouped row's own summary.
     await expect(page.locator('[data-testid="tool-group"]')).toHaveCount(0);
@@ -58,12 +58,14 @@ test.describe('tool call summaries', () => {
     await expect(group.locator('[data-testid="tool-group-summary"]')).toHaveText(
       '▸Searched for 2 patterns, read 1 file',
     );
-    await expect(group).not.toContainText('Read poll.ts');
+    await expect(group).not.toContainText('Reading poll.ts');
 
     // Expanding the run shows the same per-call text an ungrouped row would —
     // the two surfaces share one derivation, so they cannot drift apart.
     await group.locator('[data-testid="tool-group-summary"]').click();
-    await expect(group.locator('[data-testid="tool-call"]').nth(1)).toContainText('Read poll.ts');
+    await expect(group.locator('[data-testid="tool-call"]').nth(1)).toContainText(
+      'Reading poll.ts',
+    );
   });
 
   test('a run label squeezed by a narrow row ellipsizes inside its own box instead of being cut mid-word', async ({

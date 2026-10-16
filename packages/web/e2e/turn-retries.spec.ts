@@ -57,6 +57,10 @@ function userMessage(seq: number, retryOfSeq?: number): WireEvent {
 async function oneRecovery(page: import('@playwright/test').Page) {
   await applyEvent(page, userMessage(2));
   await applyEvent(page, chatState('running'));
+  // The error lands while the chat is NOT running: one that arrives after a
+  // fresh `running` is the host and server streams crossing, and the store
+  // drops it on purpose (chatStore `chat.error`).
+  await applyEvent(page, chatState('errored'));
   await applyEvent(page, {
     type: 'chat.error',
     chatId: CHAT_ID,
@@ -66,7 +70,6 @@ async function oneRecovery(page: import('@playwright/test').Page) {
     },
     seq: -1,
   } as WireEvent);
-  await applyEvent(page, chatState('errored'));
   await applyEvent(page, chatState('running'));
   await applyEvent(page, userMessage(7, 2));
 }

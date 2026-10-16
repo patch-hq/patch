@@ -18,7 +18,7 @@ test.describe('tool call folded with its result', () => {
     // Collapsed by default, summarised as the call — with `→` saying it returned.
     const row = page.getByTestId('tool-call');
     await expect(row).toHaveAttribute('data-open', 'false');
-    await expect(row).toContainText('Read poll.ts');
+    await expect(row).toContainText('Reading poll.ts');
     await expect(row).toContainText('→');
 
     // Expanding shows the args AND what came back, in the same disclosure.

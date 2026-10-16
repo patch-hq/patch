@@ -18,15 +18,15 @@ test.describe('new chat — which machine', () => {
     });
     await page.goto(NEW);
 
-    const home = page.getByTestId('machine-choice-d1');
-    const mac = page.getByTestId('machine-choice-d2');
-    await expect(home).toHaveAttribute('aria-pressed', 'true');
+    const home = page.getByTestId('host-option-d1');
+    const mac = page.getByTestId('host-option-d2');
+    await expect(home).toHaveAttribute('aria-checked', 'true');
     await expect(mac).toHaveText('mac');
     await expect(page.getByTestId('folder-quick-/Users/dev/code')).toHaveCount(0);
 
     await mac.click();
-    await expect(mac).toHaveAttribute('aria-pressed', 'true');
-    await expect(home).toHaveAttribute('aria-pressed', 'false');
+    await expect(mac).toHaveAttribute('aria-checked', 'true');
+    await expect(home).toHaveAttribute('aria-checked', 'false');
     await page.getByTestId('folder-quick-/Users/dev/code').click();
     await expect(page.locator('.folder-pill-label')).toHaveText('code');
 

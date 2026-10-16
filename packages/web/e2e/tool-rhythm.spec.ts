@@ -27,11 +27,11 @@ test('a tool row sits evenly between the prose around it and the working dots', 
   await expect(page.locator('[data-testid="msg-meta"]').first()).toHaveCount(1);
   expect(gaps).toEqual([16, 16, 16, 16, 16, 16]);
   await expect(page.locator('[data-testid="tool-group-summary"]').first()).toHaveText(
-    '▸Looking at the poller first.',
+    '▸Searched for 1 pattern, read 1 file',
   );
   const size = await page
     .locator('.tool-group .tool-summary-text')
     .first()
     .evaluate((el) => getComputedStyle(el).fontSize);
-  expect(size).toBe('15px');
+  expect(size).toBe('16px');
 });

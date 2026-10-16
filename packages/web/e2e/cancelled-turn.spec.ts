@@ -75,7 +75,7 @@ test.describe('interrupted turn status', () => {
     await expect(msg).toContainText('rename the config module');
 
     const status = msg.getByTestId('turn-interrupted');
-    await expect(status).toHaveText(/Interrupted\./);
+    await expect(status).toHaveText(/Interrupted by a newer message\./);
     await expect(status).not.toContainText('cancelled');
 
     // No retry, no Continue — the agent already saw it via the promoted turn.

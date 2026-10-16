@@ -6,6 +6,12 @@ async function chosen(page: Page, testid: string): Promise<string> {
   return page.getByTestId(testid).locator('button[aria-pressed="true"]').innerText();
 }
 
+/** Wait for a Pills group to settle on `label` — a click re-renders the group, so
+ *  reading the chosen pill straight after one can see the old choice. */
+async function expectChosen(page: Page, testid: string, label: string): Promise<void> {
+  await expect.poll(() => chosen(page, testid)).toBe(label);
+}
+
 // Real-browser e2e for the per-surface voice config (spec/07 § Voice is a
 // config matrix). Four surfaces (dictation / device / hands-free / call), each
 // ONE choice of engine — the backend and layer it maps to are not shown — with
@@ -41,7 +47,7 @@ test.describe('Settings — Voice engines', () => {
 
   test('defaults to Local everywhere, no status hint shown', async ({ page }) => {
     for (const surface of ['dictation', 'device', 'handsFree', 'call']) {
-      expect(await chosen(page, `voice-${surface}-engine`)).toBe('Local');
+      await expectChosen(page, `voice-${surface}-engine`, 'Local');
     }
     await expect(
       page.locator('[data-testid="settings-voice-config"] [data-testid$="-status"]'),
@@ -50,9 +56,9 @@ test.describe('Settings — Voice engines', () => {
 
   test('picking an engine writes the backend and layer it stands for', async ({ page }) => {
     await page.getByTestId('voice-call-engine-gemini-thinking').click();
-    expect(await chosen(page, 'voice-call-engine')).toBe('Gemini Thinking');
+    await expectChosen(page, 'voice-call-engine', 'Gemini Thinking');
     await page.getByTestId('voice-call-engine-openai-mini').click();
-    expect(await chosen(page, 'voice-call-engine')).toBe('OpenAI mini');
+    await expectChosen(page, 'voice-call-engine', 'OpenAI mini');
     await expect(page.getByTestId('voice-call-status')).toHaveCount(0);
   });
 

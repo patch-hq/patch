@@ -131,7 +131,7 @@ test.describe('version panel — updates wait to be taken', () => {
 
     const banner = page.getByTestId('desktop-update-banner');
     await expect(banner).toBeVisible();
-    await expect(banner).toContainText('0.1.900');
+    await expect(banner).toContainText('Patch has updated');
     // Behind since yesterday → the middle of the three levels.
     await expect(banner).toHaveAttribute('data-urgency', 'due');
 

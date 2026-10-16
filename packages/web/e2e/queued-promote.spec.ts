@@ -47,7 +47,8 @@ test.describe('queued message promote (↑)', () => {
       'Goes in when the agent finishes its current tool call',
     );
 
-    await queued.nth(0).hover();
+    // The turn box spans the whole row; only the bubble itself takes the pointer.
+    await queued.nth(0).getByTestId('msg-content').hover();
     await queued.nth(0).getByTestId('queued-remove').click();
 
     // The second turn moves up and now owns "Queued".
@@ -65,7 +66,8 @@ test.describe('queued message promote (↑)', () => {
     await expect(queued.nth(0)).toContainText('first queued turn');
     await expect(queued.nth(1)).toContainText('second queued turn');
 
-    await queued.nth(1).hover();
+    // The turn box spans the whole row; only the bubble itself takes the pointer.
+    await queued.nth(1).getByTestId('msg-content').hover();
     await queued.nth(1).getByTestId('queued-promote').click();
 
     // Pushing the second queued turn pushes the first along with it too —

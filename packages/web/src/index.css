@@ -4769,7 +4769,8 @@ a.ch-row:hover {
   margin: 4px 0;
   padding: 2px 10px;
   color: var(--ink-3);
-  font-size: var(--text-min);
+  /* The same size as the other furniture rows (.tool-call.trigger). */
+  font-size: 15px;
 }
 .synthetic-notice-source {
   font-weight: 500;

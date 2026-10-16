@@ -46,6 +46,10 @@ async function deliverBlip(page: import('@playwright/test').Page) {
     seq: 0,
   } as WireEvent);
   await applyEvent(page, chatState('running'));
+  // The error must land while the chat is NOT running: a transient card that
+  // arrives after a fresh `running` is the host and server streams crossing, and
+  // the store deliberately drops it (chatStore `chat.error`).
+  await applyEvent(page, chatState('errored'));
   await applyEvent(page, {
     type: 'chat.error',
     chatId: CHAT_ID,
@@ -56,7 +60,6 @@ async function deliverBlip(page: import('@playwright/test').Page) {
     // OUT_OF_BAND_SEQ — server-generated, never part of the host's stream.
     seq: -1,
   } as WireEvent);
-  await applyEvent(page, chatState('errored'));
 }
 
 test.describe('the host-link-lost card disappears once the link is back', () => {

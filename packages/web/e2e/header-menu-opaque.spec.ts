@@ -37,11 +37,11 @@ test.describe('header dropdown menus paint an opaque background', () => {
     expect(sample).toBe(true);
   });
 
-  test('the snooze menu is opaque, not transparent', async ({ page }) => {
+  test('the snooze sheet is opaque, not transparent', async ({ page }) => {
     await page.goto(HARNESS);
     await page.getByTestId('action-more').click();
     await page.getByTestId('action-snooze').click();
-    const menu = page.getByTestId('snooze-menu');
+    const menu = page.getByTestId('snooze-sheet');
     await expect(menu).toBeVisible();
     const bg = await menu.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg).not.toBe('rgba(0, 0, 0, 0)');

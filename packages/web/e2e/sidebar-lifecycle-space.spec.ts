@@ -39,11 +39,11 @@ async function stubLifecycle(
   chats: Record<'hidden' | 'archived' | 'snoozed' | 'deleted' | 'automations', unknown[]>,
 ): Promise<void> {
   const routes: Array<[string, unknown[]]> = [
-    ['**/api/chats?hidden=only', chats.hidden],
-    ['**/api/chats?archived=include', chats.archived],
-    ['**/api/chats?snoozed=only', chats.snoozed],
-    ['**/api/chats?deleted=only', chats.deleted],
-    ['**/api/chats?automations=only', chats.automations],
+    ['**/api/chats?hidden=only*', chats.hidden],
+    ['**/api/chats?archived=only*', chats.archived],
+    ['**/api/chats?snoozed=only*', chats.snoozed],
+    ['**/api/chats?deleted=only*', chats.deleted],
+    ['**/api/chats?automations=only*', chats.automations],
   ];
   for (const [pattern, list] of routes) {
     await page.route(pattern, (route) =>
@@ -123,6 +123,9 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
 
     for (const id of ['snoozed', 'deleted', 'automations'] as const) {
       await page.getByTestId(`${id}-toggle`).click();
+      // Park the pointer: while it hovers, the tooltip host lifts `title` off the
+      // element to show its own bubble, and the attribute reads as absent.
+      await page.mouse.move(900, 450);
       await expect(page.getByTestId(`${id}-section`)).toBeAttached();
       // The count IS the empty state, and it lives in the icon's tooltip, not
       // in a body below it — and an empty section grows no "open in main
@@ -143,6 +146,7 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
     // measurement of whichever list happens to be loaded.
     for (const id of ['snoozed', 'deleted', 'automations'] as const) {
       await page.getByTestId(`${id}-toggle`).click();
+      await page.mouse.move(900, 450);
       await expect(page.getByTestId(`${id}-section`)).toHaveCount(0);
       await expect(page.getByTestId(`${id}-toggle`)).toBeVisible();
       await expect(page.getByTestId(`${id}-toggle`)).toHaveAttribute('title', /· 0$/);
@@ -166,11 +170,12 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
       automations: many('auto', 'archived', { jobId: 'job_1' }),
     });
     await stubCounts(page, { hidden: 12, archived: 12, snoozed: 12, deleted: 12, automations: 12 });
-    await page.setViewportSize({ width: 1400, height: 860 });
+    await page.setViewportSize({ width: 1400, height: 900 });
     await page.goto(HARNESS);
     await expect(page.getByTestId('sidebar')).toBeVisible();
 
     for (const id of TOGGLES) await page.getByTestId(id).click();
+    await page.mouse.move(900, 450);
     await expect(page.getByTestId('archived-section').getByTestId('chat-row-arch_0')).toBeVisible();
     // A populated section reports its size in the icon's tooltip, from the
     // server total.
@@ -179,7 +184,7 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
     const lifecycle = await bandHeight(page, '.sb-lifecycle');
     const scroll = await bandHeight(page, '.sb-scroll');
 
-    // Capped at min(33%, 300px) of an 860px sidebar — nowhere near the 430px
+    // Capped at min(33%, 300px) of a 900px sidebar — nowhere near the 430px
     // the old 50% cap allowed, and it scrolls its own overflow internally.
     expect(lifecycle).toBeLessThanOrEqual(300);
     expect(

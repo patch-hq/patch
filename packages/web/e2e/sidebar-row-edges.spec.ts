@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseSidebarView } from './sidebarView';
 
 // Todoist: "sidebar rows have four different right edges". Every row and toggle
 // carried its own literal inset — `.sb-row`/`.batch-row`/the sidebar
@@ -13,9 +14,8 @@ import { test, expect } from '@playwright/test';
 const HARNESS = '/app/dev-harness.html';
 
 /** Every sidebar box whose background paints on hover / active / selection.
- *  `.attention-toggle` is deliberately absent: it is a chip sized to its own
- *  label (spec/14 § One column), so it shares the left edge and has no right
- *  edge to share — `attention-chip-size.spec.ts` owns its geometry.
+ *  The view pill (`.sidebar-view-trigger`) is deliberately absent: it is sized
+ *  to its own label (spec/14 § One column), so it has no right edge to share.
  *  `.arch-toggle` is deliberately absent too: the cold-storage row is now a
  *  strip of square icon-only buttons (spec/14 § Sidebar item 6 / § One
  *  column), the same "self-contained control" class as the brand row's own
@@ -28,13 +28,10 @@ const ROW_SELECTORS = [
   '.channels',
   '.ch-toggle',
   '.ch-row',
-  // The row the Needs attention chip shares with the chat search field: the
-  // chip keeps the left edge, the field runs to the shared right edge.
   '.sb-top-row',
   '.sb .empty-hint',
   '.nav-row',
   '.new-chat-row',
-  '.batch-tabs',
 ];
 
 type Edge = { sel: string; left: number; right: number };
@@ -148,12 +145,11 @@ test.describe('sidebar row edges', () => {
 
   test('batch view rows share the column too', async ({ page }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('batch-tab-batch').click();
+    await chooseSidebarView(page, 'batch');
     await expect(page.getByTestId('batch-empty')).toBeVisible();
 
     expectOneColumn(
       await edges(page, [
-        '.batch-tabs',
         '.batch-interval',
         '.batch-panel > .toggle',
         '.batch-row',

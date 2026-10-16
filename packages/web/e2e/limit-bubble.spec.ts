@@ -208,8 +208,8 @@ test.describe('the limit bubble', () => {
     // a control that pretends to is worse than none. The explanation that used
     // to be a paragraph of chrome lives on it.
     await expect(link).toHaveAttribute('href', /claude\.ai/);
-    await expect(link).toHaveAttribute('title', /not enabled/i);
-    await expect(link).toHaveAttribute('title', /nothing has been overspent/i);
+    await expect(link).toHaveAttribute('title', /Extra usage: disabled\./);
+    await expect(link).toHaveAttribute('title', /Opens your Claude usage settings/);
     // Not "this organisation": a personal subscription has no organisation
     // that did anything, and the sentence read as an accusation.
     await expect(link).not.toHaveAttribute('title', /organisation/i);

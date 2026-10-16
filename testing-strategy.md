@@ -14,9 +14,10 @@ Read by `/e2e-test-run patch` (and any other test-loop tooling). Defines how eac
 
 `pnpm verify` runs every layer above except Surface, and `pnpm deploy` runs `pnpm verify` first. Nothing else is a gate.
 
-Two environment facts about the browser layer, both of which look like a broken app when you hit them:
+Environment facts about the browser layer; the first and last look like a broken app when you hit them:
 
 - Playwright needs `npx playwright install chromium chromium-headless-shell` after any version bump, and `@patch/wire` must be built. Without the browsers every test fails identically on browser launch; the suite is not telling you anything about the app.
+- The release workflow runs it on GitHub runners, split four ways (`PATCH_RUN_BROWSER_GATE=1` plus `PATCH_BROWSER_SHARD=i/4`, which `scripts/verify.mjs` turns into Playwright's `--shard`). A hand run of `node scripts/verify.mjs` skips it unless `PATCH_RUN_BROWSER_GATE=1`.
 - On Hetzner it must run with `--workers=2` or fewer. At the default worker count the box starves its own dev server and tests fail en masse with `ERR_CONNECTION_REFUSED`, which reads exactly like a broken app and isn't.
 
 ## Surface targets and tooling

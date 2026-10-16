@@ -14,7 +14,7 @@ test.describe('Automations sidebar section', () => {
   test('is collapsed by default and expands to show job-spawned chats with working/done badges', async ({
     page,
   }) => {
-    await page.route('**/api/chats?automations=only', (route) =>
+    await page.route('**/api/chats?automations=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -83,7 +83,7 @@ test.describe('Automations sidebar section', () => {
   test('reports empty as a 0 on the row, with no body at all, when no job has spawned a chat', async ({
     page,
   }) => {
-    await page.route('**/api/chats?automations=only', (route) =>
+    await page.route('**/api/chats?automations=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -106,6 +106,9 @@ test.describe('Automations sidebar section', () => {
       'Automations · 0',
     );
     await page.getByTestId('automations-toggle').click();
+    // Park the pointer: while it hovers, the tooltip host lifts `title` off the
+    // element to show its own bubble, and the attribute reads as absent.
+    await page.mouse.move(900, 450);
     const section = page.getByTestId('automations-section');
     await expect(section).toBeAttached();
     await expect(page.getByTestId('automations-toggle')).toHaveAttribute(
@@ -118,7 +121,7 @@ test.describe('Automations sidebar section', () => {
   test('a job-spawned chat is a DUPLICATE view — it also shows in Archived, not moved out of it', async ({
     page,
   }) => {
-    await page.route('**/api/chats?automations=only', (route) =>
+    await page.route('**/api/chats?automations=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -143,7 +146,7 @@ test.describe('Automations sidebar section', () => {
         }),
       }),
     );
-    await page.route('**/api/chats?archived=include', (route) =>
+    await page.route('**/api/chats?archived=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -181,7 +184,7 @@ test.describe('Automations sidebar section', () => {
   test('renders oldest-first — bottom-up, not most-recent-first — so a run updating settles at the bottom instead of reshuffling the list (Todoist: "Load chats bottom up so you don\'t get a jarring effect")', async ({
     page,
   }) => {
-    await page.route('**/api/chats?automations=only', (route) =>
+    await page.route('**/api/chats?automations=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -234,7 +237,7 @@ test.describe('Automations sidebar section', () => {
   });
 
   test('a normal, non-job chat never appears in Automations', async ({ page }) => {
-    await page.route('**/api/chats?automations=only', (route) =>
+    await page.route('**/api/chats?automations=only*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',

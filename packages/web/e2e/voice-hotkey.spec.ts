@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Real-browser e2e for the ⌘; / ⌃Space voice chords (spec/07 § 4 — mode 1).
+// Real-browser e2e for the ⌘⇧D (default dictate chord) / ⌃Space voice chords (spec/07 § 4 — mode 1).
 //
 // jsdom dispatches whatever KeyboardEvent a test hands it. A real browser
 // decides for itself which keydown/keyup pairs a chord produces, which is the
@@ -17,7 +17,7 @@ async function calls(page: import('@playwright/test').Page): Promise<string[]> {
 }
 
 test.describe('voice hotkey chords', () => {
-  test('⌘; opens a note and reports exactly one release, whichever key lifts first', async ({
+  test('⌘⇧D opens a note and reports exactly one release, whichever key lifts first', async ({
     page,
   }) => {
     await page.goto(CHAT);
@@ -25,23 +25,27 @@ test.describe('voice hotkey chords', () => {
       () => (window as unknown as { __shortcutCalls?: string[] }).__shortcutCalls !== undefined,
     );
 
-    // Lift the character key first, then the modifier.
+    // Lift the character key first, then the modifiers.
     await page.keyboard.down('Meta');
-    await page.keyboard.down(';');
-    await page.keyboard.up(';');
+    await page.keyboard.down('Shift');
+    await page.keyboard.down('D');
+    await page.keyboard.up('D');
+    await page.keyboard.up('Shift');
     await page.keyboard.up('Meta');
     expect(await calls(page)).toEqual(['voiceHoldStart', 'voiceHoldEnd']);
 
-    // Lift the MODIFIER first. macOS withholds the ';' keyup while ⌘ is down,
-    // so the modifier's release has to end the chord — and the ';' keyup that
+    // Lift the MODIFIER first. macOS withholds the character's keyup while ⌘ is down,
+    // so the modifier's release has to end the chord — and the character keyup that
     // may follow must not end it a second time and commit twice.
     await page.evaluate(() => {
       (window as unknown as { __shortcutCalls: string[] }).__shortcutCalls.length = 0;
     });
     await page.keyboard.down('Meta');
-    await page.keyboard.down(';');
+    await page.keyboard.down('Shift');
+    await page.keyboard.down('D');
     await page.keyboard.up('Meta');
-    await page.keyboard.up(';');
+    await page.keyboard.up('Shift');
+    await page.keyboard.up('D');
     expect(await calls(page)).toEqual(['voiceHoldStart', 'voiceHoldEnd']);
   });
 

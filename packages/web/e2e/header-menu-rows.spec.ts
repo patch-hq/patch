@@ -44,7 +44,7 @@ test.describe('⋯ menu rows line up and the whole Snooze row is a button', () =
     ).toBeLessThanOrEqual(0.5);
   });
 
-  test('clicking the right end of the Snooze row opens the presets, and Esc closes them', async ({
+  test('clicking the right end of the Snooze row opens the snooze sheet, and Esc closes it', async ({
     page,
   }) => {
     await page.goto(HARNESS);
@@ -52,9 +52,9 @@ test.describe('⋯ menu rows line up and the whole Snooze row is a button', () =
     // Click the far right of the row, nowhere near the clock.
     const box = (await page.getByTestId('action-snooze').boundingBox())!;
     await page.mouse.click(box.x + box.width - 6, box.y + box.height / 2);
-    await expect(page.getByTestId('snooze-menu')).toBeVisible();
-    await expect(page.locator('.snooze-option').first()).toBeVisible();
+    await expect(page.getByTestId('snooze-sheet')).toBeVisible();
+    await expect(page.locator('.snooze-preset').first()).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.getByTestId('snooze-menu')).toHaveCount(0);
+    await expect(page.getByTestId('snooze-sheet')).toHaveCount(0);
   });
 });
