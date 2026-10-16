@@ -251,8 +251,8 @@ pnpm build:server                                   # → dist/server/patch-serv
 dist/server/patch-server-<release>/install          # installs into ~/.patch-server
 ```
 
-`pnpm run deploy` (`scripts/ship.mjs`, see `deploy.md`) does exactly that on
-the reference box, as one of every surface it ships.
+A server following a release channel does exactly that for itself, with each
+release it mirrors (`packages/server/src/self-update.ts`, see `deploy.md`).
 
 The desktop app, the Android app and the host are builds, not
 deployments — artifacts a person installs:

@@ -1,6 +1,5 @@
 {
   ".env.example": 1,
-  ".tmp-probe.mjs": 1,
   "Caddyfile": 3,
   "apps/mobile/plugins/withConnectionService.js": 1,
   "apps/mobile/src/lib/connection.ts": 2,
@@ -30,9 +29,6 @@
   "scripts/gcal-oauth-loopback.mjs": 1,
   "scripts/gemini-live-smoke.mjs": 1,
   "scripts/install-relay.mjs": 1,
-  "scripts/mac-gui-run.mjs": 1,
-  "scripts/ship-openai-20260914.mjs": 7,
-  "scripts/ship.mjs": 11,
   "scripts/voice-probe-fullpath.mjs": 2,
   "scripts/voice-watch.sh": 3,
   "scripts/web-dictation-live.mjs": 1,

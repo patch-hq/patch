@@ -22,8 +22,6 @@
     "dev:server": "pnpm --filter @patch/server dev",
     "dev:daemon": "pnpm --filter @patch/host dev",
     "dev:web": "pnpm --filter @patch/web dev",
-    "// deploy": "THE deploy command — every surface at once (web, server, daemon, mobile OTA, mobile APK, desktop). Run from /srv/patch on the box. It detaches itself, because the daemon restart it ends with kills the chat that started it. See deploy.md.",
-    "deploy": "node scripts/ship.mjs",
     "version:show": "node scripts/version.mjs",
     "// build:desktop": "Signing is left ENABLED (auto-discovery). It used to force CSC_IDENTITY_AUTO_DISCOVERY=false, which produced an adhoc-signed app — and Squirrel refuses to apply an update to one, so the shell could never self-update. With a code-signing identity in the keychain this signs; without one electron-builder logs a loud 'skipped code signing' warning and you get a build that cannot auto-update. PATCH_SKIP_NOTARIZE=1 because notarization needs a paid Apple account (see spec/11 § Desktop code signing).",
     "build:desktop": "pnpm --filter @patch/desktop build && PATCH_SKIP_NOTARIZE=1 pnpm --filter @patch/desktop dist:dry",

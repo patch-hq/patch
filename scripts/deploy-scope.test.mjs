@@ -173,14 +173,6 @@ test('a lane child gets no flag the caller did not give, and nothing but the lan
   ]);
 });
 
-test('ship.mjs starts its lane children with laneArgs, not a hand-built argv', async () => {
-  // laneArgs being right is no use if the spawn does not call it.
-  const { readFileSync } = await import('node:fs');
-  const src = readFileSync(new URL('./ship.mjs', import.meta.url), 'utf8');
-  assert.match(src, /`\$\{BUILD\}\/scripts\/ship\.mjs`, \.\.\.laneArgs\(surfaces, argv\)/);
-  assert.doesNotMatch(src, /'--prepared',\s*\]/);
-});
-
 test('lockstep: shipping the server also publishes and applies the host', () => {
   assert.deepEqual(withLockstep(['server']), ['server', 'daemon', 'daemon-mac', 'apply']);
 });
