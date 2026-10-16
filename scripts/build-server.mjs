@@ -15,7 +15,7 @@
 //
 // Pure JavaScript — no native addons — so one release runs on any OS/arch with
 // Node 20+. Install it with `<release>/install`; that is how the live box is
-// deployed too (scripts/ship.mjs), so self-hosting and production are one path.
+// installed by every server from its release (src/self-update.ts), so self-hosting and production are one path.
 //
 // `--reuse-server=<release dir>` assembles a release around an EXISTING server
 // build — its `server/` and its server identity — with a freshly built SPA. A

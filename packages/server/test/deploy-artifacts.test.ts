@@ -17,8 +17,9 @@
 //   - ANTHROPIC_API_KEY MUST NOT be assigned in any production deploy artifact.
 //   - Caddyfile: reverse-proxies /api + /ws to patch-server:3000 and serves the
 //     SPA at /app.
-//   - package.json: `deploy` runs scripts/ship.mjs, which installs a release
-//     (restarting the systemd unit); `build:desktop` / `build:android` produce the app artifacts.
+//   - release.yml publishes a release only when every surface built; each server
+//     installs it with the release's own installer (src/self-update.ts);
+//     `build:desktop` / `build:android` produce the app artifacts.
 //   - backup.sh + install-backup-cron.sh: restic nightly cron on /data.
 //   - fetch-models.sh: present/missing-aware model fetch with --check.
 
@@ -90,67 +91,28 @@ describe('H1 deploy artifacts — Caddyfile (test stack)', () => {
     expect(caddyfile).not.toMatch(/^[^#\n]*patch\.tomchambers\.me/m);
     expect(caddyfile).not.toMatch(/reverse_proxy\s+patch-server:/);
   });
-
-  it('the web delivery verifies the entry bundle LOADS, not just that index.html names it', () => {
-    // 2026-08-16: the box served an index.html naming the right hash while the
-    // bundle itself came back as 200 text/html. The name comparison passed, the
-    // health check passed, and the app was a blank window. A delivery that only
-    // compares names cannot tell a shipped app from a broken one, so the check
-    // that fetches the bundle and asserts its content-type must stay.
-    //
-    // It used to live in scripts/local/deliver.mjs, which is GITIGNORED — so this
-    // assertion could only pass on a machine that happened to have that private
-    // file, and threw ENOENT everywhere else. The check now lives in the shipped
-    // ship.mjs, which every checkout has.
-    const ship = read('scripts/ship.mjs');
-    expect(ship).toMatch(/content_type/);
-    expect(ship).toMatch(/javascript/);
-  });
-
-  it('one failing surface does not strand the others, and still fails the run', () => {
-    // 2026-08-28: the Mac's login keychain grew a password, so desktop() threw.
-    // It is called first, deliberately, and the whole deploy was one try block —
-    // so 35 commits including the mobile cold-start and new-chat fixes sat
-    // unshipped for a day behind a surface that shares nothing with them.
-    // Each surface now runs isolated; the run still exits non-zero and pushes a
-    // high-priority failure naming every surface that broke.
-    const ship = read('scripts/ship.mjs');
-    // Every independently-shippable surface goes through the isolating wrapper.
-    for (const name of ['desktop', 'daemon', 'ota', 'apk']) {
-      expect(ship).toMatch(new RegExp(`surface\\('${name}'`));
-    }
-    // web and server ship as one release, under whichever of the two was asked for.
-    expect(ship).toMatch(
-      /surface\(want\('server'\) \? 'server' : 'web', \(\) => release\(info\)\)/,
-    );
-    // ...which records the failure rather than rethrowing it.
-    expect(ship).toMatch(/function surface\([\s\S]*?catch \(err\) \{[\s\S]*?failures\.push/);
-    expect(ship).not.toMatch(/function surface\([\s\S]*?catch \(err\) \{[\s\S]*?throw/);
-    // A partial ship is still a failed deploy: loud, and non-zero.
-    expect(ship).toMatch(/if \(failures\.length\)[\s\S]*?process\.exit\(1\)/);
-    expect(ship).toMatch(/notify\('Patch deploy FAILED'/);
-  });
 });
 
 describe('H1 deploy artifacts — deploy command + backup scripts', () => {
-  it('`pnpm run deploy` ships via ship.mjs, which installs a release', () => {
-    // `deploy` ships every surface (web, server, host, OTA, APK, desktop).
-    // The server step builds a release and runs its installer — the same path
-    // a self-hoster uses — which restarts the systemd unit.
+  it('a release is every surface or none, and a server installs it with its own installer', () => {
+    // Releases are built by .github/workflows/release.yml and installed by each
+    // server (src/self-update.ts) — the same installer a self-hoster runs.
+    const workflow = read('.github/workflows/release.yml');
+    // Nothing is published unless every surface built and the gate passed...
+    expect(workflow).toMatch(/needs: \[verify, server, host, mac, android, ota\]/);
+    // ...and the phone's update, which phones fetch straight from Expo, goes last.
+    expect(workflow).toMatch(/ota:[\s\S]*?needs: \[verify, server, host, mac, android\]/);
+    // No second way to ship: the old box-and-Mac deploy is gone.
     const scripts = JSON.parse(read('package.json')).scripts as Record<string, string>;
-    expect(scripts.deploy ?? '').toMatch(/scripts\/ship\.mjs/);
-    // deploy:server was the docker-compose path; dc38968 deleted it with the
-    // containers. Its return would mean two ways to ship the server.
+    expect(scripts.deploy).toBeUndefined();
     expect(scripts['deploy:server']).toBeUndefined();
 
-    const program = read('scripts/ship.mjs');
-    expect(program).toMatch(/buildServerRelease/);
-    expect(program).toMatch(/\$\{dir\}\/install/);
+    const selfUpdate = read('packages/server/src/self-update.ts');
+    expect(selfUpdate).toMatch(/'install'/);
     expect(installer).toMatch(/\$\{SYSTEMCTL\} restart patch-server/);
     expect(installer).toMatch(/SYSTEMCTL="systemctl --user"/);
-    // It must verify what it shipped rather than assume the restart worked.
+    // It must verify what it installed rather than assume the restart worked.
     expect(installer).toMatch(/api\/healthz/);
-    expect(program).toMatch(/api\/healthz/);
   });
 
   it('exposes the app builds (desktop + android) as package scripts', () => {

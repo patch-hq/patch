@@ -18,7 +18,10 @@ test('electron-builder appId is the id installed shells update under', () => {
   assert.equal(id, PUBLISHED_APP_ID);
 });
 
-test('ship.mjs refuses to publish under a different id than the Mac bundle', () => {
-  const ship = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'ship.mjs'), 'utf8');
-  assert.ok(ship.includes(`Identifier=${PUBLISHED_APP_ID.replace(/\./g, '\\.')}`));
+test('the release refuses to publish under a different id than the Mac bundle', () => {
+  const release = readFileSync(
+    join(__dirname, '..', '..', '..', '.github', 'workflows', 'release.yml'),
+    'utf8',
+  );
+  assert.ok(release.includes(`Identifier=${PUBLISHED_APP_ID}`));
 });

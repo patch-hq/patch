@@ -387,7 +387,7 @@ export interface ArtifactWait {
 
 /**
  * A deploy publishes the Linux daemon first and the Mac one after its SSH build
- * (`scripts/ship.mjs` hostMac), so for a while a Mac sees a newer version
+ * (the release workflow's mac job), so for a while a Mac sees a newer version
  * with no artifact for it. That is not a failure and not worth an error: poll
  * quietly — every `pollMs`, then every `slowPollMs` once `windowMs` has passed —
  * for as long as the build is pending, and apply when it lands. `onPendingChange`

@@ -7,7 +7,7 @@
 //
 // All three fields describe ONE thing: the JS bundle actually executing. They
 // are inlined together by Metro when that bundle is built — by `eas update` for
-// an OTA (scripts/ship.mjs passes the version, sha and build time), or by the
+// an OTA (scripts/publish-ota.mjs passes the version, sha and build time), or by the
 // APK build for an embedded launch — so they cannot disagree with each other.
 //
 // `builtAt` used to come from `Updates.createdAt` instead, on the reasoning that
