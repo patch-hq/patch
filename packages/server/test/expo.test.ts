@@ -23,7 +23,7 @@ describe('ExpoPushBackend.send — tokens.length === 0 short-circuit', () => {
     vi.stubGlobal('fetch', fetchSpy);
     const backend = new ExpoPushBackend();
     const result = await backend.send([], { title: 't', body: 'b' });
-    expect(result).toEqual({ delivered: 0, failed: [], permanentlyRejected: [] });
+    expect(result).toEqual({ delivered: 0, failed: [], permanentlyRejected: [], reasons: {} });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
@@ -38,7 +38,7 @@ describe('ExpoPushBackend.send — request shape', () => {
       body: 'hello',
       data: { chatId: 'c1' },
     });
-    expect(result).toEqual({ delivered: 1, failed: [], permanentlyRejected: [] });
+    expect(result).toEqual({ delivered: 1, failed: [], permanentlyRejected: [], reasons: {} });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://exp.host/--/api/v2/push/send');
@@ -144,6 +144,10 @@ describe('ExpoPushBackend.send — response mapping', () => {
     const result = await backend.send(['tok-a', 'tok-b', 'tok-c'], { title: 't', body: 'b' });
     expect(result.delivered).toBe(1);
     expect(result.failed).toEqual(['tok-b', 'tok-c']);
+    expect(result.reasons).toEqual({
+      'tok-b': 'DeviceNotRegistered',
+      'tok-c': 'MessageRateExceeded',
+    });
     // Only DeviceNotRegistered is a permanent rejection — a rate limit is
     // transient and must not prune the token (NO FALLBACK: only prune on an
     // explicit permanent-rejection code).
@@ -158,6 +162,7 @@ describe('ExpoPushBackend.send — response mapping', () => {
     const backend = new ExpoPushBackend();
     const result = await backend.send(['tok-a'], { title: 't', body: 'b' });
     expect(result.failed).toEqual(['tok-a']);
+    expect(result.reasons).toEqual({ 'tok-a': 'unknown failure' });
     expect(result.permanentlyRejected).toEqual([]);
   });
 

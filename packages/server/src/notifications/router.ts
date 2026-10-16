@@ -65,7 +65,13 @@ export interface PushBackend {
   send(
     tokens: string[],
     payload: PushPayload,
-  ): Promise<{ delivered: number; failed: string[]; permanentlyRejected: string[] }>;
+  ): Promise<{
+    delivered: number;
+    failed: string[];
+    permanentlyRejected: string[];
+    /** Expo's error code (or message) per failed token, when it gave one. */
+    reasons?: Record<string, string>;
+  }>;
 }
 
 export interface PushPayload {
@@ -306,7 +312,9 @@ export class NotificationRouter {
         channel: 'push',
         chatId: event.chatId,
         message: event.message,
-        error: `Expo push rejected ${result.failed.length} token(s): ${result.failed.join(', ')}`,
+        error: `Expo push rejected ${result.failed.length} token(s): ${result.failed
+          .map((t) => (result.reasons?.[t] ? `${t} (${result.reasons[t]})` : t))
+          .join(', ')}`,
       });
     }
   }

@@ -46,8 +46,14 @@ export class ExpoPushBackend implements PushBackend {
   async send(
     tokens: string[],
     payload: PushPayload,
-  ): Promise<{ delivered: number; failed: string[]; permanentlyRejected: string[] }> {
-    if (tokens.length === 0) return { delivered: 0, failed: [], permanentlyRejected: [] };
+  ): Promise<{
+    delivered: number;
+    failed: string[];
+    permanentlyRejected: string[];
+    reasons: Record<string, string>;
+  }> {
+    if (tokens.length === 0)
+      return { delivered: 0, failed: [], permanentlyRejected: [], reasons: {} };
 
     // The channel is what actually decides whether an Android notification
     // makes a noise, so a silent push cannot buzz whatever its priority.
@@ -64,6 +70,7 @@ export class ExpoPushBackend implements PushBackend {
     let delivered = 0;
     const failed: string[] = [];
     const permanentlyRejected: string[] = [];
+    const reasons: Record<string, string> = {};
 
     for (let i = 0; i < tokens.length; i += MAX_MESSAGES_PER_REQUEST) {
       const chunk = tokens.slice(i, i + MAX_MESSAGES_PER_REQUEST);
@@ -93,6 +100,7 @@ export class ExpoPushBackend implements PushBackend {
           return;
         }
         failed.push(token);
+        reasons[token] = ticket.details?.error ?? ticket.message ?? 'no reason given';
         // A permanently-dead token must be pruned from the registry so it is
         // never re-attempted (spec/09: no retry queue). Expo's stable
         // permanent-rejection code for a token whose app was uninstalled /
@@ -104,6 +112,6 @@ export class ExpoPushBackend implements PushBackend {
         }
       });
     }
-    return { delivered, failed, permanentlyRejected };
+    return { delivered, failed, permanentlyRejected, reasons };
   }
 }
