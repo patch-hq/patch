@@ -34,7 +34,7 @@ const BASE_TITLE = 'patch';
 export function documentTitleFor(
   chatId: string | null,
   folder: string | undefined,
-  name?: string,
+  name?: string | null,
 ): string {
   if (chatId === null) return BASE_TITLE;
   if (SPECIAL_THREAD_ID_SET.has(chatId)) return BASE_TITLE;
