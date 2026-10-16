@@ -38,13 +38,32 @@ module.exports = async function afterSign(context) {
   execFileSync('ditto', ['-c', '-k', '--keepParent', appPath, zip], { stdio: 'inherit' });
 
   console.log(`[notarize] submitting ${appPath}`);
-  execFileSync(
-    'xcrun',
-    ['notarytool', 'submit', zip, '--key', key, '--key-id', keyId, '--issuer', issuer, '--wait'],
-    { stdio: 'inherit' },
+  const auth = ['--key', key, '--key-id', keyId, '--issuer', issuer];
+  const result = JSON.parse(
+    execFileSync('xcrun', ['notarytool', 'submit', zip, ...auth, '--wait', '--output-format', 'json'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }),
   );
   execFileSync('rm', ['-f', zip]);
-  // Staple the ticket so Gatekeeper accepts the app offline.
-  execFileSync('xcrun', ['stapler', 'staple', appPath], { stdio: 'inherit' });
+  if (result.status !== 'Accepted') {
+    // Apple's log says which file it refused and why.
+    execFileSync('xcrun', ['notarytool', 'log', result.id, ...auth], { stdio: 'inherit' });
+    throw new Error(`notarize: Apple answered "${result.status}" for submission ${result.id}`);
+  }
+  console.log(`[notarize] accepted (${result.id})`);
+
+  // Staple the ticket so Gatekeeper accepts the app offline. Fetching the ticket
+  // is a network call that drops now and then; a few tries, then fail loudly.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      execFileSync('xcrun', ['stapler', 'staple', appPath], { stdio: 'inherit' });
+      break;
+    } catch (err) {
+      if (attempt === 5) throw err;
+      console.warn(`[notarize] stapling failed (try ${attempt} of 5); trying again in ${attempt * 10}s`);
+      execFileSync('sleep', [String(attempt * 10)]);
+    }
+  }
   console.log('[notarize] notarized + stapled OK');
 };
