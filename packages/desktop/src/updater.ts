@@ -49,12 +49,6 @@ export interface UpdaterState {
   /** True once the update is on disk and installable. */
   downloaded: boolean;
   /**
-   * Set when macOS refused to let the downloaded update replace this app (it
-   * is signed differently). It cannot install itself, so the banner offers the
-   * download instead. Not persisted: the next check finds the refusal again.
-   */
-  manualInstall: { version: string; url: string } | null;
-  /**
    * ISO instant this shell FIRST learned it was behind the feed, and has been
    * behind ever since. Cleared only by actually installing.
    *
@@ -191,26 +185,7 @@ export type UpdaterEvent =
   | { type: 'up-to-date'; at: string }
   | { type: 'available'; version: string; at: string }
   | { type: 'downloaded'; version: string; at: string }
-  | { type: 'error'; kind: 'check' | 'install'; message: string; at: string }
-  | { type: 'refused'; version: string; url: string; at: string };
-
-/**
- * Squirrel.Mac's answer when a downloaded update is not signed by the same
- * identity as the app it would replace ("Code signature at URL … did not pass
- * validation: code failed to satisfy specified code requirement(s)"). macOS
- * will never apply it, however many times it is retried.
- */
-export function isSignatureRefusal(message: string): boolean {
-  return /did not pass validation|code requirement|code signature/i.test(message);
-}
-
-/** What the banner says when an update cannot install itself. */
-export function refusedCopy(version: string): string {
-  return (
-    `Patch ${version} is signed differently from the app you have, so it can't install itself. ` +
-    `Download it and replace this app once; after that, updates install themselves.`
-  );
-}
+  | { type: 'error'; kind: 'check' | 'install'; message: string; at: string };
 
 export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): UpdaterState {
   switch (event.type) {
@@ -228,7 +203,6 @@ export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): Updater
         lastErrorKind: null,
         availableVersion: null,
         downloaded: false,
-        manualInstall: null,
         // Current again. Either the update was installed, or the feed rolled
         // back to what we run; either way there is nothing to nag about.
         staleSince: null,
@@ -244,7 +218,6 @@ export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): Updater
         availableVersion: event.version,
         // What is staged on disk is the older build; it is not this version.
         downloaded: state.downloaded && state.availableVersion === event.version,
-        manualInstall: state.manualInstall?.version === event.version ? state.manualInstall : null,
         // First sighting starts the clock; later sightings do NOT restart it.
         staleSince: state.staleSince ?? event.at,
       };
@@ -258,22 +231,6 @@ export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): Updater
         lastErrorKind: null,
         availableVersion: event.version,
         downloaded: true,
-        manualInstall: null,
-        staleSince: state.staleSince ?? event.at,
-      };
-    case 'refused':
-      // Downloaded, then refused by macOS: there is nothing installable on disk,
-      // and pressing Restart would only wait for an install that cannot come.
-      return {
-        ...state,
-        checking: false,
-        lastCheckedAt: event.at,
-        lastResult: 'error',
-        lastError: refusedCopy(event.version),
-        lastErrorKind: 'install',
-        availableVersion: event.version,
-        downloaded: false,
-        manualInstall: { version: event.version, url: event.url },
         staleSince: state.staleSince ?? event.at,
       };
     case 'error':
@@ -371,7 +328,6 @@ export function initialUpdaterState(args: {
     lastErrorKind: persisted.lastResult === 'error' ? 'check' : null,
     availableVersion: persisted.availableVersion,
     downloaded: false, // a downloaded update does not survive a relaunch decision.
-    manualInstall: null,
     checking: false,
     // A relaunch is not an install: the shell that comes back is the same
     // build, so if it was behind before it is behind now. Only `quitAndInstall`
@@ -420,6 +376,20 @@ export function initialUpdaterState(args: {
  */
 export const INSTALL_WATCHDOG_MS = 20_000;
 
+/**
+ * An updater error as one short clause for the banner, which prefixes it with
+ * "Couldn't install Patch <version>:". Squirrel's messages carry the full
+ * file:// path of the staged bundle, which says nothing to the person reading.
+ */
+export function conciseReason(message: string): string {
+  return (message.split('\n')[0] ?? '')
+    .replace(/\s*at URL\s+\S+/gi, '')
+    .replace(/\s*\S+:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\.$/, '');
+}
+
 export function quitAndInstallNow(deps: {
   app: { isQuitting: boolean };
   autoUpdater: { quitAndInstall(isSilent: boolean, isForceRunAfter: boolean): void };
@@ -430,6 +400,13 @@ export function quitAndInstallNow(deps: {
    * helper is the app's fault to repair, not the user's to quit around.
    */
   recoverStall?: () => void;
+  /**
+   * The updater's error since this update finished downloading, if any.
+   * electron-updater says "downloaded" before Squirrel.Mac has staged the
+   * update; when Squirrel then fails, that error is why no install will come,
+   * and it is what the user is told — not that the installer stalled.
+   */
+  pendingError?: () => string | null;
   /** Test seam for the stall watchdog below; real callers get the real timer. */
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }): void {
@@ -448,25 +425,24 @@ export function quitAndInstallNow(deps: {
     // ever fires, so firing at all IS the evidence of a stall, not a guess.
     const watchdog = schedule(() => {
       deps.app.isQuitting = false;
+      const reason = deps.pendingError?.();
+      if (reason) {
+        deps.onError(new Error(conciseReason(reason)));
+        return;
+      }
       if (retriesLeft > 0 && deps.recoverStall) {
         try {
           deps.recoverStall();
         } catch (err) {
           deps.onError(
-            new Error(
-              `Restart stalled and the installer could not be reset: ${(err as Error).message}`,
-            ),
+            new Error(`the installer stalled and couldn't be reset (${(err as Error).message})`),
           );
           return;
         }
         attempt(retriesLeft - 1);
         return;
       }
-      deps.onError(
-        new Error(
-          'Restart did not finish — the installer stalled again after being reset, so Patch is still running the old build.',
-        ),
-      );
+      deps.onError(new Error("the installer didn't respond"));
     }, INSTALL_WATCHDOG_MS);
     watchdog.unref?.();
   };
@@ -482,14 +458,13 @@ export function installDownloaded(
   state: UpdaterState,
   deps: Parameters<typeof quitAndInstallNow>[0],
 ): void {
-  if (state.manualInstall) {
-    deps.onError(new Error(refusedCopy(state.manualInstall.version)));
+  if (!state.downloaded) {
+    deps.onError(new Error("it hasn't finished downloading"));
     return;
   }
-  if (!state.downloaded) {
-    deps.onError(
-      new Error('No update has finished downloading, so there is nothing to install yet.'),
-    );
+  const reason = deps.pendingError?.();
+  if (reason) {
+    deps.onError(new Error(conciseReason(reason)));
     return;
   }
   quitAndInstallNow(deps);

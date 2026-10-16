@@ -7207,6 +7207,12 @@ a.ch-row:hover {
   background: color-mix(in srgb, var(--danger) 38%, var(--bg-app));
   color: var(--danger);
 }
+/* An install that failed is an error, whatever the urgency: the error colour,
+ * without the overdue pulse. */
+.desktop-update-banner.failed {
+  background: color-mix(in srgb, var(--danger) 38%, var(--bg-app));
+  color: var(--danger);
+}
 .desktop-update-banner .dot {
   width: 7px;
   height: 7px;
@@ -7236,8 +7242,6 @@ a.ch-row:hover {
 }
 .desktop-update-restart {
   flex: none;
-  /* Also a link: the download offered when an update cannot install itself. */
-  text-decoration: none;
   border: 1px solid currentColor;
   background: transparent;
   color: inherit;

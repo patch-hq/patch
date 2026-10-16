@@ -98,7 +98,7 @@ export function DesktopUpdateBanner(): JSX.Element | null {
     if (!pressed) return;
     graceTimer.current = window.setTimeout(() => {
       setPressed(false);
-      setBridgeError('Patch did not restart. Try again, or quit and reopen it.');
+      setBridgeError("Patch didn't restart. Try again, or quit and reopen it.");
     }, INSTALL_GRACE_MS);
     return () => window.clearTimeout(graceTimer.current);
   }, [pressed]);
@@ -107,34 +107,6 @@ export function DesktopUpdateBanner(): JSX.Element | null {
     const id = window.setInterval(() => setNow(Date.now()), 5 * 60_000);
     return () => window.clearInterval(id);
   }, []);
-
-  // macOS refused the update (it is signed differently from this app), so it
-  // can never install itself: say why, and offer the download. Shown at once,
-  // whatever the urgency — there is nothing for waiting to fix.
-  if (state?.manualInstall) {
-    return (
-      <div
-        className="desktop-update-banner overdue"
-        data-testid="desktop-update-banner"
-        data-urgency="overdue"
-        role="status"
-      >
-        <span className="dot" aria-hidden />
-        <span className="desktop-update-text" data-testid="desktop-update-error">
-          {state.lastError}
-        </span>
-        <a
-          className="desktop-update-restart"
-          data-testid="desktop-update-download"
-          href={state.manualInstall.url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Download Patch {state.manualInstall.version}
-        </a>
-      </div>
-    );
-  }
 
   // Nothing staged means nothing to offer. `downloaded` is the honest gate:
   // an update that is merely AVAILABLE cannot be installed by pressing a
@@ -145,10 +117,19 @@ export function DesktopUpdateBanner(): JSX.Element | null {
   if (urgency === 'none') return null;
 
   const waited = state.staleSince === null ? null : waitedWords(state.staleSince, now);
+  // A failed press replaces the message and turns the banner the error colour:
+  // one short sentence that says what failed and why.
+  const failure =
+    pressed === false
+      ? (bridgeError ??
+        (lastError !== null
+          ? `Couldn't install Patch ${state.availableVersion}: ${lastError}`
+          : null))
+      : null;
 
   return (
     <div
-      className={`desktop-update-banner ${urgency}`}
+      className={`desktop-update-banner ${failure === null ? urgency : 'failed'}`}
       data-testid="desktop-update-banner"
       data-urgency={urgency}
       // `status`, not `alert`: this is standing information a screen reader
@@ -157,12 +138,13 @@ export function DesktopUpdateBanner(): JSX.Element | null {
       role="status"
     >
       <span className="dot" aria-hidden />
-      <span className="desktop-update-text">
-        Patch has updated{waited === null ? '' : `, waiting ${waited}`}.
-      </span>
-      {pressed === false && (bridgeError ?? lastError) !== null && (
+      {failure === null ? (
+        <span className="desktop-update-text">
+          Patch has updated{waited === null ? '' : `, waiting ${waited}`}.
+        </span>
+      ) : (
         <span className="desktop-update-text" data-testid="desktop-update-error">
-          {bridgeError ?? lastError}
+          {failure}
         </span>
       )}
       <button
@@ -174,7 +156,7 @@ export function DesktopUpdateBanner(): JSX.Element | null {
         onClick={() => {
           const bridge = getDesktopBridge();
           if (!bridge?.installUpdate) {
-            setBridgeError('This Patch app cannot install updates itself. Quit it and reopen it.');
+            setBridgeError("This Patch app can't install updates. Quit and reopen it.");
             return;
           }
           setBridgeError(null);

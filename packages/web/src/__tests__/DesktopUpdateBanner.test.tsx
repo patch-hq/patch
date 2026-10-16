@@ -181,7 +181,7 @@ describe('DesktopUpdateBanner', () => {
     });
     expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Update Patch');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
-    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(/did not restart/i);
+    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(/didn't restart/i);
   });
 
   it('acknowledges the press and surfaces an install failure on the banner itself', async () => {
@@ -205,7 +205,13 @@ describe('DesktopUpdateBanner', () => {
         cb(state({ lastResult: 'error', lastErrorKind: 'install', lastError: 'refused: adhoc' })),
       );
     });
-    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent('refused: adhoc');
+    // One sentence — what failed and why — in place of the update message, and
+    // the banner in the error colour whatever its urgency.
+    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
+      "Couldn't install Patch 0.1.971: refused: adhoc",
+    );
+    expect(screen.queryByText(/Patch has updated/)).toBeNull();
+    expect(screen.getByTestId('desktop-update-banner')).toHaveClass('failed');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
   });
   it('un-sticks the button when the same install failure comes back on a second press', async () => {
@@ -263,37 +269,5 @@ describe('DesktopUpdateBanner', () => {
     fireEvent.click(screen.getByTestId('desktop-update-restart'));
     expect(screen.getByTestId('desktop-update-error')).toBeInTheDocument();
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
-  });
-
-  it('an update macOS refused says why and offers the download, not a Restart that cannot work', async () => {
-    const message =
-      "Patch 1.1.37 is signed differently from the app you have, so it can't install itself. " +
-      'Download it and replace this app once; after that, updates install themselves.';
-    const installUpdate = installBridge(
-      state({
-        downloaded: false,
-        lastResult: 'error',
-        lastErrorKind: 'install',
-        lastError: message,
-        availableVersion: '1.1.37',
-        // Fell behind a minute ago: still shown, there is nothing to wait for.
-        staleSince: new Date(Date.now() - 60_000).toISOString(),
-        manualInstall: {
-          version: '1.1.37',
-          url: 'https://patch.example/api/desktop/Patch-1.1.37-arm64-mac.zip',
-        },
-      }),
-    );
-    render(<DesktopUpdateBanner />);
-    expect(await screen.findByTestId('desktop-update-error')).toHaveTextContent(message);
-    const link = screen.getByTestId('desktop-update-download');
-    expect(link).toHaveTextContent('Download Patch 1.1.37');
-    expect(link).toHaveAttribute(
-      'href',
-      'https://patch.example/api/desktop/Patch-1.1.37-arm64-mac.zip',
-    );
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(screen.queryByTestId('desktop-update-restart')).toBeNull();
-    expect(installUpdate).not.toHaveBeenCalled();
   });
 });

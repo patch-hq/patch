@@ -12,8 +12,7 @@ import {
   diagnoseUpdater,
   createInstaller,
   installDownloaded,
-  isSignatureRefusal,
-  refusedCopy,
+  conciseReason,
   shouldPollFeed,
   emptyPersisted,
   initialUpdaterState,
@@ -376,7 +375,7 @@ test('a reset that itself fails is reported, not retried', () => {
     },
   });
   assert.equal(installs, 1);
-  assert.match(errors[0]!, /could not be reset: pkill missing/);
+  assert.match(errors[0]!, /couldn't be reset \(pkill missing\)/);
 });
 
 test('a real relaunch never lets the watchdog speak', () => {
@@ -856,52 +855,70 @@ test('a persisted error comes back as a check error — an install failure did n
   assert.equal(state().lastErrorKind, null);
 });
 
-// --- an update macOS refuses: signed by a different identity -----------------
+// --- an install Squirrel has already failed says why ------------------------
 
-const REFUSAL =
+const SQUIRREL =
   'Code signature at URL file:///Users/x/Library/Caches/io.github.tomchambers2.patch.ShipIt/update.abc/Patch.app/ ' +
   'did not pass validation: code failed to satisfy specified code requirement(s)';
 
-test('Squirrel refusing a differently-signed update is recognised; a network error is not', () => {
-  assert.equal(isSignatureRefusal(REFUSAL), true);
-  assert.equal(isSignatureRefusal('net::ERR_INTERNET_DISCONNECTED'), false);
+test('an updater error becomes one short clause, without the bundle path', () => {
+  assert.equal(
+    conciseReason(SQUIRREL),
+    'Code signature did not pass validation: code failed to satisfy specified code requirement(s)',
+  );
+  assert.equal(
+    conciseReason('net::ERR_INTERNET_DISCONNECTED.\n    at foo'),
+    'net::ERR_INTERNET_DISCONNECTED',
+  );
 });
 
-test('a refused update is not installable, says why, and offers the download', () => {
-  const url = 'https://patch.tomchambers.me/api/desktop/Patch-1.1.37-arm64-mac.zip';
-  const downloaded = reduceUpdater(state(), { type: 'downloaded', version: '1.1.37', at: AT });
-  const s = reduceUpdater(downloaded, { type: 'refused', version: '1.1.37', url, at: AT });
-  assert.equal(s.downloaded, false);
-  assert.equal(s.lastResult, 'error');
-  assert.equal(s.lastErrorKind, 'install');
-  assert.equal(s.lastError, refusedCopy('1.1.37'));
-  assert.deepEqual(s.manualInstall, { version: '1.1.37', url });
-  // Still behind, and the clock that escalates the banner keeps running.
-  assert.equal(s.staleSince, AT);
-  // Being current again clears it.
-  assert.equal(reduceUpdater(s, { type: 'up-to-date', at: AT }).manualInstall, null);
-});
-
-test('Restart on a refused update repeats why, instead of waiting for an install that cannot come', () => {
+test('Restart after Squirrel has already failed the download reports that, and never arms the quit', () => {
   const app = { isQuitting: false };
   const calls: string[] = [];
   const errors: Error[] = [];
-  const refused = reduceUpdater(state(), {
-    type: 'refused',
-    version: '1.1.37',
-    url: 'https://patch.tomchambers.me/api/desktop/Patch-1.1.37-arm64-mac.zip',
-    at: AT,
-  });
-  installDownloaded(refused, {
+  installDownloaded(
+    { ...state(), downloaded: true, availableVersion: '1.1.37' },
+    {
+      app,
+      autoUpdater: { quitAndInstall: () => calls.push('quitAndInstall') },
+      onError: (e) => errors.push(e),
+      pendingError: () => SQUIRREL,
+      setTimer: () => {
+        calls.push('timer');
+        return {};
+      },
+    },
+  );
+  assert.deepEqual(calls, []);
+  assert.equal(app.isQuitting, false);
+  assert.equal(errors[0]?.message, conciseReason(SQUIRREL));
+});
+
+test('a Squirrel error during the wait is what the stall reports, not that the installer stalled', () => {
+  const app = { isQuitting: false };
+  const errors: Error[] = [];
+  let pending: string | null = null;
+  let fire: (() => void) | null = null;
+  let killed = 0;
+  quitAndInstallNow({
     app,
-    autoUpdater: { quitAndInstall: () => calls.push('quitAndInstall') },
+    autoUpdater: {
+      quitAndInstall: () => {
+        pending = SQUIRREL;
+      },
+    },
     onError: (e) => errors.push(e),
-    setTimer: () => {
-      calls.push('timer');
+    recoverStall: () => {
+      killed += 1;
+    },
+    pendingError: () => pending,
+    setTimer: (fn) => {
+      fire = fn;
       return {};
     },
   });
-  assert.deepEqual(calls, []);
+  (fire as unknown as () => void)();
+  assert.equal(killed, 0);
   assert.equal(app.isQuitting, false);
-  assert.equal(errors[0]?.message, refusedCopy('1.1.37'));
+  assert.equal(errors[0]?.message, conciseReason(SQUIRREL));
 });

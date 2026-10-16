@@ -36,6 +36,7 @@ import {
   dialog,
   screen,
   shell,
+  autoUpdater as squirrel,
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { join } from 'node:path';
@@ -46,7 +47,6 @@ import {
   emptyPersisted,
   createInstaller,
   initialUpdaterState,
-  isSignatureRefusal,
   parsePersisted,
   persistedOf,
   createCheckRunner,
@@ -1257,6 +1257,9 @@ export function getUpdaterState(): UpdaterState | null {
  * A refusal (Squirrel won't apply an update to an adhoc signature) lands on the
  * version panel as an error rather than disappearing.
  */
+/** Squirrel.Mac's error since the last download; see `pendingError` in updater.ts. */
+let errorSinceDownload: string | null = null;
+
 const installUpdate = createInstaller({
   app: app as unknown as { isQuitting: boolean },
   autoUpdater,
@@ -1265,6 +1268,7 @@ const installUpdate = createInstaller({
   recoverStall: () => {
     spawnSync('pkill', ['-x', 'ShipIt']);
   },
+  pendingError: () => errorSinceDownload,
   onError: (err) =>
     applyUpdaterEvent({
       type: 'error',
@@ -1394,13 +1398,9 @@ function setupAutoUpdater(): void {
   autoUpdater.on('update-not-available', () => {
     applyUpdaterEvent({ type: 'up-to-date', at: new Date().toISOString() });
   });
-  // The update electron-updater last downloaded: what Squirrel is then asked to
-  // stage, and what a refusal of it names.
-  let staged: { version: string; file: string } | null = null;
-  autoUpdater.on('update-downloaded', (info: { version: string; files?: { url: string }[] }) => {
+  autoUpdater.on('update-downloaded', (info: { version: string }) => {
     logDesktopEvent({ type: 'auto-update:downloaded' });
-    const file = info.files?.[0]?.url;
-    staged = file ? { version: info.version, file } : null;
+    errorSinceDownload = null;
     applyUpdaterEvent({ type: 'downloaded', version: info.version, at: new Date().toISOString() });
     // The update is now staged on disk, and that is ALL that happens here.
     //
@@ -1418,20 +1418,12 @@ function setupAutoUpdater(): void {
     // The user presses Restart when it suits them, or quits one evening and
     // gets it for free.
   });
+  // Squirrel.Mac's own failures — not a background check that hit a network
+  // blip — are the ones that mean the downloaded update will not install.
+  squirrel.on('error', (err: Error) => {
+    errorSinceDownload = err.message;
+  });
   autoUpdater.on('error', (err: Error) => {
-    // electron-updater says "downloaded" before Squirrel.Mac has checked the
-    // download. When Squirrel then refuses it as signed by someone else, that
-    // update will never install: say so, and offer it to download instead of a
-    // Restart that would wait for an install that cannot come.
-    if (staged !== null && isSignatureRefusal(err.message)) {
-      applyUpdaterEvent({
-        type: 'refused',
-        version: staged.version,
-        url: new URL(staged.file, feedUrl).toString(),
-        at: new Date().toISOString(),
-      });
-      return;
-    }
     // Surfaced verbatim to the panel. This is the path that used to swallow the
     // "Could not get code signature" failure on an adhoc-signed build.
     applyUpdaterEvent({
