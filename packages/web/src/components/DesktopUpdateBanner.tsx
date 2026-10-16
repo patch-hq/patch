@@ -25,6 +25,8 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { getDesktopBridge, useDesktopUpdaterState } from '../lib/desktopBridge.js';
 
+const UPDATE_FAILED = 'Update failed. Try again.';
+
 /**
  * Mirrors `updateUrgency` in packages/desktop/src/updater.ts. Duplicated rather
  * than imported because the web bundle must not depend on the desktop package —
@@ -98,7 +100,8 @@ export function DesktopUpdateBanner(): JSX.Element | null {
     if (!pressed) return;
     graceTimer.current = window.setTimeout(() => {
       setPressed(false);
-      setBridgeError("Patch didn't restart. Try again, or quit and reopen it.");
+      console.error('desktop update: shell never answered the install press');
+      setBridgeError(UPDATE_FAILED);
     }, INSTALL_GRACE_MS);
     return () => window.clearTimeout(graceTimer.current);
   }, [pressed]);
@@ -117,15 +120,13 @@ export function DesktopUpdateBanner(): JSX.Element | null {
   if (urgency === 'none') return null;
 
   const waited = state.staleSince === null ? null : waitedWords(state.staleSince, now);
-  // A failed press replaces the message and turns the banner the error colour:
-  // one short sentence that says what failed and why.
+  // A failed press replaces the message and turns the banner the error colour.
+  // The reason goes to the console; the user only needs to know to try again.
+  if (pressed === false && lastError !== null) {
+    console.error(`desktop update: couldn't install ${state.availableVersion}: ${lastError}`);
+  }
   const failure =
-    pressed === false
-      ? (bridgeError ??
-        (lastError !== null
-          ? `Couldn't install Patch ${state.availableVersion}: ${lastError}`
-          : null))
-      : null;
+    pressed === false ? (bridgeError ?? (lastError !== null ? UPDATE_FAILED : null)) : null;
 
   return (
     <div
@@ -156,7 +157,8 @@ export function DesktopUpdateBanner(): JSX.Element | null {
         onClick={() => {
           const bridge = getDesktopBridge();
           if (!bridge?.installUpdate) {
-            setBridgeError("This Patch app can't install updates. Quit and reopen it.");
+            console.error('desktop update: shell has no installUpdate bridge');
+            setBridgeError(UPDATE_FAILED);
             return;
           }
           setBridgeError(null);

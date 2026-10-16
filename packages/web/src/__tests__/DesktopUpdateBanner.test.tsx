@@ -181,7 +181,9 @@ describe('DesktopUpdateBanner', () => {
     });
     expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Update Patch');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
-    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(/didn't restart/i);
+    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
+      'Update failed. Try again.',
+    );
   });
 
   it('acknowledges the press and surfaces an install failure on the banner itself', async () => {
@@ -205,11 +207,12 @@ describe('DesktopUpdateBanner', () => {
         cb(state({ lastResult: 'error', lastErrorKind: 'install', lastError: 'refused: adhoc' })),
       );
     });
-    // One sentence — what failed and why — in place of the update message, and
-    // the banner in the error colour whatever its urgency.
+    // One plain sentence, no installer detail, in place of the update message,
+    // and the banner in the error colour whatever its urgency.
     expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
-      "Couldn't install Patch 0.1.971: refused: adhoc",
+      'Update failed. Try again.',
     );
+    expect(screen.getByTestId('desktop-update-error')).not.toHaveTextContent('adhoc');
     expect(screen.queryByText(/Patch has updated/)).toBeNull();
     expect(screen.getByTestId('desktop-update-banner')).toHaveClass('failed');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
@@ -240,7 +243,9 @@ describe('DesktopUpdateBanner', () => {
           ),
         );
       });
-      expect(screen.getByTestId('desktop-update-error')).toHaveTextContent('refused: adhoc');
+      expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
+        'Update failed. Try again.',
+      );
       expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
     }
   });
@@ -267,7 +272,9 @@ describe('DesktopUpdateBanner', () => {
     render(<DesktopUpdateBanner />);
     await act(async () => {});
     fireEvent.click(screen.getByTestId('desktop-update-restart'));
-    expect(screen.getByTestId('desktop-update-error')).toBeInTheDocument();
+    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
+      'Update failed. Try again.',
+    );
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
   });
 });
