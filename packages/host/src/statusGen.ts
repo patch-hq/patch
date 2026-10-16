@@ -16,7 +16,7 @@ import type { StatusKind } from '@patch/wire';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import type { Logger } from 'pino';
-import { cutAt, stripWrappingQuotes } from './textClean.js';
+import { stripWrappingQuotes } from './textClean.js';
 
 /** Cheap + fast model for the one-shot status summariser. */
 export const STATUS_MODEL = 'claude-haiku-4-5-20251001';
@@ -27,8 +27,11 @@ const STATUS_TIMEOUT_MS = 20_000;
 /** How much of the exchange to feed the summariser. */
 const MSG_SNIPPET_LEN = 1500;
 
-/** Hard cap on the returned summary line. */
-const MAX_SUMMARY_LEN = 100;
+/**
+ * Longest summary the sidebar shows whole (two lines). A longer one is
+ * rejected, never cut: a status ending in "…" says nothing was finished.
+ */
+export const MAX_SUMMARY_LEN = 80;
 
 export interface ChatStatusSummary {
   kind: StatusKind;
@@ -88,8 +91,8 @@ export function parseStatus(raw: string): ChatStatusSummary | null {
   // Strip surrounding quotes/backticks (straight + smart).
   body = stripWrappingQuotes(body);
   body = body.replace(/\s+/g, ' ').trim();
-  if (body === '') return null;
-  if (body.length > MAX_SUMMARY_LEN) body = `${cutAt(body, MAX_SUMMARY_LEN - 1).trimEnd()}…`;
+  body = body.replace(/(\.{3}|…)+$/, '').trimEnd();
+  if (body === '' || body.length > MAX_SUMMARY_LEN) return null;
   return { kind, summary: body };
 }
 
@@ -104,23 +107,22 @@ function tail(text: string): string {
 }
 
 function buildPrompt(input: GenerateStatusInput): string {
-  const user = input.lastUserMessage.slice(0, MSG_SNIPPET_LEN);
   const reply = tail(input.assistantReply);
   return [
-    'You are summarising the CURRENT STATUS of an agent chat thread for a',
-    'sidebar. Read the most recent exchange and decide whether the agent is now',
-    'waiting on the user or has simply finished.',
+    'You are summarising what an agent just did, for a sidebar. Read the',
+    "agent's final reply and decide whether the agent is now waiting on the",
+    'user or has simply finished.',
     '',
-    `Most recent user message: ${user}`,
-    `Most recent assistant reply (the final part of it): ${reply}`,
+    `The agent's final reply (the final part of it): ${reply}`,
     '',
     'Reply with EXACTLY ONE line in the form `KIND: summary`, where KIND is:',
     '- QUESTION if the agent asked the user something / needs a decision or',
     '  input to continue (the thread is paused on the user).',
     '- COMPLETE if the agent finished its turn and nothing is outstanding (the',
     '  user could pick it back up any time, but nothing is required).',
-    'The summary is a concise phrase (max ~12 words) saying what the agent did',
-    'or said and where things stand, plus any action the user must take. The',
+    `The summary is at most ${MAX_SUMMARY_LEN} characters (about 8 words), so`,
+    'someone glancing sees at once what the agent did or said and any action',
+    "the user must take. Describe the agent's outcome, never the request. The",
     'text above may begin mid-sentence because only the end is shown: never',
     'mention truncation, excerpts, or the reply being cut off; describe the',
     'agent. No markdown, no quotes, no trailing punctuation.',

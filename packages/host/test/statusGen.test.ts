@@ -6,7 +6,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
-import { parseStatus, makeStatusGenerator, STATUS_MODEL } from '../src/statusGen.js';
+import {
+  parseStatus,
+  makeStatusGenerator,
+  STATUS_MODEL,
+  MAX_SUMMARY_LEN,
+} from '../src/statusGen.js';
 import type { RunOnAccountWithCredit } from '../src/accountFailover.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import type { OAuthCheckResult } from '../src/chatRunner.js';
@@ -81,11 +86,15 @@ describe('parseStatus', () => {
     expect(out).toEqual({ kind: 'complete', summary: 'build is green' });
   });
 
-  it('caps an over-long summary with an ellipsis', () => {
-    const out = parseStatus(`COMPLETE: ${'a'.repeat(300)}`);
-    expect(out).not.toBeNull();
-    expect((out as { summary: string }).summary.length).toBeLessThanOrEqual(100);
-    expect((out as { summary: string }).summary.endsWith('…')).toBe(true);
+  it('rejects a summary too long to show whole rather than truncating it', () => {
+    expect(parseStatus(`COMPLETE: ${'a'.repeat(300)}`)).toBeNull();
+    const longest = 'a'.repeat(MAX_SUMMARY_LEN);
+    expect(parseStatus(`COMPLETE: ${longest}`)?.summary).toBe(longest);
+  });
+
+  it('never returns a summary ending in an ellipsis', () => {
+    expect(parseStatus('COMPLETE: Refactored auth…')?.summary).toBe('Refactored auth');
+    expect(parseStatus('COMPLETE: Refactored auth...')?.summary).toBe('Refactored auth');
   });
 
   it('returns null when no recognised kind prefix is present', () => {
@@ -144,6 +153,7 @@ describe('makeStatusGenerator', () => {
     expect(prompt).not.toContain('START-MARKER');
     expect(prompt).toMatch(/never\s+(mention|say)[^.]*(cut|truncat|excerpt)/i);
     expect(prompt).toMatch(/what the agent (did|said)/i);
+    expect(prompt).not.toContain(baseInput.lastUserMessage);
   });
 
   it('falls back to assembled delta text when no final assistant message arrives', async () => {
