@@ -47,7 +47,7 @@ import { useBatchStore } from '../src/stores/batchStore';
 installRelayTransport();
 
 /** Every in-app destination this layout can be asked to open. */
-type NavTarget = `/chats/${string}` | '/new-chat' | '/share' | '/(tabs)/chats';
+type NavTarget = `/chats/${string}` | '/new-chat' | '/share' | '/(tabs)/chats' | '/(tabs)/settings';
 
 /**
  * How long a held navigation waits for the root navigator. Fonts load and the
