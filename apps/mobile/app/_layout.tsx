@@ -26,6 +26,7 @@ import { startVoiceNote } from '../src/lib/voiceNote';
 import { useBatchWatcher } from '../src/lib/batchNotifier';
 import { VoiceNoteOverlay } from '../src/components/VoiceNoteOverlay';
 import { IncomingCallSheet } from '../src/components/IncomingCallSheet';
+import { SignInApprovalSheet } from '../src/components/SignInApprovalSheet';
 import { ChatLongPressSheet } from '../src/components/ChatLongPressSheet';
 import { SnoozeSheet } from '../src/components/SnoozeSheet';
 import { ConnectionDiagnosticsGate } from '../src/components/ConnectionDiagnostics';
@@ -316,6 +317,7 @@ export default function RootLayout(): React.ReactElement | null {
           </Stack>
           <ViewPositionSync />
           <IncomingCallSheet />
+          <SignInApprovalSheet />
           <VoiceNoteOverlay />
           <ChatLongPressSheet />
           <SnoozeSheet />

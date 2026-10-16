@@ -14862,3 +14862,68 @@ select.new-chat-account:focus-visible {
   color: inherit;
   cursor: pointer;
 }
+
+/* ---------- Sign-in by approval ---------- */
+
+.signin-prompt {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 20px 24px;
+  min-width: 320px;
+  text-align: center;
+  z-index: 1100;
+}
+.signin-prompt p {
+  margin: 0 0 14px;
+}
+.signin-code {
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 36px;
+  letter-spacing: 0.25em;
+  margin: 0 0 16px;
+  user-select: all;
+}
+.signin-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.signin-buttons button {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 0;
+  padding: 8px 18px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.signin-buttons button.deny {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--line);
+}
+.signin-error {
+  color: var(--danger, #ff6b6b);
+}
+.pairing-code-input {
+  width: 100%;
+  text-align: center;
+  letter-spacing: 0.3em;
+  font-size: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  margin: 8px 0;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+.pairing-alt {
+  margin-top: 20px;
+}
+.pairing-alt summary {
+  cursor: pointer;
+}

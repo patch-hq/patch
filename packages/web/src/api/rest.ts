@@ -910,6 +910,31 @@ export const api = {
           lastError: string | null;
         }
     >('/api/relay'),
+  // Sign-in by approval from another device (spec/10 § Surface linking).
+  signInRequest: (label: string) =>
+    request<{ id: string; secret: string; expiresAt: number }>('/api/auth/signin/request', {
+      method: 'POST',
+      body: { clientType: 'surface-web', label },
+    }),
+  signInState: (id: string, secret: string) =>
+    request<{ state: 'pending' | 'approved' | 'denied' | 'expired' }>(
+      `/api/auth/signin/${encodeURIComponent(id)}/state?secret=${encodeURIComponent(secret)}`,
+    ),
+  signInRedeem: (id: string, secret: string, code: string) =>
+    request<{ credential: string }>(`/api/auth/signin/${encodeURIComponent(id)}/redeem`, {
+      method: 'POST',
+      body: { secret, code },
+    }),
+  signInPending: () =>
+    request<{ requests: { id: string; label: string; expiresAt: number }[] }>(
+      '/api/auth/signin/pending',
+    ),
+  signInApprove: (id: string) =>
+    request<{ code: string; label: string }>(`/api/auth/signin/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+    }),
+  signInDeny: (id: string) =>
+    request<{ ok: true }>(`/api/auth/signin/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
   surfacePairStart: () =>
     request<{ nonce: string; expiresAt: number; uri?: string }>('/api/auth/pair/start', {
       method: 'POST',

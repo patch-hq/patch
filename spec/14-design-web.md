@@ -1396,24 +1396,22 @@ In-session reminders use `patch_wake_me` (see `08-triggers-and-jobs.md`); patch 
 
 ## Pairing screen
 
-Shown when there's no stored surface credential. It takes one field, and what
-the user pastes into it depends on which of the two routes in `10-auth.md` they
-are on:
+Shown when there's no stored surface credential. On mount it asks the server to
+sign in (`10-auth.md` § Sign-in by approval) and shows a six-digit code field:
+every signed-in surface pops up Allow / Deny, and Allow shows the code to type
+here. A denied or lapsed request says so and offers Ask again; wrong codes are
+reported inline.
 
-- The short pairing code from Link a device on an already-linked surface. This browser
-  generates its own device keypair and redeems the code for its credential
-  (`10-auth.md` § Surface linking) — the same nonce the QR carries, typed
-  because a browser has nothing to scan with.
-- The credential token (a JWT starting with `eyJ…`) from `patch auth bootstrap`,
-  which is the very first sign-in of an account that has no linked surface yet.
+Under "Use a credential token instead" is the paste route, for the very first
+sign-in of an account that has no signed-in device (`patch auth bootstrap`): a
+JWT starting with `eyJ…`, validated for shape before anything is stored (3-part,
+with a `surface_id` claim; the signature is the server's job). It opens
+by itself when the server has no account to ask. A short pairing code is
+rejected with an inline error. A malformed value in storage is self-healed:
+it's dropped and the sign-in screen returns.
 
-Each value is validated for shape before anything is stored: a JWT must be
-3-part and carry a `surface_id` claim (signature is the server's job), and a
-pairing code must be the short-code shape. The copy names both routes, and says
-that the daemon-registration code from Add host authorises a machine rather than
-a sign-in, so a value pasted from the wrong screen is rejected up front with an
-inline error. A malformed value in storage is self-healed: it's dropped and the
-pairing screen returns.
+On a signed-in surface (web, desktop, phone) the prompt is a small card at the
+top: "<device> wants to sign in" with Deny and Allow, then the code with Done.
 
 ## Offline / error states
 

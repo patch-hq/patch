@@ -21,6 +21,7 @@ import { useTerminalStore } from '../stores/terminalStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
+import { useSignInStore } from '../stores/signInStore.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
@@ -865,6 +866,17 @@ export class PatchWs {
     }
     if (event.type === 'new_chat_draft.removed') {
       useDraftStore.getState().applyRemoved(event.id);
+      return;
+    }
+    // spec/10 § Surface linking — a new device is asking to sign in.
+    if (event.type === 'signin.requested') {
+      useSignInStore
+        .getState()
+        .add({ id: event.id, label: event.label, expiresAt: event.expiresAt });
+      return;
+    }
+    if (event.type === 'signin.resolved') {
+      useSignInStore.getState().remove(event.id);
       return;
     }
     // spec/05 § Handover — where the user last was, on whichever surface.

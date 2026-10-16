@@ -640,6 +640,17 @@ export const api = {
       method: 'POST',
       body: { token, platform: 'android-expo' },
     }),
+  // Approving a new device's sign-in (spec/10 § Surface linking).
+  signInPending: () =>
+    request<{ requests: { id: string; label: string; expiresAt: number }[] }>(
+      '/api/auth/signin/pending',
+    ),
+  signInApprove: (id: string) =>
+    request<{ code: string; label: string }>(`/api/auth/signin/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+    }),
+  signInDeny: (id: string) =>
+    request<{ ok: true }>(`/api/auth/signin/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
   // Pairing: complete a QR-initiated pair using the nonce shown on an
   // already-linked surface. Server returns a fresh JWT for this device.
   pairComplete: (body: { nonce: string; devicePublicKey: string; clientType: 'surface-mobile' }) =>

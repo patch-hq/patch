@@ -16,6 +16,7 @@ import { useHostRefusalStore } from '../stores/hostRefusalStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useVoiceStore } from '../stores/voiceStore';
+import { useSignInStore } from '../stores/signInStore';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore';
 import { useTerminalStore } from '../stores/terminalStore';
 import { speakInterrupt } from '../lib/speakInterrupt';
@@ -626,6 +627,17 @@ export class PatchWs {
         hosts: event.hosts,
       };
       useSettingsStore.getState().applyShared(state);
+      return;
+    }
+    // spec/10 § Surface linking — a new device is asking to sign in.
+    if (event.type === 'signin.requested') {
+      useSignInStore
+        .getState()
+        .add({ id: event.id, label: event.label, expiresAt: event.expiresAt });
+      return;
+    }
+    if (event.type === 'signin.resolved') {
+      useSignInStore.getState().remove(event.id);
       return;
     }
     // spec/05 § Handover — where the user last was, on whichever surface.

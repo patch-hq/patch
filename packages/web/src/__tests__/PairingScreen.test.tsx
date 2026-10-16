@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, cleanup, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PairingScreen } from '../components/PairingScreen.js';
+import { api, ApiError } from '../api/rest.js';
 import { clearCredential, loadCredential } from '../lib/credential.js';
 
 function b64url(o: unknown): string {
@@ -10,9 +11,15 @@ function jwt(payload: Record<string, unknown>): string {
   return `${b64url({ alg: 'EdDSA' })}.${b64url(payload)}.sig`;
 }
 
+beforeEach(() => {
+  vi.spyOn(api, 'signInRequest').mockResolvedValue({ id: 'r1', secret: 's1', expiresAt: 1 });
+  vi.spyOn(api, 'signInState').mockResolvedValue({ state: 'pending' });
+});
+
 afterEach(() => {
   cleanup();
   clearCredential();
+  vi.restoreAllMocks();
 });
 
 describe('PairingScreen', () => {
@@ -99,5 +106,62 @@ describe('PairingScreen', () => {
   it('Continue names the chord that presses it', () => {
     render(<PairingScreen onPaired={() => {}} />);
     expect(screen.getByTestId('pairing-submit').getAttribute('title')).toBe('Ctrl+Enter');
+  });
+});
+
+describe('PairingScreen — approval from another device', () => {
+  it('asks on mount and takes a typed code for a credential', async () => {
+    const onPaired = vi.fn();
+    const token = jwt({ surface_id: 'web-9' });
+    const redeem = vi.spyOn(api, 'signInRedeem').mockResolvedValue({ credential: token });
+    render(<PairingScreen onPaired={onPaired} />);
+    await screen.findByTestId('signin-waiting');
+    expect(api.signInRequest).toHaveBeenCalledTimes(1);
+    const input = screen.getByTestId('signin-code-input');
+    fireEvent.change(input, { target: { value: '12a345' } });
+    expect((input as HTMLInputElement).value).toBe('12345');
+    expect((screen.getByTestId('signin-redeem') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: '123456' } });
+    fireEvent.click(screen.getByTestId('signin-redeem'));
+    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    expect(redeem).toHaveBeenCalledWith('r1', 's1', '123456');
+    expect(loadCredential()).toBe(token);
+  });
+
+  it('says so when the code is wrong and stays signed out', async () => {
+    const onPaired = vi.fn();
+    vi.spyOn(api, 'signInRedeem').mockRejectedValue(
+      new ApiError(403, 'wrong_code', { error: 'wrong_code' }),
+    );
+    render(<PairingScreen onPaired={onPaired} />);
+    await screen.findByTestId('signin-waiting');
+    fireEvent.change(screen.getByTestId('signin-code-input'), { target: { value: '000000' } });
+    fireEvent.click(screen.getByTestId('signin-redeem'));
+    expect((await screen.findByTestId('signin-code-error')).textContent).toMatch(/not right/);
+    expect(onPaired).not.toHaveBeenCalled();
+    expect(loadCredential()).toBeNull();
+  });
+
+  it('reports a denied request and offers to ask again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.spyOn(api, 'signInState').mockResolvedValue({ state: 'denied' });
+      render(<PairingScreen onPaired={() => {}} />);
+      await screen.findByTestId('signin-waiting');
+      await vi.advanceTimersByTimeAsync(2100);
+      expect((await screen.findByTestId('signin-ended')).textContent).toMatch(/denied/);
+      fireEvent.click(screen.getByTestId('signin-retry'));
+      await waitFor(() => expect(api.signInRequest).toHaveBeenCalledTimes(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('with no account on the server, says so and opens the token box', async () => {
+    vi.spyOn(api, 'signInRequest').mockRejectedValue(
+      new ApiError(400, 'no account bootstrapped', { error: 'no account bootstrapped' }),
+    );
+    render(<PairingScreen onPaired={() => {}} />);
+    expect((await screen.findByTestId('signin-ended')).textContent).toMatch(/no account/);
   });
 });

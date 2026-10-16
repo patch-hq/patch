@@ -4173,6 +4173,34 @@ export const HostRemovedEvent = z
   .strict();
 export type HostRemovedEvent = z.infer<typeof HostRemovedEvent>;
 
+/**
+ * Server → every signed-in surface: a new device is asking to sign in
+ * (`POST /api/auth/signin/request`). A surface shows an Allow / Deny prompt;
+ * allowing reveals the code to type on the new device. `label` is what the
+ * asking device called itself, `expiresAt` when the request lapses.
+ */
+export const SigninRequestedEvent = z
+  .object({
+    type: z.literal('signin.requested'),
+    id: z.string().min(1),
+    label: z.string(),
+    expiresAt: z.number(),
+  })
+  .strict();
+export type SigninRequestedEvent = z.infer<typeof SigninRequestedEvent>;
+
+/**
+ * Server → every signed-in surface: a sign-in request was answered or lapsed,
+ * so any prompt still showing for it goes away.
+ */
+export const SigninResolvedEvent = z
+  .object({
+    type: z.literal('signin.resolved'),
+    id: z.string().min(1),
+  })
+  .strict();
+export type SigninResolvedEvent = z.infer<typeof SigninResolvedEvent>;
+
 /** Surface → host: the settings that stay with one machine (spec/01 § Settings). */
 export const HostSettingsEvent = z
   .object({
@@ -8041,6 +8069,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostRenameEvent,
   HostSetHomeEvent,
   HostRemovedEvent,
+  SigninRequestedEvent,
+  SigninResolvedEvent,
   HostSettingsEvent,
   HostComponentInstallEvent,
   HostComponentRemoveEvent,
@@ -8315,6 +8345,8 @@ export const EVENT_SCHEMAS = {
   'host.rename': HostRenameEvent,
   'host.set_home': HostSetHomeEvent,
   'host.removed': HostRemovedEvent,
+  'signin.requested': SigninRequestedEvent,
+  'signin.resolved': SigninResolvedEvent,
   'host.settings': HostSettingsEvent,
   'host.component_install': HostComponentInstallEvent,
   'host.component_remove': HostComponentRemoveEvent,

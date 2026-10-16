@@ -27,6 +27,7 @@ import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
 import { WebUpdateBanner } from './components/WebUpdateBanner.js';
 import { ConnectionDiagnosticsGate } from './components/ConnectionDiagnostics.js';
 import { IncomingCallBanner } from './components/IncomingCallBanner.js';
+import { SignInApprovalPrompt } from './components/SignInApprovalPrompt.js';
 import { VoiceBar } from './components/VoiceBar.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { VoicePermissionBanner } from './components/VoicePermissionBanner.js';
@@ -684,6 +685,7 @@ export function AppShell(): JSX.Element {
         onAccept={(callId, chatId) => acceptCall(wsRef.current, callId, chatId, navigate)}
         onDismiss={(callId) => dismissCall(wsRef.current, callId)}
       />
+      <SignInApprovalPrompt />
       <VoiceNoteOverlay />
       <VoicePermissionBanner
         onRespond={(requestId, approve) => {

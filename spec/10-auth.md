@@ -212,6 +212,17 @@ Any already-linked surface can link a new one.
 
 A pairing nonce is single-use and expires after five minutes. The credential is bound to the nonce and the device public key, so it cannot be replayed or retargeted to another device.
 
+## Sign-in by approval
+
+A new browser signs in by asking a device that is already signed in, as on an Apple device.
+
+1. The new surface asks the server to sign in (unauthenticated, rate-limited), naming itself ("Chrome on Mac"). It keeps the private `secret` the server returns with the request id.
+2. The server tells every signed-in surface (`signin.requested`) and wakes the phone with a push. Each shows Allow / Deny. A surface that connects later reads what is waiting from `GET /api/auth/signin/pending`.
+3. Allow (`POST /api/auth/signin/:id/approve`, authenticated) returns a six-digit code, shown only on the approving surface. Deny turns the request away. Either answer sends `signin.resolved`, which clears the prompt everywhere.
+4. The person types the code on the new surface, which redeems it with its `secret` for a credential. The server mints a web credential and records the surface.
+
+A request lasts five minutes and at most five wait at once. The code works once; three wrong codes burn the request. The code is revealed only to an authenticated approve, so naming a request is not enough to sign in. The first sign-in of an account has no device to ask and still uses a credential token (`patch auth bootstrap`).
+
 ## Relay
 
 A server with no address of its own — one running on a laptop, or behind a home router — is reached through a relay: a rendezvous both sides dial out to. The relay forwards bytes it cannot read.

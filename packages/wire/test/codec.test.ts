@@ -222,6 +222,8 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'host.rename': { type: 'host.rename', hostId: 'host-a', hostName: 'hetzner' },
   'host.set_home': { type: 'host.set_home', hostId: 'host-a' },
   'host.removed': { type: 'host.removed', hostId: 'host-a' },
+  'signin.requested': { type: 'signin.requested', id: 'r1', label: 'Chrome on Mac', expiresAt: 1 },
+  'signin.resolved': { type: 'signin.resolved', id: 'r1' },
   'host.settings': {
     type: 'host.settings',
     hostId: 'host-a',

@@ -1853,6 +1853,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // A changed default model reaches every host that is up; one that is down
     // is corrected by the `host.host` reconcile when it comes back.
     terminateSurface: (surfaceId: string) => wsHub.terminateSurface(surfaceId),
+    broadcast: (event) => wsHub.sendToAll(event),
+    pushSignInRequest: ({ label }) =>
+      notificationRouter.route({
+        type: 'notify',
+        chatId: 'signin-request',
+        channel: 'push',
+        message: `${label} wants to sign in to Patch. Open Patch to allow it.`,
+        priority: 'urgent',
+      }),
     ...(hostLink instanceof InboundHostLink
       ? {
           terminateHost: (hostId: string): boolean =>

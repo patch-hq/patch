@@ -23,7 +23,13 @@ import {
 } from '@patch/auth';
 import { AccountConflictError, type Registry } from './registry.js';
 import type { PresenceTracker } from './presence.js';
-import { encodePairingUri, SharedSettingsPatch, type PairingRelay } from '@patch/wire';
+import {
+  encodePairingUri,
+  SharedSettingsPatch,
+  type PairingRelay,
+  type WireEvent,
+} from '@patch/wire';
+import { SignInRequestStore, TooManySignInRequestsError } from './signin-requests.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SettingsError, type SharedSettingsService } from './shared-settings.js';
 
@@ -99,6 +105,20 @@ const PairCompleteBody = z
     devicePublicKey: z.string().min(1),
     clientType: ClientTypeSchema,
     label: z.string().min(1).optional(),
+  })
+  .strict();
+
+const SignInRequestBody = z
+  .object({
+    clientType: ClientTypeSchema,
+    label: z.string().min(1).max(80).optional(),
+  })
+  .strict();
+
+const SignInRedeemBody = z
+  .object({
+    secret: z.string().min(1),
+    code: z.string().min(1).max(12),
   })
   .strict();
 
@@ -250,6 +270,17 @@ export interface AuthRoutesDeps {
    * one. With no public URL, a pairing code names the relay instead.
    */
   relay?: { info(): PairingRelay };
+  /**
+   * Tell every signed-in surface about a sign-in request (and its answer).
+   * Production wires `WsHub.sendToAll`; without it requests are still stored,
+   * but nothing shows the prompt.
+   */
+  broadcast?: (event: WireEvent) => number;
+  /**
+   * Wake the phone for a sign-in request, which a surface that is not open
+   * cannot otherwise hear. Production wires the notification router.
+   */
+  pushSignInRequest?: (req: { id: string; label: string }) => Promise<void>;
   /** Override clock — tests inject deterministic time. */
   nowMs?: () => number;
   /** Optional pre-existing nonce store (tests). */
@@ -494,6 +525,163 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       });
     },
   );
+
+  // ---- Sign-in by approval from another device (spec/10 § Surface linking) ----
+  // The new device asks, a signed-in one allows and shows a six-digit code, the
+  // person types it in, and the new device collects its credential.
+  const signInStore = new SignInRequestStore();
+  const SIGNIN_LOG_FIELDS = (id: string): { request: string } => ({
+    request: id.slice(0, 6) + '…',
+  });
+
+  // POST /api/auth/signin/request — no bearer: the asking device has none.
+  app.post(
+    '/api/auth/signin/request',
+    { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      if (!deps.registry.getAccount()) {
+        return reply.code(400).send({ error: 'no account bootstrapped' });
+      }
+      const parsed = SignInRequestBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+      }
+      const label = parsed.data.label ?? parsed.data.clientType.replace('surface-', '');
+      let created;
+      try {
+        created = signInStore.create(label, now());
+      } catch (e) {
+        if (e instanceof TooManySignInRequestsError) {
+          return reply.code(429).send({ error: e.message });
+        }
+        throw e;
+      }
+      deps.logger.info(SIGNIN_LOG_FIELDS(created.id), 'sign-in requested');
+      deps.broadcast?.({
+        type: 'signin.requested',
+        id: created.id,
+        label: created.label,
+        expiresAt: created.expiresAt,
+      });
+      if (deps.pushSignInRequest) {
+        deps.pushSignInRequest({ id: created.id, label: created.label }).catch((err: unknown) => {
+          deps.logger.warn({ err: (err as Error).message }, 'sign-in request: push failed');
+        });
+      }
+      return reply.code(200).send({
+        id: created.id,
+        secret: created.secret,
+        expiresAt: created.expiresAt,
+      });
+    },
+  );
+
+  // GET /api/auth/signin/:id?secret= — the asking device polls for the answer.
+  app.get(
+    '/api/auth/signin/:id/state',
+    { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const secret = (req.query as { secret?: string }).secret ?? '';
+      const state = signInStore.stateFor(id, secret, now());
+      if (state === undefined) return reply.code(404).send({ error: 'unknown sign-in request' });
+      return reply.code(200).send({ state });
+    },
+  );
+
+  // POST /api/auth/signin/:id/redeem — the typed code for a credential.
+  app.post(
+    '/api/auth/signin/:id/redeem',
+    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = SignInRedeemBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+      }
+      const label = signInStore.get(id, now())?.label;
+      const result = signInStore.redeem(id, parsed.data.secret, parsed.data.code, now());
+      if (!result.ok) {
+        if (result.reason === 'locked') {
+          deps.broadcast?.({ type: 'signin.resolved', id });
+        }
+        const status =
+          result.reason === 'unknown' ? 404 : result.reason === 'wrong_code' ? 403 : 409;
+        return reply.code(status).send({ error: result.reason });
+      }
+      const account = deps.registry.getAccount();
+      const accountPrivateKey = deps.registry.getAccountPrivateKey();
+      if (!account || !accountPrivateKey) {
+        throw new Error('sign-in redeemed but the account has no private key');
+      }
+      const surfaceId = ulid();
+      const surfaceLabel = label ?? 'web';
+      const credential = await mintSurfaceCredential({
+        userPrivateKey: accountPrivateKey,
+        surfaceId,
+        surfaceKind: 'web',
+        label: surfaceLabel,
+        now: Math.floor(now() / 1000),
+      });
+      deps.registry.upsertSurface({
+        surfaceId,
+        surfaceKind: 'web',
+        label: surfaceLabel,
+        issuedAt: Math.floor(now() / 1000),
+      });
+      deps.broadcast?.({ type: 'signin.resolved', id });
+      deps.logger.info({ surfaceId, ...SIGNIN_LOG_FIELDS(id) }, 'surface signed in by approval');
+      return reply.code(200).send({ credential, accountId: account.accountId, surfaceId });
+    },
+  );
+
+  // GET /api/auth/signin/pending — a signed-in surface asks what is waiting
+  // (it may have connected after the live event, or come from a push).
+  app.get('/api/auth/signin/pending', async (req, reply) => {
+    try {
+      await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply.code(401).send({ error: (e as Error).message });
+    }
+    return reply.code(200).send({
+      requests: signInStore
+        .pending(now())
+        .map((r) => ({ id: r.id, label: r.label, expiresAt: r.expiresAt })),
+    });
+  });
+
+  // POST /api/auth/signin/:id/approve — returns the code to type on the new device.
+  app.post('/api/auth/signin/:id/approve', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply.code(401).send({ error: (e as Error).message });
+    }
+    const { id } = req.params as { id: string };
+    const approved = signInStore.approve(id, now());
+    if (!approved) return reply.code(404).send({ error: 'no such pending sign-in request' });
+    deps.logger.info({ approvedBy: auth.surfaceId, ...SIGNIN_LOG_FIELDS(id) }, 'sign-in approved');
+    deps.broadcast?.({ type: 'signin.resolved', id });
+    return reply.code(200).send({ code: approved.code, label: approved.label });
+  });
+
+  // POST /api/auth/signin/:id/deny
+  app.post('/api/auth/signin/:id/deny', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply.code(401).send({ error: (e as Error).message });
+    }
+    const { id } = req.params as { id: string };
+    if (!signInStore.deny(id, now())) {
+      return reply.code(404).send({ error: 'no such pending sign-in request' });
+    }
+    deps.logger.info({ deniedBy: auth.surfaceId, ...SIGNIN_LOG_FIELDS(id) }, 'sign-in denied');
+    deps.broadcast?.({ type: 'signin.resolved', id });
+    return reply.code(200).send({ ok: true });
+  });
 
   // ---- POST /api/auth/revoke ----
   app.post('/api/auth/revoke', async (req, reply) => {
