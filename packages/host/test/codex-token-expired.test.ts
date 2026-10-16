@@ -73,13 +73,15 @@ it('tries again once the account is signed in again', async () => {
   await accounts.close();
 });
 
-it('tries again after the back-off passes', async () => {
+it('does not retry on a timer, however long it has been', async () => {
   const { accounts, count } = setup();
   const now = Date.now();
   await accounts.refresh();
-  const spy = (await import('vitest')).vi.spyOn(Date, 'now').mockReturnValue(now + 61 * 60_000);
+  const spy = (await import('vitest')).vi
+    .spyOn(Date, 'now')
+    .mockReturnValue(now + 48 * 60 * 60_000);
   await accounts.refresh();
   spy.mockRestore();
-  expect(count()).toBe(2);
+  expect(count()).toBe(1);
   await accounts.close();
 });

@@ -89,15 +89,12 @@ interface Account extends EligibleAccount {
   identity?: string;
   /**
    * The login was refused as expired. While set, no Codex process is started
-   * for it: it is retried only once its `auth.json` changes (signed in again)
-   * or `retryAt` passes, the gap doubling each time it is still refused.
+   * for it: it is retried only once its `auth.json` changes (signed in again).
    */
-  expired?: { auth: string | undefined; retryAt: number; failures: number };
+  expired?: { auth: string | undefined };
 }
 
 export const SIGN_IN_EXPIRED_MESSAGE = 'Sign-in expired. Sign in again in Settings.';
-const EXPIRED_RETRY_BASE_MS = 60 * 60_000;
-const EXPIRED_RETRY_MAX_MS = 12 * 60 * 60_000;
 /** Codex reports a refused login as a 401 with `token_expired`. */
 export const isTokenExpired = (message: string): boolean =>
   /token_expired|authentication token is expired/i.test(message);
@@ -245,8 +242,7 @@ export class CodexAccounts {
   async refresh(): Promise<void> {
     for (const account of this.accounts) {
       if (account.expired) {
-        const signedInAgain = readCodexAuth(account.home) !== account.expired.auth;
-        if (!signedInAgain && Date.now() < account.expired.retryAt) continue;
+        if (readCodexAuth(account.home) === account.expired.auth) continue;
       }
       try {
         const client = await this.client(account);
@@ -282,20 +278,14 @@ export class CodexAccounts {
   }
   /** Stop using a refused login: no process, one log line, flagged for the UI and a notification. */
   private async markExpired(account: Account, message: string): Promise<void> {
-    const failures = (account.expired?.failures ?? 0) + 1;
-    const wait = Math.min(EXPIRED_RETRY_BASE_MS * 2 ** (failures - 1), EXPIRED_RETRY_MAX_MS);
     account.connected = false;
     account.error = SIGN_IN_EXPIRED_MESSAGE;
     await this.closeClient(account.id);
     // Read after the process is gone: Codex may rewrite auth.json on its way
     // out, and that rewrite must not look like a fresh sign-in.
-    account.expired = {
-      auth: readCodexAuth(account.home),
-      retryAt: Date.now() + wait,
-      failures,
-    };
+    account.expired = { auth: readCodexAuth(account.home) };
     this.opts.logger?.error(
-      { accountId: account.id, err: message, retryInMs: wait },
+      { accountId: account.id, err: message },
       'codex: sign-in expired, account paused until signed in again',
     );
   }
