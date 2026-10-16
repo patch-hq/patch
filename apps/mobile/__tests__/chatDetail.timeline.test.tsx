@@ -42,6 +42,13 @@ vi.mock('../src/api/ws', () => ({
   getWs: () => ({ send: sendMock, safeSend: vi.fn(), requestReplay: vi.fn() }),
 }));
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));
+// Message hooks have their own tests (Composer.hooks.test.tsx). Unstubbed, the
+// check is a real fetch, and how fast that fails decides whether a send shows by
+// the time a test looks — it did not on CI.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
 
 import { __setLocalSearchParams } from './stubs/expo-router';
 
