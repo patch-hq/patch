@@ -338,6 +338,8 @@ jobs:
           node-version-file: .nvmrc
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Build the phone's workspace dependencies
+        run: pnpm turbo build --filter='@patch/mobile^...' --output-logs=errors-only
       - run: node scripts/publish-ota.mjs
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
