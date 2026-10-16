@@ -1928,6 +1928,10 @@ export const VoiceConfigSetting = z
 export type VoiceConfigSetting = z.infer<typeof VoiceConfigSetting>;
 
 /** `HH:MM` on a 24-hour clock, in the server's local zone. */
+/** `Send to my phone after` (spec/01 § Settings): 1 minute, 5 minutes, or only when the screen locks. */
+export const SendToPhoneAfter = z.enum(['1m', '5m', 'lock']);
+export type SendToPhoneAfter = z.infer<typeof SendToPhoneAfter>;
+
 const TimeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
 /**
@@ -1987,6 +1991,8 @@ export const SharedSettings = z
     quietHoursEnd: TimeOfDay,
     addressWord: z.string().min(1).max(32),
     reach: z.enum(['notify', 'auto-notify']),
+    /** How long a computer may sit idle before notifications go to the phone (spec/09 § Presence heuristic). */
+    sendToPhoneAfter: SendToPhoneAfter,
     defaultModel: z.string().min(1),
     /** The model a job's chat runs on unless the job's action names its own. */
     jobDefaultModel: z.string().min(1),
@@ -2063,6 +2069,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   quietHoursEnd: '07:00',
   addressWord: 'patch',
   reach: 'notify',
+  sendToPhoneAfter: '1m',
   // Chats and jobs alike do real work, so the out-of-the-box choice is the
   // strongest model rather than the cheapest.
   defaultModel: 'claude-opus-5',
@@ -4484,6 +4491,12 @@ export const SurfaceInputEvent = z
     idleMs: z.number().int().nonnegative(),
     /** `system`: any input on the machine. `page`: input on this page only. */
     scope: z.enum(['system', 'page']),
+    /**
+     * Set when the surface knows nobody is at the machine: the screen is
+     * locked or the machine is asleep. Absent otherwise. A server that does
+     * not know the field reads `idleMs` alone.
+     */
+    away: z.enum(['locked', 'asleep']).optional(),
   })
   .strict();
 export type SurfaceInputEvent = z.infer<typeof SurfaceInputEvent>;

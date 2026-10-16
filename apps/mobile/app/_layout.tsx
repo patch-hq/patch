@@ -214,6 +214,9 @@ export default function RootLayout(): React.ReactElement | null {
     if (!action) return;
     if (action.type === 'external') {
       void Linking.openURL(action.url);
+    } else if (action.type === 'chats') {
+      // Handover push (spec/09 § Handing over to the phone) — the chat list.
+      navigateWhenReady('/(tabs)/chats');
     } else if (action.type === 'batch') {
       // Batch notification (spec/15 § Batch view) — land on the Batch tab,
       // not a chat; setting the mode is what BatchView reads to draw itself.

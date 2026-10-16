@@ -32,7 +32,11 @@ export type NotificationAction =
   /** A batch check-in notification (spec/15 § Batch view, `09-notifications.md`
    *  § Batch check-in) — an ordinary push, but `kind: 'batch'` and no
    *  `chatId`. Tapping it lands on the Batch tab, never a chat. */
-  | { type: 'batch' };
+  | { type: 'batch' }
+  /** A handover push (`09-notifications.md` § Handing over to the phone) naming
+   *  several chats — `kind: 'handover'` and no `chatId`. Tapping it lands on the
+   *  chat list. */
+  | { type: 'chats' };
 
 export type DeepLinkRejectionReason =
   /** The URI yielded no word distinctive enough to look for in the text. */
@@ -151,6 +155,7 @@ export function resolveNotificationAction(
   // A batch check-in push carries no chatId and always means "open the Batch
   // tab" — there is no source chat to fall back to and no deepLink to consider.
   if (data['kind'] === 'batch') return { action: { type: 'batch' } };
+  if (data['kind'] === 'handover') return { action: { type: 'chats' } };
   const deepLink = data['deepLink'];
   if (typeof deepLink === 'string' && deepLink.length > 0) {
     const words = deepLinkWords(deepLink);

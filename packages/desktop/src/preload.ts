@@ -188,9 +188,19 @@ contextBridge.exposeInMainWorld('patch', {
   // panel. The renderer can't reach electron-updater (main-process only), so it
   // reads state, triggers a check, and subscribes to changes over IPC.
   // spec/09 § Presence heuristic — milliseconds since the last keyboard or
-  // mouse input anywhere on this machine, not just in Patch.
-  async getSystemIdleMs(): Promise<number> {
-    return (await ipcRenderer.invoke('patch:system-idle-ms')) as number;
+  // mouse input anywhere on this machine, not just in Patch, and `away` while
+  // the screen is locked or the machine is asleep.
+  async getSystemPresence(): Promise<{ idleMs: number; away?: 'locked' | 'asleep' }> {
+    return (await ipcRenderer.invoke('patch:system-presence')) as {
+      idleMs: number;
+      away?: 'locked' | 'asleep';
+    };
+  },
+  // Fires when `away` may have changed (lock, unlock, sleep, wake).
+  onSystemAwayChange(cb: () => void): () => void {
+    const handler = (): void => cb();
+    ipcRenderer.on('patch:system-away-changed', handler);
+    return () => ipcRenderer.removeListener('patch:system-away-changed', handler);
   },
   // spec/02 § Desktop app and the local host.
   localHost: {

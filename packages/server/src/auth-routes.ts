@@ -790,6 +790,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
           status: p?.status ?? 'offline',
           lastHeartbeat: p?.lastHeartbeat ?? null,
           isCurrent: s.surfaceId === auth.surfaceId,
+          // spec/09 § Presence heuristic — only a computer has input presence.
+          ...(s.surfaceKind === 'web' || s.surfaceKind === 'desktop'
+            ? { presence: deps.presence.computerOf(auth.accountId, s.surfaceId, s.surfaceKind) }
+            : {}),
         };
       });
     // requireAuth already throws (401) when no account exists and there is

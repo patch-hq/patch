@@ -80,7 +80,9 @@ import { BUILD_INFO } from '../lib/buildInfo.js';
 import {
   INPUT_REPORT_INTERVAL_MS,
   listenForPageInput,
+  onIdleDetectionChange,
   readInputReport,
+  startIdleDetection,
 } from '../lib/inputPresence.js';
 
 const INITIAL_BACKOFF_MS = 1000;
@@ -125,6 +127,7 @@ export class PatchWs {
   private heartbeatTimer: number | null = null;
   /** spec/09 § Presence heuristic — `surface.input` reports, hidden or not. */
   private inputTimer: number | null = null;
+  private stopAwayReports: (() => void) | null = null;
   private resyncTimer: number | null = null;
   private closed = false;
   private url: string;
@@ -293,6 +296,13 @@ export class PatchWs {
     };
     report();
     this.inputTimer = window.setInterval(report, INPUT_REPORT_INTERVAL_MS);
+    // `away` changing is reported at once, not at the next tick: a lock or a
+    // lid closing is when the phone should take over (spec/09 § Presence heuristic).
+    this.stopAwayReports = getDesktopBridge()?.onSystemAwayChange?.(report) ?? null;
+    onIdleDetectionChange(report);
+    startIdleDetection().catch((err: unknown) =>
+      console.error('[patch] could not start idle detection', err),
+    );
   }
 
   private startRunningResync(): void {
@@ -315,6 +325,9 @@ export class PatchWs {
 
   private stopInputReports(): void {
     if (this.inputTimer !== null) {
+      this.stopAwayReports?.();
+      this.stopAwayReports = null;
+      onIdleDetectionChange(null);
       window.clearInterval(this.inputTimer);
       this.inputTimer = null;
     }

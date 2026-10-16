@@ -1134,6 +1134,11 @@ reports the key, which Settings → Keys sets without a restart.
   host's environment supplies offers Adopt instead of Revoke. The value is
   never shown back.
 
+#### Notifications
+
+- Send to my phone after — a picker: 1 minute, 5 minutes, Only when I lock. Account-wide (`01-server.md` § Settings).
+- Idle detection — beside it, a button that asks the browser for idle detection so a tab can report the whole machine (`09-notifications.md` § Presence heuristic). A button, because the browser asks permission only on a user gesture. Shown only in a browser that supports idle detection, and never in the desktop app; once granted it reads as granted.
+
 #### Hosts & devices
 
 - Hosts — one row per host machine (`02-daemon.md` § Host identity). Each row
@@ -1185,7 +1190,10 @@ reports the key, which Settings → Keys sets without a restart.
   and hands it a nonce fetched the same way (`02-daemon.md` § Desktop app and
   the local host).
 
-- Linked devices — the surfaces on the account, each revocable, with a
+- Linked devices — the surfaces on the account, each revocable, each web or
+  desktop surface showing its current presence (`09-notifications.md` §
+  Presence heuristic): active with the time since input, away and why, or not
+  reporting; with a
   Link a device QR (`POST /api/auth/pair/start`; `10-auth.md` § Surface
   linking) drawing the code the server issued — its public address, or its
   relay (`05-surfaces.md` § Canonical QR payload). Available from any surface. The registered Android-device count is

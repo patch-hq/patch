@@ -8,9 +8,18 @@
 // heartbeats whenever it is visible, which says nothing about whether anyone
 // is sitting in front of it — a window left open on an empty desk used to hold
 // every push back. Web and desktop surfaces report `surface.input` instead:
-// the desktop app the whole machine's idle time, a browser tab its own page's.
+// the desktop app the whole machine's idle time, a browser tab its own page's
+// unless the user has granted idle detection. A report may also say the machine
+// is `away` (locked, asleep), which beats any idle time.
+
+import type { SendToPhoneAfter } from '@patch/wire';
 
 export type PresenceStatus = 'online' | 'stale' | 'offline';
+
+/** What a surface knows about nobody being at the machine. */
+export type AwayReason = 'locked' | 'asleep';
+
+export type InputScope = 'system' | 'page';
 
 export type SurfaceKind = 'terminal' | 'web' | 'desktop' | 'mobile' | 'voice-device';
 
@@ -43,6 +52,21 @@ export interface PresenceRecord {
   lastInputAt?: number;
   /** When that report arrived — a surface that stops reporting says nothing. */
   inputReportedAt?: number;
+  /** Whether the report covered the whole machine or only this page. */
+  inputScope?: InputScope;
+  /** Set when the surface said nobody is at the machine; cleared by the next report without it. */
+  away?: AwayReason;
+}
+
+/** One computer's current presence, with the evidence it rests on (spec/09 § Presence heuristic). */
+export interface ComputerPresence {
+  surfaceId: string;
+  surfaceKind: SurfaceKind;
+  state: 'active' | 'idle' | 'away' | 'not-reporting';
+  /** Time since input as of now, when the surface is reporting. */
+  idleMs?: number;
+  away?: AwayReason;
+  scope?: InputScope;
 }
 
 /**
@@ -57,8 +81,15 @@ export interface PresenceView extends PresenceRecord {
 
 export const PRESENCE_STALE_MS = 30_000;
 
-/** Input within this long means the user is at the computer. */
-export const AT_COMPUTER_IDLE_MS = 120_000;
+/** Idle time that sends notifications to the phone, per `Send to my phone after`. `lock` never lets idle alone decide. */
+export const AWAY_THRESHOLD_MS: Record<SendToPhoneAfter, number> = {
+  '1m': 60_000,
+  '5m': 300_000,
+  lock: Number.POSITIVE_INFINITY,
+};
+
+/** A page can't see the machine, so its idle time counts for more before it says anything. */
+export const PAGE_SCOPE_THRESHOLD_MS = 300_000;
 
 /** Surfaces report input every 15s; three missed reports and it is no evidence. */
 export const INPUT_REPORT_STALE_MS = 45_000;
@@ -74,6 +105,14 @@ function key(accountId: string, surfaceId: string): string {
 
 export class PresenceTracker {
   private readonly records = new Map<string, PresenceRecord>();
+
+  constructor(private readonly opts: { sendToPhoneAfter?: () => SendToPhoneAfter } = {}) {}
+
+  private thresholdMs(scope: InputScope | undefined): number {
+    const setting = this.opts.sendToPhoneAfter?.() ?? '1m';
+    const base = AWAY_THRESHOLD_MS[setting];
+    return scope === 'page' && setting === '1m' ? PAGE_SCOPE_THRESHOLD_MS : base;
+  }
 
   online(
     accountId: string,
@@ -120,13 +159,27 @@ export class PresenceTracker {
   }
 
   /** Record a `surface.input` report: the user last touched this computer `idleMs` ago. */
-  input(accountId: string, surfaceId: string, idleMs: number, nowMs: number = Date.now()): void {
+  input(
+    accountId: string,
+    surfaceId: string,
+    idleMs: number,
+    nowMs: number = Date.now(),
+    extra: { scope?: InputScope; away?: AwayReason } = {},
+  ): void {
     const k = key(accountId, surfaceId);
     const r = this.records.get(k);
     if (!r) {
       throw new Error(`PresenceTracker.input: unknown surface ${surfaceId}`);
     }
-    this.records.set(k, { ...r, lastInputAt: nowMs - idleMs, inputReportedAt: nowMs });
+    const { away: _prevAway, ...rest } = r;
+    void _prevAway;
+    this.records.set(k, {
+      ...rest,
+      lastInputAt: nowMs - idleMs,
+      inputReportedAt: nowMs,
+      inputScope: extra.scope ?? 'system',
+      ...(extra.away ? { away: extra.away } : {}),
+    });
   }
 
   setFocus(accountId: string, surfaceId: string, chatId: string | null): void {
@@ -175,22 +228,53 @@ export class PresenceTracker {
   }
 
   /**
-   * spec/09 ## Presence heuristic — true when the user has touched a computer
-   * Patch runs on within the last two minutes: any input on the machine when
-   * the desktop app is reporting, input on the page for a browser tab. A
-   * visible window on its own is not enough — only input says someone is
-   * there. The terminal never reports, so it never counts.
+   * spec/09 ## Presence heuristic — true when some web or desktop surface
+   * reported within 45s, did not say the machine is away, and has been idle for
+   * less than the `Send to my phone after` threshold. A visible window on its
+   * own is not enough — only input says someone is there. The terminal never
+   * reports, so it never counts.
    */
   isComputerActive(accountId: string, nowMs: number = Date.now()): boolean {
+    return this.computers(accountId, nowMs).some((c) => c.state === 'active');
+  }
+
+  /** Every web and desktop surface's presence, with the evidence for it. */
+  computers(accountId: string, nowMs: number = Date.now()): ComputerPresence[] {
+    const out: ComputerPresence[] = [];
     for (const r of this.records.values()) {
       if (r.accountId !== accountId) continue;
       if (!isComputerSurface(r.surfaceKind)) continue;
-      if (r.status === 'offline') continue;
-      if (r.lastInputAt === undefined || r.inputReportedAt === undefined) continue;
-      if (nowMs - r.inputReportedAt > INPUT_REPORT_STALE_MS) continue;
-      if (nowMs - r.lastInputAt <= AT_COMPUTER_IDLE_MS) return true;
+      out.push(this.presenceOf(r, nowMs));
     }
-    return false;
+    return out;
+  }
+
+  /** One surface's presence; a surface the tracker has never heard of is not reporting. */
+  computerOf(
+    accountId: string,
+    surfaceId: string,
+    surfaceKind: SurfaceKind,
+    nowMs: number = Date.now(),
+  ): ComputerPresence {
+    const r = this.records.get(key(accountId, surfaceId));
+    return r ? this.presenceOf(r, nowMs) : { surfaceId, surfaceKind, state: 'not-reporting' };
+  }
+
+  private presenceOf(r: PresenceRecord, nowMs: number): ComputerPresence {
+    const base = { surfaceId: r.surfaceId, surfaceKind: r.surfaceKind };
+    if (
+      r.status === 'offline' ||
+      r.lastInputAt === undefined ||
+      r.inputReportedAt === undefined ||
+      nowMs - r.inputReportedAt > INPUT_REPORT_STALE_MS
+    ) {
+      return { ...base, state: 'not-reporting' };
+    }
+    const scope = r.inputScope ?? 'system';
+    if (r.away) return { ...base, state: 'away', away: r.away, scope };
+    const idleMs = Math.max(0, nowMs - r.lastInputAt);
+    const state = idleMs < this.thresholdMs(scope) ? 'active' : 'idle';
+    return { ...base, state, idleMs, scope };
   }
 
   /**

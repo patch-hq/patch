@@ -484,15 +484,19 @@ test('preload.ts exposes the updater bridge for the version panel', () => {
 
 // spec/09 § Presence heuristic — the server routes notifications by whether
 // the user is at the computer, which only the main process can see (any app's input).
-test('the system idle time reaches the renderer over one IPC channel', () => {
+test('the system presence reaches the renderer over IPC, and a lock or sleep is pushed', () => {
   const main = readFileSync(join(here, 'main.ts'), 'utf8');
   const preload = readFileSync(join(here, 'preload.ts'), 'utf8');
+  assert.match(main, /new SystemPresence\(powerMonitor,/);
   assert.match(
     main,
-    /ipcMain\.handle\(\s*['"]patch:system-idle-ms['"],\s*\(\) => powerMonitor\.getSystemIdleTime\(\) \* 1000/,
+    /ipcMain\.handle\(\s*['"]patch:system-presence['"],\s*\(\) => systemPresence\.read\(\)/,
   );
-  assert.match(preload, /getSystemIdleMs/);
-  assert.match(preload, /invoke\(['"]patch:system-idle-ms['"]\)/);
+  assert.match(main, /webContents\.send\(['"]patch:system-away-changed['"]\)/);
+  assert.match(main, /systemPresence\.start\(\)/);
+  assert.match(preload, /getSystemPresence/);
+  assert.match(preload, /invoke\(['"]patch:system-presence['"]\)/);
+  assert.match(preload, /ipcRenderer\.on\(['"]patch:system-away-changed['"]/);
 });
 
 test('preload.ts exposes the patch bridge via contextBridge', () => {

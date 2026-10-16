@@ -788,6 +788,12 @@ export const api = {
         status: 'online' | 'stale' | 'offline';
         lastHeartbeat: number | null;
         isCurrent: boolean;
+        /** Web and desktop surfaces only (spec/09 § Presence heuristic). */
+        presence?: {
+          state: 'active' | 'idle' | 'away' | 'not-reporting';
+          idleMs?: number;
+          away?: 'locked' | 'asleep';
+        };
       }>;
       push: { tokenCount: number };
       daemon: {

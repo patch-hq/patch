@@ -43,6 +43,7 @@ import { AgentIdentityPage } from './settings/AgentIdentityPage.js';
 import { ActivityPage } from './settings/ActivityPage.js';
 import { KeysPage } from './settings/KeysPage.js';
 import { DevicesPage } from './settings/DevicesPage.js';
+import { NotificationsPage } from './settings/NotificationsPage.js';
 import { UpdatesPage } from './settings/UpdatesPage.js';
 import { AccountPage } from './settings/AccountPage.js';
 
@@ -60,6 +61,7 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   hosts: HostsPage,
   identity: AgentIdentityPage,
   keys: KeysPage,
+  notifications: NotificationsPage,
   devices: DevicesPage,
   updates: UpdatesPage,
   account: AccountPage,

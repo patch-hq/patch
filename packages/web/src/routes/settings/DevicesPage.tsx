@@ -40,6 +40,21 @@ export function useDevices(): {
   };
 }
 
+/** One computer's presence in words (spec/09 § Presence heuristic). */
+export function presenceLine(p: NonNullable<LinkedDevice['presence']>): string {
+  if (p.state === 'not-reporting') return 'Not reporting';
+  if (p.state === 'away') return p.away === 'asleep' ? 'Away: asleep' : 'Away: screen locked';
+  const idle = p.idleMs === undefined ? '' : ` ${formatIdle(p.idleMs)} ago`;
+  return p.state === 'active' ? `Active, last input${idle}` : `Away: idle, last input${idle}`;
+}
+
+function formatIdle(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 const KIND_LABEL: Record<string, string> = {
   web: 'Web',
   desktop: 'Desktop',
@@ -60,6 +75,7 @@ export function DeviceRow({
   const sub = [
     d.isCurrent ? 'This device' : (KIND_LABEL[d.surfaceKind] ?? d.surfaceKind),
     extra ?? null,
+    d.presence ? presenceLine(d.presence) : null,
   ].filter((x): x is string => x !== null);
   return (
     <Row

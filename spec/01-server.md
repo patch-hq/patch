@@ -40,6 +40,7 @@ Shared by every host, stored on the server:
 - Voice: the Kokoro voice and the voice config matrix (`07-voice-app.md`).
 - Claude Code `settings.json` (`02-daemon.md` § Claude Code settings).
 - Manager sweep and quiet hours, the voice address word, and the special threads' model and rotation schedule.
+- `Send to my phone after`: how long a computer may sit idle before notifications go to the phone instead (`09-notifications.md` § Presence heuristic). 1 minute (the default), 5 minutes, or `Only when I lock`.
 
 Held by each host, because they describe that machine: its name and home-host flag, its project folders, its installed components and self-update, Claude Code memory (stored under that machine's project paths), and what it has learnt at runtime about which accounts are out of credit.
 

@@ -95,6 +95,14 @@ export interface PatchDesktopBridge {
    */
   getSystemIdleMs?(): Promise<number>;
   /**
+   * spec/09 § Presence heuristic — idle time plus `away` while the machine is
+   * locked or asleep. Absent on shells that predate it, which have only
+   * `getSystemIdleMs`.
+   */
+  getSystemPresence?(): Promise<{ idleMs: number; away?: 'locked' | 'asleep' }>;
+  /** Fires when `away` may have changed (lock, unlock, sleep, wake); returns the unsubscribe. */
+  onSystemAwayChange?(cb: () => void): () => void;
+  /**
    * spec/02 § Desktop app and the local host — whether this Mac runs a
    * host, and installing one with a freshly minted pairing code. Absent in a
    * browser and on shells that predate it.

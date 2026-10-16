@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   PresenceTracker,
   PRESENCE_STALE_MS,
-  AT_COMPUTER_IDLE_MS,
+  AWAY_THRESHOLD_MS,
+  PAGE_SCOPE_THRESHOLD_MS,
   INPUT_REPORT_STALE_MS,
 } from '../src/presence.js';
 
@@ -137,23 +138,23 @@ describe('PresenceTracker', () => {
       }
     });
 
-    it('is true for input within two minutes, on either computer surface', () => {
+    it('is true for input within a minute, on either computer surface', () => {
       for (const kind of ['web', 'desktop'] as const) {
         const p = new PresenceTracker();
         p.online('acc', 'srf-1', kind, 0);
-        p.input('acc', 'srf-1', AT_COMPUTER_IDLE_MS - 1000, 100_000);
+        p.input('acc', 'srf-1', AWAY_THRESHOLD_MS['1m'] - 1000, 100_000);
         expect(p.isComputerActive('acc', 100_000)).toBe(true);
         // The broad check follows it.
         expect(p.isActive('acc', 100_000)).toBe(true);
       }
     });
 
-    it('goes false once the last input is more than two minutes old', () => {
+    it('goes false once the last input is a minute old', () => {
       const p = new PresenceTracker();
       p.online('acc', 'srf-1', 'desktop', 0);
       p.input('acc', 'srf-1', 0, 100_000);
-      expect(p.isComputerActive('acc', 100_000 + AT_COMPUTER_IDLE_MS)).toBe(false); // report stale too
-      p.input('acc', 'srf-1', AT_COMPUTER_IDLE_MS + 1, 200_000);
+      expect(p.isComputerActive('acc', 100_000 + INPUT_REPORT_STALE_MS + 1)).toBe(false); // report stale too
+      p.input('acc', 'srf-1', AWAY_THRESHOLD_MS['1m'], 200_000);
       expect(p.isComputerActive('acc', 200_000)).toBe(false);
     });
 
@@ -201,6 +202,100 @@ describe('PresenceTracker', () => {
     it('an input report from an unknown surface is an error', () => {
       const p = new PresenceTracker();
       expect(() => p.input('acc', 'nope', 0, 1000)).toThrow(/unknown surface/);
+    });
+
+    describe('away and the Send to my phone after threshold', () => {
+      const mk = (setting: '1m' | '5m' | 'lock' = '1m') =>
+        new PresenceTracker({ sendToPhoneAfter: () => setting });
+
+      it('a locked or asleep report is away at once, whatever the idle time', () => {
+        for (const away of ['locked', 'asleep'] as const) {
+          const p = mk();
+          p.online('acc', 'mac', 'desktop', 0);
+          p.input('acc', 'mac', 0, 1000, { scope: 'system', away });
+          expect(p.isComputerActive('acc', 1000)).toBe(false);
+          expect(p.computers('acc', 1000)).toEqual([
+            { surfaceId: 'mac', surfaceKind: 'desktop', state: 'away', away, scope: 'system' },
+          ]);
+        }
+      });
+
+      it('the next report without away makes the computer active again', () => {
+        const p = mk();
+        p.online('acc', 'mac', 'desktop', 0);
+        p.input('acc', 'mac', 0, 1000, { scope: 'system', away: 'locked' });
+        p.input('acc', 'mac', 0, 2000, { scope: 'system' });
+        expect(p.isComputerActive('acc', 2000)).toBe(true);
+        expect(p.computers('acc', 2000)[0]).toMatchObject({ state: 'active', idleMs: 0 });
+      });
+
+      it('1 minute: idle for a minute is away; 5 minutes: not until five', () => {
+        const one = mk('1m');
+        one.online('acc', 'mac', 'desktop', 0);
+        one.input('acc', 'mac', 59_000, 100_000, { scope: 'system' });
+        expect(one.isComputerActive('acc', 100_000)).toBe(true);
+        one.input('acc', 'mac', 60_000, 100_000, { scope: 'system' });
+        expect(one.isComputerActive('acc', 100_000)).toBe(false);
+        expect(one.computers('acc', 100_000)[0]).toMatchObject({ state: 'idle', idleMs: 60_000 });
+
+        const five = mk('5m');
+        five.online('acc', 'mac', 'desktop', 0);
+        five.input('acc', 'mac', 299_000, 400_000, { scope: 'system' });
+        expect(five.isComputerActive('acc', 400_000)).toBe(true);
+        five.input('acc', 'mac', 300_000, 400_000, { scope: 'system' });
+        expect(five.isComputerActive('acc', 400_000)).toBe(false);
+      });
+
+      it('Only when I lock: idle time alone never makes a computer inactive, a lock does', () => {
+        const p = mk('lock');
+        p.online('acc', 'mac', 'desktop', 0);
+        p.input('acc', 'mac', 3 * 3_600_000, 4_000_000, { scope: 'system' });
+        expect(p.isComputerActive('acc', 4_000_000)).toBe(true);
+        p.input('acc', 'mac', 3 * 3_600_000, 4_000_000, { scope: 'system', away: 'locked' });
+        expect(p.isComputerActive('acc', 4_000_000)).toBe(false);
+      });
+
+      it('page-scope evidence waits five minutes under the 1 minute setting', () => {
+        const p = mk('1m');
+        p.online('acc', 'tab', 'web', 0);
+        p.input('acc', 'tab', 120_000, 500_000, { scope: 'page' });
+        expect(p.isComputerActive('acc', 500_000)).toBe(true);
+        p.input('acc', 'tab', PAGE_SCOPE_THRESHOLD_MS, 500_000, { scope: 'page' });
+        expect(p.isComputerActive('acc', 500_000)).toBe(false);
+      });
+
+      it('page-scope evidence uses the chosen threshold under the 5 minute setting', () => {
+        const p = mk('5m');
+        p.online('acc', 'tab', 'web', 0);
+        p.input('acc', 'tab', 299_000, 500_000, { scope: 'page' });
+        expect(p.isComputerActive('acc', 500_000)).toBe(true);
+      });
+
+      it('the setting is read at each decision, so a change applies at once', () => {
+        let setting: '1m' | '5m' = '1m';
+        const p = new PresenceTracker({ sendToPhoneAfter: () => setting });
+        p.online('acc', 'mac', 'desktop', 0);
+        p.input('acc', 'mac', 120_000, 500_000, { scope: 'system' });
+        expect(p.isComputerActive('acc', 500_000)).toBe(false);
+        setting = '5m';
+        expect(p.isComputerActive('acc', 500_000)).toBe(true);
+      });
+
+      it('reports each computer: active, idle, away, or not reporting', () => {
+        const p = mk();
+        p.online('acc', 'a', 'desktop', 0);
+        p.online('acc', 'b', 'web', 0);
+        p.input('acc', 'a', 5000, 10_000, { scope: 'system' });
+        expect(p.computerOf('acc', 'a', 'desktop', 10_000)).toMatchObject({
+          state: 'active',
+          idleMs: 5000,
+        });
+        expect(p.computerOf('acc', 'b', 'web', 10_000).state).toBe('not-reporting');
+        expect(p.computerOf('acc', 'ghost', 'web', 10_000).state).toBe('not-reporting');
+        expect(p.computerOf('acc', 'a', 'desktop', 10_000 + INPUT_REPORT_STALE_MS + 1).state).toBe(
+          'not-reporting',
+        );
+      });
     });
   });
 });

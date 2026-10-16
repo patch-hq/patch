@@ -67,6 +67,7 @@ import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
 import { installLocalHost, localHostStatus, serverOrigin } from './local-host';
+import { SystemPresence } from './system-presence';
 import { loadFirstRun, type SetupChoice } from './first-run-api';
 import { toastSound, type NotifyPriority } from './toastSound';
 import {
@@ -1321,9 +1322,17 @@ function setupAutoUpdater(): void {
   // The panel reads state and drives checks/installs regardless of whether the
   // updater is functional — that's how the disabledReason reaches the user.
   ipcMain.handle('patch:updater:get-state', () => updaterState);
-  // spec/09 § Presence heuristic — how long since ANY input on this Mac, in any
-  // app. The server reads it to decide whether the user is at the computer.
-  ipcMain.handle('patch:system-idle-ms', () => powerMonitor.getSystemIdleTime() * 1000);
+  // spec/09 § Presence heuristic — how long since ANY input on this machine, in
+  // any app, and whether it is locked or asleep. The server reads it to decide
+  // whether the user is at the computer; a change in `away` is pushed to every
+  // window so it reports at once instead of at its next 15s tick.
+  const systemPresence = new SystemPresence(powerMonitor, () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send('patch:system-away-changed');
+    }
+  });
+  systemPresence.start();
+  ipcMain.handle('patch:system-presence', () => systemPresence.read());
   // Meeting mode: start/stop the system-audio tap and stream its PCM to the
   // renderer that asked. A tap left running by a renderer that reloaded is
   // replaced, not refused.
