@@ -2740,6 +2740,22 @@ a.ch-row:hover {
   overflow: visible;
   flex-wrap: wrap;
 }
+.new-chat-usage {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.new-chat-usage-item {
+  display: inline-flex;
+  gap: 6px;
+}
+.new-chat-usage-name {
+  color: var(--ink-2);
+}
 /* Per-chat model selector (spec/13) — a compact pill next to the folder. */
 .model-select {
   border: 1px solid var(--line);

@@ -34,6 +34,7 @@ import { folderName, type PermissionMode } from '@patch/wire';
 import { api, ApiError } from '../src/api/rest';
 import { FolderPickerSheet } from '../src/components/FolderPickerSheet';
 import { Composer, permissionModeIcon } from '../src/components/Composer';
+import { AccountUsageStrip } from '../src/components/AccountUsageStrip';
 import { ModelPicker } from '../src/components/ModelPicker';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { AnchoredMenu } from '../src/components/AnchoredMenu';
@@ -370,6 +371,8 @@ export default function NewChat(): React.ReactElement {
               ))}
             </PickRow>
           ) : null}
+
+          <AccountUsageStrip />
 
           <PickRow label="Permissions">
             <Chip

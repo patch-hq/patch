@@ -31,6 +31,7 @@ import {
   textOf,
 } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
+import { useSettingsStore } from '../src/stores/settingsStore';
 import { useFolderStore } from '../src/stores/folderStore';
 import { usePresenceStore, type HostPresence } from '../src/stores/presenceStore';
 import { useUiStore } from '../src/stores/uiStore';
@@ -841,4 +842,58 @@ it('refreshes models when ChatGPT connects on the current host', async () => {
   });
   expect(api.models.mock.calls.length).toBeGreaterThan(calls);
   expect(findHost(r.root, byTestId('new-chat-model-quick-openai/test'))).toBeTruthy();
+});
+
+describe('NewChat — account usage', () => {
+  it('shows a usage line for each connected account with its 5-hour and weekly figures', async () => {
+    useSettingsStore.setState({
+      data: {
+        preferences: {},
+        shared: {
+          version: 1,
+          secrets: {
+            claude: [
+              { id: 'c0', label: 'Work', connected: true },
+              { id: 'c1', label: 'Home', connected: true },
+              { id: 'c2', label: 'Dead', connected: false },
+            ],
+            codex: [],
+            providerKeys: [],
+          },
+          hosts: [],
+        },
+      } as never,
+    });
+    usePresenceStore.setState({
+      hosts: {
+        [HOST]: {
+          ...host(HOST),
+          accounts: {
+            'claude-code': {
+              accounts: [
+                {
+                  id: 'c0',
+                  label: 'Work',
+                  connected: true,
+                  usage: {
+                    session: { status: 'allowed', utilization: 0.42 },
+                    week: { status: 'allowed', utilization: 0.1 },
+                  },
+                },
+              ],
+            },
+          },
+        } as never,
+      },
+    });
+    const r = await renderReady();
+    const work = textOf(findHost(r.root, byTestId('new-chat-usage-claude-code-c0')));
+    expect(work).toContain('Work');
+    expect(work).toContain('42%');
+    expect(work).toContain('10%');
+    expect(textOf(findHost(r.root, byTestId('new-chat-usage-claude-code-c1')))).toContain(
+      'not read',
+    );
+    expect(findAllHost(r.root, byTestId('new-chat-usage-claude-code-c2'))).toHaveLength(0);
+  });
 });

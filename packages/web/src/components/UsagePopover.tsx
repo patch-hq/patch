@@ -26,19 +26,21 @@ import { formatReadAt, summariseContext } from '../lib/usage.js';
 
 const BACKEND_LABEL: Record<string, string> = { [CLAUDE_BACKEND_ID]: 'Claude', codex: 'OpenAI' };
 
-interface Row {
+export interface AccountUsageRow {
   key: string;
+  /** The account's own label, without the backend prefix. */
+  label: string;
   title: string;
   usage: HostAccount['usage'];
 }
 
 /** Each shared subscription account once; hosts only supply its usage readings. */
-function accountRows(
+export function accountRows(
   hosts: ReturnType<typeof usePresenceStore.getState>['hosts'],
   shared: ReturnType<typeof usePreferencesStore.getState>['shared'],
-): Row[] {
+): AccountUsageRow[] {
   if (shared === null) return [];
-  const rows: Row[] = [];
+  const rows: AccountUsageRow[] = [];
   const backends = [
     { id: CLAUDE_BACKEND_ID, accounts: shared.secrets.claude },
     { id: 'codex', accounts: shared.secrets.codex },
@@ -59,6 +61,7 @@ function accountRows(
       }
       rows.push({
         key: `${backendId}:${account.id}`,
+        label: account.label,
         title: `${backend} · ${account.label}`,
         usage,
       });

@@ -21,6 +21,7 @@ import {
   clearHosts,
   clearSharedAccounts,
   setSharedAccounts,
+  reportAccounts,
 } from './presenceHelpers.js';
 
 // What the HOST reports as its last-used model (spec/03 § `host.host`). A
@@ -1538,6 +1539,31 @@ describe('/chats/new', () => {
 
     expect(await screen.findByTestId('folder-quick-/home/tom/projects/alpha')).toBeDisabled();
     expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
+  });
+
+  it('shows a usage indicator for each connected account, with its 5-hour and weekly figures', async () => {
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
+    reportAccounts('d1', [
+      {
+        id: 'c0',
+        label: 'Claude 0',
+        connected: true,
+        usage: {
+          session: { status: 'allowed', utilization: 0.42 },
+          week: { status: 'allowed', utilization: 0.1 },
+        },
+      },
+      { id: 'c1', label: 'Claude 1', connected: true },
+    ]);
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    const first = await screen.findByTestId('new-chat-usage-claude-code:c0');
+    expect(first.textContent).toContain('Claude 0');
+    expect(first.textContent).toContain('42%');
+    expect(first.textContent).toContain('10%');
+    // An account nothing has read yet says so rather than drawing empty bars.
+    expect(screen.getByTestId('new-chat-usage-claude-code:c1').textContent).toContain('not read');
   });
 
   it('draws no quick toggles when there are no projects to offer', async () => {

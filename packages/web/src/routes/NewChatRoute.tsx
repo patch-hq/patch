@@ -56,6 +56,7 @@ import { humaniseError } from '../lib/errorCopy.js';
 import { HostPicker } from '../components/HostPicker.js';
 import { ModelPicker } from '../components/ModelPicker.js';
 import type { PatchWs } from '../api/ws.js';
+import { AccountUsageStrip } from '../components/AccountUsageStrip.js';
 import { TerminalPanel } from '../components/TerminalPanel.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { isPlainEnter } from '../lib/submitChord.js';
@@ -1001,6 +1002,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // chat's header crumb and the model is fixed at spawn.
   const setupRow = (
     <div className="new-chat-setup" data-testid="new-chat-setup">
+      <AccountUsageStrip />
       {/* Where the chat runs (spec/14 §8), only once there is a choice to make.
           An offline machine is listed so its absence is visible, and cannot be
           chosen. */}
