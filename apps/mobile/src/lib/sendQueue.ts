@@ -105,9 +105,9 @@ export function retrySource(
 }
 
 /**
- * Retry a turn (see {@link retrySource}) in place: its user text is sent again
- * naming the turn it re-runs, and the host folds the result into the same
- * bubble as another attempt (spec/12 § Retry in place).
+ * Retry a turn (see {@link retrySource}) by forking the conversation at it: the
+ * user text runs again on a new track off the turn before it, and everything
+ * from that turn down belongs to the track being left (spec/04 § Branching).
  */
 export function retryTurn(chatId: string, entry: { role?: string; seq: number }): void {
   const src = retrySource(chatId, entry);
@@ -115,16 +115,24 @@ export function retryTurn(chatId: string, entry: { role?: string; seq: number })
     useUiStore.getState().pushError('nothing to retry: no earlier text-only message');
     return;
   }
-  const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  enqueue({
-    chatId,
-    localId,
-    text: src.content,
-    files: [],
-    disabledTools: useToolsStore.getState().disabledFor(chatId),
-    retryOfSeq: src.seq,
-    refs: [],
-  });
+  try {
+    getWs().send({
+      type: 'chat.fork_request',
+      chatId,
+      seq: src.seq,
+      message: src.content,
+      localId: `fork-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+  } catch (err) {
+    useUiStore.getState().pushError(`retry failed: ${(err as Error).message}`);
+    return;
+  }
+  useChatStore.setState((s) => ({
+    timelines: {
+      ...s.timelines,
+      [chatId]: (s.timelines[chatId] ?? []).filter((e) => e.seq < src.seq),
+    },
+  }));
 }
 
 /** Retry: upload the same files again, then send (spec/15). */

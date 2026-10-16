@@ -154,20 +154,47 @@ describe('chatStore — outgoing-turn actions', () => {
 });
 
 describe('retryTurn', () => {
-  it('re-runs the turn in place: names its seq and draws no second bubble', () => {
-    useChatStore.getState().applyEvent({
-      type: 'chat.message',
-      chatId: 'c1',
-      seq: 3,
-      role: 'user',
-      content: 'do the thing',
-    } as never);
-    const before = useChatStore.getState().timelines['c1']!.length;
+  const seed = (): void => {
+    for (const [seq, role, content] of [
+      [1, 'user', 'first'],
+      [2, 'assistant', 'one'],
+      [3, 'user', 'do the thing'],
+      [4, 'assistant', 'done'],
+      [5, 'user', 'later'],
+    ] as const) {
+      useChatStore.getState().applyEvent({
+        type: 'chat.message',
+        chatId: 'c1',
+        seq,
+        role,
+        content,
+      } as never);
+    }
+  };
+
+  it('forks the conversation at the turn: fork_request, later turns dropped, no delivery', () => {
+    seed();
+    retryTurn('c1', { role: 'assistant', seq: 4 });
+    expect(submitSpy).not.toHaveBeenCalled();
+    expect(wsSend).toHaveBeenCalledTimes(1);
+    expect(wsSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'chat.fork_request',
+        chatId: 'c1',
+        seq: 3,
+        message: 'do the thing',
+      }),
+    );
+    expect(useChatStore.getState().timelines['c1']!.map((e) => e.seq)).toEqual([1, 2]);
+  });
+
+  it('a send that throws says so and keeps the transcript', () => {
+    seed();
+    wsSend.mockImplementation(() => {
+      throw new Error('socket closed');
+    });
     retryTurn('c1', { role: 'user', seq: 3 });
-    expect(submitSpy).toHaveBeenCalledTimes(1);
-    const args = submitSpy.mock.calls[0]!;
-    expect(args[1]).toBe('do the thing');
-    expect(args[6]).toBe(3);
-    expect(useChatStore.getState().timelines['c1']!.length).toBe(before);
+    expect(useChatStore.getState().timelines['c1']!.length).toBe(5);
+    expect(useUiStore.getState().errors.length).toBe(1);
   });
 });

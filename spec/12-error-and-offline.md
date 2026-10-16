@@ -297,7 +297,11 @@ sent again.
   user message for that turn, on every attempt, never the attempt before it. A
   surface folds the copy into the bubble already on screen instead of drawing
   the same sentence a second time. A user retyping the same thing is a new turn.
-- **Retry in place.** A person's Tap to retry (or Retry on a settled turn) is
+- **Retry on a settled turn forks.** Retry in a message's long-press sheet sends
+  `chat.fork_request` for the user turn (`04-chats-and-folders.md` § Branching)
+  and drops every later turn from the view: the retry starts a new track from
+  that point rather than appending to the conversation.
+- **Retry in place.** A person's Tap to retry on a turn that failed to deliver is
   the same thing from the other side: the surface sends `chat.input` with
   `retryOfSeq` set to the ORIGINAL user message's seq, draws no bubble of its
   own, and the host's resulting `chat.message` folds into the existing bubble
