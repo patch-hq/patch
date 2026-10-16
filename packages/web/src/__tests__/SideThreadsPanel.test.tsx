@@ -370,4 +370,60 @@ describe('SideThreadsPanel — alongside tabs', () => {
     fireEvent.click(screen.getByTestId('stp-tab-close-draft'));
     expect(container.querySelector('.side-threads-panel')).toBeNull();
   });
+
+  const sideBranch = (n: number, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    branchId: `c1-b${n}`,
+    parentBranchId: 'c1-b0',
+    forkFromSeq: n,
+    label: `side ${n}`,
+    createdAt: n,
+    sideThread: true,
+    ...extra,
+  });
+
+  it('the status dot reads needs-you over running over idle', () => {
+    seedBranches('c1', [
+      sideBranch(1, { running: true }),
+      sideBranch(2, { running: true }),
+      sideBranch(3),
+    ]);
+    useChatStore.setState({
+      sideThreadPermissions: {
+        'c1::c1-b2': [{ requestId: 'r1', tool: 'Bash', description: 'd', args: {} }],
+      },
+    } as never);
+    openExistingSideThread('c1', 'c1-b1');
+    renderPanel('c1');
+    const dot = (n: number): string =>
+      screen.getByTestId(`stp-tab-c1-b${n}`).querySelector('[data-testid="stp-status-dot"]')!
+        .className;
+    expect(dot(1)).toContain('running');
+    expect(dot(2)).toContain('needs-you');
+    expect(dot(3)).not.toMatch(/running|needs-you/);
+  });
+
+  it('dragging a tab onto another reorders the strip', () => {
+    seedBranches('c1', [sideBranch(1), sideBranch(2)]);
+    openExistingSideThread('c1', 'c1-b1');
+    renderPanel('c1');
+    const store: Record<string, string> = {};
+    const dataTransfer = {
+      types: ['application/x-patch-stp-tab'],
+      setData: (k: string, v: string) => void (store[k] = v),
+      getData: (k: string) => store[k] ?? '',
+    };
+    const t1 = screen.getByTestId('stp-tab-c1-b1');
+    const t2 = screen.getByTestId('stp-tab-c1-b2');
+    fireEvent.dragStart(t2, { dataTransfer });
+    fireEvent.drop(t1, { dataTransfer });
+    expect(useSideThreadsStore.getState().tabOrderByChatId['c1']).toEqual(['c1-b2', 'c1-b1']);
+  });
+
+  it('closing every tab closes the panel', () => {
+    seedBranches('c1', [sideBranch(1)]);
+    openExistingSideThread('c1', 'c1-b1');
+    const { container } = renderPanel('c1');
+    fireEvent.click(screen.getByTestId('stp-tab-close-c1-b1'));
+    expect(container.querySelector('.side-threads-panel')).toBeNull();
+  });
 });

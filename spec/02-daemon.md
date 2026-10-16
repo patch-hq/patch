@@ -34,9 +34,9 @@ The host ships as an installable binary artifact per OS/arch, which installs on
 a machine that has only an OS on it.
 
 ```
-patch-daemon-<version>-<os>-<arch>/
+patch-host-<version>-<os>-<arch>/
   node               pinned Node runtime
-  daemon.mjs         the bundled daemon
+  host.mjs         the bundled daemon
   native/            platform-native addons (onnxruntime for VAD)
   silero_vad.onnx    the VAD model (~2 MB), the one model weight in the artifact
   install            registers the service, then runs first-run setup
@@ -92,6 +92,8 @@ PATH stops rather than registering a service with a guessed one.
 
 ## Agent backends
 
+Providers are table-driven: `packages/wire/src/providers.ts` holds each provider's id, model prefix, session-id prefix and permission modes, and `packages/host/src/harnesses.ts` its host-side traits. Adding one is an entry in each plus a backend — see `docs/providers.md`, which also lists the proposed providers.
+
 A session runs on an agent backend. A backend supplies four things: the models it
 can run, the credential those models authenticate with, the permission modes it
 accepts, and the transcript store it persists sessions to. A chat's model
@@ -112,7 +114,7 @@ version and configuration the user gets in their terminal:
    Settings → Hosts.
 2. Absent: install it via the backend's own installer, reporting progress to
    surfaces over the same channel as § Optional components.
-3. Present and logged out: report `daemon.unauthenticated` naming the backend.
+3. Present and logged out: report `host.unauthenticated` naming the backend.
    Settings offers that backend's routes to a credential (`10-auth.md`).
 
 A host takes its last-used model from the first catalogue it reads successfully —
@@ -135,6 +137,12 @@ the classifier will not approve is denied outright and the agent is told so in
 the transcript, which leaves the triggers, jobs and self-wakes that run
 unattended free to carry on or fail visibly rather than stall until somebody
 happens to look.
+
+The SDK's classifier sometimes gives up on a `Bash` call and hands it to the
+host as an approval request anyway. Under `auto`, on a turn the host started itself (job, trigger, self-wake — `origin: machine`), the host treats that as the
+classifier's denial: it refuses the call at once, tells the agent so, and raises
+no approval card — the denial shown in the transcript carries the classifier's own stated reason when the SDK gives one — a card in an unattended job chat only stalls it. On a turn the user started, someone can answer, so the call is put to them as an ordinary approval card — this is how an advance approval is honoured rather than refused. Other
+escalations under `auto` (a sensitive-file write, a question) still ask.
 
 `bypassPermissions` never prompts — every tool call runs immediately.
 `default`, `acceptEdits` and `plan` DO block a turn: a tool call needing a
@@ -368,24 +376,143 @@ with no `DISPLAY`, that `Xvfb` is on the `PATH` to open one. A host that
 already has a real display (a desktop Mac, a Linux box someone is logged
 into) uses that one directly and never starts its own Xvfb.
 
-**Tools.** `06-threads-manager-speakers.md` § Browser tools has the
-full signatures. In short: `patch_browser_open` returns a `tabId`;
-`patch_browser_read` returns an accessible-ish snapshot — every visible
-interactive element with a stable `ref` — that `_click` / `_type` /
-`_fill_form` / `_select` / `_upload` target by; `_screenshot` sees what the
-snapshot can't (layout, an image, a bot check); `_tabs` lists every open tab
-on the host; `_close` ends one. A `ref` is only valid until the next `_read` —
-call it again after a navigation or anything that changes the page. Before
-anything irreversible a click or a submitted form could trigger — a payment,
-a sent message, a booking, a deletion — the tool's own guidance is to ask the
-user first; this is the tool-ownership convention (`principles.md` § Tool
-ownership), not a second permission system alongside `canUseTool`.
+**Computer use is off by default.** `patch_browser_mouse` and
+`patch_browser_key` (acting by screen position) refuse to run until the user
+has answered a permission card — Approve, Always allow, or Deny — the first
+time a chat uses them. Approve covers the rest of that chat; Always allow is
+stored in `host.json` (`computerUseAlwaysAllowed`) and covers every chat on the
+host; Deny fails the call with no fallback. The other `patch_browser_*` tools
+are not gated.
 
-A chat driving `patch_browser_*` looks like any other tool call in the
-transcript: there is no screencast, no live "Browsing &lt;site&gt;" status row,
-and no take-over control (`14-design-web.md` / `15-design-mobile.md`). The
-browser is not scoped per chat — every chat on a host shares the one real
-browser and its open tabs.
+**Tools.** `06-threads-manager-speakers.md` § Browser tools has the
+full signatures. The tools let an agent do anything a person can do in a
+browser: `patch_browser_open` returns a `tabId`; `_read` returns the page as
+element snapshot, full text, structured data or accessibility tree; `_click` /
+`_type` / `_fill_form` / `_select` / `_upload` / `_interact` act on an element by
+`ref`; `_mouse` / `_key` act by screen position; `_navigate`, `_wait`,
+`_switch_tab`, `_tabs` and `_close` move through pages and tabs; `_dialog` and
+`_downloads` handle what pages throw up; `_state` carries cookies and
+localStorage; `_eval`, `_console`, `_network` and `_viewport` debug; `_screenshot`
+sees what text can't. Before anything irreversible a click or a submitted form
+could trigger — a payment, a sent message, a booking, a deletion — the tool's
+own guidance is to ask the user first; this is the tool-ownership convention
+(`principles.md` § Tool ownership), not a second permission system alongside
+`canUseTool`.
+
+**Refs.** A `ref` names an element, wherever it lives: the top document, an
+iframe (cross-origin included) or an open shadow root. Refs are stable — an
+element keeps its ref across reads, a new element gets a new one, and a ref stops
+resolving only when its element leaves the page (`ref_not_found`). Elements with
+no ref (a paragraph, a drop zone) are named by a CSS selector where a tool takes
+one.
+
+**Reading.** `patch_browser_read` has four modes. `snapshot` lists every visible
+interactive element with its ref, role, name, value and link target. `text` is
+the page's visible text, in full up to `maxChars`, iframes included, or just the
+element at a `ref`. `structured` returns headings, tables (headers and rows),
+lists, links and the article body. `accessibility` is the browser's own
+accessibility tree. A password field's value, and anything the user typed during
+a hand-off, is `[redacted]` in every mode. Screenshots can be of the viewport, the
+whole page, or one element.
+
+**Pages that open things.** A link that opens a new tab or window
+(`target=_blank`, `window.open`, with or without `noopener`) becomes a tab of its
+own, owned by the chat that drove its opener and listed by `patch_browser_tabs`
+with its `openerTabId`. A dialog never blocks a tab: an `alert` and a
+`beforeunload` are accepted, a `confirm` or `prompt` is declined unless the agent
+armed an answer for the next one with `patch_browser_dialog`, and every dialog is
+recorded for the agent to read. A download is saved under
+`<patchHome>/browser/downloads/` and listed by `patch_browser_downloads` as a file
+on the host. A file chooser is never opened natively: it is held until
+`patch_browser_upload` fills it (`patch_browser_read` reports `fileChooserOpen`),
+and uploading through the element that opens one does both steps.
+
+**Waiting.** `patch_browser_wait` waits for text to appear or vanish, a selector
+or ref to reach a state, the address to contain a string, the network to go idle,
+or a fixed pause, and fails clearly on timeout rather than carrying on.
+
+**State.** `patch_browser_state` reads, writes, saves, loads and clears the
+profile's cookies and localStorage, so an agent can use a saved sign-in. Saving
+writes a mode-600 file on the host and returns only counts, keeping secrets out of
+the conversation; getting returns the values. The `'logged-in'` profile is shared,
+so state set in it is visible to every chat on the host.
+
+**Debugging.** `patch_browser_eval` runs JavaScript in the page or an iframe.
+Each tab keeps its last 500 console messages and page errors and its last 500
+network requests, readable through `_console` and `_network`; a response body is
+available while the page that made it is still loaded. `patch_browser_viewport`
+resizes the tab or emulates a named device (viewport, pixel ratio, touch, mobile
+user agent); the user agent changes only when a device is asked for.
+
+**Reliability.** A tab whose renderer crashed, or whose browser was killed or
+closed, is rebuilt the next time the agent uses it: same `tabId`, relaunching the
+browser if needed, reopened at the address it was on, with no action from the
+user. The page's in-memory state is lost, so the next `patch_browser_read` carries
+a one-time `notice` saying so. A tab the user closed by hand stays closed
+(`tab_not_found`). Recovery of a routed tab obeys § Route through: with the
+routing host offline it fails rather than reconnecting direct.
+
+**Watching and stopping.** The browser is one host-wide resource shared by every
+chat; a tab is attributed to the chat that opened it. A chat's browsing is visible
+and stoppable from that chat. `patch.browser_view.status` (host → surfaces) reports whether an action is
+running (in plain words, "Clicking") and the chat's open tabs, sent whenever
+either changes. Each chat's surface shows `Browsing <site>` with Watch and Stop
+(`14-design-web.md` § Main chat panel — Browser hand-off). Stop
+(`patch.browser_view.stop`) cancels that chat's in-flight `patch_browser_*` calls,
+which fail with `browser_stopped`, and closes its tabs; other chats' browsers are
+untouched. Settings → Computer use has the host-wide Stop, which does the same for
+every chat. The user can also take any tab over at any time through the hand-off
+below.
+
+### Hand-off
+
+The agent can drive the browser but must not type the user's passwords, pass
+their 2FA or approve an OAuth consent on their behalf. `patch_browser_handoff`
+hands one tab to the user, in the chat, and waits.
+
+- **Live view.** `patch.browser_view.watch` (surface → host, `tabId` optional =
+  the chat's most recently opened tab) starts a stream of
+  `patch.browser_view.frame` (host → surfaces): a JPEG of the tab each time
+  its page paints (Chrome's screencast, so a still page sends one frame and a
+  moving one up to 20 a second), its viewport size, its address with the query
+  and fragment removed, and its title. Surfaces renew the watch every 5 s; the host stops streaming a
+  tab not asked for in 15 s, so a vanished surface costs nothing. Frames are
+  detail-level (only surfaces focused on the chat get them) and carry no `seq`:
+  they never enter history. This alone is the read-only view.
+- **Hand-off.** `patch_browser_handoff({ tabId, reason, callbackPort?,
+timeoutSeconds? })` blocks the tool call. The host emits
+  `patch.browser_handoff.state` `waiting` with the agent's `reason`, and
+  streams the tab, repeating the `waiting` state every 3 s so a surface that opens
+  the chat late still hears it. The user's clicks,
+  scrolls, text and keys arrive as `patch.browser_handoff.input`, in viewport
+  pixels, and are played into the page as real browser events by the host —
+  no Computer-use gate, since the user is the actor. They play one at a time
+  in the order they came, and a burst of pointer moves collapses to the newest,
+  so hover keeps up and a click never overtakes the move before it. They are accepted only
+  with the live `handoffId` of that chat. `control` `done` or `cancel` ends it;
+  so does `timeoutSeconds` (default 600), the tab closing, or the OAuth relay
+  below. The host then emits `state` `ended` with the `outcome` (`done`,
+  `cancelled`, `timeout`, `tab_closed`, `callback`).
+- **Out of the model's reach.** Frames, the address with its query, and the
+  user's input travel host ↔ surfaces as wire events, never as tool results.
+  While a hand-off is open every other `patch_browser_*` tool refuses that tab
+  (`tab_in_handoff`, 409), and `patch_browser_tabs` shows it with no title and
+  no query. What the call returns is `{ ok, outcome, url, callbackStatus? }`
+  where `url` has no query or fragment. Typed text is never logged. The agent
+  gets the tab back when the call returns, and may then read it as usual, except
+  that `patch_browser_read` shows the value of a password field, and of any field
+  the user typed into during a hand-off, as `[redacted]`.
+- **OAuth loopback relay.** With `callbackPort`, a navigation of the tab to
+  `http(s)://localhost` or `127.0.0.1` on that port is intercepted by the host,
+  which makes the request itself against its own loopback and hands the
+  listener's response to the page. A process waiting on that port on the host
+  therefore receives the authorization code however far from the host the
+  user is, and the code appears in no tool result, event or log. The hand-off
+  ends with outcome `callback` and the listener's HTTP status. A listener that
+  cannot be reached fails the call with the reason (and no code), and the tab
+  is returned. The listener must already be running.
+- **Surfaces.** Web and phone show the same bar in the chat (`14-design-web.md`
+  § Browser hand-off, `15-design-mobile.md` § Browser hand-off).
 
 ### Route through
 
@@ -409,7 +536,7 @@ browser's proxy cannot be repointed without relaunching it.
 
 The user is always aware routing is on: the host's row and its browser detail
 state "via &lt;host&gt;" for as long as the setting is active, read from the
-same `browserRouteThrough` the host reports on `daemon.host`.
+same `browserRouteThrough` the host reports on `host.host`.
 
 The routing host being offline fails the open outright, naming it — browsing
 never falls back to going direct. Naming the routing host as itself is
@@ -417,23 +544,33 @@ refused; the Settings picker never offers it as an option.
 
 ### Web Bot Auth
 
-A host can sign every request its agent browser makes so sites that verify
-agents (Cloudflare verified bots, Akamai) can recognise Patch. Per host, by
-environment: `PATCH_WEB_BOT_AUTH=on|off` (default off). When on, every http(s)
-request from either profile (`logged-in`, `logged-out`) is signed per request
+A Patch deployment can identify requests its agent browsers make so sites that
+verify agents (Cloudflare verified bots, Akamai) can recognise it. This is an
+optional shared setting, off by default. With it off, both browser profiles work
+normally and send no Web Bot Auth headers. Turning it on or off applies to
+existing browser sessions without restarting a host. The
+server creates one Ed25519 identity on first start, keeps its private key in the
+encrypted shared-secret store, and never sends the private key to a host or
+surface. There is no operator-supplied key or environment setting. Every
+http(s) request from either profile (`logged-in`, `logged-out`) asks its paired
+server over the authenticated host link for a fresh signature and is signed per request
 (RFC 9421, `tag="web-bot-auth"`, covering `@authority` and `signature-agent`,
 Ed25519, `keyid` = the key's RFC 7638 thumbprint) and carries
-`Signature-Agent: "<directory URL>"` (`PATCH_WEB_BOT_AUTH_DIRECTORY`, default
-`https://patch.tomchambers.me/.well-known/http-message-signatures-directory`).
-The key is `PATCH_WEB_BOT_AUTH_KEY`, base64 PKCS#8, from the 1Password Agents
-vault (`env-patch`) via `deploy/web-bot-auth.env.tpl`. On with no/invalid key
-fails host start loudly; a signing failure aborts that request, never sends it
-unsigned.
+`Signature-Agent: "<server URL>/.well-known/http-message-signatures-directory"`.
+While it is on, a host that cannot reach its paired server refuses the affected
+agent-browser request; a signing failure or timeout aborts that request, never
+sends it unsigned.
 
 The server serves the public half: `GET /.well-known/http-message-signatures-directory`
-(signed key directory, unauthenticated; 503 naming the variable if no key) and
-`GET /agent` (what Patch is, that it obeys robots.txt and browses at human
-rates, and who to contact).
+(signed key directory, unauthenticated) and `GET /agent` (the deployment's
+public agent name, description and operator contact, plus that it obeys
+robots.txt and browses at human rates). The public details are ordinary shared
+settings, editable under Settings → Agent identity; the identity key is not.
+A fresh deployment serves a valid
+directory without configuration, and keeps the same identity across restarts.
+Each independently installed server therefore has its own identity and public
+directory; its hosts and surfaces depend only on that server, never on another
+Patch installation or the maintainer's devices.
 
 ## Claude Code settings
 
@@ -487,7 +624,7 @@ Settings → Keys and used by every host.
   be adopted from Settings as the shared value.
 - Everything that uses a key reads it when it opens a session or sends a
   request, so a new snapshot takes effect for the next session with no
-  restart. After applying one, each host re-publishes `daemon.host`, whose
+  restart. After applying one, each host re-publishes `host.host`, whose
   `voiceKeys` and `providerKeys` state each key's source on that host (`ui` /
   `env` / `none`) and whether its environment also has one. They drive
   Settings → Voice's "not configured" line, and re-log any configured voice
@@ -515,9 +652,13 @@ Settings → Keys and used by every host.
 
 Public-facing routing and push fanout belong to the server (see `01-server.md`).
 
+## One host per state directory
+
+A host takes `<state dir>/daemon.lock` (its pid) before it reads or writes anything, and a second host on the same directory exits at once naming the first. Two hosts appending to one chat log leave each one's remembered file positions wrong, and replays then fail with a "corrupt record". A lock whose owner is no longer alive is taken over; it is released on shutdown.
+
 ## Host identity
 
-Each host has a stable `daemonId` issued at registration and a host name,
+Each host has a stable `hostId` issued at registration and a host name,
 editable from any surface. It defaults to the name a person knows the machine
 by: on macOS the Computer Name ("Tom's MacBook Pro"), not the numbered network
 hostname; elsewhere the hostname without its domain. Surfaces
@@ -573,16 +714,18 @@ A surface accumulates deltas keyed by `messageSeq` to render the reply chunk-by-
 
 A shell command the agent asks to run in the background belongs to the agent process, which ends with the turn — so it would be killed moments later having produced nothing, and the agent would end its turn believing work was under way. The host refuses the background request and tells the agent why, so the choice is corrected rather than silently lost.
 
-Native subagent dispatch (`Agent`, formerly `Task`, and `Workflow`) is not corrected but removed: the whole subagent runs inside this turn's process tree, so it dies with the turn or a host restart and the resumed turn has no way back to its work. All three tools are in `disallowedTools`; a subagent is a `patch_delegate` call (`06-threads-manager-telegram-speakers.md` § Cross-chat toolset), covered next.
+Subagents are Patch-owned. The native SDK `Agent` (formerly `Task`) and `Workflow` tools are in `disallowedTools`: their process-tree lifecycle and background mode sit outside Patch's durable chat accounting. Agents instead receive `patch_agent`, backed by the host's own child-chat machinery.
 
-### Native subagent dispatch — `patch_delegate`
+### Patch-owned `patch_agent` subagents
 
-`patch_delegate({ prompt, model?, folder?, disallowedTools?, wait? })` gives an agent a real subagent: a durable background worker that runs `prompt` to completion and hands its full final reply back to the chat that called it (the PARENT). It is built on the host's own chat machinery rather than being a second implementation of a chat: a subagent IS an ordinary chat — same `meta.json`, same SDK session, same turn queue, same restart-resume — with one extra field, `meta.subagent: { parentChatId, label, outcome? }`, that is never cleared.
+> Retired. The tools below are no longer exposed to agents; use the native `Agent` tool (§ Background work). The text that follows describes the historical host plumbing for subagent chats that already exist.
+
+`patch_agent({ prompt, model?, folder?, disallowedTools?, background? })` gives an agent a real Patch-owned child: a durable worker that runs `prompt` to completion and hands its full final reply directly back to the chat that called it (the PARENT), never through `patch_send_to`. It is built on the host's own chat machinery rather than being a second implementation of a chat: a subagent IS an ordinary chat — same `meta.json`, same SDK session, same turn queue, same restart-resume — with one extra field, `meta.subagent: { parentChatId, label, outcome? }`, that is never cleared.
 
 That one field does three things:
 
 - **Lifecycle.** The subagent's turn runs exactly like any other chat's. The moment it settles — idle with nothing queued (success), or `errored` with no retry armed (an SDK error, or a usage limit it cannot get past) — the host stamps `outcome` (`done`/`failed`) once, and delivers a `[from <label>]`-prefixed message into the PARENT as a new turn, queuing behind a running parent turn like any other machine message (`04-chats-and-folders.md` ## Message queueing). A failure delivers the same way, naming what went wrong — never silent. Stopping or archiving the parent stops every one of its subagents that has not already settled (`outcome` stamped `stopped`, nothing delivered — the caller already knows). Several subagents can run under the same parent at once; each is an independent chat.
-- **Task/Agent semantics.** By default the call returns at once and the result arrives as the `[from]` turn. With `wait: true` the call blocks until the subagent settles and returns `{ id, label, status, reply }` as its tool result — the host then does NOT also deliver a `[from]` turn (a host restart drops the blocked call, so a waiter that is gone falls back to the delivery). `disallowedTools` is the subagent's capability limit, persisted on `meta.subagent.disallowedTools` and added to the always-disabled set for every turn it runs. A settled subagent stays addressable: `patch_delegate_send({ id, message, wait? })` clears its `outcome`, runs the message as its next turn in the same session, and settles again exactly as before; it errors for an id that is not the caller's own subagent.
+- **Task/Agent semantics.** By default the call blocks until the child settles and returns `{ id, label, status, reply }` as its tool result. With `background: true` it returns `{ id, label }` immediately; Patch owns the continuing child and delivers its final reply into the parent when it settles. `disallowedTools` is the child's capability limit, persisted on `meta.subagent.disallowedTools` and added to the always-disabled set for every turn it runs.
 - **The parent stays alive for it.** While any of its subagents has not settled, the parent counts as still working, like one with a running `patch_watch`: a hidden parent does not archive itself, an active goal is not evaluated (it re-checks once they have delivered), and the chat cannot be moved to another host.
 - **Durability.** Because a subagent is an ordinary chat, a host restart resumes its in-flight turn exactly as it would any other chat's, and the delivery above fires whenever that resumed turn settles — there is no separate subagent-restart path to get wrong.
 - **Invisibility.** Every surface that lists, searches, or notifies about chats excludes a chat carrying `meta.subagent` — not in the sidebar, Hidden, Archived, or search, no badges, no notifications, no needs-attention, never marked unread. The ONLY way in is the parent's own transcript: the `patch_delegate` call renders as a tool-call row carrying the subagent's live state (running / awaiting-permission / done / failed / stopped) and a link to open its transcript read-only (`14-design-web.md` § Main chat panel — Delegate tool row).
@@ -661,7 +804,7 @@ Keeping the agent on the list. When a turn settles idle with items still incompl
 
 An item already fired that comes back still incomplete is not re-fired — the agent stopped for a reason (usually a question for the user), and re-firing would steamroll the user's turn. A whole turn was spent on it, so the host marks it in_progress rather than leaving it reading pending, which would claim it was never started. The host never marks an item completed: only the agent or the user closes one out.
 
-The user owns the list too. A surface rewrites it — edit an item's text, change its status, add or delete items — with `chat.todos_request`, which carries the whole list; the host adopts it wholesale, emits `chat.state`, and the auto-advance above then fires from the edited list. The agent's own TodoWrite state lives inside its session and cannot be written from outside, so the host tells it instead: the next turn on that chat is prefixed with a `<system-reminder>` naming the current list and instructing the agent to call TodoWrite to adopt it (the mechanism broadcast threads already use — `09-notifications.md`). Without it the agent's next TodoWrite would silently overwrite the user's edit. The reminder is one-shot: it is attached to the next turn and then cleared.
+The user owns the list too. A surface rewrites it — edit an item's text, change its status, add or delete items — with `chat.todos_request`, which carries the whole list; the host adopts it wholesale, emits `chat.state`, and the auto-advance above then fires from the edited list. The agent's own TodoWrite state lives inside its session and cannot be written from outside, so the host tells it instead: the next turn on that chat is prefixed with a `<system-reminder>` naming the current list and instructing the agent to call TodoWrite to adopt it (the mechanism broadcast threads already use — `09-notifications.md`). Without it the agent's next TodoWrite would silently overwrite the user's edit. The reminder is one-shot: it is attached to the next turn and then cleared. A task-list item may carry `attachments` (the same refs a composer send carries) beside its `text`: the user queues it from the composer's send menu, "Add to todo list" (`14-design-web.md` § Composer), which uploads the files and appends the item instead of sending, so an item can stand in for a whole prompt. When the item fires, the host sends its attachments with the `[todo]` turn; the agent's own TodoWrite carries none, so when the host mirrors a TodoWrite it keeps the attachments of the previous item with the same text. Surfaces queue new items in a local draft and send them in a single `chat.todos_request` when the user finishes entering them, so the host only ever sees the completed batch; the draft is never on the wire.
 
 ## MCP server
 
@@ -705,25 +848,25 @@ Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discover
 
 `patch <subcommand>` invoked on the host itself (e.g. while SSH'd in) talks to the running host over a Unix domain socket at `~/.patch/daemon.sock` (HTTP framing over the socket), not via the public WebSocket. The socket path is fixed under `~/.patch`, so the local CLI finds it without a port-discovery file. The socket is created mode `0600` (owner-only).
 
-| Endpoint                         | Verb | Purpose                                                                     |
-| -------------------------------- | ---- | --------------------------------------------------------------------------- |
-| `/list`                          | GET  | Active chats                                                                |
-| `/spawn-chat`                    | POST | Spawn a new chat in a folder                                                |
-| `/stop-chat`                     | POST | SIGTERM a tracked chat                                                      |
-| `/stop`                          | POST | Shut the host down                                                          |
-| `/host`                          | GET  | This host's self-description — the same content as its `daemon.host` report |
-| `/folders`                       | GET  | This host's folder registry                                                 |
-| `/folders/add`                   | POST | Designate a project root                                                    |
-| `/folders/remove`                | POST | Drop a designated project root                                              |
-| `/backends`                      | GET  | Each backend's version and this host's view of its shared accounts          |
-| `/models`                        | GET  | This host's model catalogue across its backends                             |
-| `/components/install`            | POST | Install an optional component                                               |
-| `/components/remove`             | POST | Delete an installed component                                               |
-| `/claude-settings`               | GET  | This host's Claude Code memory entries and any settings.json drift          |
-| `/claude-settings/memory/delete` | POST | Delete one memory entry                                                     |
-| `/claude-settings/discard`       | POST | Rewrite a drifted settings.json from the last snapshot                      |
-| `/update`                        | POST | Apply an available host update                                              |
-| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)    |
+| Endpoint                         | Verb | Purpose                                                                   |
+| -------------------------------- | ---- | ------------------------------------------------------------------------- |
+| `/list`                          | GET  | Active chats                                                              |
+| `/spawn-chat`                    | POST | Spawn a new chat in a folder                                              |
+| `/stop-chat`                     | POST | SIGTERM a tracked chat                                                    |
+| `/stop`                          | POST | Shut the host down                                                        |
+| `/host`                          | GET  | This host's self-description — the same content as its `host.host` report |
+| `/folders`                       | GET  | This host's folder registry                                               |
+| `/folders/add`                   | POST | Designate a project root                                                  |
+| `/folders/remove`                | POST | Drop a designated project root                                            |
+| `/backends`                      | GET  | Each backend's version and this host's view of its shared accounts        |
+| `/models`                        | GET  | This host's model catalogue across its backends                           |
+| `/components/install`            | POST | Install an optional component                                             |
+| `/components/remove`             | POST | Delete an installed component                                             |
+| `/claude-settings`               | GET  | This host's Claude Code memory entries and any settings.json drift        |
+| `/claude-settings/memory/delete` | POST | Delete one memory entry                                                   |
+| `/claude-settings/discard`       | POST | Rewrite a drifted settings.json from the last snapshot                    |
+| `/update`                        | POST | Apply an available host update                                            |
+| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)  |
 
 Below the chat endpoints, the socket carries every host-scoped control of
 `03-wire-protocol.md` § Host events that this host owns, one endpoint per
@@ -901,8 +1044,8 @@ per host.
 
 The SDK runs in-process, so a host restart kills any in-flight query. There is nothing to reattach to — but the work is not abandoned, because a restart is the last thing every deploy does and chats must not silently stop mid-task waiting for a human to retype:
 
-- Every turn the host is running or holding in a chat's queue is written to that chat's `meta.json` as `pendingTurns` (`persistPendingTurns`), so the set of unfinished work outlives the process.
-- On restart, the host scans `~/.patch/chats/*/meta.json`, marks every chat as `idle`, and re-sends those pending turns in their original order (`resumeInterruptedTurns`). Turns belonging to a chat deleted while it was running are dropped.
+- Every turn the host is running or holding in a chat's queue is written to that chat's `meta.json` as `pendingTurns` (`persistPendingTurns`), so the set of unfinished work outlives the process. A turn whose attempt already ended and is waiting for credit or a transient-retry timer is marked with that reason; it is not restart-interrupted.
+- On restart, the host scans `~/.patch/chats/*/meta.json`, marks every chat as `idle`, and re-sends only turns that were genuinely running or queued when the process stopped (`resumeInterruptedTurns`). Credit-blocked turns remain parked until account availability releases them; expired transient retries remain failed. Turns belonging to a chat deleted while it was running are dropped.
 - Each is a fresh `query()` with `options.resume = meta.claudeSessionId`, so the SDK reconstructs context from the agent's native history and the agent can see its own half-finished work AND the original ask. The turn that was actually running is prefixed with a `<system-reminder>` saying it was cut off partway and to carry on from what it had already done rather than start the request again; that reminder is stripped from the persisted transcript AND from the visible bubble, and is captured as `systemContext` on the turn's `chat.message` (§ System-reminder disclosure below) rather than discarded. The human-visible text sent alongside it is just `'Carry on'`, never the turn's own original text — the resumed session already has that in its history, so resending it would only duplicate it, at whatever length it happened to be (a large tool-result-shaped turn used to come back verbatim on every restart that interrupted it). Turns that were only ever queued never began — the agent has never seen them — so they go back verbatim.
 - The `pendingTurns` marker is cleared before the re-send, and each resumed turn re-persists itself as it starts running: a second interruption is still caught, while a turn that takes the host down with it is not retried for ever.
 - A query that was mid-tool-call when the host died loses that tool call; the agent picks up from the last persisted message.

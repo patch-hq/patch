@@ -43,7 +43,7 @@ function seed(): void {
   useChatStore.getState().hydrate([
     {
       chatId: CHAT,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: CHAT,
       folder: 'foo',
@@ -106,7 +106,9 @@ describe('ChatRoute transcript render cost', () => {
     seed();
     renderChat();
     // Mount rendered every entry once — that's the baseline, not the subject.
-    expect(counter.renders).toBeGreaterThanOrEqual(SETTLED);
+    // The transcript virtualiser may mount only its visible window; it must
+    // still have rendered a baseline before the delta measurement starts.
+    expect(counter.renders).toBeGreaterThan(0);
     counter.renders = 0;
 
     act(() => {

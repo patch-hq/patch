@@ -10,14 +10,14 @@ import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { registerCrossHostBridge } from '../src/cross-host.js';
-import type { DaemonLink } from '../src/daemon-link.js';
+import type { HostLink } from '../src/host-link.js';
 import type { ChatRegistry } from '../src/chat-registry.js';
 import type { Registry } from '../src/registry.js';
 
 const logger = pino({ level: 'silent' });
 
 interface Sent {
-  daemonId: string;
+  hostId: string;
   surfaceId: string;
   event: WireEvent;
 }
@@ -28,9 +28,9 @@ function harness(opts: { registered?: string[]; online?: string[] } = {}) {
   const sent: Sent[] = [];
   let handler: ((e: WireEvent, from: string | null) => void) | undefined;
 
-  const daemonLink = {
-    sendTo: (daemonId: string, surfaceId: string, event: WireEvent) => {
-      sent.push({ daemonId, surfaceId, event });
+  const hostLink = {
+    sendTo: (hostId: string, surfaceId: string, event: WireEvent) => {
+      sent.push({ hostId, surfaceId, event });
     },
     isOnline: (id: string) => online.has(id),
     onEvent: (h: (e: WireEvent, from: string | null) => void) => {
@@ -39,14 +39,14 @@ function harness(opts: { registered?: string[]; online?: string[] } = {}) {
         handler = undefined;
       };
     },
-  } as unknown as DaemonLink;
+  } as unknown as HostLink;
 
   const chatRegistry = { list: () => [] } as unknown as ChatRegistry;
   const registry = {
-    isRegisteredDaemon: (id: string) => registered.has(id),
+    isRegisteredHost: (id: string) => registered.has(id),
   } as unknown as Registry;
 
-  const dispose = registerCrossHostBridge({ logger, daemonLink, chatRegistry, registry });
+  const dispose = registerCrossHostBridge({ logger, hostLink, chatRegistry, registry });
   return {
     sent,
     dispose,
@@ -58,7 +58,7 @@ const spawnFrame = (over: Partial<Record<string, unknown>> = {}): WireEvent =>
   ({
     type: 'patch.spawn',
     sourceChatId: 'chat-src',
-    daemonId: 'host-b',
+    hostId: 'host-b',
     folder: '/work/qa',
     prompt: 'hi',
     requestId: 'req-1',
@@ -70,7 +70,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
     const h = harness();
     h.feed(spawnFrame(), 'host-a');
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-b');
+    expect(h.sent[0]!.hostId).toBe('host-b');
     expect(h.sent[0]!.event).toMatchObject({ type: 'patch.spawn', requestId: 'req-1' });
     h.dispose();
   });
@@ -84,7 +84,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
         type: 'patch.spawn.response',
         requestId: 'req-1',
         sourceChatId: 'chat-src',
-        daemonId: 'host-b',
+        hostId: 'host-b',
         folder: '/work/qa',
         ok: true,
         chatId: 'chat-new',
@@ -92,12 +92,12 @@ describe('cross-host patch.spawn — the answer comes back', () => {
       'host-b',
     );
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     expect(h.sent[0]!.event).toMatchObject({
       type: 'patch.spawn.response',
       ok: true,
       chatId: 'chat-new',
-      daemonId: 'host-b',
+      hostId: 'host-b',
     });
     h.dispose();
   });
@@ -111,7 +111,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
         type: 'patch.spawn.response',
         requestId: 'req-1',
         sourceChatId: 'chat-src',
-        daemonId: 'host-b',
+        hostId: 'host-b',
         folder: '/work/qa',
         ok: false,
         error: {
@@ -122,7 +122,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
       'host-b',
     );
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     expect(h.sent[0]!.event).toMatchObject({
       type: 'patch.spawn.response',
       ok: false,
@@ -138,7 +138,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
         type: 'patch.spawn.response',
         requestId: 'never-seen',
         sourceChatId: 'chat-src',
-        daemonId: 'host-b',
+        hostId: 'host-b',
         folder: '/work/qa',
         ok: true,
         chatId: 'c9',
@@ -151,13 +151,13 @@ describe('cross-host patch.spawn — the answer comes back', () => {
 
   it('answers an UNREGISTERED target with a refusal response as well as chat.error', () => {
     const h = harness({ registered: ['host-a'] });
-    h.feed(spawnFrame({ daemonId: 'host-zzz' }), 'host-a');
+    h.feed(spawnFrame({ hostId: 'host-zzz' }), 'host-a');
     const types = h.sent.map((s) => s.event.type);
     expect(types).toEqual(['chat.error', 'patch.spawn.response']);
-    expect(h.sent.every((s) => s.daemonId === 'host-a')).toBe(true);
+    expect(h.sent.every((s) => s.hostId === 'host-a')).toBe(true);
     expect(h.sent[1]!.event).toMatchObject({
       ok: false,
-      daemonId: 'host-zzz',
+      hostId: 'host-zzz',
       error: { code: 'host_not_registered' },
     });
     expect((h.sent[1]!.event as { error: { message: string } }).error.message).toContain(
@@ -170,14 +170,14 @@ describe('cross-host patch.spawn — the answer comes back', () => {
     const h = harness({ online: ['host-a'] });
     h.feed(spawnFrame(), 'host-a');
     const resp = h.sent.find((s) => s.event.type === 'patch.spawn.response');
-    expect(resp?.daemonId).toBe('host-a');
+    expect(resp?.hostId).toBe('host-a');
     expect((resp?.event as { error: { message: string } }).error.message).toContain('host-b');
     h.dispose();
   });
 
   it('does not relay a spawn naming the machine that raised it (audit frame)', () => {
     const h = harness();
-    h.feed(spawnFrame({ daemonId: 'host-a', requestId: undefined }), 'host-a');
+    h.feed(spawnFrame({ hostId: 'host-a', requestId: undefined }), 'host-a');
     expect(h.sent).toHaveLength(0);
     h.dispose();
   });
@@ -194,7 +194,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
           type: 'patch.spawn.response',
           requestId: 'req-1',
           sourceChatId: 'chat-src',
-          daemonId: 'host-b',
+          hostId: 'host-b',
           folder: '/work/qa',
           ok: true,
           chatId: 'chat-new',

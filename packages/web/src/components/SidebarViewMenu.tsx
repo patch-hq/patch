@@ -16,7 +16,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useBatchStore } from '../stores/batchStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { CHAT_SORTS, type ChatSort } from '../lib/chatGroups.js';
+import { CHAT_SORTS, type ChatSort, type GroupSort } from '../lib/chatGroups.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import {
   applySidebarView,
@@ -28,6 +28,7 @@ import {
 
 export function SidebarViewMenu(): JSX.Element {
   const [open, setOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -117,14 +118,52 @@ export function SidebarViewMenu(): JSX.Element {
             </button>
           ))}
           <SortGroup id="chat-sort" title="Sort chats by" value={chatSort} onPick={setChatSort} />
-          <SortGroup
-            id="group-sort"
-            title="Sort projects by"
-            value={groupSort}
-            onPick={setGroupSort}
-          />
+          {chatSort === 'last-action' ? (
+            <div className="sidebar-sort-note">Agent updates won’t move conversations</div>
+          ) : null}
+          <button
+            type="button"
+            className="sidebar-view-option sidebar-sort-advanced"
+            data-testid="sidebar-sort-advanced"
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((v) => !v)}
+          >
+            <span className="sidebar-view-option-label">Advanced</span>
+            <span aria-hidden>{advancedOpen ? '▴' : '▾'}</span>
+          </button>
+          {advancedOpen ? <GroupSortGroup value={groupSort} onPick={setGroupSort} /> : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function GroupSortGroup(props: { value: GroupSort; onPick(v: GroupSort): void }): JSX.Element {
+  const options: ReadonlyArray<{ value: GroupSort; label: string }> = [
+    { value: 'same-as-chats', label: 'Same as chats' },
+    ...CHAT_SORTS,
+  ];
+  return (
+    <div role="group" aria-label="Sort projects by" data-testid="sidebar-group-sort">
+      <div className="sidebar-view-group-label">Sort projects by</div>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="option"
+          aria-selected={opt.value === props.value}
+          className={`sidebar-view-option ${opt.value === props.value ? 'selected' : ''}`}
+          data-testid={`sidebar-group-sort-${opt.value}`}
+          onClick={() => props.onPick(opt.value)}
+        >
+          <span className="sidebar-view-option-label">{opt.label}</span>
+          {opt.value === props.value ? (
+            <span className="sidebar-view-option-check" aria-hidden>
+              ✓
+            </span>
+          ) : null}
+        </button>
+      ))}
     </div>
   );
 }

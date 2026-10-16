@@ -22,7 +22,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
@@ -177,7 +177,7 @@ describe('ConfirmModal + uiStore.confirm', () => {
     const confirmSpy = vi.spyOn(window, 'confirm');
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     render(
       <MemoryRouter>
         <ChatHeader row={row()} />

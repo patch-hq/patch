@@ -2,7 +2,7 @@
 // through the FULL real stack:
 //
 //   surface HTTP  GET /api/chats/:id/doc / POST /api/chats/:id/doc/action
-//       → server chat-routes → REAL InboundDaemonLink over the REAL serverLink
+//       → server chat-routes → REAL InboundHostLink over the REAL serverLink
 //         WebSocket
 //       → host handleDocRequest / handleDocActionRequest → Host methods
 //         (chatRunner.ts), reading/writing the sidecar on real disk
@@ -25,7 +25,7 @@ async function spawnChat(harness: E2EHarness, jwt: string, folder: string): Prom
     method: 'POST',
     url: '/api/chats',
     headers: { authorization: `Bearer ${jwt}` },
-    payload: { daemonId: harness.daemonId, folder },
+    payload: { hostId: harness.hostId, folder },
   });
   expect(res.statusCode).toBe(202);
   const chatId = (res.json() as { chatId: string }).chatId;

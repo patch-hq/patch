@@ -3,22 +3,24 @@
 // Renders header + event stream + composer. Real diff viewer + file browser
 // land in group 19 (the Monaco editor right-rail).
 
+import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import type { JSX } from 'react';
 import {
   Fragment,
   createContext,
   memo,
   useCallback,
+  useLayoutEffect,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
+import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery } from '@tanstack/react-query';
 import {
   SPECIAL_THREAD_IDS,
@@ -28,12 +30,15 @@ import {
   parseBackgroundTaskNotice,
   parseGoalOutcome,
   taskNotificationSummary,
+  labelForRun,
   type AttachmentRef,
   type BackgroundTaskNotice,
   type ChatBranch,
   type GoalOutcomeNotice,
   type SystemContextItem,
 } from '@patch/wire';
+import { backRecord, parseAgentReturn, type AgentReturn } from '@patch/wire';
+import { SnoozeDivider } from '../components/SnoozeDivider.js';
 import type { WireEvent } from '@patch/wire';
 import type { Job, JobTrigger } from '@patch/wire/jobs';
 import { describeTrigger } from '../lib/jobDescribe.js';
@@ -43,11 +48,12 @@ import { patchShared } from './settings/sharedWrite.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { ChatHeader } from '../components/ChatHeader.js';
+import { ModelControl } from '../components/ChatModelControl.js';
 import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
 import { SnoozedBanner } from '../components/SnoozedBanner.js';
 import { HiddenBanner } from '../components/HiddenBanner.js';
-import { GoalBanner } from '../components/GoalBanner.js';
+import { FinishedGoalBanner, GoalBanner } from '../components/GoalBanner.js';
 import { TaskBar } from '../components/TaskBar.js';
 import { ReminderBanner } from '../components/ReminderBanner.js';
 import { WakeBar } from '../components/WakeBar.js';
@@ -67,7 +73,7 @@ import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { ThreadsStrip } from '../components/ThreadsStrip.js';
 import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
-import { DaemonOfflineBanner } from '../components/DaemonOfflineBanner.js';
+import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -75,6 +81,7 @@ import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useToolsStore } from '../stores/toolsStore.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
+import { addToTodoList } from '../lib/addToTodo.js';
 import { discardUpload, retryUpload, sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import type { PatchWs } from '../api/ws.js';
 import { getActiveWs } from '../api/ws.js';
@@ -92,8 +99,8 @@ import {
   routingSentence,
 } from '../lib/usage.js';
 import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
+import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
-import { JobBar } from '../components/JobBar.js';
 import type { ChatEventEntry, DelegateUpdateInfo, LocalAttachment } from '../stores/chatStore.js';
 import { Markdown, useStreamingMarkdownText } from '../components/Markdown.js';
 import { ContextMenu, useContextMenu } from '../components/ContextMenu.js';
@@ -105,10 +112,16 @@ import { PadCard, padIdOfArtifact } from '../components/PadCard.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { stripControlTokens } from '../lib/controlTokens.js';
-import { queueChipLabel, queueChipTitle } from '../lib/queueLabel.js';
+import {
+  queueChipLabel,
+  queueChipTitle,
+  queueRelease,
+  type QueueRelease,
+} from '../lib/queueLabel.js';
+import { attemptPaging } from '../lib/turnAttempts.js';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../lib/askUserQuestion.js';
 import { QuestionCard } from '../components/QuestionCard.js';
-import { runNarration, toolCallSummary, toolRunNarrative } from '../lib/toolSummary.js';
+import { toolCallSummary, toolRunNarrative } from '../lib/toolSummary.js';
 import { toolLabel } from '../lib/toolsCatalog.js';
 import { formatElapsed } from '../lib/backgroundTasks.js';
 import {
@@ -121,15 +134,20 @@ import {
   ExternalLink,
   FileText,
   GitFork,
+  RotateCcw,
   MessageSquarePlus,
+  Quote,
   LayoutTemplate,
   Mic,
   LoaderCircle,
   Pencil,
   Phone,
-  Info,
+  CircleAlert,
+  Clock,
+  CloudOff,
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
+import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
 import { shortcutLabel } from '../lib/shortcuts.js';
 import { isSubmitChord } from '../lib/submitChord.js';
 import { failed } from '../lib/errorCopy.js';
@@ -254,6 +272,14 @@ interface JumpTarget {
 // the jitter of a finger landing on a tap target isn't a scroll.
 const TOUCH_SCROLL_UP_SLOP = 2;
 
+// spec/14 § Main chat panel — opening a chat paints only its newest entries; the
+// rest are mounted as the reader scrolls toward them. Mounting a whole long
+// transcript at once is what made a chat open slow and fill in from the top.
+const TAIL_ENTRIES = 60;
+const TAIL_CHUNK = 60;
+// Scrolled within this many px of the top of what is mounted → mount an older chunk.
+const TAIL_NEAR_TOP_PX = 800;
+
 /**
  * spec/04 § Branching — the track switcher shown on ONE forked turn: which of
  * that fork point's tracks is active, how many there are, and the branch on
@@ -368,7 +394,6 @@ export function ChatRoute({
   useMarkChatNotificationsRead(chatId);
   const row = useChatStore((s) => s.chats[chatId]);
   const setActiveChat = useChatStore((s) => s.setActiveChat);
-  const addLocalMessage = useChatStore((s) => s.addLocalMessage);
   const setGoal = useChatStore((s) => s.setGoal);
   const setReminder = useChatStore((s) => s.setReminder);
   const removeQueued = useChatStore((s) => s.removeQueued);
@@ -382,7 +407,11 @@ export function ChatRoute({
   const pushError = useUiStore((s) => s.pushError);
   // Delivery-pending user turns render "sending…" when the host is online and
   // "queued — will send when the agent reconnects" when it is offline (spec/12).
-  const daemonOnline = usePresenceStore((s) => s.daemonOnline);
+  // Per HOST, not "any host": a chat on a down host must say so while another is up.
+  const hostOnline = usePresenceStore((s) => {
+    const id = useChatStore.getState().chats[chatId]?.hostId ?? '';
+    return s.hosts[id]?.online ?? s.hostOnline;
+  });
 
   // spec/06 ## Composer policy: Speakers is a read-only mirror —
   // no composer, no mic. Manager keeps its full composer.
@@ -417,6 +446,17 @@ export function ChatRoute({
       setActiveChat(null);
     };
   }, [chatId, focused, setActiveChat]);
+
+  // spec/04 § Snooze → Back: opening a chat that came back from a snooze is the
+  // first interaction with its set, and clears the Back state for all of it. The
+  // host does the clearing and broadcasts it; this only says the chat was opened.
+  const backSetId = row ? (backRecord(row.snoozeRecords)?.setId ?? null) : null;
+  useEffect(() => {
+    if (!focused || backSetId === null) return;
+    api.clearSnoozeBack(chatId).catch((err: unknown) => {
+      pushError(failed('clear snooze'), undefined, (err as Error).message);
+    });
+  }, [chatId, focused, backSetId, pushError]);
 
   // spec/14 § Batch mode — ending: opening a chat anywhere counts, so this
   // reports it unconditionally; the server no-ops unless `chatId` is a member
@@ -516,6 +556,44 @@ export function ChatRoute({
   // Mirrors `followRef` for the floating down arrow (spec/14 § Main chat panel).
   const [showScrollDown, setShowScrollDown] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  // Index of the oldest mounted entry. `null` = the newest TAIL_ENTRIES, tracking
+  // the tail as it grows. Keyed to the chat so a chat switch starts at the tail.
+  const [windowState, setWindowState] = useState<{ chatId: string; from: number } | null>(null);
+  const windowFrom =
+    windowState !== null && windowState.chatId === chatId ? windowState.from : null;
+  const windowStart = Math.min(
+    windowFrom ?? Math.max(0, timeline.length - TAIL_ENTRIES),
+    timeline.length,
+  );
+  const windowStartRef = useRef(windowStart);
+  windowStartRef.current = windowStart;
+  // Scroll position taken just before older entries mount, so the reader stays on
+  // the same message once they are above it.
+  const expandHoldRef = useRef<{ height: number; top: number } | null>(null);
+  function expandTo(index: number, holdPosition: boolean): void {
+    const el = streamRef.current;
+    if (holdPosition && el) expandHoldRef.current = { height: el.scrollHeight, top: el.scrollTop };
+    setWindowState({ chatId, from: Math.max(0, index) });
+  }
+  // A message that is not mounted (a jump target, a remembered anchor) is mounted on demand.
+  function ensureSeqMounted(seq: number): void {
+    const idx = timelineRef.current.findIndex((e) => e.seq === seq);
+    if (idx >= 0 && idx < windowStartRef.current) expandTo(idx - 5, false);
+  }
+  useLayoutEffect(() => {
+    const el = streamRef.current;
+    if (!el) return;
+    const hold = expandHoldRef.current;
+    if (hold !== null) {
+      expandHoldRef.current = null;
+      setSelfScrollTop(el, hold.top + (el.scrollHeight - hold.height));
+      return;
+    }
+    // Still shorter than two screens with older entries unmounted: no scroll to trigger more.
+    if (windowStart > 0 && el.scrollHeight > 0 && el.scrollHeight < el.clientHeight * 2) {
+      expandTo(windowStart - TAIL_CHUNK, true);
+    }
+  }, [windowStart, timeline.length]);
   // spec/14 § Composer — dropping a file anywhere over the chat panel (header,
   // banners, transcript) attaches it, same as dropping onto the composer
   // strip itself. `composerRef` is how the whole-panel zone below reaches the
@@ -675,7 +753,10 @@ export function ChatRoute({
     const target = el.querySelector<HTMLElement>(
       `[data-testid="msg"][data-seq="${String(anchor.seq)}"]`,
     );
-    if (target === null) return false;
+    if (target === null) {
+      ensureSeqMounted(anchor.seq);
+      return false;
+    }
     const box = el.getBoundingClientRect();
     const t = target.getBoundingClientRect();
     const top = el.scrollTop + (t.top - box.top) + anchor.delta;
@@ -699,7 +780,10 @@ export function ChatRoute({
     const target = el.querySelector<HTMLElement>(
       `[data-testid="msg"][data-seq="${String(jump.seq)}"]`,
     );
-    if (target === null) return false;
+    if (target === null) {
+      ensureSeqMounted(jump.seq);
+      return false;
+    }
     const box = el.getBoundingClientRect();
     const t = target.getBoundingClientRect();
     const offset = el.scrollTop + (t.top - box.top);
@@ -856,6 +940,18 @@ export function ChatRoute({
     if (newest === undefined || seen.has(newest)) return;
     repinnedForSendRef.current = true;
     followRef.current = true;
+    // A send outranks a still-landing `?seq=` jump and a still-settling
+    // restore, and both of those RETURN EARLY from the ResizeObserver before
+    // it reaches the follow-mode pin. Leaving them armed meant the one pin
+    // below was the only one a send ever got: fine for a text message, which
+    // changes no heights afterwards, but a message carrying a SCREENSHOT grows
+    // the transcript again when the image decodes, and the next observer fire
+    // re-applied the anchor (or did nothing) instead of re-pinning — the chat
+    // came to rest short of the bottom. Clearing them here is the same thing
+    // `onStreamScroll` does when the USER takes over: a send is the user
+    // saying where they want to be, more recently than either of these.
+    jumpRef.current = null;
+    restoreAnchorRef.current = null;
     requestAnimationFrame(() => scrollToBottom());
   }, [timeline]);
 
@@ -941,6 +1037,9 @@ export function ChatRoute({
     const maxTop = el.scrollHeight - el.clientHeight;
     const prev = lastScrollRef.current;
     lastScrollRef.current = { top: el.scrollTop, maxTop };
+    if (el.scrollTop < TAIL_NEAR_TOP_PX && windowStartRef.current > 0) {
+      expandTo(windowStartRef.current - TAIL_CHUNK, true);
+    }
     // Ignore the scroll event our own scrollToBottom()/restore just produced
     // — only a genuine USER scroll should toggle follow mode. Otherwise the
     // progressive height growth during load would flip follow off mid-pin.
@@ -973,11 +1072,10 @@ export function ChatRoute({
     // chat panel) — anchored to whichever message is at the top edge rather
     // than the bare pixel offset, so it survives that message's own content
     // laying out differently between now and the reopen.
-    chatScrollMemory.set(chatId, {
-      offset: el.scrollTop,
-      atBottom: followRef.current,
-      anchor: followRef.current ? null : captureScrollAnchor(el),
-    });
+    const anchor = followRef.current ? null : captureScrollAnchor(el);
+    chatScrollMemory.set(chatId, { offset: el.scrollTop, atBottom: followRef.current, anchor });
+    // Handover (spec/05): the same position, for the other surfaces to open at.
+    useViewPositionStore.getState().setScroll(chatId, anchor?.seq ?? null);
   }
 
   // spec/14 ## Main chat panel — "Transcript render cost is O(changed), not
@@ -998,7 +1096,12 @@ export function ChatRoute({
   // than a new field, so a host running behind the web surface still
   // decodes the frame (spec/03 § Answering with content).
   const handlePermission = useCallback(
-    (requestId: string, approve: boolean, answers?: Record<string, string>): void => {
+    (
+      requestId: string,
+      approve: boolean,
+      answers?: Record<string, string>,
+      sessionAllow?: boolean,
+    ): void => {
       if (!ws) {
         pushError('not connected');
         return;
@@ -1022,7 +1125,17 @@ export function ChatRoute({
                 decision: 'approve_with_edits',
                 editedNewString: JSON.stringify(answers),
               }
-            : { type: 'chat.permission_response', chatId, requestId, approve },
+            : sessionAllow
+              ? {
+                  type: 'chat.permission_response',
+                  chatId,
+                  requestId,
+                  approve: true,
+                  // Host turns this into a session-scoped SDK allow rule for the
+                  // tool (sdkBackend `buildCanUseTool`), same as mobile's option 2.
+                  decision: 'approve_with_session_allow',
+                }
+              : { type: 'chat.permission_response', chatId, requestId, approve },
           (event) => ws.send(event),
         );
         // Optimistically clear the pause locally so the badge + waiting-pill
@@ -1125,6 +1238,12 @@ export function ChatRoute({
   // row is keyed on its localId and a row that starts running is re-keyed, so
   // row state would vanish at exactly the moment it is needed (the edit that
   // lost the race has to go into the composer).
+  // spec/14 § Attempt pager — which attempt each re-sent turn's pager is parked
+  // on, by the turn's own seq. Absent means the one that settled (the last).
+  const [attemptSel, setAttemptSel] = useState<ReadonlyMap<number, number>>(new Map());
+  const handleAttemptAt = useCallback((seq: number, idx: number) => {
+    setAttemptSel((m) => new Map(m).set(seq, idx));
+  }, []);
   const [queuedEdit, setQueuedEdit] = useState<{ localId: string; text: string } | null>(null);
   // Text handed to the mounted composer (a queued edit that lost the race).
   const [composerInsert, setComposerInsert] = useState<{ text: string; nonce: number } | null>(
@@ -1139,6 +1258,8 @@ export function ChatRoute({
     message: string;
     files: OutgoingFile[];
     results: HookRunResult[];
+    afterTurn: boolean;
+    interrupt: boolean;
   } | null>(null);
   const [composerReplace, setComposerReplace] = useState<{ text: string; nonce: number } | null>(
     null,
@@ -1203,13 +1324,40 @@ export function ChatRoute({
   // brand new turn with the same text, not a re-send of the old localId
   // (unlike `handleRetryDelivery`, which re-sends one that never took effect).
   const handleRetryTurn = useCallback(
-    (entry: ChatEventEntry): void => {
+    (clicked: ChatEventEntry): void => {
       if (!ws) {
         pushError('not connected');
         return;
       }
+      // Retrying an assistant reply re-runs the user turn it answered.
+      let entry = clicked;
+      if (clicked.role === 'assistant') {
+        const tl = useChatStore.getState().timelines[chatId] ?? [];
+        const at = tl.findIndex((e) => e === clicked || e.seq === clicked.seq);
+        const prior = tl
+          .slice(0, at < 0 ? 0 : at)
+          .reverse()
+          .find(
+            (e) =>
+              e.kind === 'message' &&
+              e.role === 'user' &&
+              !e.goalTrigger &&
+              !e.hookTrigger &&
+              !e.jobTrigger &&
+              e.origin !== 'machine' &&
+              (e.content ?? '').length > 0,
+          );
+        if (!prior) {
+          pushError('no earlier message to retry');
+          return;
+        }
+        entry = prior;
+      }
       const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      addLocalMessage(chatId, entry.content ?? '', localId, undefined, entry.attachments);
+      // spec/12 § Retry in place — no second bubble: the retry names the turn it
+      // re-runs and the host folds the result into that bubble as another
+      // attempt (the `< >` pager). The failure mark on the bubble stays until
+      // the retry is observed running, so an undelivered retry is not silent.
       const disabledTools = useToolsStore.getState().disabledFor(chatId);
       deliveryTracker.submit(
         chatId,
@@ -1218,9 +1366,10 @@ export function ChatRoute({
         entry.attachments,
         (e) => ws.send(e),
         disabledTools,
+        entry.seq,
       );
     },
-    [ws, chatId, addLocalMessage, pushError],
+    [ws, chatId, pushError],
   );
 
   // spec/14 § Running-turn controls — a `turnStopped` message was already seen
@@ -1304,7 +1453,14 @@ export function ChatRoute({
     return <ChatNotFound chatId={chatId} />;
   }
 
-  async function handleSend(message: string, files?: OutgoingFile[]): Promise<boolean | void> {
+  async function handleSend(
+    message: string,
+    files?: OutgoingFile[],
+    _chatId?: string,
+    sendOpts?: { afterTurn?: boolean; interrupt?: boolean },
+  ): Promise<boolean | void> {
+    const afterTurn = sendOpts?.afterTurn === true;
+    const interrupt = sendOpts?.interrupt === true;
     // patch/todo.md — `/goal <text>` sets the chat's goal INSTEAD of sending a
     // chat turn (a bare `/goal` clears it). It's a REST mutation (no WS needed),
     // handled before the connection check so it works even while a turn's WS is
@@ -1414,10 +1570,10 @@ export function ChatRoute({
     const check = await api.checkHooks(chatId, message, files ?? []);
     setHookChecking(false);
     if (check.decision === 'block') {
-      setHookBlock({ message, files: files ?? [], results: check.results });
+      setHookBlock({ message, files: files ?? [], results: check.results, afterTurn, interrupt });
       return false;
     }
-    doSend(message, files ?? [], check.results);
+    doSend(message, files ?? [], check.results, afterTurn, interrupt);
   }
 
   /**
@@ -1426,7 +1582,13 @@ export function ChatRoute({
    * carries whatever `advise` outcomes matched, attached to the sent
    * message's bubble (spec/20-hooks.md § On the user's message).
    */
-  function doSend(message: string, files: OutgoingFile[], results: HookRunResult[]): void {
+  function doSend(
+    message: string,
+    files: OutgoingFile[],
+    results: HookRunResult[],
+    afterTurn = false,
+    interrupt = false,
+  ): void {
     if (!ws) {
       pushError('not connected');
       return;
@@ -1441,6 +1603,8 @@ export function ChatRoute({
     // per-chat Tools panel OFF set is captured at send time.
     const localId = sendMessage(chatId, message, files, {
       send: (e) => ws.send(e),
+      ...(afterTurn ? { afterTurn: true } : {}),
+      ...(interrupt ? { onDelivered: handlePromote } : {}),
     });
     const advise = (Array.isArray(results) ? results : []).filter(
       (r) => r.status !== 'ok' || r.decision === 'advise',
@@ -1462,7 +1626,13 @@ export function ChatRoute({
 
   function handleHookSendAnyway(): void {
     if (!hookBlock) return;
-    doSend(hookBlock.message, hookBlock.files, hookBlock.results);
+    doSend(
+      hookBlock.message,
+      hookBlock.files,
+      hookBlock.results,
+      hookBlock.afterTurn,
+      hookBlock.interrupt,
+    );
     setHookBlock(null);
   }
 
@@ -1473,6 +1643,16 @@ export function ChatRoute({
   function handleHookUseSuggestion(suggestion: string): void {
     setComposerReplace({ text: suggestion, nonce: Date.now() });
     setHookBlock(null);
+  }
+
+  async function handleAddToTodo(message: string, files: OutgoingFile[]): Promise<boolean> {
+    try {
+      await addToTodoList(chatId, message, files);
+      return true;
+    } catch (err) {
+      pushError(failed('adding to the todo list'), undefined, (err as Error).message);
+      return false;
+    }
   }
 
   function handleStop(): void {
@@ -1535,6 +1715,39 @@ export function ChatRoute({
   // spec/14 § Main chat panel — "Tool runs collapse to one row": a maximal run
   // of groupable tool entries making MORE than one call is emitted as a single
   // <ToolGroup> instead of one row per call and one per result.
+  // One state, not three. While the limit card is up it IS the account of why
+  // the turn did not run, so the trailing "Turn interrupted" line and the red
+  // failure that carry the same news in the provider's words are not drawn
+  // under it. Only the trailing run is affected: an older failure further up
+  // the transcript is history and stays.
+  const limitCardUp = Boolean(row && (row.rateLimitResumingAt || row.limitBlock));
+  let limitTailStart = timeline.length;
+  if (limitCardUp) {
+    while (limitTailStart > 0) {
+      const t = timeline[limitTailStart - 1];
+      if (
+        !t ||
+        !(t.kind === 'error' || (t.kind === 'message' && t.role === 'system' && t.synthetic))
+      )
+        break;
+      limitTailStart--;
+    }
+  }
+  // Where each snooze began (spec/04 § Snooze → Back): a permanent divider sits
+  // before the first entry after the log position the snooze started at. Which
+  // of them are already drawn is tracked across the two `renderEntries` calls.
+  const snoozeRecords = row?.snoozeRecords ?? [];
+  const dividersPlaced = new Set<number>();
+  const dividersBefore = (seq: number | null): JSX.Element[] => {
+    const found: JSX.Element[] = [];
+    snoozeRecords.forEach((record, idx) => {
+      if (dividersPlaced.has(idx) || (seq !== null && seq <= record.startSeq)) return;
+      dividersPlaced.add(idx);
+      found.push(<SnoozeDivider key={`snooze-${record.startedAt}`} record={record} />);
+    });
+    return found;
+  };
+  const paging = attemptPaging(timeline, attemptSel);
   const renderEntries = (from: number, to: number): JSX.Element[] => {
     const out: JSX.Element[] = [];
     // Each `view_file` call paired with its own result, and the indices of the
@@ -1546,7 +1759,7 @@ export function ChatRoute({
     const usedByViewFile = new Set<number>();
     for (let k = from; k < to; k++) {
       const call = timeline[k];
-      if (!call || !isViewFileCall(call)) continue;
+      if (!call || paging.hidden.has(k) || !isViewFileCall(call)) continue;
       const j = resultIndexFor(timeline, call, k, to);
       if (j === -1) continue;
       const found = timeline[j];
@@ -1558,6 +1771,16 @@ export function ChatRoute({
     while (i < to) {
       const entry = timeline[i];
       if (!entry) break;
+      out.push(...dividersBefore(entry.seq));
+      if (i >= limitTailStart) {
+        i++;
+        continue;
+      }
+      // A reply of an attempt the `< >` pager is not parked on.
+      if (paging.hidden.has(i)) {
+        i++;
+        continue;
+      }
       // Already drawn inside the file's own row above.
       if (usedByViewFile.has(i)) {
         i++;
@@ -1584,7 +1807,8 @@ export function ChatRoute({
         let calls = 0;
         for (let j = i; j < to; j++) {
           const next = timeline[j];
-          if (!next || !isGroupableToolEntry(next) || usedByViewFile.has(j)) break;
+          if (!next || !isGroupableToolEntry(next) || usedByViewFile.has(j) || paging.hidden.has(j))
+            break;
           if (next.kind === 'tool_call') calls++;
           end = j + 1;
         }
@@ -1593,7 +1817,6 @@ export function ChatRoute({
             <ToolGroup
               key={`g-${entry.seq}-${i}`}
               entries={timeline.slice(i, end)}
-              narration={runNarration(timeline[i - 1])}
               chatId={chatId}
             />,
           );
@@ -1633,7 +1856,10 @@ export function ChatRoute({
           // (which is the timeline tail from `queuedFrom`), so the chip renumbers
           // the moment a promote or remove reorders it.
           queuePos={entry.queued ? i - queuedFrom + 1 : undefined}
-          daemonOnline={daemonOnline}
+          {...(entry.queued
+            ? { release: queueRelease(timeline.slice(queuedFrom), i - queuedFrom) }
+            : {})}
+          hostOnline={hostOnline}
           onPermission={handlePermission}
           onApproveAll={handleApproveAllPending}
           onQuestionAnswer={handleQuestionAnswer}
@@ -1651,10 +1877,15 @@ export function ChatRoute({
           onFork={handleFork}
           onSwitchTrack={handleSwitchTrack}
           tracks={trackNav.get(entry.seq)}
+          {...(paging.pageable.get(entry.seq) ? { attemptPageable: true } : {})}
+          {...(attemptSel.has(entry.seq) ? { attemptAt: attemptSel.get(entry.seq)! } : {})}
+          onAttemptAt={handleAttemptAt}
         />,
       );
       i++;
     }
+    // Snoozes that began after everything drawn so far close the transcript.
+    if (to === timeline.length) out.push(...dividersBefore(null));
     return out;
   };
 
@@ -1673,27 +1904,32 @@ export function ChatRoute({
         </div>
       ) : null}
       <ChatHeader row={row} />
-      <JobBar row={row} />
-      <ChatFind key={chatId} streamRef={streamRef} contentVersion={timeline.length} />
+      <ChatFind
+        key={chatId}
+        streamRef={streamRef}
+        contentVersion={timeline.length}
+        onOpen={() => expandTo(0, false)}
+      />
       <GoalBanner row={row} />
-      <TaskBar row={row} />
+      <FinishedGoalBanner row={row} />
+      <TaskBar key={`tasks-${row.chatId}`} row={row} />
       <ReminderBanner row={row} />
       <ProviderContextPanel row={row} />
       <WakeBar row={row} />
       <BackgroundTaskBar chatId={chatId} />
+      <BrowserHandoffPanel chatId={chatId} />
       <ArtifactBar chatId={chatId} />
       <ArchivedBanner row={row} />
       <HiddenBanner row={row} />
       <SnoozedBanner row={row} />
-      {/* Credentials are per host (spec/10): this banner speaks only for the
-          machine THIS chat runs on. */}
-      <ClaudeDisconnectedBanner daemonId={row.daemonId} model={row.model ?? undefined} />
+      {/* Provider accounts are shared by every host (spec/10): no machine is named. */}
+      <ClaudeDisconnectedBanner model={row.model ?? undefined} />
       {/* And so is credit. Every chat on a spent machine says so, because the
           per-chat bubble only reaches whichever chat you happen to have open —
           it cannot tell you that the other twenty are stuck too. */}
-      <OutOfUsageBanner daemonId={row.daemonId} model={row.model ?? undefined} />
+      <OutOfUsageBanner hostId={row.hostId} model={row.model ?? undefined} chatId={chatId} />
       <MeetingLayout chatId={chatId}>
-        <DaemonOfflineBanner />
+        <HostOfflineBanner hostId={row.hostId} />
         <BlobChatIdContext.Provider value={chatId}>
           <PendingApprovalCountContext.Provider value={pendingApprovalCount}>
             <section
@@ -1711,7 +1947,7 @@ export function ChatRoute({
                 {timeline.length === 0 && !showThinking ? (
                   <EmptyChat />
                 ) : (
-                  renderEntries(0, queuedFrom)
+                  renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)
                 )}
                 <VoiceLiveBubble chatId={chatId} />
                 {showThinking ? (
@@ -1789,7 +2025,7 @@ export function ChatRoute({
               key={chatId}
               ref={composerRef}
               chatId={chatId}
-              daemonId={row.daemonId}
+              hostId={row.hostId}
               folder={row.folder}
               // spec/14 § Composer — unsent text belongs to the chat it was
               // typed in. Read non-reactively: `initialValue` is seeded once
@@ -1797,6 +2033,10 @@ export function ChatRoute({
               // it, so subscribing here would only re-render the whole route on
               // every keystroke.
               initialValue={useComposerDraftStore.getState().get(chatId)}
+              onScheduleSend={async (message, at) => {
+                await api.setLoop(chatId, { message, at });
+              }}
+              onAddToTodo={handleAddToTodo}
               onValueChange={(t) => useComposerDraftStore.getState().setDraft(chatId, t)}
               // spec/14 § Composer — opening a chat puts the cursor in the
               // composer, so you can type straight away without clicking it.
@@ -1835,7 +2075,8 @@ const TimelineEntry = memo(function TimelineEntry({
   chatId,
   isJobTrigger,
   queuePos,
-  daemonOnline,
+  release,
+  hostOnline,
   onPermission,
   onApproveAll,
   onQuestionAnswer,
@@ -1851,6 +2092,9 @@ const TimelineEntry = memo(function TimelineEntry({
   onFork,
   onSwitchTrack,
   tracks,
+  attemptPageable,
+  attemptAt,
+  onAttemptAt,
 }: {
   entry: ChatEventEntry;
   chatId: string;
@@ -1858,8 +2102,15 @@ const TimelineEntry = memo(function TimelineEntry({
   isJobTrigger?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
-  daemonOnline?: boolean;
-  onPermission(requestId: string, approve: boolean): void;
+  /** What releases a queued entry: the next tool call or the end of the turn. */
+  release?: QueueRelease;
+  hostOnline?: boolean;
+  onPermission(
+    requestId: string,
+    approve: boolean,
+    answers?: Record<string, string>,
+    sessionAllow?: boolean,
+  ): void;
   onApproveAll(): void;
   /** spec/14 § Question prompts — the user's `AskUserQuestion` selections. */
   onQuestionAnswer(requestId: string, answers: Record<string, string>): void;
@@ -1885,6 +2136,11 @@ const TimelineEntry = memo(function TimelineEntry({
   onSwitchTrack?(branchId: string): void;
   /** Set when this turn is a fork point with more than one track. */
   tracks?: TrackNav;
+  /** An attempt of this re-sent turn has replies or a failure to page to. */
+  attemptPageable?: boolean;
+  /** The attempt the pager is parked on; absent = the last. */
+  attemptAt?: number;
+  onAttemptAt?(seq: number, idx: number): void;
 }): JSX.Element {
   // spec/14 § Background task completions — a completion notice reported by the
   // layer underneath is its own entry, not a system message the reader has to
@@ -1894,6 +2150,15 @@ const TimelineEntry = memo(function TimelineEntry({
     // spec/02 § Per-turn process / warm sessions — a reply Claude Code wrote
     // itself, not the agent. A muted line that says whose words they are.
     if (entry.synthetic) return <SyntheticNoticeLine entry={entry} />;
+    // spec/10 § Backend credentials — a turn that moved to another account is
+    // a status note, the same quiet line as a call's cost.
+    if (entry.accountSwitch) {
+      return (
+        <div className="call-summary-line" data-testid="account-switch">
+          {entry.content ?? ''}
+        </div>
+      );
+    }
     // spec/07 § Call cost — the one quiet line a finished call leaves.
     if ((entry.content ?? '').startsWith('[call] ')) {
       return (
@@ -1953,6 +2218,18 @@ const TimelineEntry = memo(function TimelineEntry({
       />
     );
   }
+  // A background `patch_agent` finishing: the host delivers its reply as a
+  // machine turn, but nobody typed it, so it is a quiet system row (queued or
+  // not) — never a user bubble.
+  if (entry.kind === 'message' && entry.role === 'user') {
+    const agentReturn = parseAgentReturn(entry.content ?? '');
+    if (agentReturn) return <AgentReturnLine agentReturn={agentReturn} />;
+  }
+  // Anything else the host started on its own (self-wake, sweep nudge, todo
+  // advancing) is system input too, not a user bubble.
+  if (entry.kind === 'message' && entry.role === 'user' && entry.origin === 'machine') {
+    return <JobTriggerLine entry={entry} />;
+  }
   if (entry.kind === 'message' && entry.role === 'user' && entry.hookTrigger) {
     return <HookTriggerLine entry={entry} />;
   }
@@ -1968,7 +2245,8 @@ const TimelineEntry = memo(function TimelineEntry({
         entry={entry}
         chatId={chatId}
         {...(queuePos !== undefined ? { queuePos } : {})}
-        {...(daemonOnline !== undefined ? { daemonOnline } : {})}
+        {...(release !== undefined ? { release } : {})}
+        {...(hostOnline !== undefined ? { hostOnline } : {})}
         {...(onUnqueue ? { onUnqueue } : {})}
         {...(onPromote ? { onPromote } : {})}
         {...(queuedDraft !== undefined ? { queuedDraft } : {})}
@@ -1980,6 +2258,9 @@ const TimelineEntry = memo(function TimelineEntry({
         {...(onFork ? { onFork } : {})}
         {...(onSwitchTrack ? { onSwitchTrack } : {})}
         {...(tracks ? { tracks } : {})}
+        {...(attemptPageable ? { attemptPageable } : {})}
+        {...(attemptAt !== undefined ? { attemptAt } : {})}
+        {...(onAttemptAt ? { onAttemptAt } : {})}
       />
     );
   }
@@ -2021,7 +2302,11 @@ const TimelineEntry = memo(function TimelineEntry({
     return (
       <div className="turn-error" role="alert" data-testid="turn-error">
         <span className="turn-error-body">{presentFailure(entry.content ?? '')}</span>
-        {entry.errorCode !== undefined && entry.errorCode !== 'sdk_error' ? (
+        {entry.errorCode === 'chatgpt_login_required' ? (
+          <Link className="turn-error-action" to="/settings/usage" data-testid="turn-error-sign-in">
+            Sign in
+          </Link>
+        ) : entry.errorCode !== undefined && entry.errorCode !== 'sdk_error' ? (
           <code className="turn-error-code">{entry.errorCode}</code>
         ) : null}
       </div>
@@ -2131,11 +2416,11 @@ function UserSkillMarkdown({
   streaming: boolean;
 }): JSX.Element {
   const folder = useChatStore((st) => st.chats[chatId]?.folder ?? '');
-  const daemonId = useChatStore((st) => st.chats[chatId]?.daemonId ?? '');
+  const hostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
   const { data } = useQuery({
-    queryKey: ['skills', folder, daemonId],
-    queryFn: () => api.skills(folder, daemonId),
-    enabled: folder.trim() !== '' && daemonId.trim() !== '',
+    queryKey: ['skills', folder, hostId],
+    queryFn: () => api.skills(folder, hostId),
+    enabled: folder.trim() !== '' && hostId.trim() !== '',
   });
   const linked = data ? linkSkillTokens(content, new Set(data.skills ?? [])) : content;
   return (
@@ -2154,7 +2439,8 @@ function MessageEntry({
   entry,
   chatId,
   queuePos,
-  daemonOnline,
+  release,
+  hostOnline,
   onUnqueue,
   onPromote,
   queuedDraft,
@@ -2166,12 +2452,17 @@ function MessageEntry({
   onFork,
   onSwitchTrack,
   tracks,
+  attemptPageable,
+  attemptAt,
+  onAttemptAt,
 }: {
   entry: ChatEventEntry;
   chatId: string;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
-  daemonOnline?: boolean;
+  /** What releases a queued entry: the next tool call or the end of the turn. */
+  release?: QueueRelease;
+  hostOnline?: boolean;
   onUnqueue?(localId: string): void;
   onPromote?(localId: string): void;
   /**
@@ -2190,6 +2481,11 @@ function MessageEntry({
   onFork?(seq: number, message: string): void;
   onSwitchTrack?(branchId: string): void;
   tracks?: TrackNav;
+  /** An attempt of this re-sent turn has replies or a failure to page to. */
+  attemptPageable?: boolean;
+  /** The attempt the pager is parked on; absent = the last. */
+  attemptAt?: number;
+  onAttemptAt?(seq: number, idx: number): void;
 }): JSX.Element {
   const [forkDraft, setForkDraft] = useState<string | null>(null);
   // spec/14 § Side threads panel TRIGGER — hover button + right-click "Open
@@ -2243,7 +2539,6 @@ function MessageEntry({
   // `< >` pager is parked on. `null` means "the one that settled", which is the
   // last: a turn that recovered shows its recovered self at rest, and its
   // failed attempts only when the user walks back to them.
-  const [attemptAt, setAttemptAt] = useState<number | null>(null);
   // G2-d1: strip internal [[…]] control markers so they never render as
   // literal transcript text — they are turned into their UI affordance
   // (edit/permission card) elsewhere.
@@ -2285,15 +2580,15 @@ function MessageEntry({
   // The meta strip names where and on what the turn ran: the chat's host and model.
   const metaModel = useChatStore((st) => st.chats[chatId]?.model ?? null);
   const metaHost = usePresenceStore((st) => {
-    const daemonId = useChatStore.getState().chats[chatId]?.daemonId ?? '';
-    return (st.hosts[daemonId]?.host?.hostName ?? daemonId).trim();
+    const hostId = useChatStore.getState().chats[chatId]?.hostId ?? '';
+    return (st.hosts[hostId]?.host?.hostName ?? hostId).trim();
   });
   // Tom: "< > to show the retries IF THERE IS FAILED CONTENT". A turn that went
   // round again with nothing to show for the earlier go gets the marker but no
   // pager — arrows onto an empty page are a control that does nothing.
-  const pagedAttempts =
-    attempts !== undefined && attempts.some((a) => a.error !== undefined) ? attempts : undefined;
-  const attemptIdx = attemptAt ?? attemptCount - 1;
+  const pagedAttempts = attempts !== undefined && attemptPageable ? attempts : undefined;
+  const attemptIdx = Math.min(attemptAt ?? attemptCount - 1, attemptCount - 1);
+  const setAttemptAt = (idx: number): void => onAttemptAt?.(entry.seq, idx);
   const shownAttempt = pagedAttempts?.[attemptIdx];
   // A voice note appears LIVE (Tom, patch/todo.md): its bubble renders the
   // instant the user finishes speaking, before any transcript exists — so an
@@ -2321,6 +2616,11 @@ function MessageEntry({
     !entry.transcribing &&
     !entry.streaming &&
     text.length > 0;
+  // A settled turn can be retried from the hover button or the context menu —
+  // same settled-turn rule as the side-thread trigger. A user turn is sent again
+  // as a brand new turn (spec/12 § turn retry); an assistant reply re-runs the
+  // user turn it answered.
+  const canRetry = canSideThread && onRetryTurn !== undefined;
   return (
     <div
       className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}`}
@@ -2334,6 +2634,7 @@ function MessageEntry({
         : {})}
       data-testid="msg"
       data-seq={entry.seq}
+      data-message-at={entry.messageAt}
       data-streaming={entry.streaming ? 'true' : undefined}
       data-queued={entry.queued ? 'true' : undefined}
       data-delivery-pending={entry.deliveryPending ? 'true' : undefined}
@@ -2397,51 +2698,35 @@ function MessageEntry({
         </div>
       ) : text.length > 0 || entry.streaming ? (
         <>
-          <div
-            className={`content md${collapsed ? ' clamped' : ''}${isQueuedEdit ? ' queued-editable' : ''}`}
-            data-testid="msg-content"
-            // spec/04 ## Message queueing § Edit — clicking a queued message's
-            // text opens it for editing in place.
-            {...(isQueuedEdit
-              ? {
-                  role: 'button',
-                  tabIndex: 0,
-                  title: 'Edit',
-                  onClick: () => setDraft(entry.content ?? ''),
-                  onKeyDown: (e: React.KeyboardEvent) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return;
-                    e.preventDefault();
-                    setDraft(entry.content ?? '');
-                  },
-                }
-              : {})}
-          >
-            {entry.voice ? (
-              <>
-                <span className="msg-voice-mark" data-testid="msg-voice" title="Said in a call">
-                  <Phone size={12} aria-label="said in a call" />
-                </span>
-                <div className="msg-voice-body">
-                  <MessageMarkdown
-                    role={entry.role}
-                    chatId={chatId}
-                    content={renderedText}
-                    streaming={entry.streaming === true}
-                  />
-                  {entry.streaming ? <span className="stream-caret" aria-hidden="true" /> : null}
-                </div>
-              </>
-            ) : (
-              <>
-                <MessageMarkdown
-                  role={entry.role}
-                  chatId={chatId}
-                  content={renderedText}
-                  streaming={entry.streaming === true}
-                />
-                {entry.streaming ? <span className="stream-caret" aria-hidden="true" /> : null}
-              </>
-            )}
+          <div className={entry.voice ? 'msg-voice-row' : 'msg-content-row'}>
+            {entry.voice ? <CallMark /> : null}
+            <div
+              className={`content md${collapsed ? ' clamped' : ''}${isQueuedEdit ? ' queued-editable' : ''}`}
+              data-testid="msg-content"
+              // spec/04 ## Message queueing § Edit — clicking a queued message's
+              // text opens it for editing in place.
+              {...(isQueuedEdit
+                ? {
+                    role: 'button',
+                    tabIndex: 0,
+                    title: 'Edit',
+                    onClick: () => setDraft(entry.content ?? ''),
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      e.preventDefault();
+                      setDraft(entry.content ?? '');
+                    },
+                  }
+                : {})}
+            >
+              <MessageMarkdown
+                role={entry.role}
+                chatId={chatId}
+                content={renderedText}
+                streaming={entry.streaming === true}
+              />
+              {entry.streaming ? <span className="stream-caret" aria-hidden="true" /> : null}
+            </div>
           </div>
           {/* spec/14 § Messages — Long user messages collapse (accordion).
               Icon-only, no label — the content itself (truncated or not) is
@@ -2571,9 +2856,9 @@ function MessageEntry({
           <span
             className="queued-badge"
             data-testid="queued-badge"
-            title={queueChipTitle(queuePos!)}
+            title={queueChipTitle(queuePos!, hostOnline, release)}
           >
-            {queueChipLabel(queuePos!)}
+            {queueChipLabel(queuePos!, hostOnline, release)}
           </span>
           {entry.localId && onPromote ? (
             <button
@@ -2686,7 +2971,7 @@ function MessageEntry({
         // session), so there is nothing to retry — just say so, muted, with no
         // action, rather than offer a retry that would duplicate it.
         <div className="delivery-status interrupted" data-testid="turn-interrupted">
-          <span>Interrupted.</span>
+          <span>Interrupted by a newer message.</span>
         </div>
       ) : entry.turnStopped ? (
         // spec/14 § Running-turn controls — the user pressed Stop / Esc with
@@ -2711,10 +2996,21 @@ function MessageEntry({
         <div
           className="delivery-status pending"
           data-testid="delivery-pending"
-          data-daemon-offline={daemonOnline ? undefined : 'true'}
+          data-daemon-offline={hostOnline ? undefined : 'true'}
           aria-live="polite"
         >
-          {daemonOnline ? 'Sending…' : 'Queued until the agent reconnects'}
+          <span
+            className="delivery-pending-icon"
+            data-testid="delivery-pending-icon"
+            data-icon={hostOnline ? 'clock' : 'cloud-off'}
+          >
+            {hostOnline ? (
+              <Clock size={12} strokeWidth={2.5} aria-hidden />
+            ) : (
+              <CloudOff size={12} strokeWidth={2.5} aria-hidden />
+            )}
+          </span>
+          {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
         </div>
       ) : null}
       {/* spec/14 § Messages — the per-message meta strip: facts ABOUT the turn
@@ -2732,14 +3028,18 @@ function MessageEntry({
 
           Host and model follow the time on agent messages only: they are the
           chat's current ones, which says nothing about a message Tom typed. */}
+      {entry.messageAt !== undefined ? (
+        <div className="msg-time-rail" aria-hidden="true">
+          <span className="msg-time" data-testid="msg-time">
+            {formatMessageTime(entry.messageAt)}
+          </span>
+        </div>
+      ) : null}
       {attemptCount > 1 ||
-      entry.messageAt !== undefined ||
+      (entry.role !== 'user' && entry.messageAt !== undefined && (metaHost !== '' || metaModel)) ||
       entry.midTurn === true ||
       entry.sentNow === true ? (
         <div className="msg-meta" data-testid="msg-meta">
-          {entry.messageAt !== undefined ? (
-            <span data-testid="msg-meta-time">{formatMessageTime(entry.messageAt)}</span>
-          ) : null}
           {entry.sentNow === true ? (
             <span data-testid="msg-meta-interrupted">interrupted</span>
           ) : null}
@@ -2775,6 +3075,18 @@ function MessageEntry({
           <GitFork size={14} aria-hidden="true" />
         </button>
       ) : null}
+      {canRetry ? (
+        <button
+          type="button"
+          className="msg-retry"
+          data-testid="msg-retry-trigger"
+          aria-label="Retry"
+          title="Retry"
+          onClick={() => onRetryTurn(entry)}
+        >
+          <RotateCcw size={14} aria-hidden="true" />
+        </button>
+      ) : null}
       {canSideThread ? (
         <ContextMenu
           anchor={sideThreadMenu.anchor}
@@ -2782,11 +3094,34 @@ function MessageEntry({
           label="Message actions"
           testId="msg-context-menu"
           items={[
+            ...(canRetry
+              ? [
+                  {
+                    id: 'retry',
+                    label: 'Retry',
+                    icon: <RotateCcw size={14} aria-hidden="true" />,
+                    run: () => onRetryTurn(entry),
+                  },
+                ]
+              : []),
             {
               id: 'open-side-thread',
               label: 'Open side thread',
               icon: <GitFork size={14} aria-hidden="true" />,
               run: () => openSideThreadDraft(chatId, entry.seq, text),
+            },
+            {
+              id: 'quote',
+              label: 'Quote',
+              icon: <Quote size={14} aria-hidden="true" />,
+              run: () => {
+                quoteSelectionIntoComposer(chatId, menuSelection || text);
+                requestAnimationFrame(() =>
+                  document
+                    .querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')
+                    ?.focus(),
+                );
+              },
             },
             {
               id: 'send-to-new-chat',
@@ -3060,113 +3395,6 @@ function MessageAttachments({
   );
 }
 
-// Full-screen, zoomable image viewer rendered INSIDE the app (spec/14 §
-// Composer — "in-app zoomable viewer, never navigate away"). Click/scroll to
-// zoom, drag to pan when zoomed, Esc or a backdrop click to close.
-//
-// Portalled to <body>: `.chat-main` carries `contain: layout`, which makes it
-// the containing block for `position: fixed` descendants, so an in-tree overlay
-// is clipped to the chat panel instead of covering the window (Tom,
-// `patch/todo.md` — "viewing the image should be full screen. currently its
-// trapped in the window").
-function ImageLightbox({
-  url,
-  alt,
-  onClose,
-}: {
-  url: string;
-  alt: string;
-  onClose(): void;
-}): JSX.Element {
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
-
-  function clampScale(s: number): number {
-    return Math.min(8, Math.max(1, s));
-  }
-  function reset(): void {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  }
-
-  return createPortal(
-    <div
-      className="lightbox-backdrop"
-      data-testid="image-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label={alt}
-      onClick={onClose}
-      onWheel={(e) => {
-        e.preventDefault();
-        setScale((s) => {
-          const next = clampScale(s - e.deltaY * 0.002 * s);
-          if (next === 1) setOffset({ x: 0, y: 0 });
-          return next;
-        });
-      }}
-    >
-      <button
-        type="button"
-        className="lightbox-close"
-        data-testid="lightbox-close"
-        aria-label="Close image viewer"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-      >
-        <CloseIcon size={22} />
-      </button>
-      <img
-        className="lightbox-img"
-        src={url}
-        alt={alt}
-        draggable={false}
-        style={{
-          transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-          cursor: scale > 1 ? 'grab' : 'zoom-in',
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          // Click toggles between fit and 2.5× zoom.
-          if (scale > 1) reset();
-          else setScale(2.5);
-        }}
-        onPointerDown={(e) => {
-          if (scale <= 1) return;
-          e.stopPropagation();
-          (e.target as HTMLElement).setPointerCapture(e.pointerId);
-          drag.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
-        }}
-        onPointerMove={(e) => {
-          if (!drag.current) return;
-          setOffset({
-            x: drag.current.ox + (e.clientX - drag.current.x),
-            y: drag.current.oy + (e.clientY - drag.current.y),
-          });
-        }}
-        onPointerUp={() => {
-          drag.current = null;
-        }}
-      />
-    </div>,
-    document.body,
-  );
-}
-
 // Tool calls render COLLAPSED by default (spec/14 ## Main chat panel: "Tool
 // calls: collapsed by default with one-line summary; click to expand full args
 // + result"). File-edit tools expand to a read-only unified diff (spec/14
@@ -3206,6 +3434,10 @@ function ToolCall({
       (p) => p.tool === entry.tool && JSON.stringify(p.args ?? {}) === args,
     );
   });
+  const ownLabel = useChatStore((s) => {
+    const id = entry.callId;
+    return id === undefined ? undefined : s.toolRunSummaries[chatId]?.[id];
+  });
   const runningSince =
     !result && isCallOpen && !awaitingApproval && !isQuestionTool(entry.tool)
       ? { at: entry.startedAt }
@@ -3227,11 +3459,15 @@ function ToolCall({
   // edit keeps naming its path directly: that summary is the click target that
   // opens the file's diff, so it must name the file even when the model wrote
   // a description. The rest of the args still live only in the expanded detail.
+  // A lone call is a run of one: the host narrates it too ("Looking at the
+  // picture…" while it runs, then the closed label), so it is never a bare
+  // static row. Until that lands the derived phrase stands in.
+  const aiLabel = !isEdit ? labelForRun(ownLabel, [entry.callId])?.summary : null;
   const summary = isEdit
     ? `Editing ${String(args.file_path)}`
     : entry.tool === 'TaskStop'
       ? `Stopping task ${String(args['task_id'] ?? args['taskId'] ?? '')}`
-      : toolCallSummary(entry.tool, entry.toolArgs);
+      : (aiLabel ?? toolCallSummary(entry.tool, entry.toolArgs));
 
   // spec/09 § `### push`, spec/14 ## Main chat panel — every `patch_notify`
   // call renders as a green box carrying the message, so the transcript shows
@@ -3309,7 +3545,10 @@ function ToolCall({
   // spec/14 § Main chat panel — Delegate tool row: a `patch_delegate` call is
   // the one tool row that never collapses to the ordinary one-liner — it
   // carries a live status pill and an "Open transcript" link instead.
-  if (entry.tool && toolLabel(entry.tool) === 'patch_delegate') {
+  if (
+    entry.tool &&
+    (toolLabel(entry.tool) === 'patch_agent' || toolLabel(entry.tool) === 'patch_delegate')
+  ) {
     return <DelegateToolCall chatId={chatId} args={args} result={result} summary={summary} />;
   }
 
@@ -3573,14 +3812,14 @@ function imageDataUri(value: unknown, chatId: string | null): ToolImageSource | 
     // streams the picture itself, on its own schedule, and caches it for good.
     const sha = s['$blob'];
     if (typeof sha !== 'string' || chatId === null) return null;
-    return { src: blobUrl(chatId, sha), width, height };
+    return { src: blobUrl(chatId, sha), width, height, mediaType };
   }
   if (s['type'] !== 'base64') return null;
   const data = s['data'];
   if (typeof data !== 'string' || data.length === 0) return null;
   // Still reached by a LIVE result, which carries its bytes inline — only the
   // logged copy is externalised.
-  return { src: `data:${mediaType};base64,${data}`, width, height };
+  return { src: `data:${mediaType};base64,${data}`, width, height, mediaType };
 }
 
 /** Where a tool image comes from, and the box to hold for it. */
@@ -3588,13 +3827,14 @@ interface ToolImageSource {
   src: string;
   width?: number | undefined;
   height?: number | undefined;
+  mediaType?: string | undefined;
 }
 
 // A tool call/result's image content block, expanded inline: same
 // click-to-zoom in-app lightbox as a message's own image attachments
 // (`MessageAttachments`/`ImageLightbox`), so an image renders identically
 // whether Tom attached it or a tool call produced it.
-function ToolImage({ src, width, height }: ToolImageSource): JSX.Element {
+function ToolImage({ src, width, height, mediaType }: ToolImageSource): JSX.Element {
   const [open, setOpen] = useState(false);
   // The intrinsic `width`/`height` below are what reserve the picture's box
   // before any of its bytes arrive (with `max-width: 100%; height: auto` in
@@ -3620,7 +3860,14 @@ function ToolImage({ src, width, height }: ToolImageSource): JSX.Element {
           {...(height !== undefined ? { height } : {})}
         />
       </button>
-      {open ? <ImageLightbox url={src} alt="Tool image" onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <ImageLightbox
+          url={src}
+          alt="Tool image"
+          downloadName={mediaType ? imageDownloadName(mediaType) : undefined}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
@@ -3945,7 +4192,12 @@ function DelegateToolCall({
   const status = live?.status ?? 'running';
 
   return (
-    <div className="tool-call tool-call-delegate" data-testid="tool-call" data-delegate="true">
+    <div
+      className="tool-call tool-call-delegate"
+      data-testid="tool-call"
+      data-delegate="true"
+      data-agent-spawn-id={ack.id}
+    >
       <button
         type="button"
         className="tool-summary tool-summary-delegate"
@@ -4137,7 +4389,9 @@ function ViewFileCard({ view }: { view: ViewFileView }): JSX.Element {
           data-testid="view-file-frame"
           src={view.url}
           title={view.name}
-          sandbox="allow-scripts"
+          // A PDF is raw application/pdf, not agent-authored markup, and the
+          // browser's PDF viewer will not start inside a sandboxed frame.
+          {...(view.kind === 'pdf' ? {} : { sandbox: 'allow-scripts' })}
           loading="lazy"
         />
       )}
@@ -4297,23 +4551,14 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
 // spec/14 ## Main chat panel — "Tool runs collapse to one row". A consecutive
 // run of tool calls + results is one line saying what the batch did: once the
 // run has closed, the host's AI summary of it ("Set up the project
-// locally"); until then, or if that summary failed, a count of the work by
-// kind ("Ran 3 commands, read 2 files"). Never every call and its target —
+// locally"); until then, or if that summary failed, a count of the work by kind ("Ran 3 commands, read 2 files"). Never every call and its target —
 // that detail is a click away, not on screen before it's asked for; expanding
 // mounts the very same rows the run would have rendered ungrouped. Memoised
 // element-wise on its entries: the store keeps the identity of untouched
 // entries, so a live turn appending to the tail re-renders only the group it
 // lands in, not every group above it.
 const ToolGroup = memo(
-  function ToolGroup({
-    entries,
-    narration,
-    chatId,
-  }: {
-    entries: ChatEventEntry[];
-    narration: string | null;
-    chatId: string;
-  }) {
+  function ToolGroup({ entries, chatId }: { entries: ChatEventEntry[]; chatId: string }) {
     const calls = entries.filter((e) => e.kind === 'tool_call');
     // A run that grew out of a call the user already opened starts open.
     const [open, setOpen] = useState(() =>
@@ -4325,16 +4570,15 @@ const ToolGroup = memo(
     });
     // The summary names the run it was written for; a run this surface cut
     // differently (a rule drift) gets the count, not a label for other calls.
-    const matches =
-      ai !== undefined &&
-      ai.callIds.length === calls.length &&
-      ai.callIds.every((id, i) => calls[i]?.callId === id);
-    const aiSummary = matches ? ai.summary : null;
-    const aiError = matches ? ai.error : undefined;
-    // No label yet: the agent's own sentence before the run, else the count. A
-    // failed label keeps the count so the failure reads as one.
-    const summary =
-      aiSummary ?? (aiError === undefined ? narration : null) ?? toolRunNarrative(calls);
+    const matched = labelForRun(
+      ai,
+      calls.map((c) => c.callId),
+    );
+    const aiSummary = matched?.summary ?? null;
+    const aiError = matched?.error;
+    // No label yet (or it failed): the count of work by kind, from the tool
+    // calls alone — never the agent's prose.
+    const summary = aiSummary ?? toolRunNarrative(calls);
     // A collapsed run hides its calls, so the unreturned one's own spinner is
     // out of sight: surface the oldest still-open call on the run's row.
     const openCallIds = useChatStore((s) => s.chats[chatId]?.openCallIds);
@@ -4351,15 +4595,7 @@ const ToolGroup = memo(
         data-testid="tool-group"
         data-open={open}
         data-count={calls.length}
-        data-summary={
-          aiSummary !== null
-            ? 'ai'
-            : aiError !== undefined
-              ? 'failed'
-              : narration !== null
-                ? 'narration'
-                : 'count'
-        }
+        data-summary={aiSummary !== null ? 'ai' : aiError !== undefined ? 'failed' : 'count'}
       >
         <button
           type="button"
@@ -4377,9 +4613,12 @@ const ToolGroup = memo(
             <span
               className="tool-summary-failed"
               data-testid="tool-group-summary-failed"
+              data-tooltip-full=""
+              role="img"
+              aria-label={`Summary failed: ${aiError}`}
               title={`Summary failed: ${aiError}`}
             >
-              <Info size={16} strokeWidth={2} aria-hidden />
+              <CircleAlert size={16} strokeWidth={2} aria-hidden />
             </span>
           ) : null}
         </button>
@@ -4412,7 +4651,6 @@ const ToolGroup = memo(
   },
   (a, b) =>
     a.chatId === b.chatId &&
-    a.narration === b.narration &&
     a.entries.length === b.entries.length &&
     a.entries.every((e, i) => e === b.entries[i]),
 );
@@ -4550,6 +4788,15 @@ function CompactionLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
 // across the stream. There is nothing behind it to expand: the line IS the
 // whole fact, and the mode is named with the agent's own word for it, the same
 // as every control that offers the choice.
+/** Said in a call: an outline phone in the gutter beside the message, not inside it. */
+function CallMark(): JSX.Element {
+  return (
+    <span className="msg-voice-mark" data-testid="msg-voice" title="Said in a call">
+      <Phone size={14} strokeWidth={1.5} aria-label="said in a call" />
+    </span>
+  );
+}
+
 /**
  * spec/07 § Latency — the words being spoken on a call, as the user's own
  * bubble at the end of the call's chat, in italics while they are a live
@@ -4563,7 +4810,10 @@ function VoiceLiveBubble({ chatId }: { chatId: string }): JSX.Element | null {
   if (words === '') return null;
   return (
     <div className="msg msg-user voice-live" data-testid="voice-live-bubble" aria-live="polite">
-      <div className="content">{words}</div>
+      <div className="msg-voice-row">
+        <CallMark />
+        <div className="content">{words}</div>
+      </div>
     </div>
   );
 }
@@ -4604,13 +4854,50 @@ function PermissionModeLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
 // payload or mustached prompt never reads as if Tom typed it. Expanding
 // shows the exact text the job service sent.
 function JobTriggerLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
+  // A Pad delivery is written by Patch from what the user did in the Pad; its
+  // first line names the Pad, so it is the summary.
+  const padSummary = /^\[Pad\][^\n]*/.exec(entry.content ?? '')?.[0];
   return (
     <ToolDisclosure
       testid="job-trigger"
       variant="trigger"
-      summary="Automated trigger"
+      summary={
+        padSummary ?? (entry.origin === 'machine' ? 'Automated message' : 'Automated trigger')
+      }
       detail={<code>{entry.content ?? ''}</code>}
     />
+  );
+}
+
+// A background agent's result: muted one-liner naming the agent, expanding to
+// its reply. `data-agent-id` ties it to the spawn row (same id as its ack).
+function AgentReturnLine({ agentReturn }: { agentReturn: AgentReturn }): JSX.Element {
+  return (
+    <div data-agent-id={agentReturn.id}>
+      <ToolDisclosure
+        testid="agent-return"
+        variant="trigger"
+        summary={`Agent returned: ${agentReturn.title}`}
+        detail={
+          <>
+            <button
+              type="button"
+              data-testid="agent-return-jump"
+              onClick={() =>
+                document
+                  .querySelector(`[data-agent-spawn-id="${agentReturn.id}"]`)
+                  ?.scrollIntoView({ block: 'center' })
+              }
+            >
+              Show agent
+            </button>
+            <div className="content md">
+              <Markdown content={agentReturn.reply} />
+            </div>
+          </>
+        }
+      />
+    </div>
   );
 }
 
@@ -4633,16 +4920,15 @@ function HookTriggerLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
 
 // spec/04 § Goals — a `not_met` resubmit, the SAME collapsed-furniture
 // treatment as a hook's `block` (it is one, functionally): the summary names
-// the reason (truncated); expanding shows the exact text, since that IS this
+// the full reason; expanding shows the exact text, since that IS this
 // turn's content (the evaluator's reason, verbatim).
 function GoalTriggerLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
   const reason = entry.goalTrigger?.reason ?? '';
-  const truncated = reason.length > 80 ? `${reason.slice(0, 79)}…` : reason;
   return (
     <ToolDisclosure
       testid="goal-trigger"
       variant="trigger"
-      summary={truncated.length > 0 ? `Goal not met — ${truncated}` : 'Goal not met'}
+      summary={reason.length > 0 ? `Goal not met — ${reason}` : 'Goal not met'}
       detail={<code>{entry.content ?? ''}</code>}
     />
   );
@@ -4682,7 +4968,12 @@ function PermissionCard({
 }: {
   entry: ChatEventEntry;
   chatId: string;
-  onPermission(requestId: string, approve: boolean): void;
+  onPermission(
+    requestId: string,
+    approve: boolean,
+    answers?: Record<string, string>,
+    sessionAllow?: boolean,
+  ): void;
   onApproveAll(): void;
 }): JSX.Element {
   // spec/02 § Permission mode — Plan Mode gates every tool call, including
@@ -4694,6 +4985,11 @@ function PermissionCard({
   // bypass for what comes after, in one click instead of two.
   const permissionMode = useChatStore((s) => s.chats[chatId]?.permissionMode);
   const showBypassEscape = permissionMode === 'plan';
+  // Under bypass every tool call is already allowed, so a card is only raised
+  // for a safety check (e.g. a delete) that a session-wide allow rule does not
+  // silence. "Allow all <tool>" would promise something it cannot deliver.
+  // Computer use is stored for the host, not the session, so it stays.
+  const offerSessionAllow = entry.tool === 'Computer use' || permissionMode !== 'bypassPermissions';
   function approveAndResumeBypass(requestId: string): void {
     onPermission(requestId, true);
     getActiveWs()?.send({ type: 'chat.settings', chatId, permissionMode: 'bypassPermissions' });
@@ -4732,6 +5028,11 @@ function PermissionCard({
     if (e.key === '3') {
       e.preventDefault();
       onPermission(entry.requestId, false);
+      return;
+    }
+    if (e.key === 's' && offerSessionAllow && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      onPermission(entry.requestId, true, undefined, true);
       return;
     }
     if (e.key === '4' && showBypassEscape) {
@@ -4774,6 +5075,22 @@ function PermissionCard({
               onClick={() => onApproveAll()}
             >
               Approve all outstanding <span className="kbd-hint">2</span>
+            </button>
+          ) : null}
+          {offerSessionAllow ? (
+            <button
+              type="button"
+              data-testid="permission-approve-session"
+              onClick={() =>
+                entry.requestId && onPermission(entry.requestId, true, undefined, true)
+              }
+            >
+              {/* 'Computer use' is COMPUTER_USE_TOOL in the daemon's chatRunner.ts: its
+                third option is stored for the host, not the session. */}
+              {entry.tool === 'Computer use'
+                ? 'Always allow'
+                : `Yes, allow all ${entry.tool ?? 'tools'} during this session`}{' '}
+              <span className="kbd-hint">s</span>
             </button>
           ) : null}
           <button
@@ -4865,6 +5182,7 @@ function RateLimitBubble({
   const pastReset = resetsAt !== null && resetsAt <= now;
   const isOverload = row.resumeKind === 'overloaded';
   const limitName = LIMIT_NAME[block?.scope ?? 'unknown'];
+  const routing = block?.routing ? routingSentence(block.routing, now) : '';
 
   const resumeNow = (): void => {
     getActiveWs()?.send({ type: 'chat.resume_now_request', chatId: row.chatId });
@@ -4918,9 +5236,9 @@ function RateLimitBubble({
           )}
         </p>
 
-        {block?.routing ? (
+        {routing ? (
           <p className="rate-limit-routing" data-testid="rate-limit-routing">
-            {routingSentence(block.routing, now)}
+            {routing}
           </p>
         ) : null}
 
@@ -4945,6 +5263,13 @@ function RateLimitBubble({
           >
             Try now
           </button>
+          {/* The same switch the composer has, offered where the limit is: a
+              different model may have headroom this one has not (spec/04 § Model). */}
+          <ModelControl
+            chatId={row.chatId}
+            testId="rate-limit-change-model"
+            triggerLabel="Change model"
+          />
           {block?.overageBlocked ? (
             <a
               className="ctrl"

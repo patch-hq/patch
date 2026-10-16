@@ -7,7 +7,7 @@
 // ink-on-paper assistant bubble and the white-on-green user bubble.
 
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import {
   AstRenderer,
   MarkdownIt,
@@ -18,7 +18,9 @@ import {
   type ASTNode,
   type RenderRules,
 } from 'react-native-markdown-display';
-import { fonts, radii, space, useTheme } from '../lib/theme';
+import { configureMarkdownIt } from '../lib/markdownIt';
+import { LinkPreview } from './LinkPreview';
+import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 // The library's default `text`/`code_inline`/`code_block`/`fence` rules render
 // a plain `<Text>` with no way to set RN's `selectable` (a component prop, not
@@ -50,6 +52,21 @@ function leafRules(selectable: boolean): RenderRules {
         {children}
       </View>
     ),
+    // The link's own text opens the page, as the library's default rule does;
+    // an http(s) link also gets the preview toggle and open-in-browser icons
+    // after it (spec/14 § Message links).
+    link: (node: ASTNode, children, _parent, styles) => {
+      const href = String(node.attributes['href']);
+      const flat = StyleSheet.flatten(styles['link']) as { color: string };
+      return (
+        <Text key={node.key}>
+          <Text style={styles['link']} onPress={() => void Linking.openURL(href)}>
+            {children}
+          </Text>
+          <LinkPreview url={href} color={flat.color} />
+        </Text>
+      );
+    },
     text: (node: ASTNode, _children, _parent, styles, inheritedStyles = {}) => (
       <Text key={node.key} selectable={selectable} style={[inheritedStyles, styles.text]}>
         {node.content}
@@ -102,7 +119,7 @@ function leafRules(selectable: boolean): RenderRules {
 // constructed one on every render it isn't given — but that's the library
 // being slightly wasteful under its own component API, not something this
 // direct path needs to copy.
-const markdownIt = MarkdownIt({ typographer: true });
+const markdownIt = configureMarkdownIt(MarkdownIt({ typographer: true }));
 
 // Reproduces `getStyle` from the library's index.js (not itself exported —
 // these ~15 lines are the whole of it): merge OUR style keys over the
@@ -263,7 +280,7 @@ export function ChatMarkdown({
     },
     code_inline: {
       fontFamily: fonts.mono,
-      fontSize: 13,
+      fontSize: textMin,
       color: codeFg,
       backgroundColor: codeBg,
       borderRadius: 4,
@@ -271,7 +288,7 @@ export function ChatMarkdown({
     },
     code_block: {
       fontFamily: fonts.mono,
-      fontSize: 13,
+      fontSize: textMin,
       color: codeFg,
       backgroundColor: blockBg,
       borderWidth: 1,
@@ -285,7 +302,7 @@ export function ChatMarkdown({
     tr_stripe: { backgroundColor: colors.tableStripe },
     fence: {
       fontFamily: fonts.mono,
-      fontSize: 13,
+      fontSize: textMin,
       color: codeFg,
       backgroundColor: blockBg,
       borderWidth: 1,

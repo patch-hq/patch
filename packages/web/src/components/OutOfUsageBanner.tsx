@@ -22,8 +22,12 @@
 
 import { useEffect, useState, type JSX } from 'react';
 import { Link } from 'react-router-dom';
-import { CLAUDE_BACKEND_ID } from '@patch/wire';
+import { CLAUDE_BACKEND_ID, harnessForModel } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { useModelCatalog, loadModels } from '../lib/models.js';
+import { getActiveWs } from '../api/ws.js';
+import { ProviderSwitchModal } from './ProviderSwitchModal.js';
 import {
   formatDurationWords,
   formatReset,
@@ -33,15 +37,18 @@ import {
 } from '../lib/usage.js';
 
 export function OutOfUsageBanner({
-  daemonId,
+  hostId,
   model,
+  chatId,
 }: {
-  daemonId: string | null;
+  hostId: string | null;
   model?: string;
+  /** With it, the banner can offer to move this chat to the other provider. */
+  chatId?: string;
 }): JSX.Element | null {
   const account = usePresenceStore((s) =>
-    daemonId
-      ? (s.hosts[daemonId]?.accounts[model?.startsWith('openai/') ? 'codex' : CLAUDE_BACKEND_ID] ??
+    hostId
+      ? (s.hosts[hostId]?.accounts[model?.startsWith('openai/') ? 'codex' : CLAUDE_BACKEND_ID] ??
         null)
       : null,
   );
@@ -55,6 +62,31 @@ export function OutOfUsageBanner({
         (a.kind ?? 'chatgpt') === (model.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
     ),
   );
+  // The other provider on this host: is there credit to move to?
+  const onCodex = model?.startsWith('openai/') ?? false;
+  const otherAccount = usePresenceStore((s) =>
+    hostId ? (s.hosts[hostId]?.accounts[onCodex ? CLAUDE_BACKEND_ID : 'codex'] ?? null) : null,
+  );
+  const otherUsable =
+    otherAccount !== null &&
+    otherAccount.connected &&
+    (otherAccount.accounts ?? []).some((a) => a.connected) &&
+    hostOutage(otherAccount.accounts ?? []) === null;
+  const catalog = useModelCatalog();
+  const target =
+    model !== undefined && otherUsable
+      ? catalog.models.find((m) => harnessForModel(m.id) !== harnessForModel(model))
+      : undefined;
+  const wantsCatalogue = outage !== null && otherUsable && chatId !== undefined;
+  useEffect(() => {
+    if (wantsCatalogue && hostId) void loadModels(hostId);
+  }, [wantsCatalogue, hostId]);
+  const suppressWarning = usePreferencesStore((s) => s.preferences.suppressProviderSwitchWarning);
+  const [confirming, setConfirming] = useState(false);
+  const sendSwitch = (): void => {
+    if (chatId === undefined || target === undefined) return;
+    getActiveWs()?.send({ type: 'chat.model_request', chatId, model: target.id });
+  };
   const soonestAt = outage?.soonest?.resetsAt;
   useEffect(() => {
     if (soonestAt === undefined) return;
@@ -90,6 +122,28 @@ export function OutOfUsageBanner({
         )}{' '}
         <Link to="/settings/usage">Usage</Link>
       </span>
+      {chatId !== undefined && target !== undefined && (
+        <button
+          type="button"
+          className="out-of-usage-switch"
+          data-testid="out-of-usage-switch"
+          onClick={() => (suppressWarning ? sendSwitch() : setConfirming(true))}
+        >
+          Switch to {onCodex ? 'Claude' : 'ChatGPT'}
+        </button>
+      )}
+      {confirming && (
+        <ProviderSwitchModal
+          onCancel={() => setConfirming(false)}
+          onSwitch={(dontShowAgain) => {
+            setConfirming(false);
+            if (dontShowAgain) {
+              void usePreferencesStore.getState().update({ suppressProviderSwitchWarning: true });
+            }
+            sendSwitch();
+          }}
+        />
+      )}
     </div>
   );
 }

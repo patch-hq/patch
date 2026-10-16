@@ -32,14 +32,14 @@ export function buildGroupOptions(jobs: readonly { group?: string }[]): string[]
 /**
  * Where the Edit link beside the Skill picker should point, or why there is
  * none (spec/15 § Job editor). Mobile addresses a skill's file through the
- * host files API — daemonId + absolute path, no chat in between (spec/03 §
+ * host files API — hostId + absolute path, no chat in between (spec/03 §
  * Host files) — so unlike web's chat-scoped file browser it reaches a skill
  * anywhere on the host, including a machine-wide one under `~/.claude/skills`
  * that sits outside every project folder. NO FALLBACK: a path is never
  * guessed, and a link that would fail is never rendered — the caller shows
  * `reason` instead.
  */
-export type SkillEditTarget = { daemonId: string; path: string } | { reason: string } | null;
+export type SkillEditTarget = { hostId: string; path: string } | { reason: string } | null;
 
 export function resolveSkillEditTarget(input: {
   /** The selected skill's name — empty when none is chosen. */
@@ -47,11 +47,11 @@ export function resolveSkillEditTarget(input: {
   /** Absolute host-side file per skill name, as reported by GET /api/skills. */
   paths: Record<string, string> | undefined;
   /** The action's host — empty when no folder/host is chosen yet. */
-  daemonId: string;
+  hostId: string;
 }): SkillEditTarget {
   // No skill chosen — there is nothing to link to and nothing to explain.
   if (input.skill === '') return null;
-  if (input.daemonId.trim() === '') return { reason: 'pick a host first' };
+  if (input.hostId.trim() === '') return { reason: 'pick a host first' };
   // An older host answers without paths at all (the field is optional
   // precisely so it can) — say so rather than construct a path from the name.
   // That is a DIFFERENT case from `paths` being present but missing just this
@@ -60,7 +60,7 @@ export function resolveSkillEditTarget(input: {
   if (input.paths === undefined) return { reason: 'host does not report skill files' };
   const path = input.paths[input.skill];
   if (path === undefined) return { reason: 'skill not found on this host' };
-  return { daemonId: input.daemonId, path };
+  return { hostId: input.hostId, path };
 }
 
 export interface FormState {
@@ -95,10 +95,18 @@ export interface FormState {
   recurrenceTimezone: string;
   webhookScheme: WebhookScheme;
   webhookSecret: string;
+  /**
+   * `follows` trigger (spec/08 § Follows): the id of the job being followed,
+   * and whether a run that failed counts as well as one that settled ok.
+   * `on: 'success'` is the meaning of an ABSENT `on`, so the off state of the
+   * switch writes no field — same round-trip rule as cron's `UTC`.
+   */
+  followsJobId: string;
+  followsAny: boolean;
   filter: string;
   actionType: JobAction['type'];
   /** The host the spawned/ensured chat runs on (spec/08 § Action). */
-  spawnDaemonId: string;
+  spawnHostId: string;
   spawnFolder: string;
   spawnPrompt: string;
   spawnSkill: string;
@@ -143,7 +151,7 @@ export interface FormState {
   ensureKey: string;
   messageChatId: string;
   /**
-   * `script` only — the command each fire runs on `spawnDaemonId` in
+   * `script` only — the command each fire runs on `spawnHostId` in
    * `spawnFolder` (spec/08 § Action). A script job has no chat, so no skill,
    * prompt, model or permission mode.
    */
@@ -154,7 +162,7 @@ export interface FormState {
    * KEPT while unticked so the script is not thrown away by a comparison.
    */
   gateOn: boolean;
-  gateDaemonId: string;
+  gateHostId: string;
   gateFolder: string;
   gateCommand: string;
   /** Empty means the 60s default. */
@@ -178,16 +186,18 @@ export const DEFAULT_FORM: FormState = {
   recurrenceTimezone: deviceTimeZone(),
   webhookScheme: 'none',
   webhookSecret: '',
+  followsJobId: '',
+  followsAny: false,
   filter: '',
   gateOn: false,
-  gateDaemonId: '',
+  gateHostId: '',
   gateFolder: '',
   gateCommand: '',
   gateTimeoutMs: '',
   actionType: 'spawn',
   // Empty until settings/chat folders load; the picker shows a "Select…" prompt
   // rather than a literal path that matches no option.
-  spawnDaemonId: '',
+  spawnHostId: '',
   spawnFolder: '',
   spawnPrompt: '',
   spawnSkill: '',
@@ -217,7 +227,7 @@ export function jobToForm(job: Job): FormState {
   f.filter = job.filter ?? '';
   if (job.gate) {
     f.gateOn = true;
-    f.gateDaemonId = job.gate.daemonId;
+    f.gateHostId = job.gate.hostId;
     f.gateFolder = job.gate.folder;
     f.gateCommand = job.gate.command;
     f.gateTimeoutMs = job.gate.timeoutMs === undefined ? '' : String(job.gate.timeoutMs);
@@ -241,9 +251,13 @@ export function jobToForm(job: Job): FormState {
     f.webhookScheme = job.trigger.scheme;
     f.webhookSecret = job.trigger.secret ?? '';
   }
+  if (job.trigger.type === 'follows') {
+    f.followsJobId = job.trigger.jobId;
+    f.followsAny = job.trigger.on === 'any';
+  }
   f.actionType = job.action.type;
   if (job.action.type === 'spawn' || job.action.type === 'continue') {
-    f.spawnDaemonId = job.action.daemonId;
+    f.spawnHostId = job.action.hostId;
     f.spawnFolder = job.action.folder;
     f.spawnPrompt = job.action.prompt ?? '';
     f.spawnSkill = job.action.skill ?? '';
@@ -258,7 +272,7 @@ export function jobToForm(job: Job): FormState {
     if (job.action.type === 'spawn') f.spawnPermissionMode = job.action.permissionMode ?? 'auto';
     else f.ensureKey = job.action.key ?? '';
   } else if (job.action.type === 'script') {
-    f.spawnDaemonId = job.action.daemonId;
+    f.spawnHostId = job.action.hostId;
     f.spawnFolder = job.action.folder;
     f.scriptCommand = job.action.command;
     f.scriptTimeoutMs = job.action.timeoutMs === undefined ? '' : String(job.action.timeoutMs);
@@ -293,23 +307,36 @@ export function validateForm(form: FormState): string | null {
   // itself is checked server-side (validate.ts's RRule.fromString gate) —
   // mirrors the shallow client-side cron check above rather than duplicating
   // the rrule parser here.
+  // `FollowsTrigger.jobId` is `min(1)` server-side; say so here rather than 400.
+  if (form.triggerType === 'follows' && !form.followsJobId.trim()) {
+    return 'Name the job to follow. Its id is empty.';
+  }
   if (form.triggerType === 'recurrence' && !form.recurrenceRule.trim()) {
     return 'Set a schedule. The RRULE is empty.';
   }
   if (form.triggerType === 'recurrence' && !isValidTimeZone(form.recurrenceTimezone.trim())) {
     return `“${form.recurrenceTimezone.trim()}” is not an IANA timezone. Try e.g. Europe/London.`;
   }
+  // A timeout is typed as text. `Number('30s')` is NaN, which would go out as
+  // `null` and be refused (or worse, mean "no limit") — say so here instead.
+  const badTimeout = (raw: string): boolean => raw.trim() !== '' && !/^[1-9]\d*$/.test(raw.trim());
+  if (form.gateOn && form.gateCommand.trim().length > 0 && badTimeout(form.gateTimeoutMs)) {
+    return 'The gate timeout must be a whole number of milliseconds, 1 or more.';
+  }
+  if (form.actionType === 'script' && badTimeout(form.scriptTimeoutMs)) {
+    return 'The command timeout must be a whole number of milliseconds, 1 or more.';
+  }
   // A gate with no host or folder would be asked nowhere, and the server's own
   // `JobGate` refuses it — say so here, where there is someone to tell.
   if (form.gateOn && form.gateCommand.trim().length > 0) {
-    if (!form.gateDaemonId.trim()) return 'Choose which host the gate command runs on.';
+    if (!form.gateHostId.trim()) return 'Choose which host the gate command runs on.';
     if (!form.gateFolder.trim()) return 'Choose a folder for the gate command to run in.';
   }
   const usesSpawnFields = form.actionType === 'spawn' || form.actionType === 'continue';
   // A `script` action is validated on its own terms: a host, a folder and a
   // command, and NO first turn (spec/08 § Action — `script`).
   if (form.actionType === 'script') {
-    if (!form.spawnDaemonId.trim()) return 'Choose which host the command runs on.';
+    if (!form.spawnHostId.trim()) return 'Choose which host the command runs on.';
     if (!form.spawnFolder.trim()) return 'Choose a folder for the command to run in.';
     if (!form.scriptCommand.trim()) return 'Enter the command to run.';
     return null;
@@ -317,7 +344,7 @@ export function validateForm(form: FormState): string | null {
   // spawn + ensure need a folder.
   // A job fires unattended, so one that cannot name a host would dispatch
   // nowhere. Refuse at save time, where there is someone to tell.
-  if (usesSpawnFields && !form.spawnDaemonId.trim()) {
+  if (usesSpawnFields && !form.spawnHostId.trim()) {
     return 'Choose which host the chat runs on.';
   }
   if (usesSpawnFields && !form.spawnFolder.trim()) {
@@ -360,6 +387,15 @@ export function formToBody(form: FormState): JobCreateBody {
     case 'todoist':
       trigger = { type: 'todoist' };
       break;
+    case 'follows':
+      trigger = {
+        type: 'follows',
+        jobId: form.followsJobId.trim(),
+        // Absent IS `success`, so only `any` writes a key — a job untouched on
+        // this control serialises byte-identically to how it did before.
+        ...(form.followsAny ? { on: 'any' as const } : {}),
+      };
+      break;
     case 'recurrence':
       trigger = {
         type: 'recurrence',
@@ -374,7 +410,7 @@ export function formToBody(form: FormState): JobCreateBody {
     // spawn (fresh chat each fire) and ensure (one durable chat) share shape.
     action = {
       type: form.actionType,
-      daemonId: form.spawnDaemonId.trim(),
+      hostId: form.spawnHostId.trim(),
       folder: form.spawnFolder.trim(),
       ...(form.spawnPrompt ? { prompt: form.spawnPrompt } : {}),
       ...(form.spawnSkill ? { skill: form.spawnSkill } : {}),
@@ -402,12 +438,12 @@ export function formToBody(form: FormState): JobCreateBody {
   } else if (form.actionType === 'script') {
     action = {
       type: 'script',
-      daemonId: form.spawnDaemonId.trim(),
+      hostId: form.spawnHostId.trim(),
       folder: form.spawnFolder.trim(),
       command: form.scriptCommand,
       // Empty means the default, and must persist as an ABSENT field — the
       // same rule `model` follows above.
-      ...(form.scriptTimeoutMs ? { timeoutMs: Number(form.scriptTimeoutMs) } : {}),
+      ...(form.scriptTimeoutMs.trim() ? { timeoutMs: Number(form.scriptTimeoutMs.trim()) } : {}),
     };
   } else {
     action = {
@@ -436,11 +472,11 @@ export function formToBody(form: FormState): JobCreateBody {
     gate:
       form.gateOn && form.gateCommand.trim().length > 0
         ? {
-            daemonId: form.gateDaemonId,
+            hostId: form.gateHostId,
             folder: form.gateFolder,
             command: form.gateCommand,
             // Empty means the default, which persists as an ABSENT field.
-            ...(form.gateTimeoutMs ? { timeoutMs: Number(form.gateTimeoutMs) } : {}),
+            ...(form.gateTimeoutMs.trim() ? { timeoutMs: Number(form.gateTimeoutMs.trim()) } : {}),
           }
         : null,
     action,

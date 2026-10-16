@@ -65,7 +65,7 @@ async function spawnChat(harness: E2EHarness, jwt: string, folder: string): Prom
     method: 'POST',
     url: '/api/chats',
     headers: { authorization: `Bearer ${jwt}` },
-    payload: { daemonId: harness.daemonId, folder },
+    payload: { hostId: harness.hostId, folder },
   });
   expect(res.statusCode).toBe(202);
   return (res.json() as { chatId: string }).chatId;
@@ -389,7 +389,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     );
 
     // Drop the host's server-link socket mid-turn.
-    expect(h.dropDaemonLink()).toBe(true);
+    expect(h.dropHostLink()).toBe(true);
 
     // The chat must resolve to a VISIBLE error + errored state — NOT hang.
     const outcome = await waitReplyOrError(client, chatId, 'mode 11', 4000);
@@ -412,7 +412,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
   it('mode 12 — a turn submitted while the host link is down is delivered on reconnect (no forever-pending)', async () => {
     // A deterministic ~250ms offline window so the "submit while down" step
     // reliably lands during the offline period (not racing a fast reconnect).
-    h = await startHarness({ daemonBackoffMs: [250, 250] });
+    h = await startHarness({ hostBackoffMs: [250, 250] });
     const jwt = await h.mintSurface('srf-12');
     const client = await h.connectSurface('srf-12b');
     const chatId = await spawnChat(h, jwt, h.folder);
@@ -420,8 +420,8 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
 
     // Bring the host link down and wait until the SERVER observes it offline,
     // so the input is buffered (not written to a dying socket).
-    expect(h.dropDaemonLink()).toBe(true);
-    await h.waitDaemonOffline();
+    expect(h.dropHostLink()).toBe(true);
+    await h.waitHostOffline();
 
     // Submit a turn while down. Correct behaviour: buffered + delivered on
     // reconnect (a), OR a prompt chat.error (b). A silent forever-pending FAILS.
@@ -575,7 +575,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
   // delivers it once the link is back (spec/12 — "the surface is the source of
   // truth until it sees an ack"). Modelled by losing the buffered copy's flush.
   it('mode 16 — SERVER-RESTART-STYLE: a buffered input lost across a restart is redelivered on reconnect → ONE reply', async () => {
-    h = await startHarness({ daemonBackoffMs: [150, 150] });
+    h = await startHarness({ hostBackoffMs: [150, 150] });
     const jwt = await h.mintSurface('srf-16');
     const client = await h.connectSurface('srf-16b');
     const chatId = await spawnChat(h, jwt, h.folder);
@@ -587,8 +587,8 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     });
 
     // Host link down: the submit buffers server-side.
-    expect(h.dropDaemonLink()).toBe(true);
-    await h.waitDaemonOffline();
+    expect(h.dropHostLink()).toBe(true);
+    await h.waitHostOffline();
 
     // Model the restart losing the in-memory buffer: the buffered copy's flush
     // to the host on reconnect is swallowed, so it never runs.
@@ -596,7 +596,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     client.sendInput({ chatId, message: 'survives a restart', localId: 'restart-1' });
 
     // Link recovers; the buffer flushes but is lost — so no reply yet.
-    await h.waitDaemonOnline();
+    await h.waitHostOnline();
     await new Promise((r) => setTimeout(r, 250));
     expect(replies.length).toBe(0);
 

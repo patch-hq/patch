@@ -4,7 +4,7 @@
 // machine that is not registered or not online, round-trip exactly one
 // `patch.host_files.request` to THAT machine, and turn its answer (or its
 // silence) into an HTTP status. The host half is tested against real files in
-// packages/daemon/test/hostFiles.test.ts.
+// packages/host/test/hostFiles.test.ts.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -14,30 +14,30 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { HOST_FILES_TIMEOUT_MS } from '../src/host-files-routes.js';
 
 type Req = Extract<WireEvent, { type: 'patch.host_files.request' }>;
 type Res = Extract<WireEvent, { type: 'patch.host_files.response' }>;
 
 /** A host link whose machine answers host-files requests with `respond`. */
-class FakeHostDaemon extends InProcessDaemonLink {
-  readonly asked: Array<{ daemonId?: string; event: Req }> = [];
+class FakeHostHost extends InProcessHostLink {
+  readonly asked: Array<{ hostId?: string; event: Req }> = [];
   constructor(
-    private readonly respond: (event: Req) => Omit<Res, 'type' | 'requestId' | 'daemonId'> | null,
+    private readonly respond: (event: Req) => Omit<Res, 'type' | 'requestId' | 'hostId'> | null,
     private readonly answerAs?: string,
   ) {
     super();
   }
-  override sendTo(daemonId: string, surfaceId: string, event: WireEvent): void {
-    super.sendTo(daemonId, surfaceId, event);
+  override sendTo(hostId: string, surfaceId: string, event: WireEvent): void {
+    super.sendTo(hostId, surfaceId, event);
     if (event.type !== 'patch.host_files.request') return;
-    this.asked.push({ daemonId, event });
+    this.asked.push({ hostId, event });
     const r = this.respond(event);
     if (r === null) return; // never answers
-    const from = this.answerAs ?? daemonId;
+    const from = this.answerAs ?? hostId;
     this.emit(
-      { type: 'patch.host_files.response', requestId: event.requestId, daemonId: from, ...r },
+      { type: 'patch.host_files.response', requestId: event.requestId, hostId: from, ...r },
       from,
     );
   }
@@ -53,7 +53,7 @@ describe('host files routes', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function boot(link: InProcessDaemonLink) {
+  async function boot(link: InProcessHostLink) {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(33));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
@@ -63,20 +63,20 @@ describe('host files routes', () => {
       label: 'phone',
       issuedAt: 1,
     });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-phone',
       surfaceKind: 'mobile',
       label: 'phone',
     });
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     const auth = { authorization: `Bearer ${jwt}` };
     return { built, auth, registry };
   }
 
   it('lists the home directory when no path is given, addressed to the named machine', async () => {
-    const link = new FakeHostDaemon(() => ({
+    const link = new FakeHostHost(() => ({
       ok: true,
       path: '/home/tom',
       parent: '/home',
@@ -96,8 +96,8 @@ describe('host files routes', () => {
         entries: [{ name: '.claude', type: 'dir' }],
       });
       expect(link.asked).toHaveLength(1);
-      expect(link.asked[0]!.daemonId).toBe('d1');
-      expect(link.asked[0]!.event).toMatchObject({ op: 'list', daemonId: 'd1' });
+      expect(link.asked[0]!.hostId).toBe('d1');
+      expect(link.asked[0]!.event).toMatchObject({ op: 'list', hostId: 'd1' });
       expect(link.asked[0]!.event.path).toBeUndefined();
     } finally {
       await built.app.close();
@@ -105,7 +105,7 @@ describe('host files routes', () => {
   });
 
   it('lists a named directory', async () => {
-    const link = new FakeHostDaemon((e) => ({ ok: true, path: e.path, parent: '/', entries: [] }));
+    const link = new FakeHostHost((e) => ({ ok: true, path: e.path, parent: '/', entries: [] }));
     const { built, auth } = await boot(link);
     try {
       const res = await built.app.inject({
@@ -121,7 +121,7 @@ describe('host files routes', () => {
   });
 
   it('reads a file with its version', async () => {
-    const link = new FakeHostDaemon((e) => ({
+    const link = new FakeHostHost((e) => ({
       ok: true,
       path: e.path,
       content: '# skill\n',
@@ -149,7 +149,7 @@ describe('host files routes', () => {
   });
 
   it('saves with the base version it was opened at', async () => {
-    const link = new FakeHostDaemon((e) => ({ ok: true, path: e.path, size: 3, version: 'v2' }));
+    const link = new FakeHostHost((e) => ({ ok: true, path: e.path, size: 3, version: 'v2' }));
     const { built, auth } = await boot(link);
     try {
       const res = await built.app.inject({
@@ -172,7 +172,7 @@ describe('host files routes', () => {
   });
 
   it('accepts a save as large as the editor allows (past the server-wide 1 MiB body limit)', async () => {
-    const link = new FakeHostDaemon((e) => ({ ok: true, path: e.path, size: 1, version: 'v2' }));
+    const link = new FakeHostHost((e) => ({ ok: true, path: e.path, size: 1, version: 'v2' }));
     const { built, auth } = await boot(link);
     try {
       const content = '"\\'.repeat(512 * 1024); // 1 MiB that JSON-escapes to 2 MiB
@@ -202,7 +202,7 @@ describe('host files routes', () => {
       ['internal', 502],
     ];
     for (const [code, status] of cases) {
-      const link = new FakeHostDaemon(() => ({ ok: false, error: { code, message: `m-${code}` } }));
+      const link = new FakeHostHost(() => ({ ok: false, error: { code, message: `m-${code}` } }));
       const { built, auth } = await boot(link);
       try {
         const res = await built.app.inject({
@@ -222,7 +222,7 @@ describe('host files routes', () => {
   });
 
   it('requires a surface credential — before it says anything about the body', async () => {
-    const link = new FakeHostDaemon(() => ({ ok: true }));
+    const link = new FakeHostHost(() => ({ ok: true }));
     const { built } = await boot(link);
     try {
       for (const [method, url] of [
@@ -244,7 +244,7 @@ describe('host files routes', () => {
   });
 
   it('refuses an unregistered machine by name, never falling through to the attached one', async () => {
-    const link = new FakeHostDaemon(() => ({ ok: true, entries: [] }));
+    const link = new FakeHostHost(() => ({ ok: true, entries: [] }));
     const { built, auth } = await boot(link);
     try {
       const res = await built.app.inject({
@@ -253,7 +253,7 @@ describe('host files routes', () => {
         headers: auth,
       });
       expect(res.statusCode).toBe(404);
-      expect(res.json()).toMatchObject({ error: 'unknown_host', daemonId: 'stranger' });
+      expect(res.json()).toMatchObject({ error: 'unknown_host', hostId: 'stranger' });
       expect(link.asked).toHaveLength(0);
     } finally {
       await built.app.close();
@@ -261,7 +261,7 @@ describe('host files routes', () => {
   });
 
   it('refuses an offline machine up front rather than waiting out a timeout', async () => {
-    const link = new FakeHostDaemon(() => ({ ok: true, entries: [] }));
+    const link = new FakeHostHost(() => ({ ok: true, entries: [] }));
     link.setStatus('offline');
     const { built, auth } = await boot(link);
     try {
@@ -271,7 +271,7 @@ describe('host files routes', () => {
         headers: auth,
       });
       expect(res.statusCode).toBe(503);
-      expect(res.json()).toMatchObject({ error: 'host_offline', daemonId: 'd1' });
+      expect(res.json()).toMatchObject({ error: 'host_offline', hostId: 'd1' });
       expect(link.asked).toHaveLength(0);
     } finally {
       await built.app.close();
@@ -279,7 +279,7 @@ describe('host files routes', () => {
   });
 
   it('rejects a malformed body or a missing path as 400 without asking the machine', async () => {
-    const link = new FakeHostDaemon(() => ({ ok: true }));
+    const link = new FakeHostHost(() => ({ ok: true }));
     const { built, auth } = await boot(link);
     try {
       for (const payload of [
@@ -311,7 +311,7 @@ describe('host files routes', () => {
 
   it('a machine that never answers is a 504', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const link = new FakeHostDaemon(() => null);
+    const link = new FakeHostHost(() => null);
     const { built, auth } = await boot(link);
     try {
       const pending = built.app.inject({
@@ -331,7 +331,7 @@ describe('host files routes', () => {
 
   it('ignores an answer from a machine that was not asked', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const link = new FakeHostDaemon(() => ({ ok: true, entries: [] }), 'd2');
+    const link = new FakeHostHost(() => ({ ok: true, entries: [] }), 'd2');
     const { built, auth } = await boot(link);
     try {
       const pending = built.app.inject({
@@ -349,7 +349,7 @@ describe('host files routes', () => {
   });
 
   it('never relays a host-files response to connected surfaces', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const { built } = await boot(link);
     try {
       const sent: string[] = [];
@@ -368,7 +368,7 @@ describe('host files routes', () => {
       link.emit({
         type: 'patch.host_files.response',
         requestId: 'orphan',
-        daemonId: 'd1',
+        hostId: 'd1',
         ok: true,
         content: 'secret',
       });

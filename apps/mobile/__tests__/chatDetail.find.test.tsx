@@ -56,7 +56,7 @@ beforeEach(async () => {
   __resetFlatListCalls();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   const mod = await import('../app/chats/[chatId]');
   ChatDetailScreen = mod.default;
 });
@@ -150,5 +150,78 @@ describe('find in chat', () => {
       findHost(r.root, byTestId('chat-find-close')).props.onPress();
     });
     expect(queryHost(r.root, byTestId('chat-find-bar'))).toBeNull();
+  });
+
+  it('steps back to a lone match after scrolling away (the index does not change)', async () => {
+    seedChat('find-2');
+    message('find-2', 1);
+    message('find-2', 2);
+    message('find-2', 3);
+    __setLocalSearchParams({ chatId: 'find-2' });
+    const r = render(<ChatDetailScreen />);
+    await flushMicro();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-toggle')).props.onPress();
+    });
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-input')).props.onChangeText('msg 2');
+    });
+    await flushMicro();
+    expect(textOf(findHost(r.root, byTestId('chat-find-count')))).toBe('1/1');
+    expect(jumps().at(-1)).toMatchObject({ index: 1 });
+
+    __resetFlatListCalls();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-next')).props.onPress();
+    });
+    await flushMicro();
+    expect(jumps().at(-1)).toMatchObject({ index: 1 });
+  });
+
+  it('jumps to the new match when the query changes to another single match', async () => {
+    seedChat('find-3');
+    message('find-3', 1);
+    message('find-3', 2);
+    __setLocalSearchParams({ chatId: 'find-3' });
+    const r = render(<ChatDetailScreen />);
+    await flushMicro();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-toggle')).props.onPress();
+    });
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-input')).props.onChangeText('msg 1');
+    });
+    await flushMicro();
+    expect(jumps().at(-1)).toMatchObject({ index: 1 });
+
+    __resetFlatListCalls();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-input')).props.onChangeText('msg 2');
+    });
+    await flushMicro();
+    expect(jumps().at(-1)).toMatchObject({ index: 0 });
+  });
+
+  it('a new matching message arriving does not drag the view back to the current match', async () => {
+    seedChat('find-4');
+    message('find-4', 1);
+    message('find-4', 2);
+    __setLocalSearchParams({ chatId: 'find-4' });
+    const r = render(<ChatDetailScreen />);
+    await flushMicro();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-toggle')).props.onPress();
+    });
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-find-input')).props.onChangeText('msg');
+    });
+    await flushMicro();
+    __resetFlatListCalls();
+    await actAsync(async () => {
+      message('find-4', 3);
+    });
+    await flushMicro();
+    expect(jumps()).toEqual([]);
+    expect(textOf(findHost(r.root, byTestId('chat-find-count')))).toBe('1/3');
   });
 });

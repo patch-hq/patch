@@ -419,10 +419,10 @@ describe('WireTestClient', () => {
     try {
       fx.onMessage = (event, conn) => {
         if (event.type !== 'hello') return;
-        // Client never subscribes to 'daemon.online' — dispatch must find no
+        // Client never subscribes to 'host.online' — dispatch must find no
         // handler set and return without error — followed by a type it DOES
         // wait for, proving the connection is still healthy afterwards.
-        conn.send(encode({ type: 'daemon.online', daemonId: 'host-a' }));
+        conn.send(encode({ type: 'host.online', hostId: 'host-a' }));
         conn.send(
           encode({ type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'ok', seq: 0 }),
         );

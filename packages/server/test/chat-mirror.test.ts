@@ -3,7 +3,7 @@
 // host's chats stay searchable.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WireEvent } from '@patch/wire';
@@ -34,7 +34,7 @@ describe('ChatMirror', () => {
   it('ignores system messages and other events', () => {
     const m = new ChatMirror({ dataDir: dir, logger });
     m.observe(msg('c1', 0, 'system', 'compacted'));
-    m.observe({ type: 'daemon.online', daemonId: 'd1' } as WireEvent);
+    m.observe({ type: 'host.online', hostId: 'd1' } as WireEvent);
     expect(m.chatIds()).toEqual([]);
   });
 
@@ -52,6 +52,18 @@ describe('ChatMirror', () => {
     new ChatMirror({ dataDir: dir, logger }).observe(msg('c1', 4, 'user', 'once'));
     new ChatMirror({ dataDir: dir, logger }).observe(msg('c1', 4, 'user', 'once'));
     expect(new ChatMirror({ dataDir: dir, logger }).messages('c1')).toHaveLength(1);
+  });
+
+  it('a message appended after a torn last line is not lost with it', () => {
+    mkdirSync(join(dir, 'chat-mirror'), { recursive: true });
+    writeFileSync(
+      join(dir, 'chat-mirror', 'torn.jsonl'),
+      '{"seq":0,"role":"user","content":"x"}\n{"seq":1,"role":"us',
+    );
+    const m = new ChatMirror({ dataDir: dir, logger });
+    m.observe(msg('torn', 2, 'user', 'after the crash'));
+    const fresh = new ChatMirror({ dataDir: dir, logger });
+    expect(fresh.messages('torn').map((x) => x.seq)).toEqual([0, 2]);
   });
 
   it('a corrupt file is logged loudly and skipped, not thrown', () => {

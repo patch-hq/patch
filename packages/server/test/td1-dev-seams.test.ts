@@ -12,7 +12,7 @@
 //
 // The server is built via the SAME buildAll() the dev boot uses, reading the
 // SAME env flags the dev boot sets — so this is a faithful proxy for
-// the live stack. An InProcessDaemonLink stands in for the host: it captures
+// the live stack. An InProcessHostLink stands in for the host: it captures
 // what the server forwards (chat.input) and lets us emit the assistant reply
 // the real mock host would produce, triggering the server's reply-routing.
 
@@ -24,13 +24,13 @@ import type { FastifyInstance } from 'fastify';
 import type { ChatMessageEvent, ChatInputEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const INTERNAL_TOKEN = 'dev-internal-token-0123456789';
 
 interface Stack {
   app: FastifyInstance;
-  link: InProcessDaemonLink;
+  link: InProcessHostLink;
   dir: string;
 }
 
@@ -47,11 +47,11 @@ async function startStack(): Promise<Stack> {
   const dir = mkdtempSync(join(tmpdir(), 'td1-seams-'));
   const registry = Registry.load(dir);
   registry.bootstrapAccount();
-  const link = new InProcessDaemonLink();
+  const link = new InProcessHostLink();
   const app = await buildAll({
     dataDir: dir,
     registry,
-    daemonLink: link,
+    hostLink: link,
     internalToken: INTERNAL_TOKEN,
     logger: false,
     jobsWatch: false,

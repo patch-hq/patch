@@ -17,7 +17,7 @@ import {
   actSync,
   actAsync,
 } from './testUtils/render';
-import HostTerminal from '../app/hosts/[daemonId]/terminal';
+import HostTerminal from '../app/hosts/[hostId]/terminal';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { __injected, __resetWebView } from './stubs/webview';
 import { TOO_OLD_MESSAGE, useTerminalStore } from '../src/stores/terminalStore';
@@ -51,7 +51,7 @@ function fromPage(r: ReactTestRenderer, msg: unknown): void {
     });
   });
 }
-const fromDaemon = (event: WireEvent): void =>
+const fromHost = (event: WireEvent): void =>
   actSync(() => useTerminalStore.getState().ingest(event));
 const press = (r: ReactTestRenderer, id: string): void =>
   actSync(() => {
@@ -75,11 +75,11 @@ const inputs = (): string[] =>
 
 /** Mount in /srv, let the page load, and let the host confirm a PTY. */
 function openLive(): { r: ReactTestRenderer; sessionId: string } {
-  __setLocalSearchParams({ daemonId: 'd1', folder: '/srv' });
+  __setLocalSearchParams({ hostId: 'd1', folder: '/srv' });
   const r = render();
   fromPage(r, { type: 'ready', cols: 48, rows: 20 });
   const sessionId = opened().sessionId;
-  fromDaemon({ type: 'patch.terminal.ready', sessionId, cwd: '/srv', pty: true });
+  fromHost({ type: 'patch.terminal.ready', sessionId, cwd: '/srv', pty: true });
   return { r, sessionId };
 }
 
@@ -102,7 +102,7 @@ describe('Host terminal', () => {
   });
 
   it('draws with a real emulator page in the app`s theme, and opens nothing before it has measured', () => {
-    __setLocalSearchParams({ daemonId: 'd1', folder: '/srv' });
+    __setLocalSearchParams({ hostId: 'd1', folder: '/srv' });
     const r = render();
     const html = (webview(r).props.source as { html: string }).html;
     expect(html).toContain('new Terminal(');
@@ -111,12 +111,12 @@ describe('Host terminal', () => {
   });
 
   it('opens a PTY at the page`s size, in the chosen folder, on the named host', () => {
-    __setLocalSearchParams({ daemonId: 'd1', folder: '/srv' });
+    __setLocalSearchParams({ hostId: 'd1', folder: '/srv' });
     const r = render();
     fromPage(r, { type: 'ready', cols: 48, rows: 20 });
     expect(opened()).toMatchObject({
       type: 'patch.terminal.open',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/srv',
       pty: { cols: 48, rows: 20 },
     });
@@ -126,21 +126,21 @@ describe('Host terminal', () => {
   });
 
   it('a `command` param is typed into the shell once, as soon as it is live', () => {
-    __setLocalSearchParams({ daemonId: 'd1', folder: '/srv', command: "tail -f '/x/t1.output'" });
+    __setLocalSearchParams({ hostId: 'd1', folder: '/srv', command: "tail -f '/x/t1.output'" });
     const r = render();
     fromPage(r, { type: 'ready', cols: 48, rows: 20 });
     expect(inputs()).toEqual([]);
     const sessionId = opened().sessionId;
-    fromDaemon({ type: 'patch.terminal.ready', sessionId, cwd: '/srv', pty: true });
+    fromHost({ type: 'patch.terminal.ready', sessionId, cwd: '/srv', pty: true });
     expect(inputs()).toEqual(["tail -f '/x/t1.output'\r"]);
-    fromDaemon({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'x' });
+    fromHost({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'x' });
     expect(inputs()).toHaveLength(1);
   });
 
   it('once live, draws the shell`s output and sends what is typed', () => {
     const { r, sessionId } = openLive();
     expect(r.root.findAll((n) => n.props?.testID === 'terminal-status')).toHaveLength(0);
-    fromDaemon({
+    fromHost({
       type: 'patch.terminal.output',
       sessionId,
       stream: 'stdout',
@@ -150,7 +150,7 @@ describe('Host terminal', () => {
     fromPage(r, { type: 'data', data: 'ls\r' });
     expect(inputs()).toEqual(['ls\r']);
     // Only the new output is written the next time.
-    fromDaemon({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'a b\r\n' });
+    fromHost({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'a b\r\n' });
     expect(__injected.filter((j) => j.startsWith('window.__patch.write'))).toEqual([
       'window.__patch.write("tom@box:/srv$ ");true;',
       'window.__patch.write("a b\\r\\n");true;',
@@ -214,7 +214,7 @@ describe('Host terminal', () => {
   });
 
   it('types nothing into a session that is not live', () => {
-    __setLocalSearchParams({ daemonId: 'd1', folder: '/srv' });
+    __setLocalSearchParams({ hostId: 'd1', folder: '/srv' });
     const r = render();
     fromPage(r, { type: 'ready', cols: 48, rows: 20 });
     fromPage(r, { type: 'data', data: 'x' });
@@ -233,11 +233,11 @@ describe('Host terminal', () => {
   });
 
   it('refuses a pipe shell from a host too old for a PTY, and closes it (NO FALLBACK)', () => {
-    __setLocalSearchParams({ daemonId: 'd1', folder: '/srv' });
+    __setLocalSearchParams({ hostId: 'd1', folder: '/srv' });
     const r = render();
     fromPage(r, { type: 'ready', cols: 48, rows: 20 });
     const sessionId = opened().sessionId;
-    fromDaemon({ type: 'patch.terminal.ready', sessionId, cwd: '/srv' });
+    fromHost({ type: 'patch.terminal.ready', sessionId, cwd: '/srv' });
     expect(hasText(findHost(r.root, byTestId('terminal-status-text')), TOO_OLD_MESSAGE)).toBe(true);
     expect(safeSent()).toContainEqual({ type: 'patch.terminal.close', sessionId });
     fromPage(r, { type: 'data', data: 'ls\r' });
@@ -246,7 +246,7 @@ describe('Host terminal', () => {
 
   it('an ended session says why and restarts as a fresh shell on a cleared screen', () => {
     const { r, sessionId } = openLive();
-    fromDaemon({ type: 'patch.terminal.exit', sessionId, code: 0, reason: 'shell_exit' });
+    fromHost({ type: 'patch.terminal.exit', sessionId, code: 0, reason: 'shell_exit' });
     expect(hasText(r.root, 'Shell exited with status 0')).toBe(true);
     press(r, 'terminal-restart');
     expect(__injected).toContain('window.__patch.reset();true;');
@@ -262,7 +262,7 @@ describe('Host terminal', () => {
     wsMock.send.mockImplementation(() => {
       throw new Error('PatchWs: not connected');
     });
-    __setLocalSearchParams({ daemonId: 'd1', folder: '/srv' });
+    __setLocalSearchParams({ hostId: 'd1', folder: '/srv' });
     const r = render();
     fromPage(r, { type: 'ready', cols: 48, rows: 20 });
     expect(
@@ -284,8 +284,8 @@ describe('Host terminal', () => {
 
   it('a reloaded page is redrawn with the whole scrollback and resized', () => {
     const { r, sessionId } = openLive();
-    fromDaemon({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'one ' });
-    fromDaemon({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'two' });
+    fromHost({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'one ' });
+    fromHost({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'two' });
     __resetWebView();
     fromPage(r, { type: 'ready', cols: 30, rows: 10 });
     expect(__injected).toContain('window.__patch.write("one two");true;');
@@ -318,11 +318,11 @@ describe('Host terminal', () => {
   describe('with no folder, asks where to start', () => {
     beforeEach(() => {
       useFolderStore.getState().setHostFolders({
-        daemonId: 'd1',
+        hostId: 'd1',
         roots: ['/home/tom/projects/patch'],
         recent: [],
       });
-      __setLocalSearchParams({ daemonId: 'd1' });
+      __setLocalSearchParams({ hostId: 'd1' });
     });
 
     it('offers Home and the host`s project folders; a folder starts there', () => {

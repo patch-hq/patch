@@ -42,7 +42,7 @@ function seed(): void {
   for (let i = 0; i < CHATS; i++) {
     rows.push({
       chatId: `chat-${i}`,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: `chat ${i}`,
       folder: `~/proj-${i % 4}`,

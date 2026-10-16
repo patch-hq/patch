@@ -15,7 +15,7 @@ import { WireTestClient } from '@patch/wire/test-client';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('folder routes + relay', () => {
   let dir: string;
@@ -45,14 +45,14 @@ describe('folder routes + relay', () => {
     // `d1` must be a REGISTERED machine: every host-addressed route refuses an
     // id that is not (spec/04 § Spawn), so a fixture that skipped this would be
     // testing the refusal path instead of the route.
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     return { user, registry, jwt };
   }
 
   it('GET /api/folders is empty before the host publishes', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -68,13 +68,13 @@ describe('folder routes + relay', () => {
 
   it('GET /api/folders serves the host-published list (cold start)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       // Host connects and publishes its snapshot.
-      daemonLink.emit({
+      hostLink.emit({
         type: 'folders.list',
-        daemonId: 'd1',
+        hostId: 'd1',
         roots: ['/proj/one'],
         recent: ['/proj/two'],
       });
@@ -85,13 +85,13 @@ describe('folder routes + relay', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
-        hosts: [{ daemonId: 'd1', roots: ['/proj/one'], recent: ['/proj/two'] }],
+        hosts: [{ hostId: 'd1', roots: ['/proj/one'], recent: ['/proj/two'] }],
       });
 
       // A later folders.updated push replaces the mirror.
-      daemonLink.emit({
+      hostLink.emit({
         type: 'folders.updated',
-        daemonId: 'd1',
+        hostId: 'd1',
         roots: ['/proj/three'],
         recent: ['/proj/one'],
       });
@@ -101,7 +101,7 @@ describe('folder routes + relay', () => {
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res2.json()).toEqual({
-        hosts: [{ daemonId: 'd1', roots: ['/proj/three'], recent: ['/proj/one'] }],
+        hosts: [{ hostId: 'd1', roots: ['/proj/three'], recent: ['/proj/one'] }],
       });
     } finally {
       await built.app.close();
@@ -110,8 +110,8 @@ describe('folder routes + relay', () => {
 
   it('GET /api/folders requires auth', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({ method: 'GET', url: '/api/folders' });
       expect(res.statusCode).toBe(401);
@@ -122,26 +122,26 @@ describe('folder routes + relay', () => {
 
   it('relays folders.updated to a connected surface', async () => {
     const { user, registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
     const client = new WireTestClient({ url: `ws://127.0.0.1:${addr.port}/ws`, auth: jwt });
     void user; // keypair only needed for the jwt already minted
     try {
       await client.connect();
-      await client.waitFor('daemon.online');
+      await client.waitFor('host.online');
       const received = client.waitFor('folders.updated');
-      daemonLink.emit({
+      hostLink.emit({
         type: 'folders.updated',
-        daemonId: 'd1',
+        hostId: 'd1',
         roots: ['/proj/live'],
         recent: [],
       });
       const ev = await received;
       // The push names the machine whose filesystem it describes, so a surface
       // updates that host's picker group and leaves every other host's alone.
-      expect(ev).toMatchObject({ daemonId: 'd1', roots: ['/proj/live'], recent: [] });
+      expect(ev).toMatchObject({ hostId: 'd1', roots: ['/proj/live'], recent: [] });
     } finally {
       await client.close();
       await built.app.close();
@@ -152,8 +152,8 @@ describe('folder routes + relay', () => {
     const dir2 = mkdtempSync(join(tmpdir(), 'patch-folder-routes-noaccount-'));
     try {
       const registry = Registry.load(dir2);
-      const daemonLink = new InProcessDaemonLink();
-      const built = await buildAll({ logger: false, registry, daemonLink });
+      const hostLink = new InProcessHostLink();
+      const built = await buildAll({ logger: false, registry, hostLink });
       try {
         const res = await built.app.inject({ method: 'GET', url: '/api/folders' });
         expect(res.statusCode).toBe(401);
@@ -167,8 +167,8 @@ describe('folder routes + relay', () => {
 
   it('GET /api/folders: a malformed bearer is 401, a revoked surface is 401', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const garbage = await built.app.inject({
         method: 'GET',
@@ -218,13 +218,13 @@ describe('GET /api/folders/browse', () => {
     });
     // Browsing is host-addressed and refuses an unregistered machine, so the
     // fixture registers the machine the tests browse (spec/03 § Host events).
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     return { registry, jwt };
   }
 
   // A host that answers `patch.folders.browse.request` deterministically,
-  // mirroring the host's real handler (mirrors packages/daemon browse RPC).
-  class FakeBrowseDaemon extends InProcessDaemonLink {
+  // mirroring the host's real handler (mirrors packages/host browse RPC).
+  class FakeBrowseHost extends InProcessHostLink {
     constructor(
       private readonly respond: (
         event: Extract<WireEvent, { type: 'patch.folders.browse.request' }>,
@@ -242,7 +242,7 @@ describe('GET /api/folders/browse', () => {
         if (r === null) return; // simulate the host never answering (timeout)
         this.emit({
           type: 'patch.folders.browse.response',
-          daemonId: 'd1',
+          hostId: 'd1',
           requestId: event.requestId,
           ...r,
         } as Extract<WireEvent, { type: 'patch.folders.browse.response' }>);
@@ -252,10 +252,10 @@ describe('GET /api/folders/browse', () => {
 
   it('requires auth', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new FakeBrowseDaemon(() => ({ ok: true, entries: [] }));
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeBrowseHost(() => ({ ok: true, entries: [] }));
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
-      const res = await built.app.inject({ method: 'GET', url: '/api/folders/browse?daemonId=d1' });
+      const res = await built.app.inject({ method: 'GET', url: '/api/folders/browse?hostId=d1' });
       expect(res.statusCode).toBe(401);
     } finally {
       await built.app.close();
@@ -265,7 +265,7 @@ describe('GET /api/folders/browse', () => {
   it('with no `dir` query param, omits dir from the host request and returns the roots', async () => {
     const { registry, jwt } = await bootstrap();
     let sentDir: string | undefined = 'unset';
-    const daemonLink = new FakeBrowseDaemon((event) => {
+    const hostLink = new FakeBrowseHost((event) => {
       sentDir = event.dir;
       return {
         ok: true,
@@ -274,17 +274,17 @@ describe('GET /api/folders/browse', () => {
         entries: [{ name: 'proj', path: '/home/proj' }],
       };
     });
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/folders/browse?daemonId=d1',
+        url: '/api/folders/browse?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
       expect(sentDir).toBeUndefined();
       expect(res.json()).toEqual({
-        daemonId: 'd1',
+        hostId: 'd1',
         dir: null,
         parent: null,
         entries: [{ name: 'proj', path: '/home/proj' }],
@@ -297,7 +297,7 @@ describe('GET /api/folders/browse', () => {
   it('with a `dir` query param, forwards it to the host and returns the listing', async () => {
     const { registry, jwt } = await bootstrap();
     let sentDir: string | undefined;
-    const daemonLink = new FakeBrowseDaemon((event) => {
+    const hostLink = new FakeBrowseHost((event) => {
       sentDir = event.dir;
       return {
         ok: true,
@@ -306,17 +306,17 @@ describe('GET /api/folders/browse', () => {
         entries: [{ name: 'inner', path: '/home/proj/sub/inner' }],
       };
     });
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/folders/browse?daemonId=d1&dir=%2Fhome%2Fproj%2Fsub',
+        url: '/api/folders/browse?hostId=d1&dir=%2Fhome%2Fproj%2Fsub',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
       expect(sentDir).toBe('/home/proj/sub');
       expect(res.json()).toEqual({
-        daemonId: 'd1',
+        hostId: 'd1',
         dir: '/home/proj/sub',
         parent: '/home/proj',
         entries: [{ name: 'inner', path: '/home/proj/sub/inner' }],
@@ -328,15 +328,15 @@ describe('GET /api/folders/browse', () => {
 
   it('maps folder_not_found to 404 (a dir escaping the confining roots)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeBrowseDaemon(() => ({
+    const hostLink = new FakeBrowseHost(() => ({
       ok: false,
       error: { code: 'folder_not_found', message: 'outside project roots' },
     }));
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/folders/browse?daemonId=d1&dir=%2Fetc',
+        url: '/api/folders/browse?hostId=d1&dir=%2Fetc',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(404);
@@ -348,12 +348,12 @@ describe('GET /api/folders/browse', () => {
 
   it('maps any other host error code to 502, defaulting code/message when absent', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeBrowseDaemon(() => ({ ok: false }));
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeBrowseHost(() => ({ ok: false }));
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/folders/browse?daemonId=d1',
+        url: '/api/folders/browse?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(502);
@@ -365,16 +365,16 @@ describe('GET /api/folders/browse', () => {
 
   it('defaults dir/parent/entries to null/null/[] when the host omits them on success', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeBrowseDaemon(() => ({ ok: true }));
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeBrowseHost(() => ({ ok: true }));
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/folders/browse?daemonId=d1',
+        url: '/api/folders/browse?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ daemonId: 'd1', dir: null, parent: null, entries: [] });
+      expect(res.json()).toEqual({ hostId: 'd1', dir: null, parent: null, entries: [] });
     } finally {
       await built.app.close();
     }
@@ -382,12 +382,12 @@ describe('GET /api/folders/browse', () => {
 
   it('times out (504 daemon_timeout) when the host never answers', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeBrowseDaemon(() => null);
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeBrowseHost(() => null);
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/folders/browse?daemonId=d1',
+        url: '/api/folders/browse?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(504);
@@ -399,19 +399,19 @@ describe('GET /api/folders/browse', () => {
 
   it('ignores a late/unmatched patch.folders.browse.response (unknown requestId)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeBrowseDaemon(() => ({ ok: true, entries: [] }));
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeBrowseHost(() => ({ ok: true, entries: [] }));
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'patch.folders.browse.response',
-        daemonId: 'd1',
+        hostId: 'd1',
         requestId: 'never-requested',
         ok: true,
         entries: [],
       });
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/folders/browse?daemonId=d1',
+        url: '/api/folders/browse?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);

@@ -65,15 +65,26 @@ interface NativePart {
   type?: string;
 }
 
+/** A value inside a multipart header's quotes, escaped as browsers do: a `"` or a line break would end the header early. */
+function quoteFormValue(value: string): string {
+  return value.replace(/"/g, '%22').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+/** The `Content-Disposition` header line for one part. */
+export function formDisposition(p: Pick<NativePart, 'fieldName' | 'uri' | 'name'>): string {
+  return (
+    `Content-Disposition: form-data; name="${quoteFormValue(p.fieldName)}"` +
+    (p.uri !== undefined ? `; filename="${quoteFormValue(p.name ?? 'file')}"` : '')
+  );
+}
+
 async function nativeFormBody(
   parts: NativePart[],
 ): Promise<{ bytes: Uint8Array; contentType: string }> {
   const boundary = `----patch${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
   const out: Uint8Array[] = [];
   for (const p of parts) {
-    const disposition =
-      `Content-Disposition: form-data; name="${p.fieldName}"` +
-      (p.uri !== undefined ? `; filename="${p.name ?? 'file'}"` : '');
+    const disposition = formDisposition(p);
     const type =
       p.uri !== undefined ? `\r\nContent-Type: ${p.type ?? 'application/octet-stream'}` : '';
     out.push(utf8(`--${boundary}\r\n${disposition}${type}\r\n\r\n`));

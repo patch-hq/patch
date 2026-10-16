@@ -25,7 +25,7 @@ export interface ThreadRotatorDeps {
   chats: ChatRegistry;
   settings: () => AccountSettings;
   /** Ask this chat's host to rotate it (fire-and-forget, same shape as the
-   *  Manager watcher's `deliver` — the daemon-link forwards it to whichever
+   *  Manager watcher's `deliver` — the host-link forwards it to whichever
    *  host runs the special threads). */
   rotate: (chatId: string) => void;
   logger: Pick<Logger, 'info'>;

@@ -14,7 +14,7 @@ describe('IncomingCallBanner', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'Manager',
         folder: 'm',

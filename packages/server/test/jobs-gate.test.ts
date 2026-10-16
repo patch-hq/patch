@@ -16,7 +16,7 @@ import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '../src/jobs/types.js';
@@ -34,11 +34,11 @@ function gatedJob(overrides: Partial<Job> = {}): Job {
     trigger: { type: 'cron', expression: '*/15 * * * *' },
     filter: null,
     gate: {
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
       command: 'set -euo pipefail\necho "not due — holding"\nexit 1',
     },
-    action: { type: 'spawn', daemonId: 'd1', folder: '/work', skill: 'foreman' },
+    action: { type: 'spawn', hostId: 'd1', folder: '/work', skill: 'foreman' },
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -56,17 +56,17 @@ function runs(dir: string): Array<Record<string, unknown>> {
 
 describe('job gate', () => {
   let dir: string;
-  let link: InProcessDaemonLink;
+  let link: InProcessHostLink;
   let disp: JobDispatcher;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-gate-'));
-    link = new InProcessDaemonLink();
+    link = new InProcessHostLink();
     let n = 0;
     disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       // Distinct ids so the gate's fire and the chat the action spawns cannot be
       // confused for one another.
@@ -127,7 +127,7 @@ describe('job gate', () => {
         type: 'chat.spawned',
         chatId: spawn.event.chatId,
         folder: '/work',
-        daemonId: 'd1',
+        hostId: 'd1',
       });
     }
     const entries = runs(dir);
@@ -198,17 +198,17 @@ describe('job gate', () => {
   });
 
   it('an offline gate host is a fault, never a silent hold and never a run', () => {
-    const offline = new InProcessDaemonLink();
+    const offline = new InProcessHostLink();
     const d = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: offline,
+      hostLink: offline,
       logger: silentLogger,
       idGenerator: () => 'id1',
       // A host the link has never heard of is offline.
     });
     const result = d.dispatch(
-      gatedJob({ gate: { daemonId: 'ghost', folder: '/work', command: 'true' } }),
+      gatedJob({ gate: { hostId: 'ghost', folder: '/work', command: 'true' } }),
       {},
       'cron',
     );
@@ -225,7 +225,7 @@ describe('job gate', () => {
     // The reason a gate is a sibling of `filter` rather than part of the action:
     // it has to work for all of them.
     disp.dispatch(
-      gatedJob({ action: { type: 'continue', daemonId: 'd1', folder: '/work', skill: 'foreman' } }),
+      gatedJob({ action: { type: 'continue', hostId: 'd1', folder: '/work', skill: 'foreman' } }),
       {},
       'cron',
     );
@@ -262,7 +262,7 @@ describe('job gate', () => {
       const job = gatedJob({
         action: {
           type: 'spawn',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/work',
           prompt: 'At {{payload.firedAt}} the gate said:\n{{gate.stdout}}\n---\n{{gate.verdict}}',
         },
@@ -283,7 +283,7 @@ describe('job gate', () => {
 
     it('feeds stdout only — a gate’s accidents go to stderr and stay there', () => {
       const job = gatedJob({
-        action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: '[{{gate.stdout}}]' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: '[{{gate.stdout}}]' },
       });
       disp.dispatch(job, {}, 'cron');
       answer({

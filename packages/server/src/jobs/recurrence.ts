@@ -36,7 +36,37 @@ const { RRule } = rrulePkg;
  * caller-given instant, so this only has to predate every real job (it does,
  * by decades) and never has to change.
  */
+/** Largest delay `setTimeout` honours; anything longer fires after 1ms. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 const RULE_ANCHOR = new Date(Date.UTC(2000, 0, 1, 0, 0, 0));
+
+const DAY_MS = 86_400_000;
+/** Milliseconds in one step of each sub-daily frequency. */
+const SUB_DAILY_STEP_MS: Partial<Record<number, number>> = {
+  [RRule.HOURLY]: 3_600_000,
+  [RRule.MINUTELY]: 60_000,
+  [RRule.SECONDLY]: 1_000,
+};
+
+const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+
+/**
+ * Where to start enumerating. `rule.after()` walks every occurrence from the
+ * anchor, which for an hourly rule is a quarter of a million of them (over a
+ * minute with the event loop blocked). A sub-daily rule is moved up to a couple
+ * of days before `after`, by a whole number of days AND of its own interval, so
+ * both its phase (every 5th hour counted from the anchor) and its wall-clock
+ * time of day are exactly what they would be from 2000.
+ */
+function anchorFor(opts: { freq?: number | null; interval?: number | null }, after: Date): Date {
+  const unit = opts.freq == null ? undefined : SUB_DAILY_STEP_MS[opts.freq];
+  if (unit === undefined) return RULE_ANCHOR;
+  const step = (opts.interval ?? 1) * unit;
+  const hop = (DAY_MS / gcd(DAY_MS, step)) * step;
+  const hops = Math.floor((after.getTime() - RULE_ANCHOR.getTime() - 2 * DAY_MS) / hop);
+  return hops <= 0 ? RULE_ANCHOR : new Date(RULE_ANCHOR.getTime() + hops * hop);
+}
 
 /**
  * A `RecurrenceTrigger.rrule` that `rrule`'s own parser rejects (spec/08 §
@@ -71,7 +101,7 @@ export function nextOccurrence(rrule: string, timezone: string, after: Date): Da
   let rule: InstanceType<typeof RRule>;
   try {
     const opts = RRule.parseString(rrule);
-    rule = new RRule({ ...opts, dtstart: RULE_ANCHOR, tzid: timezone });
+    rule = new RRule({ ...opts, dtstart: anchorFor(opts, after), tzid: timezone });
   } catch (err) {
     throw new InvalidRecurrenceError(rrule, (err as Error).message);
   }
@@ -204,9 +234,20 @@ export class RecurrenceScheduler {
       return;
     }
     const delayMs = Math.max(0, fireAtMs - this.nowMs());
-    const timer = setTimeout(() => {
-      void cb();
-    }, delayMs);
+    // Node clamps a delay above 2^31-1 ms (~24.8 days) to 1ms, which would fire
+    // a monthly or yearly job at once, in a loop. Wait in capped hops instead
+    // and re-arm until the occurrence is actually due.
+    const timer = setTimeout(
+      () => {
+        if (this.nowMs() < fireAtMs) {
+          const current = this.jobs.get(job.id);
+          if (current) this.applyJob(current);
+          return;
+        }
+        void cb();
+      },
+      Math.min(delayMs, MAX_TIMEOUT_MS),
+    );
     this.timers.set(job.id, timer);
     this.logger.info(
       { jobId: job.id, rrule, timezone, nextFireAt: next.toISOString() },

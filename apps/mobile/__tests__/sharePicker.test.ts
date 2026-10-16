@@ -20,6 +20,14 @@ function row(partial: Partial<ChatRow> & { chatId: string }): ChatRow {
 }
 
 describe('shareableChats', () => {
+  it('leaves out the read-only Speakers mirror — a draft handed to it could never be sent', () => {
+    const chats = {
+      thread_speakers: row({ chatId: 'thread_speakers', lastUpdated: 9 }),
+      a: row({ chatId: 'a', lastUpdated: 1 }),
+    };
+    expect(shareableChats(chats).map((c) => c.chatId)).toEqual(['a']);
+  });
+
   it('orders by most recently updated first', () => {
     const chats = {
       old: row({ chatId: 'old', lastUpdated: 1 }),

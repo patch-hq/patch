@@ -13,7 +13,7 @@ import SettingsPageScreen from '../app/settings/[page]';
 import LayerEditorScreen from '../app/settings/layer';
 import MemoryScreen from '../app/settings/memory';
 import McpServerScreen from '../app/settings/mcp-server';
-import HostScreen from '../app/hosts/[daemonId]/index';
+import HostScreen from '../app/hosts/[hostId]/index';
 import {
   renderRN,
   findAllHost,
@@ -31,6 +31,8 @@ import { reportHost, resetHosts, settingsFixture } from './testUtils/settingsFix
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { __resetUseUpdates, __setUseUpdates } from './stubs/expo-updates';
 import { __setSafeAreaInsets } from './stubs/safe-area-context';
+import { __lastCopied, __resetClipboard } from './stubs/expo-clipboard';
+import { __getLinkingOpenedUrls, __resetLinkingOpenedUrls } from './stubs/react-native';
 
 vi.mock('../src/api/rest', () => ({
   api: {
@@ -38,6 +40,8 @@ vi.mock('../src/api/rest', () => ({
     healthz: vi.fn(),
     version: vi.fn(),
     settings: vi.fn(),
+    webBotAuthStatus: vi.fn(),
+    usageReport: vi.fn(() => Promise.resolve({ samples: [], chats: [] })),
     setPreferences: vi.fn(),
     models: vi.fn(),
     listSecrets: vi.fn(),
@@ -61,6 +65,8 @@ function render(el: React.ReactElement): ReactTestRenderer {
 }
 
 beforeEach(() => {
+  __resetClipboard();
+  __resetLinkingOpenedUrls();
   __resetRouterMock();
   vi.mocked(api.me)
     .mockReset()
@@ -69,6 +75,15 @@ beforeEach(() => {
     .mockReset()
     .mockReturnValue(new Promise(() => {}));
   vi.mocked(api.settings).mockReset().mockResolvedValue(settingsFixture());
+  vi.mocked(api.setPreferences).mockReset();
+  vi.mocked(api.webBotAuthStatus).mockReset().mockResolvedValue({
+    ready: true,
+    issue: null,
+    origin: 'https://patch.example',
+    agentUrl: 'https://patch.example/agent',
+    directoryUrl: 'https://patch.example/.well-known/http-message-signatures-directory',
+    keyId: 'key-123',
+  });
   vi.mocked(api.models).mockReset().mockResolvedValue({ models: [] });
   vi.mocked(api.listSecrets).mockReset().mockResolvedValue({ secrets: [] });
   useSettingsStore.getState()._reset();
@@ -106,7 +121,10 @@ describe('Settings tab — the list', () => {
       'Manager',
       'Goals',
       'Voice',
+      'Hooks',
+      'Computer use',
       'Hosts',
+      'Agent identity',
       'Keys',
       'Devices',
       'Updates',
@@ -124,8 +142,10 @@ describe('Settings tab — the list', () => {
       'Manager',
       'Goals',
       'Voice',
+      'Hooks',
+      'Computer use',
     ]);
-    expect(inGroup('Setup')).toEqual(['Hosts', 'Keys', 'Devices']);
+    expect(inGroup('Setup')).toEqual(['Hosts', 'Agent identity', 'Keys', 'Devices']);
     expect(inGroup('System')).toEqual(['Updates', 'Account']);
   });
 
@@ -209,6 +229,68 @@ describe('Settings tab — the list', () => {
 });
 
 describe('/settings/[page]', () => {
+  it('gives the deployment a ready-to-submit Web Bot Auth setup', async () => {
+    const committed = settingsFixture().preferences;
+    vi.mocked(api.setPreferences).mockResolvedValueOnce({
+      preferences: {
+        ...committed,
+        agentIdentity: { ...committed.agentIdentity, enabled: true },
+      },
+    });
+    __setLocalSearchParams({ page: 'identity' });
+    const r = render(<SettingsPageScreen />);
+    await flush();
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('settings-identity-ready')))).toContain('Ready');
+    expect(textOf(findHost(r.root, byTestId('settings-identity-key-generation')))).toContain(
+      'Ed25519 key',
+    );
+    expect(textOf(findHost(r.root, byTestId('identity-enabled-status')))).toContain(
+      'Off — browser requests are unsigned',
+    );
+    expect(findHost(r.root, byTestId('identity-enabled')).props.value).toBe(false);
+    findHost(r.root, byTestId('identity-enabled')).props.onValueChange(true);
+    await flush();
+    expect(api.setPreferences).toHaveBeenCalledWith({
+      agentIdentity: expect.objectContaining({ enabled: true }),
+    });
+    const cloudflareValues = textOf(findHost(r.root, byTestId('identity-cloudflare-values')));
+    expect(cloudflareValues).toContain('web_bot_auth');
+    expect(cloudflareValues).toContain('Signature URL');
+    expect(cloudflareValues).not.toContain('Verification method');
+    expect(cloudflareValues).not.toContain('Validation instructions');
+    expect(cloudflareValues).not.toContain('Use the');
+    findHost(r.root, byTestId('identity-copy-directory')).props.onPress();
+    await flush();
+    expect(__lastCopied()).toBe(
+      'https://patch.example/.well-known/http-message-signatures-directory',
+    );
+    findHost(r.root, byTestId('identity-cloudflare')).props.onPress();
+    await flush();
+    expect(__getLinkingOpenedUrls()[0]).toContain('dash.cloudflare.com');
+  });
+
+  it('hides Web Bot Auth setup on a local-only server', async () => {
+    vi.mocked(api.webBotAuthStatus).mockResolvedValueOnce({
+      ready: false,
+      issue: 'Web Bot Auth requires a publicly accessible HTTPS server',
+      origin: 'http://localhost:8787',
+      agentUrl: 'http://localhost:8787/agent',
+      directoryUrl: 'http://localhost:8787/.well-known/http-message-signatures-directory',
+      keyId: 'key-123',
+    });
+    __setLocalSearchParams({ page: 'identity' });
+    const r = render(<SettingsPageScreen />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('settings-identity-unavailable')))).toContain(
+      'publicly accessible HTTPS server',
+    );
+    expect(queryHost(r.root, byTestId('settings-identity-details'))).toBeNull();
+    expect(queryHost(r.root, byTestId('settings-identity-urls'))).toBeNull();
+    expect(queryHost(r.root, byTestId('identity-cloudflare-values'))).toBeNull();
+    expect(queryHost(r.root, byTestId('identity-cloudflare'))).toBeNull();
+  });
+
   it('renders each page by id, titled as the list names it, with a back arrow', async () => {
     for (const p of SETTINGS_PAGES) {
       __setLocalSearchParams({ page: p.id });
@@ -270,13 +352,13 @@ describe('the pages’ own routes', () => {
     __setLocalSearchParams({ layer: 'system' });
     let r = render(<LayerEditorScreen />);
     expect(findHost(r.root, byTestId('settings-layer-editor'))).toBeTruthy();
-    __setLocalSearchParams({ daemonId: 'd1', project: 'p', file: 'f.md' });
+    __setLocalSearchParams({ hostId: 'd1', project: 'p', file: 'f.md' });
     r = render(<MemoryScreen />);
     expect(findHost(r.root, byTestId('settings-memory-detail'))).toBeTruthy();
-    __setLocalSearchParams({ daemonId: 'd1' });
+    __setLocalSearchParams({ hostId: 'd1' });
     r = render(<McpServerScreen />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Add server');
-    __setLocalSearchParams({ daemonId: 'd1' });
+    __setLocalSearchParams({ hostId: 'd1' });
     r = render(<HostScreen />);
     expect(findHost(r.root, byTestId('settings-host-detail'))).toBeTruthy();
   });
@@ -286,11 +368,11 @@ describe('the pages’ own routes', () => {
     try {
       __setLocalSearchParams({ layer: 'bogus' });
       expect(() => renderRN(<LayerEditorScreen />)).toThrow(/unknown layer/);
-      __setLocalSearchParams({ daemonId: 'd1' });
-      expect(() => renderRN(<MemoryScreen />)).toThrow(/without a daemonId, project and file/);
+      __setLocalSearchParams({ hostId: 'd1' });
+      expect(() => renderRN(<MemoryScreen />)).toThrow(/without a hostId, project and file/);
       __setLocalSearchParams({});
-      expect(() => renderRN(<McpServerScreen />)).toThrow(/without a daemonId/);
-      expect(() => renderRN(<HostScreen />)).toThrow(/without a daemonId/);
+      expect(() => renderRN(<McpServerScreen />)).toThrow(/without a hostId/);
+      expect(() => renderRN(<HostScreen />)).toThrow(/without a hostId/);
     } finally {
       quiet.mockRestore();
     }

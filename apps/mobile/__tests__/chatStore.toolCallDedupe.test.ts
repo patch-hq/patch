@@ -23,7 +23,7 @@ const result = (seq: number, callId: string) =>
 describe('mobile chatStore tool call dedupe', () => {
   it('a replayed tool_call/tool_result at the same seq renders once', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     for (let i = 0; i < 2; i++) {
       s.applyEvent(call(1, 'a'));
       s.applyEvent(result(2, 'a'));
@@ -34,7 +34,7 @@ describe('mobile chatStore tool call dedupe', () => {
 
   it('the same callId at a different seq renders once', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent(call(1, 'a'));
     s.applyEvent(call(2, 'a'));
     const tl = useChatStore.getState().timelines['c1'] ?? [];

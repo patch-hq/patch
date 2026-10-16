@@ -27,7 +27,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   ChatDetailScreen = (await import('../app/chats/[chatId]')).default;
 });
 
@@ -36,7 +36,7 @@ function seed(chatId: string): void {
     {
       chatId,
       name: 'Chat',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '~/p',
       activity: 'idle',
       permissionMode: 'default',

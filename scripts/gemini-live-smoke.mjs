@@ -1,6 +1,6 @@
 // End-to-end probe of the REAL Gemini Live API, with no host involved.
 //
-// gemini-live.ts's own unit tests (packages/daemon/test/gemini-live-session.
+// gemini-live.ts's own unit tests (packages/host/test/gemini-live-session.
 // test.ts) mock the WebSocket entirely, on purpose — this repo avoids real
 // spend in automated runs. This script is the other half: one real session
 // against Google's live endpoint, run BY HAND, to prove the wire shapes this
@@ -16,7 +16,7 @@
 //      is stubbed here to a canned reply, since there is no real host in
 //      this script — this checks the WIRE contract, not chatRunner.ts.
 //
-// Deliberately talks to Google directly, NOT through packages/daemon/src/
+// Deliberately talks to Google directly, NOT through packages/host/src/
 // audio/server.ts or this box's real patch-daemon — this script must never
 // touch the production host (a live service on this host).
 //
@@ -36,9 +36,9 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Resolve 'ws' the same way scripts/voice-probe.mjs does: from
-// packages/daemon (a direct dependency there), not from scripts/ itself,
+// packages/host (a direct dependency there), not from scripts/ itself,
 // which has no node_modules of its own in a pnpm workspace.
-const require = createRequire(`${REPO}/packages/daemon/`);
+const require = createRequire(`${REPO}/packages/host/`);
 const WebSocket = require('ws');
 
 const DEFAULT_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';

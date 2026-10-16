@@ -91,6 +91,30 @@ describe('voice note — upload path', () => {
     expect(useVoiceStore.getState().voiceNoteTranscript).toBe('call the plumber');
   });
 
+  it('a second send while the first is still preparing neither errors nor closes the overlay', async () => {
+    startVoiceNote('c1', 'hold');
+    // Release-to-send and the overlay's Send land together, before the mic is ready.
+    const first = endVoiceNote(true);
+    const second = endVoiceNote(true);
+    await Promise.all([first, second]);
+
+    expect(voiceNoteSpy).toHaveBeenCalledTimes(1);
+    expect(useUiStore.getState().errors).toEqual([]);
+    expect(useVoiceStore.getState().voiceNoteState).toBe('done');
+    expect(useVoiceStore.getState().voiceNoteTranscript).toBe('hello world');
+  });
+
+  it('a Cancel that lands while a send is still waiting for the mic cancels it — nothing is uploaded', async () => {
+    startVoiceNote('c1', 'hold');
+    const sending = endVoiceNote(true);
+    const cancelling = endVoiceNote(false);
+    await Promise.all([sending, cancelling]);
+
+    expect(voiceNoteSpy).not.toHaveBeenCalled();
+    expect(useUiStore.getState().errors).toEqual([]);
+    expect(useVoiceStore.getState().voiceNoteState).toBe('idle');
+  });
+
   it('a newer note that replaced this one during the upload is left alone', async () => {
     let resolveUpload!: (v: { ok: true; transcript: string }) => void;
     voiceNoteSpy.mockReturnValueOnce(

@@ -27,7 +27,7 @@ function seedChat(chatId: string, permissionMode: PermissionMode): void {
   const row: ChatRow = {
     chatId,
     name: null,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/work',
     activity: 'idle',
     permissionMode,
@@ -61,7 +61,7 @@ function seedChat(chatId: string, permissionMode: PermissionMode): void {
 }
 
 function renderComposer(chatId: string) {
-  return render(<Composer chatId={chatId} daemonId="d1" onSend={() => {}} />);
+  return render(<Composer chatId={chatId} hostId="d1" onSend={() => {}} />);
 }
 
 /** The dropdown itself. */
@@ -119,7 +119,7 @@ describe('Composer — approval mode', () => {
 
   it('sits left of stop (which replaces send) while a turn is running', () => {
     seedChat('c1', 'auto');
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStop={() => {}} running />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStop={() => {}} running />);
     const actions = screen.getByTestId('composer').querySelector('.composer-actions')!;
     const order = Array.from(actions.children);
     expect(order.indexOf(selectRow())).toBeLessThan(order.indexOf(screen.getByTestId('stop-btn')));

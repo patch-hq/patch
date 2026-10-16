@@ -132,11 +132,11 @@ The requirement is that no content sits under the bar: pad past useSafeAreaInset
 
   updates:{title:'Updates',group:'System',pip:true,html:()=>`
     <div class="phead"><h3>Updates</h3><button class="btn pri">Check now</button></div>
-    ${group('Behind',row('Mac daemon','0.48.1 → 0.48.2','<button class="btn">Update</button>'))}
+    ${group('Behind',row('Mac host','0.48.1 → 0.48.2','<button class="btn">Update</button>'))}
     ${group('Versions',
       row('This app','desktop 2.14.0 · ui a91c3e2','')+
       row('Server','a91c3e2','')+
-      row('Hetzner daemon','0.48.2','')+
+      row('Hetzner host','0.48.2','')+
       row('Android APK','patch-2.14.0-0925.apk',''))}
     ${group('',row('Last checked','12:02',''))}`},
 

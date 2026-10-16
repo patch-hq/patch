@@ -17,19 +17,19 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 // A fake host: an in-memory secret store that answers the `patch.secrets.*`
-// RPCs the server sends, mirroring packages/daemon/src/index.ts handleSecretsMutation.
+// RPCs the server sends, mirroring packages/host/src/index.ts handleSecretsMutation.
 // Also re-publishes `secrets.updated` on success so the server's mirror updates.
-class FakeSecretsDaemon extends InProcessDaemonLink {
+class FakeSecretsHost extends InProcessHostLink {
   private store = new Map<string, string>();
   private static readonly KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
   override send(surfaceId: string, event: WireEvent): void {
     super.send(surfaceId, event);
     if (event.type === 'patch.secrets.set_request') {
-      if (!FakeSecretsDaemon.KEY_RE.test(event.key)) {
+      if (!FakeSecretsHost.KEY_RE.test(event.key)) {
         this.emit({
           type: 'patch.secrets.response',
           requestId: event.requestId,
@@ -98,8 +98,8 @@ describe('secrets routes', () => {
 
   it('GET /api/secrets is empty before the host publishes', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -115,10 +115,10 @@ describe('secrets routes', () => {
 
   it('GET /api/secrets serves the host-published set (cold start)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'secrets.list',
         secrets: [
           { key: 'OPENAI_API_KEY', value: 'sk-1' },
@@ -144,8 +144,8 @@ describe('secrets routes', () => {
 
   it('GET /api/secrets requires auth', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({ method: 'GET', url: '/api/secrets' });
       expect(res.statusCode).toBe(401);
@@ -156,8 +156,8 @@ describe('secrets routes', () => {
 
   it('PUT /api/secrets/:key upserts through the host and the mirror reflects it', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const put = await built.app.inject({
         method: 'PUT',
@@ -169,7 +169,7 @@ describe('secrets routes', () => {
       expect(put.json()).toEqual({ ok: true });
       // The host actually received the set request.
       expect(
-        daemonLink.sent.some(
+        hostLink.sent.some(
           (s) =>
             s.event.type === 'patch.secrets.set_request' &&
             s.event.key === 'OPENAI_API_KEY' &&
@@ -190,8 +190,8 @@ describe('secrets routes', () => {
 
   it('PUT with a non-string value is a 400', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'PUT',
@@ -207,8 +207,8 @@ describe('secrets routes', () => {
 
   it('PUT with an invalid key is rejected by the host (400)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'PUT',
@@ -225,11 +225,11 @@ describe('secrets routes', () => {
 
   it('DELETE /api/secrets/:key removes through the host', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    daemonLink.seed('TOKEN', 'v');
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    hostLink.seed('TOKEN', 'v');
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
-      daemonLink.emit({ type: 'secrets.list', secrets: [{ key: 'TOKEN', value: 'v' }] });
+      hostLink.emit({ type: 'secrets.list', secrets: [{ key: 'TOKEN', value: 'v' }] });
       const del = await built.app.inject({
         method: 'DELETE',
         url: '/api/secrets/TOKEN',
@@ -250,8 +250,8 @@ describe('secrets routes', () => {
 
   it('DELETE of an unknown key is a 404', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'DELETE',
@@ -267,8 +267,8 @@ describe('secrets routes', () => {
 
   it('write endpoints require auth', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const put = await built.app.inject({
         method: 'PUT',
@@ -287,8 +287,8 @@ describe('secrets routes', () => {
     const dir2 = mkdtempSync(join(tmpdir(), 'patch-secrets-noaccount-'));
     try {
       const registry = Registry.load(dir2);
-      const daemonLink = new FakeSecretsDaemon();
-      const built = await buildAll({ logger: false, registry, daemonLink });
+      const hostLink = new FakeSecretsHost();
+      const built = await buildAll({ logger: false, registry, hostLink });
       try {
         const res = await built.app.inject({ method: 'GET', url: '/api/secrets' });
         expect(res.statusCode).toBe(401);
@@ -302,8 +302,8 @@ describe('secrets routes', () => {
 
   it('a malformed bearer token is rejected with 401 (verify throws)', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -319,8 +319,8 @@ describe('secrets routes', () => {
   it('a revoked surface is rejected with 401', async () => {
     const { registry, jwt } = await bootstrap();
     registry.revoke('srf-secrets');
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -335,8 +335,8 @@ describe('secrets routes', () => {
 
   it('PUT with a blank (whitespace-only) key is 400 key_required', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'PUT',
@@ -353,8 +353,8 @@ describe('secrets routes', () => {
 
   it('DELETE with a blank (whitespace-only) key is 400 key_required', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'DELETE',
@@ -371,8 +371,8 @@ describe('secrets routes', () => {
   it('PUT times out (504 daemon_timeout) when the host never answers', async () => {
     const { registry, jwt } = await bootstrap();
     // A host link whose `send` is a black hole — never emits a response.
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       // SECRETS_REQUEST_TIMEOUT_MS (5s) is a hardcoded constant (not
       // clock-injectable), so this exercises the real setTimeout with a
@@ -396,7 +396,7 @@ describe('secrets routes', () => {
     // A host that answers ok:false with NO `error` field at all — exercises
     // the `error?.code ?? 'internal'` and `error?.message ?? '...'` fallbacks,
     // and the "anything else" 502 branch of the status ternary.
-    class BareFailureDaemon extends InProcessDaemonLink {
+    class BareFailureHost extends InProcessHostLink {
       override send(surfaceId: string, event: WireEvent): void {
         super.send(surfaceId, event);
         if (event.type === 'patch.secrets.set_request') {
@@ -404,8 +404,8 @@ describe('secrets routes', () => {
         }
       }
     }
-    const daemonLink = new BareFailureDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new BareFailureHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'PUT',
@@ -422,11 +422,11 @@ describe('secrets routes', () => {
 
   it('a late/unmatched patch.secrets.response (unknown requestId) is ignored, not a crash', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new FakeSecretsDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeSecretsHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       // No PUT/DELETE is in flight — this requestId was never registered.
-      daemonLink.emit({
+      hostLink.emit({
         type: 'patch.secrets.response',
         requestId: 'never-requested',
         ok: true,

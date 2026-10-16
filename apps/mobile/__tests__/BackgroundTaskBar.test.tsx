@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act } from 'react-test-renderer';
 import { renderRN, queryHost, findAllHost, byTestId, textOf } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
+import { useUiStore } from '../src/stores/uiStore';
 import { BackgroundTaskBar } from '../src/components/BackgroundTaskBar';
 import type { WatchTaskRow } from '@patch/wire';
 import { routerMock } from './stubs/expo-router';
@@ -39,7 +40,7 @@ function seed(): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder: 'foo',
@@ -131,6 +132,19 @@ describe('BackgroundTaskBar', () => {
     expect(textOf(queryHost(r.root, byTestId('background-task-bar-command'))!)).toBe(long);
   });
 
+  it('never cuts the command preview through the middle of an emoji', async () => {
+    const cmd = `${'a'.repeat(39)}😀${'b'.repeat(20)}`;
+    apiMocks.watchList.mockResolvedValue({ tasks: [task({ command: cmd })] });
+    const r = renderRN(<BackgroundTaskBar chatId="c1" />);
+    await act(async () => {
+      setLiveCount(1);
+      await Promise.resolve();
+    });
+    expect(textOf(queryHost(r.root, byTestId('background-task-bar-command'))!)).toBe(
+      `${'a'.repeat(39)}😀…`,
+    );
+  });
+
   it('kill calls watchStop for that task', async () => {
     apiMocks.watchList.mockResolvedValue({ tasks: [task({ taskId: 't1' })] });
     const r = renderRN(<BackgroundTaskBar chatId="c1" />);
@@ -144,6 +158,28 @@ describe('BackgroundTaskBar', () => {
       await Promise.resolve();
     });
     expect(apiMocks.watchStop).toHaveBeenCalledWith('c1', 't1');
+  });
+
+  it('a kill the host refuses is reported, not left as an unhandled rejection', async () => {
+    apiMocks.watchList.mockResolvedValue({ tasks: [task({ taskId: 't1' })] });
+    apiMocks.watchStop.mockRejectedValue(new Error('host offline'));
+    useUiStore.setState({ errors: [] });
+    const r = renderRN(<BackgroundTaskBar chatId="c1" />);
+    await act(async () => {
+      setLiveCount(1);
+      await Promise.resolve();
+    });
+    const kill = queryHost(r.root, byTestId('background-task-bar-kill'))!;
+    await act(async () => {
+      kill.props['onPress']();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useUiStore.getState().errors.map((e) => e.message)).toEqual([
+      'stopping the task failed: host offline',
+    ]);
+    // The control is usable again, not stuck mid-kill.
+    expect(queryHost(r.root, byTestId('background-task-bar-kill'))!.props['disabled']).toBeFalsy();
   });
 
   it('an ended row carries no elapsed clock and no kill control', async () => {
@@ -232,9 +268,9 @@ describe('BackgroundTaskBar', () => {
     );
     press('background-task-modal-terminal');
     expect(routerMock.push).toHaveBeenCalledWith({
-      pathname: '/hosts/[daemonId]/terminal',
+      pathname: '/hosts/[hostId]/terminal',
       params: {
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: 'foo',
         command: "tail -n 200 -f '/data/chats/c1/watch/t1.output'",
       },

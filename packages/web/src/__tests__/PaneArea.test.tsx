@@ -6,7 +6,7 @@
 // those are e2e/panes-and-tabs.spec.ts.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, createEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
@@ -31,7 +31,7 @@ function seedChats(ids: string[]): void {
   useChatStore.getState().hydrate(
     ids.map((chatId) => ({
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'foo',
@@ -60,6 +60,12 @@ beforeEach(() => {
   useLayoutStore.getState()._reset();
   useChatStore.getState()._reset();
 });
+
+const openTabInNewWindow = vi.hoisted(() => vi.fn());
+vi.mock('../lib/newWindow.js', async (orig) => ({
+  ...(await orig<typeof import('../lib/newWindow.js')>()),
+  openTabInNewWindow,
+}));
 
 describe('PaneArea — single pane, single tab', () => {
   it('draws no tab bar at all (the plain, pre-existing chat view)', () => {
@@ -199,5 +205,48 @@ describe('PaneArea — regressions found using it', () => {
     });
     const after = useLayoutStore.getState().root as LeafPane;
     expect(after.tabs.map((t) => cid(t.descriptor))).toEqual(['c2', 'c1', 'c3']);
+  });
+
+  describe('dragging a tab out of the window', () => {
+    function setup() {
+      seedChats(['c1', 'c2']);
+      const layout = useLayoutStore.getState();
+      for (const id of ['c1', 'c2'])
+        layout.openTab({ kind: 'chat', chatId: id }, { placement: 'tab' });
+      renderPanes();
+      const pane = useLayoutStore.getState().root as LeafPane;
+      return { pane, tab: screen.getByTestId(`tab-${pane.tabs[0]!.id}`) };
+    }
+    // jsdom has no DragEvent, so the pointer position and dataTransfer are
+    // set on a plain event the way a browser's dragend would carry them.
+    const dragEnd = (el: HTMLElement, dropEffect: string, clientX: number, clientY: number) => {
+      const ev = createEvent.dragEnd(el);
+      Object.assign(ev, { clientX, clientY, dataTransfer: { dropEffect, types: [] } });
+      fireEvent(el, ev);
+    };
+
+    beforeEach(() => openTabInNewWindow.mockClear());
+
+    it('an undropped drag ending outside the window detaches the tab into a new window', () => {
+      const { pane, tab } = setup();
+      dragEnd(tab, 'none', -40, 300);
+      expect(openTabInNewWindow).toHaveBeenCalledWith({ kind: 'chat', chatId: 'c1' });
+      const after = useLayoutStore.getState().root as LeafPane;
+      expect(after.tabs.map((t) => cid(t.descriptor))).toEqual(['c2']);
+      expect(pane.tabs).toHaveLength(2);
+    });
+
+    it('a drag released over the window never detaches', () => {
+      const { tab } = setup();
+      dragEnd(tab, 'none', 100, 100);
+      expect(openTabInNewWindow).not.toHaveBeenCalled();
+    });
+
+    it('an accepted drop never detaches, wherever the pointer reads', () => {
+      const { tab } = setup();
+      dragEnd(tab, 'move', -40, 300);
+      expect(openTabInNewWindow).not.toHaveBeenCalled();
+      expect((useLayoutStore.getState().root as LeafPane).tabs).toHaveLength(2);
+    });
   });
 });

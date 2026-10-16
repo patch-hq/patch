@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { CLAUDE_BACKEND_ID, rateLimitWindowBlocks, type RateLimitWindow } from '@patch/wire';
+import { CLAUDE_BACKEND_ID, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../lib/theme';
 import {
   describeDisabledReason,
@@ -23,7 +23,7 @@ import { Field, Muted, SettingsButton } from './ui';
 
 /**
  * How long a connect/disconnect/add/reorder may wait for that host's
- * `daemon.account` report. The host's work is one local file write, so this
+ * `host.account` report. The host's work is one local file write, so this
  * is a ceiling.
  */
 export const CLAUDE_ACK_TIMEOUT_MS = 5_000;
@@ -40,10 +40,10 @@ export function moveAccount(ids: readonly string[], index: number, dir: -1 | 1):
 
 /**
  * "Read this account's usage from Anthropic now." The pending flag clears on
- * the next `daemon.account` report — the host's answer — or after the window.
+ * the next `host.account` report — the host's answer — or after the window.
  */
 export function useUsageRefresh(
-  daemonId: string,
+  hostId: string,
   accountSeq: number,
   backendId: string = CLAUDE_BACKEND_ID,
 ): { refresh: () => void; refreshing: boolean } {
@@ -62,8 +62,8 @@ export function useUsageRefresh(
     refresh: () => {
       if (
         sendToHost(
-          daemonId,
-          { type: 'host.backend_usage_refresh', daemonId, backendId },
+          hostId,
+          { type: 'host.backend_usage_refresh', hostId, backendId },
           'Refresh usage',
         )
       ) {
@@ -215,9 +215,10 @@ export function UsageLine({
 }): React.ReactElement | null {
   const colors = useTheme();
   if (!win) return null;
-  const blocked = rateLimitWindowBlocks(scope, win);
-  const off = scope === 'overage' && win.status === 'rejected';
-  const warn = !blocked && !off && (win.utilization ?? 0) >= 0.8;
+  const state = rateLimitWindowState(scope, win);
+  const blocked = state === 'blocked';
+  const off = state === 'off';
+  const warn = state === 'warn';
   const fill = blocked ? colors.red : warn ? colors.amber : off ? colors.ink3 : colors.leaf;
   const pct = Math.min(100, Math.round((win.utilization ?? 0) * 100));
   const reason =

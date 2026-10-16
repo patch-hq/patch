@@ -19,7 +19,7 @@ import type { WireEvent } from '@patch/wire';
 import { generateUserKeypair } from '@patch/auth';
 import { Registry } from '../src/registry.js';
 import type { PushBackend } from '../src/notifications/router.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { build } from '../src/app.js';
 
 const ACCOUNT = generateUserKeypair(() => new Uint8Array(32).fill(7));
@@ -58,12 +58,12 @@ async function harness() {
     token: 'fcm-phone-token',
     registeredAt: 1,
   });
-  const link = new InProcessDaemonLink();
+  const link = new InProcessHostLink();
   const push = fakePush();
   const app = await build({
     dataDir: dir,
     registry,
-    daemonLink: link,
+    hostLink: link,
     pushBackend: push.backend,
     jobsWatch: false,
   });
@@ -74,7 +74,7 @@ function spawned(chatId: string): WireEvent {
   return {
     type: 'chat.spawned',
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/home/tom/projects/bed-planner',
     seq: 1,
     ts: 0,
@@ -85,7 +85,7 @@ function state(chatId: string, over: Record<string, unknown>): WireEvent {
   return {
     type: 'chat.state',
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     activity: 'idle',
     permissionMode: 'auto',
     folder: '/home/tom/projects/bed-planner',
@@ -102,7 +102,7 @@ function state(chatId: string, over: Record<string, unknown>): WireEvent {
  * the state that parks the chat.
  */
 function blockTurn(
-  link: InProcessDaemonLink,
+  link: InProcessHostLink,
   chatId: string,
   request: { tool: string; args?: unknown; description?: string },
   over: Record<string, unknown> = {},

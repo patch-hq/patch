@@ -9,7 +9,7 @@
 
 import { useEffect } from 'react';
 import { loadModels, useModelCatalog } from '../../lib/models.js';
-import { defaultDaemonId, usePresenceStore } from '../../stores/presenceStore.js';
+import { defaultHostId, usePresenceStore } from '../../stores/presenceStore.js';
 
 export function useModelOptions(value: string): {
   options: { id: string; label: string }[];
@@ -17,7 +17,7 @@ export function useModelOptions(value: string): {
   problem: { kind: 'no-host' | 'error'; text: string } | null;
 } {
   const hosts = usePresenceStore((s) => s.hosts);
-  const catalogueHost = defaultDaemonId(hosts);
+  const catalogueHost = defaultHostId(hosts);
   const catalogue = useModelCatalog();
 
   useEffect(() => {

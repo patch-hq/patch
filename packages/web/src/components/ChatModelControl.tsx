@@ -33,25 +33,114 @@ export function ChatModelControl({ chatId }: { chatId: string }): JSX.Element | 
   return (
     <>
       <ModelControl chatId={chatId} />
-      {/* Which account the latest turn ran on (spec/10 § Backend credentials). */}
-      {row.account ? (
-        <span
-          className="model-pill chat-account"
-          data-testid="chat-account"
-          title={`The latest turn ran on the ${row.account.label} account`}
-        >
-          {row.account.label}
-        </span>
-      ) : null}
+      <AccountControl chatId={chatId} />
     </>
   );
 }
 
-function ModelControl({ chatId }: { chatId: string }): JSX.Element {
+/**
+ * Which account the chat's turns start on (spec/10 § Backend credentials —
+ * preferred account). With more than one connected account for the chat's
+ * backend it is a select drawn like the approval-mode select beside it; with
+ * one there is nothing to choose, so it stays a plain readout of the account
+ * the latest turn ran on. The choice is held as pending until the host
+ * confirms it on `chat.state`, and a host that never answers is reported.
+ */
+function AccountControl({ chatId }: { chatId: string }): JSX.Element | null {
   const row = useChatStore((s) => s.chats[chatId])!;
   const pushError = useUiStore((s) => s.pushError);
   const hostLabel = usePresenceStore((s) =>
-    (s.hosts[row.daemonId]?.host?.hostName ?? row.daemonId).trim(),
+    (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim(),
+  );
+  const shared = usePreferencesStore((s) => s.shared?.secrets);
+  const accounts = (row.model?.startsWith('openai/') ? shared?.codex : shared?.claude) ?? [];
+  const choices = accounts.filter((a) => a.connected);
+  // `undefined` is "no change pending"; null is a pending "by strategy".
+  const [pending, setPending] = useState<string | null | undefined>(undefined);
+  const settled = row.preferredAccountId ?? null;
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (pending !== undefined && settled === pending) setPending(undefined);
+  }, [pending, settled]);
+  useEffect(() => {
+    if (pending === undefined) return;
+    const t = setTimeout(() => {
+      setPending(undefined);
+      pushError(`${hostLabel} did not switch the account — this chat is unchanged`);
+    }, MODEL_CONFIRM_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [pending, hostLabel, pushError]);
+
+  if (choices.length < 2) {
+    return row.account ? (
+      <span
+        className="model-pill chat-account"
+        data-testid="chat-account"
+        title={`The latest turn ran on the ${row.account.label} account`}
+      >
+        {row.account.label}
+      </span>
+    ) : null;
+  }
+  const shown = pending !== undefined ? pending : settled;
+  return (
+    <div className="permission-mode-wrap chat-account-wrap">
+      <select
+        className={pending !== undefined ? 'permission-mode is-pending' : 'permission-mode'}
+        data-testid="chat-account"
+        aria-label="Account"
+        // A native tooltip would draw over the open option list.
+        title={
+          focused
+            ? undefined
+            : row.account
+              ? `The latest turn ran on the ${row.account.label} account`
+              : 'The account this chat starts on'
+        }
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        value={shown ?? ''}
+        onChange={(e) => {
+          const next = e.target.value === '' ? null : e.target.value;
+          if (next === settled) return;
+          setPending(next);
+          getActiveWs()?.send({
+            type: 'chat.account_request',
+            chatId: row.chatId,
+            preferredAccountId: next,
+          });
+        }}
+      >
+        <option value="">
+          {row.account && settled === null ? `Auto: ${row.account.label}` : 'Auto account'}
+        </option>
+        {choices.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.label}
+          </option>
+        ))}
+      </select>
+      <span className="permission-mode-caret" aria-hidden>
+        ▾
+      </span>
+    </div>
+  );
+}
+
+export function ModelControl({
+  chatId,
+  testId = 'chat-model',
+  triggerLabel,
+}: {
+  chatId: string;
+  testId?: string;
+  /** Reads as an action ("Change model") instead of naming the model. */
+  triggerLabel?: string;
+}): JSX.Element {
+  const row = useChatStore((s) => s.chats[chatId])!;
+  const pushError = useUiStore((s) => s.pushError);
+  const hostLabel = usePresenceStore((s) =>
+    (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim(),
   );
   // spec/04 § Model — the composer's model readout is also the model control. The chosen
   // model is held here as PENDING until the host confirms it on `chat.state`;
@@ -78,8 +167,8 @@ function ModelControl({ chatId }: { chatId: string }): JSX.Element {
   const wantsCatalogue = row.model != null || modelOpen;
   useEffect(() => {
     if (!wantsCatalogue) return;
-    void loadModels(row.daemonId === '' ? null : row.daemonId);
-  }, [row.daemonId, wantsCatalogue]);
+    void loadModels(row.hostId === '' ? null : row.hostId);
+  }, [row.hostId, wantsCatalogue]);
   // The host's answer IS the new `row.model`; landing on it settles the pill.
   useEffect(() => {
     if (pendingModel !== null && row.model === pendingModel) setPendingModel(null);
@@ -135,7 +224,8 @@ function ModelControl({ chatId }: { chatId: string }): JSX.Element {
         anchorRef={modelAnchorRef}
         popupRef={modelPopupRef}
         placement={modelPlacement}
-        testId="chat-model"
+        testId={testId}
+        triggerLabel={triggerLabel}
         variant="crumb"
         // A switch lands on the NEXT turn, so while one is running the pop-up
         // says which turn it affects — presenting it as instant would

@@ -10,7 +10,7 @@ import Constants from 'expo-constants';
 import { saveCredential, loadCredential } from './credential';
 import { getRoute, setRoute } from '../config';
 import { getWs, resetWs } from '../api/ws';
-import { initPush } from './push';
+import { initPush, resetPush } from './push';
 import { runPermissionPriming } from './permissionPriming';
 import { useUiStore } from '../stores/uiStore';
 import { useChatStore } from '../stores/chatStore';
@@ -19,9 +19,12 @@ import { api } from '../api/rest';
 import { toChatListRow } from './chatListRow';
 import { useVoiceStore } from '../stores/voiceStore';
 import { showIncomingCall, initCallKeep } from './callkeep';
-import { loadPreferences } from './preferences';
+import { __resetPreferences, loadPreferences } from './preferences';
+import { useSettingsStore } from '../stores/settingsStore';
 
 let _booted = false;
+/** Unsubscribes the incoming-call bridge, so a re-pair does not stack a second one. */
+let stopCallBridge: (() => void) | null = null;
 
 /**
  * Accept `patch://?credential=<jwt>[&server=<origin>]` deep links (dev
@@ -134,7 +137,8 @@ export async function bootstrap(): Promise<void> {
 
   // Bridge incoming calls into the native UI. The WS dispatcher writes
   // them into the voice store; we observe and trigger CallKeep.
-  useVoiceStore.subscribe((state, prev) => {
+  stopCallBridge?.();
+  stopCallBridge = useVoiceStore.subscribe((state, prev) => {
     if (state.incomingCall && state.incomingCall !== prev.incomingCall) {
       try {
         showIncomingCall(state.incomingCall.callId, state.incomingCall.chatId, 'Manager');
@@ -148,6 +152,15 @@ export async function bootstrap(): Promise<void> {
 }
 
 export function teardown(): void {
+  stopCallBridge?.();
+  stopCallBridge = null;
+  resetPush();
   resetWs();
+  // The account being left must not leak into the next: an address word or a
+  // voice engine the new account's own load has not (yet) replaced.
+  __resetPreferences();
+  // The Settings payload too: its "keep the newer version" rule would otherwise
+  // hold the old account's preferences against the new account's lower version.
+  useSettingsStore.getState()._reset();
   _booted = false;
 }

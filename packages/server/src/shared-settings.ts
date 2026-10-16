@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 import { hostSecrets, tokenExpiry, refreshOpenAI, refreshClaude } from './provider-refresh.js';
 // Shared settings (spec/01 § Settings).
 //
@@ -48,6 +48,7 @@ import {
   type SharedSecretsSummary,
   type WireEvent,
 } from '@patch/wire';
+import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
 import { validateClaudeOAuthToken, type ClaudeTokenValidation } from '@patch/auth';
 
 /** Settings keys a host held before they were shared — taken from the FIRST host imported. */
@@ -56,6 +57,8 @@ const HOST_HELD_KEYS = [
   'kokoroVoice',
   'permissionModeDefault',
   'chatNameInterval',
+  'titleGenerationEnabled',
+  'statusGenerationEnabled',
   'autoResumeRateLimit',
   'questionExpiry',
   'questionExpirySeconds',
@@ -78,6 +81,12 @@ export class SettingsError extends Error {
 }
 
 export type BackendId = 'claude-code' | 'codex';
+
+/** Server-at-rest format. The identity key is intentionally not in the wire SharedSecrets schema. */
+const StoredSecrets = SharedSecrets.extend({
+  webBotAuthKey: z.string().min(1).optional(),
+}).strict();
+type StoredSecrets = z.infer<typeof StoredSecrets>;
 
 function encrypt(key: Buffer, plaintext: string): string {
   const iv = randomBytes(12);
@@ -157,13 +166,13 @@ const validateOpenAIKeyDefault: ValidateOpenAIKey = async (key) => {
 export interface SharedSettingsOptions {
   dataDir: string;
   /** Send one frame to one host. */
-  sendToDaemon: (daemonId: string, event: WireEvent) => void;
+  sendToHost: (hostId: string, event: WireEvent) => void;
   /** Hosts that are connected right now. */
-  onlineDaemonIds: () => string[];
+  onlineHostIds: () => string[];
   /** Tell every surface. */
   broadcast: (event: SettingsChangedEvent) => void;
   /** A host's name, for labels made unique on import. */
-  hostName?: (daemonId: string) => string | undefined;
+  hostName?: (hostId: string) => string | undefined;
   validateClaude?: (token: string) => Promise<ClaudeTokenValidation>;
   validateOpenAIKey?: ValidateOpenAIKey;
   adoptTimeoutMs?: number;
@@ -173,7 +182,7 @@ export interface SharedSettingsOptions {
 }
 
 interface PendingAdopt {
-  daemonId: string;
+  hostId: string;
   kind: SettingsAdoptKind;
   resolve: (event: SettingsAdoptResponseEvent) => void;
   reject: (err: Error) => void;
@@ -182,7 +191,7 @@ interface PendingAdopt {
 
 export class SharedSettingsService {
   private settings: SharedSettings;
-  private secrets: SharedSecrets = structuredClone(EMPTY_SHARED_SECRETS);
+  private secrets: StoredSecrets = structuredClone(EMPTY_SHARED_SECRETS);
   private version = 0;
   private importedHosts = new Set<string>();
   private readonly applied = new Map<string, { version?: number; error?: string }>();
@@ -212,6 +221,41 @@ export class SharedSettingsService {
       this.importedHosts = new Set(state.importedHosts ?? []);
     }
     this.loadSecrets();
+    this.provisionWebBotIdentity();
+  }
+
+  private provisionWebBotIdentity(): void {
+    if (this.problem !== undefined) return;
+    let changed = false;
+    if (!this.secrets.webBotAuthKey) {
+      this.secrets.webBotAuthKey = generateWebBotAuthKey();
+      changed = true;
+      this.opts.logger?.info('shared settings: created this deployment’s Web Bot Auth identity');
+    }
+    const key = parseWebBotAuthKey(this.secrets.webBotAuthKey);
+    if (this.settings.agentIdentity.name === 'Patch') {
+      this.settings.agentIdentity.name = `Patch agent ${key.keyId.slice(0, 8)}`;
+      changed = true;
+    }
+    const oldDescription =
+      'A personal AI agent that browses the web only when its user asks it to.';
+    if (this.settings.agentIdentity.description === oldDescription) {
+      this.settings.agentIdentity.description = DEFAULT_SHARED_SETTINGS.agentIdentity.description;
+      changed = true;
+    }
+    if (changed) {
+      this.version += 1;
+      this.persist({ secrets: true });
+    }
+  }
+
+  webBotAuthKey(): string {
+    this.requireSecrets();
+    const value = this.secrets.webBotAuthKey;
+    if (!value)
+      throw new SettingsError(503, 'identity_unavailable', 'Web Bot Auth identity is unavailable');
+    parseWebBotAuthKey(value);
+    return value;
   }
 
   /**
@@ -251,7 +295,7 @@ export class SharedSettingsService {
     }
     if (this.key && hasSecrets) {
       try {
-        this.secrets = SharedSecrets.parse(
+        this.secrets = StoredSecrets.parse(
           JSON.parse(decrypt(this.key, readFileSync(this.secretsPath, 'utf8'), this.secretsPath)),
         );
       } catch (err) {
@@ -338,8 +382,8 @@ export class SharedSettingsService {
   }
 
   hostStates(): HostSettingsState[] {
-    return [...this.applied.entries()].map(([daemonId, s]) => ({
-      daemonId,
+    return [...this.applied.entries()].map(([hostId, s]) => ({
+      hostId,
       ...(s.version !== undefined ? { appliedVersion: s.version } : {}),
       ...(s.error ? { error: s.error } : {}),
     }));
@@ -422,23 +466,24 @@ export class SharedSettingsService {
     }
   }
 
-  private snapshotFor(daemonId: string): WireEvent {
+  private snapshotFor(hostId: string): WireEvent {
+    const { webBotAuthKey: _serverOnlyIdentity, ...sharedSecrets } = this.secrets;
     return {
       type: 'settings.snapshot',
-      daemonId,
+      hostId,
       version: this.version,
       settings: this.current(),
-      secrets: hostSecrets(this.secrets),
+      secrets: hostSecrets(sharedSecrets),
     };
   }
 
   private pushAll(): void {
     if (this.syncing) {
-      for (const daemonId of this.opts.onlineDaemonIds()) {
+      for (const hostId of this.opts.onlineHostIds()) {
         // A host still being imported gets the snapshot when its import lands:
         // sending one first would overwrite the very accounts it is about to send.
-        if (!this.importedHosts.has(daemonId)) continue;
-        this.opts.sendToDaemon(daemonId, this.snapshotFor(daemonId));
+        if (!this.importedHosts.has(hostId)) continue;
+        this.opts.sendToHost(hostId, this.snapshotFor(hostId));
       }
     }
     this.opts.broadcast(this.changedEvent());
@@ -448,45 +493,45 @@ export class SharedSettingsService {
    * A host connected. Import what it held before settings were shared, once;
    * then send it the snapshot.
    */
-  hostOnline(daemonId: string): void {
+  hostOnline(hostId: string): void {
     if (!this.syncing) return;
-    if (this.importedHosts.has(daemonId)) {
-      this.opts.sendToDaemon(daemonId, this.snapshotFor(daemonId));
+    if (this.importedHosts.has(hostId)) {
+      this.opts.sendToHost(hostId, this.snapshotFor(hostId));
       return;
     }
-    if (this.importing.has(daemonId)) return;
-    this.importing.add(daemonId);
-    void this.adopt(daemonId, 'import')
+    if (this.importing.has(hostId)) return;
+    this.importing.add(hostId);
+    void this.adopt(hostId, 'import')
       .then((result) => {
         if (result.kind !== 'import') throw new Error(`import answered with ${result.kind}`);
-        this.mergeImport(daemonId, result.import);
+        this.mergeImport(hostId, result.import);
       })
       .catch((err: Error) => {
         // Not marked imported, so the next connect asks again rather than the
         // host being overwritten with a snapshot that never saw its accounts.
         this.opts.logger?.error(
-          { daemonId, err: err.message },
+          { hostId, err: err.message },
           'shared settings: import from host failed — it keeps its own settings until one succeeds',
         );
-        this.applied.set(daemonId, { error: `import failed: ${err.message}` });
+        this.applied.set(hostId, { error: `import failed: ${err.message}` });
         this.opts.broadcast(this.changedEvent());
       })
-      .finally(() => this.importing.delete(daemonId));
+      .finally(() => this.importing.delete(hostId));
   }
 
-  hostOffline(daemonId: string): void {
+  hostOffline(hostId: string): void {
     for (const [requestId, p] of this.pending) {
-      if (p.daemonId !== daemonId) continue;
+      if (p.hostId !== hostId) continue;
       clearTimeout(p.timer);
       this.pending.delete(requestId);
-      p.reject(new Error(`${daemonId} went offline`));
+      p.reject(new Error(`${hostId} went offline`));
     }
   }
 
   /** Fold one host's pre-sharing settings and secrets in (spec/01 § Settings). */
-  mergeImport(daemonId: string, imported: SettingsImport): void {
+  mergeImport(hostId: string, imported: SettingsImport): void {
     this.requireSecrets();
-    const host = this.opts.hostName?.(daemonId) ?? daemonId;
+    const host = this.opts.hostName?.(hostId) ?? hostId;
     const first = this.importedHosts.size === 0;
     if (first) {
       const patch: Record<string, unknown> = {};
@@ -537,9 +582,9 @@ export class SharedSettingsService {
         added.push(`${id} key`);
       }
     }
-    this.importedHosts.add(daemonId);
+    this.importedHosts.add(hostId);
     this.opts.logger?.info(
-      { daemonId, host, first, added, skipped },
+      { hostId, host, first, added, skipped },
       'shared settings: imported a host',
     );
     this.commit({ secrets: true });
@@ -557,16 +602,16 @@ export class SharedSettingsService {
 
   // ---- host frames ----
 
-  handleDaemonEvent(event: WireEvent): void {
+  handleHostEvent(event: WireEvent): void {
     switch (event.type) {
       case 'settings.applied':
-        this.applied.set(event.daemonId, {
+        this.applied.set(event.hostId, {
           version: event.version,
           ...(event.error ? { error: event.error } : {}),
         });
         if (event.error) {
           this.opts.logger?.warn(
-            { daemonId: event.daemonId, version: event.version, err: event.error },
+            { hostId: event.hostId, version: event.version, err: event.error },
             'shared settings: a host could not apply the snapshot',
           );
         }
@@ -581,12 +626,12 @@ export class SharedSettingsService {
         return;
       }
       case 'settings.secret_update':
-        this.secretUpdate(event.daemonId, event.update);
+        this.secretUpdate(event.hostId, event.update);
         return;
       case 'settings.account_signed_in':
         this.addCodexAccount(
           event.account,
-          `signed in on ${this.opts.hostName?.(event.daemonId) ?? event.daemonId}`,
+          `signed in on ${this.opts.hostName?.(event.hostId) ?? event.hostId}`,
         );
         return;
       default:
@@ -595,26 +640,26 @@ export class SharedSettingsService {
   }
 
   private secretUpdate(
-    daemonId: string,
+    hostId: string,
     update: Extract<WireEvent, { type: 'settings.secret_update' }>['update'],
   ): void {
     this.opts.logger?.warn(
-      { daemonId, accountId: update.accountId },
+      { hostId, accountId: update.accountId },
       'Host credential update ignored: provider refresh is owned by the server',
     );
   }
 
   /** Ask a host to send a value up (spec/01 § Settings). */
   async adopt(
-    daemonId: string,
+    hostId: string,
     kind: SettingsAdoptKind,
     id?: string,
   ): Promise<NonNullable<SettingsAdoptResponseEvent['result']>> {
-    if (!this.opts.onlineDaemonIds().includes(daemonId)) {
+    if (!this.opts.onlineHostIds().includes(hostId)) {
       throw new SettingsError(
         409,
         'host_offline',
-        `${this.opts.hostName?.(daemonId) ?? daemonId} is offline`,
+        `${this.opts.hostName?.(hostId) ?? hostId} is offline`,
       );
     }
     const requestId = randomUUID();
@@ -625,15 +670,15 @@ export class SharedSettingsService {
           new SettingsError(
             504,
             'daemon_timeout',
-            `${this.opts.hostName?.(daemonId) ?? daemonId} did not answer`,
+            `${this.opts.hostName?.(hostId) ?? hostId} did not answer`,
           ),
         );
       }, this.opts.adoptTimeoutMs ?? 20_000);
-      this.pending.set(requestId, { daemonId, kind, resolve, reject, timer });
-      this.opts.sendToDaemon(daemonId, {
+      this.pending.set(requestId, { hostId, kind, resolve, reject, timer });
+      this.opts.sendToHost(hostId, {
         type: 'settings.adopt.request',
         requestId,
-        daemonId,
+        hostId,
         kind,
         ...(id !== undefined ? { id } : {}),
       });
@@ -650,11 +695,11 @@ export class SharedSettingsService {
 
   /** Adopt a value from a host and store it as the shared one. */
   async adoptInto(
-    daemonId: string,
+    hostId: string,
     kind: Exclude<SettingsAdoptKind, 'import' | 'codex-signin'>,
     id?: string,
   ): Promise<void> {
-    const result = await this.adopt(daemonId, kind, id);
+    const result = await this.adopt(hostId, kind, id);
     switch (result.kind) {
       case 'claude-login':
         await this.addClaudeCredential(result.account.credential!, result.account.label);

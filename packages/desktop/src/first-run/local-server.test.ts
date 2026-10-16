@@ -101,22 +101,22 @@ test('without a relay it sets none', async () => {
 
 test('seeds the downloads directory with the host builds the app carries', async () => {
   const root = scratch();
-  const daemon = join(root, 'daemon');
-  mkdirSync(daemon);
-  writeFileSync(join(daemon, 'daemon-latest.json'), '{"version":"1"}');
-  writeFileSync(join(daemon, 'patch-daemon-darwin-arm64.tar.gz'), 'artifact');
+  const host = join(root, 'host');
+  mkdirSync(host);
+  writeFileSync(join(host, 'host-latest.json'), '{"version":"1"}');
+  writeFileSync(join(host, 'patch-host-darwin-arm64.tar.gz'), 'artifact');
   const server = await startLocalServer({
     ...opts(root),
     port: await freePort(),
-    daemonArtifacts: daemon,
+    hostArtifacts: host,
   });
   try {
     assert.deepEqual(readdirSync(join(root, 'server/downloads')).sort(), [
-      'daemon-latest.json',
-      'patch-daemon-darwin-arm64.tar.gz',
+      'host-latest.json',
+      'patch-host-darwin-arm64.tar.gz',
     ]);
     assert.equal(
-      readFileSync(join(root, 'server/downloads/daemon-latest.json'), 'utf8'),
+      readFileSync(join(root, 'server/downloads/host-latest.json'), 'utf8'),
       '{"version":"1"}',
     );
   } finally {
@@ -130,7 +130,7 @@ test('says which directory is missing when the app was built without its host', 
     startLocalServer({
       ...opts(root),
       port: await freePort(),
-      daemonArtifacts: join(root, 'nope'),
+      hostArtifacts: join(root, 'nope'),
     }),
     /host builds.*nope/,
   );

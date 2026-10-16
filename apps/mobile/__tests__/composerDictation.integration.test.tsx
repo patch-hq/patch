@@ -15,7 +15,6 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as FileSystem from 'expo-file-system';
 import { encodeAudio } from '@patch/wire/audio';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
 import { findHost, byLabel, byType, renderRN, actAsync, flush } from './testUtils/render';
@@ -68,11 +67,6 @@ const FRAME_SAMPLES = 640;
 function speak(ms: number): void {
   for (let i = 0; i < Math.round(ms / 40); i++) micOnFrame!(new Int16Array(FRAME_SAMPLES));
 }
-/** Samples in the WAV that was actually uploaded (44-byte RIFF header + PCM16). */
-async function uploadedSamples(uri: string): Promise<number> {
-  const b64 = await FileSystem.readAsStringAsync(uri);
-  return (Buffer.from(b64, 'base64').length - 44) / 2;
-}
 
 const mic = (r: ReturnType<typeof renderRN>): Record<string, (e?: unknown) => void> =>
   findHost(r.root, byLabel('Dictate into message')).props as Record<string, (e?: unknown) => void>;
@@ -116,21 +110,21 @@ async function mountWarm(): Promise<ReturnType<typeof renderRN>> {
   return r;
 }
 
-describe('composer dictation (real session) — a hold gesture end to end', () => {
-  it('press, speak, lift: the transcript lands in the draft editable and nothing is sent', async () => {
+describe('composer dictation (real session) — a tap session end to end', () => {
+  it('tap, speak, tap: the transcript lands in the draft editable and nothing is sent', async () => {
     const r = await mountWarm();
     await actAsync(() => {
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     // Warm audio plane, so the mic opened in the same tick as the gesture.
     expect(startMicCaptureMock).toHaveBeenCalledTimes(1);
 
     speak(600);
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      mic(r)['onPress']!();
     });
     await flush();
 
@@ -138,39 +132,6 @@ describe('composer dictation (real session) — a hold gesture end to end', () =
     expect(submitSpy).not.toHaveBeenCalled();
     expect(stopMicCaptureMock).toHaveBeenCalled();
     expect(useUiStore.getState().errors).toHaveLength(0);
-  });
-
-  it('a drift-out mid-sentence does not truncate the clip: the whole utterance is uploaded on the lift', async () => {
-    const r = await mountWarm();
-    await actAsync(() => {
-      mic(r)['onPressIn']!();
-    });
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
-
-    speak(400); // first half of the sentence
-    // The finger slides off the 44px button and comes back — RN reports that
-    // as onPressOut/onPressIn, and it must NOT end the session.
-    await actAsync(() => {
-      mic(r)['onPressOut']!();
-    });
-    await actAsync(() => {
-      mic(r)['onPressIn']!();
-    });
-    expect(voiceTranscribeMock).not.toHaveBeenCalled();
-    speak(400); // second half, still being captured
-
-    await actAsync(() => {
-      mic(r)['onTouchEnd']!();
-    });
-    await flush();
-
-    expect(voiceTranscribeMock).toHaveBeenCalledTimes(1);
-    const uri = voiceTranscribeMock.mock.calls[0]![0];
-    // 800ms at 16 kHz — both halves, not just the part before the drift.
-    expect(await uploadedSamples(uri)).toBe(20 * FRAME_SAMPLES);
-    expect(draft(r)).toBe('buy oat milk and some bread');
   });
 
   it('drops the placeholder while dictating, so it cannot paint under the live text', async () => {
@@ -185,7 +146,7 @@ describe('composer dictation (real session) — a hold gesture end to end', () =
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     await flush();
     const sock = FakeWebSocket.last();
@@ -204,7 +165,7 @@ describe('composer dictation (real session) — a hold gesture end to end', () =
 
     // It comes back once the dictation is over.
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      mic(r)['onPress']!();
     });
     await flush();
     expect(placeholder(r)).toBe('Message');
@@ -216,7 +177,7 @@ describe('composer dictation (real session) — a hold gesture end to end', () =
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     await flush(); // token mint + WS construction
     const sock = FakeWebSocket.last();
@@ -239,7 +200,7 @@ describe('composer dictation (real session) — a hold gesture end to end', () =
     expect(r.root.findAllByProps({ testID: 'dictation-status' }).length).toBeGreaterThan(0);
 
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      mic(r)['onPress']!();
     });
     await flush();
     // The session is always ended as cancelled — dictation never auto-sends.
@@ -261,11 +222,11 @@ describe('composer dictation (real session) — an empty result is never silent'
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     speak(80); // two native frames
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      mic(r)['onPress']!();
     });
     await flush();
 
@@ -285,10 +246,10 @@ describe('composer dictation (real session) — an empty result is never silent'
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      mic(r)['onPress']!();
     });
     await flush();
 
@@ -305,11 +266,11 @@ describe('composer dictation (real session) — an empty result is never silent'
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     speak(600);
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      mic(r)['onPress']!();
     });
     await flush();
 
@@ -330,7 +291,7 @@ describe('composer dictation (real session) — the press path does no permissio
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     expect(startMicCaptureMock).toHaveBeenCalledTimes(1);
     expect(requestSpy).not.toHaveBeenCalled();
@@ -347,7 +308,7 @@ describe('composer dictation (real session) — the press path does no permissio
       mic(r)['onPressIn']!();
     });
     await actAsync(() => {
-      mic(r)['onLongPress']!();
+      mic(r)['onPress']!();
     });
     await flush();
 

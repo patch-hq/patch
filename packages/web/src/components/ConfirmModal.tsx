@@ -5,6 +5,7 @@
 
 import { useEffect, type JSX } from 'react';
 import { useUiStore } from '../stores/uiStore.js';
+import { ModalOverlay } from './ModalOverlay.js';
 
 export function ConfirmModal(): JSX.Element | null {
   const dialog = useUiStore((s) => s.confirmDialog);
@@ -29,7 +30,7 @@ export function ConfirmModal(): JSX.Element | null {
   if (!dialog) return null;
 
   return (
-    <div className="modal-overlay" data-testid="confirm-modal-overlay">
+    <ModalOverlay testId="confirm-modal-overlay">
       <div
         className="modal-backdrop"
         data-testid="confirm-modal-backdrop"
@@ -64,6 +65,6 @@ export function ConfirmModal(): JSX.Element | null {
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

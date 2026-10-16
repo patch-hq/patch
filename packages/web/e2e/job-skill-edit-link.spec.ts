@@ -25,7 +25,7 @@ async function stubJobApis(
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: [FOLDER], recent: [] }] }),
+      body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: [FOLDER], recent: [] }] }),
     }),
   );
   await page.route('**/api/skills**', (route) =>

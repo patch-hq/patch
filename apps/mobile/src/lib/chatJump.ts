@@ -39,8 +39,10 @@ function holdsSeq(entry: ChatEventEntry, seq: number): boolean {
  */
 export function rowIndexForSeq(rows: readonly TimelineRow[], seq: number): number {
   return rows.findIndex((r) =>
-    r.kind === 'group'
-      ? r.entries.some((e) => holdsSeq(e, seq))
-      : holdsSeq(r.entry, seq) || (r.result !== undefined && holdsSeq(r.result, seq)),
+    r.kind === 'snooze'
+      ? false
+      : r.kind === 'group'
+        ? r.entries.some((e) => holdsSeq(e, seq))
+        : holdsSeq(r.entry, seq) || (r.result !== undefined && holdsSeq(r.result, seq)),
   );
 }

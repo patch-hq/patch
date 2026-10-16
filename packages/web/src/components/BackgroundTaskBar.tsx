@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { ChevronDown, ChevronUp, LoaderCircle, X } from 'lucide-react';
 import type { WatchTaskRow } from '@patch/wire';
+import { headCodePoints } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -85,10 +86,8 @@ function CommandPreview({
   expanded: boolean;
   onToggle: () => void;
 }): JSX.Element {
-  const text =
-    expanded || command.length <= COMMAND_PREVIEW_LEN
-      ? command
-      : `${command.slice(0, COMMAND_PREVIEW_LEN)}…`;
+  const preview = expanded ? command : headCodePoints(command, COMMAND_PREVIEW_LEN);
+  const text = preview === command ? command : `${preview}…`;
   return (
     <span
       className="background-task-bar-command"

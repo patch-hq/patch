@@ -38,7 +38,7 @@ function seedRow(): void {
   useChatStore.getState().hydrate([
     {
       chatId: CHAT,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: null,
       folder: '/home/claude-dev/Unite',

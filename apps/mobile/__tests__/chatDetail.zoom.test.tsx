@@ -11,6 +11,7 @@ import { renderRN, findHost, findAllHost, actSync } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { __setLocalSearchParams } from './stubs/expo-router';
+import { __lastCopiedImage, __resetClipboard } from './stubs/expo-clipboard';
 
 vi.mock('../src/api/rest', () => ({
   api: {
@@ -30,7 +31,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   const mod = await import('../app/chats/[chatId]');
   ChatDetailScreen = mod.default;
   useChatStore.getState().hydrate([
@@ -237,5 +238,21 @@ describe('ZoomableImageViewer — PanResponder gesture', () => {
     expect(
       findAllHost(r.root, (i) => i.props['accessibilityLabel'] === 'Close image viewer'),
     ).toHaveLength(0);
+  });
+
+  it('the Copy image button puts the displayed image on the clipboard as an image', async () => {
+    __resetClipboard();
+    const bytes = new Uint8Array([137, 80, 78, 71]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, arrayBuffer: async () => bytes.buffer })),
+    );
+    const r = renderRN(<ChatDetailScreen />);
+    openViewer(r.root);
+    actSync(() => {
+      findHost(r.root, (i) => i.props['accessibilityLabel'] === 'Copy image').props.onPress();
+    });
+    await vi.waitFor(() => expect(__lastCopiedImage()).toBe('iVBORw=='));
+    vi.unstubAllGlobals();
   });
 });

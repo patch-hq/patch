@@ -4,7 +4,7 @@
 // These fallbacks are UNREACHABLE via any real conn/daemon combination:
 // Composer only reads a null `disabledReason`/`linkReason` when `disabled`/
 // `linkDown` is ALSO false (see src/lib/connection.ts's
-// daemonControlDisabledReason — its only `return null` is the
+// hostControlDisabledReason — its only `return null` is the
 // `conn === 'connected' && host === 'online'` case, which is exactly the
 // case where `disabled`/`linkDown` are false too) — so in the real app the
 // ternary branch that reads the fallback never fires. They exist purely as a
@@ -29,8 +29,8 @@ vi.mock('../src/api/rest', () => ({
 }));
 
 vi.mock('../src/lib/connection', () => ({
-  daemonControlsDisabled: () => true,
-  daemonControlDisabledReason: () => null,
+  hostControlsDisabled: () => true,
+  hostControlDisabledReason: () => null,
 }));
 
 import { Composer } from '../src/components/Composer';

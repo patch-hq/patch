@@ -5,6 +5,7 @@
 // foregrounded. Spec/12: replay missed events with chat.replay on
 // reconnect. NO FALLBACK on auth — bad/missing JWT throws at hello-time.
 
+import { useViewPositionStore } from '../stores/viewPositionStore';
 import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import { CLOSE_AUTH_FAILED, decodeCompat, type WireEvent } from '@patch/wire';
 import { clearCredential, loadCredential } from '../lib/credential';
@@ -15,6 +16,7 @@ import { useHostRefusalStore } from '../stores/hostRefusalStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useVoiceStore } from '../stores/voiceStore';
+import { useBrowserHandoffStore } from '../stores/browserHandoffStore';
 import { useTerminalStore } from '../stores/terminalStore';
 import { speakInterrupt } from '../lib/speakInterrupt';
 import { useUiStore } from '../stores/uiStore';
@@ -90,6 +92,10 @@ export class PatchWs {
   }
 
   connect(): void {
+    // Already started (and not closed since): a second call would open a second
+    // socket whose frames are applied twice, and lose the first app-state
+    // listener so `close()` could never remove it.
+    if (this.appStateSub !== null) return;
     this.closed = false;
     this.openOnce();
     this.appStateSub = AppState.addEventListener('change', this.handleAppState);
@@ -118,7 +124,7 @@ export class PatchWs {
     usePresenceStore.getState().setConnection('offline');
     // The WS is the only channel that carries host presence — once it is
     // gone we no longer know the host's state (spec/12 § connection model).
-    usePresenceStore.getState().setDaemon('unknown');
+    usePresenceStore.getState().setHost('unknown');
     // App teardown — drop all delivery timers so nothing leaks. (A transient
     // socket-level close does NOT reset; pending inputs survive for redelivery.)
     deliveryTracker.reset();
@@ -273,7 +279,10 @@ export class PatchWs {
     // again, including one whose request died with the old connection.
     this.lastReplayCursor.clear();
     ws.onopen = (): void => {
-      this.backoff = INITIAL_BACKOFF_MS;
+      // The backoff is NOT reset here: an accepted upgrade proves nothing. A
+      // server that takes the socket and then drops it (rate limit, overload, a
+      // refused hello) would be redialled once a second for ever. It starts
+      // over on the server's greeting, `auth.ok`.
       // Report what this phone is really running (native APK version + the JS
       // bundle actually executing) so the update panel can spot a phone left
       // behind — spec/11 § Version reporting.
@@ -388,7 +397,7 @@ export class PatchWs {
       // Host presence is no longer observable while the WS is down; drop
       // back to `unknown` so the daemon-offline banner does not linger on top
       // of the WS-reconnecting banner (the two states are distinct).
-      usePresenceStore.getState().setDaemon('unknown');
+      usePresenceStore.getState().setHost('unknown');
       this.scheduleReconnect();
     };
 
@@ -456,7 +465,7 @@ export class PatchWs {
     if (clear) clearCredential();
     usePresenceStore.getState().setAuthRejected(reason);
     usePresenceStore.getState().setConnection('unauthenticated');
-    usePresenceStore.getState().setDaemon('unknown');
+    usePresenceStore.getState().setHost('unknown');
     useUiStore
       .getState()
       .pushError(
@@ -506,6 +515,7 @@ export class PatchWs {
 
   private dispatch(event: WireEvent): void {
     if (event.type === 'auth.ok') {
+      this.backoff = INITIAL_BACKOFF_MS;
       usePresenceStore.getState().setIdentity(event.accountId, event.surfaceId);
       // The greeting carries EVERY registered host with its presence and the
       // server's cached reports, so the phone's Hosts list is complete from the
@@ -529,8 +539,8 @@ export class PatchWs {
       useUiStore.getState().pushError(`session expired: ${event.reason}`);
       return;
     }
-    if (event.type === 'daemon.online') {
-      usePresenceStore.getState().setHostOnline(event.daemonId, true);
+    if (event.type === 'host.online') {
+      usePresenceStore.getState().setHostOnline(event.hostId, true);
       // The host is back — redeliver pending inputs so queued-while-offline
       // turns land promptly and any lost to a flush-time flap heals (idempotent;
       // the host dedups). spec/12.
@@ -538,22 +548,22 @@ export class PatchWs {
       permissionDeliveryTracker.onReconnect();
       return;
     }
-    if (event.type === 'daemon.offline') {
-      usePresenceStore.getState().setHostOnline(event.daemonId, false);
+    if (event.type === 'host.offline') {
+      usePresenceStore.getState().setHostOnline(event.hostId, false);
       return;
     }
-    if (event.type === 'daemon.host') {
+    if (event.type === 'host.host') {
       usePresenceStore.getState().setHostReport(event);
       return;
     }
-    if (event.type === 'daemon.unauthenticated') {
+    if (event.type === 'host.unauthenticated') {
       // ONE backend's credential on ONE host is missing/expired (spec/10
       // § Backend credentials). NOT a presence fact: the host emitted this over
       // its own live link, so it stays online — a machine that is up and simply
       // logged out of a backend must not be rendered as down.
       usePresenceStore.getState().setHostAccount({
-        type: 'daemon.account',
-        daemonId: event.daemonId,
+        type: 'host.account',
+        hostId: event.hostId,
         backendId: event.backendId,
         connected: false,
         accountEmail: null,
@@ -561,7 +571,7 @@ export class PatchWs {
       useUiStore.getState().pushError(`host unauthenticated: ${event.reason}`);
       return;
     }
-    if (event.type === 'daemon.account') {
+    if (event.type === 'host.account') {
       // spec/10 § Surface in Settings — a backend's credential on a NAMED host
       // is switchable from ANY surface, so the phone tracks the same live state
       // the desktop does. Stored against the (host, backend) pair it names:
@@ -575,7 +585,7 @@ export class PatchWs {
       // host's picker group in sync. Both events carry that host's complete
       // roots + recents — replace that host's entry, leave the others alone.
       useFolderStore.getState().setHostFolders({
-        daemonId: event.daemonId,
+        hostId: event.hostId,
         roots: event.roots,
         recent: event.recent,
       });
@@ -585,14 +595,14 @@ export class PatchWs {
       // The host was removed from the account (by any surface): drop it and
       // its cached reports. A surface that missed this learns it from the next
       // `auth.ok`, whose roster no longer names the host.
-      usePresenceStore.getState().removeHost(event.daemonId);
+      usePresenceStore.getState().removeHost(event.hostId);
       return;
     }
     if (event.type === 'claude_settings.list' || event.type === 'claude_settings.updated') {
       // spec/02 § Claude Code settings — that host's settings.json + memory
       // entries, sent whole on connect and after every edit, so Settings →
       // Hosts settles on what the machine actually holds.
-      usePresenceStore.getState().setClaudeSettings(event.daemonId, event.drift, event.memories);
+      usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
       return;
     }
     // spec/03 § Settings — the shared settings, in the greeting and after every change.
@@ -604,6 +614,12 @@ export class PatchWs {
         hosts: event.hosts,
       };
       useSettingsStore.getState().applyShared(state);
+      return;
+    }
+    // spec/05 § Handover — where the user last was, on whichever surface.
+    if (event.type === 'view_position.updated') {
+      const { type: _type, ...pos } = event;
+      useViewPositionStore.getState().applyUpdated(pos, usePresenceStore.getState().surfaceId);
       return;
     }
     // spec/14 § Composer — server-owned drafts. The cold-start snapshot, sent
@@ -630,6 +646,19 @@ export class PatchWs {
       // store, unbatched: a keystroke's echo is the one thing on this link a
       // person is watching for character by character.
       useTerminalStore.getState().ingest(event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.frame') {
+      // spec/15 § Browser hand-off. Live-only, never a timeline entry.
+      useBrowserHandoffStore.getState().applyFrame(event.chatId, event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.status') {
+      useBrowserHandoffStore.getState().applyStatus(event);
+      return;
+    }
+    if (event.type === 'patch.browser_handoff.state') {
+      useBrowserHandoffStore.getState().applyState(event);
       return;
     }
     if (event.type === 'chat.call_request') {

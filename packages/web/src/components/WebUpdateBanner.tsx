@@ -18,11 +18,13 @@
 // once it is actually ready to offer that, rather than stacking both prompts
 // for the one event.
 
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useWebUpdateStore } from '../stores/webUpdateStore.js';
 import { reloadNow } from '../lib/liveUpdate.js';
 import { updateUrgency, waitedWords } from './DesktopUpdateBanner.js';
 import { useDesktopUpdaterState } from '../lib/desktopBridge.js';
+
+const RELOAD_GRACE_MS = 8_000;
 
 export function WebUpdateBanner(): JSX.Element | null {
   const staleSince = useWebUpdateStore((s) => s.staleSince);
@@ -30,6 +32,29 @@ export function WebUpdateBanner(): JSX.Element | null {
   // escalates, rather than staying at whatever urgency it first rendered.
   const [now, setNow] = useState(() => Date.now());
   const desktopState = useDesktopUpdaterState();
+  // A press must visibly do something. A reload that is vetoed or swallowed
+  // would otherwise leave the button looking dead, so say so after a grace.
+  const [pressed, setPressed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  function press(): void {
+    setError(null);
+    setPressed(true);
+    try {
+      reloadNow();
+    } catch (err) {
+      setPressed(false);
+      setError((err as Error).message);
+      return;
+    }
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      setPressed(false);
+      setError('Patch did not reload. Try again, or quit and reopen it.');
+    }, RELOAD_GRACE_MS);
+  }
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 5 * 60_000);
@@ -55,13 +80,19 @@ export function WebUpdateBanner(): JSX.Element | null {
       <span className="desktop-update-text">
         Patch has updated{waited === null ? '' : `, waiting ${waited}`}.
       </span>
+      {error !== null && (
+        <span className="desktop-update-text" data-testid="web-update-error">
+          {error}
+        </span>
+      )}
       <button
         type="button"
         className="desktop-update-restart"
         data-testid="web-update-reload"
-        onClick={() => reloadNow()}
+        disabled={pressed}
+        onClick={press}
       >
-        Update Patch
+        {pressed ? 'Updating…' : 'Update Patch'}
       </button>
     </div>
   );

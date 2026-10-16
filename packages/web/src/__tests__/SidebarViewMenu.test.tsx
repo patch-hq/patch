@@ -18,7 +18,7 @@ function row(chatId: string, badge: 'working' | 'done', name = chatId): ChatRow 
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name,
     folder: '~/proj',
@@ -242,21 +242,38 @@ describe('SidebarViewMenu', () => {
 describe('SidebarViewMenu sort controls', () => {
   beforeEach(() => {
     localStorage.clear();
-    useUiStore.setState({ chatSort: 'last-action', groupSort: 'last-action' });
+    useUiStore.setState({ chatSort: 'last-action', groupSort: 'same-as-chats' });
   });
   afterEach(() => cleanup());
-  it('picks and persists chat and project sorts independently', () => {
+  it('explains the stable default and keeps projects following chats by default', () => {
     render(
       <MemoryRouter>
         <SidebarViewMenu />
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByTestId('sidebar-view-trigger'));
+    expect(screen.getByText('My recent activity')).toBeTruthy();
+    expect(screen.getByText('Agent updates won’t move conversations')).toBeTruthy();
+    expect(screen.queryByTestId('sidebar-group-sort-last-update')).toBeNull();
     fireEvent.click(screen.getByTestId('sidebar-chat-sort-name'));
+    expect(screen.queryByText('Agent updates won’t move conversations')).toBeNull();
+    expect(useUiStore.getState().groupSort).toBe('same-as-chats');
+  });
+
+  it('reveals and persists an independent project sort under Advanced', () => {
+    render(
+      <MemoryRouter>
+        <SidebarViewMenu />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTestId('sidebar-view-trigger'));
+    fireEvent.click(screen.getByTestId('sidebar-sort-advanced'));
+    expect(screen.getByTestId('sidebar-group-sort-same-as-chats')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
     fireEvent.click(screen.getByTestId('sidebar-group-sort-last-update'));
-    expect(useUiStore.getState().chatSort).toBe('name');
     expect(useUiStore.getState().groupSort).toBe('last-update');
-    expect(localStorage.getItem('patch.sidebar.chatSort')).toBe('name');
     expect(localStorage.getItem('patch.sidebar.groupSort')).toBe('last-update');
   });
 });

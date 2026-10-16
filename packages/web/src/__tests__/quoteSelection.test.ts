@@ -11,9 +11,17 @@ describe('withQuotedSelection', () => {
     expect(withQuotedSelection('', 'line one\nline two')).toBe('> line one\n> line two\n\n');
   });
 
-  it('appends after existing draft text, trimming its trailing whitespace', () => {
+  it('puts the quote ahead of the existing draft text', () => {
     expect(withQuotedSelection('already typed  \n', 'quoted')).toBe(
-      'already typed\n\n> quoted\n\n',
+      '> quoted\n\nalready typed  \n',
+    );
+  });
+});
+
+describe('withQuotedSelection stacking', () => {
+  it('adds a second quote after the first, before the typed text', () => {
+    expect(withQuotedSelection('> one\n\nmy question', 'two')).toBe(
+      '> one\n\n> two\n\nmy question',
     );
   });
 });
@@ -36,11 +44,9 @@ describe('quoteSelectionIntoComposer', () => {
     expect(useComposerDraftStore.getState().get('chat-1')).toBe('> a passage\n\n');
   });
 
-  it('appends to an existing draft for that chat', () => {
+  it('stacks above an existing draft for that chat', () => {
     useComposerDraftStore.getState().setDraft('chat-1', 'what about this');
     quoteSelectionIntoComposer('chat-1', 'a passage');
-    expect(useComposerDraftStore.getState().get('chat-1')).toBe(
-      'what about this\n\n> a passage\n\n',
-    );
+    expect(useComposerDraftStore.getState().get('chat-1')).toBe('> a passage\n\nwhat about this');
   });
 });

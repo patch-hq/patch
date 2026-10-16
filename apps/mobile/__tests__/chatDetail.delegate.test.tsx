@@ -48,7 +48,7 @@ beforeEach(async () => {
   __resetRouterMock();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   const mod = await import('../app/chats/[chatId]');
   ChatDetailScreen = mod.default;
   useChatStore.getState().hydrate([

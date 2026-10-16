@@ -17,7 +17,7 @@ import type {
   HookCheckResultEvent,
   WireEvent,
 } from '@patch/wire';
-import type { DaemonLink } from '../daemon-link.js';
+import type { HostLink } from '../host-link.js';
 import { hookMatches } from './gate.js';
 import {
   aggregateHookDecision,
@@ -32,7 +32,7 @@ const HOOK_CHECK_SURFACE_ID = 'hooks-check';
 
 export interface HookRunnerOptions {
   hooks: HooksInterface;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   logger: Logger;
   idGenerator?: () => string;
   nowMs?: () => number;
@@ -45,7 +45,7 @@ export interface HookCheckResult {
 
 export class HookRunner {
   private readonly hooks: HooksInterface;
-  private readonly daemonLink: DaemonLink;
+  private readonly hostLink: HostLink;
   private readonly logger: Logger;
   private readonly idGenerator: () => string;
   private readonly nowMs: () => number;
@@ -56,11 +56,11 @@ export class HookRunner {
 
   constructor(opts: HookRunnerOptions) {
     this.hooks = opts.hooks;
-    this.daemonLink = opts.daemonLink;
+    this.hostLink = opts.hostLink;
     this.logger = opts.logger;
     this.idGenerator = opts.idGenerator ?? ((): string => Math.random().toString(36).slice(2));
     this.nowMs = opts.nowMs ?? ((): number => Date.now());
-    this.daemonLink.onEvent((event: WireEvent) => {
+    this.hostLink.onEvent((event: WireEvent) => {
       if (event.type === 'hook.check_result') {
         const waiter = this.pending.get(event.requestId);
         if (!waiter) return;
@@ -90,13 +90,13 @@ export class HookRunner {
         message: event.reply,
         chatId: event.chatId,
         folder: event.folder,
-        daemonId: event.daemonId,
+        hostId: event.hostId,
         specialThread: event.specialThread,
         toolCallsSummary: event.toolCallsSummary,
       });
-      this.daemonLink.sendTo(event.daemonId, HOOK_CHECK_SURFACE_ID, {
+      this.hostLink.sendTo(event.hostId, HOOK_CHECK_SURFACE_ID, {
         type: 'hook.agent_response_outcome',
-        daemonId: event.daemonId,
+        hostId: event.hostId,
         chatId: event.chatId,
         checkId: event.checkId,
         results,
@@ -151,18 +151,18 @@ export class HookRunner {
   private runOne(hook: Hook, ctx: HookCheckContext): Promise<HookRunResult> {
     const startedAt = this.nowMs();
     const base = { hookId: hook.id, hookName: hook.name };
-    if (!this.daemonLink.isOnline(ctx.daemonId)) {
+    if (!this.hostLink.isOnline(ctx.hostId)) {
       return Promise.resolve({
         ...base,
         status: 'failed' as const,
-        error: `${ctx.daemonId} is offline`,
+        error: `${ctx.hostId} is offline`,
         durationMs: 0,
       });
     }
     const requestId = this.idGenerator();
     const event: HookCheckRequestEvent = {
       type: 'hook.check_request',
-      daemonId: ctx.daemonId,
+      hostId: ctx.hostId,
       requestId,
       hookId: hook.id,
       kind: hook.kind,
@@ -175,7 +175,7 @@ export class HookRunner {
         ...(ctx.images !== undefined && hook.kind === 'prompt' ? { images: ctx.images } : {}),
         chatId: ctx.chatId,
         folder: ctx.folder,
-        daemonId: ctx.daemonId,
+        hostId: ctx.hostId,
         specialThread: ctx.specialThread,
         ...(ctx.toolCallsSummary !== undefined ? { toolCallsSummary: ctx.toolCallsSummary } : {}),
       },
@@ -210,14 +210,14 @@ export class HookRunner {
         },
       });
       try {
-        this.daemonLink.sendTo(ctx.daemonId, HOOK_CHECK_SURFACE_ID, event);
+        this.hostLink.sendTo(ctx.hostId, HOOK_CHECK_SURFACE_ID, event);
       } catch (err) {
         clearTimeout(timer);
         this.pending.delete(requestId);
         resolve({
           ...base,
           status: 'failed',
-          error: `could not reach ${ctx.daemonId}: ${(err as Error).message}`,
+          error: `could not reach ${ctx.hostId}: ${(err as Error).message}`,
           durationMs: this.nowMs() - startedAt,
         });
       }

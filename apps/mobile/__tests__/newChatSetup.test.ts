@@ -7,7 +7,7 @@ import type { ChatRow } from '../src/stores/types';
 
 function chat(partial: Partial<ChatRow> & { chatId: string }): ChatRow {
   return {
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '',
     status: 'active',
     lastUpdated: 1,
@@ -33,7 +33,7 @@ describe('recentModelPicks', () => {
       chat({ chatId: 'a', model: 'm4', lastUpdated: 2 }),
       chat({ chatId: 'b', model: 'm3', lastUpdated: 3 }),
       chat({ chatId: 'c', model: 'm4', lastUpdated: 1 }),
-      chat({ chatId: 'other', model: 'm2', daemonId: 'd2', lastUpdated: 9 }),
+      chat({ chatId: 'other', model: 'm2', hostId: 'd2', lastUpdated: 9 }),
       chat({ chatId: 'retired', model: 'gone', lastUpdated: 8 }),
     ]);
     expect(recentModelPicks(chats, 'd1', catalogue).map((m) => m.id)).toEqual(['m3', 'm4', 'm1']);

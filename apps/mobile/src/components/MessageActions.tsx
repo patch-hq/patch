@@ -38,8 +38,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
+import { standardBase64 } from '../lib/servedFile';
 import { useRouter } from 'expo-router';
-import { Copy, GitFork, TextSelect, X } from 'lucide-react-native';
+import { Copy, GitFork, RotateCcw, TextSelect, X } from 'lucide-react-native';
 import { create } from 'zustand';
 import { useUiStore } from '../stores/uiStore';
 import { openSideThreadDraft } from '../lib/sideThreadActions';
@@ -64,10 +65,14 @@ interface MessageActionState {
   /** `ChatEventEntry.messageAt` for the row, when the row is a message with one. */
   messageAt: number | undefined;
   sideThread: SideThreadOrigin | undefined;
+  /** Present on a settled user row: sends its text again as a new turn. */
+  retry: (() => void) | undefined;
   view: 'sheet' | 'select';
   /** The brief confirmation line, or null. */
   toast: string | null;
-  show(text: string, messageAt?: number, sideThread?: SideThreadOrigin): void;
+  /** Bumped by every `setToast`, so the same line shown twice restarts its timer. */
+  toastId: number;
+  show(text: string, messageAt?: number, sideThread?: SideThreadOrigin, retry?: () => void): void;
   select(): void;
   close(): void;
   setToast(toast: string | null): void;
@@ -77,22 +82,30 @@ const useMessageActionStore = create<MessageActionState>((set) => ({
   text: null,
   messageAt: undefined,
   sideThread: undefined,
+  retry: undefined,
   view: 'sheet',
   toast: null,
-  show(text, messageAt, sideThread) {
+  toastId: 0,
+  show(text, messageAt, sideThread, retry) {
     // Clear any toast still lingering from a previous row's long-press —
     // this one hasn't earned a toast yet (MessageLongPress sets it right
     // after, for a row with a messageAt).
-    set({ text, messageAt, sideThread, view: 'sheet', toast: null });
+    set({ text, messageAt, sideThread, retry, view: 'sheet', toast: null });
   },
   select() {
     set({ view: 'select' });
   },
   close() {
-    set({ text: null, messageAt: undefined, sideThread: undefined, view: 'sheet' });
+    set({
+      text: null,
+      messageAt: undefined,
+      sideThread: undefined,
+      retry: undefined,
+      view: 'sheet',
+    });
   },
   setToast(toast) {
-    set({ toast });
+    set((s) => ({ toast, toastId: s.toastId + 1 }));
   },
 }));
 
@@ -102,8 +115,9 @@ export function showMessageActions(
   text: string,
   messageAt?: number,
   sideThread?: SideThreadOrigin,
+  retry?: () => void,
 ): void {
-  useMessageActionStore.getState().show(text, messageAt, sideThread);
+  useMessageActionStore.getState().show(text, messageAt, sideThread, retry);
 }
 
 /** Test seam: back to closed, no toast. */
@@ -112,6 +126,7 @@ export function __resetMessageActions(): void {
     text: null,
     messageAt: undefined,
     sideThread: undefined,
+    retry: undefined,
     view: 'sheet',
     toast: null,
   });
@@ -142,6 +157,22 @@ export async function copyMessageText(text: string): Promise<void> {
 }
 
 /**
+ * Copy the image served at `url` to the clipboard as an image and say so. The
+ * bytes are fetched (the relay-aware `fetch`, so a relayed route works) rather
+ * than read from disk, so it is the same path whichever route the device is on.
+ */
+export async function copyImageToClipboard(url: string): Promise<void> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url} returned HTTP ${res.status}`);
+    await Clipboard.setImageAsync(standardBase64(new Uint8Array(await res.arrayBuffer())));
+    useMessageActionStore.getState().setToast('Image copied');
+  } catch (e) {
+    useUiStore.getState().pushError(`copy failed: ${(e as Error).message}`);
+  }
+}
+
+/**
  * A transcript row that opens the copy/select sheet on long-press. `text` null
  * (a row with nothing to copy, e.g. an attachment-only message) makes it a
  * plain container with no long-press at all rather than a sheet that copies
@@ -151,6 +182,7 @@ export function MessageLongPress({
   text,
   messageAt,
   sideThread,
+  retry,
   onPress,
   style,
   testID,
@@ -163,6 +195,8 @@ export function MessageLongPress({
   messageAt?: number;
   /** spec/15 § Side threads screen TRIGGER — present on a settled message row. */
   sideThread?: SideThreadOrigin;
+  /** A settled user row: the sheet offers Retry, sending this text again as a new turn. */
+  retry?: () => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   children: React.ReactNode;
@@ -180,7 +214,7 @@ export function MessageLongPress({
       style={style}
       onPress={onPress}
       onLongPress={() => {
-        showMessageActions(text, messageAt, sideThread);
+        showMessageActions(text, messageAt, sideThread, retry);
         // The time toasts the instant the long-press fires, not after a
         // further tap inside the sheet it just opened (that was the whole
         // complaint: a message row's time cost a long-press AND a button).
@@ -238,15 +272,17 @@ export function MessageActionsHost(): React.ReactElement {
   const router = useRouter();
   const text = useMessageActionStore((s) => s.text);
   const sideThread = useMessageActionStore((s) => s.sideThread);
+  const retry = useMessageActionStore((s) => s.retry);
   const view = useMessageActionStore((s) => s.view);
   const toast = useMessageActionStore((s) => s.toast);
+  const toastId = useMessageActionStore((s) => s.toastId);
   const close = useMessageActionStore((s) => s.close);
 
   React.useEffect(() => {
     if (toast === null) return;
     const t = setTimeout(() => useMessageActionStore.getState().setToast(null), COPIED_TOAST_MS);
     return () => clearTimeout(t);
-  }, [toast]);
+  }, [toast, toastId]);
 
   return (
     <>
@@ -290,6 +326,18 @@ export function MessageActionsHost(): React.ReactElement {
               label="Select text"
               onPress={() => useMessageActionStore.getState().select()}
             />
+            {retry !== undefined ? (
+              <SheetItem
+                testID="message-action-retry"
+                icon={<RotateCcw size={18} color={colors.ink2} />}
+                label="Retry"
+                onPress={() => {
+                  const run = retry;
+                  close();
+                  run();
+                }}
+              />
+            ) : null}
             {sideThread !== undefined ? (
               <SheetItem
                 testID="message-action-side-thread"

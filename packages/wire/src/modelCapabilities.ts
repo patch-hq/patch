@@ -24,6 +24,7 @@
 // ever wrong, the turn fails loudly rather than running in a mode nobody chose.
 
 import { harnessForModel, PermissionMode, type HarnessId } from './events.js';
+import { PROVIDERS } from './providers.js';
 
 /**
  * Models that cannot run `auto`, mirroring Claude Code's own list.
@@ -59,27 +60,61 @@ export function modelSupportsAutoMode(modelId: string): boolean {
 }
 
 /**
- * The permission modes each harness can run at all. Adding a provider is one
- * entry here (plus its `harnessForModel` rule): every surface's pickers and the
- * degrade rule below read this table rather than naming a provider.
+ * The permission modes each harness can run at all, read from the provider
+ * registry (`providers.ts`): every surface's pickers and the degrade rule below
+ * read this table rather than naming a provider.
  */
-export const HARNESS_PERMISSION_MODES: Record<HarnessId, readonly PermissionMode[]> = {
-  claude: PermissionMode.options,
-  // Codex has no classifier-driven approval, so no `auto`.
-  codex: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-};
+export const HARNESS_PERMISSION_MODES = Object.fromEntries(
+  PROVIDERS.map((p) => [
+    p.id,
+    p.permissionModes === 'all' ? PermissionMode.options : p.permissionModes,
+  ]),
+) as unknown as Record<HarnessId, readonly PermissionMode[]>;
 
-/** Per-harness refinement by model id, for modes only some of its models run. */
-const MODEL_MODE_RULES: Record<HarnessId, (modelId: string, mode: PermissionMode) => boolean> = {
+/**
+ * Per-provider refinement by model id, for modes only some of its models run.
+ * A provider with no entry runs every mode it declares on every model.
+ */
+const MODEL_MODE_RULES: Partial<
+  Record<HarnessId, (modelId: string, mode: PermissionMode) => boolean>
+> = {
   claude: (modelId, mode) => mode !== 'auto' || modelSupportsAutoMode(modelId),
-  codex: () => true,
 };
 
 /** Every permission mode this model can be run in. */
 export function permissionModesFor(modelId: string): PermissionMode[] {
   const harness = harnessForModel(modelId);
   const rule = MODEL_MODE_RULES[harness];
-  return HARNESS_PERMISSION_MODES[harness].filter((m) => rule(modelId, m));
+  return HARNESS_PERMISSION_MODES[harness].filter((m) => rule?.(modelId, m) ?? true);
+}
+
+/**
+ * Static map: where a mode goes when the model a chat is moved to cannot run
+ * it. Only `auto` is ever unavailable (Codex and older Claude models lack it);
+ * its nearest neighbour — the one that still lets edits through unprompted but
+ * asks about the rest — is `acceptEdits`.
+ */
+const CLOSEST_MODE: Partial<Record<PermissionMode, PermissionMode>> = {
+  auto: 'acceptEdits',
+};
+
+/**
+ * The mode a chat should be on after being moved to `modelId`: its own mode if
+ * the model can run it, else the static closest. Unlike
+ * `resolvePermissionModeForModel` (the turn-time backstop, which degrades to
+ * `default`), this is the deliberate switch made when the USER changes model.
+ */
+export function closestPermissionModeForModel(
+  mode: PermissionMode,
+  modelId: string,
+): PermissionMode {
+  const offered = permissionModesFor(modelId);
+  if (offered.includes(mode)) return mode;
+  const closest = CLOSEST_MODE[mode];
+  if (closest === undefined || !offered.includes(closest)) {
+    throw new Error(`no closest permission mode for ${mode} on ${modelId}`);
+  }
+  return closest;
 }
 
 export interface ResolvedPermissionMode {

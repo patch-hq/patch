@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const CHAT = 'jobchat-j_01TEST-abc';
 
@@ -43,25 +43,25 @@ describe('chat registry across a server restart', () => {
       surfaceKind: 'terminal',
       label: 'cli',
     });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    return { built, daemonLink, jwt };
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
+    return { built, hostLink, jwt };
   }
 
   it('get, archived list and history work after a restart with the host still away', async () => {
     const first = await boot();
-    first.daemonLink.emit({
+    first.hostLink.emit({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: CHAT,
       folder: '/work/j',
     });
-    first.daemonLink.emit({
+    first.hostLink.emit({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: CHAT,
-      daemonId: 'd1',
+      hostId: 'd1',
       activity: 'idle',
       lastUpdated: 5,
       status: 'archived',
@@ -70,13 +70,13 @@ describe('chat registry across a server restart', () => {
     });
     await first.built.app.close(); // flushes the saved mirror
 
-    const { built, daemonLink, jwt } = await boot();
+    const { built, hostLink, jwt } = await boot();
     try {
       // d1 has NOT re-announced: no chat.spawned, no folders.list.
       const headers = { authorization: `Bearer ${jwt}` };
       const get = await built.app.inject({ method: 'GET', url: `/api/chats/${CHAT}`, headers });
       expect(get.statusCode).toBe(200);
-      expect(get.json()).toMatchObject({ chatId: CHAT, daemonId: 'd1', status: 'archived' });
+      expect(get.json()).toMatchObject({ chatId: CHAT, hostId: 'd1', status: 'archived' });
 
       const list = await built.app.inject({
         method: 'GET',
@@ -89,12 +89,12 @@ describe('chat registry across a server restart', () => {
       const active = await built.app.inject({ method: 'GET', url: '/api/chats', headers });
       expect((active.json() as { chats: unknown[] }).chats).toHaveLength(0);
 
-      const originalSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const originalSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         originalSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() =>
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: true,

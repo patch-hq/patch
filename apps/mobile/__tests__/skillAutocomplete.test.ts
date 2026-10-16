@@ -10,9 +10,15 @@ import {
 
 describe('filterSkills', () => {
   const skills = ['plant', 'plan-travel', 'deploy', 'Deep-Research'];
-  it('prefix-filters case-insensitively', () => {
-    expect(filterSkills(skills, 'pl')).toEqual(['plant', 'plan-travel']);
+  it('ranks prefix matches first, case-insensitively', () => {
+    expect(filterSkills(skills, 'pl')).toEqual(['plant', 'plan-travel', 'deploy']);
     expect(filterSkills(skills, 'de')).toEqual(['deploy', 'Deep-Research']);
+  });
+  it('matches any part of the name, then the letters in order — prefix matches first (as web)', () => {
+    const names = ['weekly-timesheet', 'time-travel', 'deploy-pending'];
+    expect(filterSkills(names, 'time')).toEqual(['time-travel', 'weekly-timesheet']);
+    expect(filterSkills(names, 'pending')).toEqual(['deploy-pending']);
+    expect(filterSkills(names, 'dpg')).toEqual(['deploy-pending']);
   });
   it('returns everything on an empty query', () => {
     expect(filterSkills(skills, '')).toEqual(skills);

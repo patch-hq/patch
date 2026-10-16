@@ -37,6 +37,13 @@ export interface UpdaterState {
   lastResult: 'up-to-date' | 'update-available' | 'downloaded' | 'error' | null;
   /** Failure detail when lastResult is 'error'. Surfaced verbatim, never swallowed. */
   lastError: string | null;
+  /**
+   * What lastError was about. A failed CHECK leaves a downloaded update fully
+   * installable, so the Restart banner must stay quiet about it; a failed
+   * INSTALL is the one that banner has to show. Not persisted: an install
+   * failure does not survive the relaunch that ends it.
+   */
+  lastErrorKind: 'check' | 'install' | null;
   /** Version offered by the feed, when newer than current. */
   availableVersion: string | null;
   /** True once the update is on disk and installable. */
@@ -159,6 +166,17 @@ export function diagnoseUpdater(env: {
 }
 
 /**
+ * Whether the shell should ever ask electron-updater to check. The shipped
+ * app-update.yml names a placeholder feed (`updates.invalid`) that is replaced at
+ * runtime by the server's own; a shell with no feed of its own ("On this Mac")
+ * must not fall back to that placeholder — it would record a DNS error every
+ * hour over the honest `disabledReason`.
+ */
+export function shouldPollFeed(env: { hasUpdateConfig: boolean; feedUrl: string | null }): boolean {
+  return env.hasUpdateConfig && env.feedUrl !== null;
+}
+
+/**
  * Fold an updater event into new state. Pure, so the whole state machine is
  * testable without Electron or a live feed.
  */
@@ -167,7 +185,7 @@ export type UpdaterEvent =
   | { type: 'up-to-date'; at: string }
   | { type: 'available'; version: string; at: string }
   | { type: 'downloaded'; version: string; at: string }
-  | { type: 'error'; message: string; at: string };
+  | { type: 'error'; kind: 'check' | 'install'; message: string; at: string };
 
 export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): UpdaterState {
   switch (event.type) {
@@ -182,6 +200,7 @@ export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): Updater
         lastCheckedAt: event.at,
         lastResult: 'up-to-date',
         lastError: null,
+        lastErrorKind: null,
         availableVersion: null,
         downloaded: false,
         // Current again. Either the update was installed, or the feed rolled
@@ -195,7 +214,10 @@ export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): Updater
         lastCheckedAt: event.at,
         lastResult: 'update-available',
         lastError: null,
+        lastErrorKind: null,
         availableVersion: event.version,
+        // What is staged on disk is the older build; it is not this version.
+        downloaded: state.downloaded && state.availableVersion === event.version,
         // First sighting starts the clock; later sightings do NOT restart it.
         staleSince: state.staleSince ?? event.at,
       };
@@ -206,6 +228,7 @@ export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): Updater
         lastCheckedAt: event.at,
         lastResult: 'downloaded',
         lastError: null,
+        lastErrorKind: null,
         availableVersion: event.version,
         downloaded: true,
         staleSince: state.staleSince ?? event.at,
@@ -220,6 +243,7 @@ export function reduceUpdater(state: UpdaterState, event: UpdaterEvent): Updater
         lastCheckedAt: event.at,
         lastResult: 'error',
         lastError: event.message,
+        lastErrorKind: event.kind,
       };
   }
 }
@@ -234,6 +258,41 @@ export function persistedOf(state: UpdaterState): PersistedUpdaterState {
   };
 }
 
+/**
+ * True when version `a` is the same as or older than `b`. Numeric core first;
+ * on a tie a prerelease (`1.0.0-rc.1`) is older than its release (`1.0.0`), per
+ * semver, and prerelease identifiers compare numerically when both are numbers.
+ */
+function versionAtMost(a: string, b: string): boolean {
+  const [coreA = '', preA] = a.split(/-(.*)/s);
+  const [coreB = '', preB] = b.split(/-(.*)/s);
+  const pa = coreA.split('.').map((n) => Number.parseInt(n, 10));
+  const pb = coreB.split('.').map((n) => Number.parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (Number.isNaN(x) || Number.isNaN(y)) return a === b;
+    if (x !== y) return x < y;
+  }
+  if (preA === undefined) return preB === undefined;
+  if (preB === undefined) return true;
+  const ia = preA.split('.');
+  const ib = preB.split('.');
+  for (let i = 0; i < Math.max(ia.length, ib.length); i++) {
+    const x = ia[i];
+    const y = ib[i];
+    if (x === undefined) return true;
+    if (y === undefined) return false;
+    if (x === y) continue;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    if (nx && ny) return Number(x) < Number(y);
+    if (nx !== ny) return nx;
+    return x < y;
+  }
+  return true;
+}
+
 /** Build the initial state from the running app plus whatever was persisted. */
 export function initialUpdaterState(args: {
   currentVersion: string;
@@ -243,22 +302,37 @@ export function initialUpdaterState(args: {
   disabledReason: string | null;
   persisted: PersistedUpdaterState;
 }): UpdaterState {
+  // The persisted "waiting" version may be the one we are now running: the
+  // install worked and the binary was replaced, but the file still names it.
+  const installed =
+    args.persisted.availableVersion !== null &&
+    versionAtMost(args.persisted.availableVersion, args.currentVersion);
+  const persisted: PersistedUpdaterState = installed
+    ? { ...args.persisted, availableVersion: null, staleSince: null, lastResult: null }
+    : args.persisted;
+  // `downloaded` is false below, so the result the panel reads must agree: a
+  // persisted 'downloaded' would say "ready — restart to apply" with the banner
+  // hidden and Restart refused. Until electron-updater re-confirms the staged
+  // file, the honest reading is that an update is available.
+  const lastResult =
+    persisted.lastResult === 'downloaded' ? 'update-available' : persisted.lastResult;
   return {
     currentVersion: args.currentVersion,
     gitSha: args.gitSha,
     builtAt: args.builtAt,
     feedUrl: args.feedUrl,
     disabledReason: args.disabledReason,
-    lastCheckedAt: args.persisted.lastCheckedAt,
-    lastResult: args.persisted.lastResult,
-    lastError: args.persisted.lastError,
-    availableVersion: args.persisted.availableVersion,
+    lastCheckedAt: persisted.lastCheckedAt,
+    lastResult,
+    lastError: persisted.lastError,
+    lastErrorKind: persisted.lastResult === 'error' ? 'check' : null,
+    availableVersion: persisted.availableVersion,
     downloaded: false, // a downloaded update does not survive a relaunch decision.
     checking: false,
     // A relaunch is not an install: the shell that comes back is the same
     // build, so if it was behind before it is behind now. Only `quitAndInstall`
     // clears this, and it clears it by replacing the binary.
-    staleSince: args.persisted.staleSince,
+    staleSince: persisted.staleSince,
   };
 }
 
@@ -306,31 +380,71 @@ export function quitAndInstallNow(deps: {
   app: { isQuitting: boolean };
   autoUpdater: { quitAndInstall(isSilent: boolean, isForceRunAfter: boolean): void };
   onError: (err: Error) => void;
+  /**
+   * Clears whatever wedged the install (kills the stuck ShipIt helper) so the
+   * install can be asked for again. Called once, on the first stall: a wedged
+   * helper is the app's fault to repair, not the user's to quit around.
+   */
+  recoverStall?: () => void;
   /** Test seam for the stall watchdog below; real callers get the real timer. */
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }): void {
-  deps.app.isQuitting = true;
-  try {
-    deps.autoUpdater.quitAndInstall(false, true);
-  } catch (err) {
-    deps.app.isQuitting = false;
-    deps.onError(err as Error);
+  const schedule = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const attempt = (retriesLeft: number): void => {
+    deps.app.isQuitting = true;
+    try {
+      deps.autoUpdater.quitAndInstall(false, true);
+    } catch (err) {
+      deps.app.isQuitting = false;
+      deps.onError(err as Error);
+      return;
+    }
+    // A call that returns without throwing is not proof the install is
+    // happening. If it genuinely is, this process exits before the timer below
+    // ever fires, so firing at all IS the evidence of a stall, not a guess.
+    const watchdog = schedule(() => {
+      deps.app.isQuitting = false;
+      if (retriesLeft > 0 && deps.recoverStall) {
+        try {
+          deps.recoverStall();
+        } catch (err) {
+          deps.onError(
+            new Error(
+              `Restart stalled and the installer could not be reset: ${(err as Error).message}`,
+            ),
+          );
+          return;
+        }
+        attempt(retriesLeft - 1);
+        return;
+      }
+      deps.onError(
+        new Error(
+          'Restart did not finish — the installer stalled again after being reset, so Patch is still running the old build.',
+        ),
+      );
+    }, INSTALL_WATCHDOG_MS);
+    watchdog.unref?.();
+  };
+  attempt(1);
+}
+
+/**
+ * The Restart button's entry point: install only what has finished downloading.
+ * With nothing staged `quitAndInstall` is a silent no-op, which the stall
+ * watchdog would then misread as a wedged ShipIt — so refuse up front, loudly.
+ */
+export function installDownloaded(
+  state: UpdaterState,
+  deps: Parameters<typeof quitAndInstallNow>[0],
+): void {
+  if (!state.downloaded) {
+    deps.onError(
+      new Error('No update has finished downloading, so there is nothing to install yet.'),
+    );
     return;
   }
-  // A call that returns without throwing is not proof the install is
-  // happening — see above. If it genuinely is, this process exits before the
-  // timer below ever fires, so firing at all IS the evidence of a stall, not
-  // a guess at one.
-  const schedule = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
-  const watchdog = schedule(() => {
-    deps.app.isQuitting = false;
-    deps.onError(
-      new Error(
-        'Restart did not finish — Patch is still running the old build. Quit it by hand (⌘Q) and reopen it.',
-      ),
-    );
-  }, INSTALL_WATCHDOG_MS);
-  watchdog.unref?.();
+  quitAndInstallNow(deps);
 }
 
 /**
@@ -395,7 +509,7 @@ export function createCheckRunner(deps: {
   const timeoutMs = deps.timeoutMs ?? UPDATE_CHECK_TIMEOUT_MS;
   let inFlight: Promise<void> | null = null;
   const fail = (message: string): void =>
-    deps.record({ type: 'error', message, at: new Date().toISOString() });
+    deps.record({ type: 'error', kind: 'check', message, at: new Date().toISOString() });
 
   const run = async (): Promise<void> => {
     deps.start();
@@ -430,5 +544,48 @@ export function createCheckRunner(deps: {
       inFlight = null;
     });
     return inFlight;
+  };
+}
+
+/**
+ * Write the persisted state so a crash mid-write can never leave a truncated
+ * file where the last good one was: stage to a sibling temp file, then rename
+ * over the target. Dependencies are injected so the failure path is testable.
+ */
+export function savePersisted(
+  file: string,
+  state: PersistedUpdaterState,
+  fs: {
+    writeFile: (path: string, data: string) => void;
+    rename: (from: string, to: string) => void;
+  },
+): void {
+  const tmp = `${file}.tmp`;
+  fs.writeFile(tmp, JSON.stringify(state, null, 2));
+  fs.rename(tmp, file);
+}
+
+/**
+ * The Restart button's handler, for the lifetime of the app. Pressing Restart
+ * while an install is still pending (the watchdog gives it 20s) used to start a
+ * second, independent install chain: two `quitAndInstall` calls, two ShipIt
+ * kills, two error reports. The check path is single-flight; the install path
+ * must be too. The latch releases when the attempt is reported as failed, so
+ * the user can always try again after being told it did not work.
+ */
+export function createInstaller(
+  deps: Parameters<typeof quitAndInstallNow>[0],
+): (state: UpdaterState) => void {
+  let pending = false;
+  return (state) => {
+    if (pending) return;
+    pending = true;
+    installDownloaded(state, {
+      ...deps,
+      onError: (err) => {
+        pending = false;
+        deps.onError(err);
+      },
+    });
   };
 }

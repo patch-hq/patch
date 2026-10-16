@@ -82,7 +82,7 @@ describe('QueueTracker', () => {
     observe({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       activity: 'idle',
       permissionMode: 'auto',
       folder: '/w',
@@ -97,7 +97,7 @@ describe('QueueTracker', () => {
     observe({
       type: 'chat.spawned',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/a',
       seq: 1,
       ts: 0,
@@ -105,14 +105,14 @@ describe('QueueTracker', () => {
     observe({
       type: 'chat.spawned',
       chatId: 'c2',
-      daemonId: 'd2',
+      hostId: 'd2',
       folder: '/b',
       seq: 1,
       ts: 0,
     } as WireEvent);
     observe(queued('c1', 'a', 1));
     observe(queued('c2', 'b', 1));
-    observe({ type: 'daemon.offline', daemonId: 'd1' } as WireEvent);
+    observe({ type: 'host.offline', hostId: 'd1' } as WireEvent);
     expect(tracker.snapshot('c1')).toEqual([]);
     expect(tracker.snapshot('c2')).toHaveLength(1);
   });

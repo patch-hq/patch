@@ -1,5 +1,5 @@
 // spec/14 § File browser — live updates: `patch.file_changed` (host →
-// surfaces) is a DETAIL-level event — WsHub's `onDaemonEvent` fans it out only
+// surfaces) is a DETAIL-level event — WsHub's `onHostEvent` fans it out only
 // to connections that have `chat.focus_change`'d onto that chat, exactly like
 // `chat.artifact` (see artifacts.test.ts's "sends the slim chat.artifact to a
 // watching surface" test, which this mirrors). A surface that never focused
@@ -15,7 +15,7 @@ import { WireTestClient } from '@patch/wire/test-client';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('patch.file_changed broadcast', () => {
   it('reaches a surface watching the chat, and never a surface that never focused it', async () => {
@@ -36,11 +36,11 @@ describe('patch.file_changed broadcast', () => {
         label: 'b',
         issuedAt: 1,
       });
-      const daemonLink = new InProcessDaemonLink();
-      const built = await buildAll({ logger: false, registry, daemonLink });
+      const hostLink = new InProcessHostLink();
+      const built = await buildAll({ logger: false, registry, hostLink });
       await built.app.listen({ port: 0, host: '127.0.0.1' });
       const addr = built.app.server.address() as AddressInfo;
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
 
       const jwtWatch = await mintSurfaceCredential({
         userPrivateKey: user.privateKey,
@@ -59,11 +59,11 @@ describe('patch.file_changed broadcast', () => {
         auth: jwtWatch,
       });
       const idle = new WireTestClient({ url: `ws://127.0.0.1:${addr.port}/ws`, auth: jwtIdle });
-      // The hub greets each surface with `daemon.online` as it connects, so the
+      // The hub greets each surface with `host.online` as it connects, so the
       // waits must be listening before the connects — otherwise `watching`'s
       // greeting can land while `idle` is still connecting, and is missed.
-      const watchingOnline = watching.waitFor('daemon.online');
-      const idleOnline = idle.waitFor('daemon.online');
+      const watchingOnline = watching.waitFor('host.online');
+      const idleOnline = idle.waitFor('host.online');
       await watching.connect();
       await idle.connect();
       await watchingOnline;
@@ -76,7 +76,7 @@ describe('patch.file_changed broadcast', () => {
         const idleGot: WireEvent[] = [];
         idle.on('patch.file_changed', (e) => idleGot.push(e));
 
-        daemonLink.emit({ type: 'patch.file_changed', chatId: 'c1', path: 'src/a.ts' });
+        hostLink.emit({ type: 'patch.file_changed', chatId: 'c1', path: 'src/a.ts' });
 
         const got = await watching.waitFor('patch.file_changed');
         expect(got).toEqual({ type: 'patch.file_changed', chatId: 'c1', path: 'src/a.ts' });

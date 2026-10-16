@@ -26,6 +26,14 @@ function resolveTomorrowAt(hour: number): number {
   return at.getTime();
 }
 
+/** The coming Monday at 8am local time — a Monday today means the one a week out. */
+function resolveNextMondayAt(hour: number): number {
+  const at = new Date(Date.now());
+  at.setDate(at.getDate() + ((8 - at.getDay()) % 7 || 7));
+  at.setHours(hour, 0, 0, 0);
+  return at.getTime();
+}
+
 export interface SnoozePreset {
   id: string;
   label: string;
@@ -41,7 +49,7 @@ export const SNOOZE_PRESETS: ReadonlyArray<SnoozePreset> = [
   { id: '5pm', label: '5pm', resolve: () => resolveTodayAt(17) },
   { id: 'tomorrow-8am', label: 'Tomorrow 8am', resolve: () => resolveTomorrowAt(8) },
   { id: '1-day', label: '1 day', resolve: () => Date.now() + DAY },
-  { id: 'next-week', label: 'Next week', resolve: () => Date.now() + 7 * DAY },
+  { id: 'next-monday', label: 'Next Monday', resolve: () => resolveNextMondayAt(8) },
 ];
 
 /** Wake time as a short local date+time, e.g. `Tue 09:30`. */
@@ -52,3 +60,5 @@ export function formatWakeTime(at: number): string {
   if (sameDay) return time;
   return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
 }
+
+export { formatWakeAt, formatSnoozeMoment, formatElapsed } from '@patch/wire';

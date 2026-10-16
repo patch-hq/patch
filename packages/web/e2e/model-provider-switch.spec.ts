@@ -100,6 +100,26 @@ test.describe('model control — provider-switch confirmation', () => {
     expect(await sentModelRequests(page)).toEqual([]);
   });
 
+  test('the dimming backdrop covers the whole window, sidebar included', async ({ page }) => {
+    await mockSettings(page, false);
+    await page.goto('/app/dev-harness.html?chat=chat_bus');
+    await page.getByTestId('chat-model').click();
+    await page.getByTestId('model-option-openai/gpt-5-codex').click();
+    await expect(page.getByTestId('provider-switch-modal')).toBeVisible();
+
+    const box = await page.getByTestId('provider-switch-modal-backdrop').boundingBox();
+    const vp = page.viewportSize()!;
+    expect(box).toEqual({ x: 0, y: 0, width: vp.width, height: vp.height });
+    // A point inside the sidebar hits the backdrop, not a sidebar row.
+    const hit = await page.evaluate(() => {
+      const sb = document.querySelector('.sb')!.getBoundingClientRect();
+      return document
+        .elementFromPoint(sb.left + sb.width / 2, sb.top + sb.height / 2)!
+        .getAttribute('data-testid');
+    });
+    expect(hit).toBe('provider-switch-modal-backdrop');
+  });
+
   test('never shows the modal for a same-provider model change', async ({ page }) => {
     await mockSettings(page, false);
     await page.goto('/app/dev-harness.html?chat=chat_bus');

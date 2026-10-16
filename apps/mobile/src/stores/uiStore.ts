@@ -28,6 +28,11 @@ export interface UiError {
   id: number;
   message: string;
   at: number;
+  /**
+   * A snooze confirmation (spec/15 § Snooze sheet): drawn dark with a clock, the
+   * message in bold, an optional second line and Undo. Absent on every error.
+   */
+  snooze?: { subline: string | null; undo: () => void };
 }
 
 interface UiState {
@@ -62,8 +67,16 @@ interface UiState {
    * nothing. Persisted.
    */
   stateFilter: ChatStateFilter;
-  setCodexSignInHost(daemonId: string | null): void;
+  /**
+   * The chat whose task bar the ⋯ menu's "Add tasks" summoned (a chat with no
+   * list shows no bar), or null. Cleared when that bar is collapsed empty.
+   */
+  taskAddChatId: string | null;
+  setTaskAddChatId(chatId: string | null): void;
+  setCodexSignInHost(hostId: string | null): void;
   pushError(msg: string): void;
+  /** The toast after a snooze: bold title, an optional second line, and Undo. */
+  pushSnoozeToast(title: string, subline: string | null, undo: () => void): void;
   dismissError(id: number): void;
   setDiagnosticsOpen(v: boolean): void;
   closeDiagnosticsBlocking(): void;
@@ -78,10 +91,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   diagnosticsOpen: false,
   diagnosticsBlockingClosed: false,
   codexSignInHost: null,
+  taskAddChatId: null,
+  setTaskAddChatId(chatId) {
+    set({ taskAddChatId: chatId });
+  },
   attentionOnly: loadAttentionOnly(),
   stateFilter: loadStateFilter(),
-  setCodexSignInHost(daemonId) {
-    set({ codexSignInHost: daemonId });
+  setCodexSignInHost(hostId) {
+    set({ codexSignInHost: hostId });
   },
   setAttentionOnly(v) {
     store().set(ATTENTION_ONLY_KEY, v);
@@ -92,8 +109,20 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ stateFilter: v });
   },
   pushError(msg) {
+    // The same message again (a flapping reconnect) is one toast, not a stack
+    // of them; a fresh `at` restarts that toast's dismiss timer. Mirrors web.
+    if (get().errors.some((e) => e.message === msg)) {
+      set({ errors: get().errors.map((e) => (e.message === msg ? { ...e, at: Date.now() } : e)) });
+      return;
+    }
     const id = ++_id;
     set({ errors: [...get().errors, { id, message: msg, at: Date.now() }] });
+  },
+  pushSnoozeToast(title, subline, undo) {
+    const id = ++_id;
+    set({
+      errors: [...get().errors, { id, message: title, at: Date.now(), snooze: { subline, undo } }],
+    });
   },
   dismissError(id) {
     set({ errors: get().errors.filter((e) => e.id !== id) });

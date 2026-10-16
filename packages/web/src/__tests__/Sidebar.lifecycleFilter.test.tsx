@@ -25,7 +25,7 @@ function archivedRow(chatId: string, name: string, preview: string | null, lastU
     snoozedUntil: null,
     hidden: false,
     lastUpdated,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     jobId: null,
     statusSummary: null,

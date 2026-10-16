@@ -40,7 +40,7 @@ export function voiceCapability(host: HostPresence | undefined): VoiceCapability
   if (!report) {
     return {
       available: false,
-      hostLabel: host?.daemonId ?? 'unknown machine',
+      hostLabel: host?.hostId ?? 'unknown machine',
       missing: [],
       reason: 'this machine has not reported what it can do yet',
     };

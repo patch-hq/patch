@@ -22,7 +22,6 @@ import { ConfirmModal } from '../components/ConfirmModal.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { resetModelCatalog } from '../lib/models.js';
-import { reportHost } from './presenceHelpers.js';
 
 // The lazy editor factory first pulls in the self-hosted Monaco bootstrap, which
 // imports the real `monaco-editor` — jsdom cannot evaluate it (it reaches for
@@ -99,11 +98,11 @@ function renderEdit() {
 // grouped by host (spec/14 § Jobs view). The option a user picks carries
 // its host, so `pick()` builds the same encoded value the component does.
 const FOLDERS_BODY = {
-  hosts: [{ daemonId: 'd1', roots: ['/Users/tom/projects/portfolio'], recent: [] }],
+  hosts: [{ hostId: 'd1', roots: ['/Users/tom/projects/portfolio'], recent: [] }],
 };
 
-function pick(daemonId: string, folder: string): string {
-  return JSON.stringify([daemonId, folder]);
+function pick(hostId: string, folder: string): string {
+  return JSON.stringify([hostId, folder]);
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -124,17 +123,17 @@ function defaultRoute(url: string): Response {
  * registry (`GET /api/folders`), so a test has to wait for the machine's group
  * before it can choose anything under it.
  */
-async function choosePickerFolder(daemonId: string, folder: string): Promise<void> {
+async function choosePickerFolder(hostId: string, folder: string): Promise<void> {
   const sel = (await screen.findByTestId('job-spawn-folder')) as HTMLSelectElement;
   await waitFor(() => {
-    expect([...sel.options].some((o) => o.value === pick(daemonId, folder))).toBe(true);
+    expect([...sel.options].some((o) => o.value === pick(hostId, folder))).toBe(true);
   });
-  fireEvent.change(sel, { target: { value: pick(daemonId, folder) } });
+  fireEvent.change(sel, { target: { value: pick(hostId, folder) } });
 }
 
 /** Choose "Custom path on <host>…" and type an ad-hoc path on that machine. */
-async function chooseCustomFolder(daemonId: string, path: string): Promise<void> {
-  await choosePickerFolder(daemonId, '__custom__');
+async function chooseCustomFolder(hostId: string, path: string): Promise<void> {
+  await choosePickerFolder(hostId, '__custom__');
   fireEvent.change(await screen.findByTestId('job-spawn-folder-custom'), {
     target: { value: path },
   });
@@ -146,7 +145,7 @@ function makeChatRow(chatId: string, folder: string, name: string | null = null)
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name,
     folder,
@@ -183,7 +182,7 @@ describe('JobEditorRoute (single-page form)', () => {
   beforeEach(() => {
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
   });
 
   beforeEach(() => {
@@ -286,6 +285,35 @@ describe('JobEditorRoute (single-page form)', () => {
     expect(screen.queryByTestId('job-spawn-folder-custom')).toBeNull();
     fireEvent.change(sel, { target: { value: pick('d1', '__custom__') } });
     expect(screen.getByTestId('job-spawn-folder-custom')).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it('custom path suggests the subfolders of the directory typed so far, on that host', async () => {
+    const browsed: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/api/folders/browse')) {
+          browsed.push(String(url));
+          return jsonResponse({
+            hostId: 'd1',
+            dir: '/srv/',
+            parent: '/',
+            entries: [{ name: 'brand-new', path: '/srv/brand-new' }],
+          });
+        }
+        return defaultRoute(String(url));
+      }),
+    );
+    renderNew();
+    await chooseCustomFolder('d1', '/srv/br');
+    await waitFor(() => {
+      expect(
+        document.querySelector('#job-spawn-folder-suggestions option[value="/srv/brand-new"]'),
+      ).not.toBeNull();
+    });
+    expect(browsed[0]).toContain('hostId=d1');
+    expect(decodeURIComponent(browsed[0] ?? '')).toContain('dir=/srv/');
     vi.unstubAllGlobals();
   });
 
@@ -397,6 +425,32 @@ describe('JobEditorRoute (single-page form)', () => {
     expect((calls[0]?.body as { action: Record<string, unknown> }).action).not.toHaveProperty(
       'hidden',
     );
+    vi.unstubAllGlobals();
+  });
+
+  it('spawn: a goal alongside the prompt posts action.goal; empty posts none', async () => {
+    const calls: Array<{ body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes('/api/jobs') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+          calls.push({ body: JSON.parse(String(init?.body)) });
+          return new Response(JSON.stringify({ id: 'j_new' }), {
+            status: 201,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return defaultRoute(String(url));
+      }),
+    );
+    renderNew();
+    fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'goal job' } });
+    await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
+    fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
+    fireEvent.change(screen.getByTestId('job-spawn-goal'), { target: { value: 'tests pass' } });
+    fireEvent.click(screen.getByTestId('job-save'));
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect((calls[0]?.body as { action: Record<string, unknown> }).action.goal).toBe('tests pass');
     vi.unstubAllGlobals();
   });
 
@@ -560,7 +614,7 @@ describe('JobEditorRoute (single-page form)', () => {
       filter: null,
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/tmp',
         prompt: 'hi',
         permissionMode: 'acceptEdits',
@@ -659,7 +713,7 @@ describe('JobEditorRoute (single-page form)', () => {
       const action = (calls[0]?.body as { action: Record<string, unknown> }).action;
       expect(action).not.toHaveProperty('hidden');
       // Exactly the keys an ensure action carried before this field existed.
-      expect(Object.keys(action).sort()).toEqual(['daemonId', 'folder', 'prompt', 'type']);
+      expect(Object.keys(action).sort()).toEqual(['folder', 'hostId', 'prompt', 'type']);
       vi.unstubAllGlobals();
     });
 
@@ -708,7 +762,7 @@ describe('JobEditorRoute (single-page form)', () => {
         filter: null,
         action: {
           type: 'continue',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/tmp',
           skill: 'app-update',
           key: '{{payload.event_data.id}}',
@@ -763,7 +817,7 @@ describe('JobEditorRoute (single-page form)', () => {
         filter: null,
         action: {
           type: 'continue',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/tmp',
           skill: 'app-update',
           startHidden: true,
@@ -880,7 +934,7 @@ describe('JobEditorRoute (single-page form)', () => {
               enabled: true,
               trigger: { type: 'cron', expression: '0 9 * * *' },
               filter: null,
-              action: { type: 'spawn', daemonId: 'd1', folder: MANAGER, prompt: 'go' },
+              action: { type: 'spawn', hostId: 'd1', folder: MANAGER, prompt: 'go' },
               createdAt: 1,
               updatedAt: 1,
             });
@@ -973,9 +1027,11 @@ describe('JobEditorRoute (single-page form)', () => {
 
     it('names which model Account default resolves to once the host is known', async () => {
       // `beforeEach` registers d1 with `host: null`, so no default has
-      // reached it yet — report one, mirroring what a real `daemon.host`
+      // reached it yet — report one, mirroring what a real `host.host`
       // does once the account default has propagated.
-      reportHost('d1', { defaultModel: 'claude-opus-5' });
+      usePreferencesStore.setState((st) => ({
+        preferences: { ...st.preferences, jobDefaultModel: 'claude-opus-5' },
+      }));
       vi.stubGlobal(
         'fetch',
         vi.fn(async (url: string) => modelRoute(String(url))),
@@ -984,13 +1040,15 @@ describe('JobEditorRoute (single-page form)', () => {
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       const sel = screen.getByTestId('job-spawn-model') as HTMLSelectElement;
       await waitFor(() => {
-        expect(sel.options[0]?.textContent).toBe('Account default (Opus 5)');
+        expect(sel.options[0]?.textContent).toBe('Job default (Opus 5)');
       });
       vi.unstubAllGlobals();
     });
 
     it('names the raw model id when the catalogue has not resolved a label for it', async () => {
-      reportHost('d1', { defaultModel: 'claude-unknown-model' });
+      usePreferencesStore.setState((st) => ({
+        preferences: { ...st.preferences, jobDefaultModel: 'claude-unknown-model' },
+      }));
       vi.stubGlobal(
         'fetch',
         vi.fn(async (url: string) => modelRoute(String(url))),
@@ -999,22 +1057,8 @@ describe('JobEditorRoute (single-page form)', () => {
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       const sel = screen.getByTestId('job-spawn-model') as HTMLSelectElement;
       await waitFor(() => {
-        expect(sel.options[0]?.textContent).toBe('Account default (claude-unknown-model)');
+        expect(sel.options[0]?.textContent).toBe('Job default (claude-unknown-model)');
       });
-      vi.unstubAllGlobals();
-    });
-
-    it('leaves Account default unlabelled while no host is chosen yet', () => {
-      // `beforeEach` registers d1 with `host: null` and this test never
-      // chooses a folder, so which model the default resolves to is
-      // genuinely unknown — not a guess dressed up as one.
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async (url: string) => modelRoute(String(url))),
-      );
-      renderNew();
-      const sel = screen.getByTestId('job-spawn-model') as HTMLSelectElement;
-      expect(sel.options[0]?.textContent).toBe('Account default');
       vi.unstubAllGlobals();
     });
 
@@ -1039,9 +1083,9 @@ describe('JobEditorRoute (single-page form)', () => {
       await waitFor(() => {
         expect([...sel.options].some((o) => o.value === 'claude-opus-5')).toBe(true);
       });
-      expect(
-        fetchMock.mock.calls.some(([u]) => String(u).includes('/api/models?daemonId=d1')),
-      ).toBe(true);
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/models?hostId=d1'))).toBe(
+        true,
+      );
       fireEvent.change(sel, { target: { value: 'claude-opus-5' } });
       fireEvent.click(screen.getByTestId('job-save'));
       await waitFor(() => {
@@ -1106,7 +1150,7 @@ describe('JobEditorRoute (single-page form)', () => {
         filter: null,
         action: {
           type: 'spawn',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/Users/tom/projects/portfolio',
           prompt: 'go',
           model: 'claude-retired-1',
@@ -1245,7 +1289,7 @@ describe('JobEditorRoute (single-page form)', () => {
       // editor posted before this field existed. `notifyOnComplete: true`
       // would be a new key on every job a not-yet-OTA'd host parses strictly.
       expect(action).not.toHaveProperty('notifyOnComplete');
-      expect(Object.keys(action).sort()).toEqual(['daemonId', 'folder', 'prompt', 'type']);
+      expect(Object.keys(action).sort()).toEqual(['folder', 'hostId', 'prompt', 'type']);
       vi.unstubAllGlobals();
     });
 
@@ -1351,7 +1395,7 @@ describe('JobEditorRoute (single-page form)', () => {
     it('a stored job with no such key shows TICKED and survives an unrelated edit', async () => {
       const job = storedJob({
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/tmp',
         skill: 'app-update',
         key: '{{payload.event_data.id}}',
@@ -1374,7 +1418,7 @@ describe('JobEditorRoute (single-page form)', () => {
       vi.unstubAllGlobals();
     });
 
-    it('Include trigger event is ticked by default, posts nothing, and unticking posts includePayload: false', async () => {
+    it('Send agent trigger payload is ticked by default, posts nothing, and unticking posts includePayload: false', async () => {
       const calls: Array<{ body: unknown }> = [];
       vi.stubGlobal(
         'fetch',
@@ -1405,7 +1449,19 @@ describe('JobEditorRoute (single-page form)', () => {
       vi.unstubAllGlobals();
     });
 
-    it('unticking Include trigger event posts action.includePayload = false', async () => {
+    it('draws Send agent trigger payload directly under Skill, above Prompt', () => {
+      renderNew();
+      const skill = screen.getByTestId('job-spawn-skill');
+      const toggle = screen.getByTestId('job-include-payload');
+      const prompt = screen.getByTestId('job-spawn-prompt');
+      expect(skill.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        toggle.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(screen.getByText('Send agent trigger payload')).toBeTruthy();
+    });
+
+    it('unticking Send agent trigger payload posts action.includePayload = false', async () => {
       const calls: Array<{ body: unknown }> = [];
       vi.stubGlobal(
         'fetch',
@@ -1440,7 +1496,7 @@ describe('JobEditorRoute (single-page form)', () => {
         'spawn',
         {
           type: 'spawn',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/tmp',
           skill: 'app-update',
           includePayload: false,
@@ -1481,7 +1537,7 @@ describe('JobEditorRoute (single-page form)', () => {
     it('a stored notifyOnComplete: false shows UNTICKED and round-trips', async () => {
       const job = storedJob({
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/tmp',
         skill: 'app-update',
         notifyOnComplete: false,
@@ -1509,7 +1565,7 @@ describe('JobEditorRoute (single-page form)', () => {
     it('re-ticking a stored false DROPS the key rather than writing true', async () => {
       const job = storedJob({
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/tmp',
         skill: 'app-update',
         notifyOnComplete: false,
@@ -1528,7 +1584,7 @@ describe('JobEditorRoute (single-page form)', () => {
       await waitFor(() => expect(calls.length).toBe(1));
       const action = (calls[0]?.body as { action: Record<string, unknown> }).action;
       expect(action).not.toHaveProperty('notifyOnComplete');
-      expect(Object.keys(action).sort()).toEqual(['daemonId', 'folder', 'skill', 'type']);
+      expect(Object.keys(action).sort()).toEqual(['folder', 'hostId', 'skill', 'type']);
       vi.unstubAllGlobals();
     });
 
@@ -1537,7 +1593,7 @@ describe('JobEditorRoute (single-page form)', () => {
     it('composes with Hide chat — a stored hidden+silenced job keeps both', async () => {
       const job = storedJob({
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/tmp',
         skill: 'app-update',
         startHidden: true,
@@ -1813,7 +1869,7 @@ describe('JobEditorRoute (single-page form)', () => {
         filter: null,
         action: {
           type: 'continue',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/tmp',
           skill: 'why',
           key: '{{payload.event_data.id}}',
@@ -1932,7 +1988,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -1957,93 +2013,10 @@ describe('JobEditorRoute (single-page form)', () => {
 
   // Task 2: "no back button on edit schedule" — the editor must have a back
   // button that navigates to /jobs regardless of save.
-  it('Task 2: back button is present in new-job view and navigates to /jobs', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
-      ),
-    );
-    renderNew();
-    expect(screen.getByTestId('nav-history')).toBeInTheDocument();
-    const back = screen.getByTestId('job-editor-back');
-    expect(back).toBeInTheDocument();
-    fireEvent.click(back);
-    await waitFor(() => expect(screen.getByTestId('jobs-list')).toBeInTheDocument());
-    vi.unstubAllGlobals();
-  });
-
-  it('Task 2: back button is present in edit view and navigates to /jobs', async () => {
-    const job = {
-      id: 'j_test1',
-      name: 'back-test',
-      enabled: true,
-      trigger: { type: 'cron', expression: '0 9 * * *' },
-      filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
-      createdAt: 1,
-      updatedAt: 1,
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (String(url).includes('/runs')) {
-          return new Response(JSON.stringify({ runs: [] }), { status: 200 });
-        }
-        return new Response(JSON.stringify(job), { status: 200 });
-      }),
-    );
-    renderEdit();
-    await screen.findByTestId('job-name');
-    const back = screen.getByTestId('job-editor-back');
-    expect(back).toBeInTheDocument();
-    fireEvent.click(back);
-    await waitFor(() => expect(screen.getByTestId('jobs-list')).toBeInTheDocument());
-    vi.unstubAllGlobals();
-  });
-
   // Bug report 23 Sep 2026: "patch job back page only goes back to jobs
   // instead of where you actually where". Opened from a chat (the chat is the
   // history entry behind the editor), Back must return there rather than
   // always landing on the jobs list (lib/useGoBack).
-  it('back button returns to the chat it was opened from', async () => {
-    const job = {
-      id: 'j_test1',
-      name: 'back-test',
-      enabled: true,
-      trigger: { type: 'cron', expression: '0 9 * * *' },
-      filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
-      createdAt: 1,
-      updatedAt: 1,
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (String(url).includes('/runs')) {
-          return new Response(JSON.stringify({ runs: [] }), { status: 200 });
-        }
-        return new Response(JSON.stringify(job), { status: 200 });
-      }),
-    );
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={['/chats/c_abc', '/jobs/j_test1']} initialIndex={1}>
-          <Routes>
-            <Route path="/jobs/:id" element={<JobEditorRoute />} />
-            <Route path="/chats/:chatId" element={<div data-testid="chat-route" />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    await screen.findByTestId('job-name');
-    fireEvent.click(screen.getByTestId('job-editor-back'));
-    await waitFor(() => expect(screen.getByTestId('chat-route')).toBeInTheDocument());
-    vi.unstubAllGlobals();
-  });
-
   // Regression (G4 live-verify): saving an edited job must hit PATCH /api/jobs/:id.
   it('saves an edited job via PATCH /api/jobs/:id', async () => {
     const job = {
@@ -2052,7 +2025,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -2086,6 +2059,78 @@ describe('JobEditorRoute (single-page form)', () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps a cron job's existing filter when only its name is changed", async () => {
+    const job = {
+      id: 'j_test1',
+      name: 'old-name',
+      enabled: true,
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      filter: 'payload.firedAt != ""',
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    let patchBody: { filter?: unknown } | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (String(url).includes('/runs')) {
+          return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+        }
+        if (method === 'PATCH') {
+          patchBody = JSON.parse(String(init?.body)) as { filter?: unknown };
+          return new Response(JSON.stringify(job), { status: 200 });
+        }
+        return new Response(JSON.stringify(job), { status: 200 });
+      }),
+    );
+    renderEdit();
+    await screen.findByTestId('job-name');
+    fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'new-name' } });
+    fireEvent.click(screen.getByTestId('job-save'));
+    await waitFor(() => expect(patchBody).not.toBeNull());
+    expect(patchBody!.filter).toBe('payload.firedAt != ""');
+    vi.unstubAllGlobals();
+  });
+
+  it('saving without touching the Starts/Stops dates keeps their exact instants (seconds included)', async () => {
+    const filter = 'now >= "2027-05-01T00:00:30.000Z" and now <= "2027-05-31T23:59:59.999Z"';
+    const job = {
+      id: 'j_test1',
+      name: 'old-name',
+      enabled: true,
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      filter,
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    let patchBody: { filter?: string } | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (String(url).includes('/runs')) {
+          return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+        }
+        if (method === 'PATCH') {
+          patchBody = JSON.parse(String(init?.body)) as { filter?: string };
+          return new Response(JSON.stringify(job), { status: 200 });
+        }
+        return new Response(JSON.stringify(job), { status: 200 });
+      }),
+    );
+    renderEdit();
+    await screen.findByTestId('job-name');
+    fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'new-name' } });
+    fireEvent.click(screen.getByTestId('job-save'));
+    await waitFor(() => expect(patchBody).not.toBeNull());
+    expect(patchBody!.filter).toContain('2027-05-01T00:00:30.000Z');
+    expect(patchBody!.filter).toContain('2027-05-31T23:59:59.999Z');
+    vi.unstubAllGlobals();
+  });
+
   it('edit summary: Recent runs links to the job’s chat (header + per-run)', async () => {
     const job = {
       id: 'j_test1',
@@ -2093,7 +2138,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'continue', daemonId: 'd1', folder: '/tmp', skill: 'why' },
+      action: { type: 'continue', hostId: 'd1', folder: '/tmp', skill: 'why' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -2151,7 +2196,7 @@ describe('JobEditorRoute (single-page form)', () => {
             enabled: true,
             trigger: { type: 'cron', expression: '*/15 * * * *' },
             filter: null,
-            action: { type: 'script', daemonId: 'd1', folder: '/work', command: GATE },
+            action: { type: 'script', hostId: 'd1', folder: '/work', command: GATE },
             createdAt: 1,
             updatedAt: 1,
           });
@@ -2211,12 +2256,12 @@ describe('JobEditorRoute (single-page form)', () => {
       trigger: { type: 'cron', expression: '*/15 * * * *', timezone: 'Europe/London' },
       filter: null,
       gate: {
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         command: '#!/usr/bin/env bash\nQUIET_FROM=23\nexit 1',
         timeoutMs: 120000,
       },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', skill: 'foreman' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', skill: 'foreman' },
       concurrency: 1,
       createdAt: 1,
       updatedAt: 1,
@@ -2486,7 +2531,7 @@ describe('JobEditorRoute (single-page form)', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '0 16 * * 5' },
         filter: 'now >= "2027-05-01T16:00:00.000Z" and now <= "2027-09-01T16:00:00.000Z"',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'go' },
         createdAt: 1,
         updatedAt: 1,
       };
@@ -2516,7 +2561,7 @@ describe('JobEditorRoute (single-page form)', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '0 16 * * 5' },
         filter: 'now >= "2027-05-01T16:00:00.000Z"',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'go' },
         createdAt: 1,
         updatedAt: 1,
       };
@@ -2562,7 +2607,7 @@ describe('JobEditorRoute (single-page form)', () => {
       filter: null,
       action: {
         type: 'script',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/home/claude-dev/projects/portfolio',
         command: '#!/usr/bin/env bash\nset -euo pipefail\necho holding',
       },
@@ -2724,7 +2769,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'continue', daemonId: 'd1', folder: '/tmp', skill: 'why' },
+      action: { type: 'continue', hostId: 'd1', folder: '/tmp', skill: 'why' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -2776,7 +2821,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'continue', daemonId: 'd1', folder: '/tmp', skill: 'why' },
+      action: { type: 'continue', hostId: 'd1', folder: '/tmp', skill: 'why' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -2808,7 +2853,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'continue', daemonId: 'd1', folder: '/tmp', skill: 'why' },
+      action: { type: 'continue', hostId: 'd1', folder: '/tmp', skill: 'why' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -2854,7 +2899,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'todoist' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'go' },
       concurrency: 1,
       createdAt: 1,
       updatedAt: 1,
@@ -2871,7 +2916,7 @@ describe('JobEditorRoute (single-page form)', () => {
               startedAt: 1,
               trigger: 'todoist',
               actionType: 'spawn',
-              daemonId: 'd1',
+              hostId: 'd1',
             },
           ],
           queued: [
@@ -2881,7 +2926,7 @@ describe('JobEditorRoute (single-page form)', () => {
               chatId: 'c-waiting',
               trigger: 'todoist',
               actionType: 'spawn',
-              daemonId: 'd1',
+              hostId: 'd1',
             },
           ],
         });
@@ -2915,7 +2960,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'todoist' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'go' },
       concurrency: 2,
       createdAt: 1,
       updatedAt: 1,
@@ -2943,7 +2988,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'todoist' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'go' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3131,7 +3176,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3169,7 +3214,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3214,7 +3259,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3256,7 +3301,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3305,7 +3350,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3352,7 +3397,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3539,7 +3584,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'webhook', scheme: 'none' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp/wh2', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp/wh2', prompt: 'go' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3692,7 +3737,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3732,7 +3777,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'webhook', scheme: 'stripe', secret: 'whsec' },
       filter: 'payload.ok',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp/wh', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp/wh', prompt: 'go' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3818,7 +3863,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3856,7 +3901,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3898,7 +3943,7 @@ describe('JobEditorRoute (single-page form)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -3970,7 +4015,7 @@ describe('JobEditorRoute (single-page form)', () => {
     // The defect this replaces: a flat list of bare paths let a folder that
     // lives on host A be saved against host B (spec/14 § Jobs view —
     // "picking a folder picks the host, and that pair is stored on the action
-    // as daemonId + folder").
+    // as hostId + folder").
     const calls: Array<{ body: unknown }> = [];
     vi.stubGlobal(
       'fetch',
@@ -3978,8 +4023,8 @@ describe('JobEditorRoute (single-page form)', () => {
         if (String(url).includes('/api/folders')) {
           return jsonResponse({
             hosts: [
-              { daemonId: 'd1', roots: ['/shared/path'], recent: [] },
-              { daemonId: 'd2', roots: ['/shared/path'], recent: [] },
+              { hostId: 'd1', roots: ['/shared/path'], recent: [] },
+              { hostId: 'd2', roots: ['/shared/path'], recent: [] },
             ],
           });
         }
@@ -4003,8 +4048,8 @@ describe('JobEditorRoute (single-page form)', () => {
     fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
     fireEvent.click(screen.getByTestId('job-save'));
     await waitFor(() => expect(calls.length).toBe(1));
-    const body = calls[0]?.body as { action: { daemonId: string; folder: string } };
-    expect(body.action.daemonId).toBe('d2');
+    const body = calls[0]?.body as { action: { hostId: string; folder: string } };
+    expect(body.action.hostId).toBe('d2');
     expect(body.action.folder).toBe('/shared/path');
   });
 
@@ -4020,7 +4065,7 @@ describe('JobEditorRoute (single-page form)', () => {
       filter: null,
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/Users/tom/projects/portfolio',
         skill: 'why',
       },
@@ -4228,7 +4273,7 @@ describe('JobEditorRoute (single-page form)', () => {
       // The only chat is on another machine, so its folder root is a different
       // filesystem — opening the path through it would read the wrong file.
       useChatStore.setState({
-        chats: { c_other: { ...makeChatRow('c_other', SEED), daemonId: 'd2' } },
+        chats: { c_other: { ...makeChatRow('c_other', SEED), hostId: 'd2' } },
       });
       vi.stubGlobal(
         'fetch',
@@ -4352,7 +4397,7 @@ describe('JobEditorRoute — end condition (spec/08 § One-off jobs)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       oneOff: true,
       createdAt: 1,
       updatedAt: 1,
@@ -4379,7 +4424,7 @@ describe('JobEditorRoute — end condition (spec/08 § One-off jobs)', () => {
       enabled: false,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       oneOff: true,
       expiredAt: 1_700_000_000_000,
       createdAt: 1,
@@ -4407,7 +4452,7 @@ describe('JobEditorRoute — end condition (spec/08 § One-off jobs)', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -4439,8 +4484,8 @@ describe('JobEditorRoute — end condition (spec/08 § One-off jobs)', () => {
 });
 
 describe('resolveSkillLink', () => {
-  const CHATS = [{ chatId: 'c1', folder: '/p', daemonId: 'd1' }];
-  const base = { daemonId: 'd1', folder: '/p', chats: CHATS };
+  const CHATS = [{ chatId: 'c1', folder: '/p', hostId: 'd1' }];
+  const base = { hostId: 'd1', folder: '/p', chats: CHATS };
 
   it('is silent (not an explanation) when no skill is chosen', () => {
     expect(resolveSkillLink({ ...base, skill: '', paths: { a: '/p/a.md' } })).toBeNull();
@@ -4451,9 +4496,9 @@ describe('resolveSkillLink', () => {
     // directory — a prefix test without the separator would link into it.
     expect(
       resolveSkillLink({
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/project',
-        chats: [{ chatId: 'c1', folder: '/project', daemonId: 'd1' }],
+        chats: [{ chatId: 'c1', folder: '/project', hostId: 'd1' }],
         skill: 'a',
         paths: { a: '/project-other/.claude/skills/a.md' },
       }),
@@ -4466,10 +4511,10 @@ describe('resolveSkillLink', () => {
     expect(
       resolveSkillLink({
         ...base,
-        daemonId: 'd2',
+        hostId: 'd2',
         chats: [
-          { chatId: 'c1', folder: '/p', daemonId: 'd1' },
-          { chatId: 'c2', folder: '/p', daemonId: 'd2' },
+          { chatId: 'c1', folder: '/p', hostId: 'd1' },
+          { chatId: 'c2', folder: '/p', hostId: 'd2' },
         ],
         skill: 'a',
         paths: { a: '/p/a.md' },
@@ -4514,9 +4559,9 @@ describe('buildFolderGroups — excludes patch’s own thread folders', () => {
     const groups = buildFolderGroups({
       registry: [],
       chats: [
-        { chatId: 'thread_manager', folder: '/home/tom/.patch/threads/manager', daemonId: 'd1' },
-        { chatId: 'thread_speakers', folder: '/home/tom/.patch/threads/speakers', daemonId: 'd1' },
-        { chatId: 'c1', folder: '/home/tom/projects/alpha', daemonId: 'd1' },
+        { chatId: 'thread_manager', folder: '/home/tom/.patch/threads/manager', hostId: 'd1' },
+        { chatId: 'thread_speakers', folder: '/home/tom/.patch/threads/speakers', hostId: 'd1' },
+        { chatId: 'c1', folder: '/home/tom/projects/alpha', hostId: 'd1' },
       ],
       hostNames: HOSTS,
     });
@@ -4531,9 +4576,9 @@ describe('buildFolderGroups — excludes patch’s own thread folders', () => {
     const groups = buildFolderGroups({
       registry: [],
       chats: [
-        { chatId: 'c1', folder: '/daemon-home/threads/manager', daemonId: 'd1' },
-        { chatId: 'c2', folder: '/tmp/scratch', daemonId: 'd1' },
-        { chatId: 'c3', folder: '/home/tom/projects/alpha', daemonId: 'd1' },
+        { chatId: 'c1', folder: '/daemon-home/threads/manager', hostId: 'd1' },
+        { chatId: 'c2', folder: '/tmp/scratch', hostId: 'd1' },
+        { chatId: 'c3', folder: '/home/tom/projects/alpha', hostId: 'd1' },
       ],
       hostNames: HOSTS,
     });
@@ -4544,7 +4589,7 @@ describe('buildFolderGroups — excludes patch’s own thread folders', () => {
     const groups = buildFolderGroups({
       registry: [
         {
-          daemonId: 'd1',
+          hostId: 'd1',
           // A root deliberately placed in scratch is a user designation and
           // survives (spec/04 § Folders).
           roots: ['/tmp/work'],
@@ -4561,9 +4606,9 @@ describe('buildFolderGroups — excludes patch’s own thread folders', () => {
     // The group still has to exist — its Custom path… option is the only way
     // to aim a job at a machine patch has never been used on.
     const groups = buildFolderGroups({
-      registry: [{ daemonId: 'd1', roots: [], recent: [] }],
+      registry: [{ hostId: 'd1', roots: [], recent: [] }],
       chats: [
-        { chatId: 'thread_manager', folder: '/home/tom/.patch/threads/manager', daemonId: 'd1' },
+        { chatId: 'thread_manager', folder: '/home/tom/.patch/threads/manager', hostId: 'd1' },
       ],
       hostNames: HOSTS,
     });
@@ -4579,23 +4624,23 @@ describe('mostRecentPair — the seed a new job starts from', () => {
         {
           chatId: 'thread_manager',
           folder: '/home/tom/.patch/threads/manager',
-          daemonId: 'd1',
+          hostId: 'd1',
           lastUpdated: 9000,
         },
-        { chatId: 'older', folder: '/home/tom/projects/alpha', daemonId: 'd1', lastUpdated: 100 },
-        { chatId: 'newest', folder: '/home/tom/projects/bravo', daemonId: 'd1', lastUpdated: 200 },
+        { chatId: 'older', folder: '/home/tom/projects/alpha', hostId: 'd1', lastUpdated: 100 },
+        { chatId: 'newest', folder: '/home/tom/projects/bravo', hostId: 'd1', lastUpdated: 200 },
       ]),
-    ).toEqual({ folder: '/home/tom/projects/bravo', daemonId: 'd1' });
+    ).toEqual({ folder: '/home/tom/projects/bravo', hostId: 'd1' });
   });
 
   it('skips a junk path reached from an ordinary chat', () => {
     expect(
       mostRecentPair([
-        { chatId: 'c1', folder: '/daemon-home/threads/speakers', daemonId: 'd1', lastUpdated: 900 },
-        { chatId: 'c2', folder: '/tmp/scratch', daemonId: 'd1', lastUpdated: 800 },
-        { chatId: 'c3', folder: '/home/tom/projects/alpha', daemonId: 'd1', lastUpdated: 100 },
+        { chatId: 'c1', folder: '/daemon-home/threads/speakers', hostId: 'd1', lastUpdated: 900 },
+        { chatId: 'c2', folder: '/tmp/scratch', hostId: 'd1', lastUpdated: 800 },
+        { chatId: 'c3', folder: '/home/tom/projects/alpha', hostId: 'd1', lastUpdated: 100 },
       ]),
-    ).toEqual({ folder: '/home/tom/projects/alpha', daemonId: 'd1' });
+    ).toEqual({ folder: '/home/tom/projects/alpha', hostId: 'd1' });
   });
 
   // NO FALLBACK: with nothing but thread folders to learn from there is no
@@ -4608,7 +4653,7 @@ describe('mostRecentPair — the seed a new job starts from', () => {
         {
           chatId: 'thread_manager',
           folder: '/home/tom/.patch/threads/manager',
-          daemonId: 'd1',
+          hostId: 'd1',
           lastUpdated: 9000,
         },
       ]),
@@ -4624,7 +4669,7 @@ describe('JobEditorRoute — recurrence trigger', () => {
   beforeEach(() => {
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
     useUiStore.getState().clearToasts();
     useUiStore.getState().resolveConfirm(false);
     useChatStore.setState({
@@ -4749,7 +4794,7 @@ describe('JobEditorRoute — recurrence trigger', () => {
         timezone: 'Europe/London',
       },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -4797,7 +4842,7 @@ describe('JobEditorRoute — recurrence trigger', () => {
         timezone: 'UTC',
       },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -5014,7 +5059,7 @@ describe('JobEditorRoute — group', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -5058,7 +5103,7 @@ describe('JobEditorRoute — group', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -5171,7 +5216,7 @@ describe('JobEditorRoute — autonomy prompt', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -5270,7 +5315,7 @@ describe('JobEditorRoute — autonomy prompt', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -5298,7 +5343,7 @@ describe('JobEditorRoute — autonomy prompt', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
       createdAt: 1,
       updatedAt: 1,
     };

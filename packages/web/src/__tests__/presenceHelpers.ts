@@ -2,28 +2,29 @@
 //
 // Credentials are per host per backend (spec/10 § Surface in Settings), so a
 // test that wants "Claude is connected" has to say WHICH machine — there is no
-// account-wide slot to set. These wrap the `daemon.account` report the host
+// account-wide slot to set. These wrap the `host.account` report the host
 // really sends.
 
 import {
   CLAUDE_BACKEND_ID,
   type ClaudeMemoryEntry,
-  type DaemonAccountEvent,
-  type DaemonAccountSummary,
-  type DaemonHostEvent,
+  type HostAccountEvent,
+  type HostAccountSummary,
+  type HostInfoEvent,
 } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 
-/** Report one host's Claude credential, exactly as `daemon.account` does. */
+/** Report one host's Claude credential, exactly as `host.account` does. */
 export function reportAccount(
-  daemonId: string,
+  hostId: string,
   connected: boolean,
   accountEmail: string | null = null,
-  usage?: DaemonAccountEvent['usage'],
+  usage?: HostAccountEvent['usage'],
 ): void {
   usePresenceStore.getState().setHostAccount({
-    type: 'daemon.account',
-    daemonId,
+    type: 'host.account',
+    hostId,
     backendId: CLAUDE_BACKEND_ID,
     connected,
     accountEmail,
@@ -40,14 +41,14 @@ export function reportAccount(
  * legacy single-row fields or the new per-account rows off the same report.
  */
 export function reportAccounts(
-  daemonId: string,
-  accounts: DaemonAccountSummary[],
+  hostId: string,
+  accounts: HostAccountSummary[],
   activeAccountId?: string,
 ): void {
   const active = accounts.find((a) => a.id === activeAccountId) ?? accounts[0] ?? undefined;
   usePresenceStore.getState().setHostAccount({
-    type: 'daemon.account',
-    daemonId,
+    type: 'host.account',
+    hostId,
     backendId: CLAUDE_BACKEND_ID,
     connected: active?.connected ?? false,
     accountEmail: active?.accountEmail ?? null,
@@ -58,12 +59,12 @@ export function reportAccounts(
 }
 
 /**
- * Report one host's self-description (`daemon.host`), which is where the host's
- * last-used model comes from (spec/02 § Agent backends, spec/03 § `daemon.host`).
+ * Report one host's self-description (`host.host`), which is where the host's
+ * last-used model comes from (spec/02 § Agent backends, spec/03 § `host.host`).
  */
 export function reportHost(
-  daemonId: string,
-  patch: Partial<Omit<DaemonHostEvent, 'type' | 'daemonId'>> = {},
+  hostId: string,
+  patch: Partial<Omit<HostInfoEvent, 'type' | 'hostId'>> = {},
 ): void {
   const {
     questionExpiry,
@@ -76,12 +77,12 @@ export function reportHost(
     ...rest
   } = patch;
   usePresenceStore.getState().setHostReport({
-    type: 'daemon.host',
-    daemonId,
-    hostName: hostName ?? daemonId,
+    type: 'host.host',
+    hostId,
+    hostName: hostName ?? hostId,
     platform: 'darwin',
     arch: 'arm64',
-    daemonVersion: '0.0.0-test',
+    hostVersion: '0.0.0-test',
     updateAvailable: false,
     permissionModeDefault: permissionModeDefault ?? 'bypassPermissions',
     permissionOverrides: permissionOverrides ?? 0,
@@ -102,39 +103,39 @@ export function reportHost(
 
 /** Report one host's Claude Code settings + memory snapshot (`claude_settings.list`). */
 export function reportClaudeSettings(
-  daemonId: string,
+  hostId: string,
   memories: ClaudeMemoryEntry[] = [],
   drift?: string,
 ): void {
-  usePresenceStore.getState().setClaudeSettings(daemonId, drift, memories);
+  usePresenceStore.getState().setClaudeSettings(hostId, drift, memories);
 }
 
 /** Report one host's folder registry (`folders.list` / `folders.updated`). */
-export function reportFolders(daemonId: string, roots: string[], recent: string[] = []): void {
-  usePresenceStore.getState().setHostFolders(daemonId, roots, recent);
+export function reportFolders(hostId: string, roots: string[], recent: string[] = []): void {
+  usePresenceStore.getState().setHostFolders(hostId, roots, recent);
 }
 
 /** Back to "no host has reported anything" — the pre-greeting state. */
 export function clearHosts(): void {
-  usePresenceStore.setState({ hosts: {}, daemonOnline: false });
+  usePresenceStore.setState({ hosts: {}, hostOnline: false });
 }
 
 /**
  * Report a credential validation failure from the host, exactly as
- * `daemon.account` does with `credentialError` set. One-shot: the server
+ * `host.account` does with `credentialError` set. One-shot: the server
  * does not cache it, so a surface that connects after the fact never sees it.
  */
 export function reportCredentialError(
-  daemonId: string,
-  credentialError: NonNullable<DaemonAccountEvent['credentialError']>,
+  hostId: string,
+  credentialError: NonNullable<HostAccountEvent['credentialError']>,
   /** The accounts that are still in the store (unchanged after a rejection). */
-  accounts: DaemonAccountSummary[] = [],
+  accounts: HostAccountSummary[] = [],
   activeAccountId?: string,
 ): void {
   const active = accounts.find((a) => a.id === activeAccountId) ?? accounts[0] ?? undefined;
   usePresenceStore.getState().setHostAccount({
-    type: 'daemon.account',
-    daemonId,
+    type: 'host.account',
+    hostId,
     backendId: CLAUDE_BACKEND_ID,
     connected: active?.connected ?? false,
     accountEmail: active?.accountEmail ?? null,
@@ -142,4 +143,34 @@ export function reportCredentialError(
     ...(activeAccountId === undefined ? {} : { activeAccountId }),
     credentialError,
   });
+}
+
+/** Seed the server's shared provider accounts, as the settings state delivers them. */
+export function setSharedAccounts(accounts: {
+  claude?: { connected: boolean }[];
+  codex?: { connected: boolean; kind?: 'chatgpt' | 'apiKey' }[];
+}): void {
+  usePreferencesStore.setState({
+    shared: {
+      version: 1,
+      secrets: {
+        claude: (accounts.claude ?? []).map((a, i) => ({
+          id: `c${i}`,
+          label: `Claude ${i}`,
+          ...a,
+        })),
+        codex: (accounts.codex ?? []).map((a, i) => ({
+          id: `o${i}`,
+          label: `OpenAI ${i}`,
+          kind: 'chatgpt' as const,
+          ...a,
+        })),
+        providerKeys: [],
+      },
+    } as never,
+  });
+}
+
+export function clearSharedAccounts(): void {
+  usePreferencesStore.setState({ shared: null });
 }

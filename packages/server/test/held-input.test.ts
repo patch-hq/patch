@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import { decode, type WireEvent } from '@patch/wire';
-import { InboundDaemonLink } from '../src/daemon-link.js';
+import { InboundHostLink } from '../src/host-link.js';
 import { HeldInputStore, HELD_INPUT_MAX_AGE_MS } from '../src/held-input-store.js';
 
 const logger = pino({ level: 'silent' });
@@ -41,7 +41,7 @@ describe('messages held for an offline host', () => {
   });
 
   const makeLink = (now?: () => number) =>
-    new InboundDaemonLink({
+    new InboundHostLink({
       logger,
       heldInputs: new HeldInputStore({ dataDir: dir, logger, ...(now ? { now } : {}) }),
     });

@@ -141,6 +141,20 @@ describe('Pair — scan handling', () => {
     expect(pairCompleteMock).toHaveBeenCalledTimes(1);
   });
 
+  it('the camera reporting the same code twice in one frame pairs once (the nonce is single-use)', async () => {
+    pairCompleteMock.mockResolvedValue({ credential: 'jwt.token.here' });
+    const r = renderRN(<Pair />);
+    const camera = findHost(r.root, byType('CameraView'));
+    const scan = (camera.props as { onBarcodeScanned: (r: { data: string }) => void })
+      .onBarcodeScanned;
+    // Both calls land before React re-renders, so state cannot be the guard.
+    await actAsync(async () => {
+      scan({ data: NONCE_URL });
+      scan({ data: NONCE_URL });
+    });
+    expect(pairCompleteMock).toHaveBeenCalledTimes(1);
+  });
+
   it('an invalid QR payload surfaces an Alert and re-arms scanning (no fallback)', async () => {
     const r = renderRN(<Pair />);
     const camera = findHost(r.root, byType('CameraView'));

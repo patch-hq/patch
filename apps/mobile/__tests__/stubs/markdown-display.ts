@@ -18,10 +18,16 @@ export function removeTextStyleProps(style: object): object {
   return style;
 }
 
-export function MarkdownIt(): { parse(source: string, opts: unknown): unknown[] } {
+export function MarkdownIt(): {
+  parse(source: string, opts: unknown): unknown[];
+  disable(rules: string | string[]): unknown;
+} {
   return {
     parse(source: string): unknown[] {
       return [{ type: 'stub', content: source }];
+    },
+    disable(): unknown {
+      return this;
     },
   };
 }

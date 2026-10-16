@@ -13,9 +13,10 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { renderRN, hasText } from './testUtils/render';
+import { Text } from 'react-native';
+import { renderRN, hasText, findAllHost, byTestId } from './testUtils/render';
 import { ChatMarkdown } from '../src/components/ChatMarkdown';
-import { __parseCallCount, __resetParseCallCount } from './stubs/markdown-display';
+import { __parseCallCount, __resetParseCallCount, __lastRenderer } from './stubs/markdown-display';
 
 beforeEach(() => {
   __resetParseCallCount();
@@ -80,5 +81,27 @@ describe('ChatMarkdown — real output caching', () => {
     __resetParseCallCount();
     renderRN(<ChatMarkdown content="filler 2499" color="#111" />);
     expect(__parseCallCount()).toBe(0); // most recent — still warm
+  });
+});
+
+describe('ChatMarkdown — link previews', () => {
+  it('an http link renders its text plus the preview toggle; a mailto link has no toggle', async () => {
+    renderRN(<ChatMarkdown content="x" color="#111" />);
+    const { rules, style } = __lastRenderer();
+    const link = (href: string) =>
+      renderRN(
+        rules['link']!(
+          { key: 'l', type: 'link', attributes: { href } } as never,
+          [<Text key="t">label</Text>],
+          [],
+          style as never,
+        ) as React.ReactElement,
+      );
+    const web = link('https://example.com');
+    expect(hasText(web.root, 'label')).toBe(true);
+    expect(findAllHost(web.root, byTestId('link-preview-toggle')).length).toBe(1);
+    const mail = link('mailto:a@b.c');
+    expect(hasText(mail.root, 'label')).toBe(true);
+    expect(findAllHost(mail.root, byTestId('link-preview-toggle')).length).toBe(0);
   });
 });

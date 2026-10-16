@@ -9,7 +9,7 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { registerJobRoutes } from '../src/jobs/routes.js';
 import { JobStore } from '../src/jobs/store.js';
 import { JobLogs } from '../src/jobs/logs.js';
@@ -46,7 +46,7 @@ describe('jobs REST routes', () => {
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
     });
     return { built, jwt };
   }
@@ -62,7 +62,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'polled-by-the-ui',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const auth = { authorization: `Bearer ${jwt}` };
       for (const url of [
@@ -89,7 +89,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'mutated',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const codes: number[] = [];
       for (let i = 0; i < 40; i++) {
@@ -120,7 +120,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'morning bus',
           trigger: { type: 'cron', expression: '0 7 * * 1-5' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'check buses' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'check buses' },
         },
       });
       expect(create.statusCode).toBe(201);
@@ -222,7 +222,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'bad cron',
           trigger: { type: 'cron', expression: 'not a real cron' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         },
       });
       expect(res.statusCode).toBe(400);
@@ -244,7 +244,7 @@ describe('jobs REST routes', () => {
           payload: {
             name: 'cron-fields',
             trigger: { type: 'cron', expression },
-            action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'x' },
+            action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'x' },
           },
         });
 
@@ -281,7 +281,7 @@ describe('jobs REST routes', () => {
           name: 'bad filter',
           trigger: { type: 'cron', expression: '0 9 * * *' },
           filter: '$.broken(',
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         },
       });
       expect(res.statusCode).toBe(400);
@@ -298,7 +298,7 @@ describe('jobs REST routes', () => {
       // Seed the registry with a known chat so the gate is "warm".
       built.chatRegistry.observe({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'real',
         folder: '/x',
       });
@@ -344,7 +344,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'bad-limit',
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         },
       });
       const job = created.json() as { id: string };
@@ -375,7 +375,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 't',
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         },
       });
       const job = created.json() as { id: string };
@@ -409,7 +409,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'serialised',
         trigger: { type: 'todoist' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
         concurrency: 1,
       });
       const auth = { authorization: `Bearer ${jwt}` };
@@ -445,7 +445,7 @@ describe('jobs REST routes', () => {
       expect(body.inFlight[0]).toMatchObject({
         trigger: 'todoist',
         actionType: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/x',
       });
       expect(typeof body.inFlight[0]?.chatId).toBe('string');
@@ -453,7 +453,7 @@ describe('jobs REST routes', () => {
       expect(body.queued[0]).toMatchObject({
         trigger: 'todoist',
         actionType: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/x',
       });
       expect(typeof body.queued[0]?.fireId).toBe('string');
@@ -480,7 +480,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'unlimited',
         trigger: { type: 'todoist' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       built.jobDispatcher.dispatch(job, { n: 1 }, 'todoist');
       const res = await built.app.inject({
@@ -563,7 +563,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'no-op spawn',
           trigger: { type: 'cron', expression: '0 8 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/tmp' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/tmp' },
         },
       });
       expect(spawn.statusCode).toBe(400);
@@ -575,7 +575,7 @@ describe('jobs REST routes', () => {
 
       built.chatRegistry.observe({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'real',
         folder: '/x',
       });
@@ -605,7 +605,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'both',
           trigger: { type: 'cron', expression: '0 8 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', skill: 'foo', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/tmp', skill: 'foo', prompt: 'x' },
         },
       });
       expect(res.statusCode).toBe(201);
@@ -623,7 +623,7 @@ describe('jobs REST routes', () => {
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
     });
     try {
       const res = await built.app.inject({
@@ -656,7 +656,7 @@ describe('jobs REST routes', () => {
     try {
       built.chatRegistry.observe({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'real',
         folder: '/x',
       });
@@ -682,7 +682,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'patch-bad-cron-target',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const res = await built.app.inject({
         method: 'PATCH',
@@ -704,7 +704,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'auth-probe',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const routes: Array<{ method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string }> = [
         { method: 'GET', url: `/api/jobs/${job.id}` },
@@ -746,7 +746,7 @@ describe('jobs REST routes', () => {
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
     });
     try {
       const before = await built.app.inject({
@@ -788,7 +788,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'patch-invalid',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const res = await built.app.inject({
         method: 'PATCH',
@@ -826,7 +826,7 @@ describe('jobs REST routes', () => {
       const job = built.jobs.create({
         name: 'transient-patch-target',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const patch = await built.app.inject({
         method: 'PATCH',
@@ -846,14 +846,14 @@ describe('jobs REST routes', () => {
     try {
       built.chatRegistry.observe({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'real',
         folder: '/x',
       });
       const job = built.jobs.create({
         name: 'patch-bad-chatid',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const res = await built.app.inject({
         method: 'PATCH',
@@ -899,7 +899,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'run-now-target',
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
         },
       });
       const job = create.json() as { id: string };
@@ -918,7 +918,7 @@ describe('jobs REST routes', () => {
       });
       expect(run.statusCode).toBe(200);
       const body = run.json() as { status: string; fireId: string };
-      // bootstrap()'s InProcessDaemonLink reports itself online by default -> sent.
+      // bootstrap()'s InProcessHostLink reports itself online by default -> sent.
       expect(body.status).toBe('sent');
       expect(typeof body.fireId).toBe('string');
 
@@ -949,7 +949,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'run-draft',
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'saved prompt' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'saved prompt' },
         },
       });
       const job = create.json() as { id: string };
@@ -959,7 +959,7 @@ describe('jobs REST routes', () => {
         headers,
         payload: {
           draft: {
-            action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'edited prompt' },
+            action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'edited prompt' },
           },
         },
       });
@@ -1003,7 +1003,7 @@ describe('jobs REST routes', () => {
         payload: {
           name: 'run-now-auth',
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
         },
       });
       const job = create.json() as { id: string };
@@ -1035,7 +1035,7 @@ describe('jobs REST routes', () => {
     const job = store.create({
       name: 'no-dispatcher-target',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     registerJobRoutes(app, { logger: silentLogger, registry, jobs: store });
     await app.ready();
@@ -1158,7 +1158,7 @@ describe('jobs REST routes', () => {
           payload: {
             name: 'rethrow-create',
             trigger: { type: 'cron', expression: '0 9 * * *' },
-            action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+            action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
           },
         });
         expect(res.statusCode).toBe(500);
@@ -1174,7 +1174,7 @@ describe('jobs REST routes', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '0 9 * * *' },
         filter: null,
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         createdAt: 1,
         updatedAt: 1,
       };
@@ -1199,7 +1199,7 @@ describe('jobs REST routes', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '0 9 * * *' },
         filter: null,
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         createdAt: 1,
         updatedAt: 1,
       };
@@ -1229,7 +1229,7 @@ describe('jobs REST routes', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '0 9 * * *' },
         filter: null,
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         createdAt: 1,
         updatedAt: 1,
       };
@@ -1254,12 +1254,12 @@ describe('jobs REST routes', () => {
       const fired = store.create({
         name: 'has-fired',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const never = store.create({
         name: 'never-fired',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const logs = new JobLogs(dir);
       logs.appendRun({ ts: 10, jobId: fired.id, status: 'ok', trigger: 'cron' });
@@ -1268,7 +1268,7 @@ describe('jobs REST routes', () => {
         jobId: fired.id,
         status: 'chat-error',
         trigger: 'cron',
-        action: { type: 'spawn', chatId: 'c_latest', daemonId: 'd1' },
+        action: { type: 'spawn', chatId: 'c_latest', hostId: 'd1' },
       });
       const { app, jwt } = await rawApp(store, { withJobLogs: true });
       try {
@@ -1297,7 +1297,7 @@ describe('jobs REST routes', () => {
       store.create({
         name: 'no-logs',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const { app, jwt } = await rawApp(store);
       try {
@@ -1322,7 +1322,7 @@ describe('jobs REST routes', () => {
       const job = store.create({
         name: 'single',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       new JobLogs(dir).appendRun({ ts: 5, jobId: job.id, status: 'ok', trigger: 'cron' });
       const { app, jwt } = await rawApp(store, { withJobLogs: true });
@@ -1346,7 +1346,7 @@ describe('jobs REST routes', () => {
       const job = store.create({
         name: 'with-jobLogs',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       });
       const { app, jwt } = await rawApp(store, { withJobLogs: true });
       try {

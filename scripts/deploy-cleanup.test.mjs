@@ -179,7 +179,7 @@ const clean = {
   freed: 4.2e9,
   after: 18e9,
   usedPct: 88,
-  buildDaemons: 0,
+  buildHosts: 0,
 };
 
 test('the summary is one line naming what went and what it freed', () => {

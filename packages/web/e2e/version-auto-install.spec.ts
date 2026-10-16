@@ -54,6 +54,7 @@ const SHELL = {
   lastCheckedAt: '2026-09-07T11:55:00.000Z',
   lastResult: 'downloaded',
   lastError: null,
+  lastErrorKind: null,
   availableVersion: '0.1.900',
   downloaded: true,
   checking: false,
@@ -194,6 +195,7 @@ test.describe('version panel — updates wait to be taken', () => {
       ...SHELL,
       lastResult: 'error',
       downloaded: false,
+      lastErrorKind: 'install',
       lastError: 'Could not get code signature for running application',
     });
     await page.goto(SETTINGS);

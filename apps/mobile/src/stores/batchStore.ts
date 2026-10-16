@@ -39,6 +39,13 @@ interface BatchState {
   _reset(): void;
 }
 
+/**
+ * Bumped when a change (start / remove / check in / mark opened) begins and
+ * again when it lands. A poll that was in flight across either was answered
+ * from before the change and must not overwrite it; the next poll corrects.
+ */
+let changeEpoch = 0;
+
 export const useBatchStore = create<BatchState>((set) => ({
   mode: loadMode(),
   batch: null,
@@ -51,31 +58,42 @@ export const useBatchStore = create<BatchState>((set) => ({
   },
 
   async refresh() {
+    const epoch = changeEpoch;
     const res = await api.getBatch();
+    if (epoch !== changeEpoch) return;
     set({ batch: res.batch, carryover: res.carryover, loaded: true });
   },
 
   async start(checkIn) {
+    changeEpoch++;
     const res = await api.startBatch(checkIn);
+    changeEpoch++;
     set({ batch: res.batch, carryover: res.carryover, loaded: true });
   },
 
   async removeMember(chatId) {
+    changeEpoch++;
     const res = await api.removeBatchMember(chatId);
+    changeEpoch++;
     set({ batch: res.batch, carryover: res.carryover, loaded: true });
   },
 
   async checkInNow() {
+    changeEpoch++;
     const res = await api.checkInBatchNow();
+    changeEpoch++;
     set({ batch: res.batch, carryover: res.carryover, loaded: true });
   },
 
   async markOpened(chatId) {
+    changeEpoch++;
     const res = await api.markBatchOpened(chatId);
+    changeEpoch++;
     set({ batch: res.batch, carryover: res.carryover, loaded: true });
   },
 
   _reset() {
+    changeEpoch++;
     set({ mode: 'regular', batch: null, carryover: [], loaded: false });
   },
 }));

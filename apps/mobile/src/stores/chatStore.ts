@@ -11,7 +11,7 @@ import type {
   TodoItem,
   WireEvent,
 } from '@patch/wire';
-import { isTransientChatError } from '@patch/wire';
+import { headCodePoints, isTransientChatError } from '@patch/wire';
 import {
   deriveBadge,
   type ChatListRow,
@@ -21,6 +21,7 @@ import {
   type ProviderContextEntry,
 } from './types';
 import { loadCachedChatList, saveCachedChatList } from '../lib/chatListCache';
+import { loadVisited, saveVisited } from '../lib/visitedChats';
 
 /** A closed tool run's AI summary (spec/14 § Tool runs), or why there is none. */
 export interface ToolRunSummary {
@@ -28,6 +29,8 @@ export interface ToolRunSummary {
   /** Null exactly when generation failed; `error` then says why. */
   summary: string | null;
   error?: string;
+  /** The run is still open and `summary` narrates it as it happens; the closed label replaces it. */
+  live?: boolean;
 }
 
 /** A `patch_delegate` subagent's live state (spec/15 § Chat detail —
@@ -63,6 +66,8 @@ export interface ChatEventEntry {
    * Not the agent speaking. Mirrors the wire `ChatMessageEvent.synthetic`.
    */
   synthetic?: boolean;
+  /** A `system` line marking a turn that moved to another account — a status note, not a message. */
+  accountSwitch?: boolean;
   tool?: string;
   toolArgs?: unknown;
   toolResult?: unknown;
@@ -82,6 +87,12 @@ export interface ChatEventEntry {
    * Drawn as collapsed rows under the bubble; absent when there were none.
    */
   systemContext?: SystemContextItem[];
+  /**
+   * spec/20-hooks.md § On the user's message — hooks that advised on, or failed
+   * to check, this SENT message. This surface's own session only: never sent
+   * over the wire, not part of the persisted transcript.
+   */
+  hookAdvise?: { hookId: string; hookName: string; analysis?: string }[];
   /**
    * The user turn arrived by voice — the host prepends a `[voice • <surface>]`
    * tag (specialThreads.ts). We strip that literal text (it's agent context, not
@@ -130,6 +141,8 @@ export interface ChatEventEntry {
    * `deliveryPending` (waiting on the host reconnecting): only one applies.
    */
   queued?: boolean;
+  /** On a queued turn: it needs a run of its own, so it waits for the running turn to end rather than a tool boundary. */
+  queuedOwnTurn?: boolean;
   /**
    * spec/15 § Composer → Attachments — the files an outgoing turn was sent
    * with, as the LOCAL copies the user picked. The bubble draws its
@@ -201,6 +214,19 @@ function stripVoicePrefix(s: string): { text: string; voice: boolean; handoff: b
   const m = /^\[voice(\s+hand-off)?\s*[•·]\s*[^\]]+\]\s*/.exec(s);
   if (m) return { text: s.slice(m[0].length), voice: true, handoff: m[1] !== undefined };
   return { text: s, voice: false, handoff: false };
+}
+
+/** Everything the store holds for one chat, taken by `removeChat` so a refused delete can put it all back. */
+export interface ChatSnapshot {
+  chatId: string;
+  row: ChatRow | undefined;
+  timeline: ChatEventEntry[] | undefined;
+  providerContext: ChatState['providerContext'][string] | undefined;
+  toolRunSummaries: ChatState['toolRunSummaries'][string] | undefined;
+  delegateUpdates: ChatState['delegateUpdates'][string] | undefined;
+  branchGraph: ChatState['branchGraphs'][string] | undefined;
+  sideThreadPermissions: Record<string, PendingPermission[]>;
+  visitedAt: number | undefined;
 }
 
 interface ChatState {
@@ -294,9 +320,12 @@ interface ChatState {
   setActiveChat(chatId: string | null): void;
   markRead(chatId: string): void;
   setArchived(chatId: string, archived: boolean): void;
-  setPinned(chatId: string, pinned: boolean): void;
+  /** `pinnedAt` puts back the time a refused unpin took away; omitted, a pin is stamped now. */
+  setPinned(chatId: string, pinned: boolean, pinnedAt?: number | null): void;
   /** Local optimistic update for snooze / unsnooze (spec/04 § Snooze). */
   setSnoozed(chatId: string, snoozedUntil: number | null): void;
+  /** Optimistic rename; null clears back to the derived label. */
+  setName(chatId: string, name: string | null): void;
   /** Local optimistic update for hide / Show (spec/04 § Hidden). */
   setHidden(chatId: string, hidden: boolean): void;
   /** Optimistic goal write (goal bar); reverted by the caller on failure. */
@@ -335,13 +364,16 @@ interface ChatState {
    * ONTO this row (`ensureRow` in `applyEvents` finds it) rather than racing a
    * second one into existence. This is NOT a fallback: it seeds only the two
    * facts the client genuinely knows (the id it was just given and the folder
-   * the user picked); `daemonId` stays empty because the host is genuinely
+   * the user picked); `hostId` stays empty because the host is genuinely
    * unknown until the host names it, and a spawn that FAILS still arrives as
    * `chat.error` and renders as the red `turn-error` row in the transcript
    * (`chat.error` is deliberately not detail-gated, so it lands regardless).
    */
   ensureChat(chatId: string, folder: string): void;
-  removeChat(chatId: string): void;
+  /** Drop a chat and everything held for it; returns what was held, to `restoreChat` if the delete is refused. */
+  removeChat(chatId: string): ChatSnapshot | null;
+  /** Put back what `removeChat` returned. */
+  restoreChat(snapshot: ChatSnapshot): void;
   appendLocalUserMessage(
     chatId: string,
     content: string,
@@ -420,12 +452,15 @@ function decisionOf(ev: { approve: boolean; decision?: string }): 'approve' | 'd
   return ev.decision === 'deny' || ev.approve === false ? 'deny' : 'approve';
 }
 
+/** When each chat was last opened on this phone; persisted (lib/visitedChats.ts). */
+const visited: Record<string, number> = loadVisited();
+
 function emptyRow(chatId: string, folder: string): ChatRow {
   return {
     chatId,
     name: null,
     // Unknown until `chat.spawned` names it.
-    daemonId: '',
+    hostId: '',
     folder,
     activity: 'idle',
     // The floor of the resolution chain (spec/02 § Permission mode) — replaced
@@ -437,7 +472,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     lastUpdated: 0,
     lastUserActivity: 0,
     awaitingPermission: false,
-    lastVisitedAt: 0,
+    lastVisitedAt: visited[chatId] ?? 0,
     preview: null,
     pendingPermissions: [],
     lastSeq: 0,
@@ -445,6 +480,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     snoozedUntil: null,
     hidden: false,
     backgroundTasks: null,
+    context: null,
     // Unknown until the roster or `chat.spawned` names it.
     model: null,
     // A chat is a person's until the roster or `chat.spawned` names a job.
@@ -481,8 +517,11 @@ function mergeListRow(prior: ChatRow | undefined, r: ChatListRow): ChatRow {
     disabled: r.disabled !== undefined ? r.disabled : base.disabled,
     pendingWake: r.pendingWake !== undefined ? r.pendingWake : base.pendingWake,
     snoozedUntil: r.snoozedUntil !== undefined ? r.snoozedUntil : base.snoozedUntil,
+    snoozeRecords: r.snoozeRecords !== undefined ? r.snoozeRecords : base.snoozeRecords,
+    runningSince: r.runningSince !== undefined ? r.runningSince : base.runningSince,
     hidden: r.hidden !== undefined ? r.hidden : base.hidden,
     backgroundTasks: r.backgroundTasks !== undefined ? r.backgroundTasks : base.backgroundTasks,
+    context: r.context !== undefined ? r.context : base.context,
   };
 }
 
@@ -491,21 +530,37 @@ function mergeListRow(prior: ChatRow | undefined, r: ChatListRow): ChatRow {
  * does not carry `model` (an older server) keeps the model `existing` already
  * knows from the live stream rather than wiping it to unknown.
  */
+/**
+ * Chats the account roster (or a `chat.spawned`) has named. The cold-start roster
+ * leaves archived chats out, so a frame about a chat that is in neither this set
+ * nor the store is about a chat the Chats list must not show — never a
+ * chat-creation event. Mirrors web's `rosteredChatIds`.
+ */
+const rosteredChatIds = new Set<string>();
+/** False until the first roster lands; frames that beat it still create rows. */
+let rosterLanded = false;
+
 function rowsToRecord(
   rows: ChatListRow[],
   existing: Record<string, ChatRow> = {},
 ): Record<string, ChatRow> {
   const next: Record<string, ChatRow> = {};
   for (const r of rows) {
-    // Only the roster's own fields are laid over a FRESH row: `existing` is
-    // consulted solely for fields the roster row omits (see mergeListRow).
+    // The roster's own fields are laid over a FRESH row; `existing` is consulted
+    // only for what the roster does not carry (see `ChatListRow`) — the live
+    // stream may have landed before this answer did (bootstrap opens the socket
+    // first), and a refresh must not wipe it.
     const prior = existing[r.chatId];
     const fresh = emptyRow(r.chatId, r.folder);
+    // A roster snapshot older than the last `chat.state` is a race, not news
+    // (the same rule `chat.state` applies to itself): keep the live state.
+    const live = prior !== undefined && prior.lastUpdated > r.lastUpdated;
     next[r.chatId] = mergeListRow(
       prior
         ? {
             ...fresh,
             model: prior.model,
+            context: prior.context,
             jobId: prior.jobId,
             statusSummary: prior.statusSummary,
             statusKind: prior.statusKind,
@@ -514,9 +569,22 @@ function rowsToRecord(
             reminder: prior.reminder,
             todos: prior.todos,
             disabled: prior.disabled,
+            preview: prior.preview,
+            lastVisitedAt: prior.lastVisitedAt,
+            pendingPermissions: prior.pendingPermissions,
+            lastSeq: prior.lastSeq,
+            awaitingPermission: prior.awaitingPermission,
           }
         : undefined,
-      r,
+      live
+        ? {
+            ...r,
+            activity: prior.activity,
+            permissionMode: prior.permissionMode,
+            lastUpdated: prior.lastUpdated,
+            lastUserActivity: prior.lastUserActivity,
+          }
+        : r,
     );
   }
   return next;
@@ -527,7 +595,7 @@ function toListRow(row: ChatRow): ChatListRow {
   return {
     chatId: row.chatId,
     name: row.name,
-    daemonId: row.daemonId,
+    hostId: row.hostId,
     folder: row.folder,
     activity: row.activity,
     permissionMode: row.permissionMode,
@@ -538,8 +606,11 @@ function toListRow(row: ChatRow): ChatListRow {
     lastUserActivity: row.lastUserActivity,
     pendingWake: row.pendingWake,
     snoozedUntil: row.snoozedUntil,
+    ...(row.snoozeRecords !== undefined ? { snoozeRecords: row.snoozeRecords } : {}),
+    ...(row.runningSince !== undefined ? { runningSince: row.runningSince } : {}),
     hidden: row.hidden,
     backgroundTasks: row.backgroundTasks,
+    context: row.context,
     model: row.model,
     jobId: row.jobId,
     statusSummary: row.statusSummary,
@@ -561,6 +632,9 @@ export function accountSwitchLine(sw: { from: string; to: string; until?: number
   return `Switched from ${sw.from} to ${sw.to} — ${sw.from} is out${back}`;
 }
 
+/** `${chatId}::${localId}` of turns whose persisted echo has landed, so a late `chat.queued` is ignored. */
+const settledLocalIds = new Set<string>();
+
 export const useChatStore = create<ChatState>((set, get) => ({
   // Painted from the on-device cache SYNCHRONOUSLY, at store construction —
   // before the first render, let alone the first network call (spec/15 §
@@ -578,6 +652,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   hydrate(rows) {
     saveCachedChatList(rows);
+    rosterLanded = true;
+    rosteredChatIds.clear();
+    for (const r of rows) rosteredChatIds.add(r.chatId);
     set({
       chats: rowsToRecord(rows, get().chats),
       rosterGeneration: get().rosterGeneration + 1,
@@ -663,14 +740,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     for (const event of events) {
+      // Once the roster has landed, only `chat.spawned` creates a chat. Any other
+      // chat-scoped frame for a chat neither rostered nor already held (an
+      // archived chat that woke, a replay after a host restart) would go through
+      // `ensureRow` and appear as a new ACTIVE row in the Chats list.
+      if (
+        rosterLanded &&
+        event.type !== 'chat.spawned' &&
+        'chatId' in event &&
+        typeof event.chatId === 'string' &&
+        !rosteredChatIds.has(event.chatId) &&
+        chats[event.chatId] === undefined
+      ) {
+        continue;
+      }
       switch (event.type) {
         case 'chat.spawned': {
+          rosteredChatIds.add(event.chatId);
           const row = ensureRow(event.chatId, event.folder);
-          // Keep the host: a chat row with no daemonId cannot answer "is this
+          // Keep the host: a chat row with no hostId cannot answer "is this
           // machine's Claude connected?" or "whose disk is this folder on?".
           chats[event.chatId] = {
             ...row,
-            daemonId: event.daemonId,
+            hostId: event.hostId,
             folder: event.folder,
             // Absent on a host with no model catalogue (or an older host):
             // "unchanged, don't guess" — the same rule as `chat.state` below.
@@ -683,6 +775,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         case 'chat.state': {
           const row = ensureRow(event.chatId, event.folder);
+          // `lastUpdated` is host-owned and only ever set from state frames, so an
+          // older one is a replay/race, not news: applying it rolls `activity`
+          // back (a tick on a working chat, orange on a finished one). As web.
+          if (event.lastUpdated < row.lastUpdated) break;
           chats[event.chatId] = {
             ...row,
             activity: event.activity,
@@ -709,6 +805,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // the chat (spec/04 § Snooze), so it must land; an omitted field is a
             // `chat.state` about something else and preserves the known wake time.
             snoozedUntil: event.snoozedUntil !== undefined ? event.snoozedUntil : row.snoozedUntil,
+            // What each snooze was and did (spec/04 § Snooze → Back); omitted by
+            // an older host, which keeps what is known.
+            snoozeRecords:
+              event.snoozeRecords !== undefined ? event.snoozeRecords : row.snoozeRecords,
+            runningSince: event.runningSince !== undefined ? event.runningSince : row.runningSince,
             // spec/04 § Hidden — same "omitted is unchanged" rule: an explicit
             // `false` is the chat leaving Hidden and must land.
             hidden: event.hidden !== undefined ? event.hidden : row.hidden,
@@ -720,6 +821,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.backgroundTasks !== undefined
                 ? event.backgroundTasks
                 : (row.backgroundTasks ?? null),
+            context: event.context !== undefined ? event.context : (row.context ?? null),
             // spec/04 § Model — the model the next turn runs on. Also the
             // acknowledgement of a `chat.model_request` from ANY surface. An
             // omitted field is "unchanged", never "no model".
@@ -743,10 +845,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             disabled: event.disabled !== undefined ? event.disabled : row.disabled,
           };
           // The host is speaking for this chat again with a non-`errored`
-          // activity, so the server's daemon-link-lost notice has resolved —
+          // activity, so the server's host-link-lost notice has resolved —
           // the turn carried on or was re-sent, as its message promised. Only
-          // this clears it: no timer, and not `daemon.online` on its own.
+          // this clears it: no timer, and not `host.online` on its own.
           if (event.activity !== 'errored') clearTransientErrors(event.chatId);
+          // A chat that is not running cannot be holding anything behind a turn
+          // (the server's QueueTracker applies the same rule). `chat.dequeued`
+          // is live-only, so a missed one would leave the message QUEUED for good.
+          if (event.activity === 'idle') {
+            const held = timelines[event.chatId];
+            if (held?.some((e) => e.queued === true)) {
+              timelines[event.chatId] = held.map((e) =>
+                e.queued === true ? { ...e, queued: false } : e,
+              );
+            }
+          }
           break;
         }
         case 'chat.message': {
@@ -814,8 +927,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 : { text: event.content, voice: false, handoff: false };
           chats[event.chatId] = {
             ...row,
-            preview: text.slice(0, 140),
-            lastUpdated: Date.now(),
+            preview: headCodePoints(text, 140),
+            // `lastUpdated` is the host's (`chat.state`), not this frame's arrival
+            // time: a `chat.replay` re-delivers the whole history, and stamping
+            // "now" on each message would turn every read chat unread (as web).
             lastSeq: Math.max(row.lastSeq, event.seq),
           };
           // Reconcile an optimistic outgoing user echo (rendered locally on send —
@@ -883,8 +998,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     e.kind === 'message' &&
                     e.seq === event.seq &&
                     e.role === event.role &&
-                    e.content === text &&
-                    e.localId === undefined,
+                    e.localId === undefined &&
+                    // The same text — or, for a turn this surface sent, the
+                    // same localId: a promoted echo keeps what was TYPED, which
+                    // the host's persisted text can drift from.
+                    (e.content === text ||
+                      (event.localId !== undefined &&
+                        settledLocalIds.has(`${event.chatId}::${event.localId}`))),
                 )
               : -1;
             if (held >= 0 && list) {
@@ -912,7 +1032,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const idx =
               byLocalId >= 0
                 ? byLocalId
-                : list
+                : // An echo that names a localId is a different turn from any
+                  // pending one (a replayed earlier same-text message, another
+                  // surface): folding it in moved the pending bubble up the
+                  // transcript, and the real echo then re-added it at the tail.
+                  list && event.localId === undefined
                   ? list.findIndex(
                       (e) =>
                         e.localId !== undefined &&
@@ -928,12 +1052,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const prev = idx >= 0 && list ? list[idx] : undefined;
             if (prev && list) {
               const updated = ownTimeline(event.chatId);
+              // A `chat.queued` can still arrive after this echo; remember the
+              // turn settled so it does not draw a second QUEUED bubble.
+              if (prev.localId !== undefined)
+                settledLocalIds.add(`${event.chatId}::${prev.localId}`);
               updated[idx] = {
                 ...prev,
                 seq: event.seq,
                 localId: undefined,
                 deliveryPending: false,
                 deliveryFailed: false,
+                // The persisted copy only exists once the turn has left the
+                // queue; `chat.dequeued` is live-only (matches web).
+                queued: false,
                 ...(voice ? { voice: true } : {}),
                 // The optimistic echo cannot know what the host injected.
                 ...(event.systemContext && event.systemContext.length > 0
@@ -954,6 +1085,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : {}),
             ...(voice ? { voice: true } : {}),
             ...(handoff ? { voiceHandoff: true } : {}),
+            ...(event.accountSwitch ? { accountSwitch: true } : {}),
             ...(event.systemContext && event.systemContext.length > 0
               ? { systemContext: event.systemContext }
               : {}),
@@ -972,13 +1104,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (idx >= 0 && list[idx]!.queued === true) {
             // The host re-announcing it after an edit (§ Edit): update the
             // text IN PLACE — the turn keeps its place in the queue.
-            list[idx] = { ...list[idx]!, content: event.message };
+            list[idx] = {
+              ...list[idx]!,
+              content: event.message,
+              ...(event.ownTurn ? { queuedOwnTurn: true } : {}),
+            };
           } else if (idx >= 0) {
             // A positive delivery signal (spec/12): clear the delivery marks so
             // it reads as queued, not "sending…", and move it to the tail so it
             // sits BELOW the live transcript even if output raced in meanwhile.
             const [msg] = list.splice(idx, 1);
-            list.push({ ...msg!, queued: true, deliveryPending: false, deliveryFailed: false });
+            list.push({
+              ...msg!,
+              queued: true,
+              ...(event.ownTurn ? { queuedOwnTurn: true } : {}),
+              deliveryPending: false,
+              deliveryFailed: false,
+            });
+          } else if (settledLocalIds.has(`${event.chatId}::${event.localId}`)) {
+            // Late announcement for a turn whose persisted echo already landed.
+            break;
           } else {
             list.push({
               seq: -Date.now(),
@@ -987,6 +1132,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               content: event.message,
               localId: event.localId,
               queued: true,
+              ...(event.ownTurn ? { queuedOwnTurn: true } : {}),
               at: Date.now(),
             });
           }
@@ -1122,7 +1268,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             at: Date.now(),
           };
           if (existing >= 0) list[existing] = entry;
-          else list.push(entry);
+          else pushTimeline(event.chatId, entry);
           break;
         }
         case 'chat.permission_request': {
@@ -1207,6 +1353,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // there is no card to address, so the frame is not a store event.
           if (event.chatId === undefined) continue;
           const chatId = event.chatId;
+          // A side thread's own question is held per branch, not on the row:
+          // answered elsewhere, it has to leave there as well.
+          for (const key of Object.keys(sideThreadPermissions)) {
+            if (!key.startsWith(`${chatId}::`)) continue;
+            const held = sideThreadPermissions[key]!;
+            const left = held.filter((p) => p.requestId !== event.requestId);
+            if (left.length === held.length) continue;
+            sideThreadPermissions[key] = left;
+            changed = true;
+          }
           const row = chats[chatId];
           // A response for a chat this surface has never loaded has nothing to
           // resolve — seeding a row from it would invent a chat out of an answer.
@@ -1257,6 +1413,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               callIds: event.callIds,
               summary: event.summary,
               ...(event.error !== undefined ? { error: event.error } : {}),
+              ...(event.live === true ? { live: true } : {}),
             },
           };
           break;
@@ -1337,8 +1494,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   markRead(chatId) {
     const row = get().chats[chatId];
     if (!row) return;
+    // Never earlier than the chat's own `lastUpdated`: that is the SERVER's
+    // clock, and a phone running behind it would otherwise mark a chat it just
+    // read as still unread.
+    const at = Math.max(Date.now(), row.lastUpdated);
+    visited[chatId] = at;
+    saveVisited(visited);
     set({
-      chats: { ...get().chats, [chatId]: { ...row, lastVisitedAt: Date.now() } },
+      chats: { ...get().chats, [chatId]: { ...row, lastVisitedAt: at } },
     });
   },
 
@@ -1353,13 +1516,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  setPinned(chatId, pinned) {
+  setPinned(chatId, pinned, pinnedAt) {
     const row = get().chats[chatId];
     if (!row) return;
     set({
       chats: {
         ...get().chats,
-        [chatId]: { ...row, pinned, pinnedAt: pinned ? Date.now() : null },
+        [chatId]: { ...row, pinned, pinnedAt: pinned ? (pinnedAt ?? Date.now()) : null },
       },
     });
   },
@@ -1373,6 +1536,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [chatId]: { ...row, snoozedUntil },
       },
     });
+  },
+
+  setName(chatId, name) {
+    const row = get().chats[chatId];
+    if (!row) return;
+    set({ chats: { ...get().chats, [chatId]: { ...row, name } } });
   },
 
   setHidden(chatId, hidden) {
@@ -1420,18 +1589,79 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   removeChat(chatId) {
+    const before = get();
+    const snapshot: ChatSnapshot | null = before.chats[chatId]
+      ? {
+          chatId,
+          row: before.chats[chatId],
+          timeline: before.timelines[chatId],
+          providerContext: before.providerContext[chatId],
+          toolRunSummaries: before.toolRunSummaries[chatId],
+          delegateUpdates: before.delegateUpdates[chatId],
+          branchGraph: before.branchGraphs[chatId],
+          sideThreadPermissions: Object.fromEntries(
+            Object.entries(before.sideThreadPermissions).filter(([k]) =>
+              k.startsWith(`${chatId}::`),
+            ),
+          ),
+          visitedAt: visited[chatId],
+        }
+      : null;
     const chats = { ...get().chats };
     const timelines = { ...get().timelines };
     const providerContext = { ...get().providerContext };
+    const toolRunSummaries = { ...get().toolRunSummaries };
+    const delegateUpdates = { ...get().delegateUpdates };
+    const branchGraphs = { ...get().branchGraphs };
+    const sideThreadPermissions = { ...get().sideThreadPermissions };
+    delete visited[chatId];
+    saveVisited(visited);
     delete chats[chatId];
     delete timelines[chatId];
     delete providerContext[chatId];
+    delete toolRunSummaries[chatId];
+    delete delegateUpdates[chatId];
+    delete branchGraphs[chatId];
+    for (const key of Object.keys(sideThreadPermissions)) {
+      if (key.startsWith(`${chatId}::`)) delete sideThreadPermissions[key];
+    }
     // Drop it from the cache too, or a chat deleted on this device is painted
     // back on the next launch and only disappears once the roster fetch lands.
     saveCachedChatList(Object.values(chats).map(toListRow));
-    const next: Partial<ChatState> = { chats, timelines, providerContext };
+    const next: Partial<ChatState> = {
+      chats,
+      timelines,
+      providerContext,
+      toolRunSummaries,
+      delegateUpdates,
+      branchGraphs,
+      sideThreadPermissions,
+    };
     if (get().activeChatId === chatId) next.activeChatId = null;
     set(next as ChatState);
+    return snapshot;
+  },
+
+  restoreChat(snap) {
+    const { chatId } = snap;
+    const s = get();
+    const put = <T>(held: Record<string, T>, value: T | undefined): Record<string, T> =>
+      value === undefined ? held : { ...held, [chatId]: value };
+    if (snap.visitedAt !== undefined) {
+      visited[chatId] = snap.visitedAt;
+      saveVisited(visited);
+    }
+    const chats = put(s.chats, snap.row);
+    saveCachedChatList(Object.values(chats).map(toListRow));
+    set({
+      chats,
+      timelines: put(s.timelines, snap.timeline),
+      providerContext: put(s.providerContext, snap.providerContext),
+      toolRunSummaries: put(s.toolRunSummaries, snap.toolRunSummaries),
+      delegateUpdates: put(s.delegateUpdates, snap.delegateUpdates),
+      branchGraphs: put(s.branchGraphs, snap.branchGraph),
+      sideThreadPermissions: { ...s.sideThreadPermissions, ...snap.sideThreadPermissions },
+    });
   },
 
   appendLocalUserMessage(chatId, content, localId, attachments, opts) {
@@ -1487,8 +1717,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.chats,
         [chatId]: {
           ...row,
-          preview: content.slice(0, 140),
-          lastUpdated: Date.now(),
+          preview: headCodePoints(content, 140),
           // spec/14 § Sidebar ordering — optimistic, so the row moves to the
           // top of its folder the instant the user sends, not once the
           // host's `chat.state` round-trips back.
@@ -1555,6 +1784,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   _reset() {
+    rosterLanded = false;
+    rosteredChatIds.clear();
+    settledLocalIds.clear();
+    for (const id of Object.keys(visited)) delete visited[id];
+    saveVisited(visited);
     saveCachedChatList([]);
     set({
       chats: {},

@@ -27,7 +27,7 @@ three.
 ## Fixtures
 
 Fixture audio for the host unit tests lives in
-`packages/daemon/test/fixtures/audio/`. Mock backends in
+`packages/host/test/fixtures/audio/`. Mock backends in
 `docker-compose.test.yml` make these self-contained:
 
 - `WHISPER_BACKEND=mock` echoes a synthetic transcript whose ms-duration
@@ -38,7 +38,7 @@ Fixture audio for the host unit tests lives in
 ## Latency-budget vitest
 
 ```bash
-pnpm --filter @patch/daemon test:latency
+pnpm --filter @patch/host test:latency
 ```
 
 (currently shipping as part of `audio-session.test.ts` — measured via

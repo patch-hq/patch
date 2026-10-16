@@ -143,7 +143,7 @@ if (process.env['PATCH_REAL_CLAUDE'] !== '1') {
   console.log(
     '\nnote: the real-Claude layers (real-backend, mcp-tools-real-sdk) are SKIPPED — ' +
       'they spend tokens.\n      Run them deliberately: ' +
-      'PATCH_REAL_CLAUDE=1 pnpm --filter @patch/daemon exec vitest run test/real-backend.integration.test.ts',
+      'PATCH_REAL_CLAUDE=1 pnpm --filter @patch/host exec vitest run test/real-backend.integration.test.ts',
   );
 }
 

@@ -39,6 +39,12 @@ function stamp(build: Pick<LayerBuild, 'version' | 'gitSha'>): string {
  */
 function shellStatus(state: DesktopUpdaterState): string {
   if (state.checking) return 'checking…';
+  const result = shellResult(state);
+  // Dated, so "up to date" and "check failed" say how stale that answer is.
+  return state.lastCheckedAt ? `${result} · checked ${relativeIso(state.lastCheckedAt)}` : result;
+}
+
+function shellResult(state: DesktopUpdaterState): string {
   switch (state.lastResult) {
     case 'downloaded':
       return `${state.availableVersion} ready — restart to apply`;
@@ -108,8 +114,8 @@ export function UpdatesPage(): JSX.Element {
   // the version the host runs rather than guessing a target.
   const hostsBehind = behind.some((b) => b.kind === 'host');
   const { data: published } = useQuery({
-    queryKey: ['daemon-manifest'],
-    queryFn: () => api.daemonManifest(),
+    queryKey: ['host-manifest'],
+    queryFn: () => api.hostManifest(),
     enabled: hostsBehind,
     retry: false,
   });
@@ -155,17 +161,17 @@ export function UpdatesPage(): JSX.Element {
           {behind.map((b) =>
             b.kind === 'host' ? (
               <Row
-                key={b.host.daemonId}
+                key={b.host.hostId}
                 title={`${hostLabel(b.host)} host`}
                 sub={[
                   b.host.host && published?.version
-                    ? `${b.host.host.daemonVersion} → ${published.version}`
-                    : b.host.host?.daemonVersion,
+                    ? `${b.host.host.hostVersion} → ${published.version}`
+                    : b.host.host?.hostVersion,
                   b.host.online ? null : 'offline',
                 ]
                   .filter(Boolean)
                   .join(' · ')}
-                testid={`version-behind-${b.host.daemonId}`}
+                testid={`version-behind-${b.host.hostId}`}
               >
                 <HostUpdateButton host={b.host} />
               </Row>
@@ -187,7 +193,11 @@ export function UpdatesPage(): JSX.Element {
           ) : null}
           {shell?.lastResult === 'error' && shell.lastError ? (
             <Row
-              title="Last update check failed"
+              title={
+                shell.lastErrorKind === 'install'
+                  ? 'Last update install failed'
+                  : 'Last update check failed'
+              }
               sub={shell.lastError}
               testid="version-shell-error"
             />
@@ -230,10 +240,10 @@ export function UpdatesPage(): JSX.Element {
         ) : null}
         {sortHosts(Object.values(hosts)).map((h) => (
           <Row
-            key={h.daemonId}
+            key={h.hostId}
             title={`${hostLabel(h)} host`}
-            testid={`version-host-${h.daemonId}`}
-            sub={h.host ? <code>{h.host.daemonVersion}</code> : 'not reported'}
+            testid={`version-host-${h.hostId}`}
+            sub={h.host ? <code>{h.host.hostVersion}</code> : 'not reported'}
           />
         ))}
         {report?.desktop ? (
@@ -283,7 +293,7 @@ function HostUpdateButton({ host }: { host: HostPresence }): JSX.Element {
       type="button"
       className="set-btn"
       disabled={updating}
-      data-testid={`host-${host.daemonId}-update`}
+      data-testid={`host-${host.hostId}-update`}
       onClick={apply}
     >
       {updating ? 'Updating…' : 'Update'}

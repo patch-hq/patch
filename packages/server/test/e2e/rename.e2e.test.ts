@@ -4,7 +4,7 @@
 //
 // The path exercised is the one a surface actually takes:
 //   POST /api/chats/:id/rename
-//     → server chat-routes → InboundDaemonLink
+//     → server chat-routes → InboundHostLink
 //       → real serverLink WS → real Daemon.setName
 //         → meta.json on disk + chat.state fanned back out to the surface
 //
@@ -39,7 +39,7 @@ async function spawnChat(
     method: 'POST',
     url: '/api/chats',
     headers: { authorization: `Bearer ${jwt}` },
-    payload: { daemonId: harness.daemonId, folder },
+    payload: { hostId: harness.hostId, folder },
   });
   expect(res.statusCode).toBe(202);
   const chatId = (res.json() as { chatId: string }).chatId;

@@ -13,7 +13,7 @@ import { WireTestClient } from '@patch/wire/test-client';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const wait = (ms = 60): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -30,11 +30,11 @@ describe('the server as the log of record', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(51));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: link,
+      hostLink: link,
       logSyncDelayMs: 30,
     });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
@@ -48,8 +48,8 @@ describe('the server as the log of record', () => {
     });
     const client = new WireTestClient({ url, auth: jwt });
     await client.connect();
-    await client.waitFor('daemon.online');
-    link.emit({ type: 'chat.spawned', chatId: 'c1', daemonId: 'd1', folder: '/w' });
+    await client.waitFor('host.online');
+    link.emit({ type: 'chat.spawned', chatId: 'c1', hostId: 'd1', folder: '/w' });
     // Watching the chat is what makes a surface receive its transcript events live.
     client.replay('c1', -1);
     await wait(30);
@@ -59,7 +59,7 @@ describe('the server as the log of record', () => {
       ({
         type: 'chat.state',
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         activity: 'idle',
         permissionMode: 'auto',
         folder: '/w',
@@ -151,7 +151,7 @@ describe('the server as the log of record', () => {
       await wait(250);
       const acks = t.link.sent.filter((s) => s.event.type === 'chat.committed');
       expect(acks).toHaveLength(1);
-      expect(acks[0]!.daemonId).toBe('d1');
+      expect(acks[0]!.hostId).toBe('d1');
       expect(acks[0]!.event).toEqual({ type: 'chat.committed', chatId: 'c1', through: 5 });
     } finally {
       await t.client.close();
@@ -235,7 +235,7 @@ describe('the server as the log of record', () => {
       t.link.emit(t.state(1));
       await wait(200);
       const restore = t.link.sent.find((s) => s.event.type === 'patch.log_restore');
-      expect(restore?.daemonId).toBe('d1');
+      expect(restore?.hostId).toBe('d1');
       expect(
         (restore!.event as { events: Array<{ seq: number }> }).events.map((e) => e.seq),
       ).toEqual([2, 3, 4]);

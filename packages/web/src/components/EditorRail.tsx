@@ -21,6 +21,8 @@ import { useChatStore } from '../stores/chatStore.js';
 import { MONACO_THEME } from '../lib/monacoTheme.js';
 import { shortcutLabel } from '../lib/shortcuts.js';
 import { isSubmitChord } from '../lib/submitChord.js';
+import { ModalOverlay } from './ModalOverlay.js';
+import { isPlainEnter } from '../lib/submitChord.js';
 
 /**
  * Pull in the self-hosted Monaco bootstrap (installs `MonacoEnvironment` and
@@ -846,7 +848,7 @@ export function SaveConflictModal({
   }, [onCancel]);
 
   return (
-    <div className="modal-overlay" data-testid="save-conflict-overlay">
+    <ModalOverlay testId="save-conflict-overlay">
       <div className="modal-backdrop" data-testid="save-conflict-backdrop" onClick={onCancel} />
       <div
         className="modal-card save-conflict-modal"
@@ -888,7 +890,7 @@ export function SaveConflictModal({
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -1016,7 +1018,7 @@ export function FileTreeRows({
                     onChange={(ev) => onRenameChange(ev.target.value)}
                     onClick={(ev) => ev.stopPropagation()}
                     onKeyDown={(ev) => {
-                      if (ev.key === 'Enter') {
+                      if (isPlainEnter(ev)) {
                         ev.preventDefault();
                         ev.stopPropagation();
                         onRenameCommit();
@@ -1131,7 +1133,7 @@ export function FileSearch({
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onClose();
-          if (e.key === 'Enter' && matches[0]) onPick(matches[0].basename, matches[0].name);
+          if (isPlainEnter(e) && matches[0]) onPick(matches[0].basename, matches[0].name);
         }}
         placeholder="Find file…"
       />
@@ -1213,7 +1215,7 @@ export function agentBaselineForFile(
     const filePath = typeof a['file_path'] === 'string' ? a['file_path'] : a['notebook_path'];
     if (typeof filePath !== 'string') continue;
     // Match on basename or full path (tool args carry absolute paths).
-    if (filePath === path || filePath.endsWith(`/${path}`) || filePath.endsWith(path)) {
+    if (filePath === path || filePath.endsWith(`/${path}`)) {
       const oldStr =
         typeof a['old_string'] === 'string'
           ? (a['old_string'] as string)
@@ -1231,6 +1233,9 @@ export function agentBaselineForFile(
       if (oldStr === null || newStr === null) return { kind: 'whole-file', original: '' };
       // Reverse the LAST occurrence of the agent's new_string (its most-recent
       // edit region) back to old_string to rebuild the pre-edit full file.
+      // A deletion leaves nothing to find (`lastIndexOf('')` is the end of the
+      // file), so where the old text sat is unknown.
+      if (newStr === '') return { kind: 'unreconstructable' };
       const at = currentContent.lastIndexOf(newStr);
       if (at === -1) return { kind: 'unreconstructable' };
       return {
@@ -1499,6 +1504,7 @@ export function editorOptionsFor(language: string): {
   wrappingIndent: 'same';
   wordBasedSuggestions: 'off' | 'currentDocument';
   quickSuggestions: boolean;
+  contextmenu: boolean;
 } {
   const prose = language === 'markdown';
   return {
@@ -1506,6 +1512,9 @@ export function editorOptionsFor(language: string): {
     wrappingIndent: 'same',
     wordBasedSuggestions: prose ? 'off' : 'currentDocument',
     quickSuggestions: !prose,
+    // Monaco's built-in menu (Command Palette, Peek Definition, Format
+    // Document…) is IDE chrome that means nothing in Patch.
+    contextmenu: false,
   };
 }
 

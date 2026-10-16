@@ -7,11 +7,18 @@
 // merges the answers, and joins them against the chat mirror for name/host/
 // folder. NO FALLBACK: a machine that is offline or does not answer fails the
 // call, because an answer missing one host's messages would look complete.
+//
+// Not every `role: 'user'` row is a person typing: a job's fire, a hook/goal
+// resubmit, or the host starting a turn itself (self-wake, Manager sweep, a
+// delegate relay, the todo list advancing) all land that way too. Each host
+// already reads its own `kind` off the turn's own flags (`userMessages.ts`);
+// this module only carries it through the join untouched — see
+// `ActivityMessageKind` for what each value means.
 
 import { randomUUID } from 'node:crypto';
 import type { ActivityMessage, PatchActivityReadResponseEvent } from '@patch/wire';
 import type { ChatRegistry } from './chat-registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 
 /** How far back a single `patch_activity` call may reach. Declared in code per spec/06. */
 export const ACTIVITY_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -43,25 +50,25 @@ export interface ActivityReader {
 }
 
 export function createActivityReader(deps: {
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   chatRegistry: ChatRegistry;
   now?: () => number;
 }): ActivityReader {
-  const { daemonLink, chatRegistry } = deps;
+  const { hostLink, chatRegistry } = deps;
   const now = deps.now ?? Date.now;
   const waiting = new Map<
     string,
     { resolve: (e: PatchActivityReadResponseEvent) => void; reject: (err: Error) => void }
   >();
 
-  const unsubscribe = daemonLink.onEvent((event) => {
+  const unsubscribe = hostLink.onEvent((event) => {
     if (event.type !== 'patch.activity.read.response') return;
     const w = waiting.get(event.requestId);
     if (w) w.resolve(event);
   });
 
   const readHost = (
-    daemonId: string,
+    hostId: string,
     since: number,
     until: number,
     limit: number,
@@ -72,7 +79,7 @@ export function createActivityReader(deps: {
         waiting.delete(requestId);
         reject(
           new Error(
-            `patch_activity: machine ${daemonId} did not answer within ${ACTIVITY_READ_TIMEOUT_MS / 1000}s`,
+            `patch_activity: machine ${hostId} did not answer within ${ACTIVITY_READ_TIMEOUT_MS / 1000}s`,
           ),
         );
       }, ACTIVITY_READ_TIMEOUT_MS);
@@ -89,7 +96,7 @@ export function createActivityReader(deps: {
           reject(err);
         },
       });
-      daemonLink.sendTo(daemonId, READ_SURFACE_ID, {
+      hostLink.sendTo(hostId, READ_SURFACE_ID, {
         type: 'patch.activity.read.request',
         requestId,
         since,
@@ -109,13 +116,36 @@ export function createActivityReader(deps: {
       );
       const from = q.messagesCursor !== undefined ? Math.max(q.messagesCursor, since) : since;
 
-      const hosts = daemonLink.onlineDaemonIds();
+      const hosts = hostLink.onlineHostIds();
       // Each machine returns its oldest `limit + 1` — enough to tell whether
       // the merged page is truncated without any machine sending its whole log.
       const answers = await Promise.all(hosts.map((h) => readHost(h, from, until, limit + 1)));
       const all = answers.flatMap((a) => a.messages).sort((a, b) => a.ts - b.ts);
       const truncated = all.length > limit;
-      const page = all.slice(0, limit);
+      let page = all.slice(0, limit);
+      // The cursor is a timestamp and hosts read `ts >= since`, so a page must
+      // not end inside a run of equal timestamps: what follows the cut would
+      // be skipped. End the page before the run and resume AT it instead.
+      let nextMessagesCursor: number | undefined;
+      if (truncated) {
+        const runTs = all[limit]!.ts;
+        const runStart = page.findIndex((m) => m.ts === runTs);
+        if (runStart > 0) {
+          page = page.slice(0, runStart);
+          nextMessagesCursor = runTs;
+        } else if (runStart === 0) {
+          // The run fills the page, so ending before it would never move on:
+          // read that instant in full and return all of it.
+          const run = await Promise.all(
+            hosts.map((h) => readHost(h, runTs, runTs, Number.MAX_SAFE_INTEGER)),
+          );
+          page = run.flatMap((a) => a.messages);
+          nextMessagesCursor = runTs + 1;
+        } else {
+          // `+1`: the next page must not re-include the last message returned.
+          nextMessagesCursor = page[page.length - 1]!.ts + 1;
+        }
+      }
 
       const messages: ActivityMessage[] = [];
       for (const m of page) {
@@ -125,14 +155,13 @@ export function createActivityReader(deps: {
         messages.push({
           chatId: m.chatId,
           chatName: chat.name,
-          daemonId: chat.daemonId,
+          hostId: chat.hostId,
           folder: chat.folder,
           text: m.text,
           ts: m.ts,
+          ...(m.kind !== undefined ? { kind: m.kind } : {}),
         });
       }
-      // `+1`: the next page must not re-include the last message returned.
-      const nextMessagesCursor = truncated ? (page[page.length - 1]?.ts ?? from) + 1 : undefined;
       return {
         messages,
         messagesTruncated: truncated,

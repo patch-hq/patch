@@ -1,5 +1,6 @@
 // Chat detail screen: full-screen stream + composer.
 
+import { useViewPositionStore } from '../../src/stores/viewPositionStore';
 import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
 import {
@@ -24,7 +25,8 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
-import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
+import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import {
   ChevronLeft,
   Search,
@@ -36,14 +38,17 @@ import {
   X,
   ExternalLink,
   LayoutTemplate,
+  Clock,
+  CloudOff,
 } from 'lucide-react-native';
-import { ArrowUp, ChevronDown, ChevronRight } from 'lucide-react-native';
+import { ArrowUp, ChevronDown, ChevronRight, Copy } from 'lucide-react-native';
 import {
   SPECIAL_THREAD_IDS,
   folderName,
   hasTaskNotification,
   isReservedSpecialThread,
   taskNotificationSummary,
+  labelForRun,
   type AttachmentRef,
 } from '@patch/wire';
 import { apiUrl, getRoute } from '../../src/config';
@@ -62,9 +67,16 @@ import { usePresenceStore } from '../../src/stores/presenceStore';
 import { deliveryTracker } from '../../src/lib/deliveryTracker';
 import { permissionDeliveryTracker } from '../../src/lib/permissionDeliveryTracker';
 import { openExistingSideThread } from '../../src/lib/sideThreadActions';
-import { discardUpload, retryUpload } from '../../src/lib/sendQueue';
+import { discardUpload, retrySource, retryTurn, retryUpload } from '../../src/lib/sendQueue';
 import { Composer } from '../../src/components/Composer';
-import { queueChipLabel, queueChipTitle } from '../../src/lib/queueLabel';
+import {
+  queueChipLabel,
+  queueChipTitle,
+  queueRelease,
+  type QueueRelease,
+} from '../../src/lib/queueLabel';
+import { backRecord, parseAgentReturn, type AgentReturn } from '@patch/wire';
+import { SnoozeDivider } from '../../src/components/SnoozeDivider';
 import { editQueuedMessage, promoteMessage, unqueueMessage } from '../../src/lib/queuedActions';
 import { getComposerDraft, setComposerDraft } from '../../src/lib/composerDraft';
 import { useUiStore } from '../../src/stores/uiStore';
@@ -78,6 +90,7 @@ import { ChatBars } from '../../src/components/ChatBars';
 import { ChatFindBar } from '../../src/components/ChatFindBar';
 import { findMessageSeqs, stepIndex } from '../../src/lib/chatFind';
 import { ContextDisclosure } from '../../src/components/ContextDisclosure';
+import { openArtifactTarget } from '../../src/lib/pads';
 import { ChatActionsMenu } from '../../src/components/ChatActionsMenu';
 import { EmptyState } from '../../src/components/EmptyState';
 import { EMPTY_STATES } from '../../src/lib/emptyStates';
@@ -86,6 +99,8 @@ import {
   toolCallSummary,
   toolRunNarrative,
   groupToolRuns,
+  insertSnoozeDividers,
+  rowFirstSeq,
   pairedResult,
   type TimelineRow,
 } from '../../src/lib/toolSummary';
@@ -101,6 +116,7 @@ import { deriveBadge } from '../../src/stores/types';
 import { UnifiedDiff, diffFromToolCall } from '../../src/components/UnifiedDiff';
 import { ChatMarkdown } from '../../src/components/ChatMarkdown';
 import {
+  copyImageToClipboard,
   MessageActionsHost,
   MessageLongPress,
   showMessageActions,
@@ -118,6 +134,7 @@ import { startVoiceCall } from '../../src/lib/voiceCall';
 import { getWs } from '../../src/api/ws';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../../src/lib/askUserQuestion';
 import { goBack } from '../../src/lib/goBack';
+import { useLeaveWhenArchivedElsewhere } from '../../src/lib/leaveArchived';
 import { QuestionCard } from '../../src/components/QuestionCard';
 
 // The transcript renders as an INVERTED FlatList (spec/15 § Chat detail): data
@@ -165,6 +182,8 @@ const AT_BOTTOM_SLOP = 24;
 const LIST_CONTENT_STYLE = { padding: space.lg, flexGrow: 1 } as const;
 
 const keyExtractor = (r: TimelineRow): string => r.key;
+// Stable identity for a chat with no timeline yet, so memos over it hold.
+const NO_TIMELINE: ChatEventEntry[] = [];
 
 // A freshly opened chat paints the transcript hidden (opacity 0, `settled`
 // state below) until it has gone quiet — not just until the landing call is
@@ -196,6 +215,8 @@ export default function ChatDetailScreen(): React.ReactElement {
   return <ChatDetailBody />;
 }
 
+const SWIPE_MIN_DX = 80;
+
 function ChatDetailBody(): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
@@ -209,11 +230,34 @@ function ChatDetailBody(): React.ReactElement {
   const targetSeq = parseSeqParam(params.seq);
   const justCreated = params.justCreated === '1';
   const row = useChatStore((s) => s.chats[chatId]);
+  useLeaveWhenArchivedElsewhere(chatId, router, '/(tabs)/chats');
+  // Swipe sideways to step to the neighbouring chat in the Chats tab's order.
+  // A claimed gesture must be clearly horizontal and long, so vertical
+  // scrolling and horizontal scrollers inside messages (code, tables) win.
+  // Read the store at release rather than subscribing: the list moving under a
+  // finger must not re-render this screen.
+  const swipe = React.useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) =>
+        Math.abs(g.dx) > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onPanResponderRelease: (_e, g) => {
+        if (Math.abs(g.dx) < SWIPE_MIN_DX) return;
+        const { prev, next } = swipeNeighbours(useChatStore.getState().chats, chatIdRef.current);
+        // Finger moving right drags the previous chat in from the left.
+        const target = g.dx > 0 ? prev : next;
+        if (target) routerRef.current.replace(`/chats/${target}`);
+      },
+    }),
+  ).current;
+  const chatIdRef = React.useRef(chatId);
+  chatIdRef.current = chatId;
+  const routerRef = React.useRef(router);
+  routerRef.current = router;
   // Which machine the chat runs on, for the header crumb (spec/15 § Chat detail).
   const hostLabel = usePresenceStore((s) =>
-    row?.daemonId ? (s.hosts[row.daemonId]?.host?.hostName ?? row.daemonId).trim() : '',
+    row?.hostId ? (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim() : '',
   );
-  const timeline = useChatStore((s) => s.timelines[chatId]) ?? [];
+  const timeline = useChatStore((s) => s.timelines[chatId]) ?? NO_TIMELINE;
   // What the list actually draws: the timeline with each consecutive run of
   // tool calls folded into one row (spec/15 § Chat detail). Everything else on
   // this screen still reasons about `timeline` itself — the fold is a
@@ -264,7 +308,11 @@ function ChatDetailBody(): React.ReactElement {
     },
     [chatId],
   );
-  const rows = React.useMemo(() => groupToolRuns(visibleTimeline), [visibleTimeline]);
+  const snoozeRecords = row?.snoozeRecords;
+  const rows = React.useMemo(
+    () => insertSnoozeDividers(groupToolRuns(visibleTimeline), snoozeRecords),
+    [visibleTimeline, snoozeRecords],
+  );
   // FlatList's `inverted` mode wants data newest-first (see the block comment
   // above) — `rows` stays chronological for everything else on this screen
   // (badge/title derivation, the send-re-pin effect, ...), this reversal is a
@@ -282,17 +330,19 @@ function ChatDetailBody(): React.ReactElement {
   // stick after the reply had landed).
   // Over the live transcript only: a queued turn has not started, so it must
   // not make the running turn's own replies look like they precede it.
-  const lastUserIdx = liveTimeline.reduce(
-    (idx, e, i) => (e.kind === 'message' && e.role === 'user' ? i : idx),
-    -1,
-  );
-  const assistantResponded = liveTimeline.some(
-    (e, i) =>
-      i > lastUserIdx &&
-      (e.kind === 'tool_call' ||
-        e.kind === 'tool_result' ||
-        (e.kind === 'message' && e.role === 'assistant')),
-  );
+  const assistantResponded = React.useMemo(() => {
+    const lastUserIdx = liveTimeline.reduce(
+      (idx, e, i) => (e.kind === 'message' && e.role === 'user' ? i : idx),
+      -1,
+    );
+    return liveTimeline.some(
+      (e, i) =>
+        i > lastUserIdx &&
+        (e.kind === 'tool_call' ||
+          e.kind === 'tool_result' ||
+          (e.kind === 'message' && e.role === 'assistant')),
+    );
+  }, [liveTimeline]);
   const working = row ? deriveBadge(row) === 'working' && !assistantResponded : false;
 
   // The Manager chat's Conversation | Chats switch (spec/15 § Voice tab (Manager));
@@ -304,6 +354,17 @@ function ChatDetailBody(): React.ReactElement {
   // thread would create a reply that never reaches the source channel, which
   // breaks the user's mental model — so the composer is replaced by a hint.
   const readOnlyMirror = chatId === SPECIAL_THREAD_IDS.speakers;
+
+  // spec/04 § Snooze → Back: opening a chat that came back from a snooze is the
+  // first interaction with its set, and clears the Back state for all of it. The
+  // host does the clearing and broadcasts it; this only says the chat was opened.
+  const backSetId = row ? (backRecord(row.snoozeRecords)?.setId ?? null) : null;
+  React.useEffect(() => {
+    if (backSetId === null) return;
+    api.clearSnoozeBack(chatId).catch((e: Error) => {
+      useUiStore.getState().pushError(`clear snooze failed: ${e.message}`);
+    });
+  }, [chatId, backSetId]);
 
   React.useEffect(() => {
     useChatStore.getState().setActiveChat(chatId);
@@ -472,7 +533,9 @@ function ChatDetailBody(): React.ReactElement {
       if (index === null || index === undefined) return;
       const row = invertedRowsRef.current[index];
       if (!row) return;
-      anchorSeqRef.current = row.kind === 'group' ? (row.entries[0]?.seq ?? null) : row.entry.seq;
+      // A divider is not a message: keep the last real anchor.
+      const seq = rowFirstSeq(row);
+      if (seq !== null) anchorSeqRef.current = seq;
     },
   ).current;
   const viewabilityConfig = React.useRef({ itemVisiblePercentThreshold: 50 }).current;
@@ -638,12 +701,18 @@ function ChatDetailBody(): React.ReactElement {
   React.useEffect(() => {
     setFindIndex(findSeqs.length === 0 ? -1 : 0);
   }, [findOpen, findQuery, chatId]);
+  // Bumped by every Next/Prev tap: with a single match the index never moves,
+  // so a tap has to ask for the jump itself.
+  const [findStep, setFindStep] = React.useState(0);
+  const findSeq = findSeqs[findIndex];
+  // Keyed on the SEQ jumped to, not the match count: a query that swaps one
+  // match for another keeps the same index, and a matching message arriving
+  // live adds a match without moving the current one.
   React.useEffect(() => {
-    const seq = findSeqs[findIndex];
-    if (seq === undefined) return;
-    jumpRef.current = { seq, deadline: Date.now() + JUMP_WAIT_MS };
+    if (findSeq === undefined) return;
+    jumpRef.current = { seq: findSeq, deadline: Date.now() + JUMP_WAIT_MS };
     tryJumpRef.current();
-  }, [findIndex, findSeqs.length]);
+  }, [findSeq, findStep]);
   const closeFind = React.useCallback((): void => {
     setFindOpen(false);
     setFindQuery('');
@@ -747,6 +816,8 @@ function ChatDetailBody(): React.ReactElement {
           atBottom: atNewest,
           anchorSeq: atNewest ? null : anchorSeqRef.current,
         });
+        // Handover (spec/05): the same position, for the other surfaces.
+        useViewPositionStore.getState().setScroll(chatId, atNewest ? null : anchorSeqRef.current);
       }
     },
     [chatId],
@@ -757,9 +828,10 @@ function ChatDetailBody(): React.ReactElement {
   // TimelineItem / ToolGroupItem actually bite).
   const renderItem = React.useCallback(
     ({ item }: { item: TimelineRow }): React.ReactElement => {
+      if (item.kind === 'snooze') return <SnoozeDivider record={item.record} />;
       const cell =
         item.kind === 'group' ? (
-          <ToolGroupItem entries={item.entries} narration={item.narration} chatId={chatId} />
+          <ToolGroupItem entries={item.entries} chatId={chatId} />
         ) : (
           <TimelineItem entry={item.entry} chatId={chatId} result={item.result} />
         );
@@ -887,7 +959,11 @@ function ChatDetailBody(): React.ReactElement {
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.paper }}>
+    <View
+      testID="chat-swipe-surface"
+      style={{ flex: 1, backgroundColor: colors.paper }}
+      {...swipe.panHandlers}
+    >
       <View
         testID="chat-header"
         style={{
@@ -994,7 +1070,7 @@ function ChatDetailBody(): React.ReactElement {
             (spec/07 § Session modes). It never ends itself on silence, so
             there is nothing to reopen an hour into plastering a wall, and only
             an utterance addressed to Patch counts as a turn. */}
-        {!readOnlyMirror && chatId === SPECIAL_THREAD_IDS.manager ? (
+        {!readOnlyMirror ? (
           <Pressable
             onPress={() => startVoiceCall(chatId, 'hands-free')}
             style={{ padding: space.sm }}
@@ -1024,7 +1100,10 @@ function ChatDetailBody(): React.ReactElement {
           onQuery={setFindQuery}
           position={findIndex}
           count={findSeqs.length}
-          onStep={(d) => setFindIndex((i) => stepIndex(i, d, findSeqs.length))}
+          onStep={(d) => {
+            setFindIndex((i) => stepIndex(i, d, findSeqs.length));
+            setFindStep((n) => n + 1);
+          }}
           onClose={closeFind}
         />
       ) : null}
@@ -1142,6 +1221,7 @@ function ChatDetailBody(): React.ReactElement {
                     entry={entry}
                     chatId={chatId}
                     queuePos={i + 1}
+                    release={queueRelease(queuedEntries, i)}
                     {...(queuedEdit !== null && entry.localId === queuedEdit.localId
                       ? { queuedDraft: queuedEdit.text }
                       : {})}
@@ -1280,7 +1360,10 @@ function ToolCallItem({
   // (spec/14 § Main chat panel — Delegate tool row). Checked before any hook
   // below runs — `entry.tool` is fixed for the life of this mounted row, so
   // the branch is as stable as any other component-selection dispatch.
-  if (entry.tool && toolLabel(entry.tool) === 'patch_delegate') {
+  if (
+    entry.tool &&
+    (toolLabel(entry.tool) === 'patch_agent' || toolLabel(entry.tool) === 'patch_delegate')
+  ) {
     return <DelegateToolCallItem chatId={chatId} entry={entry} result={result} />;
   }
   // `view_file` exists to SHOW the file, so a valid ack renders the file itself
@@ -1298,9 +1381,15 @@ function ToolCallItem({
   // description or the thing it acted on, not the NAMES of its arguments. A
   // settled call reads with a trailing arrow, same as web, so the row itself
   // says the call is done without a second "↳ ... done" row underneath it.
-  const summary = result
-    ? `${toolCallSummary(entry.tool, entry.toolArgs)} →`
-    : toolCallSummary(entry.tool, entry.toolArgs);
+  // A lone call is a run of one: the host narrates it ("Looking at the
+  // picture…" live, then the closed label), so it is never a bare static row.
+  const ownLabel = useChatStore((s) => {
+    const id = entry.callId;
+    return id === undefined ? undefined : s.toolRunSummaries[chatId]?.[id];
+  });
+  const phrase =
+    labelForRun(ownLabel, [entry.callId])?.summary ?? toolCallSummary(entry.tool, entry.toolArgs);
+  const summary = result ? `${phrase} →` : phrase;
   // patch_notify calls carrying a deepLink render a tappable link row on the
   // collapsed summary itself — same tap-target the push notification itself
   // opens (spec/09 § `### push`, spec/15 § Chat detail) — rather than
@@ -1798,6 +1887,7 @@ function ToolResultItem({ entry }: { entry: ChatEventEntry }): React.ReactElemen
 // (`ArtifactViewer.tsx`), the one place an artifact opens on mobile.
 function ArtifactCard({ entry }: { entry: ChatEventEntry }): React.ReactElement {
   const colors = useTheme();
+  const router = useRouter();
   // The card sizes itself from its content: a plain column cell (like the tool
   // group above it), the Pressable only a row of icon + text. No `flex: 1` in
   // the row — on Android in the inverted list it was measured against the cell
@@ -1809,7 +1899,12 @@ function ArtifactCard({ entry }: { entry: ChatEventEntry }): React.ReactElement 
         accessibilityRole="button"
         accessibilityLabel={`Open artifact ${entry.artifactTitle ?? ''}`}
         onPress={() =>
-          openArtifactViewer(apiUrl(entry.artifactUrl ?? ''), entry.artifactTitle ?? '')
+          openArtifactTarget(
+            entry.artifactUrl ?? '',
+            entry.artifactTitle ?? '',
+            { pushRoute: (r) => router.push(r as Href), viewer: openArtifactViewer },
+            apiUrl,
+          )
         }
         style={{
           flexDirection: 'row',
@@ -1847,11 +1942,9 @@ function ArtifactCard({ entry }: { entry: ChatEventEntry }): React.ReactElement 
 // the right test.
 const ToolGroupItem = React.memo(function ToolGroupItem({
   entries,
-  narration,
   chatId,
 }: {
   entries: ChatEventEntry[];
-  narration: string | null;
   chatId: string;
 }): React.ReactElement {
   const colors = useTheme();
@@ -1863,17 +1956,13 @@ const ToolGroupItem = React.memo(function ToolGroupItem({
     const first = calls[0]?.callId;
     return first === undefined ? undefined : s.toolRunSummaries[chatId]?.[first];
   });
-  const matches =
-    ai !== undefined &&
-    ai.callIds.length === calls.length &&
-    ai.callIds.every((id, i) => calls[i]?.callId === id);
-  const aiError = matches ? ai.error : undefined;
-  // No label yet: the agent's own sentence before the run, else the count.
-  // A failed label keeps the count so the failure reads as one.
-  const summary =
-    (matches ? ai.summary : null) ??
-    (aiError === undefined ? narration : null) ??
-    toolRunNarrative(calls);
+  const matched = labelForRun(
+    ai,
+    calls.map((c) => c.callId),
+  );
+  const aiError = matched?.error;
+  // No label yet (or it failed): the count, from the tool calls alone.
+  const summary = matched?.summary ?? toolRunNarrative(calls);
   return (
     <View
       testID="tool-group"
@@ -1907,7 +1996,7 @@ const ToolGroupItem = React.memo(function ToolGroupItem({
         {aiError !== undefined ? (
           <Text
             testID="tool-group-summary-failed"
-            style={{ ...typography.meta, color: colors.ink3, marginLeft: space.xs }}
+            style={{ ...typography.meta, color: colors.red, marginLeft: space.xs }}
             accessibilityLabel={`Summary failed: ${aiError}`}
           >
             ⓘ
@@ -2017,6 +2106,24 @@ function SideThreadMarkers({
   chatId: string;
   seq: number;
 }): React.ReactElement | null {
+  // Every message row mounts one of these, so it must not subscribe to a whole
+  // store map: that map is replaced on every event batch and would re-render
+  // every row. Subscribe to a primitive "do any side threads fork here" and read
+  // the rest only once there are some.
+  const hasHere = useChatStore((s) =>
+    (s.branchGraphs[chatId]?.branches ?? []).some((b) => b.sideThread && b.forkFromSeq === seq),
+  );
+  if (!hasHere) return null;
+  return <SideThreadMarkerRows chatId={chatId} seq={seq} />;
+}
+
+function SideThreadMarkerRows({
+  chatId,
+  seq,
+}: {
+  chatId: string;
+  seq: number;
+}): React.ReactElement | null {
   const colors = useTheme();
   const router = useRouter();
   const branches = useChatStore((s) => s.branchGraphs[chatId]?.branches);
@@ -2063,6 +2170,30 @@ function SideThreadMarkers({
   );
 }
 
+function AgentReturnItem({ agentReturn }: { agentReturn: AgentReturn }): React.ReactElement {
+  const colors = useTheme();
+  const [open, setOpen] = React.useState(false);
+  return (
+    <View testID="agent-return" style={{ marginBottom: space.sm }}>
+      <Pressable
+        testID="agent-return-toggle"
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((v) => !v)}
+      >
+        <Text style={{ fontSize: textMin, color: colors.ink3 }}>
+          {`Agent returned: ${agentReturn.title}`}
+        </Text>
+      </Pressable>
+      {open ? (
+        <Text testID="agent-return-body" style={{ fontSize: textMin, color: colors.ink2 }}>
+          {agentReturn.reply}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 // Memoised for the same reason as ToolGroupItem: entries are immutable, so a
 // row only needs to re-render when its own entry object is replaced.
 const TimelineItem = React.memo(function TimelineItem({
@@ -2070,6 +2201,7 @@ const TimelineItem = React.memo(function TimelineItem({
   chatId,
   result,
   queuePos,
+  release,
   queuedDraft,
   onQueuedDraft,
   onEditQueued,
@@ -2080,13 +2212,15 @@ const TimelineItem = React.memo(function TimelineItem({
   result?: ChatEventEntry;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
+  /** What releases a queued entry: the next tool call or the end of the turn. */
+  release?: QueueRelease;
   /** spec/04 § Edit — the text in this queued message's open editor. */
   queuedDraft?: string;
   onQueuedDraft?(localId: string, text: string | null): void;
   onEditQueued?(entry: ChatEventEntry, text: string): void;
 }): React.ReactElement | null {
   const colors = useTheme();
-  const daemonOnline = usePresenceStore((s) => s.daemon === 'online');
+  const hostOnline = usePresenceStore((s) => s.daemon === 'online');
   // spec/15 ## Chat detail, spec/02 § Background task completions — a
   // completion that arrived still wrapped in its raw block (replay, or a host
   // on a pre-lifting host) is not a turn anyone typed and none of its
@@ -2103,6 +2237,12 @@ const TimelineItem = React.memo(function TimelineItem({
   // itself, not the agent: one muted line that says whose words they are.
   // spec/07 § The fast voice and the chat's agent — what a call's fast voice
   // asked the agent; § Call cost — the line a finished call leaves.
+  // A background `patch_agent` finishing: delivered as a machine turn, but
+  // nobody typed it — a muted system row (queued or not), not a user bubble.
+  if (entry.kind === 'message' && (entry.role ?? 'assistant') === 'user') {
+    const agentReturn = parseAgentReturn(entry.content ?? '');
+    if (agentReturn) return <AgentReturnItem agentReturn={agentReturn} />;
+  }
   if (entry.kind === 'message' && entry.voiceHandoff) {
     return (
       <Text
@@ -2129,6 +2269,21 @@ const TimelineItem = React.memo(function TimelineItem({
         }}
       >
         {(entry.content ?? '').slice('[call] '.length)}
+      </Text>
+    );
+  }
+  if (entry.kind === 'message' && entry.accountSwitch) {
+    return (
+      <Text
+        testID="account-switch"
+        style={{
+          fontSize: textMin,
+          color: colors.ink3,
+          marginBottom: space.sm,
+          alignSelf: 'center',
+        }}
+      >
+        {entry.content ?? ''}
       </Text>
     );
   }
@@ -2177,6 +2332,12 @@ const TimelineItem = React.memo(function TimelineItem({
             // point to hang a side thread off (NO FALLBACK) — mirrors web's
             // `canSideThread`.
             {...(entry.localId === undefined ? { sideThread: { chatId, seq: entry.seq } } : {})}
+            // Retry: a settled turn re-runs its user message (an assistant
+            // reply re-runs the one it answered). Offered only when that
+            // message is text-only — attachments would be dropped.
+            {...(entry.localId === undefined && !entry.queued && retrySource(chatId, entry) !== null
+              ? { retry: () => retryTurn(chatId, entry) }
+              : {})}
             // spec/04 ## Message queueing § Edit — a tap on a queued message
             // opens it for editing in place.
             {...(entry.queued &&
@@ -2281,10 +2442,10 @@ const TimelineItem = React.memo(function TimelineItem({
           >
             <Text
               testID="queued-badge"
-              accessibilityLabel={`${queueChipLabel(queuePos)}. ${queueChipTitle(queuePos)}`}
+              accessibilityLabel={`${queueChipLabel(queuePos, hostOnline, release)}. ${queueChipTitle(queuePos, hostOnline, release)}`}
               style={{ color: colors.ink3, fontSize: textMin }}
             >
-              {queueChipLabel(queuePos)}
+              {queueChipLabel(queuePos, hostOnline, release)}
             </Text>
             {entry.localId ? (
               <Pressable
@@ -2372,12 +2533,26 @@ const TimelineItem = React.memo(function TimelineItem({
             </Text>
           </Pressable>
         ) : entry.deliveryPending ? (
-          <Text
-            testID="delivery-pending"
-            style={{ alignSelf: 'flex-end', marginTop: 2, color: colors.ink3, fontSize: textMin }}
+          <View
+            style={{
+              alignSelf: 'flex-end',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              marginTop: 2,
+            }}
           >
-            {daemonOnline ? 'Sending…' : 'Queued — will send when the agent reconnects'}
-          </Text>
+            <View testID="delivery-pending-icon">
+              {hostOnline ? (
+                <Clock size={textMin} color={colors.ink3} />
+              ) : (
+                <CloudOff size={textMin} color={colors.ink3} />
+              )}
+            </View>
+            <Text testID="delivery-pending" style={{ color: colors.ink3, fontSize: textMin }}>
+              {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
+            </Text>
+          </View>
         ) : null}
         {/* spec/15 § Chat detail — every <system-reminder> block this turn
             received, one quiet collapsed row each, under its own bubble. */}
@@ -2389,6 +2564,20 @@ const TimelineItem = React.memo(function TimelineItem({
                 testID="system-context"
                 summary={item.label}
                 text={item.text}
+              />
+            ))}
+          </View>
+        ) : null}
+        {/* spec/20-hooks.md § On the user's message — hooks that advised on
+            (or failed to check) this send, collapsed under its bubble. */}
+        {entry.hookAdvise && entry.hookAdvise.length > 0 ? (
+          <View testID="hook-advise-group" style={{ marginTop: space.xs }}>
+            {entry.hookAdvise.map((a) => (
+              <ContextDisclosure
+                key={a.hookId}
+                testID="hook-advise"
+                summary={a.hookName}
+                text={a.analysis ?? ''}
               />
             ))}
           </View>
@@ -2534,53 +2723,75 @@ const TimelineItem = React.memo(function TimelineItem({
           <View style={{ flexDirection: 'column', marginTop: space.sm }}>
             {(
               [
-                { key: 'approve', label: '1. Yes', approve: true },
+                { key: 'approve', label: '1. Yes', approve: true, decision: 'approve' },
                 {
                   key: 'approve_session',
-                  // KNOWN-GAP (group 22): wire schema's PermissionDecision
-                  // enum doesn't yet include `approve_with_session_allow`.
-                  // Until that lands we map to plain `approve`. Text mirrors
-                  // Claude Code's exact option 2 wording (spec/15 ## Chat detail).
+                  // Text mirrors Claude Code's exact option 2 wording (spec/15
+                  // § Chat detail). `approve_with_session_allow` tells the
+                  // host to add an `updatedPermissions` rule to the SDK's own
+                  // session (sdkBackend.ts `buildCanUseTool`), so `tool`
+                  // itself stops asking for the rest of the session rather
+                  // than just this one call.
                   label: `2. Yes, allow all ${entry.tool ?? 'tools'} during this session`,
                   approve: true,
+                  decision: 'approve_with_session_allow',
                 },
-                { key: 'deny', label: '3. No, tell Claude what to do differently', approve: false },
+                {
+                  key: 'deny',
+                  label: '3. No, tell Claude what to do differently',
+                  approve: false,
+                  decision: 'deny',
+                },
               ] as const
-            ).map((opt) => (
-              <Pressable
-                key={opt.key}
-                onPress={() => {
-                  if (!entry.requestId) return;
-                  permissionDeliveryTracker.send({
-                    type: 'chat.permission_response',
-                    requestId: entry.requestId,
-                    approve: opt.approve,
-                    decision: opt.approve ? 'approve' : 'deny',
-                  });
-                  // Answer the card here rather than waiting for the host's
-                  // echo: the round trip is over the network, and until it lands
-                  // the options are still tappable.
-                  useChatStore
-                    .getState()
-                    .resolvePermission(chatId, entry.requestId, opt.approve ? 'approve' : 'deny');
-                }}
-                style={{
-                  backgroundColor: opt.approve ? colors.leaf : colors.paperRaised,
-                  borderWidth: 1,
-                  borderColor: opt.approve ? colors.leaf : colors.divider,
-                  paddingVertical: space.md,
-                  paddingHorizontal: space.md,
-                  borderRadius: radii.md,
-                  marginTop: space.sm,
-                }}
-              >
-                <Text
-                  style={{ ...typography.label, color: opt.approve ? colors.onAccent : colors.ink }}
+            )
+              // Under bypass every call is already allowed; a card here is a
+              // safety check (e.g. a delete) which a session rule does not
+              // silence, so "allow all <tool>" would promise too much.
+              .filter(
+                (opt) =>
+                  opt.key !== 'approve_session' ||
+                  useChatStore.getState().chats[chatId]?.permissionMode !== 'bypassPermissions',
+              )
+              .map((opt) => (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => {
+                    if (!entry.requestId) return;
+                    permissionDeliveryTracker.send({
+                      type: 'chat.permission_response',
+                      requestId: entry.requestId,
+                      approve: opt.approve,
+                      decision: opt.decision,
+                    });
+                    // Answer the card here rather than waiting for the host's
+                    // echo: the round trip is over the network, and until it lands
+                    // the options are still tappable. Local resolve only tracks
+                    // approve/deny for display, so session-allow still resolves
+                    // as a plain approve here.
+                    useChatStore
+                      .getState()
+                      .resolvePermission(chatId, entry.requestId, opt.approve ? 'approve' : 'deny');
+                  }}
+                  style={{
+                    backgroundColor: opt.approve ? colors.leaf : colors.paperRaised,
+                    borderWidth: 1,
+                    borderColor: opt.approve ? colors.leaf : colors.divider,
+                    paddingVertical: space.md,
+                    paddingHorizontal: space.md,
+                    borderRadius: radii.md,
+                    marginTop: space.sm,
+                  }}
                 >
-                  {opt.label}
-                </Text>
-              </Pressable>
-            ))}
+                  <Text
+                    style={{
+                      ...typography.label,
+                      color: opt.approve ? colors.onAccent : colors.ink,
+                    }}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
           </View>
         )}
       </View>
@@ -2657,7 +2868,7 @@ function MessageAttachments({
             accessibilityLabel={att.name}
           >
             <FileText size={14} color={chipFg} />
-            <Text numberOfLines={1} style={{ color: chipFg, fontSize: 13, maxWidth: 200 }}>
+            <Text numberOfLines={1} style={{ color: chipFg, fontSize: textMin, maxWidth: 200 }}>
               {att.name}
             </Text>
           </Pressable>
@@ -2795,6 +3006,25 @@ function ZoomableImageViewer({
           }}
         >
           <X size={24} color={fixed.onShade} />
+        </Pressable>
+        <Pressable
+          onPress={() => void copyImageToClipboard(url)}
+          accessibilityRole="button"
+          accessibilityLabel="Copy image"
+          hitSlop={12}
+          style={{
+            position: 'absolute',
+            top: 48,
+            right: 76,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: fixed.backdrop,
+          }}
+        >
+          <Copy size={22} color={fixed.onShade} />
         </Pressable>
       </View>
     </Modal>

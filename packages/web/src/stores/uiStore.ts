@@ -12,6 +12,7 @@ import {
   CHAT_STATE_FILTERS,
   DEFAULT_CHAT_SORT,
   type ChatSort,
+  type GroupSort,
   type ChatStateFilter,
 } from '../lib/chatGroups.js';
 import { DEFAULT_JOB_SORT, type JobSort } from '../lib/jobSort.js';
@@ -121,7 +122,7 @@ function loadStateFilter(): ChatStateFilter {
 const CHAT_SORT_KEY = 'patch.sidebar.chatSort';
 const GROUP_SORT_KEY = 'patch.sidebar.groupSort';
 
-function loadSort(key: string): ChatSort {
+function loadChatSort(key: string): ChatSort {
   /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
   if (typeof localStorage === 'undefined') return DEFAULT_CHAT_SORT;
   const raw = localStorage.getItem(key);
@@ -129,7 +130,15 @@ function loadSort(key: string): ChatSort {
   return CHAT_SORTS.some((o) => o.value === raw) ? (raw as ChatSort) : DEFAULT_CHAT_SORT;
 }
 
-function persistSort(key: string, v: ChatSort): void {
+function loadGroupSort(): GroupSort {
+  /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
+  if (typeof localStorage === 'undefined') return 'same-as-chats';
+  const raw = localStorage.getItem(GROUP_SORT_KEY);
+  if (raw === null || raw === 'same-as-chats') return 'same-as-chats';
+  return CHAT_SORTS.some((o) => o.value === raw) ? (raw as ChatSort) : 'same-as-chats';
+}
+
+function persistSort(key: string, v: ChatSort | GroupSort): void {
   /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(key, v);
@@ -496,6 +505,7 @@ export interface PromptDialog {
   title: string;
   message: string;
   placeholder: string;
+  initialValue: string;
   confirmLabel: string;
   cancelLabel: string;
 }
@@ -505,6 +515,8 @@ export interface PromptOptions {
   title?: string;
   message?: string;
   placeholder?: string;
+  /** Text the field opens with (selected), e.g. the current name when renaming. */
+  initialValue?: string;
   confirmLabel?: string;
   cancelLabel?: string;
 }
@@ -539,6 +551,11 @@ export interface ErrorToast {
    */
   action: ToastAction | null;
   /**
+   * A snooze confirmation (spec/14 § Snooze sheet): drawn dark with a clock, the
+   * message in bold and this second line beneath. Absent on every other toast.
+   */
+  snooze?: { subline: string | null };
+  /**
    * The original machine-readable code + message behind `message`, shown in a
    * collapsed disclosure (`lib/errorCopy.ts`). Null when the sentence is all
    * there is.
@@ -558,9 +575,20 @@ export interface ErrorToast {
 // (spec/12 — errors are surfaced, not pinned forever).
 const TOAST_TTL_MS = 6000;
 
+/** What the Snooze sheet is open for (spec/14 § Snooze sheet). */
+export type SnoozeSheetTarget =
+  | { kind: 'chat'; chatId: string }
+  | { kind: 'project'; folder: string; name: string };
+
 interface UiState {
+  /** The open Snooze sheet, or `null`. Held here so it outlives the menu that opened it. */
+  snoozeSheet: SnoozeSheetTarget | null;
+  openSnoozeSheet(target: SnoozeSheetTarget): void;
+  closeSnoozeSheet(): void;
+  /** The toast after a snooze: bold title, an optional second line, and Undo. */
+  pushSnoozeToast(title: string, subline: string | null, undo: () => void): void;
   codexSignInHost: string | null;
-  setCodexSignInHost(daemonId: string | null): void;
+  setCodexSignInHost(hostId: string | null): void;
   channelsOpen: boolean;
   /** Hidden section expanded? Collapsed by default (spec/04 § Hidden). */
   hiddenOpen: boolean;
@@ -630,7 +658,7 @@ interface UiState {
   /** Order of chats within a project (spec/14 § Sidebar ordering). */
   chatSort: ChatSort;
   /** Order of the projects themselves. */
-  groupSort: ChatSort;
+  groupSort: GroupSort;
   sidebarCollapsed: boolean;
   /** Sidebar drawn as a rail of status dots (spec/14 § Mini sidebar). */
   sidebarMini: boolean;
@@ -723,6 +751,12 @@ interface UiState {
    * what it does, its definition, and an on/off switch), or null when closed.
    */
   toolsPanelChatId: string | null;
+  /**
+   * The chat whose task bar was summoned from the ⋯ menu's "Add tasks" (a chat
+   * with no list shows no bar), or null. The bar opens its add row for it and
+   * clears this when collapsed.
+   */
+  taskAddChatId: string | null;
   errors: ErrorToast[];
   /**
    * The confirmation currently shown in the custom modal, or null when none is
@@ -748,7 +782,7 @@ interface UiState {
   setAttentionOnly(v: boolean): void;
   setStateFilter(v: ChatStateFilter): void;
   setChatSort(v: ChatSort): void;
-  setGroupSort(v: ChatSort): void;
+  setGroupSort(v: GroupSort): void;
   /** Forget a recent folder — removes it from the Recent folders list. */
   forgetFolder(folder: string): void;
   /** Fold a project's rows away in the sidebar, or unfold them again. */
@@ -812,6 +846,7 @@ interface UiState {
   setFilePickerOpen(v: boolean): void;
   /** Open the Tools panel for a chat (pass null to close). */
   setToolsPanelChatId(chatId: string | null): void;
+  setTaskAddChatId(chatId: string | null): void;
   /**
    * Open the custom confirm modal and resolve to the user's choice (true =
    * confirmed, false = cancelled/dismissed). Replaces `window.confirm()`.
@@ -851,7 +886,7 @@ let pendingPromptResolve: ((value: string | null) => void) | null = null;
 
 export const useUiStore = create<UiState>((set, get) => ({
   codexSignInHost: null,
-  setCodexSignInHost: (daemonId) => set({ codexSignInHost: daemonId }),
+  setCodexSignInHost: (hostId) => set({ codexSignInHost: hostId }),
   channelsOpen: false,
   hiddenOpen: false,
   archivedOpen: false,
@@ -866,8 +901,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   jobsFilter: NO_JOB_FILTER,
   attentionOnly: loadBool(ATTENTION_ONLY_KEY),
   stateFilter: loadStateFilter(),
-  chatSort: loadSort(CHAT_SORT_KEY),
-  groupSort: loadSort(GROUP_SORT_KEY),
+  chatSort: loadChatSort(CHAT_SORT_KEY),
+  groupSort: loadGroupSort(),
   forgottenFolders: loadForgottenFolders(),
   collapsedFolders: loadCollapsedFolders(),
   sidebarCollapsed: loadSidebarHiddenParam(),
@@ -892,6 +927,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   lastFileChanged: {},
   filePickerOpen: false,
   toolsPanelChatId: null,
+  taskAddChatId: null,
   errors: [],
   confirmDialog: null,
   promptDialog: null,
@@ -1107,6 +1143,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   setToolsPanelChatId(chatId) {
     set({ toolsPanelChatId: chatId });
   },
+  setTaskAddChatId(chatId) {
+    set({ taskAddChatId: chatId });
+  },
   confirm(opts) {
     // Only one confirm at a time: if one is still pending, cancel it (false)
     // before showing the new one, so no resolver is ever leaked.
@@ -1144,6 +1183,7 @@ export const useUiStore = create<UiState>((set, get) => ({
           title: opts.title ?? 'Enter a value',
           message: opts.message ?? '',
           placeholder: opts.placeholder ?? '',
+          initialValue: opts.initialValue ?? '',
           confirmLabel: opts.confirmLabel ?? 'OK',
           cancelLabel: opts.cancelLabel ?? 'Cancel',
         },
@@ -1213,6 +1253,33 @@ export const useUiStore = create<UiState>((set, get) => ({
     });
     scheduleAutoDismiss(id, get, set);
   },
+  snoozeSheet: null,
+  openSnoozeSheet(target) {
+    set({ snoozeSheet: target });
+  },
+  closeSnoozeSheet() {
+    set({ snoozeSheet: null });
+  },
+  pushSnoozeToast(title, subline, undo) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    set({
+      errors: [
+        ...get().errors,
+        {
+          id,
+          message: title,
+          level: 'info',
+          retry: null,
+          action: { label: 'Undo', run: undo },
+          snooze: { subline },
+          detail: null,
+          held: false,
+          at: Date.now(),
+        },
+      ],
+    });
+    scheduleAutoDismiss(id, get, set);
+  },
   holdError(id) {
     set({ errors: get().errors.map((e) => (e.id === id ? { ...e, held: true } : e)) });
   },
@@ -1226,6 +1293,8 @@ export const useUiStore = create<UiState>((set, get) => ({
 
 // Auto-dismiss a toast after the TTL so it can't linger across navigations.
 // `setTimeout` is a no-op-safe in jsdom/tests; the dismiss is idempotent.
+const dismissTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function scheduleAutoDismiss(
   id: string,
   get: () => UiState,
@@ -1233,9 +1302,16 @@ function scheduleAutoDismiss(
 ): void {
   /* v8 ignore next -- jsdom (the test environment) always defines `setTimeout`; this guard cannot be exercised under vitest+jsdom. */
   if (typeof setTimeout === 'undefined') return;
-  setTimeout(() => {
-    // Held = its Details disclosure is open. Keep it until dismissed by hand.
-    if (get().errors.find((e) => e.id === id)?.held === true) return;
-    set({ errors: get().errors.filter((e) => e.id !== id) });
-  }, TOAST_TTL_MS);
+  // A repeat of the same toast restarts its clock: drop the pending dismissal.
+  const pending = dismissTimers.get(id);
+  if (pending !== undefined) clearTimeout(pending);
+  dismissTimers.set(
+    id,
+    setTimeout(() => {
+      dismissTimers.delete(id);
+      // Held = its Details disclosure is open. Keep it until dismissed by hand.
+      if (get().errors.find((e) => e.id === id)?.held === true) return;
+      set({ errors: get().errors.filter((e) => e.id !== id) });
+    }, TOAST_TTL_MS),
+  );
 }

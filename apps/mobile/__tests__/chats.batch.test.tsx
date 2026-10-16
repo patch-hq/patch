@@ -5,6 +5,7 @@
 // Unread filter's FIFO ordering + the "held row" release-on-navigate rule.
 
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   renderRN,
@@ -125,6 +126,19 @@ beforeEach(() => {
 });
 
 describe('Chats tab view dropdown', () => {
+  it('never truncates the trigger pill label ("All chats" must not read "All cha…")', () => {
+    const r = renderRN(<ChatsScreen />);
+    const pill = findHost(r.root, byTestId('chats-view-menu'));
+    const style = StyleSheet.flatten(
+      typeof pill.props['style'] === 'function'
+        ? pill.props['style']({ pressed: false })
+        : pill.props['style'],
+    );
+    expect(style.minWidth).toBeGreaterThanOrEqual(140);
+    const label = findAllHost(pill, byType('Text'))[0];
+    expect(StyleSheet.flatten(label.props['style']).flexShrink).toBe(0);
+  });
+
   it('reads "All chats" by default, and lists every option when opened', () => {
     const r = renderRN(<ChatsScreen />);
     expect(hasText(findHost(r.root, byTestId('chats-view-menu')), 'All chats')).toBe(true);

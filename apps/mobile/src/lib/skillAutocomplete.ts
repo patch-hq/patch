@@ -3,10 +3,35 @@
 // `activeSlashToken` below, which is cursor-aware; the menu is active only
 // while the token AT THE CURSOR is still open (no closing space yet).
 
-/** Skills whose name starts with `query` (case-insensitive). */
+/**
+ * Skills matching `query`, best first — a mirror of the web composer's
+ * `packages/web/src/lib/skillMatch.ts` (the two apps share no package):
+ *   0. the name starts with the query          (`dep` → `deploy`)
+ *   1. the name contains it anywhere           (`pending` → `deploy-pending`)
+ *   2. the query's letters appear in order     (`dpg` → `deploy-pending`)
+ * Within a tier the incoming order stands.
+ */
 export function filterSkills(skills: string[], query: string): string[] {
   const q = query.toLowerCase();
-  return skills.filter((s) => s.toLowerCase().startsWith(q));
+  const scored: { skill: string; tier: number; at: number }[] = [];
+  skills.forEach((skill, at) => {
+    const n = skill.toLowerCase();
+    const tier =
+      q === '' || n.startsWith(q) ? 0 : n.includes(q) ? 1 : isSubsequence(n, q) ? 2 : null;
+    if (tier !== null) scored.push({ skill, tier, at });
+  });
+  scored.sort((a, b) => (a.tier === b.tier ? a.at - b.at : a.tier - b.tier));
+  return scored.map((s) => s.skill);
+}
+
+/** Do `q`'s characters appear in `n`, in order but not necessarily adjacent? */
+function isSubsequence(n: string, q: string): boolean {
+  let i = 0;
+  for (const ch of n) {
+    if (ch === q[i]) i++;
+    if (i === q.length) return true;
+  }
+  return false;
 }
 
 // spec/15 § Composer — Skill autocomplete: `/` opens the menu anywhere it

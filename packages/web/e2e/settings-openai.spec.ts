@@ -20,7 +20,7 @@ test('a ChatGPT account shows its usage, and a sign-in on a host shows its code'
   });
   await page.goto(settingsUrl('usage'));
   await setHostAccount(page, {
-    daemonId: 'd1',
+    hostId: 'd1',
     backendId: 'codex',
     connected: true,
     login: {
@@ -56,7 +56,7 @@ test('Sign in with ChatGPT runs the device flow on the online host', async ({ pa
   await page.goto(settingsUrl('usage'));
   await page.getByTestId('chatgpt-signin').click();
   expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([
-    expect.objectContaining({ backendId: 'codex', authMethod: 'device', daemonId: 'd1' }),
+    expect.objectContaining({ backendId: 'codex', authMethod: 'device', hostId: 'd1' }),
   ]);
 });
 
@@ -103,9 +103,9 @@ test('a signed-out Claude host can select ChatGPT and enable the new-chat compos
     }),
   );
   await page.goto('/app/dev-harness.html?chat=new');
-  await setHostAccount(page, { daemonId: 'd1', backendId: 'claude-code', connected: false });
+  await setHostAccount(page, { hostId: 'd1', backendId: 'claude-code', connected: false });
   await setHostAccount(page, {
-    daemonId: 'd1',
+    hostId: 'd1',
     backendId: 'codex',
     connected: true,
     accounts: [{ id: 'a1', label: 'ChatGPT', kind: 'chatgpt', connected: true }],
@@ -129,6 +129,6 @@ test('Codex sign-in on Hosts opens Usage with that host chosen for the ChatGPT s
   await expect(page.getByText(/Paste a token from.*claude setup-token/)).toBeHidden();
   await page.getByTestId('chatgpt-signin').click();
   expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([
-    expect.objectContaining({ backendId: 'codex', authMethod: 'device', daemonId: 'd1' }),
+    expect.objectContaining({ backendId: 'codex', authMethod: 'device', hostId: 'd1' }),
   ]);
 });

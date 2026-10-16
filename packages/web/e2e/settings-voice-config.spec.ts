@@ -63,11 +63,9 @@ test.describe('Settings — Voice engines', () => {
     await expect(page.getByTestId('voice-device-status')).toContainText('Not implemented yet');
   });
 
-  test('Gemini on hands-free says the address word is not enforced', async ({ page }) => {
+  test('Gemini on hands-free shows no warning: the address word is enforced', async ({ page }) => {
     await page.getByTestId('voice-handsFree-engine-gemini-flash').click();
-    await expect(page.getByTestId('voice-handsFree-status')).toContainText(
-      'address word is not enforced',
-    );
+    await expect(page.getByTestId('voice-handsFree-status')).toHaveCount(0);
   });
 
   test('shows what voice calls have cost on each host, this month and in all', async ({ page }) => {
@@ -85,7 +83,7 @@ test.describe('Settings — Voice engines', () => {
       const host = store.getState().hosts['d1']!.host!;
       store.getState().setHostReport({
         ...host,
-        type: 'daemon.host',
+        type: 'host.host',
         voiceUsage: { monthUsd: 0.0412, monthCalls: 3, allUsd: 1.5, allCalls: 40 },
       });
     });
@@ -97,7 +95,7 @@ test.describe('Settings — Voice engines', () => {
   test('a hosted cell whose key the host lacks says so, naming the host and the key', async ({
     page,
   }) => {
-    // The host reports which provider keys it holds (`daemon.host.voiceKeys`).
+    // The host reports which provider keys it holds (`host.host.voiceKeys`).
     await page.evaluate(() => {
       const store = (
         window as unknown as {
@@ -112,7 +110,7 @@ test.describe('Settings — Voice engines', () => {
       const host = store.getState().hosts['d1']!.host!;
       store.getState().setHostReport({
         ...host,
-        type: 'daemon.host',
+        type: 'host.host',
         voiceKeys: { gemini: false, openai: true },
       });
     });

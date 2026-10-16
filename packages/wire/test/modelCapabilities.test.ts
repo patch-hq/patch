@@ -11,6 +11,7 @@ import {
   permissionModesFor,
   HARNESS_PERMISSION_MODES,
   resolvePermissionModeForModel,
+  closestPermissionModeForModel,
 } from '../src/modelCapabilities.js';
 
 describe('modelSupportsAutoMode', () => {
@@ -109,5 +110,25 @@ describe('permission modes are keyed by harness', () => {
       degradedFrom: 'auto',
     });
     expect(resolvePermissionModeForModel('plan', 'openai/gpt-5')).toEqual({ mode: 'plan' });
+  });
+});
+
+describe('closestPermissionModeForModel', () => {
+  it('keeps a mode the target model can run', () => {
+    expect(closestPermissionModeForModel('plan', 'openai/gpt-5')).toBe('plan');
+    expect(closestPermissionModeForModel('auto', 'claude-opus-5')).toBe('auto');
+  });
+
+  it('moves `auto` to its static closest when the target cannot run it', () => {
+    expect(closestPermissionModeForModel('auto', 'openai/gpt-5')).toBe('acceptEdits');
+    expect(closestPermissionModeForModel('auto', 'claude-haiku-4-5')).toBe('acceptEdits');
+  });
+
+  it('every mapped target is runnable on every harness that lacks the source mode', () => {
+    for (const model of ['openai/gpt-5', 'claude-haiku-4-5', 'claude-opus-5']) {
+      for (const mode of ['auto', 'default', 'acceptEdits', 'bypassPermissions', 'plan'] as const) {
+        expect(permissionModesFor(model)).toContain(closestPermissionModeForModel(mode, model));
+      }
+    }
   });
 });

@@ -1,12 +1,12 @@
-// Server-side daemon-link bridge for `patch.jobs.request` events.
+// Server-side host-link bridge for `patch.jobs.request` events.
 //
 // Group 10 BLOCKER B.8: the host's MCP child invokes `patch_job_*` tools
 // that hit the host UDS, which in turn calls `RemoteJobsStore` — that
 // store sends `patch.jobs.request` upstream. This bridge:
 //
-//   1. Listens for inbound `patch.jobs.request` on the daemon-link.
+//   1. Listens for inbound `patch.jobs.request` on the host-link.
 //   2. Maps the op onto the server's persistent JobsInterface (JobStore).
-//   3. Emits `patch.jobs.response` back via daemonLink.send.
+//   3. Emits `patch.jobs.response` back via hostLink.send.
 //
 // NO FALLBACK: zod-schema rejections produce `invalid_input`; missing jobs
 // produce `not_found`; everything else is `internal` (logged with stack).
@@ -14,7 +14,7 @@
 import type { Logger } from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { JobCreateBody, JobPatchBody } from '@patch/wire/jobs';
-import type { DaemonLink } from '../daemon-link.js';
+import type { HostLink } from '../host-link.js';
 import { JOB_ID_REGEX, type JobLogs } from './logs.js';
 import { JobValidationError } from './validate.js';
 import type { JobsInterface } from './types.js';
@@ -22,7 +22,7 @@ import type { JobsInterface } from './types.js';
 const BRIDGE_SURFACE_ID = 'jobs-rpc-bridge';
 
 export interface AttachOptions {
-  link: DaemonLink;
+  link: HostLink;
   jobs: JobsInterface;
   logs: JobLogs;
   logger: Logger;
@@ -30,21 +30,21 @@ export interface AttachOptions {
 
 export function attachJobsRpcBridge(opts: AttachOptions): () => void {
   const { link, jobs, logs, logger } = opts;
-  const unsub = link.onEvent((event, fromDaemonId) => {
+  const unsub = link.onEvent((event, fromHostId) => {
     if (event.type !== 'patch.jobs.request') return;
     // The response MUST go back to the machine that asked. `patch.jobs.response`
-    // carries neither `daemonId` nor `chatId`, so `DaemonLink.routeOf()` would
+    // carries neither `hostId` nor `chatId`, so `HostLink.routeOf()` would
     // fall through to the account's HOME machine — every request from any other
-    // host then hung until its 10s client timeout. `fromDaemonId` is the
+    // host then hung until its 10s client timeout. `fromHostId` is the
     // requester, and `sendTo` addresses it directly.
-    if (fromDaemonId === null) {
+    if (fromHostId === null) {
       logger.error(
         { requestId: event.requestId, op: event.op },
         'jobs-rpc-bridge: request with no originating machine; dropping (cannot route a reply)',
       );
       return;
     }
-    handle(event, jobs, logs, link, logger, fromDaemonId);
+    handle(event, jobs, logs, link, logger, fromHostId);
   });
   return unsub;
 }
@@ -53,9 +53,9 @@ function handle(
   event: Extract<WireEvent, { type: 'patch.jobs.request' }>,
   jobs: JobsInterface,
   logs: JobLogs,
-  link: DaemonLink,
+  link: HostLink,
   logger: Logger,
-  fromDaemonId: string,
+  fromHostId: string,
 ): void {
   const reply = (
     ok: boolean,
@@ -76,7 +76,7 @@ function handle(
           /* v8 ignore next */
           error: error ?? { code: 'internal', message: 'unknown' },
         };
-    link.sendTo(fromDaemonId, BRIDGE_SURFACE_ID, response);
+    link.sendTo(fromHostId, BRIDGE_SURFACE_ID, response);
   };
 
   try {

@@ -156,3 +156,84 @@ describe('voiceMic — Android, module present', () => {
     await expect(stopMicCapture()).resolves.toBeUndefined();
   });
 });
+
+describe('voiceMic — the frame subscription never outlives its capture', () => {
+  async function withSubscriptions(start: () => Promise<void>): Promise<{
+    removed: string[];
+    restore: () => void;
+  }> {
+    Platform.OS = 'android';
+    NativeModules['PatchVoiceMic'] = {
+      start: vi.fn(start),
+      stop: vi.fn(async () => undefined),
+      addListener: vi.fn(),
+      removeListeners: vi.fn(),
+    };
+    const { NativeEventEmitter } = await import('react-native');
+    const realAddListener = NativeEventEmitter.prototype.addListener;
+    const removed: string[] = [];
+    let n = 0;
+    NativeEventEmitter.prototype.addListener = function () {
+      const id = `sub${++n}`;
+      return { remove: () => void removed.push(id) };
+    } as typeof realAddListener;
+    return {
+      removed,
+      restore: () => {
+        NativeEventEmitter.prototype.addListener = realAddListener;
+      },
+    };
+  }
+
+  it('a capture that fails to start drops its subscription', async () => {
+    const { removed, restore } = await withSubscriptions(async () => {
+      throw new Error('AudioRecord busy');
+    });
+    try {
+      const { startMicCapture } = await import('../src/lib/voiceMic');
+      await expect(startMicCapture(vi.fn(), vi.fn())).rejects.toThrow('AudioRecord busy');
+      expect(removed).toEqual(['sub1']);
+    } finally {
+      restore();
+    }
+  });
+
+  it('starting again replaces the earlier subscription instead of orphaning it', async () => {
+    const { removed, restore } = await withSubscriptions(async () => undefined);
+    try {
+      const { startMicCapture, stopMicCapture } = await import('../src/lib/voiceMic');
+      await startMicCapture(vi.fn(), vi.fn());
+      await startMicCapture(vi.fn(), vi.fn());
+      expect(removed).toEqual(['sub1']);
+      await stopMicCapture();
+      expect(removed).toEqual(['sub1', 'sub2']);
+    } finally {
+      restore();
+    }
+  });
+
+  it("an earlier capture's failed start does not drop the subscription of the one that replaced it", async () => {
+    let failFirst!: (e: Error) => void;
+    let starts = 0;
+    const { removed, restore } = await withSubscriptions(() => {
+      starts += 1;
+      return starts === 1
+        ? new Promise<void>((_res, rej) => {
+            failFirst = rej;
+          })
+        : Promise.resolve();
+    });
+    try {
+      const { startMicCapture } = await import('../src/lib/voiceMic');
+      const first = startMicCapture(vi.fn(), vi.fn());
+      await Promise.resolve();
+      await startMicCapture(vi.fn(), vi.fn()); // replaces the first (sub1 removed)
+      failFirst(new Error('late failure'));
+      await expect(first).rejects.toThrow('late failure');
+      // sub1 once (replaced) and once more (its own failure) — sub2 never.
+      expect(removed).not.toContain('sub2');
+    } finally {
+      restore();
+    }
+  });
+});

@@ -16,7 +16,7 @@ export function isRelayed(): boolean {
 
 const copies = new Map<string, Promise<string>>();
 
-function standardBase64(bytes: Uint8Array): string {
+export function standardBase64(bytes: Uint8Array): string {
   const url = toBase64Url(bytes);
   return url.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (url.length % 4)) % 4);
 }

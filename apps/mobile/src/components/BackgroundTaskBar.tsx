@@ -17,6 +17,8 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronDown, ChevronUp, X } from 'lucide-react-native';
 import type { WatchTaskRow } from '@patch/wire';
+import { headCodePoints } from '@patch/wire';
+import { useUiStore } from '../stores/uiStore';
 import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
 import {
@@ -94,6 +96,8 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement 
     setKilling((prev) => new Set(prev).add(task.taskId));
     try {
       await api.watchStop(chatId, task.taskId);
+    } catch (e) {
+      useUiStore.getState().pushError(`stopping the task failed: ${(e as Error).message}`);
     } finally {
       setKilling((prev) => {
         const next = new Set(prev);
@@ -120,10 +124,8 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement 
 
   function commandPreview(key: string, command: string): ReactElement {
     const isExpanded = expanded.has(key);
-    const text =
-      isExpanded || command.length <= COMMAND_PREVIEW_LEN
-        ? command
-        : `${command.slice(0, COMMAND_PREVIEW_LEN)}…`;
+    const preview = isExpanded ? command : headCodePoints(command, COMMAND_PREVIEW_LEN);
+    const text = preview === command ? command : `${preview}…`;
     return (
       <Pressable
         testID="background-task-bar-command"
@@ -286,7 +288,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement 
                   setDetailId(null);
                   router.push(
                     terminalRoute(
-                      row.daemonId,
+                      row.hostId,
                       row.folder === '' ? undefined : row.folder,
                       watchTailCommand(detailTask.outputFile),
                     ) as never,

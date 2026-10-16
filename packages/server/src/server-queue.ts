@@ -39,10 +39,10 @@ interface Persisted {
 export interface ServerQueueDeps {
   chats: Pick<ChatRegistry, 'get'>;
   /** Send a frame to one host (buffered by the link while it is offline). */
-  sendTo: (daemonId: string, surfaceId: string, event: WireEvent) => void;
-  isOnline: (daemonId: string) => boolean;
+  sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
+  isOnline: (hostId: string) => boolean;
   /** Does this host take queued messages from the server? */
-  hostSupports: (daemonId: string) => boolean;
+  hostSupports: (hostId: string) => boolean;
   /** Put a frame through the same pipeline a host's own frame takes, so surfaces and observers see it. */
   inject: (event: WireEvent) => void;
   dataDir?: string;
@@ -81,11 +81,8 @@ export class ServerQueue {
    * queue (and acknowledged it); false when it should go to the host as usual.
    */
   enqueueIfBusy(surfaceId: string, event: ChatInputEvent): boolean {
-    if (event.branchId !== undefined || event.source !== undefined) return false;
-    const chat = this.deps.chats.get(event.chatId);
-    if (!chat) return false;
-    const host = chat.daemonId;
-    if (!this.deps.isOnline(host) || !this.deps.hostSupports(host)) return false;
+    if (!this.takes(event)) return false;
+    const chat = this.deps.chats.get(event.chatId)!;
     const existing = this.queues.get(event.chatId)?.find((i) => i.localId === event.localId);
     if (existing) {
       // A redelivery from a surface that did not see the acknowledgement.
@@ -105,10 +102,24 @@ export class ServerQueue {
     return true;
   }
 
-  /** The hub handed a message straight to an idle host: the next one must queue behind it. */
-  noteForwarded(chatId: string): void {
-    if (!this.deps.chats.get(chatId)) return;
-    this.releasing.set(chatId, this.now());
+  /**
+   * The hub handed a message straight to an idle host: the next one must queue
+   * behind it. Only a message this queue would itself hold counts — a side
+   * branch, voice-device, offline-host or unsupported-host message starts no
+   * turn on the chat's main line, so nothing would ever release what queued
+   * behind it.
+   */
+  noteForwarded(event: ChatInputEvent): void {
+    if (!this.takes(event)) return;
+    this.releasing.set(event.chatId, this.now());
+  }
+
+  /** Is this a message the server queue decides for (rather than the host)? */
+  private takes(event: ChatInputEvent): boolean {
+    if (event.branchId !== undefined || event.source !== undefined) return false;
+    const chat = this.deps.chats.get(event.chatId);
+    if (!chat) return false;
+    return this.deps.isOnline(chat.hostId) && this.deps.hostSupports(chat.hostId);
   }
 
   /**
@@ -119,10 +130,10 @@ export class ServerQueue {
    * so the idle report becomes `running` (surfaces, the completion push and the
    * sweep all read idle as "done") and the next message is released.
    */
-  gate(event: WireEvent, fromDaemonId: string | null): WireEvent | null {
-    if (event.type === 'daemon.offline') {
+  gate(event: WireEvent, fromHostId: string | null): WireEvent | null {
+    if (event.type === 'host.offline') {
       for (const [chatId] of this.releasing) {
-        if (this.deps.chats.get(chatId)?.daemonId === event.daemonId) this.releasing.delete(chatId);
+        if (this.deps.chats.get(chatId)?.hostId === event.hostId) this.releasing.delete(chatId);
       }
       return event;
     }
@@ -139,7 +150,7 @@ export class ServerQueue {
     if (event.activity !== 'idle' || !this.hasWaiting(chatId)) return event;
     // Defer the release: this frame has not been seen by the registry yet, and
     // the release looks the chat's host up.
-    const host = fromDaemonId ?? this.deps.chats.get(chatId)?.daemonId ?? null;
+    const host = fromHostId ?? this.deps.chats.get(chatId)?.hostId ?? null;
     queueMicrotask(() => this.release(chatId, host));
     return { ...event, activity: 'running' };
   }
@@ -186,7 +197,7 @@ export class ServerQueue {
   promote(chatId: string, localId: string, surfaceId: string): boolean {
     const items = this.queues.get(chatId);
     if (!items?.some((i) => i.localId === localId)) return false;
-    const host = this.deps.chats.get(chatId)?.daemonId;
+    const host = this.deps.chats.get(chatId)?.hostId;
     if (host !== undefined)
       this.deps.sendTo(host, surfaceId, { type: 'chat.stop_request', chatId });
     return true;
@@ -252,6 +263,7 @@ export class ServerQueue {
       localId: item.localId,
       message: item.event.message,
       queueSeq: item.queueSeq,
+      ...(item.event.afterTurn ? { ownTurn: true } : {}),
     });
   }
 

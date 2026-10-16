@@ -21,6 +21,10 @@ import { useUiStore } from '../stores/uiStore';
 import { NEW_CHAT_DRAFT_KEY } from './newChat';
 
 const COMPOSER_DRAFT_PREFIX = 'patch.composerDraft:';
+/** Set once the pre-server-drafts MMKV entries have been offered to the server. */
+const MIGRATED_KEY = 'patch.composerDraftMigrated';
+/** JSON array of chatIds whose latest local write the server never confirmed. */
+const PENDING_KEY = 'patch.composerDraftPending';
 
 /** How long after the last keystroke we wait before telling the server. */
 export const DRAFT_SEND_DEBOUNCE_MS = 400;
@@ -97,6 +101,23 @@ function persistOne(chatId: string, text: string): void {
 function loadAll(): { drafts: Record<string, string>; pending: string[] } {
   const drafts: Record<string, string> = {};
   const pending: string[] = [];
+  // Only the FIRST launch after the move to server-owned drafts treats every
+  // cached entry as owed to the server. After that an entry is just a cache:
+  // re-pushing it on every launch resurrected drafts that had since been sent
+  // or cleared on another surface, with a fresh timestamp that beat the clear.
+  let migrated = false;
+  let owed: string[] = [];
+  try {
+    migrated = store().getString(MIGRATED_KEY) === '1';
+    if (migrated) {
+      const raw = store().getString(PENDING_KEY);
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) owed = parsed.filter((c): c is string => typeof c === 'string');
+    }
+  } catch {
+    // Unreadable bookkeeping: treat the cache as plain cache, never re-push it.
+    migrated = true;
+  }
   let keys: string[];
   try {
     keys = store().getAllKeys();
@@ -115,15 +136,49 @@ function loadAll(): { drafts: Record<string, string>; pending: string[] } {
     }
     if (typeof text === 'string' && hasDraftText(text)) {
       drafts[chatId] = text;
-      if (chatId !== NEW_CHAT_DRAFT_KEY) pending.push(chatId);
+      if (chatId !== NEW_CHAT_DRAFT_KEY && (!migrated || owed.includes(chatId))) {
+        pending.push(chatId);
+      }
     }
+  }
+  // A pending clear has no MMKV key to find it by, so carry those over too.
+  if (migrated) for (const chatId of owed) if (!pending.includes(chatId)) pending.push(chatId);
+  try {
+    store().set(MIGRATED_KEY, '1');
+  } catch {
+    // Storage unavailable: nothing is cached either.
   }
   return { drafts, pending };
 }
 
 const localEditAt = new Map<string, number>();
 const sendTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const pendingOp = new Set<string>();
+const pendingSet = new Set<string>();
+
+function savePending(): void {
+  try {
+    store().set(PENDING_KEY, JSON.stringify([...pendingSet]));
+  } catch (err) {
+    useUiStore.getState().pushError(`${SAVE_FAILED_MESSAGE} (${(err as Error).message})`);
+  }
+}
+
+/** The set of chats owed to the server, mirrored to MMKV so a relaunch keeps it. */
+const pendingOp = {
+  has: (chatId: string): boolean => pendingSet.has(chatId),
+  add(chatId: string): void {
+    if (pendingSet.has(chatId)) return;
+    pendingSet.add(chatId);
+    savePending();
+  },
+  delete(chatId: string): void {
+    if (pendingSet.delete(chatId)) savePending();
+  },
+  clear(): void {
+    pendingSet.clear();
+  },
+  [Symbol.iterator]: () => pendingSet[Symbol.iterator](),
+};
 
 function cancelSendTimer(chatId: string): void {
   const timer = sendTimers.get(chatId);
@@ -167,7 +222,8 @@ function flushPending(chatId: string): void {
 }
 
 const initial = loadAll();
-for (const chatId of initial.pending) pendingOp.add(chatId);
+for (const chatId of initial.pending) pendingSet.add(chatId);
+savePending();
 
 export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
   drafts: initial.drafts,
@@ -262,22 +318,28 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
 
   applyDraftUpdated(chatId, text, updatedAt) {
     if (chatId === NEW_CHAT_DRAFT_KEY) return;
-    pendingOp.delete(chatId);
     if (get().focused[chatId]) {
+      // A keystroke made after this update was captured is still owed to the
+      // server: the update may be the echo of our own earlier send.
+      if (updatedAt >= (localEditAt.get(chatId) ?? 0)) pendingOp.delete(chatId);
       set({ pendingRemote: { ...get().pendingRemote, [chatId]: { text, updatedAt } } });
       return;
     }
+    pendingOp.delete(chatId);
     persistOne(chatId, text);
     set({ drafts: { ...get().drafts, [chatId]: text } });
   },
 
   applyDraftCleared(chatId, updatedAt) {
     if (chatId === NEW_CHAT_DRAFT_KEY) return;
-    pendingOp.delete(chatId);
     if (get().focused[chatId]) {
+      // A keystroke made after this update was captured is still owed to the
+      // server: the update may be the echo of our own earlier send.
+      if (updatedAt >= (localEditAt.get(chatId) ?? 0)) pendingOp.delete(chatId);
       set({ pendingRemote: { ...get().pendingRemote, [chatId]: { text: null, updatedAt } } });
       return;
     }
+    pendingOp.delete(chatId);
     if (!(chatId in get().drafts)) return;
     persistOne(chatId, '');
     const drafts = { ...get().drafts };

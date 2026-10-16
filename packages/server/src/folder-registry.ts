@@ -15,7 +15,7 @@ import type { WireEvent } from '@patch/wire';
 
 /** One host's published registry: its designated roots and its recents. */
 export interface HostFolders {
-  daemonId: string;
+  hostId: string;
   roots: string[];
   recent: string[];
 }
@@ -32,8 +32,8 @@ export class FolderRegistry {
   /** Update the mirror from a host folder event. Ignores everything else. */
   observe(event: WireEvent): void {
     if (event.type === 'folders.list' || event.type === 'folders.updated') {
-      this.byHost.set(event.daemonId, {
-        daemonId: event.daemonId,
+      this.byHost.set(event.hostId, {
+        hostId: event.hostId,
         roots: [...event.roots],
         recent: [...event.recent],
       });
@@ -43,15 +43,15 @@ export class FolderRegistry {
   /** Every host that has published, in first-published order. */
   list(): HostFolders[] {
     return [...this.byHost.values()].map((h) => ({
-      daemonId: h.daemonId,
+      hostId: h.hostId,
       roots: [...h.roots],
       recent: [...h.recent],
     }));
   }
 
   /** One host's registry, or null when it has never published. */
-  forHost(daemonId: string): HostFolders | null {
-    const h = this.byHost.get(daemonId);
-    return h ? { daemonId, roots: [...h.roots], recent: [...h.recent] } : null;
+  forHost(hostId: string): HostFolders | null {
+    const h = this.byHost.get(hostId);
+    return h ? { hostId, roots: [...h.roots], recent: [...h.recent] } : null;
   }
 }

@@ -9,9 +9,9 @@
 //     4400)
 //   - surface.foregrounded / surface.backgrounded heartbeat semantics
 //   - chat.call_response with no onCallResponse wired
-//   - resolveInFlightChatsOnDaemonOffline (a real in-flight chat forced to
+//   - resolveInFlightChatsOnHostOffline (a real in-flight chat forced to
 //     `errored` when the host link drops)
-//   - onDaemonEvent: a forSurfaceId-tagged event for a no-longer-connected
+//   - onHostEvent: a forSurfaceId-tagged event for a no-longer-connected
 //     surface is dropped (not fanned out, no throw)
 //   - account-scoped (no chatId) host event fanout
 //   - direct introspection/send helpers: connectedSurfaceIds,
@@ -19,7 +19,7 @@
 //     — including their try/catch write-failure branches
 //   - auth buffer overflow while authenticating
 //   - handleHello: no account bootstrapped / missing auth token in hello
-//   - host hello rejected when attachDaemon isn't wired (InProcessDaemonLink)
+//   - host hello rejected when attachHost isn't wired (InProcessHostLink)
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -31,7 +31,7 @@ import { WireTestClient } from '@patch/wire/test-client';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import pino from 'pino';
 import { WsHub } from '../src/ws-hub.js';
 import { PresenceTracker } from '../src/presence.js';
@@ -40,20 +40,28 @@ import { ChatRegistry } from '../src/chat-registry.js';
 interface Harness {
   url: string;
   registry: Registry;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   built: Awaited<ReturnType<typeof buildAll>>;
   close: () => Promise<void>;
 }
 
-async function startServer(opts: { registry: Registry }): Promise<Harness> {
-  const daemonLink = new InProcessDaemonLink();
-  const built = await buildAll({ logger: false, registry: opts.registry, daemonLink });
+async function startServer(opts: {
+  registry: Registry;
+  hostOfflineGraceMs?: number;
+}): Promise<Harness> {
+  const hostLink = new InProcessHostLink();
+  const built = await buildAll({
+    logger: false,
+    registry: opts.registry,
+    hostLink,
+    hostOfflineGraceMs: opts.hostOfflineGraceMs ?? 0,
+  });
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
   return {
     url: `ws://127.0.0.1:${addr.port}/ws`,
     registry: opts.registry,
-    daemonLink,
+    hostLink,
     built,
     close: async () => {
       await built.app.close();
@@ -76,7 +84,7 @@ async function makeAuthedClient(
   });
   const client = new WireTestClient({ url: h.url, auth: jwt });
   await client.connect();
-  await client.waitFor('daemon.online');
+  await client.waitFor('host.online');
   return client;
 }
 
@@ -95,7 +103,7 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
     registry.bootstrapAccount({ keypair: user });
     // `patch.spawn` below names a machine, and the hub refuses one that is not
     // registered (spec/03 § Host events), so register it.
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const c = await makeAuthedClient(h, user, 'srf-forward');
@@ -139,7 +147,7 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
         { type: 'patch.send_to', sourceChatId: 'chat-src', targetChatId: 'chat-tgt', message: 'm' },
         {
           type: 'patch.spawn',
-          daemonId: 'd1',
+          hostId: 'd1',
           sourceChatId: 'chat-src',
           folder: '/work',
           prompt: 'go',
@@ -150,7 +158,7 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
       await new Promise((r) => setTimeout(r, 100));
 
       for (const ev of events) {
-        const fwd = h.daemonLink.sent.find((s) => s.event.type === ev.type);
+        const fwd = h.hostLink.sent.find((s) => s.event.type === ev.type);
         expect(fwd, `expected ${ev.type} to be forwarded`).toBeDefined();
       }
       await c.close();
@@ -182,12 +190,12 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
     // exercise the "not configured" branch we drive WsHub directly.
     const registry = Registry.load(dir);
     registry.bootstrapAccount();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const hub = new WsHub({
       logger: pino({ level: 'silent' }),
       registry,
       presence: new PresenceTracker(),
-      daemonLink,
+      hostLink,
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       // onCallResponse deliberately omitted.
@@ -269,7 +277,7 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
       );
       await new Promise((r) => setTimeout(r, 100));
       // A host→surface-only event type sent surface→server must be rejected.
-      ws.send(JSON.stringify({ type: 'daemon.online', daemonId: 'd1' }));
+      ws.send(JSON.stringify({ type: 'host.online', hostId: 'd1' }));
       const code = await new Promise<number>((resolve) => {
         ws.once('close', (c: number) => resolve(c));
       });
@@ -289,28 +297,28 @@ describe('WS hub — host socket state ignores its own hub message listener', ()
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('a frame arriving on an authenticated host socket is ignored by the hub (InboundDaemonLink owns it)', async () => {
+  it('a frame arriving on an authenticated host socket is ignored by the hub (InboundHostLink owns it)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(85));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
-    const daemonLink = undefined; // force InboundDaemonLink (real host gate)
-    void daemonLink;
-    const built = await buildAll({ logger: false, registry }); // no injected daemonLink
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    const hostLink = undefined; // force InboundHostLink (real host gate)
+    void hostLink;
+    const built = await buildAll({ logger: false, registry }); // no injected hostLink
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
     const url = `ws://127.0.0.1:${addr.port}/ws`;
     try {
       const daemonKeyJwt = await mintDaemonKey({
         userPrivateKey: user.privateKey,
-        daemonId: 'daemon-1',
+        hostId: 'daemon-1',
         label: 'd',
       });
-      const daemon = new WireTestClient({ url, clientType: 'daemon', auth: daemonKeyJwt });
+      const daemon = new WireTestClient({ url, clientType: 'host', auth: daemonKeyJwt });
       await daemon.connect();
       await daemon.waitFor('auth.ok');
       // Send an extra raw frame directly on the underlying socket — reaches
-      // BOTH the InboundDaemonLink's own 'message' listener (attach()) AND
+      // BOTH the InboundHostLink's own 'message' listener (attach()) AND
       // the hub's onConnect listener (still registered on the same socket).
       // The hub's listener must see state==='daemon' and no-op.
       const ws = (daemon as unknown as { ws: import('ws').WebSocket }).ws;
@@ -341,9 +349,9 @@ describe('WS hub — lastClaudeAccount replay on late-joining surfaces', () => {
     const h = await startServer({ registry });
     try {
       // Emit BEFORE any surface connects.
-      h.daemonLink.emit({
-        type: 'daemon.account',
-        daemonId: 'd1',
+      h.hostLink.emit({
+        type: 'host.account',
+        hostId: 'd1',
         backendId: 'claude-code',
         connected: true,
         accountEmail: 'cached@x.com',
@@ -364,18 +372,18 @@ describe('WS hub — lastClaudeAccount replay on late-joining surfaces', () => {
       });
       const client = new WireTestClient({ url: h.url, auth: jwt });
       // The cached report arrives INSIDE the greeting, not as a replayed frame
-      // (spec/03 § Control → `auth.ok`: "the server's cached `daemon.host` /
-      // `daemon.account` reports"). A late-joining surface renders the whole
+      // (spec/03 § Control → `auth.ok`: "the server's cached `host.host` /
+      // `host.account` reports"). A late-joining surface renders the whole
       // Hosts list from one message rather than waiting on a second round trip.
       const greetingP = client.waitFor('auth.ok');
       await client.connect();
       const greeting = await greetingP;
       expect(greeting.hosts).toEqual([
         expect.objectContaining({
-          daemonId: 'd1',
+          hostId: 'd1',
           accounts: [
             {
-              daemonId: 'd1',
+              hostId: 'd1',
               backendId: 'claude-code',
               connected: true,
               accountEmail: 'cached@x.com',
@@ -408,9 +416,9 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       // Emit BEFORE any surface connects — same "the host only publishes on
       // link auth and on change" reasoning as folders.list (spec/03 § Host
       // events — `claude_settings.list` is "sent on connect").
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'claude_settings.list',
-        daemonId: 'd1',
+        hostId: 'd1',
         drift: '{"model":"opus"}',
         memories: [
           {
@@ -443,7 +451,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       await client.connect();
       const ev = await replayed;
       expect(ev).toMatchObject({
-        daemonId: 'd1',
+        hostId: 'd1',
         drift: '{"model":"opus"}',
         memories: [
           {
@@ -467,9 +475,9 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
     registry.bootstrapAccount({ keypair: user });
     const h = await startServer({ registry });
     try {
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'claude_settings.list',
-        daemonId: 'd1',
+        hostId: 'd1',
         drift: '{"model":"sonnet"}',
         memories: [
           {
@@ -481,9 +489,9 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
           },
         ],
       });
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'claude_settings.updated',
-        daemonId: 'd1',
+        hostId: 'd1',
         drift: '{"model":"opus"}',
         memories: [],
       });
@@ -507,7 +515,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       const ev = await replayed;
       // The update REPLACED the cache, so the surface never sees the stale
       // memory entry — same "carries the COMPLETE state" contract as folders.
-      expect(ev).toMatchObject({ daemonId: 'd1', drift: '{"model":"opus"}', memories: [] });
+      expect(ev).toMatchObject({ hostId: 'd1', drift: '{"model":"opus"}', memories: [] });
       await client.close();
     } finally {
       await h.close();
@@ -515,7 +523,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
   });
 });
 
-describe('WS hub — resolveInFlightChatsOnDaemonOffline', () => {
+describe('WS hub — resolveInFlightChatsOnHostOffline', () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-wshub-inflight-'));
@@ -533,13 +541,13 @@ describe('WS hub — resolveInFlightChatsOnDaemonOffline', () => {
       const c = await makeAuthedClient(h, user, 'srf-inflight');
       // Seed a spawned + running chat into the registry mirror via the same
       // host events the real host would emit.
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'chat-running',
         folder: '/work',
       });
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'chat-running',
@@ -553,7 +561,7 @@ describe('WS hub — resolveInFlightChatsOnDaemonOffline', () => {
       c.on('chat.error', (e) => errors.push(e));
       c.on('chat.state', (e) => states.push(e));
 
-      h.daemonLink.setStatus('offline');
+      h.hostLink.setStatus('offline');
       await new Promise((r) => setTimeout(r, 50));
 
       const err = errors.find((e) => (e as { chatId: string }).chatId === 'chat-running') as
@@ -578,6 +586,79 @@ describe('WS hub — resolveInFlightChatsOnDaemonOffline', () => {
     }
   });
 
+  it('a host that drops and returns inside the grace never errors its chat (no running → errored → running flicker)', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(76));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry, hostOfflineGraceMs: 150 });
+    try {
+      const c = await makeAuthedClient(h, user, 'srf-blip');
+      h.hostLink.emit({
+        type: 'chat.spawned',
+        hostId: 'd1',
+        chatId: 'chat-blip',
+        folder: '/work',
+      });
+      h.hostLink.emit({
+        type: 'chat.state',
+        permissionMode: 'bypassPermissions',
+        chatId: 'chat-blip',
+        activity: 'running',
+        lastUpdated: 1,
+      });
+      await new Promise((r) => setTimeout(r, 30));
+      const errors: unknown[] = [];
+      const states: Array<{ chatId: string; activity: string }> = [];
+      c.on('chat.error', (e) => errors.push(e));
+      c.on('chat.state', (e) => states.push(e as { chatId: string; activity: string }));
+
+      h.hostLink.setStatus('offline');
+      await new Promise((r) => setTimeout(r, 40));
+      h.hostLink.setStatus('online');
+      await new Promise((r) => setTimeout(r, 250));
+
+      expect(errors).toHaveLength(0);
+      expect(states.filter((s) => s.activity === 'errored')).toHaveLength(0);
+      await c.close();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('a host still offline after the grace has its chat errored', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(77));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry, hostOfflineGraceMs: 80 });
+    try {
+      const c = await makeAuthedClient(h, user, 'srf-grace');
+      h.hostLink.emit({
+        type: 'chat.spawned',
+        hostId: 'd1',
+        chatId: 'chat-g',
+        folder: '/work',
+      });
+      h.hostLink.emit({
+        type: 'chat.state',
+        permissionMode: 'bypassPermissions',
+        chatId: 'chat-g',
+        activity: 'running',
+        lastUpdated: 1,
+      });
+      await new Promise((r) => setTimeout(r, 30));
+      const errors: unknown[] = [];
+      c.on('chat.error', (e) => errors.push(e));
+      h.hostLink.setStatus('offline');
+      await new Promise((r) => setTimeout(r, 30));
+      expect(errors).toHaveLength(0);
+      await new Promise((r) => setTimeout(r, 150));
+      expect(errors).toHaveLength(1);
+      await c.close();
+    } finally {
+      await h.close();
+    }
+  });
+
   it('is a no-op when there are no in-flight chats', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(75));
     const registry = Registry.load(dir);
@@ -587,7 +668,7 @@ describe('WS hub — resolveInFlightChatsOnDaemonOffline', () => {
       const c = await makeAuthedClient(h, user, 'srf-noinflight');
       const errors: unknown[] = [];
       c.on('chat.error', (e) => errors.push(e));
-      h.daemonLink.setStatus('offline');
+      h.hostLink.setStatus('offline');
       await new Promise((r) => setTimeout(r, 30));
       expect(errors).toHaveLength(0);
       await c.close();
@@ -597,7 +678,7 @@ describe('WS hub — resolveInFlightChatsOnDaemonOffline', () => {
   });
 });
 
-describe('WS hub — onDaemonEvent edge cases', () => {
+describe('WS hub — onHostEvent edge cases', () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-wshub-daemonevent-'));
@@ -613,7 +694,7 @@ describe('WS hub — onDaemonEvent edge cases', () => {
     const h = await startServer({ registry });
     try {
       expect(() => {
-        h.daemonLink.emit({
+        h.hostLink.emit({
           type: 'chat.replay',
           chatId: 'chat-ghost',
           fromSeq: 0,
@@ -636,11 +717,11 @@ describe('WS hub — onDaemonEvent edge cases', () => {
       const b = await makeAuthedClient(h, user, 'srf-acct-b');
       const aSeen: unknown[] = [];
       const bSeen: unknown[] = [];
-      a.on('daemon.account', (e) => aSeen.push(e));
-      b.on('daemon.account', (e) => bSeen.push(e));
-      h.daemonLink.emit({
-        type: 'daemon.account',
-        daemonId: 'd1',
+      a.on('host.account', (e) => aSeen.push(e));
+      b.on('host.account', (e) => bSeen.push(e));
+      h.hostLink.emit({
+        type: 'host.account',
+        hostId: 'd1',
         backendId: 'claude-code',
         connected: true,
         accountEmail: 'x@y.com',
@@ -691,19 +772,19 @@ describe('WS hub — introspection + direct send helpers', () => {
     const h = await startServer({ registry });
     try {
       const c = await makeAuthedClient(h, user, 'srf-send1');
-      const got = c.waitFor('daemon.account');
+      const got = c.waitFor('host.account');
       const delivered = h.built.wsHub.sendToSurface('srf-send1', {
-        type: 'daemon.account',
-        daemonId: 'd1',
+        type: 'host.account',
+        hostId: 'd1',
         backendId: 'claude-code',
         connected: true,
         accountEmail: null,
       });
       expect(delivered).toBe(true);
       await got;
-      expect(
-        h.built.wsHub.sendToSurface('srf-ghost', { type: 'daemon.online', daemonId: 'd1' }),
-      ).toBe(false);
+      expect(h.built.wsHub.sendToSurface('srf-ghost', { type: 'host.online', hostId: 'd1' })).toBe(
+        false,
+      );
       await c.close();
     } finally {
       await h.close();
@@ -720,10 +801,10 @@ describe('WS hub — introspection + direct send helpers', () => {
       const web = await makeAuthedClient(h, user, 'srf-web', 'web');
       await new Promise((r) => setTimeout(r, 20));
 
-      const mobileGot = mobile.waitFor('daemon.account');
+      const mobileGot = mobile.waitFor('host.account');
       const kindsCount = h.built.wsHub.sendToKinds(new Set(['mobile']), {
-        type: 'daemon.account',
-        daemonId: 'd1',
+        type: 'host.account',
+        hostId: 'd1',
         backendId: 'claude-code',
         connected: true,
         accountEmail: null,
@@ -731,14 +812,14 @@ describe('WS hub — introspection + direct send helpers', () => {
       expect(kindsCount).toBe(1);
       await mobileGot;
 
-      const webGot = web.waitFor('daemon.online');
-      const kindCount = h.built.wsHub.sendToKind('web', { type: 'daemon.online', daemonId: 'd1' });
+      const webGot = web.waitFor('host.online');
+      const kindCount = h.built.wsHub.sendToKind('web', { type: 'host.online', hostId: 'd1' });
       expect(kindCount).toBe(1);
       await webGot;
 
-      const bothGotA = mobile.waitFor('daemon.offline');
-      const bothGotB = web.waitFor('daemon.offline');
-      const allCount = h.built.wsHub.sendToAll({ type: 'daemon.offline', daemonId: 'd1' });
+      const bothGotA = mobile.waitFor('host.offline');
+      const bothGotB = web.waitFor('host.offline');
+      const allCount = h.built.wsHub.sendToAll({ type: 'host.offline', hostId: 'd1' });
       expect(allCount).toBe(2);
       await bothGotA;
       await bothGotB;
@@ -764,12 +845,12 @@ describe('WS hub — introspection + direct send helpers', () => {
   it('sendToSurface / sendToKinds / sendToKind / sendToAll swallow a throwing socket.send (write-failure branch)', async () => {
     const registry = Registry.load(dir);
     registry.bootstrapAccount();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const hub = new WsHub({
       logger: pino({ level: 'silent' }),
       registry,
       presence: new PresenceTracker(),
-      daemonLink,
+      hostLink,
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
     });
@@ -793,10 +874,10 @@ describe('WS hub — introspection + direct send helpers', () => {
         },
       ]),
     );
-    expect(hub.sendToSurface('srf-throw', { type: 'daemon.online', daemonId: 'd1' })).toBe(false);
-    expect(hub.sendToKinds(new Set(['web']), { type: 'daemon.online', daemonId: 'd1' })).toBe(0);
-    expect(hub.sendToKind('web', { type: 'daemon.online', daemonId: 'd1' })).toBe(0);
-    expect(hub.sendToAll({ type: 'daemon.online', daemonId: 'd1' })).toBe(0);
+    expect(hub.sendToSurface('srf-throw', { type: 'host.online', hostId: 'd1' })).toBe(false);
+    expect(hub.sendToKinds(new Set(['web']), { type: 'host.online', hostId: 'd1' })).toBe(0);
+    expect(hub.sendToKind('web', { type: 'host.online', hostId: 'd1' })).toBe(0);
+    expect(hub.sendToAll({ type: 'host.online', hostId: 'd1' })).toBe(0);
   });
 });
 
@@ -811,8 +892,8 @@ describe('WS hub — auth edge cases', () => {
 
   it('rejects hello when no account has been bootstrapped', async () => {
     const registry = Registry.load(dir); // no bootstrapAccount()
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
     const url = `ws://127.0.0.1:${addr.port}/ws`;
@@ -847,8 +928,8 @@ describe('WS hub — auth edge cases', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(81));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
     const url = `ws://127.0.0.1:${addr.port}/ws`;
@@ -872,17 +953,17 @@ describe('WS hub — auth edge cases', () => {
     }
   });
 
-  it('rejects a host hello when attachDaemon is not wired (InProcessDaemonLink)', async () => {
+  it('rejects a host hello when attachHost is not wired (InProcessHostLink)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(82));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
-    // InProcessDaemonLink is injected → app.ts does NOT wire attachDaemon.
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    // InProcessHostLink is injected → app.ts does NOT wire attachHost.
     const h = await startServer({ registry });
     try {
       const daemonKeyJwt = await mintDaemonKey({
         userPrivateKey: user.privateKey,
-        daemonId: 'daemon-1',
+        hostId: 'daemon-1',
         label: 'd',
       });
       const WebSocketCtor = (await import('ws')).default;
@@ -894,7 +975,7 @@ describe('WS hub — auth edge cases', () => {
       ws.send(
         JSON.stringify({
           type: 'hello',
-          clientType: 'daemon',
+          clientType: 'host',
           clientVersion: '0.0.0-test',
           auth: daemonKeyJwt,
         }),

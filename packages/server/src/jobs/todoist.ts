@@ -155,7 +155,33 @@ async function evaluateAndDispatch(
   }
   // Run entry comes from the host's own answer — see the dispatcher
   // (spec/08 ## Execution model step 6).
-  const result = deps.dispatcher.dispatch(job, payload, kind);
+  let result: ReturnType<typeof deps.dispatcher.dispatch>;
+  try {
+    result = deps.dispatcher.dispatch(job, payload, kind);
+  } catch (err) {
+    // One job that cannot be dispatched (e.g. a broken prompt template) must
+    // not stop the rest of the fan-out: record it against that job alone.
+    const message = (err as Error).message;
+    deps.logger.error({ jobId, err: message }, 'todoist: dispatch threw');
+    deps.logs.appendWebhook({
+      ts: nowMs(),
+      jobId,
+      signature: 'ok',
+      scheme: 'todoist',
+      filter: 'pass',
+      status: 200,
+      error: message,
+    });
+    deps.logs.appendRun({
+      ts: nowMs(),
+      jobId,
+      status: 'dispatch-error',
+      trigger: kind,
+      payloadDigest: digestPayload(payload),
+      error: message,
+    });
+    return { jobId, status: 'dispatch-error' };
+  }
   deps.logs.appendWebhook({
     ts: nowMs(),
     jobId,

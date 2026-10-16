@@ -70,7 +70,7 @@ export class PermissionDeliveryTracker {
   }
 
   private onTimeout(entry: PendingResponse): void {
-    if (!this.pending.has(entry.requestId)) return;
+    if (this.pending.get(entry.requestId) !== entry) return;
     const { connection, daemon } = usePresenceStore.getState();
     if (connection !== 'connected' || daemon !== 'online') {
       this.arm(entry);
@@ -86,6 +86,11 @@ export class PermissionDeliveryTracker {
    * back.
    */
   send(event: WireEvent & { requestId: string }, send?: (event: WireEvent) => void): void {
+    // A new answer for a request replaces the old one — and its timer, which
+    // would otherwise keep resending the superseded answer (the map still has
+    // the key) alongside the new one until the ack.
+    const prior = this.pending.get(event.requestId);
+    if (prior?.timer) clearTimeout(prior.timer);
     const entry: PendingResponse = { requestId: event.requestId, event, timer: null };
     this.pending.set(event.requestId, entry);
     this.doSend(entry, send);

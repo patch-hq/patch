@@ -20,7 +20,7 @@ import { useChatStore } from '../stores/chatStore.js';
 function spawn(): void {
   useChatStore
     .getState()
-    .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
 }
 
 /** The user's turn, as the host persists it: seq 2, localId echoed back. */
@@ -53,7 +53,7 @@ function state(activity: 'running' | 'errored' | 'idle'): void {
   useChatStore.getState().applyEvent({
     type: 'chat.state',
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     activity,
     lastUpdated: 1,
@@ -181,7 +181,7 @@ describe('chatStore — the failure is temporary once the turn goes round again'
     expect(userBubbles()[0]?.turnFailed).toBe(true);
   });
 
-  it('files the daemon-link card on the attempt it ended, and takes it off the transcript', () => {
+  it('files the host-link card on the attempt it ended, and takes it off the transcript', () => {
     spawn();
     originalTurn();
     useChatStore.getState().applyEvent({
@@ -287,5 +287,90 @@ describe('chatStore — a folded re-send keeps the system context it carried', (
     originalTurn();
     resend(7, 2);
     expect(userBubbles()[0]!.systemContext).toBeUndefined();
+  });
+});
+
+describe('chatStore — a failed mark does not outlive the turn running again', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+    localStorage.removeItem('patch.readState.v1');
+  });
+
+  function fail(seq: number, causeSeq: number): void {
+    useChatStore.getState().applyEvent({
+      type: 'chat.error',
+      chatId: 'c1',
+      seq,
+      causeSeq,
+      error: { code: 'sdk_error', message: 'boom' },
+    });
+  }
+  function stateAt(activity: 'running' | 'errored', lastUpdated: number): void {
+    useChatStore.getState().applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      hostId: 'd1',
+      permissionMode: 'auto',
+      activity,
+      lastUpdated,
+    });
+  }
+
+  it('clears "Turn failed" when the host reports the chat running again', () => {
+    spawn();
+    originalTurn();
+    stateAt('errored', 10);
+    fail(3, 2);
+    expect(userBubbles()[0]?.turnFailed).toBe(true);
+    stateAt('running', 11);
+    expect(userBubbles()[0]?.turnFailed).toBe(false);
+  });
+
+  it('keeps the mark while the chat stays errored', () => {
+    spawn();
+    originalTurn();
+    stateAt('errored', 10);
+    fail(3, 2);
+    stateAt('errored', 11);
+    expect(userBubbles()[0]?.turnFailed).toBe(true);
+  });
+
+  it('leaves an older failed turn alone when a newer message starts running', () => {
+    spawn();
+    originalTurn();
+    fail(3, 2);
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: 'next',
+      seq: 4,
+    });
+    stateAt('running', 11);
+    expect(userBubbles()[0]?.turnFailed).toBe(true);
+  });
+});
+
+describe('chatStore — a pending retry attempt', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+    localStorage.removeItem('patch.readState.v1');
+  });
+
+  it('is replaced, not added to, when the host echoes the retry', () => {
+    spawn();
+    originalTurn();
+    useChatStore.getState().beginRetryAttempt('c1', 2);
+    expect(userBubbles()[0]!.attempts).toHaveLength(2);
+    resend(7, 2);
+    expect(userBubbles()[0]!.attempts!.map((a) => a.seq)).toEqual([2, 7]);
+  });
+
+  it('is dropped when the retry never reached the host', () => {
+    spawn();
+    originalTurn();
+    useChatStore.getState().beginRetryAttempt('c1', 2);
+    useChatStore.getState().cancelRetryAttempt('c1', 2);
+    expect(userBubbles()[0]!.attempts).toBeUndefined();
   });
 });

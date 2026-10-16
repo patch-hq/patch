@@ -23,7 +23,7 @@ describe('folderStore', () => {
 
   it('setHostFolders records a host registry (folders.list snapshot)', () => {
     useFolderStore.getState().setHostFolders({
-      daemonId: 'd1',
+      hostId: 'd1',
       roots: ['/proj/a'],
       recent: ['/proj/b'],
     });
@@ -31,31 +31,27 @@ describe('folderStore', () => {
   });
 
   it("a later setHostFolders wholesale-replaces THAT host's entry (folders.updated push)", () => {
-    useFolderStore.getState().setHostFolders({ daemonId: 'd1', roots: ['/proj/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: 'd1', roots: ['/proj/a'], recent: [] });
     useFolderStore
       .getState()
-      .setHostFolders({ daemonId: 'd1', roots: ['/proj/c'], recent: ['/proj/a'] });
+      .setHostFolders({ hostId: 'd1', roots: ['/proj/c'], recent: ['/proj/a'] });
     expect(useFolderStore.getState().foldersFor('d1')).toEqual(['/proj/c', '/proj/a']);
   });
 
   // The reason the store is keyed by host at all.
   it('keeps two hosts separate, including when they share a path string', () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: 'd1', roots: ['/work/patch'], recent: [] });
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: 'd2', roots: ['/work/patch'], recent: [] });
-    useFolderStore.getState().setHostFolders({ daemonId: 'd2', roots: [], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: 'd1', roots: ['/work/patch'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: 'd2', roots: ['/work/patch'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: 'd2', roots: [], recent: [] });
     expect(useFolderStore.getState().foldersFor('d1')).toEqual(['/work/patch']);
     expect(useFolderStore.getState().foldersFor('d2')).toEqual([]);
   });
 
   it('setAllFolders replaces every host (cold-start GET /api/folders)', () => {
-    useFolderStore.getState().setHostFolders({ daemonId: 'stale', roots: ['/gone'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: 'stale', roots: ['/gone'], recent: [] });
     useFolderStore.getState().setAllFolders([
-      { daemonId: 'd1', roots: ['/proj/a'], recent: [] },
-      { daemonId: 'd2', roots: ['/proj/b'], recent: [] },
+      { hostId: 'd1', roots: ['/proj/a'], recent: [] },
+      { hostId: 'd2', roots: ['/proj/b'], recent: [] },
     ]);
     expect(Object.keys(useFolderStore.getState().byHost).sort()).toEqual(['d1', 'd2']);
     expect(useFolderStore.getState().foldersFor('stale')).toEqual([]);
@@ -64,7 +60,7 @@ describe('folderStore', () => {
   it("feeds the picker with the chosen host's folders first", () => {
     useFolderStore
       .getState()
-      .setHostFolders({ daemonId: 'd1', roots: ['/daemon/one'], recent: ['/daemon/two'] });
+      .setHostFolders({ hostId: 'd1', roots: ['/daemon/one'], recent: ['/daemon/two'] });
     const options = folderOptions(useFolderStore.getState().foldersFor('d1'), ['/chat/x']);
     expect(options).toEqual(['/daemon/one', '/daemon/two', '/chat/x']);
   });

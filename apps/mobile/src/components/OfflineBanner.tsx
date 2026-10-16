@@ -9,7 +9,7 @@ import { Pressable, Text, View } from 'react-native';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
 import { offlineBannerText } from '../lib/connection';
-import { fonts, radii, space, useTheme } from '../lib/theme';
+import { radii, space, typography, useTheme } from '../lib/theme';
 
 export function OfflineBanner(): React.ReactElement | null {
   const colors = useTheme();
@@ -22,17 +22,32 @@ export function OfflineBanner(): React.ReactElement | null {
     <View
       testID="offline-banner"
       style={{
-        backgroundColor: colors.amber,
-        paddingHorizontal: space.lg,
-        paddingVertical: space.sm,
+        backgroundColor: colors.waitingTint,
+        borderColor: colors.waiting,
+        borderWidth: 1,
+        paddingHorizontal: space.md,
+        paddingVertical: space.xs,
         borderRadius: radii.md,
-        margin: space.sm,
+        marginHorizontal: space.sm,
+        marginTop: space.sm,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
       }}
     >
-      <Text style={{ color: colors.onAccent, fontFamily: fonts.bodyMedium }}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View
+          testID="offline-dot"
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: colors.waiting,
+            marginRight: space.sm,
+          }}
+        />
+        <Text style={{ color: colors.waiting, ...typography.meta }}>{label}</Text>
+      </View>
       {/* spec/12 § Connection diagnostics screen: 'Reconnecting…' on its own is
           a dead end — the banner must open the diagnostics screen. */}
       <Pressable
@@ -41,7 +56,11 @@ export function OfflineBanner(): React.ReactElement | null {
         accessibilityLabel="Diagnose the connection"
         onPress={() => setDiagnosticsOpen(true)}
       >
-        <Text style={{ color: colors.onAccent, textDecorationLine: 'underline' }}>Diagnose</Text>
+        <Text
+          style={{ color: colors.waiting, ...typography.meta, textDecorationLine: 'underline' }}
+        >
+          Diagnose
+        </Text>
       </Pressable>
     </View>
   );

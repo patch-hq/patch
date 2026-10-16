@@ -11,7 +11,7 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const wait = (ms = 80): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -28,16 +28,16 @@ describe('Manager failover through the hub', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(41));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'home', publicKey: user.publicKey, issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'other', publicKey: user.publicKey, issuedAt: 1 });
-    const link = new InProcessDaemonLink();
-    link.setDaemonId(null);
+    registry.setDaemonKey({ hostId: 'home', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'other', publicKey: user.publicKey, issuedAt: 1 });
+    const link = new InProcessHostLink();
+    link.setHostId(null);
     link.addOnlineHost('home');
     link.addOnlineHost('other');
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: link,
+      hostLink: link,
       managerFailoverGraceMs: 40,
     });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
@@ -45,7 +45,7 @@ describe('Manager failover through the hub', () => {
       const say = (from: string, seq: number, role: 'user' | 'assistant', content: string) =>
         link.emit({ type: 'chat.message', chatId: 'thread_manager', role, content, seq }, from);
       link.emit(
-        { type: 'chat.spawned', chatId: 'thread_manager', daemonId: 'home', folder: '/m' },
+        { type: 'chat.spawned', chatId: 'thread_manager', hostId: 'home', folder: '/m' },
         'home',
       );
       say('home', 0, 'user', 'before');
@@ -54,7 +54,7 @@ describe('Manager failover through the hub', () => {
       link.dropOnlineHost('home');
       await wait();
       const adopt = link.sent.find((s) => s.event.type === 'host.manager_adopt');
-      expect(adopt?.daemonId).toBe('other');
+      expect(adopt?.hostId).toBe('other');
       expect(adopt?.event).toMatchObject({ nextSeq: 2 });
       expect((adopt!.event as { handoff: string }).handoff).toContain('user: before');
 
@@ -76,7 +76,7 @@ describe('Manager failover through the hub', () => {
       const url = `ws://127.0.0.1:${(built.app.server.address() as AddressInfo).port}/ws`;
       const client = new WireTestClient({ url, auth: jwt });
       await client.connect();
-      await client.waitFor('daemon.online');
+      await client.waitFor('host.online');
       const got: number[] = [];
       client.on('chat.message', (e) => got.push(e.seq));
       client.replay('thread_manager', -1);
@@ -92,22 +92,22 @@ describe('Manager failover through the hub', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(42));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'home', publicKey: user.publicKey, issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'other', publicKey: user.publicKey, issuedAt: 1 });
-    const link = new InProcessDaemonLink();
-    link.setDaemonId(null);
+    registry.setDaemonKey({ hostId: 'home', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'other', publicKey: user.publicKey, issuedAt: 1 });
+    const link = new InProcessHostLink();
+    link.setHostId(null);
     link.addOnlineHost('home');
     link.addOnlineHost('other');
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: link,
+      hostLink: link,
       managerFailoverGraceMs: 40,
     });
     try {
       const settle = (chatId: string): void => {
         link.emit(
-          { type: 'chat.spawned', chatId, daemonId: 'home', folder: '/w' } as WireEvent,
+          { type: 'chat.spawned', chatId, hostId: 'home', folder: '/w' } as WireEvent,
           'home',
         );
         for (const activity of ['running', 'idle']) {
@@ -115,7 +115,7 @@ describe('Manager failover through the hub', () => {
             {
               type: 'chat.state',
               chatId,
-              daemonId: 'home',
+              hostId: 'home',
               activity,
               permissionMode: 'auto',
               folder: '/w',
@@ -126,7 +126,7 @@ describe('Manager failover through the hub', () => {
         }
       };
       const sweepTargets = (): string[] =>
-        link.sent.filter((s) => s.event.type === 'manager.sweep_run').map((s) => s.daemonId);
+        link.sent.filter((s) => s.event.type === 'manager.sweep_run').map((s) => s.hostId);
 
       settle('chat-a');
       expect(built.managerSweeper.checkNow()).toBe(true);

@@ -29,7 +29,7 @@ interface StoreBridge {
 function baseRow(activity: 'running' | 'idle'): unknown {
   return {
     chatId: CHAT_ID,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     name: 'Flicker test',
     folder: '/tmp/flicker-e2e',

@@ -21,7 +21,7 @@ const STORED_JOB = {
   enabled: true,
   trigger: { type: 'cron', expression: '0 21 * * *' },
   filter: null,
-  action: { type: 'spawn', daemonId: 'host-a', folder: '/tmp', prompt: 'go' },
+  action: { type: 'spawn', hostId: 'host-a', folder: '/tmp', prompt: 'go' },
   createdAt: 1,
   updatedAt: 2,
 };

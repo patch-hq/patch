@@ -70,6 +70,7 @@ patch chats attach <id>                   # reattach to a live chat's TUI
 patch chats resume [<id>]                 # reopen the most recent chat's TUI, or the one named
 patch chats stop <id>                     # stop a chat
 patch chats archive <id>                  # archive a chat (UI hides; its history and metadata stay on its host)
+patch chats set-model <id> <model>       # change an existing chat's model, from its next turn (spec/04 § Model)
 patch chats rename <id> [<name>]          # rename a chat; no name clears it back to the derived label
 patch chats move <id> --host H --folder F   # move a chat to another machine, to run in folder F there (spec/04 § Moving a chat to another host)
 
@@ -177,7 +178,7 @@ socket, which carries one endpoint per host-scoped control for that reason
 name this machine, because the server owns what they change rather than the
 daemon: `hosts add`, `hosts rename`, `hosts set-home` and `hosts remove`.
 
-`--host` accepts a host name or a `daemonId` prefix. An ambiguous or unknown
+`--host` accepts a host name or a `hostId` prefix. An ambiguous or unknown
 value is an error listing the candidates.
 
 ## Auth

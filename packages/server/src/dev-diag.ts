@@ -23,7 +23,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import { z } from 'zod';
 import type { SpeakersTtsRecorder } from './notifications/router.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import { routeVoiceDeviceTranscript } from './notifications/routes.js';
 import type { CronScheduler } from './jobs/cron.js';
 import type { CallOrchestrator } from './notifications/call-orchestrator.js';
@@ -49,7 +49,7 @@ export class InMemorySpeakersRecorder implements SpeakersTtsRecorder {
 
 export interface DevDiagDeps {
   logger: Logger;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   internalToken: string;
   speakersRecorder?: InMemorySpeakersRecorder;
   idGenerator?: () => string;
@@ -139,7 +139,7 @@ export function registerDevDiagRoutes(app: FastifyInstance, deps: DevDiagDeps): 
     routeVoiceDeviceTranscript({
       deviceId: parsed.data.deviceId,
       transcript: parsed.data.transcript,
-      daemonLink: deps.daemonLink,
+      hostLink: deps.hostLink,
       ...(deps.idGenerator ? { idGenerator: deps.idGenerator } : {}),
     });
     deps.logger.info(
@@ -153,7 +153,7 @@ export function registerDevDiagRoutes(app: FastifyInstance, deps: DevDiagDeps): 
   //   Simulate a physical voice device opening (active:true) or closing
   //   (active:false) an audio session on the host. Injects the same
   //   account-scoped `device.session` wire event the real host emits
-  //   (packages/daemon audio server `onDeviceSession`), so the server fans it
+  //   (packages/host audio server `onDeviceSession`), so the server fans it
   //   out to surfaces and the web Speakers row shows the "🎙 <name>" pill
   //   (spec/14 ## Sidebar). Mock-stack stand-in for a real HA Voice PE unit.
   app.post('/internal/diag/voice-device/session', async (req, reply) => {
@@ -164,7 +164,7 @@ export function registerDevDiagRoutes(app: FastifyInstance, deps: DevDiagDeps): 
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
     }
-    deps.daemonLink.injectDaemonEvent({
+    deps.hostLink.injectHostEvent({
       type: 'device.session',
       deviceId: parsed.data.deviceId,
       name: parsed.data.name,
@@ -232,7 +232,7 @@ export function registerDevDiagRoutes(app: FastifyInstance, deps: DevDiagDeps): 
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
     }
-    deps.daemonLink.send('dev-diag', {
+    deps.hostLink.send('dev-diag', {
       type: 'patch.diag.inject_permission',
       chatId: parsed.data.chatId,
       tool: parsed.data.tool ?? 'Bash',
@@ -261,7 +261,7 @@ export function registerDevDiagRoutes(app: FastifyInstance, deps: DevDiagDeps): 
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
     }
-    deps.daemonLink.send(parsed.data.surfaceId, {
+    deps.hostLink.send(parsed.data.surfaceId, {
       type: 'patch.diag.voice_inject',
       surfaceId: parsed.data.surfaceId,
       text: parsed.data.text,

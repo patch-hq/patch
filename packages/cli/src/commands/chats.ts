@@ -6,6 +6,7 @@
 //   spawn     → POST /internal/spawn (uds) | POST /api/chats (rest)
 //   send-to   → POST /internal/send-to (uds) | POST /api/chats/:id/send-to (rest)
 //   stop      → POST /chats/:id/stop (uds) | POST /api/chats/:id/stop (rest)
+//   set-model → POST /chats/:id/model (uds) | POST /api/chats/:id/model (rest)
 //   archive   → POST /chats/:id/archive (uds) | POST /api/chats/:id/archive (rest)
 //   pin       → POST /api/chats/:id/pin (rest)
 //   rename    → POST /api/chats/:id/rename (rest)
@@ -15,7 +16,15 @@
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
-import { emitJson, emitText, errorMessage, getTransport, pickPath, run } from './_common.js';
+import {
+  emitJson,
+  emitText,
+  errorMessage,
+  getTransport,
+  parseBoolFlag,
+  pickPath,
+  run,
+} from './_common.js';
 import { resolveHost } from './hosts.js';
 import { resolveChatId } from './chatId.js';
 
@@ -201,13 +210,28 @@ export function registerChatsCommands(program: Command): void {
       await run(opts, async () => {
         const t = getTransport(opts);
         const id = await resolveChatId(t, rawId);
-        const archived = opts.archived !== 'false';
+        const archived = parseBoolFlag('archived', opts.archived);
         // One backend (spec/17): archive is a host resource op. Local CLI
         // hits the host UDS route; remote goes through the server REST API.
         const path = pickPath(t, `/chats/${id}/archive`, `/api/chats/${id}/archive`);
         const res = await t.post<{ ok: true }>(path, { archived });
         if (opts.json) emitJson(res);
         else emitText(archived ? 'archived' : 'unarchived');
+      });
+    });
+
+  chats
+    .command('set-model <id> <model>')
+    .description("Change an existing chat's model; takes effect from its next turn")
+    .option('--json', 'JSON output')
+    .action(async (rawId: string, model: string, opts: CommonOpts) => {
+      await run(opts, async () => {
+        const t = getTransport(opts);
+        const id = await resolveChatId(t, rawId);
+        const path = pickPath(t, `/chats/${id}/model`, `/api/chats/${id}/model`);
+        const res = await t.post<{ ok: true }>(path, { model });
+        if (opts.json) emitJson(res);
+        else emitText(`model set to ${model}`);
       });
     });
 
@@ -222,7 +246,7 @@ export function registerChatsCommands(program: Command): void {
       await run(opts, async () => {
         const t = getTransport(opts);
         const id = await resolveChatId(t, rawId);
-        const disabled = opts.disabled !== 'false';
+        const disabled = parseBoolFlag('disabled', opts.disabled);
         const path = pickPath(t, `/chats/${id}/disable`, `/api/chats/${id}/disable`);
         const res = await t.post<{ ok: true }>(path, { disabled });
         if (opts.json) emitJson(res);
@@ -253,19 +277,19 @@ export function registerChatsCommands(program: Command): void {
     .description(
       'Move a chat to another machine, to run in --folder there (spec/04 § Moving a chat to another host)',
     )
-    .requiredOption('--host <host>', 'The machine to move it to: a host name or daemonId prefix')
+    .requiredOption('--host <host>', 'The machine to move it to: a host name or hostId prefix')
     .requiredOption('--folder <folder>', 'Absolute folder on that machine')
     .option('--json', 'JSON output')
     .action(async (rawId: string, opts: CommonOpts & { host: string; folder: string }) => {
       await run(opts, async () => {
         // Only the server can reach both machines, so this is REST even from
         // the machine the chat is on.
-        const daemonId = await resolveHost(opts);
+        const hostId = await resolveHost(opts);
         const t = getTransport({ ...opts, remote: true });
         const id = await resolveChatId(t, rawId);
-        const res = await t.post<{ ok: true; chatId: string; daemonId: string; folder: string }>(
+        const res = await t.post<{ ok: true; chatId: string; hostId: string; folder: string }>(
           `/api/chats/${id}/move`,
-          { daemonId, folder: opts.folder },
+          { hostId, folder: opts.folder },
         );
         if (opts.json) emitJson(res);
         else emitText(`moved ${res.chatId} to ${opts.host}:${res.folder}`);
@@ -281,7 +305,7 @@ export function registerChatsCommands(program: Command): void {
       await run(opts, async () => {
         const t = getTransport(opts);
         const id = await resolveChatId(t, rawId);
-        const pinned = opts.pinned !== 'false';
+        const pinned = parseBoolFlag('pinned', opts.pinned);
         if (t.kind === 'uds') {
           throw new Error('chats pin over UDS not supported; use REST (--remote or non-UDS)');
         }

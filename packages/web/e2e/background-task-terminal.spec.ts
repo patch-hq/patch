@@ -57,7 +57,7 @@ test.describe('background task → terminal', () => {
 
     // The shell is on the chat's own host, rooted in the chat's folder.
     const open = (await sent(page)).find((e) => e.type === 'patch.terminal.open');
-    expect(open).toMatchObject({ daemonId: 'd1', folder: '/home/tom/projects/patch' });
+    expect(open).toMatchObject({ hostId: 'd1', folder: '/home/tom/projects/patch' });
   });
 
   test('the row is reachable and openable from the keyboard', async ({ page }) => {

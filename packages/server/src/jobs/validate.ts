@@ -16,9 +16,20 @@ import cron from 'node-cron';
 import jsonata from 'jsonata';
 import rrulePkg from 'rrule';
 import { isValidTimeZone } from '@patch/wire';
-import type { JobCreateBody, JobPatchBody, Queueing } from './types.js';
+import { nextOccurrence } from './recurrence.js';
+import type { JobCreateBody, JobPatchBody, JobTrigger, Queueing } from './types.js';
 
 const { RRule } = rrulePkg;
+
+/** RRULE fields `rrule` accepts at any value, with their RFC 5545 ranges. */
+const RRULE_RANGES = [
+  ['byhour', 'BYHOUR', 0, 23],
+  ['byminute', 'BYMINUTE', 0, 59],
+  ['bysecond', 'BYSECOND', 0, 59],
+  ['bymonth', 'BYMONTH', 1, 12],
+  // ±1..31, never 0 — a negative day counts back from the month's end.
+  ['bymonthday', 'BYMONTHDAY', -31, 31],
+] as const;
 
 export class JobValidationError extends Error {
   constructor(
@@ -53,6 +64,25 @@ export function assertValidQueueing(job: {
     throw new JobValidationError(
       `queueing mode "append" delivers into one durable chat, which only a "continue" action has (this action is "${job.action.type}")`,
       'queueing.mode',
+    );
+  }
+}
+
+/**
+ * Refuse a recurrence rule with no occurrence after `now`. The scheduler
+ * enumerates every rule from a fixed 2000-01-01 anchor, so a COUNT is spent
+ * in 2000 and a past UNTIL is already over — either would save looking
+ * healthy and then never fire. Separate from `assertValidJobBody` because it
+ * depends on the clock: the store runs it on create, and on a patch only when
+ * the trigger CHANGES, so a stored rule that has since run out can still be
+ * loaded, renamed or disabled.
+ */
+export function assertRecurrenceCanFire(trigger: JobTrigger | undefined, now: Date): void {
+  if (!trigger || trigger.type !== 'recurrence') return;
+  if (nextOccurrence(trigger.rrule, trigger.timezone, now) === null) {
+    throw new JobValidationError(
+      `RRULE has no future occurrences — it would never fire: ${trigger.rrule}`,
+      'trigger.rrule',
     );
   }
 }
@@ -104,10 +134,44 @@ export function assertValidJobBody(body: JobCreateBody | JobPatchBody): void {
     // the scheduler will (`packages/server/src/jobs/recurrence.ts`), so a rule
     // rejected here is refused at write time rather than persisted looking
     // healthy and then silently refused at registration (NO FALLBACK).
+    let opts: ReturnType<typeof RRule.parseString>;
     try {
+      opts = RRule.parseString(trigger.rrule);
       RRule.fromString(trigger.rrule);
     } catch (err) {
       throw new JobValidationError(`invalid RRULE: ${(err as Error).message}`, 'trigger.rrule');
+    }
+    // `rrule` range-checks only BYSETPOS. Everything else it takes on trust:
+    // BYMINUTE=75 rolls over to the next hour, BYHOUR=25 to the next day, and
+    // a rule with no FREQ silently becomes YEARLY — each one saves looking
+    // healthy and fires at a time nobody wrote. Refuse them the way node-cron
+    // refuses an out-of-range cron field (NO FALLBACK).
+    if (opts.freq === undefined) {
+      throw new JobValidationError(
+        `invalid RRULE (FREQ is required): ${trigger.rrule}`,
+        'trigger.rrule',
+      );
+    }
+    // INTERVAL below 1 is not a repeat at all: a negative one sends
+    // `rule.after()` into a loop that never returns, freezing the server.
+    if (opts.interval !== undefined && opts.interval !== null && opts.interval < 1) {
+      throw new JobValidationError(
+        `invalid RRULE (INTERVAL=${opts.interval} is out of range): ${trigger.rrule}`,
+        'trigger.rrule',
+      );
+    }
+    for (const [key, field, min, max] of RRULE_RANGES) {
+      const raw = opts[key] as number | number[] | null | undefined;
+      if (raw === undefined || raw === null) continue;
+      for (const n of Array.isArray(raw) ? raw : [raw]) {
+        const ok = key === 'bymonthday' ? n !== 0 && Math.abs(n) <= max : n >= min && n <= max;
+        if (!ok) {
+          throw new JobValidationError(
+            `invalid RRULE (${field}=${n} is out of range): ${trigger.rrule}`,
+            'trigger.rrule',
+          );
+        }
+      }
     }
   }
   if (typeof body.filter === 'string' && body.filter.length > 0) {

@@ -8,7 +8,7 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { NotificationLog, NOTIFICATION_LOG_CAP } from '../src/notifications/log.js';
 
 describe('NotificationLog', () => {
@@ -87,19 +87,19 @@ describe('notification REST', () => {
       surfaceKind: 'terminal',
       label: 'cli',
     });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    return { jwt, built, daemonLink };
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
+    return { jwt, built, hostLink };
   }
 
   it('records agent notifies (not call rings), serves them and marks them read', async () => {
-    const { jwt, built, daemonLink } = await boot();
+    const { jwt, built, hostLink } = await boot();
     const auth = { authorization: `Bearer ${jwt}` };
     try {
       expect(
         (await built.app.inject({ method: 'GET', url: '/api/notifications' })).statusCode,
       ).toBe(401);
-      daemonLink.emit({
+      hostLink.emit({
         type: 'notify',
         chatId: 'chat-a',
         message: 'washing done',
@@ -107,7 +107,7 @@ describe('notification REST', () => {
         deepLink: 'x://y',
         channel: 'speakers',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'notify',
         chatId: 'chat-a',
         message: 'ring',

@@ -37,7 +37,7 @@ EdDSA-JWT (RFC 8037). Claims: `sub` (= account ID), `surface_id`, `surface_kind`
 
 ### Host registration (`daemon-key.ts`)
 
-- `mintDaemonKey({ userPrivateKey, daemonId, label })` — same shape as a surface JWT, claim `kind: 'daemon'`.
+- `mintDaemonKey({ userPrivateKey, hostId, label })` — same shape as a surface JWT, claim `kind: 'daemon'`.
 - `verifyDaemonKey(credential, { userPublicKey })`
 
 This package returns the credential string. The host (group 5) writes it to `~/.patch/daemon.key`.

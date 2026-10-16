@@ -1,7 +1,7 @@
 // Batch store (spec/14 § Batch mode).
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -35,6 +35,17 @@ describe('BatchStore', () => {
     const store = makeStore();
     expect(store.current()).toBeNull();
     expect(store.carryoverMembers()).toEqual([]);
+  });
+
+  test('persists by replacing the file (temp + rename), never rewriting it in place', () => {
+    const store = makeStore();
+    const file = join(dir, 'batch.json');
+    store.start({ type: 'time', minutes: 20 });
+    const before = statSync(file).ino;
+    store.ensureMember('c1');
+    // A fresh inode means a crash mid-write can only lose the temp file.
+    expect(statSync(file).ino).not.toBe(before);
+    expect(readdirSync(dir)).toEqual(['batch.json']);
   });
 
   test('start() creates a running batch with the chosen check-in', () => {

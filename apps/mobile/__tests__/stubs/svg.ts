@@ -16,3 +16,9 @@ export function Circle(props: Record<string, unknown>): React.ReactElement {
 export function Path(props: Record<string, unknown>): React.ReactElement {
   return React.createElement('Path', props);
 }
+export function Line(props: Record<string, unknown>): React.ReactElement {
+  return React.createElement('Line', props);
+}
+export function Polyline(props: Record<string, unknown>): React.ReactElement {
+  return React.createElement('Polyline', props);
+}

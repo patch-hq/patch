@@ -8,13 +8,14 @@ import {
   decode,
   parseSearchQuery,
   encode,
+  makeSnippet,
   type ChatSearchHit,
 } from '../src/index.js';
 
 function hit(over: Partial<ChatSearchHit> = {}): ChatSearchHit {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     name: 'Fix the boiler',
     preview: 'the boiler is making a noise',
     folder: '/home/tom',
@@ -43,7 +44,7 @@ describe('chat search wire', () => {
     const req = {
       type: 'patch.chat_search.request' as const,
       requestId: 'r1',
-      daemonId: 'd1',
+      hostId: 'd1',
       query: 'boiler',
       limit: 20,
     };
@@ -51,7 +52,7 @@ describe('chat search wire', () => {
     const res = {
       type: 'patch.chat_search.response' as const,
       requestId: 'r1',
-      daemonId: 'd1',
+      hostId: 'd1',
       ok: true,
       hits: [hit()],
       total: 1,
@@ -62,7 +63,7 @@ describe('chat search wire', () => {
   });
 
   it('refuses a one-character query and a limit past the paging depth', () => {
-    const base = { type: 'patch.chat_search.request', requestId: 'r', daemonId: 'd1' };
+    const base = { type: 'patch.chat_search.request', requestId: 'r', hostId: 'd1' };
     expect(() => decode(JSON.stringify({ ...base, query: 'a', limit: 5 }))).toThrow();
     expect(() =>
       decode(JSON.stringify({ ...base, query: 'ab', limit: CHAT_SEARCH_MAX_DEPTH + 1 })),
@@ -80,7 +81,7 @@ describe('chat search wire', () => {
     const base = {
       type: 'patch.chat_search.request',
       requestId: 'r',
-      daemonId: 'd1',
+      hostId: 'd1',
       query: 'ab',
       limit: 5,
     };
@@ -94,7 +95,7 @@ describe('chat search wire', () => {
       hits: [hit({ snippet: { ...hit().snippet!, seq: null, createdAt: null } })],
       total: 1,
       nextOffset: null,
-      hosts: [{ daemonId: 'd1', hostName: 'hetzner', state: 'searched', searchedChats: 1 }],
+      hosts: [{ hostId: 'd1', hostName: 'hetzner', state: 'searched', searchedChats: 1 }],
     });
     expect(r.hits[0]!.snippet!.seq).toBeNull();
   });
@@ -105,13 +106,13 @@ describe('chat search wire', () => {
       hits: [],
       total: 0,
       nextOffset: null,
-      hosts: [{ daemonId: 'mac', hostName: 'mac', state: 'offline' }],
+      hosts: [{ hostId: 'mac', hostName: 'mac', state: 'offline' }],
     });
     expect(r.hosts[0]!.state).toBe('offline');
     expect(() =>
       ChatSearchResponse.parse({
         ...r,
-        hosts: [{ daemonId: 'mac', hostName: null, state: 'gone' }],
+        hosts: [{ hostId: 'mac', hostName: null, state: 'gone' }],
       }),
     ).toThrow();
   });
@@ -130,5 +131,15 @@ describe('chat search wire', () => {
     const x = hit({ chatId: 'x' });
     const y = hit({ chatId: 'y' });
     expect([y, x].sort(compareChatSearchHits).map((h) => h.chatId)).toEqual(['x', 'y']);
+  });
+});
+
+describe('makeSnippet — case folding that changes length', () => {
+  it('still windows around the match when earlier text lower-cases to a different length', () => {
+    // `İ` lower-cases to TWO code units, which shifted every later index.
+    const text = `${'İ'.repeat(70)} needle tail ${'x'.repeat(200)}`;
+    const { text: snippet, highlights } = makeSnippet(text, parseSearchQuery('needle'));
+    expect(snippet).toContain('needle');
+    expect(highlights.length).toBe(1);
   });
 });

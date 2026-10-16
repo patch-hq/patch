@@ -78,6 +78,15 @@ const SOCKET_CODE_OK = (code: number): boolean =>
   (code >= 3000 && code <= 4999) ||
   (code >= 1001 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006);
 
+/**
+ * A request path is appended to the server's own address, so it has to be a
+ * path: without a leading `/`, `@elsewhere.example/x` makes the URL's host
+ * `elsewhere.example` and the host would fetch from there for whoever asked.
+ */
+function isTargetPath(path: unknown): path is string {
+  return typeof path === 'string' && path.startsWith('/');
+}
+
 /** Headers on an answer that describe how the target sent it, not what it says. */
 const DROP_RESPONSE = new Set([
   'connection',
@@ -280,8 +289,10 @@ export class RelayHost {
       case Msg.ReqHead: {
         if (client.streams.size >= (this.opts.maxStreamsPerClient ?? 64))
           return fail('too many open streams');
+        const head = parseJson<RequestHead>(payload);
+        if (!isTargetPath(head.path)) return fail(`bad path: ${JSON.stringify(head.path)}`);
         client.streams.set(id, {
-          head: parseJson<RequestHead>(payload),
+          head,
           body: [],
           bytes: 0,
           abort: new AbortController(),
@@ -312,6 +323,7 @@ export class RelayHost {
         if (client.streams.size >= (this.opts.maxStreamsPerClient ?? 64))
           return fail('too many open streams');
         const { path, protocols } = parseJson<SocketOpen>(payload);
+        if (!isTargetPath(path)) return fail(`could not open the socket: bad path`);
         const target = new NodeWebSocket(this.opts.target.replace(/^http/, 'ws') + path, protocols);
         const stream: Stream = { body: [], bytes: 0, abort: new AbortController(), socket: target };
         client.streams.set(id, stream);
@@ -323,6 +335,14 @@ export class RelayHost {
         target.on('message', (data: Buffer, isBinary: boolean) => {
           const bytes = new Uint8Array(data.buffer, data.byteOffset, data.length);
           if (!isBinary) {
+            // A text message has no continuation frame, so one bigger than a
+            // frame cannot be carried: end this socket, not the whole host.
+            if (bytes.length > MAX_CHUNK) {
+              fail(`message too large for one frame (${bytes.length} bytes)`);
+              client.streams.delete(id);
+              target.close(1009, 'message too large');
+              return;
+            }
             say(Msg.WsText, bytes);
             return;
           }

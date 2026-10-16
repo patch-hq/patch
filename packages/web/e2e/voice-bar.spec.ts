@@ -55,4 +55,26 @@ test.describe('voice bar', () => {
     await expect(page.getByTestId('voice-bar-mode')).toBeVisible();
     await expect(page.getByTestId('voice-bar-end')).toBeVisible();
   });
+
+  test('on a phone a long transcript wraps and the bar grows instead of overflowing', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    const long = 'this is a long thing that was said out loud and it keeps going '.repeat(4);
+    await page.goto(`${HANDS_FREE}&voiceLine=${encodeURIComponent(long)}`);
+    const text = page.locator('.vb-text');
+    await expect(text).toBeVisible();
+    const m = await text.evaluate((el) => ({
+      clipped: el.scrollWidth > el.clientWidth + 1,
+      height: el.getBoundingClientRect().height,
+      line: parseFloat(getComputedStyle(el).lineHeight) || 16,
+    }));
+    expect(m.clipped).toBe(false);
+    expect(m.height).toBeGreaterThan(m.line * 2);
+    const bar = await page.getByTestId('voice-bar').evaluate((el) => ({
+      over: el.scrollWidth > el.clientWidth + 1,
+    }));
+    expect(bar.over).toBe(false);
+    await expect(page.getByTestId('voice-bar-end')).toBeVisible();
+  });
 });

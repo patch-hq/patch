@@ -19,7 +19,7 @@ function chat(
 ): Parameters<ReturnType<typeof useChatStore.getState>['hydrate']>[0][number] {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     name: 'a chat',
     preview: null,
@@ -41,7 +41,7 @@ function chat(
 function hit(over: Partial<ChatSearchHit>): ChatSearchHit {
   return {
     chatId: 'h1',
-    daemonId: 'd1',
+    hostId: 'd1',
     name: 'bus watch',
     preview: null,
     folder: '/home/tom/projects/bus',
@@ -65,7 +65,7 @@ function response(over: Partial<ChatSearchResponse> = {}): ChatSearchResponse {
     hits: [],
     total: 0,
     nextOffset: null,
-    hosts: [{ daemonId: 'd1', hostName: 'hetzner', state: 'searched' }],
+    hosts: [{ hostId: 'd1', hostName: 'hetzner', state: 'searched' }],
     ...over,
   };
 }
@@ -292,7 +292,7 @@ describe('sidebar chat search', () => {
     usePresenceStore.setState({
       hosts: {
         mac1: {
-          daemonId: 'mac1',
+          hostId: 'mac1',
           online: false,
           lastSeenAt: null,
           host: { hostName: 'Mac' } as never,
@@ -305,10 +305,10 @@ describe('sidebar chat search', () => {
     search.mockResolvedValue(
       response({
         hosts: [
-          { daemonId: 'd1', hostName: 'hetzner', state: 'searched' },
-          { daemonId: 'mac1', hostName: null, state: 'offline' },
-          { daemonId: 'pi', hostName: 'pi', state: 'timeout' },
-          { daemonId: 'nuc', hostName: null, state: 'error', message: 'index corrupt' },
+          { hostId: 'd1', hostName: 'hetzner', state: 'searched' },
+          { hostId: 'mac1', hostName: null, state: 'offline' },
+          { hostId: 'pi', hostName: 'pi', state: 'timeout' },
+          { hostId: 'nuc', hostName: null, state: 'error', message: 'index corrupt' },
         ],
       }),
     );
@@ -394,6 +394,24 @@ describe('sidebar chat search', () => {
       .map((el) => el.getAttribute('data-chat-id'));
     expect(ids).toEqual(['p1', 'p2']);
     expect(screen.queryByTestId('chat-search-more')).toBeNull();
+  });
+
+  it('More results is usable again after the scope changes while a page was loading', async () => {
+    const slowPage = deferred<ChatSearchResponse>();
+    search
+      .mockResolvedValueOnce(response({ hits: [hit({ chatId: 'p1' })], total: 2, nextOffset: 1 }))
+      .mockReturnValueOnce(slowPage.promise)
+      .mockResolvedValueOnce(response({ hits: [hit({ chatId: 'p1' })], total: 2, nextOffset: 1 }));
+    renderSidebar();
+    type('bus');
+    await settle();
+    fireEvent.click(screen.getByTestId('chat-search-more'));
+    // The scope flips before that page lands: its answer is for a search nobody is looking at.
+    fireEvent.click(screen.getByTestId('chat-search-fulltext'));
+    await settle();
+    slowPage.resolve(response({ hits: [hit({ chatId: 'p2' })], total: 2, nextOffset: null }));
+    await settle(0);
+    expect(screen.getByTestId('chat-search-more')).not.toBeDisabled();
   });
 
   it('clearing the field brings the chat list back', async () => {

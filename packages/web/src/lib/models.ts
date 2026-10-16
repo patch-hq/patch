@@ -18,6 +18,9 @@
 import { useSyncExternalStore } from 'react';
 import { api } from '../api/rest.js';
 
+/** The picker offers this many models: the host's catalogue is newest-first. */
+export const RECENT_MODEL_COUNT = 5;
+
 export interface ModelOption {
   /** SDK `options.model` value. */
   id: string;
@@ -95,11 +98,11 @@ let loadedFor: string | null = null;
  * request. Never throws — the failure lands in the catalogue's `error` so the
  * picker can show it.
  */
-export function loadModels(daemonId: string | null, force = false): Promise<void> {
+export function loadModels(hostId: string | null, force = false): Promise<void> {
   // The catalogue is PER MACHINE (spec/02 § Model catalogue) — `/api/models`
   // requires the machine whose catalogue is being read, and rejects a call that
   // names none. Asking without one produced `invalid query` and an empty picker.
-  if (!daemonId) {
+  if (!hostId) {
     setModelCatalog({
       models: [],
       status: 'error',
@@ -109,15 +112,18 @@ export function loadModels(daemonId: string | null, force = false): Promise<void
     });
     return Promise.resolve();
   }
-  if (inFlight && loadedFor === daemonId) return inFlight;
+  if (inFlight && loadedFor === hostId) return inFlight;
   // A different machine means a different catalogue; a cached one must not be
   // shown for it.
-  if (!force && catalog.status === 'ready' && loadedFor === daemonId) return Promise.resolve();
-  loadedFor = daemonId;
+  if (!force && catalog.status === 'ready' && loadedFor === hostId) return Promise.resolve();
+  loadedFor = hostId;
   setModelCatalog({ models: catalog.models, status: 'loading' });
-  inFlight = api
-    .models(daemonId)
+  // A request superseded by one for another machine must neither land its
+  // catalogue nor clear the newer request's in-flight slot.
+  const req: Promise<void> = api
+    .models(hostId)
     .then((res) => {
+      if (inFlight !== req) return;
       setModelCatalog({
         models: res.models,
         status: 'ready',
@@ -125,6 +131,7 @@ export function loadModels(daemonId: string | null, force = false): Promise<void
       });
     })
     .catch((err: unknown) => {
+      if (inFlight !== req) return;
       setModelCatalog({
         models: [],
         status: 'error',
@@ -132,16 +139,17 @@ export function loadModels(daemonId: string | null, force = false): Promise<void
       });
     })
     .finally(() => {
-      inFlight = null;
+      if (inFlight === req) inFlight = null;
     });
-  return inFlight;
+  inFlight = req;
+  return req;
 }
 
 // There is deliberately NO surface-local "last used model" here, and no default
 // model id. Last-used follows the MACHINE, not the surface that asked
 // (spec/04-chats-and-folders.md § Spawn: "a host records the model of each chat
 // spawned on it, so the last-used value follows the machine rather than the
-// surface that asked"). The host reports it as `daemon.host.defaultModel`, and
+// surface that asked"). The host reports it as `host.host.defaultModel`, and
 // a spawn that names no model resolves against it on the host.
 //
 // A browser-local copy plus a hard-coded starting id is what made the surface's
@@ -149,8 +157,8 @@ export function loadModels(daemonId: string | null, force = false): Promise<void
 // overwrote whatever the machine was actually last used on.
 
 /** A provider's connected accounts changed; refresh only the visible host. */
-export async function refreshModelsForHost(daemonId: string): Promise<void> {
-  if (loadedFor !== daemonId) return;
+export async function refreshModelsForHost(hostId: string): Promise<void> {
+  if (loadedFor !== hostId) return;
   if (inFlight) await inFlight;
-  if (loadedFor === daemonId) await loadModels(daemonId, true);
+  if (loadedFor === hostId) await loadModels(hostId, true);
 }

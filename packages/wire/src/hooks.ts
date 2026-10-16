@@ -200,7 +200,7 @@ export interface HookCheckContext {
   images?: HookImage[];
   chatId: string;
   folder: string;
-  daemonId: string;
+  hostId: string;
   specialThread: boolean;
   toolCallsSummary?: string;
 }
@@ -211,7 +211,7 @@ export interface HookCheckContext {
  * JSONata) since it needs an async evaluator this package does not carry.
  */
 export function hookGateMatches(gate: HookGate, ctx: HookCheckContext): boolean {
-  if (gate.hosts != null && !gate.hosts.includes(ctx.daemonId)) return false;
+  if (gate.hosts != null && !gate.hosts.includes(ctx.hostId)) return false;
   if (gate.folders != null && !gate.folders.includes(ctx.folder)) return false;
   if (gate.chatIds != null && !gate.chatIds.includes(ctx.chatId)) return false;
   const wantsSpecial = gate.specialThreads === true;

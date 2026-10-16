@@ -34,7 +34,7 @@ export function describeChange(c: Change): string {
     case 'note':
       return `Note on ${on}: "${clip(a['text'], 1000)}"`;
     case 'draw':
-      return `Drew on ${on}${a['over']?.length ? ` (the stroke crosses ${a['over'].join(', ')})` : ''} — see the picture`;
+      return `Drew ${a['shape'] ? `a ${a['shape']} ` : ''}on ${on}${a['over']?.length ? ` (the stroke crosses ${a['over'].join(', ')})` : ''} — see the picture`;
     default:
       throw new Error(`unknown change kind ${String(c.kind)}`);
   }

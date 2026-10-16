@@ -17,7 +17,7 @@ import { hostLabel } from './hostScope.js';
 
 /**
  * How long a confirmed connect/disconnect may wait for that host's
- * `daemon.account` report before it is declared failed (spec/10 § Surface in
+ * `host.account` report before it is declared failed (spec/10 § Surface in
  * Settings). The host's work is one local file write, so the real round trip
  * is milliseconds — this is a generous ceiling, not a budget.
  */
@@ -28,8 +28,9 @@ export function agoLabel(at: number | null): string {
   if (at === null) return 'never';
   const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
   if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
-  if (secs < 86_400) return `${Math.round(secs / 3600)}h ago`;
+  // Pick the unit from the ROUNDED count, so 59m40s reads "1h ago", not "60m ago".
+  if (Math.round(secs / 60) < 60) return `${Math.round(secs / 60)}m ago`;
+  if (Math.round(secs / 3600) < 24) return `${Math.round(secs / 3600)}h ago`;
   return `${Math.round(secs / 86_400)}d ago`;
 }
 
@@ -64,13 +65,13 @@ export function sendToHost(host: HostPresence, event: WireEvent): boolean {
 /** `host.settings` with just the fields given. */
 export function sendHostSettings(
   host: HostPresence,
-  patch: Omit<HostSettingsEvent, 'type' | 'daemonId'>,
+  patch: Omit<HostSettingsEvent, 'type' | 'hostId'>,
 ): boolean {
-  return sendToHost(host, { type: 'host.settings', daemonId: host.daemonId, ...patch });
+  return sendToHost(host, { type: 'host.settings', hostId: host.hostId, ...patch });
 }
 
 /**
- * What to say when a connect/disconnect gets no `daemon.account` report inside
+ * What to say when a connect/disconnect gets no `host.account` report inside
  * the ack window.
  *
  * "did not respond" was the whole message, and it was wrong twice over. It
@@ -90,7 +91,7 @@ export function sendHostSettings(
  */
 export function unansweredMessage(
   action: 'connect' | 'disconnect' | 'add' | 'reorder',
-  daemonId: string,
+  hostId: string,
   label: string,
 ): string {
   const secs = Math.round(CLAUDE_ACK_TIMEOUT_MS / 1000);
@@ -99,7 +100,7 @@ export function unansweredMessage(
   if (connection !== 'connected') {
     return `${action} not confirmed: lost the link to the server before ${label} answered (${connection}); ${unknown}`;
   }
-  const host = hosts[daemonId];
+  const host = hosts[hostId];
   if (!host?.online) {
     return `${action} not confirmed: ${label} went offline before it answered (last seen ${agoLabel(
       host?.lastSeenAt ?? null,
@@ -107,14 +108,14 @@ export function unansweredMessage(
   }
   // Both ends up, no report: the server is not addressing this socket. A
   // reconnect re-registers the surface and re-seeds every host's state.
-  getActiveWs()?.forceReconnect(`no daemon.account from ${daemonId} within ${secs}s`);
+  getActiveWs()?.forceReconnect(`no daemon.account from ${hostId} within ${secs}s`);
   return `${action} not confirmed: ${label} is online but sent no report in ${secs}s, reconnecting to the server; ${unknown}`;
 }
 
 /** Shared preflight for credential actions: a live socket AND the named host up. */
 export function readySocket(
   what: 'connect' | 'disconnect' | 'add' | 'refresh usage' | 'reorder',
-  daemonId: string,
+  hostId: string,
   label: string,
   pushError: (message: string) => void,
 ): ReturnType<typeof getActiveWs> {
@@ -133,7 +134,7 @@ export function readySocket(
   // happened and then apply minutes later. Refuse instead — and say when the
   // machine was last heard from, since "offline" alone gives no idea whether
   // this is a blip or a box that has been down since yesterday.
-  const hostPresence = hosts[daemonId];
+  const hostPresence = hosts[hostId];
   if (!hostPresence?.online) {
     pushError(
       `${what} failed: ${label} is offline (last seen ${agoLabel(
@@ -165,8 +166,8 @@ export function useHostUpdate(host: HostPresence): { updating: boolean; apply: (
   const errors = useUiStore((s) => s.errors);
   const [updating, setUpdating] = useState(false);
   useEffect(() => {
-    if (updating && errors.some((e) => e.message.includes(host.daemonId))) setUpdating(false);
-  }, [errors, updating, host.daemonId]);
+    if (updating && errors.some((e) => e.message.includes(host.hostId))) setUpdating(false);
+  }, [errors, updating, host.hostId]);
   const wasOffline = useRef(!host.online);
   useEffect(() => {
     if (host.online && wasOffline.current) setUpdating(false);
@@ -178,7 +179,7 @@ export function useHostUpdate(host: HostPresence): { updating: boolean; apply: (
       return;
     }
     setUpdating(true);
-    const sent = sendToHost(host, { type: 'host.update', daemonId: host.daemonId });
+    const sent = sendToHost(host, { type: 'host.update', hostId: host.hostId });
     if (!sent) setUpdating(false);
   }
   return { updating, apply };

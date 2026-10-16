@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 const HARNESS = '/app/dev-harness.html';
 
 test.describe('notifications bell', () => {
-  test('shows unread count, marks read on click and opens the source chat, mark-all clears', async ({
+  test('has no visible count, marks read on click and opens the source chat, mark-all clears', async ({
     page,
   }) => {
     const items = [
@@ -51,7 +51,11 @@ test.describe('notifications bell', () => {
     });
 
     await page.goto(HARNESS);
-    await expect(page.getByTestId('notif-badge')).toHaveText('2');
+    await expect(page.getByTestId('notif-badge')).toHaveCount(0);
+    await expect(page.getByTestId('notif-bell')).toHaveAttribute(
+      'aria-label',
+      'Notifications, 2 unread',
+    );
 
     await page.getByTestId('notif-bell').click();
     const panel = page.getByTestId('notif-panel');
@@ -67,7 +71,11 @@ test.describe('notifications bell', () => {
     // click one: read + opens its chat
     await page.getByTestId('notif-item-n2').click();
     await expect(page.getByTestId('chat-title')).toHaveText('July Seasonal Food');
-    await expect(page.getByTestId('notif-badge')).toHaveText('1');
+    await expect(page.getByTestId('notif-badge')).toHaveCount(0);
+    await expect(page.getByTestId('notif-bell')).toHaveAttribute(
+      'aria-label',
+      'Notifications, 1 unread',
+    );
 
     // mark all read
     await page.getByTestId('notif-bell').click();

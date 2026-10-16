@@ -18,6 +18,8 @@
 // NO FALLBACK: if the configured server URL is missing in production we
 // fail loudly at boot; if a global hotkey fails to register we throw.
 
+import { parseOpenChat, writeFrontChat } from './front-chat';
+import { spawnSync } from 'node:child_process';
 import {
   app,
   BrowserWindow,
@@ -38,16 +40,18 @@ import {
 import { autoUpdater } from 'electron-updater';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
-import { realpathSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { realpathSync, existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import {
   diagnoseUpdater,
   emptyPersisted,
+  createInstaller,
   initialUpdaterState,
   parsePersisted,
   persistedOf,
-  quitAndInstallNow,
   createCheckRunner,
   reduceUpdater,
+  savePersisted,
+  shouldPollFeed,
   type UpdaterEvent,
   type UpdaterState,
 } from './updater';
@@ -62,7 +66,7 @@ import { parseSavedPlacement, resolvePlacement, type DisplayInfo } from './windo
 import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
-import { installLocalDaemon, localDaemonStatus, serverOrigin } from './local-daemon';
+import { installLocalHost, localHostStatus, serverOrigin } from './local-host';
 import { loadFirstRun, type SetupChoice } from './first-run-api';
 import { toastSound, type NotifyPriority } from './toastSound';
 import {
@@ -364,6 +368,7 @@ function attachWindowLinkPolicy(win: BrowserWindow): void {
           if (action.kind === 'external') openInAppBrowser(win, action.url);
         },
         writeText: (text) => clipboard.writeText(text),
+        copyImageAt: (x, y) => win.webContents.copyImageAt(x, y),
       });
       Menu.buildFromTemplate(template).popup({ window: win });
     })();
@@ -1086,6 +1091,13 @@ function registerIpc(): void {
   // chat route, closes it). Distinct from `patch:iab:close`, which is the
   // panel's own toolbar button; a close with nothing open is a no-op.
   ipcMain.on('patch:panel:close', () => inAppBrowser?.close());
+  // The renderer reporting which chat its window has open; published for
+  // Foreman (front-chat.ts). A malformed payload is refused loudly.
+  ipcMain.on('patch:open-chat', (_e, payload: unknown) => {
+    const chat = parseOpenChat(payload, Date.now());
+    if (!chat) throw new Error(`patch:open-chat: malformed payload ${JSON.stringify(payload)}`);
+    writeFrontChat(app.getPath('home'), chat);
+  });
   // The divider is being dragged (spec/14 § Links and the web panel:
   // "drag-resizable like every other column"). Fires on every pointermove;
   // resizeTo moves the real views + pushes the inset immediately, and the
@@ -1208,7 +1220,10 @@ const UPDATE_STATE_FILE = (): string => join(app.getPath('userData'), 'update-st
 function saveUpdaterState(): void {
   if (!updaterState) return;
   try {
-    writeFileSync(UPDATE_STATE_FILE(), JSON.stringify(persistedOf(updaterState), null, 2));
+    savePersisted(UPDATE_STATE_FILE(), persistedOf(updaterState), {
+      writeFile: writeFileSync,
+      rename: renameSync,
+    });
   } catch (err) {
     // Losing the timestamp is not worth killing the app over, but it must be
     // visible rather than silent.
@@ -1240,14 +1255,22 @@ export function getUpdaterState(): UpdaterState | null {
  * A refusal (Squirrel won't apply an update to an adhoc signature) lands on the
  * version panel as an error rather than disappearing.
  */
-function installUpdate(): void {
-  quitAndInstallNow({
-    app: app as unknown as { isQuitting: boolean },
-    autoUpdater,
-    onError: (err) =>
-      applyUpdaterEvent({ type: 'error', message: err.message, at: new Date().toISOString() }),
-  });
-}
+const installUpdate = createInstaller({
+  app: app as unknown as { isQuitting: boolean },
+  autoUpdater,
+  // Squirrel.Mac's ShipIt helper can wedge holding the install request; kill
+  // it so the retry starts a fresh one instead of asking the user to quit.
+  recoverStall: () => {
+    spawnSync('pkill', ['-x', 'ShipIt']);
+  },
+  onError: (err) =>
+    applyUpdaterEvent({
+      type: 'error',
+      kind: 'install',
+      message: err.message,
+      at: new Date().toISOString(),
+    }),
+});
 
 function setupAutoUpdater(): void {
   const build = readDesktopBuildInfo();
@@ -1320,9 +1343,9 @@ function setupAutoUpdater(): void {
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
   // spec/02 § Desktop app and the local host — whether this Mac runs a
   // host, and installing one with a pairing code the SPA just minted.
-  ipcMain.handle('patch:local-daemon:status', () => localDaemonStatus(app.getPath('home')));
-  ipcMain.handle('patch:local-daemon:install', (_e, payload: { code?: unknown }) =>
-    installLocalDaemon({
+  ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
+  ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>
+    installLocalHost({
       serverUrl: serverOrigin(SERVER_URL),
       code: typeof payload?.code === 'string' ? payload.code : '',
       home: app.getPath('home'),
@@ -1344,14 +1367,15 @@ function setupAutoUpdater(): void {
   // an update; everything else waits for an ordinary quit
   // (autoInstallOnAppQuit, left at its default true).
   ipcMain.on('patch:updater:install', () => {
-    installUpdate();
+    if (updaterState) installUpdate(updaterState);
   });
 
   // An unusable updater is wired for reporting but never asked to check — calling
-  // checkForUpdates without app-update.yml just ENOENT-rejects on every launch.
-  if (disabledReason !== null && !hasUpdateConfig) return;
+  // checkForUpdates without app-update.yml just ENOENT-rejects on every launch,
+  // and without a feed it would poll the build's placeholder.
+  if (!shouldPollFeed({ hasUpdateConfig, feedUrl }) || feedUrl === null) return;
 
-  if (feedUrl) autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl, channel: 'latest' });
+  autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl, channel: 'latest' });
   autoUpdater.autoDownload = true;
   autoUpdater.on('update-available', (info: { version: string }) => {
     logDesktopEvent({ type: 'auto-update:available' });
@@ -1382,7 +1406,12 @@ function setupAutoUpdater(): void {
   autoUpdater.on('error', (err: Error) => {
     // Surfaced verbatim to the panel. This is the path that used to swallow the
     // "Could not get code signature" failure on an adhoc-signed build.
-    applyUpdaterEvent({ type: 'error', message: err.message, at: new Date().toISOString() });
+    applyUpdaterEvent({
+      type: 'error',
+      kind: 'check',
+      message: err.message,
+      at: new Date().toISOString(),
+    });
   });
 
   void checkForUpdates();
@@ -1525,8 +1554,8 @@ async function resolveServer(): Promise<void> {
       label: `${app.getName()} on ${hostname()}`,
       ui,
       installHost: (origin, code) =>
-        installLocalDaemon({ serverUrl: origin, code, home: app.getPath('home') }),
-      hostInstalled: () => localDaemonStatus(app.getPath('home')).installed,
+        installLocalHost({ serverUrl: origin, code, home: app.getPath('home') }),
+      hostInstalled: () => localHostStatus(app.getPath('home')).installed,
     });
     activeLaunch = launched;
     initialUrl = launched.appUrl;

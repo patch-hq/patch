@@ -41,7 +41,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
@@ -181,5 +181,16 @@ describe('model control — provider-switch confirmation', () => {
     expect(sent).toEqual([
       { type: 'chat.model_request', chatId: 'c1', model: 'openai/gpt-5-codex' },
     ]);
+  });
+
+  it('offers only the five most recent models', () => {
+    setModelCatalog({
+      status: 'ready',
+      models: Array.from({ length: 8 }, (_, n) => ({ id: `m${n}`, label: `Model ${n}` })),
+    });
+    render(row({ model: 'm0' }));
+    fireEvent.click(screen.getByTestId('chat-model'));
+    expect(screen.getAllByRole('option')).toHaveLength(5);
+    expect(screen.queryByTestId('model-option-m5')).toBeNull();
   });
 });

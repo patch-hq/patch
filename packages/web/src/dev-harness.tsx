@@ -33,20 +33,24 @@ import { useSideThreadsStore } from './stores/sideThreadsStore.js';
 import { ConfirmModal } from './components/ConfirmModal.js';
 import { PromptModal } from './components/PromptModal.js';
 import { DevErrorOverlay } from './components/DevErrorOverlay.js';
+import { SnoozeSheet } from './components/SnoozeSheet.js';
 import { ErrorToasts } from './components/ErrorToasts.js';
 import { TooltipHost } from './components/TooltipHost.js';
 import { useBatchWatcher } from './lib/batchNotifier.js';
 import { useBatchStore } from './stores/batchStore.js';
 import { useDesktopNavigation } from './lib/desktopNavigation.js';
 import { VoiceBar } from './components/VoiceBar.js';
+import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
+import { startVoiceNote, cancelVoiceNote } from './lib/voiceController.js';
 import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
-import { DaemonOfflineBanner } from './components/DaemonOfflineBanner.js';
+import { HostOfflineBanner } from './components/HostOfflineBanner.js';
 import { useChatStore } from './stores/chatStore.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
+import { useBrowserHandoffStore } from './stores/browserHandoffStore.js';
 import type { MeetingState } from '@patch/wire';
 import { useDraftStore } from './stores/draftStore.js';
 import { useComposerDraftStore } from './stores/composerDraftStore.js';
@@ -109,7 +113,7 @@ const machineRecencyFixture =
 useChatStore.getState().hydrate([
   {
     chatId: 'thread_manager',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'manager',
     folder: '/home/tom/.patch/threads/manager',
@@ -125,7 +129,7 @@ useChatStore.getState().hydrate([
     ? [
         {
           chatId: 'jobchat-nightly',
-          daemonId: 'd1',
+          hostId: 'd1',
           permissionMode: 'auto' as const,
           name: 'nightly-job-fixture',
           folder: '/home/tom/projects/bus',
@@ -142,7 +146,7 @@ useChatStore.getState().hydrate([
     : []),
   {
     chatId: 'thread_speakers',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'speakers',
     folder: '/home/tom/.patch/threads/speakers',
@@ -155,7 +159,7 @@ useChatStore.getState().hydrate([
   },
   {
     chatId: 'chat_bus',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'bus-watch',
     folder: '/home/tom/projects/bus',
@@ -183,7 +187,7 @@ useChatStore.getState().hydrate([
   // (`wake-bar.spec.ts`).
   {
     chatId: 'chat_loop_waiting',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'deploy-watch',
     folder: '/home/tom/projects/deploy-watch',
@@ -202,7 +206,7 @@ useChatStore.getState().hydrate([
   },
   {
     chatId: 'chat_md',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'July Seasonal Food',
     folder: '/home/tom/projects/portfolio',
@@ -218,7 +222,7 @@ useChatStore.getState().hydrate([
   // chat keeps its exact shape.
   {
     chatId: 'chat_table',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'Tea prices',
     folder: '/home/tom/projects/portfolio',
@@ -234,7 +238,7 @@ useChatStore.getState().hydrate([
   // the transcript-spacing and markdown specs' chats keep their exact shape.
   {
     chatId: 'chat_perm_mode',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'acceptEdits' as const,
     name: 'kettle spares',
     folder: '/home/tom/projects/bus',
@@ -250,7 +254,7 @@ useChatStore.getState().hydrate([
   // it reads differently from a person's own switch above.
   {
     chatId: 'chat_perm_mode_auto',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'plan' as const,
     name: 'overnight refactor',
     folder: '/home/tom/projects/bus',
@@ -266,7 +270,7 @@ useChatStore.getState().hydrate([
   // and transcript-spacing specs' chats keep their existing bar stack.
   {
     chatId: 'chat_tasks',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'index-rebuild',
     folder: '/home/tom/projects/bus',
@@ -277,6 +281,14 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 6,
     goal: 'Get the search index rebuilding nightly',
+    goalProgress: {
+      startedAt: Date.now() - 2 * 60_000,
+      turnsEvaluated: 1,
+      tokensSpent: 3_800_000,
+      lastVerdict: 'not_met' as const,
+      lastReason:
+        'The index rebuild has not been scheduled yet and the nightly job still needs wiring up and a passing test run before this can be called done',
+    },
     todos: [
       { text: 'read the current indexer', status: 'completed' as const },
       { text: 'rebuild the index', status: 'in_progress' as const },
@@ -290,9 +302,23 @@ useChatStore.getState().hydrate([
   // here (it is event-sourced, never part of the REST hydrate shape).
   {
     chatId: 'chat_provider_context',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'provider context demo',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 6,
+  },
+  // System-role furniture rows side by side — drives the furniture-style e2e.
+  {
+    chatId: 'chat_furniture',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'furniture demo',
     folder: '/home/tom/projects/bus',
     activity: 'idle',
     status: 'active',
@@ -306,7 +332,7 @@ useChatStore.getState().hydrate([
   // Its transcript is seeded below through the real `chat.message` reducer.
   {
     chatId: 'chat_system_context',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'system context demo',
     folder: '/home/tom/projects/bus',
@@ -322,7 +348,7 @@ useChatStore.getState().hydrate([
   // next to the remove (×).
   {
     chatId: 'chat_queued',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'queued-fixture',
     folder: '/home/tom/projects/bus',
@@ -339,7 +365,7 @@ useChatStore.getState().hydrate([
   // error.
   {
     chatId: 'chat_stopped',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'stopped-fixture',
     folder: '/home/tom/projects/bus',
@@ -356,7 +382,7 @@ useChatStore.getState().hydrate([
   // (the promoted turn's own run).
   {
     chatId: 'chat_interrupted',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'interrupted-fixture',
     folder: '/home/tom/projects/bus',
@@ -372,7 +398,7 @@ useChatStore.getState().hydrate([
   // fork point.
   {
     chatId: 'chat_forked',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'forked-fixture',
     folder: '/home/tom/projects/bus',
@@ -388,7 +414,7 @@ useChatStore.getState().hydrate([
   // WHOLE window rather than being clipped to the chat panel.
   {
     chatId: 'chat_image',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'image-fixture',
     folder: '/home/tom/projects/bus',
@@ -403,9 +429,23 @@ useChatStore.getState().hydrate([
   // panel — "Tool runs collapse to one row") — drives the tool-group e2e.
   {
     chatId: 'chat_tools',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'tools-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
+  // Words said in a call, user and assistant, for the call-mark e2e (spec/07).
+  {
+    chatId: 'chat_voice',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'voice-fixture',
     folder: '/home/tom/projects/bus',
     activity: 'idle',
     status: 'active',
@@ -419,7 +459,7 @@ useChatStore.getState().hydrate([
   // the transcript-rhythm e2e (spec/14 § Breathing room).
   {
     chatId: 'chat_tool_rhythm',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'tool-rhythm-fixture',
     folder: '/home/tom/projects/bus',
@@ -435,7 +475,7 @@ useChatStore.getState().hydrate([
   // calls) — drives the tool-call summary e2e.
   {
     chatId: 'chat_tool_single',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'single-tool-fixture',
     folder: '/home/tom/projects/bus',
@@ -448,9 +488,22 @@ useChatStore.getState().hydrate([
   },
   {
     chatId: 'chat_scroll',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'scroll-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
+  {
+    chatId: 'chat_long_history',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'long-history-fixture',
     folder: '/home/tom/projects/bus',
     activity: 'idle',
     status: 'active',
@@ -464,7 +517,7 @@ useChatStore.getState().hydrate([
   // calls — spec/12 § "No message deduplication beyond seq").
   {
     chatId: 'chat_replay_dupe',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'replay-dupe-fixture',
     folder: '/home/tom/projects/bus',
@@ -476,11 +529,11 @@ useChatStore.getState().hydrate([
     lastUpdated: 0,
   },
   // No seeded timeline — driven live via `__store.applyEvent` by the spec
-  // itself (spec/04 § Activity: the server's daemon-link-lost notice must
+  // itself (spec/04 § Activity: the server's host-link-lost notice must
   // disappear from the transcript once the host comes back).
   {
     chatId: 'chat_daemon_blip',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'daemon-blip-fixture',
     folder: '/home/tom/projects/bus',
@@ -495,7 +548,7 @@ useChatStore.getState().hydrate([
   // Main chat panel) — drives the tappable-link-on-the-collapsed-summary e2e.
   {
     chatId: 'chat_deeplink',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'deeplink-fixture',
     folder: '/home/tom/projects/bus',
@@ -512,7 +565,7 @@ useChatStore.getState().hydrate([
   // which already has `.claude/skills/plant/SKILL.md`.
   {
     chatId: 'chat_skill',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'skill-call-fixture',
     folder: '/home/tom/projects/bus',
@@ -527,7 +580,7 @@ useChatStore.getState().hydrate([
   // calls) — drives the "renders as a picture, not raw base64" e2e.
   {
     chatId: 'chat_tool_image',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'tool-image-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -542,7 +595,7 @@ useChatStore.getState().hydrate([
   // drives the "one row, not two" e2e.
   {
     chatId: 'chat_tool_paired',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'tool-paired-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -556,7 +609,7 @@ useChatStore.getState().hydrate([
   // A `view_file` call showing a page inline (spec/14 § Viewing files).
   {
     chatId: 'chat_view_file',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'view-file-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -571,7 +624,7 @@ useChatStore.getState().hydrate([
   // drives the click-to-lightbox e2e.
   {
     chatId: 'chat_view_file_image',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'view-file-image-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -586,7 +639,7 @@ useChatStore.getState().hydrate([
   // sandboxed-frame treatment as an HTML page, not the image/lightbox path.
   {
     chatId: 'chat_view_file_pdf',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'view-file-pdf-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -603,7 +656,7 @@ useChatStore.getState().hydrate([
   // the Archived banner + Unarchive control (patch/todo.md).
   {
     chatId: 'chat_archived',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'old cleanup',
     folder: '/home/tom/projects/portfolio',
@@ -619,7 +672,7 @@ useChatStore.getState().hydrate([
   // it was. `?chat=chat_hidden` opens it to verify the Hidden banner + Show.
   {
     chatId: 'chat_hidden',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'inbox triage run',
     folder: '/home/tom/projects/portfolio',
@@ -631,11 +684,24 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  {
+    chatId: 'chat_user_fits_measure',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'user-fits-measure-fixture',
+    folder: '/home/tom/projects/portfolio',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A long-unbroken-string fixture (todo item: "long text in a message flows
   // over the edge of the message box") — drives the message-overflow e2e.
   {
     chatId: 'chat_long_text',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'long-text-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -649,7 +715,7 @@ useChatStore.getState().hydrate([
   // A user message typed with single newlines — drives the user-newlines e2e.
   {
     chatId: 'chat_user_newlines',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'user-newlines-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -664,7 +730,7 @@ useChatStore.getState().hydrate([
   // the accordion-collapse e2e.
   {
     chatId: 'chat_long_user_message',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'long-user-message-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -679,7 +745,7 @@ useChatStore.getState().hydrate([
   // message containing an http(s) link.
   {
     chatId: 'chat_link_preview',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'link-preview-fixture',
     folder: '/home/tom/projects/portfolio',
@@ -695,7 +761,7 @@ useChatStore.getState().hydrate([
   // furniture, not a plain user bubble; a later, normal user reply does not.
   {
     chatId: 'chat_job_trigger',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'job-trigger-fixture',
     folder: '/home/tom/projects/bus',
@@ -714,7 +780,7 @@ useChatStore.getState().hydrate([
   // the flag is read per-message, not inferred from job-chat membership.
   {
     chatId: 'chat_job_trigger_later_fire',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'job-trigger-later-fire-fixture',
     // A folder of its own, and deliberately NOT sharing any substring with
@@ -735,7 +801,7 @@ useChatStore.getState().hydrate([
   // arrived as a user turn.
   {
     chatId: 'chat_task_notification',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'task-notification-fixture',
     folder: '/home/tom/projects/patch',
@@ -751,7 +817,7 @@ useChatStore.getState().hydrate([
   // a count to get wrong and a completion to have honoured.
   {
     chatId: 'chat_bgtask',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'background-task-fixture',
     folder: '/home/tom/projects/patch',
@@ -773,7 +839,7 @@ useChatStore.getState().hydrate([
   // always landing on the jobs list.
   {
     chatId: 'chat_job_open_link',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'job-open-link-fixture',
     folder: '/home/tom/projects/bus',
@@ -789,7 +855,7 @@ useChatStore.getState().hydrate([
   // first) and no `backgroundTasks`/unread — the ONLY signal is `pendingWake`.
   {
     chatId: 'chat_monitoring',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'monitoring-fixture (self-wake armed)',
     folder: '/home/tom/projects/patch',
@@ -808,7 +874,7 @@ useChatStore.getState().hydrate([
   // badge has to come from `statusKind` alone or this fixture proves nothing.
   {
     chatId: 'chat_declared_question',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'declared-question-fixture (patch_ask_human)',
     folder: '/home/tom/projects/patch',
@@ -831,7 +897,7 @@ useChatStore.getState().hydrate([
   // mark-everything-read empty state.
   {
     chatId: 'chat_question',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'question-fixture',
     folder: '/home/tom/projects/patch',
@@ -849,7 +915,7 @@ useChatStore.getState().hydrate([
   // `chat_question` above.
   {
     chatId: 'chat_question_timer',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'question-timer-fixture',
     folder: '/home/tom/projects/patch',
@@ -867,7 +933,7 @@ useChatStore.getState().hydrate([
   // prompts). `activity: 'idle'` for the same reason as `chat_question` above.
   {
     chatId: 'chat_question_styles',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'question-styles-fixture',
     folder: '/home/tom/projects/patch',
@@ -886,7 +952,7 @@ useChatStore.getState().hydrate([
   // `activity: 'idle'` for the same reason as `chat_question` above.
   {
     chatId: 'chat_question_answered',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'question-answered-fixture',
     folder: '/home/tom/projects/patch',
@@ -903,7 +969,7 @@ useChatStore.getState().hydrate([
   // provider's sentence about a monthly spend limit is not part of it.
   {
     chatId: 'chat_limit_blocked',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'limit-blocked-fixture',
     folder: '/home/tom/projects/bus',
@@ -931,7 +997,7 @@ useChatStore.getState().hydrate([
   // flight.
   {
     chatId: 'chat_limit_past_reset',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'limit-past-reset-fixture',
     folder: '/home/tom/projects/bus',
@@ -959,7 +1025,7 @@ useChatStore.getState().hydrate([
   // that read "That was 20690 days 23 hours ago".
   {
     chatId: 'chat_limit_epoch_reset',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'limit-epoch-reset-fixture',
     folder: '/home/tom/projects/bus',
@@ -985,7 +1051,7 @@ useChatStore.getState().hydrate([
   // separators and a placeholder (spec/14 § Chat panel header).
   {
     chatId: 'chat_no_folder',
-    daemonId: '',
+    hostId: '',
     permissionMode: 'auto' as const,
     name: 'no-folder-fixture',
     folder: '',
@@ -1598,6 +1664,24 @@ useChatStore.setState((s) => ({
     chat_tools: toolRunEntries,
     chat_tools_failed: toolRunFailedEntries,
     chat_tool_rhythm: toolRhythmEntries,
+    chat_voice: [
+      {
+        seq: 1,
+        kind: 'message',
+        role: 'user',
+        content: "Okay, we'll restart those then.",
+        voice: true,
+        at: 1,
+      },
+      {
+        seq: 2,
+        kind: 'message',
+        role: 'assistant',
+        content: 'Restarting the host now.',
+        voice: true,
+        at: 2,
+      },
+    ],
     chat_tool_single: singleToolEntries,
     chat_question: questionEntries,
     chat_question_timer: questionTimerEntries,
@@ -1679,6 +1763,17 @@ useChatStore.setState((s) => ({
     // A long history so the scroll-behaviour spec has something to scroll.
     chat_scroll: Array.from(
       { length: 40 },
+      (_v, i): ChatEventEntry => ({
+        seq: i,
+        kind: 'message',
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
+        at: i,
+      }),
+    ),
+    // A transcript far longer than the tail window the web panel paints on open.
+    chat_long_history: Array.from(
+      { length: 400 },
       (_v, i): ChatEventEntry => ({
         seq: i,
         kind: 'message',
@@ -1866,6 +1961,18 @@ useChatStore.setState((s) => ({
         content:
           'Here it is: https://example.com/a/very/long/path/segment/that/keeps/going/and/going/without/any/spaces/to/break/on/query?param1=aaaaaaaaaa&param2=bbbbbbbbbb&param3=cccccccccc',
         at: 1,
+      },
+    ],
+    // A one-line user message that fits the reading measure but is wider than
+    // 82% of it — it must stay on one line.
+    chat_user_fits_measure: [
+      {
+        seq: 0,
+        kind: 'message',
+        role: 'user',
+        content:
+          'This message is long enough to run most of the way across the chat column but fits on one line.',
+        at: 0,
       },
     ],
     chat_user_newlines: [
@@ -2160,8 +2267,11 @@ useChatStore.setState((s) => ({
 // Exposed so the scroll-behaviour spec can append an optimistic turn the way a
 // real send does.
 (window as unknown as { __store?: typeof useChatStore }).__store = useChatStore;
-// Exposed so specs can push a fresh `daemon.account` report (e.g. usage
+// Exposed so specs can push a fresh `host.account` report (e.g. usage
 // windows) the way the real WS greeting/report would, without a live host.
+// The voice-NOTE path (⌃Space / ⌘; / the new-chat mic) has no composer to drive
+// it in this harness, so an e2e starts one directly and reads the overlay.
+Object.assign(window, { __startVoiceNote: startVoiceNote, __cancelVoiceNote: cancelVoiceNote });
 (window as unknown as { __presenceStore?: typeof usePresenceStore }).__presenceStore =
   usePresenceStore;
 // Exposed so specs can play a `settings.changed` (spec/03 § Settings) the way
@@ -2195,13 +2305,20 @@ useChatStore.setState((s) => ({
 // Exposed so batch specs can force a re-poll (spec/14 § Batch mode is server-
 // owned and polled; the harness has no live socket to push a change over).
 (window as unknown as { __batchStore?: typeof useBatchStore }).__batchStore = useBatchStore;
+// Lets a spec play the host's browser live-view frames and hand-off prompt.
+(
+  window as unknown as { __browserHandoffStore?: typeof useBrowserHandoffStore }
+).__browserHandoffStore = useBrowserHandoffStore;
 // A fake active WS that only records what a host-scoped control sends, so e2e
 // can click Save/remove in Settings → Hosts → Claude Code settings and assert
 // on the real frame — the harness otherwise runs with no live socket (`ws={null}`
 // throughout), which is why nothing captured outbound sends before.
 const wsSent: WireEvent[] = [];
 (window as unknown as { __wsSent: WireEvent[] }).__wsSent = wsSent;
-setActiveWs({ send: (event: WireEvent) => wsSent.push(event) } as unknown as PatchWs);
+setActiveWs({
+  send: (event: WireEvent) => wsSent.push(event),
+  safeSend: (event: WireEvent) => wsSent.push(event),
+} as unknown as PatchWs);
 // The model catalogue (spec/14 § Model selector). Seeded, not fetched: the
 // harness has no backend, and the chat header's model crumb is a live control —
 // it opens this list and sends a `chat.model_request` for the chosen row
@@ -2338,6 +2455,29 @@ useChatStore.getState().applyEvent({
   label: 'Tokens remaining',
   text: '14,900,112 tokens left',
 });
+useChatStore.getState().applyEvent({
+  type: 'chat.message',
+  chatId: 'chat_furniture',
+  role: 'assistant',
+  content: 'Plain message text for comparison.',
+  seq: 1,
+});
+useChatStore.getState().applyEvent({
+  type: 'chat.message',
+  chatId: 'chat_furniture',
+  role: 'system',
+  content: 'No response requested.',
+  seq: 2,
+  synthetic: true,
+});
+useChatStore.getState().applyEvent({
+  type: 'chat.message',
+  chatId: 'chat_furniture',
+  role: 'user',
+  content: 'The goal was not met: the tests still fail.',
+  seq: 3,
+  goalTrigger: { reason: 'the tests still fail' },
+});
 // `chat_system_context` (spec/02 § System-reminder disclosure): a turn carrying
 // a todo-edit reminder, re-sent after a restart with the restart reminder, then
 // answered — all through the real reducer, so the fold is the store's own.
@@ -2398,15 +2538,15 @@ usePresenceStore.getState().setConnection('connected');
 // has nothing to preselect and no host to spawn on — exactly as in the real app.
 usePresenceStore.getState().setHosts([
   {
-    daemonId: 'd1',
+    hostId: 'd1',
     online: true,
     lastSeenAt: Date.now(),
     host: {
-      daemonId: 'd1',
+      hostId: 'd1',
       hostName: 'dev-host',
       platform: 'darwin',
       arch: 'arm64',
-      daemonVersion: '0.0.0-dev',
+      hostVersion: '0.0.0-dev',
       updateAvailable: false,
       permissionModeDefault: 'auto',
       permissionOverrides: 0,
@@ -2431,7 +2571,7 @@ usePresenceStore.getState().setHosts([
     },
     accounts: [
       {
-        daemonId: 'd1',
+        hostId: 'd1',
         backendId: 'claude-code',
         connected: true,
         accountEmail: 'dev@example.com',
@@ -2449,13 +2589,13 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
     ...(home
       ? [
           {
-            daemonId: 'd1',
+            hostId: 'd1',
             online: true,
             lastSeenAt: Date.now(),
             host: home.host,
             accounts: [
               {
-                daemonId: 'd1',
+                hostId: 'd1',
                 backendId: 'claude-code',
                 connected: true,
                 accountEmail: 'dev@example.com',
@@ -2465,15 +2605,13 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
         ]
       : []),
     {
-      daemonId: 'd2',
+      hostId: 'd2',
       online: true,
       lastSeenAt: Date.now(),
-      host: home?.host
-        ? { ...home.host, daemonId: 'd2', hostName: 'mac', isHomeHost: false }
-        : null,
+      host: home?.host ? { ...home.host, hostId: 'd2', hostName: 'mac', isHomeHost: false } : null,
       accounts: [
         {
-          daemonId: 'd2',
+          hostId: 'd2',
           backendId: 'claude-code',
           connected: true,
           accountEmail: 'dev@example.com',
@@ -3179,7 +3317,7 @@ function Harness(): JSX.Element {
       const res = await fetch('/api/chats/folders');
       if (!res.ok) return;
       const body = (await res.json()) as {
-        folders: Array<{ folder: string; daemonId: string; lastUpdated: number }>;
+        folders: Array<{ folder: string; hostId: string; lastUpdated: number }>;
       };
       useChatStore.getState().setFolderRoster(body.folders);
     })();
@@ -3279,6 +3417,7 @@ function Harness(): JSX.Element {
             (spec/12 § Principles), so e2e can see what a failure actually
             looks like instead of asserting against a stand-in. */}
         <ErrorToasts />
+        <SnoozeSheet />
         <TooltipHost />
         <DevErrorOverlay />
       </MemoryRouter>
@@ -3292,9 +3431,10 @@ function Harness(): JSX.Element {
   const withChrome = (
     <>
       <OfflineBanner />
-      <DaemonOfflineBanner />
+      <HostOfflineBanner />
       <DesktopUpdateBanner />
       {columns}
+      <VoiceNoteOverlay />
     </>
   );
   // Without `?voice` the harness is the columns alone, exactly as every layout

@@ -20,7 +20,7 @@ const queryClient = new QueryClient();
 useChatStore.getState().hydrate([
   {
     chatId: 'thread_manager',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'manager',
     folder: '/home/tom/.patch/threads/manager',
@@ -33,7 +33,7 @@ useChatStore.getState().hydrate([
   },
   {
     chatId: 'chat_bus',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'bus-watch',
     folder: '/home/tom/projects/bus',
@@ -46,7 +46,7 @@ useChatStore.getState().hydrate([
   },
   {
     chatId: 'chat_garden',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'garden-podcast',
     folder: '/home/tom/projects/garden',
@@ -59,7 +59,7 @@ useChatStore.getState().hydrate([
   },
   {
     chatId: 'thread_speakers',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'speakers',
     folder: '/home/tom/.patch/threads/speakers',

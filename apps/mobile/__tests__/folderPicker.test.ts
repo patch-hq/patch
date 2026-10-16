@@ -13,7 +13,7 @@ import {
 import type { ChatRow } from '../src/stores/types';
 
 const chat = (p: Partial<ChatRow> & { chatId: string }): ChatRow =>
-  ({ daemonId: 'd1', folder: '', status: 'active', lastUpdated: 1, jobId: null, ...p }) as ChatRow;
+  ({ hostId: 'd1', folder: '', status: 'active', lastUpdated: 1, jobId: null, ...p }) as ChatRow;
 
 describe('shortHomePath', () => {
   it('shortens linux and mac home directories', () => {
@@ -70,7 +70,7 @@ describe('buildRecentFolders', () => {
     const out = buildRecentFolders(
       {
         a: chat({ chatId: 'a', folder: '/p/x' }),
-        b: chat({ chatId: 'b', folder: '/p/x', daemonId: 'd2' }),
+        b: chat({ chatId: 'b', folder: '/p/x', hostId: 'd2' }),
       },
       {},
     );
@@ -80,8 +80,8 @@ describe('buildRecentFolders', () => {
 
 describe('filterRows', () => {
   const recents = [
-    { folder: '/home/tom/projects/alpha', daemonId: 'd1', lastUpdated: 2 },
-    { folder: '/p/beta', daemonId: 'd2', lastUpdated: 1 },
+    { folder: '/home/tom/projects/alpha', hostId: 'd1', lastUpdated: 2 },
+    { folder: '/p/beta', hostId: 'd2', lastUpdated: 1 },
   ];
   it('matches name or short path and narrows by host', () => {
     expect(filterRows(recents, 'alp', 'all').map((r) => r.name)).toEqual(['alpha']);

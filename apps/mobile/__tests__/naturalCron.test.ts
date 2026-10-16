@@ -13,6 +13,23 @@ describe('parseNaturalSchedule', () => {
     expect(parseNaturalSchedule('   ')).toBeNull();
   });
 
+  it('reads a leading time ("8am every day", "17:30 weekdays")', () => {
+    expect(parseNaturalSchedule('8am every day')).toBe('0 8 * * *');
+    expect(parseNaturalSchedule('17:30 weekdays')).toBe('30 17 * * 1-5');
+  });
+  it('refuses a time window cron cannot express instead of reading its end time as the schedule', () => {
+    expect(parseNaturalSchedule('every day between 9am and 5pm')).toBeNull();
+    expect(parseNaturalSchedule('every day from 5pm to 9am')).toBeNull();
+  });
+
+  it('reads a dotted clock time ("7.30pm")', () => {
+    expect(parseNaturalSchedule('every weekday at 7.30pm')).toBe('30 19 * * 1-5');
+  });
+
+  it('refuses a day phrase with digits that are not a time, never a silent midnight', () => {
+    expect(parseNaturalSchedule('9 every day')).toBeNull();
+  });
+
   it('parses "every 15 minutes"', () => {
     expect(parseNaturalSchedule('every 15 minutes')).toBe('*/15 * * * *');
   });
@@ -101,6 +118,30 @@ describe('parseNaturalSchedule', () => {
     expect(parseNaturalSchedule('sun at 9am')).toBe('0 9 * * 0');
   });
 
+  it('refuses a window whose ends fall between the hours — cron cannot start at 9:30', () => {
+    // Cron's hour field would fire at 9:00 and 9:15 (before the window opens)
+    // and 17:45 (after it closes).
+    expect(parseNaturalSchedule('every 15 minutes between 9:30am and 5:30pm')).toBeNull();
+    expect(parseNaturalSchedule('every 2 hours from 9:30am to 5pm')).toBeNull();
+    expect(parseNaturalSchedule('every 5 minutes between 9am and 9:30am')).toBeNull();
+  });
+
+  it('a window on the hour is still read', () => {
+    expect(parseNaturalSchedule('every 15 minutes between 9:00am and 5:00pm')).toBe(
+      '*/15 9-17 * * *',
+    );
+  });
+
+  it('a range of days that covers the whole week is every day, not an empty field', () => {
+    expect(parseNaturalSchedule('monday to sunday at 9am')).toBe('0 9 * * *');
+    expect(parseNaturalSchedule('tuesday to monday at 9am')).toBe('0 9 * * *');
+    expect(parseNaturalSchedule('every 5 minutes monday to sunday')).toBe('*/5 * * * *');
+  });
+
+  it('a range that wraps the weekend still lists its days', () => {
+    expect(parseNaturalSchedule('friday to monday at 9am')).toBe('0 9 * * 0,1,5,6');
+  });
+
   it('parses a time window ("between 9am and 5pm") combined with an interval', () => {
     expect(parseNaturalSchedule('every 5 minutes between 9am and 5pm')).toBe('*/5 9-17 * * *');
   });
@@ -115,10 +156,8 @@ describe('parseNaturalSchedule', () => {
       '*/15 9-17 * * 1-5',
     );
   });
-  it('a window that wraps past midnight (start > end) is dropped, not a total parse failure', () => {
-    // parseTimeWindow returns null for a wrapping range; the interval form
-    // still parses, just without an hour constraint (hourField falls back to '*').
-    expect(parseNaturalSchedule('every 5 minutes between 5pm and 9am')).toBe('*/5 * * * *');
+  it('a window that wraps past midnight (start > end) is refused, never widened to all day', () => {
+    expect(parseNaturalSchedule('every 5 minutes between 5pm and 9am')).toBeNull();
   });
 
   it('returns null for unparseable gibberish', () => {
@@ -132,20 +171,21 @@ describe('parseNaturalSchedule', () => {
     expect(parseNaturalSchedule('every 5 minutes between 12 34am and 5pm')).toBe('*/5 * * * *');
   });
 
-  it('a window whose start hour is out of range drops the window (parseTime returns null for a well-formed-but-invalid token)', () => {
-    // "25:00" matches TIME_TOKEN's shape fine (window regex succeeds), but
-    // parseTime rejects it on range (h>23) — a different failure mode than
-    // the syntactic-mismatch case above, both surfacing as `!start`.
-    expect(parseNaturalSchedule('every 5 minutes between 25:00 and 5pm')).toBe('*/5 * * * *');
+  it('a window whose start hour is out of range is refused, never widened to all day', () => {
+    // "25:00" matches TIME_TOKEN's shape (the window regex succeeds), but parseTime
+    // rejects it on range (h>23).
+    expect(parseNaturalSchedule('every 5 minutes between 25:00 and 5pm')).toBeNull();
   });
 
-  it('an "at <time>" phrase whose captured text is syntactically invalid drops the time, not the whole parse', () => {
+  it('an "at <time>" phrase whose captured text is syntactically invalid is refused, not read as midnight', () => {
     // atMatch's charset ([0-9: ]+) is looser than parseTime's own anchored
     // regex — "12:34:56am" (two colons) matches atMatch but parseTime's
     // single optional `:mm` group can't consume it, so parseTime's `m` is
     // null and it returns null via its own regex-mismatch branch (distinct
     // from the out-of-range h>23/min>59 branch pinned above).
-    expect(parseNaturalSchedule('every day at 12:34:56am')).toBe('0 0 * * *');
+    // The digits are there but are not a time, so the web parser returns null
+    // rather than a silent midnight; mobile must agree.
+    expect(parseNaturalSchedule('every day at 12:34:56am')).toBeNull();
   });
 
   it('a bare clock time with no day phrase and no "at"/day-word context returns null', () => {
@@ -250,5 +290,30 @@ describe('describeCron', () => {
 
   it('returns "" for a shape describeCron does not recognise', () => {
     expect(describeCron('5 5 5 5 5')).toBe('');
+  });
+});
+
+describe('parseNaturalSchedule — what it cannot say it refuses to say', () => {
+  it.each([
+    'every 2 days at 9am',
+    'every other day at 9am',
+    'every week at 9am',
+    'every month at 9am',
+    'monthly at 9am',
+    'every 2 weeks on monday at 9am',
+  ])('%s is not a daily schedule', (phrase) => {
+    expect(parseNaturalSchedule(phrase)).toBeNull();
+  });
+
+  it.each([
+    ['monday to friday at 9am', '0 9 * * 1-5'],
+    ['mon-fri at 8:30am', '30 8 * * 1-5'],
+    ['tuesday through thursday at 9am', '0 9 * * 2-4'],
+  ])('%s is a day range', (phrase, cron) => {
+    expect(parseNaturalSchedule(phrase)).toBe(cron);
+  });
+
+  it('keeps a compact time window rather than dropping it', () => {
+    expect(parseNaturalSchedule('every 15 minutes 9am-5pm')).toBe('*/15 9-17 * * *');
   });
 });

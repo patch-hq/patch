@@ -2,16 +2,17 @@
 // § Snooze) — patch/todo.md: "ability to snooze a chat for 2, 5, 30, 1 hour,
 // 1 day, next week or custom amount of time, like in gmail".
 //
-// The header's clock icon opens an anchored menu of wake times. Choosing one
-// resolves `now + delta` to an ABSOLUTE timestamp, optimistically stamps the
-// row and POSTs it; failure reverts and toasts (NO FALLBACK). While snoozed the
-// menu leads with Unsnooze.
+// The header's Snooze row opens the Snooze sheet. Choosing a preset only selects
+// it; confirming resolves `now + delta` to an ABSOLUTE timestamp, optimistically
+// stamps the row and POSTs it; failure reverts and toasts (NO FALLBACK). On a
+// snoozed chat the row is a direct Unsnooze.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { JSX } from 'react';
 import { render as rtlRender, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ChatHeader } from '../components/ChatHeader.js';
+import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import type { ChatRow } from '../stores/types.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -31,7 +32,15 @@ function render(ui: JSX.Element): ReturnType<typeof rtlRender> {
   return rtlRender(
     <MemoryRouter initialEntries={['/chats/c1']}>
       <Routes>
-        <Route path="*" element={ui} />
+        <Route
+          path="*"
+          element={
+            <>
+              {ui}
+              <SnoozeSheet />
+            </>
+          }
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -40,7 +49,7 @@ function render(ui: JSX.Element): ReturnType<typeof rtlRender> {
 function row(overrides: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
@@ -82,6 +91,7 @@ describe('ChatHeader — snooze', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
+    useUiStore.getState().closeSnoozeSheet();
     vi.mocked(api.snoozeChat)
       .mockReset()
       .mockResolvedValue(undefined as never);
@@ -98,7 +108,7 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    const menu = screen.getByTestId('snooze-menu');
+    const menu = screen.getByTestId('snooze-sheet');
     for (const label of [
       '2 minutes',
       '5 minutes',
@@ -107,7 +117,7 @@ describe('ChatHeader — snooze', () => {
       '5pm',
       'Tomorrow 8am',
       '1 day',
-      'Next week',
+      'Next Monday',
       'Custom…',
     ]) {
       expect(menu).toHaveTextContent(label);
@@ -120,20 +130,38 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-1-hour'));
-    await waitFor(() => expect(api.snoozeChat).toHaveBeenCalledWith('c1', NOW + 3_600_000));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-1-hour'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+    await waitFor(() =>
+      expect(api.snoozeChat).toHaveBeenCalledWith('c1', NOW + 3_600_000, expect.any(String)),
+    );
     expect(useChatStore.getState().chats['c1']?.snoozedUntil).toBe(NOW + 3_600_000);
-    // The menu closes once a choice is made.
-    expect(screen.queryByTestId('snooze-menu')).toBeNull();
+    // The sheet closes once confirmed.
+    expect(screen.queryByTestId('snooze-sheet')).toBeNull();
+  });
+
+  it('Next Monday resolves to the coming Monday at 8am local', async () => {
+    const r = row();
+    seed(r);
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-snooze'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-next-monday'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+    await waitFor(() => expect(api.snoozeChat).toHaveBeenCalled());
+    const at = new Date((api.snoozeChat as any).mock.calls[0][1]);
+    expect(at.getDay()).toBe(1);
+    expect(at.getHours()).toBe(8);
+    expect(at.getTime()).toBeGreaterThan(NOW);
+    expect(at.getTime() - NOW).toBeLessThanOrEqual(7 * 24 * 3_600_000);
   });
 
   it('each preset resolves to its own delta', async () => {
     const cases: Array<[string, number]> = [
-      ['snooze-preset-2-minutes', 2 * 60_000],
-      ['snooze-preset-5-minutes', 5 * 60_000],
-      ['snooze-preset-30-minutes', 30 * 60_000],
-      ['snooze-preset-1-day', 24 * 3_600_000],
-      ['snooze-preset-next-week', 7 * 24 * 3_600_000],
+      ['snooze-sheet-preset-2-minutes', 2 * 60_000],
+      ['snooze-sheet-preset-5-minutes', 5 * 60_000],
+      ['snooze-sheet-preset-30-minutes', 30 * 60_000],
+      ['snooze-sheet-preset-1-day', 24 * 3_600_000],
     ];
     for (const [testId, delta] of cases) {
       const r = row();
@@ -142,7 +170,10 @@ describe('ChatHeader — snooze', () => {
       fireEvent.click(screen.getByTestId('action-more'));
       fireEvent.click(screen.getByTestId('action-snooze'));
       fireEvent.click(screen.getByTestId(testId));
-      await waitFor(() => expect(api.snoozeChat).toHaveBeenCalledWith('c1', NOW + delta));
+      fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+      await waitFor(() =>
+        expect(api.snoozeChat).toHaveBeenCalledWith('c1', NOW + delta, expect.any(String)),
+      );
       vi.mocked(api.snoozeChat).mockClear();
       cleanup();
     }
@@ -158,11 +189,13 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-5pm'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-5pm'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await waitFor(() =>
       expect(api.snoozeChat).toHaveBeenCalledWith(
         'c1',
         new Date(2026, 7, 25, 17, 0, 0, 0).getTime(),
+        expect.any(String),
       ),
     );
   });
@@ -174,11 +207,13 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-5pm'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-5pm'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await waitFor(() =>
       expect(api.snoozeChat).toHaveBeenCalledWith(
         'c1',
         new Date(2026, 7, 26, 17, 0, 0, 0).getTime(),
+        expect.any(String),
       ),
     );
   });
@@ -190,11 +225,13 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-tomorrow-8am'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-tomorrow-8am'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await waitFor(() =>
       expect(api.snoozeChat).toHaveBeenCalledWith(
         'c1',
         new Date(2026, 7, 26, 8, 0, 0, 0).getTime(),
+        expect.any(String),
       ),
     );
   });
@@ -205,14 +242,14 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-custom'));
-    const input = screen.getByTestId('snooze-custom-input') as HTMLInputElement;
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-custom'));
+    const input = screen.getByTestId('snooze-sheet-custom-input') as HTMLInputElement;
     // A local datetime string, as `datetime-local` produces.
     const target = new Date(NOW + 3 * 3_600_000);
     const pad = (n: number): string => String(n).padStart(2, '0');
     const local = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T${pad(target.getHours())}:${pad(target.getMinutes())}`;
     fireEvent.change(input, { target: { value: local } });
-    fireEvent.click(screen.getByTestId('snooze-custom-submit'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await waitFor(() => expect(api.snoozeChat).toHaveBeenCalledTimes(1));
     const [, until] = vi.mocked(api.snoozeChat).mock.calls[0]!;
     // Minute precision — the datetime-local field has no seconds.
@@ -225,23 +262,24 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-custom'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-custom'));
     const past = new Date(NOW - 3 * 3_600_000);
     const pad = (n: number): string => String(n).padStart(2, '0');
     const local = `${past.getFullYear()}-${pad(past.getMonth() + 1)}-${pad(past.getDate())}T${pad(past.getHours())}:${pad(past.getMinutes())}`;
-    fireEvent.change(screen.getByTestId('snooze-custom-input'), { target: { value: local } });
-    fireEvent.click(screen.getByTestId('snooze-custom-submit'));
+    fireEvent.change(screen.getByTestId('snooze-sheet-custom-input'), { target: { value: local } });
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     expect(api.snoozeChat).not.toHaveBeenCalled();
     await waitFor(() => expect(useUiStore.getState().errors.length).toBe(1));
   });
 
-  it('a snoozed chat leads with Unsnooze, which clears the snooze', async () => {
+  it('a snoozed chat’s Snooze row is a direct Unsnooze, with no sheet', async () => {
     const r = row({ snoozedUntil: NOW + 60_000 });
     seed(r);
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
+    expect(screen.getByTestId('action-snooze')).toHaveTextContent('Unsnooze');
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-unsnooze'));
+    expect(screen.queryByTestId('snooze-sheet')).toBeNull();
     await waitFor(() => expect(api.snoozeChat).toHaveBeenCalledWith('c1', null));
     expect(useChatStore.getState().chats['c1']?.snoozedUntil).toBe(null);
   });
@@ -253,20 +291,23 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-1-hour'));
-    await waitFor(() => expect(useUiStore.getState().errors.length).toBe(1));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-1-hour'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+    await waitFor(() =>
+      expect(useUiStore.getState().errors.filter((e) => e.level === 'error').length).toBe(1),
+    );
     expect(useChatStore.getState().chats['c1']?.snoozedUntil).toBe(null);
   });
 
-  it('Esc closes the menu without snoozing', () => {
+  it('Esc closes the sheet without snoozing', () => {
     const r = row();
     seed(r);
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    expect(screen.getByTestId('snooze-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('snooze-sheet')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.queryByTestId('snooze-menu')).toBeNull();
+    expect(screen.queryByTestId('snooze-sheet')).toBeNull();
     expect(api.snoozeChat).not.toHaveBeenCalled();
   });
 

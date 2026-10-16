@@ -16,8 +16,10 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { speakInterrupt } from '../lib/speakInterrupt.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
+import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
+import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
@@ -324,7 +326,8 @@ export class PatchWs {
     }
   }
 
-  private safeSend(event: WireEvent): void {
+  /** Best-effort send: a no-op when the socket is not open. For frames that are re-sent anyway. */
+  safeSend(event: WireEvent): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify(event));
   }
@@ -349,7 +352,7 @@ export class PatchWs {
    * only as metadata rows are skipped: their transcripts load lazily on open
    * (spec/12 § Cold start loads metadata only).
    *
-   * `daemonId` narrows the sweep to one host, for a host that has just come
+   * `hostId` narrows the sweep to one host, for a host that has just come
    * back; omitted on a fresh socket, where every host is equally unknown.
    * `force` drops each swept chat's dedup cursor first — a returning host
    * usually leaves the cursor exactly where it was, so the request that heals
@@ -357,13 +360,13 @@ export class PatchWs {
    * the history we are now missing the tail of. Scoped to the chats being
    * swept, so one host's restart never re-asks another host's.
    */
-  private replayHeldChats(daemonId?: string, force = false): void {
+  private replayHeldChats(hostId?: string, force = false): void {
     const { chats, timelines, activeChatId } = useChatStore.getState();
     for (const chatId of Object.keys(chats)) {
       const row = chats[chatId];
       /* v8 ignore next -- defensive only: `chatId` is drawn from `Object.keys(chats)`, so `chats[chatId]` is always defined; this only exists to satisfy noUncheckedIndexedAccess. */
       if (row === undefined) continue;
-      if (daemonId !== undefined && row.daemonId !== daemonId) continue;
+      if (hostId !== undefined && row.hostId !== hostId) continue;
       const held = chatId === activeChatId || (timelines[chatId]?.length ?? 0) > 0;
       if (!held) continue;
       if (force) this.lastReplayCursor.delete(chatId);
@@ -546,6 +549,10 @@ export class PatchWs {
     });
 
     ws.addEventListener('close', (ev) => {
+      // A socket that reconnectNow() replaced closes too, sometimes after its
+      // successor is live: it must not null that one or schedule a second dial.
+      // (Teardown is the exception: it still records why the last socket ended.)
+      if (this.ws !== ws && !this.closed) return;
       this.ws = null;
       this.stopHeartbeat();
       // Record WHY, before the early return — a close during teardown is still
@@ -723,8 +730,8 @@ export class PatchWs {
       useUiStore.getState().pushError(`session expired: ${event.reason}`);
       return;
     }
-    if (event.type === 'daemon.online') {
-      usePresenceStore.getState().setHostOnline(event.daemonId, true);
+    if (event.type === 'host.online') {
+      usePresenceStore.getState().setHostOnline(event.hostId, true);
       // The host just came back, and this surface's socket to the SERVER may
       // never have dropped — a host restart (a deploy, a crash) does not
       // reconnect us. Nothing else asks for what we missed: the connect-time
@@ -732,7 +739,7 @@ export class PatchWs {
       // chat or the link changes identity. Without this a chat sits there
       // holding whatever it had when the host went down, silently missing
       // every event emitted since, with no error anywhere.
-      this.replayHeldChats(event.daemonId, true);
+      this.replayHeldChats(event.hostId, true);
       // The server flushes its buffer, but a copy lost to a flap at flush time
       // would never arrive — redeliver every still-pending input so
       // queued-while-offline turns land promptly and any lost one heals
@@ -740,26 +747,26 @@ export class PatchWs {
       deliveryTracker.onReconnect();
       return;
     }
-    if (event.type === 'daemon.offline') {
-      usePresenceStore.getState().setHostOnline(event.daemonId, false);
+    if (event.type === 'host.offline') {
+      usePresenceStore.getState().setHostOnline(event.hostId, false);
       return;
     }
-    if (event.type === 'daemon.unauthenticated') {
+    if (event.type === 'host.unauthenticated') {
       // A backend on a NAMED host has no usable credential — on boot and on a
       // refused query. Dropping it is what once produced a silent app: you
       // could open a chat, type and send, and the turn simply never ran. It is
       // authoritative "not connected" for that (host, backend) pair only —
       // another machine's credential is unaffected.
       usePresenceStore.getState().setHostAccount({
-        type: 'daemon.account',
-        daemonId: event.daemonId,
+        type: 'host.account',
+        hostId: event.hostId,
         backendId: event.backendId,
         connected: false,
         accountEmail: null,
       });
       return;
     }
-    if (event.type === 'daemon.host') {
+    if (event.type === 'host.host') {
       usePresenceStore.getState().setHostReport(event);
       return;
     }
@@ -787,8 +794,8 @@ export class PatchWs {
       );
       return;
     }
-    if (event.type === 'daemon.account') {
-      const previous = usePresenceStore.getState().hosts[event.daemonId]?.accounts[event.backendId];
+    if (event.type === 'host.account') {
+      const previous = usePresenceStore.getState().hosts[event.hostId]?.accounts[event.backendId];
       const fingerprint = (
         account: Pick<NonNullable<typeof previous>, 'connected' | 'accounts'> | undefined,
       ): string =>
@@ -797,7 +804,7 @@ export class PatchWs {
           account?.accounts?.map((a) => [a.id, a.kind, a.connected]),
         ]);
       if (fingerprint(previous) !== fingerprint(event))
-        void import('../lib/models.js').then((m) => m.refreshModelsForHost(event.daemonId));
+        void import('../lib/models.js').then((m) => m.refreshModelsForHost(event.hostId));
 
       // Addressed to ONE (host, backend) pair and stored as such. Flattening it
       // into an account-wide slot is what let a logged-out machine block sending
@@ -809,13 +816,13 @@ export class PatchWs {
     // sent whole on connect and re-sent on every change (including after an
     // add/remove made from Settings → Hosts → Project folders).
     if (event.type === 'folders.list' || event.type === 'folders.updated') {
-      usePresenceStore.getState().setHostFolders(event.daemonId, event.roots, event.recent);
+      usePresenceStore.getState().setHostFolders(event.hostId, event.roots, event.recent);
       return;
     }
     // The server removed a host from the account (Settings → Hosts → Remove,
     // from any surface). Its credential is revoked; forget it and its reports.
     if (event.type === 'host.removed') {
-      usePresenceStore.getState().removeHost(event.daemonId);
+      usePresenceStore.getState().removeHost(event.hostId);
       return;
     }
     // A host refused a Claude Code settings.json / memory edit (invalid JSON, an
@@ -827,7 +834,20 @@ export class PatchWs {
       return;
     }
     if (event.type === 'claude_settings.list' || event.type === 'claude_settings.updated') {
-      usePresenceStore.getState().setClaudeSettings(event.daemonId, event.drift, event.memories);
+      usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
+      return;
+    }
+    // Agent browser live view and hand-off: live-only, never a timeline entry.
+    if (event.type === 'patch.browser_view.frame') {
+      useBrowserHandoffStore.getState().applyFrame(event.chatId, event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.status') {
+      useBrowserHandoffStore.getState().applyStatus(event);
+      return;
+    }
+    if (event.type === 'patch.browser_handoff.state') {
+      useBrowserHandoffStore.getState().applyState(event);
       return;
     }
     if (event.type === 'meeting.state') {
@@ -845,6 +865,12 @@ export class PatchWs {
     }
     if (event.type === 'new_chat_draft.removed') {
       useDraftStore.getState().applyRemoved(event.id);
+      return;
+    }
+    // spec/05 § Handover — where the user last was, on whichever surface.
+    if (event.type === 'view_position.updated') {
+      const { type: _type, ...pos } = event;
+      useViewPositionStore.getState().applyUpdated(pos, usePresenceStore.getState().surfaceId);
       return;
     }
     // spec/14 § Composer — server-owned drafts. The cold-start snapshot, sent

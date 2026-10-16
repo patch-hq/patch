@@ -52,6 +52,36 @@ describe('initPush — happy path', () => {
   });
 });
 
+describe('initPush — re-pairing and retries', () => {
+  it('registers the token again after resetPush (a re-pair), leaving one set of listeners', async () => {
+    const Notifications = await import('./stubs/expo-notifications');
+    Notifications.__clearResponseListeners();
+    const { api } = await import('../src/api/rest');
+    const { initPush, resetPush } = await import('../src/lib/push');
+    (api.pushRegister as ReturnType<typeof vi.fn>).mockClear();
+    await initPush();
+    resetPush();
+    await initPush();
+    expect(api.pushRegister).toHaveBeenCalledTimes(2);
+    expect(Notifications.__responseListenerCount()).toBe(1);
+    // One token-rotation listener: a rotation re-registers once, not twice.
+    Notifications.__emitPushToken({ data: 'native' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(api.pushRegister).toHaveBeenCalledTimes(3);
+  });
+
+  it('a retry after a failed initPush leaves a single notification-response listener', async () => {
+    const Notifications = await import('./stubs/expo-notifications');
+    Notifications.__clearResponseListeners();
+    const { api } = await import('../src/api/rest');
+    (api.pushRegister as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('offline'));
+    const { initPush } = await import('../src/lib/push');
+    await expect(initPush()).rejects.toThrow(/offline/);
+    await initPush();
+    expect(Notifications.__responseListenerCount()).toBe(1);
+  });
+});
+
 describe('initPush — NO FALLBACK throws', () => {
   it('throws when notification permission is denied', async () => {
     const Notifications = await import('./stubs/expo-notifications');
@@ -172,5 +202,36 @@ describe('initPush — listeners', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(api.pushRegister).not.toHaveBeenCalled();
+  });
+
+  it('a rotation whose new Expo token cannot be minted is reported, not swallowed', async () => {
+    const Notifications = await import('./stubs/expo-notifications');
+    const { useUiStore } = await import('../src/stores/uiStore');
+    const { initPush } = await import('../src/lib/push');
+    await initPush();
+    useUiStore.setState({ errors: [] });
+    Notifications.__setExpoPushTokenError(new Error('offline'));
+    Notifications.__emitPushToken({ data: 'native-rotated-token' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    Notifications.__setExpoPushTokenError(null);
+    expect(useUiStore.getState().errors.map((e) => e.message)).toEqual([
+      'push token refresh failed: offline',
+    ]);
+  });
+
+  it('a rotation the server refuses to register is reported, not swallowed', async () => {
+    const Notifications = await import('./stubs/expo-notifications');
+    const { api } = await import('../src/api/rest');
+    const { useUiStore } = await import('../src/stores/uiStore');
+    const { initPush } = await import('../src/lib/push');
+    await initPush();
+    useUiStore.setState({ errors: [] });
+    vi.mocked(api.pushRegister).mockRejectedValueOnce(new Error('server 500'));
+    Notifications.__setExpoPushToken({ data: 'ExponentPushToken[rotated]' });
+    Notifications.__emitPushToken({ data: 'native-rotated-token' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useUiStore.getState().errors.map((e) => e.message)).toEqual([
+      'push token refresh failed: server 500',
+    ]);
   });
 });

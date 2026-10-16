@@ -5,6 +5,7 @@
 // explicit control (the × on the row), never a side effect of deleting text.
 
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react';
+import { isPlainEnter } from '../lib/submitChord.js';
 
 export function InlineEditText({
   value,
@@ -47,7 +48,7 @@ export function InlineEditText({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>): void {
-    if (e.key === 'Enter') {
+    if (isPlainEnter(e)) {
       e.preventDefault();
       commit();
       return;

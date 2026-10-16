@@ -8,6 +8,7 @@
 import React from 'react';
 import {
   CHAT_SEARCH_MIN_QUERY,
+  parseSearchQuery,
   SPECIAL_THREAD_IDS,
   type ChatSearchHit,
   type ChatSearchHostResult,
@@ -16,7 +17,6 @@ import {
 } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import { isHidden, isSnoozed } from '../stores/types';
-import { filterChats } from './chatFilter';
 import { api } from '../api/rest';
 
 /** How long typing has to pause before the query is sent. */
@@ -69,15 +69,14 @@ export function highlightSegments(
 
 /** Every case-insensitive occurrence of `query` in `text`, as ranges. */
 export function findRanges(text: string, query: string): [number, number][] {
-  const q = query.toLowerCase();
-  if (q.length === 0) return [];
-  const hay = text.toLowerCase();
+  if (query.length === 0) return [];
+  // Matched against the original text: lower-casing can change a string's length
+  // ('İ' becomes two code units), which would shift every range after it.
+  // A space in the query matches any run of whitespace, as the server's phrase
+  // matching does: a phrase spans a line break or a double space in the text.
+  const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ +/g, '\\s+'), 'giu');
   const out: [number, number][] = [];
-  let i = hay.indexOf(q);
-  while (i !== -1) {
-    out.push([i, i + q.length]);
-    i = hay.indexOf(q, i + q.length);
-  }
+  for (const m of text.matchAll(re)) out.push([m.index, m.index + m[0].length]);
   return out;
 }
 
@@ -95,24 +94,35 @@ export function sectionOf(row: ChatRow, now: number = Date.now()): ChatSearchSec
 }
 
 /**
+ * Ranges of every term in `text` when ALL of them occur in it, else none — the
+ * server's rule that a chat matches only when every term is present (a quoted
+ * run is one term). Sorted, so overlapping terms read left to right.
+ */
+function termRanges(text: string, terms: readonly string[]): [number, number][] {
+  const found = terms.map((t) => findRanges(text, t));
+  if (found.some((r) => r.length === 0)) return [];
+  return found.flat().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
+
+/**
  * The instant stand-in shown until the server answers the current query: the
- * chats this phone already holds that `filterChats` matches (name or preview,
- * case-insensitive), shaped as hits so one row component draws both lists and
+ * chats this phone already holds that match every term of the query (name or
+ * preview, case-insensitive; a "quoted run" is one exact phrase), shaped as hits so one row component draws both lists and
  * nothing changes shape when the answer lands. The server's answer replaces
  * this wholesale — it is only what is loaded.
  */
 export function localSearchHits(rows: readonly ChatRow[], query: string): ChatSearchHit[] {
-  const q = query.trim();
-  if (q === '') return [];
-  const out: ChatSearchHit[] = filterChats(
-    rows.filter((r) => r.status !== 'deleted'),
-    q,
-  ).map((row) => {
-    const nameHighlights = row.name === null ? [] : findRanges(row.name, q);
-    const previewHighlights = row.preview === null ? [] : findRanges(row.preview, q);
-    return {
+  const terms = parseSearchQuery(query);
+  if (terms.length === 0) return [];
+  const out: ChatSearchHit[] = [];
+  for (const row of rows) {
+    if (row.status === 'deleted') continue;
+    const nameHighlights = row.name === null ? [] : termRanges(row.name, terms);
+    const previewHighlights = row.preview === null ? [] : termRanges(row.preview, terms);
+    if (nameHighlights.length === 0 && previewHighlights.length === 0) continue;
+    out.push({
       chatId: row.chatId,
-      daemonId: row.daemonId,
+      hostId: row.hostId,
       name: row.name,
       preview: row.preview,
       folder: row.folder,
@@ -121,7 +131,7 @@ export function localSearchHits(rows: readonly ChatRow[], query: string): ChatSe
       pinned: row.pinned,
       snoozedUntil: row.snoozedUntil,
       lastUpdated: row.lastUpdated,
-      jobId: null,
+      jobId: row.jobId,
       nameMatch: nameHighlights.length > 0,
       nameHighlights,
       messageMatches: 0,
@@ -135,8 +145,8 @@ export function localSearchHits(rows: readonly ChatRow[], query: string): ChatSe
               createdAt: null,
             }
           : null,
-    };
-  });
+    });
+  }
   // The server's ranking: name matches first, then the most recent.
   return out.sort((a, b) =>
     a.nameMatch !== b.nameMatch ? (a.nameMatch ? -1 : 1) : b.lastUpdated - a.lastUpdated,

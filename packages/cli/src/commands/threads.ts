@@ -6,7 +6,7 @@
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
-import { emitJson, emitText, getTransport, run } from './_common.js';
+import { emitJson, emitText, getTransport, parseLimit, run } from './_common.js';
 
 interface ChatSummary {
   chatId: string;
@@ -89,7 +89,7 @@ export function registerThreadsCommands(program: Command): void {
     .action(async (opts: CommonOpts & { limit?: string }) => {
       await run(opts, async () => {
         const t = getTransport({ ...opts, remote: true });
-        const limit = opts.limit ? Math.min(200, Math.max(1, Number(opts.limit) || 50)) : undefined;
+        const limit = opts.limit !== undefined ? Math.min(200, parseLimit(opts.limit)) : undefined;
         const res = await t.get<{ runs: unknown[] }>(
           `/api/manager/sweeps${limit ? `?limit=${limit}` : ''}`,
         );

@@ -22,7 +22,7 @@
 // supported outcome — `autoInstallOnAppQuit` means the update lands the next
 // time you quit Patch anyway, so the patient path costs the user nothing.
 
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { getDesktopBridge, useDesktopUpdaterState } from '../lib/desktopBridge.js';
 
 /**
@@ -33,6 +33,14 @@ import { getDesktopBridge, useDesktopUpdaterState } from '../lib/desktopBridge.j
  */
 const URGENCY_DUE_MS = 8 * 60 * 60 * 1000;
 const URGENCY_OVERDUE_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * How long a press may go unanswered. The shell's own install watchdog needs
+ * two 20s stalls before it reports an error; this sits above that. An older
+ * shell, a dropped IPC message or a stalled installer reports nothing at all,
+ * and without this the button stayed on "Updating…" and disabled for good.
+ */
+const INSTALL_GRACE_MS = 60_000;
 
 export type UpdateUrgency = 'none' | 'ready' | 'due' | 'overdue';
 
@@ -70,6 +78,30 @@ export function DesktopUpdateBanner(): JSX.Element | null {
   // Re-read the clock every few minutes so a shell left running overnight
   // actually escalates, rather than staying at whatever it rendered at boot.
   const [now, setNow] = useState(() => Date.now());
+  // Acknowledge the press. A refused or stalled install reports through the
+  // updater state's lastError; show it here, where the button was pressed.
+  const [pressed, setPressed] = useState(false);
+  // Only an INSTALL failure belongs next to this button; a failed background check
+  // leaves the staged update exactly as installable as before.
+  const lastError =
+    state?.lastResult === 'error' && state.lastErrorKind === 'install' ? state.lastError : null;
+  // Keyed on when the error was recorded, not its text: a second failure reads
+  // identically to the first, and keying on the text left the button stuck on
+  // "Updating…" with the error hidden — a press that looked like it did nothing.
+  const errorAt = lastError !== null ? (state?.lastCheckedAt ?? null) : null;
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
+  useEffect(() => {
+    if (lastError !== null) setPressed(false);
+  }, [lastError, errorAt]);
+  const graceTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!pressed) return;
+    graceTimer.current = window.setTimeout(() => {
+      setPressed(false);
+      setBridgeError('Patch did not restart. Try again, or quit and reopen it.');
+    }, INSTALL_GRACE_MS);
+    return () => window.clearTimeout(graceTimer.current);
+  }, [pressed]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 5 * 60_000);
@@ -100,14 +132,29 @@ export function DesktopUpdateBanner(): JSX.Element | null {
       <span className="desktop-update-text">
         Patch has updated{waited === null ? '' : `, waiting ${waited}`}.
       </span>
+      {pressed === false && (bridgeError ?? lastError) !== null && (
+        <span className="desktop-update-text" data-testid="desktop-update-error">
+          {bridgeError ?? lastError}
+        </span>
+      )}
       <button
         type="button"
         className="desktop-update-restart"
         data-testid="desktop-update-restart"
         data-version={state.availableVersion}
-        onClick={() => getDesktopBridge()?.installUpdate?.()}
+        disabled={pressed}
+        onClick={() => {
+          const bridge = getDesktopBridge();
+          if (!bridge?.installUpdate) {
+            setBridgeError('This Patch app cannot install updates itself. Quit it and reopen it.');
+            return;
+          }
+          setBridgeError(null);
+          setPressed(true);
+          bridge.installUpdate();
+        }}
       >
-        Update Patch
+        {pressed ? 'Updating…' : 'Update Patch'}
       </button>
     </div>
   );

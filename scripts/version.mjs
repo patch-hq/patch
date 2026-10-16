@@ -84,7 +84,7 @@ export function serverSha() {
     'HEAD',
     '--',
     'packages/server',
-    'packages/daemon',
+    'packages/host',
     'packages/wire',
     'packages/auth',
   ]);

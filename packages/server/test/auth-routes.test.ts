@@ -20,7 +20,7 @@ import {
 } from '@patch/auth';
 import { buildAll, type BuildOptions } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 /**
  * Bootstrap the singleton account with a deterministic keypair (test seam) so
@@ -88,7 +88,7 @@ describe('auth REST routes', () => {
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       ...extra,
     });
     return built;
@@ -817,11 +817,11 @@ describe('auth REST routes', () => {
       label: 'browser',
       issuedAt: 1,
     });
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     const jwt = await surfaceBearer(user, 'srf-revoker');
-    // buildAll only wires `terminateDaemon` for a real InboundDaemonLink
-    // (see app.ts); with the InProcessDaemonLink test double it stays
-    // undefined, so `terminated = deps.terminateDaemon ? ... : false`
+    // buildAll only wires `terminateHost` for a real InboundHostLink
+    // (see app.ts); with the InProcessHostLink test double it stays
+    // undefined, so `terminated = deps.terminateHost ? ... : false`
     // exercises its `false` arm here — the daemon-id-match branch itself
     // (rather than the surface branch) is what this test targets.
     const { app } = await makeApp(registry);
@@ -965,7 +965,7 @@ describe('auth REST routes', () => {
     const registry = Registry.load(dir);
     bootstrap(registry, user);
     registry.upsertSurface({ surfaceId: 'srf-web', surfaceKind: 'web', label: 'mac', issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     const { app } = await makeApp(registry);
     try {
       const jwt = await surfaceBearer(user, 'srf-web');
@@ -984,10 +984,10 @@ describe('auth REST routes', () => {
 
 // registerAuthRoutes called directly against a bare Fastify instance (NOT via
 // buildAll) — exercises AuthRoutesDeps fields that buildAll's own production
-// wiring never leaves at their "unset" default: `terminateDaemon` (buildAll
-// only wires it for a real InboundDaemonLink, never the test's
-// InProcessDaemonLink), `terminateSurface` omitted entirely, and
-// `daemonLink` omitted entirely (both documented in auth-routes.ts as
+// wiring never leaves at their "unset" default: `terminateHost` (buildAll
+// only wires it for a real InboundHostLink, never the test's
+// InProcessHostLink), `terminateSurface` omitted entirely, and
+// `hostLink` omitted entirely (both documented in auth-routes.ts as
 // "optional only so unit tests can exercise the registry side in isolation").
 describe('registerAuthRoutes: direct deps injection (branches buildAll never exercises)', () => {
   let dir: string;
@@ -1005,22 +1005,22 @@ describe('registerAuthRoutes: direct deps injection (branches buildAll never exe
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('POST /api/auth/revoke: terminateDaemon IS called when revoking a host id', async () => {
+  it('POST /api/auth/revoke: terminateHost IS called when revoking a host id', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(140));
     const registry = Registry.load(dir);
     bootstrap(registry, user);
     registry.upsertSurface({ surfaceId: 'srf-web', surfaceKind: 'web', label: 'mac', issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     const jwt = await surfaceBearer(user, 'srf-web');
 
     const app = Fastify();
-    let terminateDaemonCalls = 0;
+    let terminateHostCalls = 0;
     registerAuthRoutes(app, {
       logger: app.log,
       registry,
       presence: new PresenceTracker(),
-      terminateDaemon: () => {
-        terminateDaemonCalls += 1;
+      terminateHost: () => {
+        terminateHostCalls += 1;
         return true;
       },
     });
@@ -1032,7 +1032,7 @@ describe('registerAuthRoutes: direct deps injection (branches buildAll never exe
         payload: { id: 'daemon-1' },
       });
       expect(res.statusCode).toBe(200);
-      expect(terminateDaemonCalls).toBe(1);
+      expect(terminateHostCalls).toBe(1);
     } finally {
       await app.close();
     }
@@ -1052,7 +1052,7 @@ describe('registerAuthRoutes: direct deps injection (branches buildAll never exe
     const jwt = await surfaceBearer(user, 'srf-web');
 
     const app = Fastify();
-    // No terminateSurface / terminateDaemon in deps at all.
+    // No terminateSurface / terminateHost in deps at all.
     registerAuthRoutes(app, { logger: app.log, registry, presence: new PresenceTracker() });
     try {
       const res = await app.inject({
@@ -1068,7 +1068,7 @@ describe('registerAuthRoutes: direct deps injection (branches buildAll never exe
     }
   });
 
-  it('GET /api/settings: daemonLink omitted → daemon.status defaults to offline, lastConnectedAt null', async () => {
+  it('GET /api/settings: hostLink omitted → daemon.status defaults to offline, lastConnectedAt null', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(142));
     const registry = Registry.load(dir);
     bootstrap(registry, user);
@@ -1076,7 +1076,7 @@ describe('registerAuthRoutes: direct deps injection (branches buildAll never exe
     const jwt = await surfaceBearer(user, 'srf-web');
 
     const app = Fastify();
-    // No daemonLink in deps at all.
+    // No hostLink in deps at all.
     registerAuthRoutes(app, { logger: app.log, registry, presence: new PresenceTracker() });
     try {
       const res = await app.inject({
@@ -1100,14 +1100,14 @@ describe('registerAuthRoutes: direct deps injection (branches buildAll never exe
 describe('host registration REST routes: edge cases (current flow)', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'patch-daemon-reg-edge-'));
+    dir = mkdtempSync(join(tmpdir(), 'patch-host-reg-edge-'));
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   });
 
   async function makeApp(registry: Registry, extra: Partial<BuildOptions> = {}) {
-    return buildAll({ logger: false, registry, daemonLink: new InProcessDaemonLink(), ...extra });
+    return buildAll({ logger: false, registry, hostLink: new InProcessHostLink(), ...extra });
   }
 
   async function bootstrapWithSurface(seedByte: number): Promise<{
@@ -1140,7 +1140,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce: 'x', daemonId: 'd1', label: 'l', publicKey: daemonPublicKey(19) },
+        payload: { nonce: 'x', hostId: 'd1', label: 'l', publicKey: daemonPublicKey(19) },
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: string }).error).toBe('no account bootstrapped');
@@ -1157,7 +1157,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
         // Missing required `label`.
-        payload: { nonce: 'x', daemonId: 'd1', publicKey: daemonPublicKey(19) },
+        payload: { nonce: 'x', hostId: 'd1', publicKey: daemonPublicKey(19) },
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: string }).error).toBe('invalid body');
@@ -1175,7 +1175,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce: 'x', daemonId: 'd1', label: 'l' },
+        payload: { nonce: 'x', hostId: 'd1', label: 'l' },
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: string }).error).toBe('invalid body');
@@ -1197,7 +1197,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'd1', label: 'l', publicKey: 'not-a-real-ed25519-key' },
+        payload: { nonce, hostId: 'd1', label: 'l', publicKey: 'not-a-real-ed25519-key' },
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: string }).error).toBe('invalid publicKey');
@@ -1213,9 +1213,9 @@ describe('host registration REST routes: edge cases (current flow)', () => {
     // that is already live IS refused: it would decommission a running machine
     // nobody asked to replace.
     const { registry, jwt } = await bootstrapWithSurface(121);
-    registry.setDaemonKey({ daemonId: 'existing-daemon', publicKey: 'pk', issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'existing-daemon', publicKey: 'pk', issuedAt: 1 });
     const { app } = await makeApp(registry);
-    async function completeWith(daemonId: string) {
+    async function completeWith(hostId: string) {
       const startRes = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/pair/start',
@@ -1225,13 +1225,13 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       return app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId, label: daemonId, publicKey: daemonPublicKey(21) },
+        payload: { nonce, hostId, label: hostId, publicKey: daemonPublicKey(21) },
       });
     }
     try {
       const added = await completeWith('new-daemon');
       expect(added.statusCode).toBe(200);
-      expect(registry.registeredDaemonIds().sort()).toEqual(['existing-daemon', 'new-daemon']);
+      expect(registry.registeredHostIds().sort()).toEqual(['existing-daemon', 'new-daemon']);
 
       const dupe = await completeWith('new-daemon');
       expect(dupe.statusCode).toBe(409);
@@ -1258,14 +1258,14 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const first = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'machine-1', label: 'm1', publicKey: daemonPublicKey(29) },
+        payload: { nonce, hostId: 'machine-1', label: 'm1', publicKey: daemonPublicKey(29) },
       });
       expect(first.statusCode).toBe(200);
 
       const second = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'machine-2', label: 'm2', publicKey: daemonPublicKey(30) },
+        payload: { nonce, hostId: 'machine-2', label: 'm2', publicKey: daemonPublicKey(30) },
       });
       expect(second.statusCode).toBe(400);
       expect(second.json()).toMatchObject({ error: 'code already used', code: 'nonce_used' });
@@ -1285,7 +1285,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
         url: '/api/auth/daemon/register/complete',
         payload: {
           nonce: 'never-issued',
-          daemonId: 'd1',
+          hostId: 'd1',
           label: 'l',
           publicKey: daemonPublicKey(22),
         },
@@ -1305,7 +1305,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       nowMs: () => clock,
     });
     const app = built.app;
@@ -1320,7 +1320,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'd1', label: 'l', publicKey: daemonPublicKey(23) },
+        payload: { nonce, hostId: 'd1', label: 'l', publicKey: daemonPublicKey(23) },
       });
       expect(res.statusCode).toBe(400);
       expect(res.json()).toMatchObject({ error: 'code expired', code: 'nonce_expired' });
@@ -1343,7 +1343,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'd1', label: 'l', publicKey: daemonPublicKey(24) },
+        payload: { nonce, hostId: 'd1', label: 'l', publicKey: daemonPublicKey(24) },
       });
       expect(res.statusCode).toBe(500);
       expect(res.json()).toEqual({ error: 'internal' });
@@ -1378,7 +1378,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const failed = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'd1', label: 'l', publicKey: daemonPublicKey(25) },
+        payload: { nonce, hostId: 'd1', label: 'l', publicKey: daemonPublicKey(25) },
       });
       expect(failed.statusCode).toBe(500);
       expect(failed.json()).toEqual({ error: 'internal' });
@@ -1389,10 +1389,10 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const retry = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'd1', label: 'l', publicKey: daemonPublicKey(25) },
+        payload: { nonce, hostId: 'd1', label: 'l', publicKey: daemonPublicKey(25) },
       });
       expect(retry.statusCode).toBe(200);
-      expect(registry.getDaemonKey('d1')?.daemonId).toBe('d1');
+      expect(registry.getDaemonKey('d1')?.hostId).toBe('d1');
       // The registry recorded WHICH machine took the slot.
       expect(registry.getDaemonKey('d1')?.publicKey).toBe(daemonPublicKey(25));
     } finally {
@@ -1450,7 +1450,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const completeRes = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'd1', label: 'l', publicKey: daemonPublicKey(28) },
+        payload: { nonce, hostId: 'd1', label: 'l', publicKey: daemonPublicKey(28) },
       });
       expect(completeRes.statusCode).toBe(200);
 
@@ -1462,13 +1462,66 @@ describe('host registration REST routes: edge cases (current flow)', () => {
     }
   });
 
+  it("register/await stops handing out a redeemed code's credential once its window is over, and the slot is later forgotten", async () => {
+    const { registry, jwt } = await bootstrapWithSurface(131);
+    const start = 1_700_000_000_000;
+    let clock = start;
+    const built = await buildAll({
+      logger: false,
+      registry,
+      hostLink: new InProcessHostLink(),
+      nowMs: () => clock,
+    });
+    const app = built.app;
+    const awaitKey = () =>
+      app.inject({
+        method: 'GET',
+        url: `/api/auth/daemon/register/await?nonce=${encodeURIComponent(nonce)}`,
+      });
+    const completeAs = (hostId: string, seed: number) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/auth/daemon/register/complete',
+        payload: { nonce, hostId, label: 'l', publicKey: daemonPublicKey(seed) },
+      });
+    let nonce = '';
+    try {
+      const startRes = await app.inject({
+        method: 'POST',
+        url: '/api/auth/daemon/pair/start',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      nonce = (startRes.json() as { nonce: string }).nonce;
+      // Redeemed at the last moment: the host still gets to collect its key.
+      clock = start + 5 * 60 * 1000 - 1;
+      expect((await completeAs('m1', 31)).statusCode).toBe(200);
+      clock = start + 5 * 60 * 1000 + 1_000;
+      expect((await awaitKey()).statusCode).toBe(200);
+
+      // Its own window over, the credential is no longer handed out, while a
+      // second machine trying the code is still told it was used.
+      clock = start + 10 * 60 * 1000;
+      const late = await awaitKey();
+      expect(late.statusCode).toBe(410);
+      expect(late.json()).not.toHaveProperty('daemonKey');
+      expect((await completeAs('m2', 32)).json()).toMatchObject({ code: 'nonce_used' });
+
+      // Long after, the slot is gone altogether.
+      clock = start + 2 * 60 * 60 * 1000;
+      expect((await awaitKey()).statusCode).toBe(404);
+      expect((await completeAs('m2', 32)).json()).toMatchObject({ code: 'nonce_unknown' });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('register/await: times out with 408 when complete never arrives', async () => {
     const { registry, jwt } = await bootstrapWithSurface(129);
     let clock = 0;
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       nowMs: () => clock,
     });
     const app = built.app;
@@ -1494,18 +1547,18 @@ describe('host registration REST routes: edge cases (current flow)', () => {
 // spec/14 `/settings` "add-daemon QR": the already-linked web surface mints the
 // registration nonce (POST /api/auth/daemon/pair/start) and renders it as a QR;
 // the host scans it and completes the same way (register/complete), claiming
-// its own daemonId against the surface-issued slot — the SERVER mints the key.
+// its own hostId against the surface-issued slot — the SERVER mints the key.
 describe('surface-initiated add-daemon pairing (G4-9)', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'patch-daemon-pair-'));
+    dir = mkdtempSync(join(tmpdir(), 'patch-host-pair-'));
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   });
 
   async function makeApp(registry: Registry, extra: Partial<BuildOptions> = {}) {
-    return buildAll({ logger: false, registry, daemonLink: new InProcessDaemonLink(), ...extra });
+    return buildAll({ logger: false, registry, hostLink: new InProcessHostLink(), ...extra });
   }
 
   it('requires a surface bearer (401 anonymously)', async () => {
@@ -1565,7 +1618,7 @@ describe('surface-initiated add-daemon pairing (G4-9)', () => {
       await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, daemonId: 'mac', label: 'mac', publicKey: daemonPublicKey(95) },
+        payload: { nonce, hostId: 'mac', label: 'mac', publicKey: daemonPublicKey(95) },
       });
       const awaitRes = await app.inject({
         method: 'GET',
@@ -1578,7 +1631,7 @@ describe('surface-initiated add-daemon pairing (G4-9)', () => {
     }
   });
 
-  it('the host completes against a surface-issued nonce, claiming its own daemonId', async () => {
+  it('the host completes against a surface-issued nonce, claiming its own hostId', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(92));
     const registry = Registry.load(dir);
     bootstrap(registry, user);
@@ -1603,13 +1656,13 @@ describe('surface-initiated add-daemon pairing (G4-9)', () => {
         url: '/api/auth/daemon/register/complete',
         payload: {
           nonce,
-          daemonId: 'hetzner-daemon',
+          hostId: 'hetzner-daemon',
           label: 'hetzner',
           publicKey: daemonPublicKey(93),
         },
       });
       expect(completeRes.statusCode).toBe(200);
-      expect(registry.getDaemonKey('hetzner-daemon')?.daemonId).toBe('hetzner-daemon');
+      expect(registry.getDaemonKey('hetzner-daemon')?.hostId).toBe('hetzner-daemon');
       expect(registry.getDaemonKey('hetzner-daemon')?.publicKey).toBe(daemonPublicKey(93));
 
       const awaitRes = await app.inject({

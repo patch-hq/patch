@@ -62,15 +62,12 @@ export function highlightSegments(
 
 /** Every case-insensitive occurrence of `query` in `text`, as ranges. */
 export function findRanges(text: string, query: string): [number, number][] {
-  const q = query.toLowerCase();
-  if (q.length === 0) return [];
-  const hay = text.toLowerCase();
+  if (query.length === 0) return [];
+  // Matched against the original text: lower-casing can change a string's length
+  // ('İ' becomes two code units), which would shift every range after it.
+  const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
   const out: [number, number][] = [];
-  let i = hay.indexOf(q);
-  while (i !== -1) {
-    out.push([i, i + q.length]);
-    i = hay.indexOf(q, i + q.length);
-  }
+  for (const m of text.matchAll(re)) out.push([m.index, m.index + m[0].length]);
   return out;
 }
 
@@ -120,7 +117,7 @@ export function localSearchHits(
     if (nameHighlights.length === 0 && previewHighlights.length === 0) continue;
     out.push({
       chatId: row.chatId,
-      daemonId: row.daemonId,
+      hostId: row.hostId,
       name: row.name,
       preview: row.preview,
       folder: row.folder,

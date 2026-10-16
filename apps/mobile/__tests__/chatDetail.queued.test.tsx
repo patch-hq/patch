@@ -44,7 +44,7 @@ beforeEach(async () => {
   useUiStore.setState({ errors: [] });
   clearComposerDraft('c1');
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   ChatDetailScreen = (await import('../app/chats/[chatId]')).default;
   useChatStore.getState().hydrate([
     {
@@ -68,7 +68,16 @@ describe('queued messages on the chat screen', () => {
     queue('B', 'second queued');
     const r = renderRN(<ChatDetailScreen />);
     const badges = findAllHost(r.root, byTestId('queued-badge')).map((b) => b.props.children);
-    expect(badges).toEqual(['Queued', '2nd in queue']);
+    expect(badges).toEqual(['Queued · next tool call', '2nd in queue · next tool call']);
+  });
+
+  it('reads "Host offline" on the chip while the host is offline', () => {
+    usePresenceStore.getState().setHost('offline');
+    queue('A', 'first queued');
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('queued-badge')).map((b) => b.props.children)).toEqual([
+      'Host offline',
+    ]);
   });
 
   it('renumbers when the head is removed', () => {
@@ -77,7 +86,7 @@ describe('queued messages on the chat screen', () => {
     const r = renderRN(<ChatDetailScreen />);
     actSync(() => findAllHost(r.root, byTestId('queued-remove'))[0]!.props.onPress());
     expect(findAllHost(r.root, byTestId('queued-badge')).map((b) => b.props.children)).toEqual([
-      'Queued',
+      'Queued · next tool call',
     ]);
     expect(sendMock).toHaveBeenCalledWith({
       type: 'chat.unqueue_request',

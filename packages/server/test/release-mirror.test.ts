@@ -63,12 +63,12 @@ const GOOD = (): Record<string, string> => ({
   'patch-server.tar.gz': 'SERVER-TARBALL',
   'patch-server.tar.gz.sha256': `${sha('SERVER-TARBALL')}  patch-server.tar.gz\n`,
   'install.sh': '#!/bin/sh\n',
-  'patch-daemon-1.2.3-linux-x64.tar.gz': 'X64',
-  'patch-daemon-1.2.3-linux-x64.tar.gz.sig': 'SIG-X64',
-  'patch-daemon-1.2.3-linux-arm64.tar.gz': 'ARM',
-  'patch-daemon-1.2.3-linux-arm64.tar.gz.sig': 'SIG-ARM',
-  'daemon-latest-linux-x64.json': manifest('linux-x64'),
-  'daemon-latest-linux-arm64.json': manifest('linux-arm64'),
+  'patch-host-1.2.3-linux-x64.tar.gz': 'X64',
+  'patch-host-1.2.3-linux-x64.tar.gz.sig': 'SIG-X64',
+  'patch-host-1.2.3-linux-arm64.tar.gz': 'ARM',
+  'patch-host-1.2.3-linux-arm64.tar.gz.sig': 'SIG-ARM',
+  'host-latest-linux-x64.json': manifest('linux-x64'),
+  'host-latest-linux-arm64.json': manifest('linux-arm64'),
 });
 
 const opts = (fetchImpl: typeof fetch) => ({
@@ -140,9 +140,9 @@ describe('mirrorOnce', () => {
   it('serves a release: artifacts, the merged host manifest and the server release', async () => {
     const tag = await mirrorOnce(opts(github(GOOD()).fetchImpl));
     expect(tag).toBe('v1.2.3');
-    expect(readFileSync(join(dir, 'patch-daemon-1.2.3-linux-x64.tar.gz'), 'utf8')).toBe('X64');
+    expect(readFileSync(join(dir, 'patch-host-1.2.3-linux-x64.tar.gz'), 'utf8')).toBe('X64');
     expect(readFileSync(join(dir, 'server-release', 'install.sh'), 'utf8')).toContain('#!/bin/sh');
-    const served = JSON.parse(readFileSync(join(dir, 'daemon-latest.json'), 'utf8'));
+    const served = JSON.parse(readFileSync(join(dir, 'host-latest.json'), 'utf8'));
     expect(served.artifacts.map((a: { target: string }) => a.target).sort()).toEqual([
       'linux-arm64',
       'linux-x64',
@@ -160,14 +160,14 @@ describe('mirrorOnce', () => {
   it('a tarball that does not match its checksum changes nothing', async () => {
     const bad = { ...GOOD(), 'patch-server.tar.gz': 'TAMPERED' };
     await expect(mirrorOnce(opts(github(bad).fetchImpl))).rejects.toThrow(/checksum/);
-    expect(existsSync(join(dir, 'daemon-latest.json'))).toBe(false);
+    expect(existsSync(join(dir, 'host-latest.json'))).toBe(false);
     expect(readMirrorState(dir)).toBeNull();
     expect(readdirSync(dir)).toEqual([]);
   });
 
   it('a manifest that names a target with no signed artifact changes nothing', async () => {
     const files = GOOD();
-    delete files['patch-daemon-1.2.3-linux-arm64.tar.gz.sig'];
+    delete files['patch-host-1.2.3-linux-arm64.tar.gz.sig'];
     await expect(mirrorOnce(opts(github(files).fetchImpl))).rejects.toThrow(/linux-arm64/);
     expect(readdirSync(dir)).toEqual([]);
   });
@@ -176,12 +176,22 @@ describe('mirrorOnce', () => {
     const files = GOOD();
     const broken = github(files);
     const flaky = (async (url: string, init?: RequestInit) =>
-      url.endsWith('patch-daemon-1.2.3-linux-x64.tar.gz')
+      url.endsWith('patch-host-1.2.3-linux-x64.tar.gz')
         ? new Response('boom', { status: 500 })
         : broken.fetchImpl(url, init)) as typeof fetch;
     await expect(mirrorOnce(opts(flaky))).rejects.toThrow(/500/);
     expect(readMirrorState(dir)).toBeNull();
     expect(await mirrorOnce(opts(broken.fetchImpl))).toBe('v1.2.3');
+  });
+
+  it('a truncated state file is reported and treated as nothing mirrored, not a fault every tick', async () => {
+    writeFileSync(join(dir, 'release-mirror.json'), '{"tag":"v1.2');
+    const logs: string[] = [];
+    const { fetchImpl } = github(GOOD());
+    expect(await mirrorOnce({ ...opts(fetchImpl), log: (m) => logs.push(m) })).toBe('v1.2.3');
+    expect(logs.join(' ')).toMatch(/release-mirror\.json is corrupt/);
+    expect(readMirrorState(dir)).toMatchObject({ tag: 'v1.2.3' });
+    expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]);
   });
 
   it('a channel with no release yet is quiet', async () => {

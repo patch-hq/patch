@@ -478,10 +478,13 @@ export class RelayConnection {
 
   /** The live session, dialling one if there is none. */
   async session(): Promise<RelayClient> {
-    if (this.current) {
-      const existing = await this.current.catch(() => null);
+    while (this.current) {
+      const observed = this.current;
+      const existing = await observed.catch(() => null);
       if (existing && !existing.closed) return existing;
-      this.current = null;
+      // Another caller may have started a new dial while this one waited: only
+      // clear the session this call actually saw end, and otherwise join theirs.
+      if (this.current === observed) this.current = null;
     }
     this.set('connecting', null);
     const pending = this.connect();

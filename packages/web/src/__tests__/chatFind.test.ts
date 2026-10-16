@@ -14,4 +14,11 @@ describe('chatFind', () => {
     expect(stepIndex(0, -1, 3)).toBe(2);
     expect(stepIndex(0, 1, 0)).toBe(-1);
   });
+  it('keeps ranges aligned when lower-casing changes the text length', () => {
+    const root = document.createElement('div');
+    root.textContent = 'İİİİ hello';
+    const ranges = findRanges(root, 'hello');
+    expect(ranges.map((r) => [r.startOffset, r.endOffset])).toEqual([[5, 10]]);
+    expect(ranges[0]?.toString()).toBe('hello');
+  });
 });

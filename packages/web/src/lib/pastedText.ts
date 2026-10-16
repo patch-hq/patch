@@ -10,6 +10,8 @@ export function pastedTextName(text: string): string {
     .filter(Boolean)
     .slice(0, 6)
     .join(' ');
-  const head = words.length > 40 ? words.slice(0, 40).trimEnd() + '…' : words;
+  // Cut on code points: a code-unit slice can split an emoji's surrogate pair.
+  const chars = Array.from(words);
+  const head = chars.length > 40 ? chars.slice(0, 40).join('').trimEnd() + '…' : words;
   return head ? `Pasted – ${head}.md` : 'Pasted text.md';
 }

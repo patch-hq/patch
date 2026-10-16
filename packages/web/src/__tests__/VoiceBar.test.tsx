@@ -52,6 +52,14 @@ describe('voice bar', () => {
     vi.restoreAllMocks();
   });
 
+  it('a call is headed by the phone glyph, never the dictation mic', () => {
+    open('call');
+    render(<VoiceBar />);
+    const head = screen.getByTestId('voice-bar-head');
+    expect(head.querySelector('svg.lucide-phone')).not.toBeNull();
+    expect(head.querySelector('svg.lucide-mic')).toBeNull();
+  });
+
   it('is absent with no session', () => {
     render(<VoiceBar />);
     expect(screen.queryByTestId('voice-bar')).toBeNull();

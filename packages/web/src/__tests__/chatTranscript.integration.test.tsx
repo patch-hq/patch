@@ -148,7 +148,7 @@ function makeRow(chatId: string, overrides: Partial<ChatRow> = {}): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: chatId,
     folder: '/proj',
@@ -192,7 +192,7 @@ function makeFetch(chats: ChatRow[]): ReturnType<typeof vi.fn> {
       return json({
         chats: chats.map((c) => ({
           chatId: c.chatId,
-          daemonId: 'd1',
+          hostId: 'd1',
           permissionMode: 'bypassPermissions' as const,
           name: c.name,
           preview: c.preview,
@@ -240,7 +240,7 @@ async function mountApp(
       accountId: 'acc-1',
       surfaceId: 'web-1',
     } as WireEvent);
-    fake.receive({ type: 'daemon.online', daemonId: 'd1' } as WireEvent);
+    fake.receive({ type: 'host.online', hostId: 'd1' } as WireEvent);
     await Promise.resolve();
   });
   // Cold-start hydrate landed.
@@ -291,7 +291,7 @@ beforeEach(() => {
   });
   usePresenceStore.setState({
     connection: 'offline',
-    daemonOnline: false,
+    hostOnline: false,
     accountId: null,
     surfaceId: null,
     hosts: {},
@@ -729,7 +729,7 @@ describe('integration: reconnect replay rebuilds transcript (voice turn reconcil
         accountId: 'acc-1',
         surfaceId: 'web-1',
       } as WireEvent);
-      reconnected.receive({ type: 'daemon.online', daemonId: 'd1' } as WireEvent);
+      reconnected.receive({ type: 'host.online', hostId: 'd1' } as WireEvent);
     });
     // On reconnect the client asked to replay this chat.
     expect(reconnected.outbound().some((e) => e.type === 'chat.replay' && e.chatId === 'c1')).toBe(
@@ -772,9 +772,9 @@ describe('integration: daemon-offline send renders queued then delivers', () => 
     const { fake } = await mountApp('/chats/c1', [makeRow('c1')]);
     // Host goes offline (link still up).
     act(() => {
-      fake.receive({ type: 'daemon.offline', daemonId: 'd1' } as WireEvent);
+      fake.receive({ type: 'host.offline', hostId: 'd1' } as WireEvent);
     });
-    expect(usePresenceStore.getState().daemonOnline).toBe(false);
+    expect(usePresenceStore.getState().hostOnline).toBe(false);
 
     const input = await screen.findByTestId('composer-input');
     fireEvent.change(input, { target: { value: 'send me later' } });
@@ -783,14 +783,14 @@ describe('integration: daemon-offline send renders queued then delivers', () => 
     // The turn renders with the daemon-offline queued affordance (NOT a bare
     // spinner, NOT lost).
     const pending = await screen.findByTestId('delivery-pending');
-    expect(pending).toHaveTextContent(/queued.*reconnect/i);
+    expect(pending).toHaveTextContent(/host offline.*reconnect/i);
     expect(pending).toHaveAttribute('data-daemon-offline', 'true');
     const localId = sentInputs(fake).find((e) => e.message === 'send me later')!.localId;
 
     // Host comes back — the surface redelivers (spec/12) and the host acks +
     // replies. The queued affordance clears and the reply renders.
     act(() => {
-      fake.receive({ type: 'daemon.online', daemonId: 'd1' } as WireEvent);
+      fake.receive({ type: 'host.online', hostId: 'd1' } as WireEvent);
       fake.receive({ type: 'chat.input_ack', chatId: 'c1', localId } as WireEvent);
       fake.receive({
         type: 'chat.message',

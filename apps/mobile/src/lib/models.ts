@@ -2,7 +2,7 @@
 // (spec/02 § Model catalogue, spec/15 § New chat flow → Model picker).
 //
 // The catalogue is PER MACHINE — `/api/models` is addressed to the host whose
-// backends are being read — so this hook takes the daemonId and re-reads when
+// backends are being read — so this hook takes the hostId and re-reads when
 // it changes. Showing one machine's models for a spawn pinned to another is how
 // an unrunnable model id gets sent.
 //
@@ -18,6 +18,9 @@
 import React from 'react';
 import { api } from '../api/rest';
 import { usePresenceStore } from '../stores/presenceStore';
+
+/** The picker offers this many models: the host's catalogue is newest-first. */
+export const RECENT_MODEL_COUNT = 5;
 
 export interface ModelOption {
   /** The backend's model id — what a spawn sends as `model`. */
@@ -35,13 +38,13 @@ export interface ModelCatalog {
 }
 
 /**
- * Read `daemonId`'s catalogue. `idle` while no host has been resolved — there
+ * Read `hostId`'s catalogue. `idle` while no host has been resolved — there
  * is nothing to ask, and asking without one is an error the server raises.
  */
-export function useModelCatalog(daemonId: string | null): ModelCatalog {
+export function useModelCatalog(hostId: string | null): ModelCatalog {
   const accountState = usePresenceStore((s) =>
     JSON.stringify(
-      Object.values(daemonId ? (s.hosts[daemonId]?.accounts ?? {}) : {}).map((a) => [
+      Object.values(hostId ? (s.hosts[hostId]?.accounts ?? {}) : {}).map((a) => [
         a.backendId,
         a.connected,
         a.accounts?.map((x) => [x.id, x.kind, x.connected]),
@@ -55,14 +58,14 @@ export function useModelCatalog(daemonId: string | null): ModelCatalog {
   });
 
   React.useEffect(() => {
-    if (daemonId === null || daemonId === '') {
+    if (hostId === null || hostId === '') {
       setCatalog({ models: [], status: 'idle', error: null });
       return;
     }
     let live = true;
     setCatalog({ models: [], status: 'loading', error: null });
     void api
-      .models(daemonId)
+      .models(hostId)
       .then((r) => {
         if (live) setCatalog({ models: r.models ?? [], status: 'ready', error: null });
       })
@@ -74,7 +77,7 @@ export function useModelCatalog(daemonId: string | null): ModelCatalog {
     return () => {
       live = false;
     };
-  }, [daemonId, accountState]);
+  }, [hostId, accountState]);
 
   return catalog;
 }

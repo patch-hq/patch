@@ -44,15 +44,27 @@ export function diffFromToolCall(tool: string | undefined, args: unknown): DiffP
   return null;
 }
 
-interface DiffLine {
+export interface DiffLine {
   kind: 'context' | 'add' | 'del';
   text: string;
 }
 
+/**
+ * The lines of a text. A final newline ENDS the last line, it doesn't begin
+ * another: "a\nb\n" is two lines, not three with an empty one — or every
+ * written file would show a blank added line at the bottom.
+ */
+function linesOf(text: string): string[] {
+  if (text.length === 0) return [];
+  const lines = text.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
 /** Minimal line-level unified diff: trim common head/tail, mark the rest. */
-function unifiedLines(oldText: string, newText: string): DiffLine[] {
-  const oldLines = oldText.length > 0 ? oldText.split('\n') : [];
-  const newLines = newText.length > 0 ? newText.split('\n') : [];
+export function unifiedLines(oldText: string, newText: string): DiffLine[] {
+  const oldLines = linesOf(oldText);
+  const newLines = linesOf(newText);
 
   let head = 0;
   while (head < oldLines.length && head < newLines.length && oldLines[head] === newLines[head]) {

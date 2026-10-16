@@ -32,7 +32,7 @@ function listRow(chatId: string, over: Partial<ChatListRow> = {}): ChatListRow {
   return {
     chatId,
     name: `Chat ${chatId}`,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '~/proj',
     activity: 'idle',
     permissionMode: 'default',
@@ -104,7 +104,7 @@ describe('ManagerChatsList', () => {
   it('Approve answers the pending permission and resolves it locally', () => {
     // A chat owned by a host other than the home one: the response must name
     // the chat so the server relays it there, not to Hetzner where it is lost.
-    useChatStore.getState().hydrate([listRow('c1', { daemonId: 'mac' })]);
+    useChatStore.getState().hydrate([listRow('c1', { hostId: 'mac' })]);
     askPermission('c1', 'req-1');
     const r = renderRN(<ManagerChatsList />);
     actSync(() => findHost(r.root, byLabel('Approve Chat c1')).props.onPress());

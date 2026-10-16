@@ -46,7 +46,7 @@ describe('TerminalPanel', () => {
   beforeEach(() => {
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
     useTerminalStore.getState()._reset();
   });
 
@@ -57,7 +57,7 @@ describe('TerminalPanel', () => {
     await waitFor(() => expect(ws.sent).toHaveLength(1));
     expect(ws.sent[0]).toMatchObject({
       type: 'patch.terminal.open',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/projects',
     });
   });
@@ -266,7 +266,7 @@ describe('TerminalPanel — queued work', () => {
   beforeEach(() => {
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
     useTerminalStore.getState()._reset();
   });
 
@@ -382,7 +382,7 @@ describe('TerminalPanel — command completion', () => {
   beforeEach(() => {
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
     useTerminalStore.getState()._reset();
   });
 

@@ -58,6 +58,14 @@ describe('actionVerb', () => {
 });
 
 describe('actionTarget', () => {
+  it('cuts a long prompt or script line on a code point, never through half of an emoji', () => {
+    const long = `${'a'.repeat(46)}😀${'b'.repeat(10)}`;
+    expect(actionTarget({ type: 'message', prompt: long, chatId: 'c1' })).toBe(
+      `"${'a'.repeat(46)}😀…"`,
+    );
+    expect(actionTarget({ type: 'script', command: long })).toBe(`"${'a'.repeat(46)}😀…"`);
+  });
+
   it('a folder-addressed skill target carries the host + folder', () => {
     expect(actionTarget({ type: 'spawn', skill: 'life-coach', folder: '/p' }, 'Mac mini')).toBe(
       'life-coach · Mac mini · /p',

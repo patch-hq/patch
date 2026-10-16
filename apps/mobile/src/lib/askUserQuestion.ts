@@ -94,7 +94,12 @@ export function parseStoredAnswer(
     if (match) return { picked: [match.label], other: null };
     // A bare `Other` (chosen with no comment) is the label itself.
     if (answer === 'Other') return { picked: [], other: '' };
-    return { picked: [], other: answer };
+    // A single-select answer is one option, free text, or an option followed
+    // by `, ` and free text added to it.
+    const lead = options.find((o) => answer.startsWith(`${o.label}, `));
+    return lead
+      ? { picked: [lead.label], other: answer.slice(lead.label.length + 2) }
+      : { picked: [], other: answer };
   }
   const labels = new Set(options.map((o) => o.label));
   const picked: string[] = [];
@@ -137,9 +142,22 @@ export function isQuestionRowCoveredByCard(
 ): boolean {
   if (entry.kind !== 'tool_call' && entry.kind !== 'tool_result') return false;
   if (entry.tool !== ASK_USER_QUESTION) return false;
-  const card = timeline.find(
-    (e) => e.kind === 'permission' && e.tool === ASK_USER_QUESTION && e.seq < entry.seq,
-  );
+  // The card this row belongs to is the NEAREST one before it: a chat can ask
+  // several questions, and each result answers its own card.
+  let card: (typeof timeline)[number] | undefined;
+  for (const e of timeline) {
+    if (e.kind !== 'permission' || e.tool !== ASK_USER_QUESTION || e.seq >= entry.seq) continue;
+    if (card === undefined || e.seq > card.seq) card = e;
+  }
   if (!card) return false;
+  // A card renders ONE question, so it covers one call and one result: an
+  // earlier row of the same kind between it and this one has already had its
+  // turn, and this row belongs to a question with no card of its own.
+  const cardSeq = card.seq;
+  const taken = timeline.some(
+    (e) =>
+      e.kind === entry.kind && e.tool === ASK_USER_QUESTION && e.seq > cardSeq && e.seq < entry.seq,
+  );
+  if (taken) return false;
   return entry.kind === 'tool_call' || card.permissionResolved === 'approve';
 }

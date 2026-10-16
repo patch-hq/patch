@@ -52,7 +52,7 @@ describe('hookGateMatches', () => {
     message: 'hi',
     chatId: 'c1',
     folder: '/work',
-    daemonId: 'd1',
+    hostId: 'd1',
     specialThread: false,
   };
 
@@ -138,7 +138,7 @@ describe('HookCheckContext', () => {
       message: 'hi',
       chatId: 'c1',
       folder: '/work',
-      daemonId: 'd1',
+      hostId: 'd1',
       specialThread: false,
     };
     expect(userMessageCtx.toolCallsSummary).toBeUndefined();

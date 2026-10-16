@@ -12,7 +12,7 @@ import { create } from 'zustand';
 
 /** One host's published registry (spec/04 § Folders). */
 export interface HostFolders {
-  daemonId: string;
+  hostId: string;
   roots: string[];
   recent: string[];
 }
@@ -30,7 +30,7 @@ interface FolderState {
   /** Replace every host's registry (cold-start `GET /api/folders`). */
   setAllFolders(entries: HostFolders[]): void;
   /** Every folder on one host, roots first then recents — the picker's group. */
-  foldersFor(daemonId: string): string[];
+  foldersFor(hostId: string): string[];
   _reset(): void;
 }
 
@@ -40,8 +40,8 @@ export const useFolderStore = create<FolderState>((set, get) => ({
     set((s) => ({
       byHost: {
         ...s.byHost,
-        [entry.daemonId]: {
-          daemonId: entry.daemonId,
+        [entry.hostId]: {
+          hostId: entry.hostId,
           roots: [...entry.roots],
           recent: [...entry.recent],
         },
@@ -51,12 +51,12 @@ export const useFolderStore = create<FolderState>((set, get) => ({
   setAllFolders(entries) {
     const byHost: Record<string, HostFolders> = {};
     for (const e of entries) {
-      byHost[e.daemonId] = { daemonId: e.daemonId, roots: [...e.roots], recent: [...e.recent] };
+      byHost[e.hostId] = { hostId: e.hostId, roots: [...e.roots], recent: [...e.recent] };
     }
     set({ byHost });
   },
-  foldersFor(daemonId) {
-    const h = get().byHost[daemonId];
+  foldersFor(hostId) {
+    const h = get().byHost[hostId];
     return h ? [...h.roots, ...h.recent] : [];
   },
   _reset() {

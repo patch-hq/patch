@@ -11,23 +11,33 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { findHost, findAllHost, byType, hasText, renderRN, update } from './testUtils/render';
+import {
+  findHost,
+  findAllHost,
+  byType,
+  byTestId,
+  hasText,
+  renderRN,
+  update,
+  actSync,
+} from './testUtils/render';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { lightColors as colors, darkColors } from '../src/lib/theme';
 import { __setColorScheme } from './stubs/react-native';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
 import type { ChatRow } from '../src/stores/types';
+import { useSnoozeSheetStore } from '../src/components/SnoozeSheet';
 
-const { archiveChatSpy, pinChatSpy, deleteChatSpy, snoozeChatSpy, hideChatSpy } = vi.hoisted(
-  () => ({
+const { renameChatSpy, archiveChatSpy, pinChatSpy, deleteChatSpy, snoozeChatSpy, hideChatSpy } =
+  vi.hoisted(() => ({
+    renameChatSpy: vi.fn().mockResolvedValue(undefined),
     hideChatSpy: vi.fn().mockResolvedValue(undefined),
     archiveChatSpy: vi.fn().mockResolvedValue(undefined),
     pinChatSpy: vi.fn().mockResolvedValue(undefined),
     deleteChatSpy: vi.fn().mockResolvedValue(undefined),
     snoozeChatSpy: vi.fn().mockResolvedValue(undefined),
-  }),
-);
+  }));
 vi.mock('../src/api/rest', () => ({
   api: {
     archiveChat: archiveChatSpy,
@@ -35,6 +45,7 @@ vi.mock('../src/api/rest', () => ({
     deleteChat: deleteChatSpy,
     snoozeChat: snoozeChatSpy,
     hideChat: hideChatSpy,
+    renameChat: renameChatSpy,
   },
 }));
 
@@ -43,8 +54,11 @@ vi.mock('../src/lib/voiceNote', () => ({ startVoiceNote: startVoiceNoteSpy }));
 
 import {
   ChatLongPressSheet,
+  deleteChatRow,
   showChatLongPressSheet,
   showChatSnoozeSheet,
+  toggleArchive,
+  togglePin,
 } from '../src/components/ChatLongPressSheet';
 
 function row(overrides: Partial<ChatRow> = {}): ChatRow {
@@ -374,34 +388,18 @@ describe('ChatLongPressSheet — snooze (spec/04 § Snooze)', () => {
     vi.useRealTimers();
   });
 
-  it('"Snooze chat" swaps the sheet for the preset list without snoozing anything yet', () => {
+  it('"Snooze chat" hands off to the Snooze sheet without snoozing anything yet', () => {
     const r = renderRN(<ChatLongPressSheet />);
     showChatLongPressSheet(row({ chatId: 'c1' }));
     update(r, <ChatLongPressSheet />);
     menuItem(r.root, 'Snooze chat').props['onPress']();
     update(r, <ChatLongPressSheet />);
 
-    for (const label of ['2 minutes', '5 minutes', '30 minutes', '1 hour', '1 day', 'Next week']) {
-      expect(hasText(r.root, label)).toBe(true);
-    }
-    // The actions are replaced, not stacked underneath.
-    expect(hasText(r.root, 'Delete chat')).toBe(false);
-    // Nothing committed by merely opening the list.
-    expect(snoozeChatSpy).not.toHaveBeenCalled();
-  });
-
-  it('picking a preset resolves "now + delta" to an ABSOLUTE timestamp and closes the sheet', () => {
-    const r = renderRN(<ChatLongPressSheet />);
-    showChatLongPressSheet(row({ chatId: 'c1' }));
-    update(r, <ChatLongPressSheet />);
-    menuItem(r.root, 'Snooze chat').props['onPress']();
-    update(r, <ChatLongPressSheet />);
-    menuItem(r.root, '30 minutes').props['onPress']();
-
-    expect(snoozeChatSpy).toHaveBeenCalledWith('c1', NOW + 30 * 60_000);
-    expect(useChatStore.getState().chats['c1']?.snoozedUntil).toBe(NOW + 30 * 60_000);
-    update(r, <ChatLongPressSheet />);
+    expect(useSnoozeSheetStore.getState().target).toEqual({ kind: 'chat', chatId: 'c1' });
+    // The actions sheet is gone; the presets live in the Snooze sheet.
     expect(r.toJSON()).toBeNull();
+    expect(snoozeChatSpy).not.toHaveBeenCalled();
+    useSnoozeSheetStore.getState().close();
   });
 
   it('an already-snoozed chat offers "Unsnooze chat", clearing it in one tap (no preset list)', () => {
@@ -423,28 +421,106 @@ describe('ChatLongPressSheet — snooze (spec/04 § Snooze)', () => {
     expect(hasText(r.root, 'Unsnooze chat')).toBe(false);
   });
 
-  it('showChatSnoozeSheet opens straight into the preset list (the chat-detail kebab route)', () => {
-    const r = renderRN(<ChatLongPressSheet />);
+  it('showChatSnoozeSheet opens the Snooze sheet for the chat (the chat-detail kebab route)', () => {
     showChatSnoozeSheet(row({ chatId: 'c1' }));
-    update(r, <ChatLongPressSheet />);
-    expect(hasText(r.root, '1 hour')).toBe(true);
-    expect(hasText(r.root, 'Archive chat')).toBe(false);
+    expect(useSnoozeSheetStore.getState().target).toEqual({ kind: 'chat', chatId: 'c1' });
+    useSnoozeSheetStore.getState().close();
+  });
+});
+
+describe('pin / archive / delete — refused by the server', () => {
+  const failures = (): string[] => useUiStore.getState().errors.map((e) => e.message);
+  beforeEach(() => {
+    useUiStore.setState({ errors: [] });
   });
 
-  it('a failed snooze REVERTS the optimistic flip and surfaces the error (no silent no-op)', async () => {
-    snoozeChatSpy.mockRejectedValueOnce(new Error('snoozedUntil is in the past'));
-    const r = renderRN(<ChatLongPressSheet />);
-    showChatLongPressSheet(row({ chatId: 'c1' }));
-    update(r, <ChatLongPressSheet />);
-    menuItem(r.root, 'Snooze chat').props['onPress']();
-    update(r, <ChatLongPressSheet />);
-    menuItem(r.root, '1 hour').props['onPress']();
+  it('a refused pin puts the chat back to unpinned and says so', async () => {
+    pinChatSpy.mockRejectedValueOnce(new Error('nope'));
+    const before = useChatStore.getState().chats['c1']!;
+    togglePin(before);
+    expect(useChatStore.getState().chats['c1']?.pinned).toBe(true);
+    await vi.waitFor(() => expect(useChatStore.getState().chats['c1']?.pinned).toBe(false));
+    expect(failures().some((m) => /pin failed: nope/.test(m))).toBe(true);
+  });
 
-    await vi.waitFor(() => {
-      expect(useChatStore.getState().chats['c1']?.snoozedUntil).toBeNull();
+  it('a refused archive brings the chat back to active and says so', async () => {
+    archiveChatSpy.mockRejectedValueOnce(new Error('nope'));
+    toggleArchive(useChatStore.getState().chats['c1']!);
+    expect(useChatStore.getState().chats['c1']?.status).toBe('archived');
+    await vi.waitFor(() => expect(useChatStore.getState().chats['c1']?.status).toBe('active'));
+    expect(failures().some((m) => /archive failed: nope/.test(m))).toBe(true);
+  });
+
+  it('a refused unpin puts the pin back at its ORIGINAL time, not a fresh one', async () => {
+    pinChatSpy.mockRejectedValueOnce(new Error('nope'));
+    useChatStore.getState().setPinned('c1', true, 100);
+    const pinned = useChatStore.getState().chats['c1']!;
+    togglePin(pinned);
+    expect(useChatStore.getState().chats['c1']?.pinned).toBe(false);
+    await vi.waitFor(() => expect(useChatStore.getState().chats['c1']?.pinned).toBe(true));
+    expect(useChatStore.getState().chats['c1']?.pinnedAt).toBe(100);
+  });
+
+  it('a refused delete restores the chat with its transcript, branches and read mark, and says so', async () => {
+    deleteChatSpy.mockRejectedValueOnce(new Error('nope'));
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'assistant',
+      content: 'hello',
     });
-    expect(useUiStore.getState().errors.some((e) => e.message.includes('snooze failed'))).toBe(
-      true,
-    );
+    s.applyEvent({
+      type: 'chat.branches',
+      chatId: 'c1',
+      activeBranchId: 'b0',
+      branches: [
+        { branchId: 'b0', parentBranchId: null, forkFromSeq: null, label: 'main', createdAt: 1 },
+      ],
+    });
+    s.setActiveChat('c1');
+    const visitedAt = useChatStore.getState().chats['c1']!.lastVisitedAt;
+    expect(visitedAt).toBeGreaterThan(0);
+
+    deleteChatRow(useChatStore.getState().chats['c1']!);
+    expect(useChatStore.getState().chats['c1']).toBeUndefined();
+    expect(useChatStore.getState().branchGraphs['c1']).toBeUndefined();
+
+    await vi.waitFor(() => expect(useChatStore.getState().chats['c1']).toBeDefined());
+    const after = useChatStore.getState();
+    expect(after.timelines['c1']?.map((e) => e.content)).toEqual(['hello']);
+    expect(after.branchGraphs['c1']?.activeBranchId).toBe('b0');
+    expect(after.chats['c1']?.lastVisitedAt).toBe(visitedAt);
+    expect(failures().some((m) => /delete failed: nope/.test(m))).toBe(true);
+  });
+
+  it('an accepted delete leaves the chat gone', async () => {
+    deleteChatRow(useChatStore.getState().chats['c1']!);
+    await Promise.resolve();
+    expect(deleteChatSpy).toHaveBeenCalledWith('c1');
+    expect(useChatStore.getState().chats['c1']).toBeUndefined();
+    expect(failures()).toEqual([]);
+  });
+});
+
+describe('ChatLongPressSheet — rename', () => {
+  it('Rename chat opens a field seeded with the stored name; Save renames optimistically', () => {
+    useChatStore.getState().setName('c1', 'old');
+    const r = renderRN(<ChatLongPressSheet />);
+    actSync(() => showChatLongPressSheet(useChatStore.getState().chats['c1']!));
+    findHost(
+      r.root,
+      (i) =>
+        i.type === 'Pressable' &&
+        hasText(i, 'Rename chat') &&
+        findAllHost(i, byType('Pressable')).length === 1,
+    ).props['onPress']();
+    const input = findHost(r.root, byTestId('rename-input'));
+    expect(input.props['value']).toBe('old');
+    actSync(() => input.props['onChangeText'](' new '));
+    actSync(() => findHost(r.root, byTestId('rename-input')).props['onSubmitEditing']());
+    expect(renameChatSpy).toHaveBeenCalledWith('c1', 'new');
+    expect(useChatStore.getState().chats['c1']!.name).toBe('new');
   });
 });

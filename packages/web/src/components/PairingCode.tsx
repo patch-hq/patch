@@ -17,7 +17,7 @@ import { api } from '../api/rest.js';
 export function PairingCode(): JSX.Element {
   const { data, error, isFetching, refetch } = useQuery({
     queryKey: ['daemon-pair-nonce'],
-    queryFn: () => api.daemonPairStart(),
+    queryFn: () => api.hostPairStart(),
     // Codes are good for five minutes; re-mint just before that elapses so the
     // one on screen is always redeemable.
     refetchInterval: 4.5 * 60 * 1000,

@@ -9,13 +9,13 @@ import { generateUserKeypair, mintSurfaceCredential, mintDaemonKey } from '@patc
 import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import type { Job } from '../src/jobs/types.js';
 
 interface Harness {
   url: string;
   registry: Registry;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   app: Awaited<ReturnType<typeof buildAll>>['app'];
   built: Awaited<ReturnType<typeof buildAll>>;
   close: () => Promise<void>;
@@ -23,17 +23,19 @@ interface Harness {
 
 async function startServer(opts: {
   registry: Registry;
-  daemonLink?: InProcessDaemonLink;
+  hostLink?: InProcessHostLink;
   helloTimeoutMs?: number;
   webDistDir?: string;
+  hostOfflineGraceMs?: number;
   /** Pass a pino config to CAPTURE what the hub logs (default: silent). */
   logger?: unknown;
 }): Promise<Harness> {
-  const daemonLink = opts.daemonLink ?? new InProcessDaemonLink();
+  const hostLink = opts.hostLink ?? new InProcessHostLink();
   const built = await buildAll({
     logger: (opts.logger ?? false) as never,
     registry: opts.registry,
-    daemonLink,
+    hostLink,
+    hostOfflineGraceMs: opts.hostOfflineGraceMs ?? 0,
     ...(opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: opts.helloTimeoutMs } : {}),
     ...(opts.webDistDir !== undefined ? { webDistDir: opts.webDistDir } : {}),
   });
@@ -42,7 +44,7 @@ async function startServer(opts: {
   return {
     url: `ws://127.0.0.1:${addr.port}/ws`,
     registry: opts.registry,
-    daemonLink,
+    hostLink,
     app: built.app,
     built,
     close: async () => {
@@ -83,9 +85,9 @@ describe('WS hub auth gate', () => {
     try {
       const client = new WireTestClient({ url: h.url, auth: jwt });
       await client.connect();
-      // We expect a daemon.online (the InProcessDaemonLink defaults to online).
-      const greet = await client.waitFor('daemon.online');
-      expect(greet.type).toBe('daemon.online');
+      // We expect a daemon.online (the InProcessHostLink defaults to online).
+      const greet = await client.waitFor('host.online');
+      expect(greet.type).toBe('host.online');
       await client.close();
     } finally {
       await h.close();
@@ -369,7 +371,7 @@ describe('WS hub relay', () => {
     });
     const client = new WireTestClient({ url: h.url, auth: jwt });
     await client.connect();
-    await client.waitFor('daemon.online');
+    await client.waitFor('host.online');
     return client;
   }
 
@@ -412,7 +414,7 @@ describe('WS hub relay', () => {
         source: { kind: 'voice-device', deviceId: 'kitchen' },
       });
       await new Promise((r) => setTimeout(r, 100));
-      const inputs = h.daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = h.hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(inputs).toHaveLength(1);
       const ev = inputs[0]!.event as { source?: unknown };
       expect(ev.source).toBeUndefined();
@@ -439,7 +441,7 @@ describe('WS hub relay', () => {
         localId: 'ro-2',
       });
       await new Promise((r) => setTimeout(r, 100));
-      const inputs = h.daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = h.hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(inputs).toHaveLength(0);
       await client.close();
     } finally {
@@ -464,7 +466,7 @@ describe('WS hub relay', () => {
       // idempotency authority on `(chatId, localId)`) dedups it and re-emits
       // `chat.input_ack`. A server-side drop would strand a flap/restart
       // redelivery forever. So BOTH sends reach the host link.
-      const inputs = h.daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = h.hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(inputs).toHaveLength(2);
       expect(inputs.every((s) => (s.event as { localId?: string }).localId === 'local-1')).toBe(
         true,
@@ -488,7 +490,7 @@ describe('WS hub relay', () => {
 
       const ackP = client.waitFor('chat.input_ack');
       // The host accepts the input and emits its receipt upstream.
-      h.daemonLink.emit({ type: 'chat.input_ack', chatId: 'chat-1', localId: 'local-1' });
+      h.hostLink.emit({ type: 'chat.input_ack', chatId: 'chat-1', localId: 'local-1' });
       const ack = await ackP;
       expect(ack).toMatchObject({ type: 'chat.input_ack', chatId: 'chat-1', localId: 'local-1' });
       // The out-of-band routing field must be stripped before it reaches the surface.
@@ -510,7 +512,7 @@ describe('WS hub relay', () => {
         ['L2', 1],
         ['L3', 2],
       ] as const) {
-        h.daemonLink.emit({
+        h.hostLink.emit({
           type: 'chat.queued',
           chatId: 'chat-1',
           localId,
@@ -518,7 +520,7 @@ describe('WS hub relay', () => {
           queueSeq,
         });
       }
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.dequeued',
         chatId: 'chat-1',
         localId: 'L2',
@@ -545,9 +547,9 @@ describe('WS hub relay', () => {
     registry.bootstrapAccount({ keypair: user });
     const h = await startServer({ registry });
     try {
-      h.daemonLink.emit({ type: 'chat.spawned', chatId: 'chat-1', daemonId: 'd1', folder: '/w' });
+      h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
       for (let seq = 1; seq <= 3; seq++) {
-        h.daemonLink.emit({
+        h.hostLink.emit({
           type: 'chat.message',
           chatId: 'chat-1',
           role: 'assistant',
@@ -566,7 +568,7 @@ describe('WS hub relay', () => {
 
       // Host offline: the server answers from its own copy, after the seq asked for.
       const offline = await makeAuthedClient(h, user, 'srf-offline');
-      h.daemonLink.setStatus('offline');
+      h.hostLink.setStatus('offline');
       const fromOffline: number[] = [];
       offline.on('chat.message', (e) => fromOffline.push(e.seq));
       offline.replay('chat-1', 1);
@@ -593,7 +595,7 @@ describe('WS hub relay', () => {
 
       // Host publishes 5 chat.message events.
       for (let seq = 1; seq <= 5; seq++) {
-        h.daemonLink.emit({
+        h.hostLink.emit({
           type: 'chat.message',
           chatId: 'chat-1',
           role: 'assistant',
@@ -608,7 +610,7 @@ describe('WS hub relay', () => {
       c2.replay('chat-1', 2);
       await new Promise((r) => setTimeout(r, 50));
 
-      const replayRequests = h.daemonLink.sent.filter((s) => s.event.type === 'chat.replay');
+      const replayRequests = h.hostLink.sent.filter((s) => s.event.type === 'chat.replay');
       expect(replayRequests).toHaveLength(1);
       const replayEvent = replayRequests[0]?.event;
       expect(replayEvent?.type).toBe('chat.replay');
@@ -623,7 +625,7 @@ describe('WS hub relay', () => {
       // A replay is addressed to the surface that asked for it; a live resend of
       // what the server already holds is not broadcast again.
       for (const seq of [3, 4, 5]) {
-        h.daemonLink.emit({
+        h.hostLink.emit({
           type: 'chat.message',
           chatId: 'chat-1',
           role: 'assistant',
@@ -650,7 +652,7 @@ describe('WS hub relay', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(77));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: 'pk-d1', issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: 'pk-d1', issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const client = await makeAuthedClient(h, user, 'srf-automations');
@@ -661,7 +663,7 @@ describe('WS hub relay', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '* * * * *' },
         filter: null,
-        action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
         createdAt: 1,
         updatedAt: 1,
       };
@@ -669,10 +671,10 @@ describe('WS hub relay', () => {
       const chatId = result.event.chatId;
 
       const spawnedP = client.waitFor('chat.spawned');
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.spawned',
         chatId,
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
       });
       const spawned = await spawnedP;
@@ -691,16 +693,53 @@ describe('WS hub relay', () => {
     const h = await startServer({ registry });
     try {
       const client = await makeAuthedClient(h, user, 'srf-1');
-      const offlinePromise = client.waitFor('daemon.offline');
-      h.daemonLink.setStatus('offline');
+      const offlinePromise = client.waitFor('host.offline');
+      h.hostLink.setStatus('offline');
       const ev = await offlinePromise;
-      expect(ev.type).toBe('daemon.offline');
+      expect(ev.type).toBe('host.offline');
       // Fix 4 (TB1): wire spec documents daemon.offline as `{}` — no `reason`.
       expect((ev as { reason?: unknown }).reason).toBeUndefined();
       // Presence names the machine it describes — an anonymous offline frame
       // tells a surface nothing about WHICH host went away.
-      expect(Object.keys(ev).sort()).toEqual(['daemonId', 'type']);
-      expect(ev).toMatchObject({ daemonId: 'd1' });
+      expect(Object.keys(ev).sort()).toEqual(['hostId', 'type']);
+      expect(ev).toMatchObject({ hostId: 'd1' });
+      await client.close();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('a host that redials inside the grace window is never announced offline', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(14));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry, hostOfflineGraceMs: 300 });
+    try {
+      const client = await makeAuthedClient(h, user, 'srf-1');
+      const seen: string[] = [];
+      client.on('host.offline', () => seen.push('host.offline'));
+      client.on('host.online', () => seen.push('host.online'));
+      h.hostLink.setStatus('offline');
+      await new Promise((r) => setTimeout(r, 100));
+      h.hostLink.setStatus('online');
+      await new Promise((r) => setTimeout(r, 500));
+      expect(seen.filter((t) => t === 'host.offline' || t === 'host.online')).toEqual([]);
+      await client.close();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('a host that stays down past the grace window is announced offline', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(15));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry, hostOfflineGraceMs: 150 });
+    try {
+      const client = await makeAuthedClient(h, user, 'srf-1');
+      const offlinePromise = client.waitFor('host.offline');
+      h.hostLink.setStatus('offline');
+      expect((await offlinePromise).type).toBe('host.offline');
       await client.close();
     } finally {
       await h.close();
@@ -709,22 +748,22 @@ describe('WS hub relay', () => {
 
   it('the greeting carries an offline registered host — in the auth.ok roster and as daemon.offline', async () => {
     // spec/03 § Control → `auth.ok`: the greeting is `{surfaceId, hosts[],
-    // webBundleHash}` where `hosts[]` is `{daemonId, online, lastSeenAt, host,
+    // webBundleHash}` where `hosts[]` is `{hostId, online, lastSeenAt, host,
     // accounts[]}` per REGISTERED host. That roster is the authoritative
     // presence carrier — a surface renders the whole Hosts list from the
     // greeting alone, including machines that are down.
     //
     // The roster is keyed off the REGISTRY, so a host only appears once it is
     // actually registered against the account. An offline link contributes no
-    // id of its own (it is not in `onlineDaemonIds()`), which is exactly right:
+    // id of its own (it is not in `onlineHostIds()`), which is exactly right:
     // an unregistered, offline machine is not a host of this account.
     const user = generateUserKeypair(() => new Uint8Array(32).fill(34));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: 'pk-d1', issuedAt: 1 });
-    const daemonLink = new InProcessDaemonLink();
-    daemonLink.setStatus('offline');
-    const h = await startServer({ registry, daemonLink });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: 'pk-d1', issuedAt: 1 });
+    const hostLink = new InProcessHostLink();
+    hostLink.setStatus('offline');
+    const h = await startServer({ registry, hostLink });
     try {
       h.registry.upsertSurface({
         surfaceId: 'srf-greet',
@@ -744,21 +783,28 @@ describe('WS hub relay', () => {
       // buffered, and the whole greeting arrives as one burst — arming the
       // second one only after awaiting the first races the frame away.
       const okPromise = client.waitFor('auth.ok');
-      const offlinePromise = client.waitFor('daemon.offline');
+      const offlinePromise = client.waitFor('host.offline');
 
       // 1. The auth.ok roster names the machine and says it is down. The server
       //    invents no description for a machine it has never heard from.
       const ok = await okPromise;
       expect(ok.hosts).toEqual([
-        { daemonId: 'd1', online: false, lastSeenAt: null, host: null, accounts: [] },
+        {
+          hostId: 'd1',
+          online: false,
+          lastSeenAt: null,
+          host: null,
+          registeredName: null,
+          accounts: [],
+        },
       ]);
 
       // 2. The standalone presence frame agrees, and names the machine it
       //    describes — an anonymous offline frame tells a surface nothing about
       //    WHICH host went away. No `reason`: spec/03 documents no such field.
       const ev = await offlinePromise;
-      expect(Object.keys(ev).sort()).toEqual(['daemonId', 'type']);
-      expect(ev).toMatchObject({ daemonId: 'd1' });
+      expect(Object.keys(ev).sort()).toEqual(['hostId', 'type']);
+      expect(ev).toMatchObject({ hostId: 'd1' });
       await client.close();
     } finally {
       await h.close();
@@ -810,7 +856,7 @@ describe('WS hub relay', () => {
 
       // Wait for auth to complete + frames to drain.
       await new Promise((r) => setTimeout(r, 150));
-      const inputs = h.daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = h.hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(inputs).toHaveLength(1);
       // Socket must still be open (not closed 4401).
       expect(ws.readyState).toBe(WebSocketCtor.OPEN);
@@ -967,7 +1013,7 @@ describe('WS hub relay', () => {
 });
 
 // ---- Host hello gate + inbound link (spec/10 inversion) ----
-// These tests use the REAL InboundDaemonLink (no injected daemonLink) so the
+// These tests use the REAL InboundHostLink (no injected hostLink) so the
 // host authenticates INTO /ws exactly like a surface.
 
 interface RealHarness {
@@ -981,7 +1027,7 @@ async function startRealServer(
   registry: Registry,
   opts: { unknownChatHostWaitMs?: number; unknownChatHostPollMs?: number } = {},
 ): Promise<RealHarness> {
-  const built = await buildAll({ logger: false, registry, ...opts }); // no daemonLink → InboundDaemonLink
+  const built = await buildAll({ logger: false, hostOfflineGraceMs: 0, registry, ...opts }); // no hostLink → InboundHostLink
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
   return {
@@ -1016,7 +1062,7 @@ describe('WS hub host gate', () => {
 
   it('host authenticates via hello; daemon.online fans out to surfaces', async () => {
     const { registry, user } = bootstrappedRegistry(60);
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({ surfaceId: 'srf-1', surfaceKind: 'web', label: 'b', issuedAt: 1 });
 
     const h = await startRealServer(registry);
@@ -1031,21 +1077,21 @@ describe('WS hub host gate', () => {
       });
       const surface = new WireTestClient({ url: h.url, auth: surfaceJwt });
       await surface.connect();
-      await surface.waitFor('daemon.offline'); // greeting — host not yet online
+      await surface.waitFor('host.offline'); // greeting — host not yet online
 
-      const onlinePromise = surface.waitFor('daemon.online');
+      const onlinePromise = surface.waitFor('host.online');
 
       const daemonKey = await mintDaemonKey({
         userPrivateKey: user.privateKey,
-        daemonId: 'daemon-1',
+        hostId: 'daemon-1',
         label: 'hetzner',
       });
-      const daemon = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemonKey });
+      const daemon = new WireTestClient({ url: h.url, clientType: 'host', auth: daemonKey });
       await daemon.connect();
       await daemon.waitFor('auth.ok');
 
       const ev = await onlinePromise;
-      expect(ev.type).toBe('daemon.online');
+      expect(ev.type).toBe('host.online');
 
       await surface.close();
       await daemon.close();
@@ -1057,13 +1103,13 @@ describe('WS hub host gate', () => {
   it('rejects a host hello with an invalid/foreign daemonKey (close 4401)', async () => {
     const { registry, user } = bootstrappedRegistry(61);
     const foreign = generateUserKeypair(() => new Uint8Array(32).fill(62));
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
 
     const h = await startRealServer(registry);
     try {
       const daemonKey = await mintDaemonKey({
         userPrivateKey: foreign.privateKey, // signed by the wrong user key
-        daemonId: 'daemon-1',
+        hostId: 'daemon-1',
         label: 'attacker',
       });
       const code = await connectExpectClose(h.url, 'daemon', daemonKey);
@@ -1075,13 +1121,13 @@ describe('WS hub host gate', () => {
 
   it('rejects a host hello for an unregistered daemon_id (close 4401)', async () => {
     const { registry, user } = bootstrappedRegistry(63);
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
 
     const h = await startRealServer(registry);
     try {
       const daemonKey = await mintDaemonKey({
         userPrivateKey: user.privateKey,
-        daemonId: 'daemon-OTHER', // not the registered id
+        hostId: 'daemon-OTHER', // not the registered id
         label: 'rogue',
       });
       const code = await connectExpectClose(h.url, 'daemon', daemonKey);
@@ -1098,7 +1144,7 @@ describe('WS hub host gate', () => {
     try {
       const daemonKey = await mintDaemonKey({
         userPrivateKey: user.privateKey,
-        daemonId: 'daemon-1',
+        hostId: 'daemon-1',
         label: 'd',
       });
       const code = await connectExpectClose(h.url, 'daemon', daemonKey);
@@ -1110,17 +1156,17 @@ describe('WS hub host gate', () => {
 
   it('rejects a revoked host and emits auth.revoked', async () => {
     const { registry, user } = bootstrappedRegistry(65);
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     registry.revoke('daemon-1');
 
     const h = await startRealServer(registry);
     try {
       const daemonKey = await mintDaemonKey({
         userPrivateKey: user.privateKey,
-        daemonId: 'daemon-1',
+        hostId: 'daemon-1',
         label: 'd',
       });
-      const daemon = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemonKey });
+      const daemon = new WireTestClient({ url: h.url, clientType: 'host', auth: daemonKey });
       await daemon.connect();
       const revoked = await daemon.waitFor('auth.revoked');
       expect(revoked.reason).toMatch(/revoked/);
@@ -1132,13 +1178,13 @@ describe('WS hub host gate', () => {
 
   it('host drop → daemon.offline {} fans out; surface→host events buffer and flush on reconnect', async () => {
     const { registry, user } = bootstrappedRegistry(66);
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({ surfaceId: 'srf-1', surfaceKind: 'web', label: 'b', issuedAt: 1 });
 
     const h = await startRealServer(registry);
     const daemonKey = await mintDaemonKey({
       userPrivateKey: user.privateKey,
-      daemonId: 'daemon-1',
+      hostId: 'daemon-1',
       label: 'd',
     });
     try {
@@ -1150,43 +1196,43 @@ describe('WS hub host gate', () => {
       });
       const surface = new WireTestClient({ url: h.url, auth: surfaceJwt });
       await surface.connect();
-      await surface.waitFor('daemon.offline'); // greeting
+      await surface.waitFor('host.offline'); // greeting
 
       // Host connects.
-      const daemon1 = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemonKey });
-      await daemon1.connect();
-      await daemon1.waitFor('auth.ok');
-      await surface.waitFor('daemon.online');
+      const host1 = new WireTestClient({ url: h.url, clientType: 'host', auth: daemonKey });
+      await host1.connect();
+      await host1.waitFor('auth.ok');
+      await surface.waitFor('host.online');
 
       // Surface→host event arrives at the host socket.
-      const got1 = daemon1.waitFor('chat.input');
+      const got1 = host1.waitFor('chat.input');
       surface.sendInput({ chatId: 'c1', message: 'first', localId: 'L1' });
       const recv1 = await got1;
       expect(recv1.message).toBe('first');
 
       // Host drops.
-      const offlinePromise = surface.waitFor('daemon.offline');
-      await daemon1.close();
+      const offlinePromise = surface.waitFor('host.offline');
+      await host1.close();
       const offline = await offlinePromise;
-      expect(Object.keys(offline).sort()).toEqual(['daemonId', 'type']); // no `reason`
+      expect(Object.keys(offline).sort()).toEqual(['hostId', 'type']); // no `reason`
       // Names the host that dropped — read off the link that changed, not
       // guessed, so it stays right once several hosts are attached.
-      expect(offline).toMatchObject({ daemonId: 'daemon-1' });
+      expect(offline).toMatchObject({ hostId: 'daemon-1' });
 
       // Surface keeps sending while host is gone — these buffer.
       surface.sendInput({ chatId: 'c1', message: 'buffered', localId: 'L2' });
       await new Promise((r) => setTimeout(r, 50));
 
       // Host reconnects; buffered event flushes.
-      const daemon2 = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemonKey });
-      const got2 = daemon2.waitFor('chat.input', (e) => e.localId === 'L2');
-      await daemon2.connect();
-      await daemon2.waitFor('auth.ok');
+      const host2 = new WireTestClient({ url: h.url, clientType: 'host', auth: daemonKey });
+      const got2 = host2.waitFor('chat.input', (e) => e.localId === 'L2');
+      await host2.connect();
+      await host2.waitFor('auth.ok');
       const recv2 = await got2;
       expect(recv2.message).toBe('buffered');
 
       await surface.close();
-      await daemon2.close();
+      await host2.close();
     } finally {
       await h.close();
     }
@@ -1194,14 +1240,14 @@ describe('WS hub host gate', () => {
 
   // Todoist: "Server says chat_not_found while a host is reconnecting after a
   // server redeploy" — full stack (real WS host + surface sockets, real
-  // Registry, real InboundDaemonLink) proof that a chat-scoped frame whose
+  // Registry, real InboundHostLink) proof that a chat-scoped frame whose
   // host the registry mirror doesn't know yet is held rather than guessed at
   // an ONLINE-but-wrong registered machine, and that the requesting surface
   // is told plainly (`daemon_unavailable`) rather than left hanging.
   it('a chat-scoped frame whose host is unknown is not misrouted to a different, already-connected registered machine, and the surface is told daemon_unavailable if it never resolves', async () => {
     const { registry, user } = bootstrappedRegistry(69);
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'daemon-2', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-2', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({ surfaceId: 'srf-1', surfaceKind: 'web', label: 'b', issuedAt: 1 });
 
     const h = await startRealServer(registry, {
@@ -1210,7 +1256,7 @@ describe('WS hub host gate', () => {
     });
     const daemon1Key = await mintDaemonKey({
       userPrivateKey: user.privateKey,
-      daemonId: 'daemon-1',
+      hostId: 'daemon-1',
       label: 'd1',
     });
     try {
@@ -1222,16 +1268,16 @@ describe('WS hub host gate', () => {
       });
       const surface = new WireTestClient({ url: h.url, auth: surfaceJwt });
       await surface.connect();
-      await surface.waitFor('daemon.offline'); // greeting — neither machine connected yet
+      await surface.waitFor('host.offline'); // greeting — neither machine connected yet
 
       // daemon-1 is this account's home/default machine (registered first)
       // and IS connected — but it has never heard of 'c1'; it lives on
       // daemon-2, which stays offline for the whole test.
-      const daemon1 = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemon1Key });
-      const daemon1Got: unknown[] = [];
-      daemon1.on('chat.input', (e) => daemon1Got.push(e));
-      await daemon1.connect();
-      await daemon1.waitFor('auth.ok');
+      const host1 = new WireTestClient({ url: h.url, clientType: 'host', auth: daemon1Key });
+      const host1Got: unknown[] = [];
+      host1.on('chat.input', (e) => host1Got.push(e));
+      await host1.connect();
+      await host1.waitFor('auth.ok');
 
       const errorPromise = surface.waitFor('chat.error', undefined, 2000);
       surface.sendInput({ chatId: 'c1', message: 'hi', localId: 'L1' });
@@ -1239,15 +1285,15 @@ describe('WS hub host gate', () => {
       // Not misrouted to the connected-but-wrong home host while the wait
       // is still running.
       await new Promise((r) => setTimeout(r, 80));
-      expect(daemon1Got).toHaveLength(0);
+      expect(host1Got).toHaveLength(0);
 
       const err = await errorPromise;
       expect(err).toMatchObject({ chatId: 'c1', error: { code: 'daemon_unavailable' } });
       // Still never delivered anywhere, even after giving up.
-      expect(daemon1Got).toHaveLength(0);
+      expect(host1Got).toHaveLength(0);
 
       await surface.close();
-      await daemon1.close();
+      await host1.close();
     } finally {
       await h.close();
     }
@@ -1255,7 +1301,7 @@ describe('WS hub host gate', () => {
 
   it('revoking the host id terminates the live host socket and rejects future hellos', async () => {
     const { registry, user } = bootstrappedRegistry(67);
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
       surfaceId: 'srf-revoker',
       surfaceKind: 'web',
@@ -1266,11 +1312,11 @@ describe('WS hub host gate', () => {
     const h = await startRealServer(registry);
     const daemonKey = await mintDaemonKey({
       userPrivateKey: user.privateKey,
-      daemonId: 'daemon-1',
+      hostId: 'daemon-1',
       label: 'd',
     });
     try {
-      const daemon = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemonKey });
+      const daemon = new WireTestClient({ url: h.url, clientType: 'host', auth: daemonKey });
       await daemon.connect();
       await daemon.waitFor('auth.ok');
 
@@ -1307,30 +1353,30 @@ describe('WS hub host gate', () => {
 
   it('only one host connection: a second host closes the first', async () => {
     const { registry, user } = bootstrappedRegistry(68);
-    registry.setDaemonKey({ daemonId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
 
     const h = await startRealServer(registry);
     const daemonKey = await mintDaemonKey({
       userPrivateKey: user.privateKey,
-      daemonId: 'daemon-1',
+      hostId: 'daemon-1',
       label: 'd',
     });
     try {
-      const daemon1 = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemonKey });
-      await daemon1.connect();
-      await daemon1.waitFor('auth.ok');
+      const host1 = new WireTestClient({ url: h.url, clientType: 'host', auth: daemonKey });
+      await host1.connect();
+      await host1.waitFor('auth.ok');
 
       const firstClosed = new Promise<void>((resolve) => {
-        const ws = (daemon1 as unknown as { ws: import('ws').WebSocket }).ws;
+        const ws = (host1 as unknown as { ws: import('ws').WebSocket }).ws;
         ws.once('close', () => resolve());
       });
 
-      const daemon2 = new WireTestClient({ url: h.url, clientType: 'daemon', auth: daemonKey });
-      await daemon2.connect();
-      await daemon2.waitFor('auth.ok');
+      const host2 = new WireTestClient({ url: h.url, clientType: 'host', auth: daemonKey });
+      await host2.connect();
+      await host2.waitFor('auth.ok');
 
       await firstClosed; // older host socket closed
-      await daemon2.close();
+      await host2.close();
     } finally {
       await h.close();
     }
@@ -1340,7 +1386,7 @@ describe('WS hub host gate', () => {
 /** Connect a raw WS, send a hello, and resolve with the close code. */
 async function connectExpectClose(
   url: string,
-  clientType: 'daemon' | 'surface-web',
+  clientType: 'host' | 'surface-web',
   auth: string,
 ): Promise<number> {
   const WebSocketCtor = (await import('ws')).default;

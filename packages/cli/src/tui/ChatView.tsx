@@ -7,6 +7,7 @@ import { Box, Text, useInput } from 'ink';
 import type { WireEvent } from '@patch/wire';
 import type { ConnectionState, PatchWsClient } from '../transport/ws.js';
 import { StatusStrip } from './StatusStrip.js';
+import { clipCodePoints, dropLastCodePoint } from './text.js';
 
 /** One-line summary of a tool's args, Claude-Code style: `[Read src/x.ts]`. */
 function summariseToolArgs(args: unknown): string {
@@ -27,7 +28,7 @@ function summariseResult(result: unknown): string {
   const text =
     typeof result === 'string' ? result : result === undefined ? '' : JSON.stringify(result);
   const firstLine = text.split('\n', 1)[0] ?? '';
-  return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+  return clipCodePoints(firstLine, 80);
 }
 
 /** A permission prompt awaiting the user's approve/deny. */
@@ -250,7 +251,7 @@ export function ChatView(props: ChatViewProps): React.JSX.Element {
     }
 
     if (key.backspace || key.delete) {
-      setInput((s) => s.slice(0, -1));
+      setInput(dropLastCodePoint);
       return;
     }
     if (char && !key.ctrl && !key.meta) setInput((s) => s + char);

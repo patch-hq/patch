@@ -17,6 +17,8 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import {
   runningVersion,
+  judgeBuildIdentity,
+  versionPageIntent,
   LOG_INVARIANTS,
   MIN_TEXTS_PER_SCREEN,
   MIN_TEXTS_SOMEWHERE,
@@ -26,6 +28,7 @@ import {
   visibleText,
   findTap,
   discoverNav,
+  homeIntent,
   openDestination,
   openSettled,
   judgeScreen,
@@ -37,6 +40,7 @@ import {
   DEDICATED_AVD,
   runAdb,
   ADB_TIMEOUT_MS,
+  judgeJsThread,
 } from './mobile-surface-smoke.mjs';
 
 const node = (attrs) => `<node ${attrs} />`;
@@ -481,7 +485,9 @@ test('splitDevices on an empty list finds nothing rather than throwing', () => {
 
 test('foregroundPackage names the app owning the focused window', () => {
   assert.equal(
-    foregroundPackage('  mCurrentFocus=Window{9f0 u0 io.github.tomchambers2.patch/com.x.MainActivity}'),
+    foregroundPackage(
+      '  mCurrentFocus=Window{9f0 u0 io.github.tomchambers2.patch/com.x.MainActivity}',
+    ),
     'io.github.tomchambers2.patch',
   );
   // The case that misled a whole deploy: a different app in front.
@@ -595,4 +601,53 @@ test('an adb call that fails for another reason keeps its own error', () => {
       ),
     (err) => err === boom,
   );
+});
+
+// ---- the build under test is the build being shipped ----------------------
+//
+// 2026-10-13/14: every deploy's smoke said "no version at all" and then, from
+// the same cause, "every destination painted the SAME screen". The version page
+// was opened with a VIEW intent that a running app swallowed, and the walk went
+// ahead on the APK's own ancient bundle. One cause must be one message, and a
+// bundle that is not the one shipping must never be walked.
+
+test('the version page is opened with a cold start (-S), so a running app cannot swallow the intent', () => {
+  const args = versionPageIntent('app.pkg');
+  assert.ok(args.includes('-S'));
+  assert.ok(args.includes('patch://settings/updates'));
+  assert.equal(args.at(-1), 'app.pkg');
+});
+
+test('the sha being seen is a confirmed build and the walk may proceed', () => {
+  const v = judgeBuildIdentity({ sha: 'abc1234', versions: ['0.1.12 · abc12345'] });
+  assert.deepEqual(v, { confirmed: true, failure: null });
+});
+
+test('a version page that was never reached says so, not "reports no version"', () => {
+  const v = judgeBuildIdentity({ sha: 'abc1234', versions: [] });
+  assert.equal(v.confirmed, false);
+  assert.match(v.failure, /never reached the Updates page/);
+  assert.match(v.failure, /not walked/);
+});
+
+test('a different version names it, and says the walk was skipped', () => {
+  const v = judgeBuildIdentity({ sha: 'abc1234', versions: ['0.1.3 · 735b001'] });
+  assert.equal(v.confirmed, false);
+  assert.match(v.failure, /0\.1\.3 · 735b001/);
+  assert.match(v.failure, /OTA/);
+  assert.match(v.failure, /not walked/);
+});
+
+test('an idle JS thread passes; one pinned at 100% names the render loop', () => {
+  assert.equal(judgeJsThread({ before: 1000, after: 1010, seconds: 5 }), null);
+  const failure = judgeJsThread({ before: 1000, after: 1500, seconds: 5 });
+  assert.match(failure, /100% of a core for 5s/);
+  assert.match(failure, /render loop/);
+});
+
+test('the walk cold-starts on the tab root, not the last open chat', () => {
+  const args = homeIntent('app.pkg');
+  assert.ok(args.includes('-S'));
+  assert.equal(args[args.indexOf('-d') + 1], 'patch://home');
+  assert.equal(args.at(-1), 'app.pkg');
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DaemonHostEvent,
+  HostInfoEvent,
   HostProviderKey,
   PROVIDER_KEYS,
   ProviderKeyId,
@@ -40,12 +40,12 @@ describe('HostProviderKey', () => {
 
   it('rides on daemon.host', () => {
     const host = {
-      type: 'daemon.host',
-      daemonId: 'h1',
+      type: 'host.host',
+      hostId: 'h1',
       hostName: 'h1',
       platform: 'linux',
       arch: 'x64',
-      daemonVersion: '1.0.0',
+      hostVersion: '1.0.0',
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
@@ -55,7 +55,7 @@ describe('HostProviderKey', () => {
       components: [],
       providerKeys: [{ id: 'gemini', source: 'none', envSet: false }],
     };
-    expect(DaemonHostEvent.parse(host).providerKeys).toEqual([
+    expect(HostInfoEvent.parse(host).providerKeys).toEqual([
       { id: 'gemini', source: 'none', envSet: false },
     ]);
   });

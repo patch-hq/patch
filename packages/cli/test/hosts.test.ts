@@ -117,3 +117,11 @@ test('no hosts command changes a shared setting', () => {
     assert.ok(!names.includes(gone), `hosts ${gone} is gone (have: ${names.join(', ')})`);
   }
 });
+
+test('pickHost: an empty --host names no machine, even with one host registered', async () => {
+  const { pickHost } = await import('../src/commands/hosts.js');
+  const hosts = [{ hostId: 'd-abc', hostName: 'mac', online: true, isHomeHost: true }];
+  assert.throws(() => pickHost(hosts, ''), /--host must not be empty/);
+  assert.equal(pickHost(hosts, 'mac'), 'd-abc');
+  assert.equal(pickHost(hosts, 'd-a'), 'd-abc');
+});

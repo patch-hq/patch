@@ -20,7 +20,7 @@ const JOB = {
   filter: null,
   action: {
     type: 'continue',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: FOLDER,
     skill: 'app-update',
     key: '{{payload.event_data.id}}',
@@ -44,7 +44,7 @@ async function stub(page: import('@playwright/test').Page, saved: Saved): Promis
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: [FOLDER], recent: [] }] }),
+      body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: [FOLDER], recent: [] }] }),
     }),
   );
   await page.route('**/api/skills**', (route) =>
@@ -164,7 +164,7 @@ test.describe('job editor — Notify when job complete', () => {
     // still serialises to exactly what a host predating the field accepts —
     // `notifyOnComplete: true` would be a new key on every job.
     expect('notifyOnComplete' in action).toBe(false);
-    expect(Object.keys(action).sort()).toEqual(['daemonId', 'folder', 'key', 'skill', 'type']);
+    expect(Object.keys(action).sort()).toEqual(['folder', 'hostId', 'key', 'skill', 'type']);
   });
 
   test('turning it OFF posts notifyOnComplete: false, keeping the continue key', async ({

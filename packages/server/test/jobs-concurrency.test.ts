@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatActivity, WireEvent } from '@patch/wire';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobLogs, type RunLogEntry } from '../src/jobs/logs.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import type { Job } from '../src/jobs/types.js';
@@ -35,7 +35,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     enabled: true,
     trigger: { type: 'todoist' },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+    action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -58,12 +58,20 @@ function stateEvent(chatId: string, activity: ChatActivity): WireEvent {
   };
 }
 
+function parkedStateEvent(chatId: string, activity: ChatActivity, resumeAt: number): WireEvent {
+  return {
+    ...stateEvent(chatId, activity),
+    rateLimitResumingAt: resumeAt,
+    resumeKind: 'rate_limit',
+  };
+}
+
 function spawnedEvent(chatId: string): WireEvent {
-  return { type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' };
+  return { type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' };
 }
 
 /** chatIds of every spawn request the link was asked to send, in order. */
-function spawnedChatIds(link: InProcessDaemonLink): string[] {
+function spawnedChatIds(link: InProcessHostLink): string[] {
   return link.sent
     .filter((s) => s.event.type === 'chat.spawn_request')
     .map((s) => (s.event.type === 'chat.spawn_request' ? s.event.chatId : ''));
@@ -88,11 +96,11 @@ describe('job concurrency gate', () => {
   });
 
   it('a job with no concurrency dispatches every fire, exactly as before', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -108,11 +116,11 @@ describe('job concurrency gate', () => {
   });
 
   it('concurrency 1 → the second fire queues instead of sending', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -129,11 +137,11 @@ describe('job concurrency gate', () => {
   // `counts` says how many; the job page has to say WHICH — spec/08 §
   // Concurrency.
   it('queue() lists the in-flight fires oldest-first and the waiting fires in release order', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -162,13 +170,13 @@ describe('job concurrency gate', () => {
     expect(view.inFlight[0]).toMatchObject({
       trigger: 'todoist',
       actionType: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
     });
     expect(view.queued[0]).toMatchObject({
       trigger: 'todoist',
       actionType: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
     });
     expect(typeof view.queued[0]?.fireId).toBe('string');
@@ -186,11 +194,11 @@ describe('job concurrency gate', () => {
   });
 
   it('queue() follows the drain: a released fire moves from waiting to in flight', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -215,11 +223,11 @@ describe('job concurrency gate', () => {
   });
 
   it('a keyed ensure update reaches the chat already working that subject, instead of queueing behind it', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -227,7 +235,7 @@ describe('job concurrency gate', () => {
       concurrency: 1,
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'go',
         key: '{{id}}',
@@ -256,11 +264,11 @@ describe('job concurrency gate', () => {
   });
 
   it('releases the slot when the chat goes idle after working, and drains the queue', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -280,11 +288,11 @@ describe('job concurrency gate', () => {
   });
 
   it('does NOT release the slot on the idle a chat reports before it has run', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -305,11 +313,11 @@ describe('job concurrency gate', () => {
   });
 
   it('drains in FIFO order', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
       nowMs: (() => {
@@ -346,11 +354,11 @@ describe('job concurrency gate', () => {
         errors.push(String(msg));
       },
     } as unknown as typeof silentLogger;
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger,
       idGenerator: seqIds(),
       slotTimeoutMs: 60_000,
@@ -373,11 +381,11 @@ describe('job concurrency gate', () => {
   });
 
   it('never refuses a fire, even well past the old cap — a fire waits, it is never refused', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -402,11 +410,11 @@ describe('job concurrency gate', () => {
   });
 
   it('a queued fire survives a restart and still runs', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const first = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -419,11 +427,11 @@ describe('job concurrency gate', () => {
     // New process, same data dir. The queued fire is still on disk, and the
     // slot held by the chat that is still working is still held — otherwise
     // the restart would start a second build on top of a running one.
-    const link2 = new InProcessDaemonLink();
+    const link2 = new InProcessHostLink();
     const second = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link2,
+      hostLink: link2,
       logger: silentLogger,
       idGenerator: seqIds(),
       chatActivity: (id) => (id === heldChat ? 'running' : null),
@@ -447,11 +455,11 @@ describe('job concurrency gate', () => {
   // like a chat that is gone. Freeing the slot on that read is what drained
   // the queue on prod and put two builds in one working tree.
   it('a restart with an empty chat mirror does not dispatch on top of a running chat', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const first = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -463,11 +471,11 @@ describe('job concurrency gate', () => {
     first.close();
 
     // Restart against the same data dir. The mirror knows nothing yet.
-    const link2 = new InProcessDaemonLink();
+    const link2 = new InProcessHostLink();
     const second = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link2,
+      hostLink: link2,
       logger: silentLogger,
       idGenerator: seqIds(),
       chatActivity: () => null,
@@ -489,11 +497,11 @@ describe('job concurrency gate', () => {
   });
 
   it('reconciliation frees a slot whose chat the mirror says has finished', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const first = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -502,11 +510,11 @@ describe('job concurrency gate', () => {
     first.dispatch(job, { n: 2 }, 'todoist');
     first.close();
 
-    const link2 = new InProcessDaemonLink();
+    const link2 = new InProcessHostLink();
     const second = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link2,
+      hostLink: link2,
       logger: silentLogger,
       idGenerator: seqIds(),
       // A positive answer: the host is back and that chat is done.
@@ -529,11 +537,11 @@ describe('job concurrency gate', () => {
         errors.push(String(msg));
       },
     } as unknown as typeof silentLogger;
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const first = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger,
       idGenerator: seqIds(),
       slotTimeoutMs: 60_000,
@@ -543,11 +551,11 @@ describe('job concurrency gate', () => {
     first.dispatch(job, { n: 2 }, 'todoist');
     first.close();
 
-    const link2 = new InProcessDaemonLink();
+    const link2 = new InProcessHostLink();
     const second = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link2,
+      hostLink: link2,
       logger,
       idGenerator: seqIds(),
       slotTimeoutMs: 60_000,
@@ -573,11 +581,11 @@ describe('job concurrency gate', () => {
     // An explicit wall clock: the point of the test is elapsed time ACROSS a
     // restart, which the timer clock alone can't express.
     let clock = 1_000_000;
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const first = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
       slotTimeoutMs: 60_000,
@@ -590,11 +598,11 @@ describe('job concurrency gate', () => {
     clock += 50_000;
     first.close();
 
-    const link2 = new InProcessDaemonLink();
+    const link2 = new InProcessHostLink();
     const second = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link2,
+      hostLink: link2,
       logger: silentLogger,
       idGenerator: seqIds(),
       slotTimeoutMs: 60_000,
@@ -612,12 +620,12 @@ describe('job concurrency gate', () => {
   });
 
   it('a reconnect flush respects the limit instead of dumping the backlog', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
       nowMs: (() => {
@@ -641,12 +649,12 @@ describe('job concurrency gate', () => {
     disp.close();
   });
 
-  it('an errored chat releases its slot', () => {
-    const link = new InProcessDaemonLink();
+  it('an errored chat releases its slot when the failure is terminal', () => {
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });
@@ -660,12 +668,41 @@ describe('job concurrency gate', () => {
     disp.close();
   });
 
-  it('a host refusing the fire releases its slot', () => {
-    const link = new InProcessDaemonLink();
+  it('a timed fire parked for auto-resume keeps its slot and blocks the next fire', () => {
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
+      logger: silentLogger,
+      idGenerator: seqIds(),
+    });
+    const job = makeJob({ concurrency: 1 });
+    disp.dispatch(job, { n: 1 }, 'todoist');
+    disp.dispatch(job, { n: 2 }, 'todoist');
+    const first = spawnedChatIds(link)[0] as string;
+    link.emit(spawnedEvent(first));
+    link.emit(stateEvent(first, 'running'));
+
+    // A usage limit ends the active turn, but Patch has promised to retry it.
+    // That is a pause in the same run, not completion of the job.
+    link.emit(parkedStateEvent(first, 'errored', Date.now() + 60_000));
+    expect(spawnedChatIds(link)).toHaveLength(1);
+    expect(disp.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 1 });
+
+    // The retry starts, then genuinely completes with no further resume armed.
+    link.emit(stateEvent(first, 'running'));
+    link.emit(stateEvent(first, 'idle'));
+    expect(spawnedChatIds(link)).toHaveLength(2);
+    disp.close();
+  });
+
+  it('a host refusing the fire releases its slot', () => {
+    const link = new InProcessHostLink();
+    const disp = new JobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
       logger: silentLogger,
       idGenerator: seqIds(),
     });

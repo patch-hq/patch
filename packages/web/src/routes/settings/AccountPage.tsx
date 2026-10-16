@@ -5,12 +5,17 @@ import type { JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/rest.js';
 import { clearCredential } from '../../lib/credential.js';
+import { Toggle } from '../../components/Toggle.js';
+import { usePreferencesStore } from '../../stores/preferencesStore.js';
+import { patchShared } from './sharedWrite.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { Group, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
 
 export function AccountPage(): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
+  const syncPosition = usePreferencesStore((s) => s.preferences.syncPosition);
+  const prefsLoaded = usePreferencesStore((s) => s.loaded);
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.me() });
   const { data: health } = useQuery({ queryKey: ['healthz'], queryFn: () => api.healthz() });
   const { data: relay } = useQuery({
@@ -74,6 +79,16 @@ export function AccountPage(): JSX.Element {
             }
           />
         ) : null}
+      </Group>
+      <Group testid="settings-sync">
+        <Row title="Sync position between surfaces" testid="sync-position">
+          <Toggle
+            checked={syncPosition}
+            disabled={!prefsLoaded}
+            onChange={(next) => void patchShared('sync position', { syncPosition: next })}
+            testid="sync-position-toggle"
+          />
+        </Row>
       </Group>
       <Group label="This device" testid="settings-session">
         <Row title="Sign this device out">

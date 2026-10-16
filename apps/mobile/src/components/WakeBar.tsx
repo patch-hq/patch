@@ -57,6 +57,12 @@ export function WakeBar({ row }: { row: ChatRow | undefined }): ReactElement | n
     return () => clearInterval(t);
   }, [fireAt]);
 
+  // The sheet shows THIS wake. When it fires (or is cancelled) the sheet goes
+  // with it, or it would reopen over whatever wake is armed next.
+  useEffect(() => {
+    if (fireAt === null) setOpen(false);
+  }, [fireAt]);
+
   if (!wake) return null;
 
   const countdown = formatWakeCountdown(wake.fireAt - now);

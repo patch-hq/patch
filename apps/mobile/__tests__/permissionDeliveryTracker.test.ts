@@ -16,7 +16,7 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 describe('mobile PermissionDeliveryTracker', () => {
   beforeEach(() => {
     usePresenceStore.getState().setConnection('connected');
-    usePresenceStore.getState().setDaemon('online');
+    usePresenceStore.getState().setHost('online');
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -50,6 +50,24 @@ describe('mobile PermissionDeliveryTracker', () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it('a second answer for the same request replaces the first: only the latest is ever resent', () => {
+    const send = vi.fn();
+    const t = new PermissionDeliveryTracker({ send, retryMs: 5_000 });
+    t.send({ type: 'chat.permission_response', requestId: 'req-1', approve: true });
+    t.send({ type: 'chat.permission_response', requestId: 'req-1', approve: false });
+    expect(t.size()).toBe(1);
+    send.mockClear();
+
+    vi.advanceTimersByTime(5_000);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ approve: false }));
+
+    t.ack('req-1');
+    send.mockClear();
+    vi.advanceTimersByTime(20_000);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('a send that throws (not connected) is swallowed and still redelivers on the next tick', () => {
     const send = vi.fn(() => {
       throw new Error('PatchWs: not connected');
@@ -69,11 +87,11 @@ describe('mobile PermissionDeliveryTracker', () => {
     const t = new PermissionDeliveryTracker({ send, retryMs: 5_000 });
     t.send({ type: 'chat.permission_response', requestId: 'req-1', approve: true });
 
-    usePresenceStore.getState().setDaemon('offline');
+    usePresenceStore.getState().setHost('offline');
     vi.advanceTimersByTime(20_000);
     expect(send).toHaveBeenCalledTimes(1);
 
-    usePresenceStore.getState().setDaemon('online');
+    usePresenceStore.getState().setHost('online');
     vi.advanceTimersByTime(5_000);
     expect(send).toHaveBeenCalledTimes(2);
   });

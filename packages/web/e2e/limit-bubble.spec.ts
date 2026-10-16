@@ -27,15 +27,15 @@ async function park(
       const w = window as unknown as {
         __store: {
           getState: () => {
-            chats: Record<string, { daemonId: string; folder: string }>;
+            chats: Record<string, { hostId: string; folder: string }>;
             applyEvent: (e: unknown) => void;
           };
         };
         __presenceStore: { getState: () => { setHostReport: (e: unknown) => void } };
       };
       w.__presenceStore.getState().setHostReport({
-        type: 'daemon.host',
-        daemonId: 'd1',
+        type: 'host.host',
+        hostId: 'd1',
         hostName: 'box',
         backends: [],
         components: [],
@@ -46,7 +46,7 @@ async function park(
       w.__store.getState().applyEvent({
         type: 'chat.state',
         chatId: 'chat_md',
-        daemonId: row.daemonId,
+        hostId: row.hostId,
         activity: 'idle',
         folder: row.folder,
         lastUpdated: Date.now(),
@@ -111,6 +111,83 @@ test.describe('the limit bubble', () => {
     await expect(countdown).toContainText('2 minutes', { timeout: 20_000 });
     // A unit symbol is not something a person says.
     await expect(countdown).not.toContainText(/\d+\s?h\b/);
+  });
+
+  test('is a bounded raised card with its buttons on one divided row', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto(HARNESS);
+    await park(page, {
+      scope: 'session',
+      overageBlocked: true,
+      overageReason: 'org_level_disabled_until',
+    });
+    const card = page.locator('[data-testid="rate-limit-bar"] .content');
+    await expect(card).toBeVisible();
+    const box = (await card.boundingBox())!;
+    expect(box.width).toBeLessThanOrEqual(461);
+    const style = await card.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { radius: parseFloat(cs.borderTopLeftRadius), shadow: cs.boxShadow };
+    });
+    expect(style.radius).toBeGreaterThanOrEqual(16);
+    expect(style.shadow).not.toBe('none');
+    const rows = await page.evaluate(() => {
+      const tops = ['rate-limit-retry', 'rate-limit-extra-usage'].map(
+        (id) => document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect().top,
+      );
+      return Math.max(...tops) - Math.min(...tops);
+    });
+    expect(rows).toBeLessThan(12);
+    await page.screenshot({ path: process.env['LIMIT_SHOT'] ?? 'test-results/limit-card.png' });
+  });
+
+  test('is one state: the interrupted line and red failure are not drawn under the card', async ({
+    page,
+  }) => {
+    await page.goto(HARNESS);
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __store: { getState: () => { applyEvent: (e: unknown) => void } };
+      };
+      w.__store.getState().applyEvent({
+        type: 'chat.message',
+        chatId: 'chat_md',
+        role: 'user',
+        content: 'go on then',
+        seq: 9000,
+      });
+      w.__store.getState().applyEvent({
+        type: 'chat.message',
+        chatId: 'chat_md',
+        role: 'system',
+        content: 'No response requested.',
+        synthetic: true,
+        seq: 9001,
+      });
+      w.__store.getState().applyEvent({
+        type: 'chat.error',
+        chatId: 'chat_md',
+        error: { code: 'sdk_error', message: "You've hit your session limit" },
+        seq: 9002,
+      });
+      w.__store.getState().applyEvent({
+        type: 'chat.error',
+        chatId: 'chat_md',
+        error: { code: 'daemon_unavailable', message: 'Connection to the host was lost.' },
+        seq: -1,
+      });
+    });
+    // Before the card is up, both are shown — this is the three-things state.
+    await expect(page.getByTestId('synthetic-notice')).toHaveCount(1);
+    await expect(page.getByTestId('turn-failed')).toHaveCount(1);
+    await expect(page.getByTestId('turn-error')).toHaveCount(1);
+
+    await park(page, { scope: 'session' });
+    await expect(page.getByTestId('rate-limit-bar')).toBeVisible();
+    await expect(page.getByTestId('synthetic-notice')).toHaveCount(0);
+    await expect(page.getByTestId('turn-error')).toHaveCount(0);
+    // The bubble's own retry mark stays (limit-notice-unparked.spec).
+    await expect(page.getByTestId('turn-failed')).toHaveCount(1);
   });
 
   test('offers the way to turn extra usage on only when that is what left no overflow', async ({

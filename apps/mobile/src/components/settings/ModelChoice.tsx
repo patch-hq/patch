@@ -10,7 +10,7 @@
 
 import React from 'react';
 import { useModelCatalog } from '../../lib/models';
-import { defaultDaemonId, usePresenceStore } from '../../stores/presenceStore';
+import { defaultHostId, usePresenceStore } from '../../stores/presenceStore';
 import { OptionPicker } from '../OptionPicker';
 import { ErrorLine, Row } from './ui';
 
@@ -25,7 +25,7 @@ export function ModelChoice({
   testID: string;
   onSelect: (id: string) => void;
 }): React.ReactElement {
-  const catalogueHost = usePresenceStore((s) => defaultDaemonId(s.hosts));
+  const catalogueHost = usePresenceStore((s) => defaultHostId(s.hosts));
   const catalogue = useModelCatalog(catalogueHost);
   const ids = catalogue.models.map((m) => m.id);
   const extra = value && !ids.includes(value) ? [{ id: value, label: value }] : [];

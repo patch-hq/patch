@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('batch REST routes', () => {
   let dir: string;
@@ -37,11 +37,11 @@ describe('batch REST routes', () => {
       surfaceKind: 'terminal',
       label: 'cli',
     });
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink,
+      hostLink,
       nowMs: () => now,
     });
     return { jwt, built };

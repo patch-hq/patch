@@ -19,6 +19,7 @@ import { useSettingsStore } from '../src/stores/settingsStore';
 import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
+import { useBrowserHandoffStore } from '../src/stores/browserHandoffStore';
 import { useFolderStore } from '../src/stores/folderStore';
 import { useHostRefusalStore } from '../src/stores/hostRefusalStore';
 import { useVoiceStore } from '../src/stores/voiceStore';
@@ -40,7 +41,7 @@ beforeEach(() => {
   // flash on load) — reset to it explicitly rather than to 'offline', which
   // would spuriously suppress the connecting-state assertion below.
   usePresenceStore.getState().setConnection('connecting');
-  usePresenceStore.getState().setDaemon('unknown');
+  usePresenceStore.getState().setHost('unknown');
   usePresenceStore.getState().setOutageVisible(false);
   AppState.currentState = 'active';
   vi.spyOn(deliveryTracker, 'onReconnect');
@@ -689,17 +690,17 @@ describe('message dispatch', () => {
     );
   });
 
-  it('daemon.online sets host presence + redelivers pending', () => {
+  it('host.online sets host presence + redelivers pending', () => {
     const sock = open();
     vi.mocked(deliveryTracker.onReconnect).mockClear();
-    sock.emitMessage(JSON.stringify({ type: 'daemon.online', daemonId: 'd1' }));
+    sock.emitMessage(JSON.stringify({ type: 'host.online', hostId: 'd1' }));
     expect(usePresenceStore.getState().daemon).toBe('online');
     expect(deliveryTracker.onReconnect).toHaveBeenCalled();
   });
 
-  it('daemon.offline sets host presence', () => {
+  it('host.offline sets host presence', () => {
     const sock = open();
-    sock.emitMessage(JSON.stringify({ type: 'daemon.offline', daemonId: 'd1' }));
+    sock.emitMessage(JSON.stringify({ type: 'host.offline', hostId: 'd1' }));
     expect(usePresenceStore.getState().daemon).toBe('offline');
   });
 
@@ -708,19 +709,19 @@ describe('message dispatch', () => {
   // it over its own live link, so its presence is untouched. Flipping presence
   // here would tell the user the machine is down when it is up and simply
   // logged out of one backend.
-  it('daemon.unauthenticated marks that backend on that host not-connected and surfaces the reason', () => {
+  it('host.unauthenticated marks that backend on that host not-connected and surfaces the reason', () => {
     const sock = open();
     usePresenceStore.getState().setHostOnline('d1', true);
     sock.emitMessage(
       JSON.stringify({
-        type: 'daemon.unauthenticated',
-        daemonId: 'd1',
+        type: 'host.unauthenticated',
+        hostId: 'd1',
         backendId: 'claude-code',
         reason: 'bad token',
       }),
     );
     expect(usePresenceStore.getState().hosts['d1']?.accounts['claude-code']).toMatchObject({
-      daemonId: 'd1',
+      hostId: 'd1',
       backendId: 'claude-code',
       connected: false,
     });
@@ -730,19 +731,19 @@ describe('message dispatch', () => {
     ).toBe(true);
   });
 
-  it('daemon.unauthenticated marks THAT host s backend not connected', () => {
+  it('host.unauthenticated marks THAT host s backend not connected', () => {
     const sock = open();
     usePresenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'd1',
+      type: 'host.account',
+      hostId: 'd1',
       backendId: 'claude-code',
       connected: true,
       accountEmail: 'tom@example.com',
     });
     sock.emitMessage(
       JSON.stringify({
-        type: 'daemon.unauthenticated',
-        daemonId: 'd1',
+        type: 'host.unauthenticated',
+        hostId: 'd1',
         backendId: 'claude-code',
         reason: 'bad token',
       }),
@@ -753,15 +754,15 @@ describe('message dispatch', () => {
     });
   });
 
-  // `daemon.account` replaced the account-wide report: a machine can be
+  // `host.account` replaced the account-wide report: a machine can be
   // connected on one backend and logged out on another, so the frame names
   // machine AND backend (spec/10 § Backend credentials).
-  it('daemon.account records one backend s credential on one host', () => {
+  it('host.account records one backend s credential on one host', () => {
     const sock = open();
     sock.emitMessage(
       JSON.stringify({
-        type: 'daemon.account',
-        daemonId: 'd1',
+        type: 'host.account',
+        hostId: 'd1',
         backendId: 'claude-code',
         connected: true,
         accountEmail: 'tom@example.com',
@@ -775,8 +776,8 @@ describe('message dispatch', () => {
     // must leave d1's row untouched.
     sock.emitMessage(
       JSON.stringify({
-        type: 'daemon.account',
-        daemonId: 'd2',
+        type: 'host.account',
+        hostId: 'd2',
         backendId: 'claude-code',
         connected: false,
         accountEmail: null,
@@ -795,18 +796,51 @@ describe('message dispatch', () => {
   // (spec/04 § Folders).
   it('folders.list replaces THAT host s registry only', () => {
     const sock = open();
-    useFolderStore.getState().setHostFolders({ daemonId: 'd2', roots: ['~/z'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: 'd2', roots: ['~/z'], recent: [] });
     sock.emitMessage(
-      JSON.stringify({ type: 'folders.list', daemonId: 'd1', roots: ['~/a'], recent: ['~/b'] }),
+      JSON.stringify({ type: 'folders.list', hostId: 'd1', roots: ['~/a'], recent: ['~/b'] }),
     );
     expect(useFolderStore.getState().foldersFor('d1')).toEqual(['~/a', '~/b']);
     expect(useFolderStore.getState().foldersFor('d2')).toEqual(['~/z']);
   });
 
+  it('routes browser live-view frames and hand-off state into browserHandoffStore', () => {
+    const sock = open();
+    useBrowserHandoffStore.getState().reset();
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'patch.browser_view.frame',
+        chatId: 'c1',
+        tabId: 't1',
+        data: 'AAAA',
+        width: 100,
+        height: 50,
+        url: 'https://example.com/',
+        title: 'Example',
+      }),
+    );
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'patch.browser_handoff.state',
+        chatId: 'c1',
+        handoffId: 'h1',
+        tabId: 't1',
+        status: 'waiting',
+        reason: 'Sign in',
+        startedAt: 1,
+      }),
+    );
+    expect(useBrowserHandoffStore.getState().frames['c1']).toMatchObject({
+      tabId: 't1',
+      width: 100,
+    });
+    expect(useBrowserHandoffStore.getState().handoffs['c1']).toMatchObject({ handoffId: 'h1' });
+  });
+
   it('folders.updated replaces THAT host s registry only', () => {
     const sock = open();
     sock.emitMessage(
-      JSON.stringify({ type: 'folders.updated', daemonId: 'd1', roots: ['~/c'], recent: [] }),
+      JSON.stringify({ type: 'folders.updated', hostId: 'd1', roots: ['~/c'], recent: [] }),
     );
     expect(useFolderStore.getState().foldersFor('d1')).toEqual(['~/c']);
   });
@@ -817,13 +851,13 @@ describe('message dispatch', () => {
     const sock = open();
     const memory = { project: 'p', file: 'm.md', name: 'n', description: '', memoryType: 'user' };
     sock.emitMessage(
-      JSON.stringify({ type: 'claude_settings.list', daemonId: 'd1', memories: [memory] }),
+      JSON.stringify({ type: 'claude_settings.list', hostId: 'd1', memories: [memory] }),
     );
     expect(usePresenceStore.getState().hosts['d1']?.claudeSettings).toEqual({ memories: [memory] });
     sock.emitMessage(
       JSON.stringify({
         type: 'claude_settings.updated',
-        daemonId: 'd1',
+        hostId: 'd1',
         drift: '{"a":1}',
         memories: [],
       }),
@@ -831,7 +865,7 @@ describe('message dispatch', () => {
     expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.drift).toBe('{"a":1}');
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] }]);
     expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.drift).toBe('{"a":1}');
   });
 
@@ -868,15 +902,15 @@ describe('message dispatch', () => {
   it('host.removed drops THAT host and its cached reports, and nothing else', () => {
     const sock = open();
     usePresenceStore.getState().setHosts([
-      { daemonId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] },
-      { daemonId: 'd2', online: false, lastSeenAt: 1, host: null, accounts: [] },
+      { hostId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] },
+      { hostId: 'd2', online: false, lastSeenAt: 1, host: null, accounts: [] },
     ]);
     usePresenceStore.getState().setClaudeSettings('d1', undefined, []);
-    sock.emitMessage(JSON.stringify({ type: 'host.removed', daemonId: 'd1' }));
+    sock.emitMessage(JSON.stringify({ type: 'host.removed', hostId: 'd1' }));
     expect(Object.keys(usePresenceStore.getState().hosts)).toEqual(['d2']);
     expect(usePresenceStore.getState().daemon).toBe('offline');
     // Unknown id: a no-op, not an error.
-    sock.emitMessage(JSON.stringify({ type: 'host.removed', daemonId: 'nope' }));
+    sock.emitMessage(JSON.stringify({ type: 'host.removed', hostId: 'nope' }));
     expect(Object.keys(usePresenceStore.getState().hosts)).toEqual(['d2']);
   });
 
@@ -884,12 +918,12 @@ describe('message dispatch', () => {
   // this surface was away).
   it('a host missing from auth.ok’s roster is dropped', () => {
     usePresenceStore.getState().setHosts([
-      { daemonId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] },
-      { daemonId: 'd2', online: true, lastSeenAt: 1, host: null, accounts: [] },
+      { hostId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] },
+      { hostId: 'd2', online: true, lastSeenAt: 1, host: null, accounts: [] },
     ]);
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd2', online: true, lastSeenAt: 1, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd2', online: true, lastSeenAt: 1, host: null, accounts: [] }]);
     expect(Object.keys(usePresenceStore.getState().hosts)).toEqual(['d2']);
   });
 
@@ -1180,6 +1214,38 @@ describe('reconnect with backoff', () => {
     expect(FakeWebSocket.instances.length).toBe(3);
   });
 
+  it('keeps backing off a server that accepts the socket and then drops it, without ever greeting', () => {
+    connectAndOpen();
+    // Each reconnect OPENS (the upgrade is accepted) and is then dropped before
+    // `auth.ok`: rate-limited, overloaded, refused after the hello.
+    for (const delay of [1000, 2000, 4000, 8000]) {
+      const before = FakeWebSocket.instances.length;
+      FakeWebSocket.last().emitClose(1013);
+      vi.advanceTimersByTime(delay - 1);
+      expect(FakeWebSocket.instances.length).toBe(before);
+      vi.advanceTimersByTime(1);
+      expect(FakeWebSocket.instances.length).toBe(before + 1);
+      FakeWebSocket.last().emitOpen();
+    }
+  });
+
+  it('starts over at one second once the server has actually greeted it', () => {
+    connectAndOpen();
+    FakeWebSocket.last().emitClose();
+    vi.advanceTimersByTime(1000);
+    FakeWebSocket.last().emitOpen();
+    FakeWebSocket.last().emitClose();
+    vi.advanceTimersByTime(2000);
+    FakeWebSocket.last().emitOpen();
+    FakeWebSocket.last().emitMessage(
+      JSON.stringify({ type: 'auth.ok', hosts: [], accountId: 'acc1', surfaceId: 'surf1' }),
+    );
+    const before = FakeWebSocket.instances.length;
+    FakeWebSocket.last().emitClose();
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+  });
+
   it('a reopen that finds no credential stops, rather than retrying for ever', () => {
     connectAndOpen();
     // The reconnect path re-reads the credential; clearing it mid-flight is the
@@ -1203,6 +1269,22 @@ describe('reconnect with backoff', () => {
   it('onerror does not itself change state (close follows)', () => {
     connectAndOpen();
     expect(() => FakeWebSocket.last().emitError()).not.toThrow();
+  });
+});
+
+describe('connect()', () => {
+  it('is idempotent: a second call neither opens a second socket nor stacks a listener', () => {
+    const ws = getWs();
+    ws.connect();
+    ws.connect();
+    expect(FakeWebSocket.instances.length).toBe(1);
+  });
+
+  it('can be started again after close()', () => {
+    const ws = connectAndOpen();
+    ws.close();
+    ws.connect();
+    expect(FakeWebSocket.instances.length).toBe(2);
   });
 });
 

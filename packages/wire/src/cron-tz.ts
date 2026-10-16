@@ -82,26 +82,68 @@ export function assertValidTimeZone(tz: string): void {
   }
 }
 
+// Names node-cron accepts in place of a number, case-insensitively, full or
+// three-letter: months are 1-based, weekdays 0-based from Sunday.
+const MONTH_NAMES = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+];
+const WEEKDAY_NAMES = [
+  'sunday',
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+];
+
+interface CronFieldBounds {
+  min: number;
+  max: number;
+  /** Names usable for a value, in order from `min`. */
+  names?: readonly string[];
+}
+
 /** Per-field numeric bounds for a standard 5-field cron `min hour dom mon dow`. */
-const CRON_FIELD_BOUNDS: ReadonlyArray<{ min: number; max: number }> = [
+const CRON_FIELD_BOUNDS: ReadonlyArray<CronFieldBounds> = [
   { min: 0, max: 59 }, // minute
   { min: 0, max: 23 }, // hour
   { min: 1, max: 31 }, // day-of-month
-  { min: 1, max: 12 }, // month
-  { min: 0, max: 7 }, // day-of-week (0 and 7 = Sunday)
+  { min: 1, max: 12, names: MONTH_NAMES }, // month
+  { min: 0, max: 7, names: WEEKDAY_NAMES }, // day-of-week (0 and 7 = Sunday)
 ];
 
 /** Validate a single integer is within [min,max]. */
-function inBounds(n: number, b: { min: number; max: number }): boolean {
+function inBounds(n: number, b: CronFieldBounds): boolean {
   return Number.isInteger(n) && n >= b.min && n <= b.max;
+}
+
+/** The number one value stands for — digits, or a name this field allows — else null. */
+function cronValue(term: string, b: CronFieldBounds): number | null {
+  if (/^\d+$/.test(term)) return Number(term);
+  const lower = term.toLowerCase();
+  const i = b.names?.findIndex((n) => n === lower || n.slice(0, 3) === lower) ?? -1;
+  return i === -1 ? null : b.min + i;
 }
 
 /**
  * Validate one cron field against its bounds. Supports `*`, single values,
  * ranges (`a-b`), lists (`a,b,c`), and steps (`*​/n`, `a-b/n`, `a/n`) — the
- * standard 5-field crontab grammar. Returns true iff well-formed and in range.
+ * standard 5-field crontab grammar — plus month and weekday names, as node-cron
+ * takes them. Returns true iff well-formed and in range.
  */
-function validCronField(field: string, b: { min: number; max: number }): boolean {
+function validCronField(field: string, b: CronFieldBounds): boolean {
   // Unreachable: the only caller (assertValidCron) builds `field` from
   // `expr.trim().split(/\s+/)`, which can never produce an empty string for
   // one of exactly 5 fields (a run of whitespace always collapses to a
@@ -127,8 +169,8 @@ function validCronField(field: string, b: { min: number; max: number }): boolean
     // Range `a-b` or single value.
     const bounds = rangePart.split('-');
     if (bounds.length === 1) {
-      if (!/^\d+$/.test(rangePart)) return false;
-      return inBounds(Number(rangePart), b);
+      const n = cronValue(rangePart, b);
+      return n !== null && inBounds(n, b);
     }
     if (bounds.length === 2) {
       const [lo, hi] = bounds;
@@ -136,9 +178,9 @@ function validCronField(field: string, b: { min: number; max: number }): boolean
       // destructure yields two defined strings.
       /* v8 ignore next */
       if (lo === undefined || hi === undefined) return false;
-      if (!/^\d+$/.test(lo) || !/^\d+$/.test(hi)) return false;
-      const loN = Number(lo);
-      const hiN = Number(hi);
+      const loN = cronValue(lo, b);
+      const hiN = cronValue(hi, b);
+      if (loN === null || hiN === null) return false;
       return inBounds(loN, b) && inBounds(hiN, b) && loN <= hiN;
     }
     return false;

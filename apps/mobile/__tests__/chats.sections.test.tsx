@@ -151,6 +151,23 @@ describe('items memo — folder grouping', () => {
     expect(hasText(r.root, 'Alpha folder chat')).toBe(true);
   });
 
+  it('orders folders by their path, so a folder always comes before one that merely extends its name', () => {
+    useChatStore
+      .getState()
+      .hydrate([
+        row({ chatId: 'f1', name: 'dash chat', folder: '/a-b' }),
+        row({ chatId: 'f2', name: 'space chat', folder: '/a b' }),
+        row({ chatId: 'f3', name: 'plain chat', folder: '/a' }),
+      ]);
+    const r = renderRN(<ChatsScreen />);
+    const texts = findAllHost(r.root, byType('Text')).map((t) =>
+      typeof t.children[0] === 'string' ? t.children[0] : '',
+    );
+    const headers = ['/a', '/a b', '/a-b'].map((h) => texts.indexOf(h));
+    expect(headers.every((i) => i >= 0)).toBe(true);
+    expect(headers).toEqual([...headers].sort((x, y) => x - y));
+  });
+
   it('sorts rows within a folder by lastUserActivity descending', () => {
     useChatStore
       .getState()
@@ -305,7 +322,7 @@ describe('Archived — rows fetched on open', () => {
         {
           chatId: 'a9',
           name: 'From the server',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/old',
           activity: 'idle',
           permissionMode: 'default',
@@ -347,5 +364,39 @@ describe('renderItem / keyExtractor — defensive branches unreachable via real 
       index: number,
     ) => string;
     expect(keyExtractor({ kind: 'pinned-row' }, 3)).toBe('r-undefined');
+  });
+});
+
+describe('empty states (spec/15 § Empty states)', () => {
+  const noChats = { archived: 0, snoozed: 0, hidden: 0, deleted: 0, automations: 0 };
+
+  it('a phone with no chats at all says so, and offers a new one', async () => {
+    countsSpy.mockResolvedValue(noChats);
+    const r = renderRN(<ChatsScreen />);
+    await actAsync(async () => undefined);
+    expect(hasText(r.root, 'No chats yet')).toBe(true);
+    expect(hasText(r.root, 'New chat')).toBe(true);
+  });
+
+  it('does not claim there are no chats while the archived count is still unknown', async () => {
+    countsSpy.mockReturnValue(new Promise(() => {}));
+    const r = renderRN(<ChatsScreen />);
+    await actAsync(async () => undefined);
+    expect(hasText(r.root, 'No chats yet')).toBe(false);
+  });
+
+  it('does not claim there are no chats when the only ones are archived', async () => {
+    countsSpy.mockResolvedValue({ ...noChats, archived: 2 });
+    const r = renderRN(<ChatsScreen />);
+    await actAsync(async () => undefined);
+    expect(hasText(r.root, 'No chats yet')).toBe(false);
+  });
+
+  it('is gone as soon as there is a chat', async () => {
+    countsSpy.mockResolvedValue(noChats);
+    useChatStore.getState().hydrate([row({ chatId: 'f1', name: 'A chat', folder: '/a' })]);
+    const r = renderRN(<ChatsScreen />);
+    await actAsync(async () => undefined);
+    expect(hasText(r.root, 'No chats yet')).toBe(false);
   });
 });

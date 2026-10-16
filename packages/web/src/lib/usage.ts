@@ -71,11 +71,26 @@ export function formatResetDetail(at: number): string {
   return `${local} · ${utc}`;
 }
 
+/** Compact local reset for usage tooltips — one clock, with its zone named. */
+export function formatResetLocal(at: number, now: number = Date.now()): string {
+  const d = new Date(at);
+  const sameDay = new Date(now).toDateString() === d.toDateString();
+  return new Intl.DateTimeFormat('en-GB', {
+    ...(sameDay ? {} : { weekday: 'short' }),
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'short',
+  })
+    .format(d)
+    .replace(',', '');
+}
+
 /** How long until an instant, coarsely — `in 28 min`, `in 3 h`, `now`. */
 export function formatUntil(at: number, now: number = Date.now()): string {
   const ms = at - now;
   if (ms <= 0) return 'now';
-  const min = Math.round(ms / 60_000);
+  const min = Math.max(1, Math.round(ms / 60_000));
   if (min < 60) return `in ${min} min`;
   const hours = ms / 3_600_000;
   if (hours < 48) return `in ${Math.round(hours)} h`;
@@ -133,6 +148,8 @@ export const EXTRA_USAGE_URL = 'https://claude.ai/settings/usage';
 
 /** Anthropic's reason code for an account that never bought the add-on. */
 export const OVERAGE_DISABLED_REASON = 'org_level_disabled_until';
+/** Anthropic's reason code when organisation policy prevents the add-on. */
+export const OVERAGE_ORG_DISABLED_REASON = 'org_level_disabled';
 
 /**
  * Extra usage being off, in the ONE sentence patch uses for it everywhere.
@@ -145,10 +162,11 @@ export const OVERAGE_DISABLED_REASON = 'org_level_disabled_until';
  * subscription has no organisation that did anything, and the sentence read as
  * an accusation about an account that was fine.
  */
-export const EXTRA_USAGE_OFF_TEXT = 'extra usage is not enabled — nothing has been overspent';
+export const EXTRA_USAGE_OFF_TEXT = 'Extra usage: disabled';
+export const EXTRA_USAGE_ORG_DISABLED_TEXT = 'Extra usage: disabled by organisation';
 
 /** The same wording as a standalone sentence, for a tooltip. */
-export const EXTRA_USAGE_OFF_SENTENCE = `${EXTRA_USAGE_OFF_TEXT.charAt(0).toUpperCase()}${EXTRA_USAGE_OFF_TEXT.slice(1)}.`;
+export const EXTRA_USAGE_OFF_SENTENCE = `${EXTRA_USAGE_OFF_TEXT}.`;
 
 /**
  * The pool that RAN OUT, if one has.
@@ -160,13 +178,16 @@ export const EXTRA_USAGE_OFF_SENTENCE = `${EXTRA_USAGE_OFF_TEXT.charAt(0).toUppe
  * started this: "Extra usage limit on Default", which names a limit nobody
  * reached and suggests no action.
  */
-export function blockingScope(usage: AccountUsage | undefined): UsageScope | undefined {
-  return refusingRateLimitScope(usage);
+export function blockingScope(
+  usage: AccountUsage | undefined,
+  now: number = Date.now(),
+): UsageScope | undefined {
+  return refusingRateLimitScope(usage, now);
 }
 
 /** True when any pool is refusing work. */
-export function isBlocked(usage: AccountUsage | undefined): boolean {
-  return blockingScope(usage) !== undefined;
+export function isBlocked(usage: AccountUsage | undefined, now: number = Date.now()): boolean {
+  return blockingScope(usage, now) !== undefined;
 }
 
 /**
@@ -185,12 +206,21 @@ export function summariseUsage(
   const present = SCOPE_ORDER.filter((s) => usage[s] !== undefined);
   if (present.length === 0) return null;
 
-  const blocking = blockingScope(usage);
+  const blocking = blockingScope(usage, now);
   const detail = present
     .map((s) => {
       const w = usage[s]!;
-      const reset = w.resetsAt !== undefined ? `, resets ${formatResetDetail(w.resetsAt)}` : '';
-      return `${SCOPE_LABEL[s]} ${formatUtilization(w)} (${w.status})${reset}`;
+      const state =
+        w.status === 'allowed'
+          ? ''
+          : w.status === 'allowed_warning'
+            ? ' · nearing limit'
+            : s === 'overage'
+              ? ' · unavailable'
+              : ' · blocked';
+      const reset =
+        w.resetsAt !== undefined ? ` · resets ${formatResetLocal(w.resetsAt, now)}` : '';
+      return `${SCOPE_LABEL[s]} ${formatUtilization(w)}${state}${reset}`;
     })
     .join('\n');
 
@@ -206,14 +236,16 @@ export function summariseUsage(
     };
   }
 
-  // Not blocked: report the pool closest to its limit, since that is the one
-  // that will stop work first. A pool with no figure cannot be compared, so it
-  // loses to one that has a figure rather than being treated as empty.
-  const worst = present.reduce((acc, s) =>
+  // Not blocked: report the pool that will stop work first. A pool Anthropic
+  // itself is warning about comes before one that is merely fuller, and a pool
+  // with no figure loses to one that has a figure rather than reading as empty.
+  const warned = present.filter((s) => usage[s]?.status === 'allowed_warning');
+  const candidates = warned.length > 0 ? warned : present;
+  const worst = candidates.reduce((acc, s) =>
     (usage[s]?.utilization ?? -1) > (usage[acc]?.utilization ?? -1) ? s : acc,
   );
   const w = usage[worst]!;
-  const level = (w.utilization ?? 0) >= 0.8 ? 'warn' : 'ok';
+  const level = warned.length > 0 || (w.utilization ?? 0) >= 0.8 ? 'warn' : 'ok';
   return {
     text: `${SCOPE_LABEL[worst]} ${formatUtilization(w)}`,
     title: detail,
@@ -272,13 +304,14 @@ export interface HostOutage {
 
 export function hostOutage(
   accounts: readonly { id: string; label: string; connected: boolean; usage?: AccountUsage }[],
+  now: number = Date.now(),
 ): HostOutage | null {
   const connected = accounts.filter((a) => a.connected);
   if (connected.length === 0) return null;
 
   const spent: SpentAccount[] = [];
   for (const a of connected) {
-    const scope = blockingScope(a.usage);
+    const scope = blockingScope(a.usage, now);
     // No reading, or a reading that says this account is fine: either way we
     // cannot claim the machine is out.
     if (scope === undefined) return null;
@@ -310,7 +343,7 @@ export function listLabels(labels: readonly string[]): string {
 /** `850`, `46k`, `1.2M` — a token count at a glance. */
 export function formatTokens(n: number): string {
   if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  if (Math.round(n / 1000) < 1000) return `${Math.round(n / 1000)}k`;
   const m = n / 1_000_000;
   return `${m < 10 ? m.toFixed(1).replace(/\.0$/, '') : Math.round(m)}M`;
 }
@@ -348,20 +381,15 @@ export function summariseContext(ctx: ChatContextUsage | null | undefined): {
   };
 }
 
-const STRATEGY_NAME = {
-  priority: 'Priority order',
-  'round-robin': 'Round robin',
-  'soonest-reset': 'Soonest reset',
-  'least-used': 'Least used',
-} as const;
-
 /**
- * The account strategy and where the exhaustion has got, in one line:
- * "Round robin — all 3 accounts out, next resets 14:00 (personal)".
+ * Where the other accounts stand, in plain words — the routing strategy is a
+ * Settings concern and "1 of 2 accounts out" never said what to expect.
+ * "Another account is still available." / "All 3 accounts are out. The first
+ * is back at 14:00 (personal)." Empty when there is nothing to add: a single
+ * account that is out is the headline already.
  */
 export function routingSentence(
   r: {
-    strategy: keyof typeof STRATEGY_NAME;
     accounts: number;
     exhausted: number;
     nextResetsAt?: number;
@@ -369,17 +397,18 @@ export function routingSentence(
   },
   now: number = Date.now(),
 ): string {
-  const state =
-    r.exhausted >= r.accounts
-      ? r.accounts === 1
-        ? 'the account is out'
-        : `all ${r.accounts} accounts out`
-      : `${r.exhausted} of ${r.accounts} accounts out`;
+  if (r.exhausted < r.accounts) {
+    const left = r.accounts - r.exhausted;
+    return left === 1
+      ? 'Another account is still available.'
+      : `${left} other accounts are still available.`;
+  }
+  if (r.accounts === 1) return '';
   const next =
     r.nextResetsAt === undefined
       ? ''
-      : `, next resets ${formatReset(r.nextResetsAt, now)}${r.nextLabel ? ` (${r.nextLabel})` : ''}`;
-  return `${STRATEGY_NAME[r.strategy]} — ${state}${next}`;
+      : ` The first is back ${formatReset(r.nextResetsAt, now)}${r.nextLabel ? ` (${r.nextLabel})` : ''}.`;
+  return `All ${r.accounts} accounts are out.${next}`;
 }
 
 /**

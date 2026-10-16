@@ -2,17 +2,20 @@
 // the top linking to that job; an ordinary chat carries none.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { setActiveWs } from '../api/ws.js';
+import { api } from '../api/rest.js';
 
 vi.mock('../api/rest.js', () => ({
   api: {
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getFileContent: vi.fn(async () => ({ path: '', content: '', size: 0 })),
+    getJob: vi.fn(async () => ({ id: 'j_bus', name: 'bus check' })),
     getFileContentAtHead: vi.fn(async () => ({ path: '', content: '', size: 0 })),
   },
 }));
@@ -21,7 +24,7 @@ function seed(jobId: string | null): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'bus check',
       folder: 'foo',
@@ -37,12 +40,15 @@ function seed(jobId: string | null): void {
 }
 
 function renderChat(): ReturnType<typeof render> {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={['/chats/c1']}>
-      <Routes>
-        <Route path="/chats/:chatId" element={<ChatRoute ws={null} />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={['/chats/c1']}>
+        <Routes>
+          <Route path="/chats/:chatId" element={<ChatRoute ws={null} />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -61,13 +67,24 @@ describe('ChatRoute — job bar', () => {
   it('links a job-created chat to its job', () => {
     seed('j_bus');
     renderChat();
+    expect(screen.queryByTestId('job-bar')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('action-hamburger'));
     const link = screen.getByTestId('job-bar-link');
-    expect(link).toHaveAttribute('href', '/jobs/j_bus');
+    expect(link).toBeInTheDocument();
+  });
+
+  it('names the job that ran the chat', async () => {
+    seed('j_bus');
+    renderChat();
+    fireEvent.click(screen.getByTestId('action-hamburger'));
+    expect(await screen.findByText('Run by "bus check" job')).toBeInTheDocument();
+    expect(api.getJob).toHaveBeenCalledWith('j_bus');
   });
 
   it('shows no bar on an ordinary chat', () => {
     seed(null);
     renderChat();
-    expect(screen.queryByTestId('job-bar')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('action-hamburger'));
+    expect(screen.queryByTestId('job-bar-link')).not.toBeInTheDocument();
   });
 });

@@ -8,13 +8,17 @@ import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { patchShared } from './sharedWrite.js';
 import { Group, Row, SettingsPage } from './ui.js';
+import { UsageHistory } from './UsageHistory.js';
 import { AddChatGPTAccount, AddClaudeAccount, SharedAccounts } from './SharedAccounts.js';
 
 export function UsagePage(): JSX.Element {
   const autoResume = usePreferencesStore((s) => s.preferences.autoResumeRateLimit);
+  const titleGen = usePreferencesStore((s) => s.preferences.titleGenerationEnabled);
+  const statusGen = usePreferencesStore((s) => s.preferences.statusGenerationEnabled);
   const loaded = usePreferencesStore((s) => s.loaded);
   return (
     <SettingsPage title="Usage" testid="settings-usage">
+      <UsageHistory />
       <Group label="Claude" testid="settings-claude" after={<AddClaudeAccount />}>
         <SharedAccounts backendId="claude-code" />
       </Group>
@@ -28,6 +32,26 @@ export function UsagePage(): JSX.Element {
             disabled={!loaded}
             onChange={(next) => void patchShared('auto-resume', { autoResumeRateLimit: next })}
             testid="auto-resume-rate-limit-toggle"
+          />
+        </Row>
+        <Row title="Generate chat titles" testid="title-generation">
+          <Toggle
+            checked={titleGen}
+            disabled={!loaded}
+            onChange={(next) =>
+              void patchShared('title generation', { titleGenerationEnabled: next })
+            }
+            testid="title-generation-toggle"
+          />
+        </Row>
+        <Row title="Summarise chat status after each turn" testid="status-generation">
+          <Toggle
+            checked={statusGen}
+            disabled={!loaded}
+            onChange={(next) =>
+              void patchShared('status generation', { statusGenerationEnabled: next })
+            }
+            testid="status-generation-toggle"
           />
         </Row>
       </Group>

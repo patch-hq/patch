@@ -1,6 +1,6 @@
 // Whether this phone already knows a voice surface cannot run for a chat: the
 // surface is configured onto a hosted backend and the chat's host has reported
-// (`daemon.host.voiceKeys`) that it holds no key for it. The host is the
+// (`host.host.voiceKeys`) that it holds no key for it. The host is the
 // authority and refuses such a session itself with the same sentence; this
 // only lets a gesture with no session behind it until release — a voice note,
 // a dictation — fail at the press instead of after the user has spoken.
@@ -17,9 +17,9 @@ export function voiceKeyRefusal(chatId: string, surface: VoiceSurface): string |
   if (config === null) return null;
   const { backend } = voiceCellFor(config, surface);
   if (backend === 'local') return null;
-  const daemonId = useChatStore.getState().chats[chatId]?.daemonId;
-  if (!daemonId) return null;
-  const keys = usePresenceStore.getState().hosts[daemonId]?.host?.voiceKeys;
+  const hostId = useChatStore.getState().chats[chatId]?.hostId;
+  if (!hostId) return null;
+  const keys = usePresenceStore.getState().hosts[hostId]?.host?.voiceKeys;
   if (!keys || keys[backend]) return null;
   return voiceKeyMissingMessage(surface, backend);
 }

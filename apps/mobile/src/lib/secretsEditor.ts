@@ -16,7 +16,7 @@ export interface SecretEntry {
   value: string;
 }
 
-/** Env-var-style identifier — must match packages/daemon/src/secrets.ts. */
+/** Env-var-style identifier — must match packages/host/src/secrets.ts. */
 export const SECRET_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export interface SecretValidation {

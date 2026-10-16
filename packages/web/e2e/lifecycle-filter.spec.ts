@@ -17,7 +17,7 @@ function row(chatId: string, name: string, lastUpdated: number): unknown {
     snoozedUntil: null,
     hidden: false,
     lastUpdated,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     jobId: null,
     statusSummary: null,

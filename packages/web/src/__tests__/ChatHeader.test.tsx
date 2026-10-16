@@ -52,7 +52,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
@@ -89,6 +89,7 @@ describe('ChatHeader', () => {
     // prior test's open kebab doesn't toggle the next one closed.
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
+    useUiStore.getState().closeSnoozeSheet();
     // Clear any confirm left pending by a prior test (resolves its promise).
     useUiStore.getState().resolveConfirm(false);
     vi.mocked(api.deleteChat)
@@ -146,7 +147,7 @@ describe('ChatHeader', () => {
 
   it('shows folder · host only in the title hover, never as a line in the bar', () => {
     render(
-      <ChatHeader row={row({ daemonId: 'ubuntu-4gb-hel1-1', folder: '~/projects/portfolio' })} />,
+      <ChatHeader row={row({ hostId: 'ubuntu-4gb-hel1-1', folder: '~/projects/portfolio' })} />,
     );
     const title = screen.getByTestId('chat-title');
     expect(title.textContent).toBe('fix layout');
@@ -305,13 +306,14 @@ describe('ChatHeader', () => {
     it('Files link opens the Files tab, Terminal link opens the terminal tab', () => {
       useLayoutStore.getState()._reset();
       render(<ChatHeader row={row()} />);
-      const links = screen.getByTestId('chat-quicklinks');
-      expect(links.previousElementSibling).toBe(screen.getByTestId('chat-head'));
-      fireEvent.click(within(links).getByTestId('quicklink-files'));
+      expect(screen.queryByTestId('chat-quicklinks')).toBeNull();
+      fireEvent.click(screen.getByTestId('action-hamburger'));
+      fireEvent.click(screen.getByTestId('quicklink-files'));
       expect(
         useLayoutStore.getState().findTab({ kind: 'page', page: 'files', chatId: 'c1' }),
       ).not.toBeNull();
-      fireEvent.click(within(links).getByTestId('quicklink-terminal'));
+      fireEvent.click(screen.getByTestId('action-hamburger'));
+      fireEvent.click(screen.getByTestId('quicklink-terminal'));
       expect(useLayoutStore.getState().findTab({ kind: 'terminal', chatId: 'c1' })).not.toBeNull();
     });
   });
@@ -502,7 +504,7 @@ describe('ChatHeader', () => {
   it('archives the chat optimistically and persists via the API', async () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     render(<ChatHeader row={row()} />);
     fireEvent.click(screen.getByTestId('action-archive'));
     expect(useChatStore.getState().chats['c1']?.status).toBe('archived');
@@ -513,7 +515,7 @@ describe('ChatHeader', () => {
     vi.mocked(api.archiveChat).mockRejectedValueOnce(new Error('network down'));
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     render(<ChatHeader row={row()} />);
     fireEvent.click(screen.getByTestId('action-archive'));
     expect(useChatStore.getState().chats['c1']?.status).toBe('archived'); // optimistic
@@ -528,7 +530,7 @@ describe('ChatHeader', () => {
   it('reads as Unarchive and unarchives when the chat is already archived', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     render(<ChatHeader row={row({ status: 'archived' })} />);
     const btn = screen.getByTestId('action-archive');
     expect(btn.getAttribute('aria-label')).toBe('Unarchive chat');
@@ -594,7 +596,7 @@ describe('ChatHeader', () => {
   it('handleDelete soft-deletes the chat on confirm + API success', async () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     render(
       <>
         <ChatHeader row={row()} />
@@ -616,7 +618,7 @@ describe('ChatHeader', () => {
     vi.mocked(api.deleteChat).mockRejectedValueOnce(new Error('server error'));
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     render(
       <>
         <ChatHeader row={row()} />
@@ -695,7 +697,7 @@ describe('ChatHeader', () => {
     it('Archive behaves exactly like the rail icon: flips status via the API', () => {
       useChatStore
         .getState()
-        .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+        .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
       render(<ChatHeader row={row()} />);
       openHamburger();
       fireEvent.click(screen.getByTestId('hamburger-archive'));
@@ -739,39 +741,39 @@ describe('ChatHeader', () => {
     });
   });
 
-  // An optimistically-seeded row carries `daemonId: ''` and `folder: ''`
+  // An optimistically-seeded row carries `hostId: ''` and `folder: ''`
   // (chatStore's emptyRow). An unknown part is omitted from the tooltip with
   // its separator; with nothing known there is no tooltip at all.
   describe('title hover omits unknown parts', () => {
     const hover = (): string | null => screen.getByTestId('chat-title').getAttribute('title');
 
     it('a chat with no folder hovers as the host alone', () => {
-      render(<ChatHeader row={row({ daemonId: 'dev-host', folder: '' })} />);
+      render(<ChatHeader row={row({ hostId: 'dev-host', folder: '' })} />);
       expect(hover()).toBe('dev-host');
     });
 
     it('a bare "." folder is not a folder', () => {
-      render(<ChatHeader row={row({ daemonId: 'dev-host', folder: '.' })} />);
+      render(<ChatHeader row={row({ hostId: 'dev-host', folder: '.' })} />);
       expect(hover()).toBe('dev-host');
     });
 
     it('a "./name" folder still resolves to its basename', () => {
-      render(<ChatHeader row={row({ daemonId: 'dev-host', folder: './proj' })} />);
+      render(<ChatHeader row={row({ hostId: 'dev-host', folder: './proj' })} />);
       expect(hover()).toBe('proj · dev-host');
     });
 
     it('an unnamed host hovers as the folder alone', () => {
-      render(<ChatHeader row={row({ daemonId: '', folder: '~/projects/foo' })} />);
+      render(<ChatHeader row={row({ hostId: '', folder: '~/projects/foo' })} />);
       expect(hover()).toBe('foo');
     });
 
     it('an optimistic row (no host, no folder) has no tooltip', () => {
-      render(<ChatHeader row={row({ daemonId: '', folder: '' })} />);
+      render(<ChatHeader row={row({ hostId: '', folder: '' })} />);
       expect(hover()).toBeNull();
     });
 
     it('draws no tooltip from the model alone', () => {
-      render(<ChatHeader row={row({ daemonId: '', folder: '', model: 'claude-opus-4' })} />);
+      render(<ChatHeader row={row({ hostId: '', folder: '', model: 'claude-opus-4' })} />);
       expect(hover()).toBeNull();
     });
   });
@@ -889,7 +891,7 @@ describe('ChatHeader', () => {
     });
   });
 
-  // spec/04 § Goals — "A finished goal stays viewable from the chat header".
+  // spec/04 § Goals — "A finished goal stays viewable in the top bar".
   describe('finished goal indicator', () => {
     const lastGoal = {
       condition: 'Ship the release by Friday',
@@ -901,34 +903,9 @@ describe('ChatHeader', () => {
       reason: 'All tests pass and the release is tagged',
     };
 
-    it('shows nothing when no goal has ever finished', () => {
-      render(<ChatHeader row={row()} />);
-      expect(screen.queryByTestId('finished-goal-indicator')).not.toBeInTheDocument();
-    });
-
-    it('shows nothing while a goal is still active (the bar owns it instead)', () => {
-      render(<ChatHeader row={row({ goal: 'still going', lastGoal })} />);
-      expect(screen.queryByTestId('finished-goal-indicator')).not.toBeInTheDocument();
-    });
-
-    it('shows a collapsed "Goal met" once goal clears, expanding to condition/duration/turns/tokens/reason', () => {
+    it('no longer renders a finished-goal chip in the header (it lives in the top bar)', () => {
       render(<ChatHeader row={row({ goal: null, lastGoal })} />);
-      expect(screen.getByTestId('finished-goal-summary')).toHaveTextContent('Goal met');
-      expect(screen.queryByTestId('finished-goal-detail')).not.toBeInTheDocument();
-      fireEvent.click(screen.getByTestId('finished-goal-summary'));
-      const detail = screen.getByTestId('finished-goal-detail');
-      expect(detail).toHaveTextContent('Ship the release by Friday');
-      expect(detail).toHaveTextContent('9m');
-      expect(detail).toHaveTextContent('3 turns');
-      expect(detail).toHaveTextContent('8.2k tokens');
-      expect(detail).toHaveTextContent('All tests pass and the release is tagged');
-    });
-
-    it('labels an impossible outcome distinctly from met', () => {
-      render(
-        <ChatHeader row={row({ goal: null, lastGoal: { ...lastGoal, outcome: 'impossible' } })} />,
-      );
-      expect(screen.getByTestId('finished-goal-summary')).toHaveTextContent('Goal impossible');
+      expect(screen.queryByTestId('finished-goal-indicator')).not.toBeInTheDocument();
     });
   });
 
@@ -936,19 +913,20 @@ describe('ChatHeader', () => {
   // div around a 32px icon-only button, so clicking the word "Snooze" (or any
   // of the row but the clock) did nothing, unlike every sibling item.
   describe('Snooze row in the menus is one whole-row menu item', () => {
-    it('⋯ menu: clicking the Snooze label opens the preset pop-up', () => {
+    it('⋯ menu: clicking the Snooze label opens the Snooze sheet and closes the menu', () => {
       render(<ChatHeader row={row()} />);
       openMore();
       fireEvent.click(screen.getByRole('menuitem', { name: /snooze/i }));
-      expect(screen.getByTestId('snooze-menu')).toBeInTheDocument();
+      expect(useUiStore.getState().snoozeSheet).toEqual({ kind: 'chat', chatId: 'c1' });
+      expect(screen.queryByTestId('menu-snooze-row')).toBeNull();
     });
 
-    it('hamburger menu: clicking the Snooze label opens the preset pop-up', () => {
+    it('hamburger menu: clicking the Snooze label opens the Snooze sheet', () => {
       render(<ChatHeader row={row()} />);
       fireEvent.click(screen.getByTestId('action-hamburger'));
       const hm = screen.getByTestId('head-hamburger-menu');
       fireEvent.click(within(hm).getByRole('menuitem', { name: /snooze/i }));
-      expect(screen.getByTestId('snooze-menu')).toBeInTheDocument();
+      expect(useUiStore.getState().snoozeSheet).toEqual({ kind: 'chat', chatId: 'c1' });
     });
 
     it('the row trigger is a head-menu-item, not the icon-only head-action', () => {

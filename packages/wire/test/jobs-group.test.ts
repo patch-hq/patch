@@ -11,7 +11,7 @@
 import { describe, test, expect } from 'vitest';
 import { Job, JobCreateBody, JobPatchBody } from '../src/jobs.js';
 
-const ACTION = { type: 'spawn', daemonId: 'host-a', folder: '/tmp', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'host-a', folder: '/tmp', prompt: 'go' } as const;
 const TRIGGER = { type: 'cron', expression: '0 9 * * *' } as const;
 
 const STORED_JOB = {

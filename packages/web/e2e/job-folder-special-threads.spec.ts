@@ -21,15 +21,15 @@ const THREAD_FOLDERS = ['/home/tom/.patch/threads/manager', '/home/tom/.patch/th
 const HOSTS = {
   hosts: [
     {
-      daemonId: 'd1',
+      hostId: 'd1',
       roots: ['/home/tom/projects/alpha'],
       recent: ['/daemon-home/threads/manager', '/home/tom/projects/beta'],
     },
   ],
 };
 
-function value(daemonId: string, folder: string): string {
-  return JSON.stringify([daemonId, folder]);
+function value(hostId: string, folder: string): string {
+  return JSON.stringify([hostId, folder]);
 }
 
 async function stub(page: import('@playwright/test').Page): Promise<void> {

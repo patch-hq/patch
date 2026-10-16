@@ -27,7 +27,7 @@
 //   - ↵ / Esc on the IncomingCallBanner.
 //   - 1 / 2 / 3 inside a focused permission card.
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useUiStore } from '../stores/uiStore.js';
 import { matchesChord } from './dictateChord.js';
@@ -288,11 +288,15 @@ function scopeAllows(scope: ShortcutScope, e: KeyboardEvent, state: ShortcutScop
 }
 
 export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeState): void {
+  // Null when the chord is up; otherwise the moment it went down, so the
+  // release can report how long it was held. In refs, not the effect: the
+  // effect re-runs whenever `handlers` is a new object (every render of a
+  // caller passing it inline), and a hold in progress must survive that.
+  const dictateHeldRef = useRef<{ at: number | null; code: string }>({ at: null, code: '' });
+  const ctrlSpaceHeldRef = useRef<{ at: number | null }>({ at: null });
   useEffect(() => {
-    // Null when the chord is up; otherwise the moment it went down, so the
-    // release can report how long it was held.
-    const dictateHeld: { at: number | null; code: string } = { at: null, code: '' };
-    const ctrlSpaceHeld: { at: number | null } = { at: null };
+    const dictateHeld = dictateHeldRef.current;
+    const ctrlSpaceHeld = ctrlSpaceHeldRef.current;
 
     function down(e: KeyboardEvent): void {
       // First, so a chord the user picked is never shadowed by a built-in one.
@@ -310,7 +314,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         handlers.onCheatSheet();
         return;
       }
-      if (isMod(e) && e.key === 'k') {
+      if (isMod(e) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         handlers.onSearch('k');
         return;
@@ -401,7 +405,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         handlers.onArchiveCurrent();
         return;
       }
-      if (isMod(e) && e.key === 'p') {
+      if (isMod(e) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         handlers.onFilePicker();
         return;
@@ -423,7 +427,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         handlers.onToggleTerminal();
         return;
       }
-      if (e.altKey && (e.key === 'e' || e.key === 'E')) {
+      if (e.altKey && (e.code === 'KeyE' || e.key.toLowerCase() === 'e')) {
         e.preventDefault();
         handlers.onToggleEditor();
         return;

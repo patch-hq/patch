@@ -206,3 +206,23 @@ describe('isQuestionRowCoveredByCard', () => {
     expect(isQuestionRowCoveredByCard(result, [denied, call, result])).toBe(false);
   });
 });
+
+describe('isQuestionRowCoveredByCard with several questions in one chat', () => {
+  it('judges a result by the card just before it, not the first card ever', () => {
+    const approved = {
+      kind: 'permission',
+      tool: 'AskUserQuestion',
+      seq: 5,
+      permissionResolved: 'approve',
+    };
+    const denied = {
+      kind: 'permission',
+      tool: 'AskUserQuestion',
+      seq: 10,
+      permissionResolved: 'deny',
+    };
+    const result = { kind: 'tool_result', tool: 'AskUserQuestion', seq: 12 };
+    // The second question was denied: its result row carries the reason and stays.
+    expect(isQuestionRowCoveredByCard(result, [approved, denied, result])).toBe(false);
+  });
+});

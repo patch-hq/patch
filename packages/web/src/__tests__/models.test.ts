@@ -54,7 +54,7 @@ describe('model catalogue', () => {
     await loadModels('host-a');
 
     const firstCall = fetchMock.mock.calls[0] as unknown as unknown[];
-    expect(String(firstCall[0])).toBe('/api/models?daemonId=host-a');
+    expect(String(firstCall[0])).toBe('/api/models?hostId=host-a');
     const cat = getModelCatalog();
     expect(cat.status).toBe('ready');
     expect(cat.models.map((m) => m.id)).toEqual(['claude-opus-5', 'claude-sonnet-5']);
@@ -95,6 +95,7 @@ describe('model catalogue', () => {
 describe('no surface-local model default', () => {
   it('exports no default model id and no surface-local last-used accessors', () => {
     expect(Object.keys(models).sort()).toEqual([
+      'RECENT_MODEL_COUNT',
       'getModelCatalog',
       'loadModels',
       'refreshModelsForHost',
@@ -122,7 +123,7 @@ describe('no surface-local model default', () => {
   });
 });
 
-// The catalogue is per MACHINE. The web asked `/api/models` with no daemonId,
+// The catalogue is per MACHINE. The web asked `/api/models` with no hostId,
 // which the server rejects (`ModelsQuery` is strict), so the picker showed
 // "Couldn't load models — invalid query" and offered nothing.
 describe('the catalogue is per machine', () => {
@@ -136,7 +137,7 @@ describe('the catalogue is per machine', () => {
     );
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     await loadModels('host-b', true);
-    expect(String(fetchMock.mock.lastCall?.[0])).toContain('daemonId=host-b');
+    expect(String(fetchMock.mock.lastCall?.[0])).toContain('hostId=host-b');
   });
 
   it('refuses to ask without a machine, and says why', async () => {
@@ -160,7 +161,56 @@ describe('the catalogue is per machine', () => {
     await loadModels('host-a', true);
     await loadModels('host-b');
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.lastCall?.[0])).toContain('daemonId=host-b');
+    expect(String(fetchMock.mock.lastCall?.[0])).toContain('hostId=host-b');
+  });
+
+  it('ignores a slower answer for a machine that is no longer the current one', async () => {
+    const pending = new Map<string, (models: { id: string; label: string }[]) => void>();
+    const fetchMock = vi.fn(
+      (url: string | URL | Request) =>
+        new Promise<Response>((resolve) => {
+          const host = /hostId=([^&]+)/.exec(String(url))?.[1] ?? '';
+          pending.set(host, (list) =>
+            resolve(new Response(JSON.stringify({ models: list }), { status: 200 })),
+          );
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const a = loadModels('host-a', true);
+    const b = loadModels('host-b');
+    await vi.waitFor(() => expect(pending.size).toBe(2));
+    pending.get('host-b')?.([{ id: 'b-model', label: 'B' }]);
+    await b;
+    pending.get('host-a')?.([{ id: 'a-model', label: 'A' }]);
+    await a;
+    expect(getModelCatalog().status).toBe('ready');
+    expect(getModelCatalog().models.map((m) => m.id)).toEqual(['b-model']);
+  });
+
+  it("does not let a superseded load clear the current machine's in-flight request", async () => {
+    const pending = new Map<string, (models: { id: string; label: string }[]) => void>();
+    const fetchMock = vi.fn(
+      (url: string | URL | Request) =>
+        new Promise<Response>((resolve) => {
+          const host = /hostId=([^&]+)/.exec(String(url))?.[1] ?? '';
+          pending.set(host, (list) =>
+            resolve(new Response(JSON.stringify({ models: list }), { status: 200 })),
+          );
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const a = loadModels('host-a', true);
+    const b = loadModels('host-b');
+    await vi.waitFor(() => expect(pending.size).toBe(2));
+    pending.get('host-a')?.([{ id: 'a-model', label: 'A' }]);
+    await a;
+    // host-b is still loading; a second caller must share its request.
+    expect(getModelCatalog().status).toBe('loading');
+    void loadModels('host-b', true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    pending.get('host-b')?.([{ id: 'b-model', label: 'B' }]);
+    await b;
+    expect(getModelCatalog().models.map((m) => m.id)).toEqual(['b-model']);
   });
 });
 

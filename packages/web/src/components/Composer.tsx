@@ -1,4 +1,3 @@
-import { accountConnectedForModel } from '@patch/wire';
 // Composer — multi-line input. ↵ (or ⌘↵ / Ctrl↵) sends; while a turn is
 // running a send queues behind it and never interrupts it (spec/04 § Message
 // queueing). Disabled while WS is offline (per spec/14 ## Offline / error
@@ -43,15 +42,31 @@ import {
 import { createPortal } from 'react-dom';
 import { ContextRing } from './ContextRing.js';
 import { ChatModelControl } from './ChatModelControl.js';
-import { Mic, Send, Square, Paperclip, Phone, FileText, Pencil, AudioLines } from 'lucide-react';
+import {
+  Mic,
+  ListPlus,
+  Send,
+  Square,
+  Paperclip,
+  PenLine,
+  Phone,
+  FileText,
+  Pencil,
+  AudioLines,
+  Clock,
+  Zap,
+} from 'lucide-react';
 import { endMeeting, startMeeting } from '../lib/meetingControl.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
 import { CloseIcon } from './icons.js';
+import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
 import { ImageAnnotator } from './ImageAnnotator.js';
+import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
 import type { PermissionMode } from '@patch/wire';
-import { CLAUDE_BACKEND_ID, permissionModesFor } from '@patch/wire';
-import { hostAccount, usePresenceStore } from '../stores/presenceStore.js';
+import { permissionModesFor } from '@patch/wire';
+import { usePresenceStore } from '../stores/presenceStore.js';
+import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
@@ -77,7 +92,9 @@ import {
 } from '../lib/voiceRecorder.js';
 import { startDictationPreview, type DictationPreview } from '../lib/dictationPreview.js';
 import { registerComposerMic } from '../lib/composerMic.js';
+import { startDictationMode, type DictationMode } from '../lib/dictationMode.js';
 import type { OutgoingFile } from '../lib/sendQueue.js';
+import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { getLastUsedSkill, setLastUsedSkill, orderSkillsByLastUsed } from '../lib/lastUsedSkill.js';
 import { rankByQuery } from '../lib/skillMatch.js';
 import {
@@ -237,7 +254,7 @@ export interface ComposerProps {
    * yet — a brand-new chat with no folder chosen — and nothing about a
    * credential can be asserted, so sending is not blocked on that ground.
    */
-  daemonId: string | null;
+  hostId: string | null;
   selectedModel?: string;
   /**
    * The chat's folder — sources the skill autocomplete (`/` menu). Omitted for
@@ -260,6 +277,7 @@ export interface ComposerProps {
     message: string,
     files?: OutgoingFile[],
     chatId?: string,
+    opts?: { afterTurn?: boolean; interrupt?: boolean },
   ): void | boolean | Promise<void | boolean>;
   /**
    * Resolve the REAL chatId to upload/send to when `chatId` is a placeholder
@@ -271,6 +289,21 @@ export interface ComposerProps {
    * new"). Normal chats don't pass this — `chatId` is already real.
    */
   resolveChatId?(): Promise<string | null>;
+  /**
+   * Right-click ▸ "Scheduled send": deliver `message` into the chat at `at` (ISO
+   * timestamp) through the host's durable one-shot wake. Rejecting shows the
+   * error in place and keeps the text. Omitted for surfaces that can't schedule
+   * (a not-yet-created chat), which hides the item.
+   */
+  onScheduleSend?(message: string, at: string): Promise<void>;
+  /**
+   * Right-click ▸ "Add to todo list": queue the composer's whole input (text and
+   * files) as an item on the chat's task list instead of sending it, so it runs
+   * as its own turn when the list reaches it. Resolve `false` (error already
+   * surfaced) to keep the input in the composer. Omitted where there is no chat
+   * to hold a list yet.
+   */
+  onAddToTodo?(message: string, files: OutgoingFile[]): Promise<boolean>;
   /**
    * When provided, the mic runs in NOTE mode: it fires this to start a voice
    * NOTE (the overlay-driven, fire-a-turn flow) instead of transcribing into the
@@ -298,6 +331,8 @@ export interface ComposerProps {
   transcribeClip?(clip: Blob): Promise<{ transcript: string }>;
   /** Test seam (transcribe mode): inject the live-partial preview session. */
   previewFactory?: typeof startDictationPreview;
+  /** Test seam (transcribe mode): inject the dictation-mode session factory. */
+  dictationModeFactory?: typeof startDictationMode;
   /**
    * Put the cursor in the input on mount (spec/14 § Composer — opening a chat
    * puts the cursor in the composer; § New chat). Skipped while offline, and
@@ -394,16 +429,19 @@ function focusIsClaimed(): boolean {
 export const Composer = forwardRef(function Composer(
   {
     chatId,
-    daemonId,
+    hostId,
     folder,
     onSend,
     selectedModel,
     resolveChatId,
+    onScheduleSend,
+    onAddToTodo,
     onStartVoiceNote,
     onStartCall,
     recorderFactory,
     transcribeClip,
     previewFactory,
+    dictationModeFactory,
     autoFocus = false,
     initialValue,
     onValueChange,
@@ -417,32 +455,25 @@ export const Composer = forwardRef(function Composer(
   ref: Ref<ComposerHandle>,
 ): JSX.Element {
   const connection = usePresenceStore((s) => s.connection);
-  const daemonOnline = usePresenceStore((s) => s.daemonOnline);
+  const hostOnline = usePresenceStore((s) => s.hostOnline);
   const offline = connection !== 'connected';
-  // The credential that gates THIS chat is the one on the host it runs on
-  // (spec/10 § Surface in Settings). An account-wide reading blocked sending in
-  // a chat on a healthy machine as soon as any other machine reported itself
-  // logged out.
+  // Provider accounts are the user's, shared by every host (spec/10), so what
+  // gates sending is whether any account is connected for this model, never
+  // which machine the chat runs on.
   const storedModel = useChatStore((s) => s.chats[chatId]?.model);
   const accountModel = selectedModel ?? storedModel;
-  const claudeAccount = usePresenceStore((s) =>
-    hostAccount(
-      s.hosts,
-      daemonId,
-      accountModel?.startsWith('openai/') ? 'codex' : CLAUDE_BACKEND_ID,
-    ),
-  );
+  const claudeDisconnected =
+    usePreferencesStore((s) => providerConnectedForModel(s.shared, accountModel)) === false;
   // Text sends stay enabled while the host is offline — they QUEUE and deliver
   // on reconnect (spec/12 + spec/14 § Daemon-offline UX). Only real-time-only
   // audio controls (voice note/call) can't be queued, so they disable with a
   // daemon-offline reason. `offline` (WS link down) still disables voice/attach
   // — there's nothing to upload/stream into.
-  const voiceDisabled = offline || !daemonOnline;
+  const voiceDisabled = offline || !hostOnline;
   // A missing Claude credential is NOT like daemon-offline. Daemon-offline queues
   // the text and delivers it on reconnect, so sending stays enabled; with no
   // credential the turn can never run, so accepting the message would be a lie.
   // Disabling here is what stops "new chat cannot work but doesn't say so".
-  const claudeDisconnected = !accountConnectedForModel(claudeAccount, accountModel);
   // Attach/voice need a live link regardless of chat state (upload-on-send /
   // real-time audio have nothing to queue into).
   const linkOrCredentialBlocked = offline || claudeDisconnected;
@@ -478,6 +509,10 @@ export const Composer = forwardRef(function Composer(
   // join its transcript onto whatever is in the box by then.
   const valueRef = useRef(value);
   valueRef.current = value;
+  // spec/14 § Composer — quotes: leading `> ` blocks of the draft are drawn as
+  // cards above the input, and the textarea (with its caret, `/` menu and
+  // chips) works on the remaining `body` only.
+  const { quotes, body } = useMemo(() => splitQuotes(value), [value]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Where the caret sits, kept in sync so the `/` menu (and chip rendering)
   // can reason about the token the cursor is actually IN, anywhere in the
@@ -608,7 +643,7 @@ export const Composer = forwardRef(function Composer(
   // the composer holds nothing else. The menu is active only while the token
   // AT THE CURSOR is still open (no closing space yet). Esc dismisses it
   // without clearing the text.
-  const activeToken = activeSlashToken(value, cursorPos);
+  const activeToken = activeSlashToken(body, cursorPos);
   const slashQuery = activeToken?.query ?? null;
   const slashActive = activeToken !== null;
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -636,12 +671,12 @@ export const Composer = forwardRef(function Composer(
   const [skillsError, setSkillsError] = useState<string | null>(null);
   const trimmedFolder = (folder ?? '').trim();
   useEffect(() => {
-    if (!slashActive || slashDismissed || trimmedFolder === '' || !daemonId) {
+    if (!slashActive || slashDismissed || trimmedFolder === '' || !hostId) {
       return;
     }
     let live = true;
     void api
-      .skills(trimmedFolder, daemonId)
+      .skills(trimmedFolder, hostId)
       .then((r) => {
         if (!live) return;
         setSkills(r.skills ?? []);
@@ -657,7 +692,7 @@ export const Composer = forwardRef(function Composer(
     return () => {
       live = false;
     };
-  }, [slashActive, slashDismissed, trimmedFolder, daemonId]);
+  }, [slashActive, slashDismissed, trimmedFolder, hostId]);
   // spec/14 § Composer — chips: a completed `/<skill>` must be recognised (and
   // drawn as a chip, with its preview reachable) even before the `/` menu has
   // ever been opened this session — e.g. reopening a chat whose draft already
@@ -674,12 +709,12 @@ export const Composer = forwardRef(function Composer(
   // fetch problem is meant to surface.
   const chipFetchPrimedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (trimmedFolder === '' || slashActive || !daemonId) return;
+    if (trimmedFolder === '' || slashActive || !hostId) return;
     if (chipFetchPrimedRef.current === trimmedFolder) return;
     if (!value.includes('/')) return;
     let live = true;
     void api
-      .skills(trimmedFolder, daemonId)
+      .skills(trimmedFolder, hostId)
       .then((r) => {
         if (!live) return;
         // Marked primed only on SUCCESS, and only once the fetch is known to
@@ -699,7 +734,7 @@ export const Composer = forwardRef(function Composer(
     return () => {
       live = false;
     };
-  }, [trimmedFolder, value, slashActive, daemonId]);
+  }, [trimmedFolder, value, slashActive, hostId]);
   // Built-in slash commands always available regardless of folder.
   const BUILTIN_COMMANDS: { name: string; description: string }[] = [
     { name: CLEAR_COMMAND_NAME, description: CLEAR_COMMAND_DESCRIPTION },
@@ -714,7 +749,7 @@ export const Composer = forwardRef(function Composer(
     // static, so `skills` is the only thing that actually changes this set.
     [skills],
   );
-  const chipTokens = useMemo(() => findChipTokens(value, knownChipNames), [value, knownChipNames]);
+  const chipTokens = useMemo(() => findChipTokens(body, knownChipNames), [body, knownChipNames]);
 
   // The last skill completed in this folder sorts to the top and is therefore
   // the highlighted default (spec/14 § Skill autocomplete). Ordering only — the
@@ -787,8 +822,8 @@ export const Composer = forwardRef(function Composer(
     // after it untouched (spec/14 § Skill autocomplete — mid-message
     // completion). The trailing space commits the token: it stops matching
     // an open `/token`, so the menu closes and it renders as a chip.
-    const { text, cursor } = spliceCompletion(value, activeToken.start, cursorPos, name);
-    setValue(text);
+    const { text, cursor } = spliceCompletion(body, activeToken.start, cursorPos, name);
+    setValue(joinQuotes(quotes, text));
     pendingCursorRef.current = cursor;
     // Only remember last-used for skills (not built-in commands).
     if (!isBuiltin) setLastUsedSkill(trimmedFolder, name);
@@ -868,6 +903,9 @@ export const Composer = forwardRef(function Composer(
   // same `key`, so it stays the same chip and flows through the ordinary
   // upload path unchanged.
   const [annotating, setAnnotating] = useState<PendingAttachment | null>(null);
+  const [sketching, setSketching] = useState(false);
+  // The pending image open in the full-screen preview (click its thumbnail).
+  const [previewing, setPreviewing] = useState<PendingAttachment | null>(null);
 
   function replaceAttachmentFile(key: string, file: File): void {
     setAttachments((cur) =>
@@ -933,7 +971,10 @@ export const Composer = forwardRef(function Composer(
     useVoiceStore.getState().clearComposerRestore();
     // The owed text was typed FIRST, so it leads anything typed since the note
     // started, joined the same way the turn itself would have been joined.
-    setValue((cur) => (cur.trim().length > 0 ? `${owed.trimEnd()} ${cur.trimStart()}` : owed));
+    setValue((cur) => {
+      const { quotes: q, body: b } = splitQuotes(cur);
+      return joinQuotes(q, b.trim().length > 0 ? `${owed.trimEnd()} ${b.trimStart()}` : owed);
+    });
   }, [composerRestore, chatId]);
   const pressAt = useRef<number | null>(null);
   const toggledOpen = useRef(false);
@@ -947,6 +988,15 @@ export const Composer = forwardRef(function Composer(
   const recordingRef = useRef<VoiceRecording | null>(null);
   const previewRef = useRef<DictationPreview | null>(null);
   const showLivePreview = micState === 'recording' && livePartial.length > 0;
+  // Seconds spent waiting on the transcript, so a slow upload visibly counts
+  // up instead of looking identical to recording.
+  const [transcribeSecs, setTranscribeSecs] = useState(0);
+  useEffect(() => {
+    if (micState !== 'transcribing') return;
+    setTranscribeSecs(0);
+    const t = setInterval(() => setTranscribeSecs((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [micState]);
   // spec/14 § Composer — chips: the mirror only needs to exist while there is
   // at least one chip to draw, and only when dictation isn't already using
   // the transparent-textarea trick for its own mirror (the two never overlap
@@ -991,7 +1041,7 @@ export const Composer = forwardRef(function Composer(
     let cursor = 0;
     chipTokens.forEach((chip, i) => {
       if (chip.start > cursor) {
-        nodes.push(<span key={`text-${i}`}>{value.slice(cursor, chip.start)}</span>);
+        nodes.push(<span key={`text-${i}`}>{body.slice(cursor, chip.start)}</span>);
       }
       nodes.push(
         <span
@@ -1019,7 +1069,7 @@ export const Composer = forwardRef(function Composer(
       );
       cursor = chip.end;
     });
-    if (cursor < value.length) nodes.push(<span key="text-tail">{value.slice(cursor)}</span>);
+    if (cursor < body.length) nodes.push(<span key="text-tail">{body.slice(cursor)}</span>);
     return nodes;
   }
   // While voice is running, the input is being painted over: the live-dictation
@@ -1194,7 +1244,59 @@ export const Composer = forwardRef(function Composer(
     setMicState('idle');
   }
 
+  // Dictation mode (spec/07 § Dictation mode): right-click the mic and it stays
+  // open — each time the speaker goes quiet for a few seconds what they said is
+  // sent as its own message, and it keeps listening. Clicking the mic or Esc
+  // ends it. Not a call: nothing speaks back.
+  const [dictModeOn, setDictModeOn] = useState(false);
+  const [dictPending, setDictPending] = useState(0);
+  const dictModeRef = useRef<DictationMode | null>(null);
+  function stopDictationMode(): void {
+    const mode = dictModeRef.current;
+    dictModeRef.current = null;
+    mode?.stop();
+    setDictModeOn(false);
+    setDictPending(0);
+  }
+  function startDictMode(): void {
+    if (voiceDisabled || noteMode || noteActive || micState !== 'idle') return;
+    if (dictModeRef.current) {
+      stopDictationMode();
+      return;
+    }
+    const factory = dictationModeFactory ?? startDictationMode;
+    const mode = factory(
+      { transcribe: (c: Blob) => api.voiceTranscribe(c) },
+      {
+        onText: (t: string) => {
+          const cur = valueRef.current;
+          const text = cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t;
+          if (!submitRef.current(text)) {
+            setValue(text);
+            pushError('voice: message not sent');
+          }
+        },
+        onBusy: (n: number) => setDictPending(n),
+        onError: (message: string) => pushError(message),
+      },
+    );
+    dictModeRef.current = mode;
+    setDictModeOn(true);
+    mode.ready.catch((e: Error) => {
+      if (dictModeRef.current !== mode) return;
+      dictModeRef.current = null;
+      setDictModeOn(false);
+      pushError(`voice: could not start recording: ${e.message}`);
+    });
+  }
+  // Leaving the chat (or unmounting) must release the microphone.
+  useEffect(() => stopDictationMode, [chatId]);
+
   function onMicDown(): void {
+    if (dictModeRef.current) {
+      stopDictationMode();
+      return;
+    }
     /* v8 ignore next -- defensive only: the mic button carries `disabled={voiceDisabled}`, and React suppresses onMouseDown dispatch entirely on a disabled form control (verified: fireEvent.mouseDown on a disabled button never invokes the handler), so `onMicDown` can never actually run while `voiceDisabled` is true. */
     if (voiceDisabled) return;
     // A note already in flight (sidebar row, ⌘⇧D/⌃Space hotkey, or the new-chat
@@ -1315,7 +1417,87 @@ export const Composer = forwardRef(function Composer(
     wasRunningRef.current = running;
   }, [running, offline]);
 
-  function handleSubmit(): void {
+  const sendMenu = useContextMenu();
+  const [scheduling, setScheduling] = useState<{ at: string; error: string | null } | null>(null);
+
+  /** Local `YYYY-MM-DDTHH:mm` for a datetime-local input, defaulting to an hour out. */
+  function defaultScheduleAt(): string {
+    const d = new Date(Date.now() + 60 * 60 * 1000);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  }
+
+  const sendMenuItems: ContextMenuItem[] = [
+    ...(onScheduleSend && attachments.length === 0
+      ? [
+          {
+            id: 'scheduled-send',
+            label: 'Scheduled send',
+            icon: <Clock size={ICON_SIZE} aria-hidden />,
+            run: () => setScheduling({ at: defaultScheduleAt(), error: null }),
+          },
+        ]
+      : []),
+    {
+      id: 'send-interrupt',
+      label: 'Send, interrupt immediately',
+      icon: <Zap size={ICON_SIZE} aria-hidden />,
+      // Send, then promote it (spec/04 § Message queueing § Promote): the
+      // running turn is cut short and this message goes in now.
+      run: () => {
+        submitRef.current(value, false, true);
+      },
+    },
+    {
+      id: 'send-after-finished',
+      label: 'Send, wait until agent finished',
+      icon: <Send size={ICON_SIZE} aria-hidden />,
+      // A send while a turn runs queues behind it and never interrupts it
+      // (spec/04 § Message queueing) — this is that path, named explicitly.
+      run: () => {
+        submitRef.current(value, true);
+      },
+    },
+    ...(onAddToTodo && chatId !== 'new' && micState === 'idle'
+      ? [
+          {
+            id: 'add-to-todo',
+            label: 'Add to todo list',
+            icon: <ListPlus size={ICON_SIZE} aria-hidden />,
+            run: () => {
+              const text = value.trim();
+              const files = attachments;
+              if (!text && files.length === 0) return;
+              void onAddToTodo(text, files).then((ok) => {
+                if (ok === false) return;
+                setValue('');
+                setAttachments([]);
+              });
+            },
+          },
+        ]
+      : []),
+  ];
+
+  async function confirmSchedule(): Promise<void> {
+    if (!scheduling || !onScheduleSend) return;
+    const when = new Date(scheduling.at);
+    if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) {
+      setScheduling({ ...scheduling, error: 'Pick a time in the future' });
+      return;
+    }
+    const text = value.trim();
+    if (!text) return;
+    try {
+      await onScheduleSend(text, when.toISOString());
+      setValue('');
+      setScheduling(null);
+    } catch (err) {
+      setScheduling({ ...scheduling, error: (err as Error).message });
+    }
+  }
+
+  function handleSubmit(interrupt = false): void {
     // Send while dictating ends the dictation and sends what it heard along
     // with anything typed. Mid-transcription (mic already tapped off) the
     // send just waits for the transcript.
@@ -1328,11 +1510,11 @@ export const Composer = forwardRef(function Composer(
       }
       return;
     }
-    submitText(value);
+    submitText(value, false, interrupt);
   }
 
   /** Returns false when there was nothing to send or sending is blocked. */
-  function submitText(text: string): boolean {
+  function submitText(text: string, afterTurn = false, interrupt = false): boolean {
     if (resolving) return false;
     // The textarea itself stays enabled while offline (typing is never
     // blocked), so Enter's direct call here — not gated by the send
@@ -1363,7 +1545,7 @@ export const Composer = forwardRef(function Composer(
           if (!target) return;
           setAttachments([]);
           setValue('');
-          finishSend(trimmed, pending, target);
+          finishSend(trimmed, pending, target, afterTurn, interrupt);
         } finally {
           setResolving(false);
         }
@@ -1374,7 +1556,7 @@ export const Composer = forwardRef(function Composer(
     // Clear optimistically, restore on a reported failure.
     setAttachments([]);
     setValue('');
-    finishSend(trimmed, pending, pending.length > 0 ? chatId : undefined);
+    finishSend(trimmed, pending, pending.length > 0 ? chatId : undefined, afterTurn, interrupt);
     return true;
   }
 
@@ -1388,14 +1570,20 @@ export const Composer = forwardRef(function Composer(
     trimmed: string,
     files: PendingAttachment[],
     resolvedChatId: string | undefined,
+    afterTurn: boolean,
+    interrupt = false,
   ): void {
     // Call with the bare message for a text-only turn (keeps the call shape
     // stable for callers/tests that predate attachments); pass the files + the
     // chatId only when there are attachments to carry.
     const hasFiles = files.length > 0;
-    const args: Parameters<ComposerProps['onSend']> = hasFiles
-      ? [trimmed, files, resolvedChatId]
-      : [trimmed];
+    const args: Parameters<ComposerProps['onSend']> = interrupt
+      ? [trimmed, hasFiles ? files : undefined, resolvedChatId, { interrupt: true }]
+      : afterTurn
+        ? [trimmed, hasFiles ? files : undefined, resolvedChatId, { afterTurn: true }]
+        : hasFiles
+          ? [trimmed, files, resolvedChatId]
+          : [trimmed];
     if (!running && onStop) setPendingSend(true);
     const restore = (): void => {
       setPendingSend(false);
@@ -1486,10 +1674,37 @@ export const Composer = forwardRef(function Composer(
               item={allItems[activeSkillIndex]}
               paths={skillPaths}
               frontmatter={skillFrontmatter}
-              daemonId={daemonId ?? ''}
+              hostId={hostId ?? ''}
               folder={trimmedFolder}
             />
           ) : null}
+        </div>
+      ) : null}
+      {/* Quote cards stacked above the input (spec/14 § Composer — quotes). */}
+      {quotes.length > 0 ? (
+        <div className="composer-quotes" data-testid="composer-quotes">
+          {quotes.map((q, i) => (
+            <div key={i} className="composer-quote" data-testid="composer-quote">
+              <span className="composer-quote-text">{q}</span>
+              <button
+                type="button"
+                className="composer-quote-remove"
+                data-testid="composer-quote-remove"
+                aria-label="remove quote"
+                title="Remove quote"
+                onClick={() =>
+                  setValue(
+                    joinQuotes(
+                      quotes.filter((_, j) => j !== i),
+                      body,
+                    ),
+                  )
+                }
+              >
+                <CloseIcon size={14} />
+              </button>
+            </div>
+          ))}
         </div>
       ) : null}
       {/* Removable thumbnails/chips above the input (spec/14 § Composer). */}
@@ -1502,7 +1717,16 @@ export const Composer = forwardRef(function Composer(
               data-testid="composer-attachment"
             >
               {a.kind === 'image' && a.previewUrl ? (
-                <img src={a.previewUrl} alt={a.name} />
+                <button
+                  type="button"
+                  className="att-preview"
+                  data-testid="composer-attachment-preview"
+                  aria-label={`preview ${a.name}`}
+                  title="Preview image"
+                  onClick={() => setPreviewing(a)}
+                >
+                  <img src={a.previewUrl} alt={a.name} />
+                </button>
               ) : (
                 <FileText size={18} aria-hidden />
               )}
@@ -1535,6 +1759,14 @@ export const Composer = forwardRef(function Composer(
           ))}
         </div>
       ) : null}
+      {previewing?.previewUrl ? (
+        <ImageLightbox
+          url={previewing.previewUrl}
+          alt={previewing.name}
+          downloadName={previewing.name}
+          onClose={() => setPreviewing(null)}
+        />
+      ) : null}
       {annotating ? (
         <ImageAnnotator
           file={annotating.file}
@@ -1542,6 +1774,15 @@ export const Composer = forwardRef(function Composer(
           onDone={(file) => {
             replaceAttachmentFile(annotating.key, file);
             setAnnotating(null);
+          }}
+        />
+      ) : null}
+      {sketching ? (
+        <ImageAnnotator
+          onCancel={() => setSketching(false)}
+          onDone={(file) => {
+            addFiles([file]);
+            setSketching(false);
           }}
         />
       ) : null}
@@ -1559,6 +1800,28 @@ export const Composer = forwardRef(function Composer(
           e.target.value = '';
         }}
       />
+      {dictModeOn ? (
+        <div
+          className="dictation-status"
+          data-testid="dictation-mode-status"
+          data-state={dictPending > 0 ? 'transcribing' : 'recording'}
+          role="status"
+        >
+          {dictPending > 0 ? 'Dictating… sending' : 'Dictating… pause to send'}
+        </div>
+      ) : null}
+      {micState !== 'idle' ? (
+        <div
+          className="dictation-status"
+          data-testid="dictation-status"
+          data-state={micState}
+          role="status"
+        >
+          {micState === 'recording'
+            ? 'Listening…'
+            : `Transcribing…${transcribeSecs > 0 ? ` ${transcribeSecs}s` : ''}`}
+        </div>
+      ) : null}
       <div className="composer-row">
         {/* The input and its live-dictation mirror share one positioned box so
             the greyed preview sits exactly over the real text. */}
@@ -1570,9 +1833,9 @@ export const Composer = forwardRef(function Composer(
               Only mounted while there is something to preview. */}
           {showLivePreview ? (
             <div className="composer-live-preview" data-testid="composer-live-preview" aria-hidden>
-              <span className="composer-live-committed">{value}</span>
+              <span className="composer-live-committed">{body}</span>
               <span className="composer-live-partial" data-testid="composer-live-partial">
-                {value.trim().length > 0 ? ' ' : ''}
+                {body.trim().length > 0 ? ' ' : ''}
                 {livePartial}
               </span>
             </div>
@@ -1600,9 +1863,9 @@ export const Composer = forwardRef(function Composer(
             placeholder={
               suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : 'Type a message'
             }
-            value={value}
+            value={body}
             onChange={(e) => {
-              setValue(e.target.value);
+              setValue(joinQuotes(quotes, e.target.value));
               // Any edit re-opens a menu the user had Esc-dismissed.
               setSlashDismissed(false);
               syncCursor(e.target);
@@ -1644,10 +1907,12 @@ export const Composer = forwardRef(function Composer(
               if (e.key === 'Backspace') {
                 const el = e.currentTarget;
                 if (el.selectionStart !== null && el.selectionStart === el.selectionEnd) {
-                  const chip = chipEndingAt(value, el.selectionStart, knownChipNames);
+                  const chip = chipEndingAt(body, el.selectionStart, knownChipNames);
                   if (chip) {
                     e.preventDefault();
-                    setValue(value.slice(0, chip.start) + value.slice(el.selectionStart));
+                    setValue(
+                      joinQuotes(quotes, body.slice(0, chip.start) + body.slice(el.selectionStart)),
+                    );
                     pendingCursorRef.current = chip.start;
                     return;
                   }
@@ -1689,6 +1954,12 @@ export const Composer = forwardRef(function Composer(
               // Esc cancels an open transcribe-mode recording without transcribing
               // (mic toggle session) — before the running-turn Esc so a recording
               // takes priority.
+              if (e.key === 'Escape' && dictModeRef.current) {
+                e.preventDefault();
+                e.stopPropagation();
+                stopDictationMode();
+                return;
+              }
               if (e.key === 'Escape' && !noteMode && micState !== 'idle') {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1708,15 +1979,15 @@ export const Composer = forwardRef(function Composer(
               // composition (e.g. for CJK input) must not be hijacked — Enter there
               // commits the candidate.
               if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-              if (e.shiftKey) return; // newline
+              // ⇧ alone is a newline; ⌘⇧↵ / Ctrl⇧↵ is the keyboard form of the send
+              // menu's "Send, interrupt immediately" — send, then promote.
+              if (e.shiftKey && !(e.metaKey || e.ctrlKey)) return; // newline
               e.preventDefault();
               // ↵ and ⌘↵ both just send; mid-turn that queues behind the running
-              // turn. Neither interrupts it — only Stop, Esc and a queued
+              // turn and does not interrupt it. Only ⌘⇧↵, Stop, Esc and a queued
               // message's ↑ do (spec/04 § Message queueing). An empty composer
-              // has nothing to send, so Enter there does nothing: it used to
-              // promote the queue head, and the second Enter of a double press
-              // killed the turn the message was queued behind.
-              handleSubmit();
+              // has nothing to send, so Enter there does nothing.
+              handleSubmit(e.shiftKey);
             }}
             // Typing stays possible while the LINK is down (`offline`), and
             // for an existing chat so does sending — it queues and flushes on
@@ -1754,12 +2025,23 @@ export const Composer = forwardRef(function Composer(
           </button>
           <button
             type="button"
-            className={`voice-note-btn ${noteActive || micState !== 'idle' ? 'active' : ''}`}
+            className="attach-btn"
+            data-testid="sketch-btn"
+            aria-label="sketch"
+            title="Sketch"
+            onClick={() => setSketching(true)}
+            disabled={linkOrCredentialBlocked || resolving}
+          >
+            <PenLine size={ICON_SIZE} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={`voice-note-btn ${noteActive || micState !== 'idle' || dictModeOn ? 'active' : ''}${micState === 'transcribing' ? ' busy' : ''}`}
             data-testid="voice-note-btn"
             aria-label={noteMode ? 'voice note' : 'dictate into message'}
-            aria-pressed={noteActive || micState !== 'idle'}
+            aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
             title={
-              !offline && !daemonOnline
+              !offline && !hostOnline
                 ? 'Voice unavailable while the agent is offline (audio can’t be queued)'
                 : noteMode
                   ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
@@ -1767,8 +2049,19 @@ export const Composer = forwardRef(function Composer(
                     ? 'Transcribing…'
                     : shortcutTitle('Dictate', chordGlyphs(dictateChord))
             }
-            onMouseDown={onMicDown}
-            onMouseUp={onMicUp}
+            // Only the primary button dictates: a right-click is dictation
+            // mode (onContextMenu), and its own mousedown must not also start
+            // a hold-to-talk recording.
+            onMouseDown={(e) => {
+              if (e.button === 0) onMicDown();
+            }}
+            onMouseUp={(e) => {
+              if (e.button === 0) onMicUp();
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              startDictMode();
+            }}
             onMouseLeave={() => {
               // Pointer left while holding: commit (release-sends / release-dictates).
               if (pressAt.current !== null) onMicUp();
@@ -1803,18 +2096,20 @@ export const Composer = forwardRef(function Composer(
           </button>
           {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
-          <button
-            type="button"
-            className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
-            data-testid="meeting-btn"
-            aria-pressed={inMeeting}
-            aria-label={inMeeting ? 'end meeting' : 'meeting'}
-            title={inMeeting ? 'End meeting' : 'Meeting'}
-            onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
-            disabled={voiceDisabled && !inMeeting}
-          >
-            <AudioLines size={ICON_SIZE} aria-hidden />
-          </button>
+          {chatId === 'new' ? null : (
+            <button
+              type="button"
+              className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
+              data-testid="meeting-btn"
+              aria-pressed={inMeeting}
+              aria-label={inMeeting ? 'end meeting' : 'meeting'}
+              title={inMeeting ? 'End meeting' : 'Meeting'}
+              onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
+              disabled={voiceDisabled && !inMeeting}
+            >
+              <AudioLines size={ICON_SIZE} aria-hidden />
+            </button>
+          )}
           {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
               chat's next turn will use, last in the utility group so it reads
               against the turn about to be sent without displacing stop/send from
@@ -1909,12 +2204,46 @@ export const Composer = forwardRef(function Composer(
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
               title={running ? shortcutTitle('Queue', '↵') : shortcutTitle('Send', '↵')}
               disabled={sendBlocked || resolving || !hasContent}
+              onContextMenu={sendMenu.openAt}
             >
               <Send size={ICON_SIZE} aria-hidden />
             </button>
           )}
         </div>
       </div>
+      <ContextMenu
+        anchor={sendMenu.anchor}
+        items={sendMenuItems}
+        onClose={sendMenu.close}
+        label="Send options"
+        testId="send-menu"
+      />
+      {scheduling ? (
+        <div className="composer-schedule" data-testid="schedule-send">
+          <input
+            type="datetime-local"
+            data-testid="schedule-at"
+            aria-label="send at"
+            value={scheduling.at}
+            onChange={(e) => setScheduling({ at: e.target.value, error: null })}
+          />
+          <button
+            type="button"
+            data-testid="schedule-confirm"
+            onClick={() => void confirmSchedule()}
+          >
+            Schedule
+          </button>
+          <button type="button" data-testid="schedule-cancel" onClick={() => setScheduling(null)}>
+            Cancel
+          </button>
+          {scheduling.error ? (
+            <span role="alert" data-testid="schedule-error">
+              {scheduling.error}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       {/* spec/14 § Skill autocomplete — hovering (desktop) or tapping (web
           touch) a chip shows the SAME preview as the `/` list: full
           description, the rest of the frontmatter, an Edit link. Portalled so
@@ -1942,7 +2271,7 @@ export const Composer = forwardRef(function Composer(
                 }}
                 paths={skillPaths}
                 frontmatter={skillFrontmatter}
-                daemonId={daemonId ?? ''}
+                hostId={hostId ?? ''}
                 folder={trimmedFolder}
               />
             </div>,

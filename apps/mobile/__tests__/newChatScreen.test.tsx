@@ -1,3 +1,4 @@
+import { StyleSheet } from 'react-native';
 // app/new-chat.tsx — type-first new chat (spec/15 § New chat flow, parity
 // with web's new chat, spec/14 § Sidebar §8). Pins:
 //   - the screen opens on the most recently used (host, folder) pair, shown in
@@ -76,12 +77,12 @@ import NewChat from '../app/new-chat';
 const HOST = 'd1';
 const OTHER = 'd2';
 
-function host(daemonId: string, online = true, extra: Record<string, unknown> = {}): HostPresence {
+function host(hostId: string, online = true, extra: Record<string, unknown> = {}): HostPresence {
   return {
-    daemonId,
+    hostId,
     online,
     lastSeenAt: 1,
-    host: { hostName: `${daemonId}-box`, permissionModeDefault: 'default', ...extra },
+    host: { hostName: `${hostId}-box`, permissionModeDefault: 'default', ...extra },
     accounts: {},
   } as unknown as HostPresence;
 }
@@ -90,7 +91,7 @@ function chat(partial: Partial<ChatRow> & { chatId: string }): ChatRow {
   return {
     name: null,
     preview: null,
-    daemonId: HOST,
+    hostId: HOST,
     folder: '',
     activity: 'idle',
     status: 'active',
@@ -191,12 +192,27 @@ const selected = (r: ReturnType<typeof renderRN>, testID: string): boolean =>
   findHost(r.root, byTestId(testID)).props.accessibilityState?.selected === true;
 
 describe('NewChat — setup quick picks', () => {
+  it('fills the chosen folder pill and model dropdown solid so the choice is unmistakable', async () => {
+    saveLastNewChat({
+      hostId: HOST,
+      folder: '/p/mine',
+      model: 'claude-sonnet-5',
+      permissionMode: 'plan',
+    });
+    const r = await renderReady();
+    const bg = (id: string): unknown =>
+      StyleSheet.flatten(findHost(r.root, byTestId(id)).props.style).backgroundColor;
+    expect(bg('new-chat-folder-pill')).toBe('#46802f');
+    expect(bg('new-chat-model-quick-claude-sonnet-5')).toBe('#46802f');
+    expect(bg('new-chat-model-pill')).toBe('#46802f');
+  });
+
   // Todoist 6hhj229445J7cG36: the options for a new chat are whatever the last
   // NEW chat used — not the newest activity anywhere, and never moving while
   // the screen is showing.
   it('opens on what the last new chat used, not the newest chat activity', async () => {
     saveLastNewChat({
-      daemonId: HOST,
+      hostId: HOST,
       folder: '/p/mine',
       model: 'claude-sonnet-5',
       permissionMode: 'plan',
@@ -212,6 +228,24 @@ describe('NewChat — setup quick picks', () => {
     expect(textOf(findHost(r.root, byTestId('new-chat-permission-mode')))).toBe('Plan only');
   });
 
+  it('does not carry Auto onto a model that cannot run it: the pill reads the host default and none is sent', async () => {
+    saveLastNewChat({
+      hostId: HOST,
+      folder: '/p/mine',
+      model: 'claude-haiku-4-5',
+      permissionMode: 'auto',
+    });
+    const r = await renderReady();
+    expect(textOf(findHost(r.root, byTestId('new-chat-permission-mode')))).toBe(
+      'Ask before acting',
+    );
+    typeText(r, 'go');
+    await send(r);
+    const payload = api.createChat.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload['model']).toBe('claude-haiku-4-5');
+    expect(payload).not.toHaveProperty('permissionMode');
+  });
+
   it('without a last new chat, existing chats do not choose a folder', async () => {
     useChatStore.setState({
       chats: { b: chat({ chatId: 'b', folder: '/p/latest', lastUpdated: 5 }) },
@@ -221,7 +255,7 @@ describe('NewChat — setup quick picks', () => {
   });
 
   it('nothing changing in the chat list while it is open moves the options', async () => {
-    saveLastNewChat({ daemonId: HOST, folder: '/p/mine', model: null, permissionMode: null });
+    saveLastNewChat({ hostId: HOST, folder: '/p/mine', model: null, permissionMode: null });
     useChatStore.setState({
       chats: { a: chat({ chatId: 'a', folder: '/p/one', model: 'claude-opus-4', lastUpdated: 1 }) },
     });
@@ -245,14 +279,14 @@ describe('NewChat — setup quick picks', () => {
   });
 
   it('creating a new chat records its host, folder, model and mode as the next default', async () => {
-    useFolderStore.getState().setHostFolders({ daemonId: HOST, roots: ['/p/one'], recent: [] });
-    __setLocalSearchParams({ daemonId: HOST, folder: '/p/one' });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/p/one'], recent: [] });
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
     const r = await renderReady();
     await press(r, 'new-chat-model-quick-claude-sonnet-5');
     typeText(r, 'hello');
     await send(r);
     expect(loadLastNewChat()).toEqual({
-      daemonId: HOST,
+      hostId: HOST,
       folder: '/p/one',
       model: 'claude-sonnet-5',
       permissionMode: null,
@@ -260,7 +294,7 @@ describe('NewChat — setup quick picks', () => {
   });
 
   it('merely viewing or backing out records nothing', async () => {
-    __setLocalSearchParams({ daemonId: HOST, folder: '/p/one' });
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
     await renderReady();
     expect(loadLastNewChat()).toBeNull();
   });
@@ -269,14 +303,14 @@ describe('NewChat — setup quick picks', () => {
     useChatStore.setState({
       chats: { b: chat({ chatId: 'b', folder: '/p/latest', lastUpdated: 5 }) },
     });
-    __setLocalSearchParams({ daemonId: HOST, folder: '/p/here' });
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/here' });
     const r = await renderReady();
     expect(pillText(r)).toBe('here · d1-box');
     expect(api.createChat).not.toHaveBeenCalled();
   });
 
   it('with no chats the pill invites a choice and no folder is chosen', async () => {
-    useFolderStore.getState().setHostFolders({ daemonId: HOST, roots: ['/p/root1'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/p/root1'], recent: [] });
     const r = await renderReady();
     expect(pillText(r)).toBe('Choose a folder…');
   });
@@ -367,7 +401,7 @@ describe('NewChat — setup quick picks', () => {
 describe('NewChat — folder picker sheet', () => {
   beforeEach(() => {
     saveLastNewChat({
-      daemonId: HOST,
+      hostId: HOST,
       folder: '/home/tom/projects/one',
       model: null,
       permissionMode: null,
@@ -414,7 +448,7 @@ describe('NewChat — folder picker sheet', () => {
     expect(pillText(r)).toBe('two · d1-box');
     typeText(r, 'go');
     await send(r);
-    expect(api.createChat).toHaveBeenCalledWith({ daemonId: HOST, folder: '/p/two' });
+    expect(api.createChat).toHaveBeenCalledWith({ hostId: HOST, folder: '/p/two' });
   });
 
   it('the backdrop dismisses without changing the choice', async () => {
@@ -428,7 +462,7 @@ describe('NewChat — folder picker sheet', () => {
   it('typing a path switches to path completion on the host; a suggestion completes it, "Use" chooses it', async () => {
     api.browseFolders
       .mockResolvedValueOnce({
-        daemonId: HOST,
+        hostId: HOST,
         dir: '/home/tom',
         parent: null,
         entries: [
@@ -437,7 +471,7 @@ describe('NewChat — folder picker sheet', () => {
           { name: 'notes', path: '/home/tom/notes' },
         ],
       })
-      .mockResolvedValue({ daemonId: HOST, dir: '/home/tom/projects', parent: null, entries: [] });
+      .mockResolvedValue({ hostId: HOST, dir: '/home/tom/projects', parent: null, entries: [] });
     const r = await renderReady();
     await openSheet(r);
     searchSheet(r, '~/p');
@@ -532,14 +566,14 @@ describe('NewChat — folder picker sheet', () => {
 
 describe('NewChat — folder picker sheet, several hosts', () => {
   beforeEach(() => {
-    saveLastNewChat({ daemonId: HOST, folder: '/p/one', model: null, permissionMode: null });
+    saveLastNewChat({ hostId: HOST, folder: '/p/one', model: null, permissionMode: null });
     usePresenceStore.setState({
       hosts: { [HOST]: host(HOST, true, { isHomeHost: true }), [OTHER]: host(OTHER, true) },
     });
     useChatStore.setState({
       chats: {
         a: chat({ chatId: 'a', folder: '/p/one', lastUpdated: 5 }),
-        b: chat({ chatId: 'b', daemonId: OTHER, folder: '/p/other', lastUpdated: 3 }),
+        b: chat({ chatId: 'b', hostId: OTHER, folder: '/p/other', lastUpdated: 3 }),
       },
     });
   });
@@ -564,7 +598,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
     expect(selected(r, 'new-chat-model-quick-claude-sonnet-5')).toBe(false);
     typeText(r, 'go');
     await send(r);
-    expect(api.createChat).toHaveBeenCalledWith({ daemonId: OTHER, folder: '/p/other' });
+    expect(api.createChat).toHaveBeenCalledWith({ hostId: OTHER, folder: '/p/other' });
   });
 
   it('a folder on an offline host is refused, loudly', async () => {
@@ -595,7 +629,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
 
 describe('NewChat — the first send creates the chat', () => {
   beforeEach(() => {
-    saveLastNewChat({ daemonId: HOST, folder: '/p/one', model: null, permissionMode: null });
+    saveLastNewChat({ hostId: HOST, folder: '/p/one', model: null, permissionMode: null });
     useChatStore.setState({ chats: { a: chat({ chatId: 'a', folder: '/p/one' }) } });
   });
 
@@ -604,7 +638,7 @@ describe('NewChat — the first send creates the chat', () => {
     expect(api.createChat).not.toHaveBeenCalled();
     typeText(r, '  fix the build  ');
     await send(r);
-    expect(api.createChat).toHaveBeenCalledWith({ daemonId: HOST, folder: '/p/one' });
+    expect(api.createChat).toHaveBeenCalledWith({ hostId: HOST, folder: '/p/one' });
     expect(useChatStore.getState().chats['chat_new']).toBeDefined();
     expect(submitSpy).toHaveBeenCalledTimes(1);
     expect(submitSpy.mock.calls[0]?.[0]).toBe('chat_new');
@@ -624,7 +658,7 @@ describe('NewChat — the first send creates the chat', () => {
     typeText(r, 'go');
     await send(r);
     expect(api.createChat).toHaveBeenCalledWith({
-      daemonId: HOST,
+      hostId: HOST,
       folder: '/p/one',
       model: 'claude-sonnet-5',
       permissionMode: 'plan',
@@ -798,8 +832,8 @@ it('refreshes models when ChatGPT connects on the current host', async () => {
   api.models.mockResolvedValue({ models: [{ id: 'openai/test', label: 'ChatGPT test' }] });
   await actAsync(async () => {
     usePresenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: HOST,
+      type: 'host.account',
+      hostId: HOST,
       backendId: 'codex',
       connected: true,
     });

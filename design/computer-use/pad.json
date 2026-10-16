@@ -1,0 +1,6 @@
+{ "screens": [
+  { "id": "working",  "name": "Working on the Mac",    "path": "index.html#working" },
+  { "id": "approve",  "name": "Approve an app, confirm a send", "path": "index.html#approve" },
+  { "id": "takeover", "name": "Take over",              "path": "index.html#takeover" },
+  { "id": "server",   "name": "On the server",          "path": "index.html#server" },
+  { "id": "settings", "name": "Settings › Hosts › Mac", "path": "settings.html" } ] }

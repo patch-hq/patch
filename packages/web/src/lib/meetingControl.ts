@@ -63,6 +63,9 @@ function systemFeed(bridge: PatchDesktopBridge): PcmFeed {
 }
 
 async function beginCapture(chatId: string): Promise<void> {
+  // 'new' is the new-chat screen's placeholder, not a chat: no host owns it, so
+  // the server would drop every control frame and clip sent for it.
+  if (chatId === 'new') throw new Error('Send a first message to create the chat, then start it');
   const sources = await acquireSources();
   try {
     capture = startMeetingCapture(sources, (source, audioBase64) => {

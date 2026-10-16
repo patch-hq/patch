@@ -1,8 +1,8 @@
-// Tests for DaemonOfflineBanner, OfflineBanner, and ColumnDivider.
+// Tests for HostOfflineBanner, OfflineBanner, and ColumnDivider.
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, screen } from '@testing-library/react';
 import { act } from 'react';
-import { DaemonOfflineBanner } from '../components/DaemonOfflineBanner.js';
+import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
 import { OfflineBanner } from '../components/OfflineBanner.js';
 import { ColumnDivider } from '../components/ColumnDivider.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -11,7 +11,7 @@ afterEach(() => {
   cleanup();
   usePresenceStore.setState({
     connection: 'offline',
-    daemonOnline: false,
+    hostOnline: false,
     accountId: null,
     surfaceId: null,
     hosts: {},
@@ -20,22 +20,22 @@ afterEach(() => {
   });
 });
 
-describe('DaemonOfflineBanner', () => {
+describe('HostOfflineBanner', () => {
   it('renders nothing when not connected', () => {
-    usePresenceStore.setState({ connection: 'reconnecting', daemonOnline: false });
-    const { container } = render(<DaemonOfflineBanner />);
+    usePresenceStore.setState({ connection: 'reconnecting', hostOnline: false });
+    const { container } = render(<HostOfflineBanner />);
     expect(container.firstChild).toBeNull();
   });
 
   it('renders nothing when connected and host online', () => {
-    usePresenceStore.setState({ connection: 'connected', daemonOnline: true });
-    const { container } = render(<DaemonOfflineBanner />);
+    usePresenceStore.setState({ connection: 'connected', hostOnline: true });
+    const { container } = render(<HostOfflineBanner />);
     expect(container.firstChild).toBeNull();
   });
 
   it('renders banner when connected but host offline', () => {
-    usePresenceStore.setState({ connection: 'connected', daemonOnline: false, hostsSeeded: true });
-    render(<DaemonOfflineBanner />);
+    usePresenceStore.setState({ connection: 'connected', hostOnline: false, hostsSeeded: true });
+    render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toBeTruthy();
     expect(screen.getByText(/Agent offline/)).toBeTruthy();
   });

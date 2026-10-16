@@ -5,7 +5,7 @@
 // keypair and mints all credentials. This script only needs to BOOTSTRAP the
 // account; the real host container then self-registers (it POSTs
 // register/start + register/complete itself and long-polls register/await for
-// its server-minted daemonKey — see packages/daemon/src/registration.ts). Once
+// its server-minted daemonKey — see packages/host/src/registration.ts). Once
 // the account exists, the host's registration round-trip completes and it
 // connects inbound to /ws — exactly the production flow, minus the human surface.
 //

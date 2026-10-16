@@ -66,6 +66,11 @@ describe('keySequence', () => {
 });
 
 describe('applyCtrl', () => {
+  it('passes non-ASCII letters through even when they upper-case to ASCII', () => {
+    expect(applyCtrl('ß')).toBe('ß'); // "SS"
+    expect(applyCtrl('ı')).toBe('ı'); // dotless i -> "I"
+    expect(applyCtrl('ſ')).toBe('ſ'); // long s -> "S"
+  });
   it('turns a letter into its control character, either case', () => {
     expect(applyCtrl('c')).toBe('\x03');
     expect(applyCtrl('C')).toBe('\x03');

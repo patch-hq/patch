@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import pino from 'pino';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { HookRunner } from '../src/hooks/runner.js';
 import type { Hook, HooksInterface } from '../src/hooks/types.js';
 
@@ -60,16 +60,16 @@ const ctx = {
   message: 'hello',
   chatId: 'c_abc',
   folder: '/work',
-  daemonId: 'd1',
+  hostId: 'd1',
   specialThread: false,
 };
 
 describe('HookRunner', () => {
   it('returns pass with no results when nothing matches', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const runner = new HookRunner({
       hooks: new FakeHooksStore([]),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
     });
     const result = await runner.check(ctx);
@@ -77,9 +77,9 @@ describe('HookRunner', () => {
   });
 
   it('dispatches matching hooks in parallel and aggregates pass', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const hooks = new FakeHooksStore([hook('hook_a'), hook('hook_b')]);
-    const runner = new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    const runner = new HookRunner({ hooks, hostLink: link, logger: silentLogger });
     const checkPromise = runner.check(ctx);
     // Both requests should have gone out before either resolves.
     await vi_waitForSentCount(link, 2);
@@ -102,9 +102,9 @@ describe('HookRunner', () => {
   });
 
   it('a block from one hook wins the aggregate even when others pass', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const hooks = new FakeHooksStore([hook('hook_a'), hook('hook_b')]);
-    const runner = new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    const runner = new HookRunner({ hooks, hostLink: link, logger: silentLogger });
     const checkPromise = runner.check(ctx);
     await vi_waitForSentCount(link, 2);
     for (const sent of link.sent) {
@@ -127,19 +127,19 @@ describe('HookRunner', () => {
   });
 
   it('a hook that never answers times out and the aggregate advises, never blocks', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const hooks = new FakeHooksStore([hook('hook_a', { timeoutMs: 20 })]);
-    const runner = new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    const runner = new HookRunner({ hooks, hostLink: link, logger: silentLogger });
     const result = await runner.check(ctx);
     expect(result.decision).toBe('advise');
     expect(result.results[0]?.status).toBe('timeout');
   });
 
   it('an offline host fails the hook immediately without sending', async () => {
-    const link = new InProcessDaemonLink();
-    link.setDaemonId(null);
+    const link = new InProcessHostLink();
+    link.setHostId(null);
     const hooks = new FakeHooksStore([hook('hook_a', { gate: { hosts: null } })]);
-    const runner = new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    const runner = new HookRunner({ hooks, hostLink: link, logger: silentLogger });
     const result = await runner.check(ctx);
     expect(result.decision).toBe('advise');
     expect(result.results[0]?.status).toBe('failed');
@@ -148,9 +148,9 @@ describe('HookRunner', () => {
   });
 
   it('a hook whose gate does not match this chat is excluded', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const hooks = new FakeHooksStore([hook('hook_a', { gate: { chatIds: ['c_other'] } })]);
-    const runner = new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    const runner = new HookRunner({ hooks, hostLink: link, logger: silentLogger });
     const result = await runner.check(ctx);
     expect(result).toEqual({ decision: 'pass', results: [] });
   });
@@ -158,12 +158,12 @@ describe('HookRunner', () => {
 
 describe('HookRunner.checkAgentResponse', () => {
   it('only matches agent_response hooks, never user_message ones', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const hooks = new FakeHooksStore([
       hook('hook_um', { when: 'user_message' }),
       hook('hook_ar', { when: 'agent_response' }),
     ]);
-    const runner = new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    const runner = new HookRunner({ hooks, hostLink: link, logger: silentLogger });
     const checkPromise = runner.checkAgentResponse({
       ...ctx,
       message: 'the agent reply',
@@ -194,9 +194,9 @@ describe('HookRunner.checkAgentResponse', () => {
   });
 
   it('does not aggregate — a failed hook is reported as failed, not forced to block', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const hooks = new FakeHooksStore([hook('hook_a', { when: 'agent_response', timeoutMs: 20 })]);
-    const runner = new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    const runner = new HookRunner({ hooks, hostLink: link, logger: silentLogger });
     const results = await runner.checkAgentResponse(ctx);
     expect(results).toHaveLength(1);
     expect(results[0]?.status).toBe('timeout');
@@ -206,10 +206,10 @@ describe('HookRunner.checkAgentResponse', () => {
   });
 
   it('nothing matching returns an empty array, not pass', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const runner = new HookRunner({
       hooks: new FakeHooksStore([hook('hook_um', { when: 'user_message' })]),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
     });
     const results = await runner.checkAgentResponse(ctx);
@@ -219,13 +219,13 @@ describe('HookRunner.checkAgentResponse', () => {
 
 describe('HookRunner — hook.agent_response_check_request handling', () => {
   it('resolves matching hooks and reports the outcome back to the same host', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const hooks = new FakeHooksStore([hook('hook_ar', { when: 'agent_response' })]);
-    new HookRunner({ hooks, daemonLink: link, logger: silentLogger });
+    new HookRunner({ hooks, hostLink: link, logger: silentLogger });
 
     link.emit({
       type: 'hook.agent_response_check_request',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c_abc',
       checkId: 'arc_1',
       folder: '/work',
@@ -270,7 +270,7 @@ describe('HookRunner — hook.agent_response_check_request handling', () => {
 });
 
 /** Poll briefly until the fake link has recorded `n` sent frames. */
-async function vi_waitForSentCount(link: InProcessDaemonLink, n: number): Promise<void> {
+async function vi_waitForSentCount(link: InProcessHostLink, n: number): Promise<void> {
   const deadline = Date.now() + 1000;
   while (link.sent.length < n) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${n} sent frames`);

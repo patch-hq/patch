@@ -13,13 +13,13 @@ import { generateUserKeypair, mintSurfaceCredential, type UserKeypair } from '@p
 import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll, type BuiltApp } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 interface TestCtx {
   dir: string;
   user: UserKeypair;
   registry: Registry;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   built: BuiltApp;
   url: string;
   clientFor: (surfaceId: string) => Promise<WireTestClient>;
@@ -40,9 +40,9 @@ async function setUp(): Promise<TestCtx> {
     label: 'cli',
     issuedAt: 1,
   });
-  registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
-  const daemonLink = new InProcessDaemonLink();
-  const built = await buildAll({ logger: false, registry, daemonLink });
+  registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+  const hostLink = new InProcessHostLink();
+  const built = await buildAll({ logger: false, registry, hostLink });
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
   const url = `ws://127.0.0.1:${addr.port}/ws`;
@@ -70,7 +70,7 @@ async function setUp(): Promise<TestCtx> {
     });
   }
 
-  return { dir, user, registry, daemonLink, built, url, clientFor, restJwt };
+  return { dir, user, registry, hostLink, built, url, clientFor, restJwt };
 }
 
 async function cleanUp(ctx: TestCtx): Promise<void> {
@@ -158,7 +158,7 @@ describe('composer drafts — surface → server → every other surface', () =>
 
         // The `composer_draft.list` snapshot is sent synchronously right after
         // `auth.ok`, in the same burst — same ordering hazard as
-        // `file-changed-broadcast.test.ts`'s `daemon.online` wait, so the
+        // `file-changed-broadcast.test.ts`'s `host.online` wait, so the
         // waiter must be registered before connecting, not after.
         const jwtC = await mintSurfaceCredential({
           userPrivateKey: ctx.user.privateKey,
@@ -213,9 +213,9 @@ describe('composer drafts — surface → server → every other surface', () =>
       const a = await ctx.clientFor('srf-a');
       const b = await ctx.clientFor('srf-b');
       try {
-        ctx.daemonLink.emit({
+        ctx.hostLink.emit({
           type: 'chat.spawned',
-          daemonId: 'd1',
+          hostId: 'd1',
           chatId: 'c1',
           folder: '/tmp/x',
         });

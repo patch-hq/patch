@@ -42,7 +42,7 @@ async function spawnChat(harness: E2EHarness, jwt: string): Promise<string> {
     method: 'POST',
     url: '/api/chats',
     headers: { authorization: `Bearer ${jwt}` },
-    payload: { daemonId: harness.daemonId, folder: harness.folder },
+    payload: { hostId: harness.hostId, folder: harness.folder },
   });
   expect(res.statusCode).toBe(202);
   return (res.json() as { chatId: string }).chatId;

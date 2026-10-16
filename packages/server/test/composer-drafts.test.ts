@@ -1,7 +1,15 @@
 // Server-owned composer drafts (spec/14 § Composer, spec/15 § Composer).
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -38,6 +46,17 @@ describe('ComposerDraftStore', () => {
     const store = new ComposerDraftStore({ dataDir: dir, logger, nowMs });
     expect(store.list()).toEqual([]);
     expect(store.get('c1')).toBeUndefined();
+  });
+
+  test('persists by replacing the file (temp + rename), never rewriting it in place', () => {
+    const store = new ComposerDraftStore({ dataDir: dir, logger, nowMs });
+    const file = join(dir, 'composer-drafts.json');
+    store.set('c1', 'first');
+    const before = statSync(file).ino;
+    store.set('c1', 'second');
+    // A fresh inode means a crash mid-write can only lose the temp file.
+    expect(statSync(file).ino).not.toBe(before);
+    expect(readdirSync(dir)).toEqual(['composer-drafts.json']);
   });
 
   test('set stores the text stamped with the receipt time, and persists', () => {

@@ -50,8 +50,29 @@ function lowerBound(el: HTMLElement): number {
  */
 function upperBound(el: HTMLElement): number {
   const head = el.closest('main')?.querySelector('[data-testid="chat-head"]');
-  if (head) return head.getBoundingClientRect().bottom;
-  return 0;
+  const headBottom = head ? head.getBoundingClientRect().bottom : 0;
+  return Math.max(headBottom, clipTop(el));
+}
+
+/**
+ * The top edge of the nearest scroll/clip container around the anchor, below
+ * which the pop-up must stay. An in-flow absolute pop-up that pokes above its
+ * scroll container (the new-chat transcript, whose top sits under the header
+ * and the tab strip) is clipped there — border, radius and first rows — however
+ * much room the header leaves (Todoist "dropdown is clipped at top", 3rd
+ * report). Anchors in the header are portalled out, so are not bounded here.
+ */
+function clipTop(el: HTMLElement): number {
+  if (el.closest('[data-testid="chat-head"]')) return 0;
+  const main = el.closest('main');
+  let top = 0;
+  for (let p = el.parentElement; p && p !== main; p = p.parentElement) {
+    const s = getComputedStyle(p);
+    if (/(hidden|auto|scroll|clip)/.test(s.overflowY)) {
+      top = Math.max(top, p.getBoundingClientRect().top);
+    }
+  }
+  return top;
 }
 
 /**

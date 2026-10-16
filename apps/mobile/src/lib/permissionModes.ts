@@ -45,3 +45,15 @@ export function offeredPermissionModes(model: string | null | undefined): Permis
     ? [...PERMISSION_MODE_ORDER]
     : permissionModesFor(model);
 }
+
+/**
+ * A mode picked earlier, kept only while the model now chosen can run it.
+ * Otherwise `null` — the host's own default — so the screen never shows (or
+ * sends) a mode that Claude Code would quietly swap for `default`.
+ */
+export function modeForModel(
+  mode: PermissionMode | null,
+  model: string | null | undefined,
+): PermissionMode | null {
+  return mode !== null && offeredPermissionModes(model).includes(mode) ? mode : null;
+}

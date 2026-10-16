@@ -11,7 +11,7 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { PatchActivityReadRequestEvent, WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 // `d1` is the stand-in link's own machine; the two added hosts join it.
 const ONLINE_HOSTS = ['d1', 'host-a', 'host-b'];
@@ -35,24 +35,24 @@ async function setup() {
     surfaceKind: 'web',
     label: 'web',
   });
-  const daemonLink = new InProcessDaemonLink();
-  daemonLink.addOnlineHost('host-a');
-  daemonLink.addOnlineHost('host-b');
+  const hostLink = new InProcessHostLink();
+  hostLink.addOnlineHost('host-a');
+  hostLink.addOnlineHost('host-b');
   const built = await buildAll({
     logger: false as never,
     registry,
-    daemonLink,
+    hostLink,
     jobsWatch: false,
     gcalSubscriptions: false,
   });
-  for (const [chatId, daemonId] of [
+  for (const [chatId, hostId] of [
     ['c-a', 'host-a'],
     ['c-b', 'host-b'],
   ] as const) {
     built.chatRegistry.observe({
       type: 'chat.spawned',
       chatId,
-      daemonId,
+      hostId,
       folder: `/work/${chatId}`,
     } as never);
   }
@@ -62,26 +62,34 @@ async function setup() {
       url: `/api/activity?${qs}`,
       headers: { authorization: `Bearer ${jwt}` },
     });
-  const readRequests = (): Array<{ daemonId?: string; event: PatchActivityReadRequestEvent }> =>
-    daemonLink.sent.filter(
-      (s): s is { surfaceId: string; daemonId?: string; event: PatchActivityReadRequestEvent } =>
+  const readRequests = (): Array<{ hostId?: string; event: PatchActivityReadRequestEvent }> =>
+    hostLink.sent.filter(
+      (s): s is { surfaceId: string; hostId?: string; event: PatchActivityReadRequestEvent } =>
         s.event.type === 'patch.activity.read.request',
     );
   const answerAll = async (
-    byHost: Record<string, Array<{ chatId: string; text: string; ts: number }>>,
+    byHost: Record<
+      string,
+      Array<{
+        chatId: string;
+        text: string;
+        ts: number;
+        kind?: 'job' | 'hook' | 'goal' | 'machine';
+      }>
+    >,
   ) => {
     for (let i = 0; i < 100 && readRequests().length < ONLINE_HOSTS.length; i++) {
       await new Promise((r) => setTimeout(r, 5));
     }
     for (const r of readRequests()) {
-      daemonLink.injectDaemonEvent({
+      hostLink.injectHostEvent({
         type: 'patch.activity.read.response',
         requestId: r.event.requestId,
-        messages: byHost[r.daemonId!] ?? [],
+        messages: byHost[r.hostId!] ?? [],
       } as WireEvent);
     }
   };
-  return { built, daemonLink, get, readRequests, answerAll };
+  return { built, hostLink, get, readRequests, answerAll };
 }
 
 describe('GET /api/activity', () => {
@@ -100,7 +108,7 @@ describe('GET /api/activity', () => {
           {
             chatId: 'c-b',
             chatName: null,
-            daemonId: 'host-b',
+            hostId: 'host-b',
             folder: '/work/c-b',
             text: 'first',
             ts: 2000,
@@ -108,7 +116,7 @@ describe('GET /api/activity', () => {
           {
             chatId: 'c-a',
             chatName: null,
-            daemonId: 'host-a',
+            hostId: 'host-a',
             folder: '/work/c-a',
             text: 'second',
             ts: 3000,
@@ -118,9 +126,30 @@ describe('GET /api/activity', () => {
       });
       expect(
         readRequests()
-          .map((r) => r.daemonId)
+          .map((r) => r.hostId)
           .sort(),
       ).toEqual(ONLINE_HOSTS.slice().sort());
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('carries a host-reported kind through the join untouched, and omits it when absent', async () => {
+    const { built, get, answerAll } = await setup();
+    try {
+      const pending = get('since=1000&until=9000');
+      await answerAll({
+        'host-a': [{ chatId: 'c-a', text: 'a nudge', ts: 3000, kind: 'machine' }],
+        'host-b': [{ chatId: 'c-b', text: 'typed by hand', ts: 2000 }],
+      });
+      const res = await pending;
+      expect(res.json()).toMatchObject({
+        messages: [
+          { chatId: 'c-b', text: 'typed by hand', ts: 2000 },
+          { chatId: 'c-a', text: 'a nudge', ts: 3000, kind: 'machine' },
+        ],
+      });
+      expect('kind' in res.json().messages[0]).toBe(false);
     } finally {
       await built.app.close();
     }
@@ -145,6 +174,67 @@ describe('GET /api/activity', () => {
       expect(body.messages.map((m) => m.text)).toEqual(['one']);
       expect(body.messagesTruncated).toBe(true);
       expect(body.nextMessagesCursor).toBe(1501);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('never ends a page inside a run of equal timestamps, so the next page loses none of it', async () => {
+    const { built, get, answerAll } = await setup();
+    try {
+      const pending = get('since=0&until=9000&limit=2');
+      await answerAll({
+        'host-a': [
+          { chatId: 'c-a', text: 'one', ts: 1000 },
+          { chatId: 'c-a', text: 'two-a', ts: 2000 },
+        ],
+        'host-b': [{ chatId: 'c-b', text: 'two-b', ts: 2000 }],
+      });
+      const body = (await pending).json() as {
+        messages: Array<{ text: string }>;
+        messagesTruncated: boolean;
+        nextMessagesCursor: number;
+      };
+      expect(body.messages.map((m) => m.text)).toEqual(['one']);
+      expect(body.messagesTruncated).toBe(true);
+      // The host reads `ts >= since`: resuming AT 2000 picks up both.
+      expect(body.nextMessagesCursor).toBe(2000);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('returns the whole run when equal timestamps fill the page, then moves past it', async () => {
+    const { built, hostLink, get, answerAll, readRequests } = await setup();
+    try {
+      const pending = get('since=0&until=9000&limit=1');
+      const run = {
+        'host-a': [{ chatId: 'c-a', text: 'a', ts: 2000 }],
+        'host-b': [{ chatId: 'c-b', text: 'b', ts: 2000 }],
+      };
+      await answerAll(run);
+      // A second read for the run itself: exactly that instant, uncapped.
+      for (let i = 0; i < 100 && readRequests().length < 2 * ONLINE_HOSTS.length; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      const second = readRequests().slice(ONLINE_HOSTS.length);
+      expect(second).toHaveLength(ONLINE_HOSTS.length);
+      for (const r of second) {
+        expect([r.event.since, r.event.until]).toEqual([2000, 2000]);
+        hostLink.injectHostEvent({
+          type: 'patch.activity.read.response',
+          requestId: r.event.requestId,
+          messages: run[r.hostId as keyof typeof run] ?? [],
+        } as WireEvent);
+      }
+      const body = (await pending).json() as {
+        messages: Array<{ text: string }>;
+        messagesTruncated: boolean;
+        nextMessagesCursor: number;
+      };
+      expect(body.messages.map((m) => m.text).sort()).toEqual(['a', 'b']);
+      expect(body.messagesTruncated).toBe(true);
+      expect(body.nextMessagesCursor).toBe(2001);
     } finally {
       await built.app.close();
     }
@@ -179,9 +269,9 @@ describe('GET /api/activity', () => {
 
 describe('patch.activity.request (a host’s patch_activity)', () => {
   it('answers the asking machine with a patch.activity.response', async () => {
-    const { built, daemonLink, answerAll } = await setup();
+    const { built, hostLink, answerAll } = await setup();
     try {
-      daemonLink.injectDaemonEvent({
+      hostLink.injectHostEvent({
         type: 'patch.activity.request',
         sourceChatId: 'caller',
         since: 1000,
@@ -190,12 +280,12 @@ describe('patch.activity.request (a host’s patch_activity)', () => {
       await answerAll({ 'host-a': [{ chatId: 'c-a', text: 'hi', ts: 2000 }] });
       for (
         let i = 0;
-        i < 100 && !daemonLink.sent.some((s) => s.event.type === 'patch.activity.response');
+        i < 100 && !hostLink.sent.some((s) => s.event.type === 'patch.activity.response');
         i++
       ) {
         await new Promise((r) => setTimeout(r, 5));
       }
-      const reply = daemonLink.sent.find((s) => s.event.type === 'patch.activity.response')!.event;
+      const reply = hostLink.sent.find((s) => s.event.type === 'patch.activity.response')!.event;
       expect(reply).toMatchObject({
         type: 'patch.activity.response',
         sourceChatId: 'caller',

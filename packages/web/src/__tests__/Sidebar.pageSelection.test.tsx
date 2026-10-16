@@ -22,7 +22,7 @@ import type { ChatRow } from '../stores/types.js';
 function rowFixture(overrides: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'a chat',
     folder: '~/proj',

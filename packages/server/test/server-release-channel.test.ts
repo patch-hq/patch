@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { generateUserKeypair } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('GET /api/server-release/:name', () => {
   let dir: string;
@@ -37,7 +37,7 @@ describe('GET /api/server-release/:name', () => {
   async function makeApp() {
     const registry = Registry.load(join(dir, 'data'));
     registry.bootstrapAccount({ keypair: generateUserKeypair(() => new Uint8Array(32).fill(7)) });
-    return buildAll({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    return buildAll({ logger: false, registry, hostLink: new InProcessHostLink() });
   }
 
   it('serves the installer, tarball and checksum with no credential', async () => {

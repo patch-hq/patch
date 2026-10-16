@@ -83,3 +83,14 @@ test.describe('job trigger turn — a later fire into an existing chat', () => {
     await expect(line.locator('.tool-detail')).toContainText('"route": "36"');
   });
 });
+
+// Todoist "trigger font is tiny": the trigger and compaction furniture lines sat
+// at the 13px legibility floor, a full 4px under the 17px body. Still quieter
+// than the reply, but readable.
+test('trigger line text is not at the legibility floor', async ({ page }) => {
+  await page.goto(JOB_TRIGGER);
+  const line = page.getByTestId('job-trigger');
+  await expect(line).toBeVisible();
+  const size = await line.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(size).toBeGreaterThanOrEqual(15);
+});

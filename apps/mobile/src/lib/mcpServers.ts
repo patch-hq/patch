@@ -63,7 +63,7 @@ export function envText(env: Record<string, string>): string {
 
 /** Parse `KEY=VALUE` lines; blank lines are skipped, anything else is an error. */
 export function parseEnvText(text: string): Record<string, string> {
-  const env: Record<string, string> = {};
+  const env = new Map<string, string>();
   text.split('\n').forEach((raw, i) => {
     const line = raw.trim();
     if (line === '') return;
@@ -72,10 +72,11 @@ export function parseEnvText(text: string): Record<string, string> {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
       throw new Error(`Environment line ${i + 1} is not KEY=VALUE`);
     }
-    if (key in env) throw new Error(`${key} is set twice`);
-    env[key] = line.slice(eq + 1).trim();
+    if (env.has(key)) throw new Error(`${key} is set twice`);
+    env.set(key, line.slice(eq + 1).trim());
   });
-  return env;
+  // fromEntries defines own properties, so a key like __proto__ stays data.
+  return Object.fromEntries(env);
 }
 
 export interface McpDraft {

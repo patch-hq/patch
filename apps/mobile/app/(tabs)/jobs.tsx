@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { Alert, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { Archive, ArchiveRestore, Clock, MessageCircle, Plus, Trash2 } from 'lucide-react-native';
 import { api } from '../../src/api/rest';
 import { EmptyState } from '../../src/components/EmptyState';
@@ -45,7 +45,7 @@ import {
 import { JOBS_SEARCH_PLACEHOLDER } from '../../src/lib/labels';
 import { getSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
 import { usePresenceStore } from '../../src/stores/presenceStore';
-import { fonts, radii, space, typography, useTheme } from '../../src/lib/theme';
+import { fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
 
 /** A job as this screen needs it — tolerant of whatever shape the server (or
  * an older/newer host relaying one) actually sends, same convention the old
@@ -58,7 +58,7 @@ interface JobShape {
   trigger: DescribableTrigger | undefined;
   triggerType?: string;
   cron?: string;
-  action: (DescribableAction & { daemonId?: string; key?: string }) | undefined;
+  action: (DescribableAction & { hostId?: string; key?: string }) | undefined;
   archived?: boolean;
   oneOff?: boolean;
   expiredAt?: number;
@@ -84,7 +84,7 @@ function toDescribableTrigger(raw: unknown): DescribableTrigger | undefined {
 
 function toDescribableAction(
   raw: unknown,
-): (DescribableAction & { daemonId?: string; key?: string }) | undefined {
+): (DescribableAction & { hostId?: string; key?: string }) | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const a = raw as Record<string, unknown>;
   const str = (k: string): string | undefined =>
@@ -96,7 +96,7 @@ function toDescribableAction(
     folder: str('folder'),
     chatId: str('chatId'),
     command: str('command'),
-    daemonId: str('daemonId'),
+    hostId: str('hostId'),
     key: str('key'),
   };
 }
@@ -156,7 +156,7 @@ export default function Jobs(): React.ReactElement {
 
   const hosts = usePresenceStore((s) => s.hosts);
   // Every registered host's live self-reported name, falling back to its
-  // daemonId until it has reported one — same source and shape as the job
+  // hostId until it has reported one — same source and shape as the job
   // editor's own `hostNames` (spec/15 § Jobs screen).
   const hostNames = React.useMemo(
     () => Object.fromEntries(Object.entries(hosts).map(([id, h]) => [id, h.host?.hostName ?? id])),
@@ -222,7 +222,7 @@ export default function Jobs(): React.ReactElement {
     () =>
       jobs.map((j) => {
         const subtitle = triggerLabel(j.trigger);
-        const hostName = j.action?.daemonId ? hostNames[j.action.daemonId] : undefined;
+        const hostName = j.action?.hostId ? hostNames[j.action.hostId] : undefined;
         const actionLabel = j.action
           ? `${actionVerb(j.action)} ${actionTarget(j.action, hostName)}`
           : undefined;
@@ -281,6 +281,24 @@ export default function Jobs(): React.ReactElement {
       >
         <Text style={{ ...typography.title, color: colors.ink, flex: 1 }}>Jobs</Text>
         <Pressable
+          onPress={() => router.push('/pads' as Href)}
+          testID="pads-open"
+          accessibilityRole="button"
+          accessibilityLabel="Pads"
+          style={{
+            paddingVertical: space.xs,
+            paddingHorizontal: space.sm,
+            marginRight: space.sm,
+            borderRadius: radii.md,
+            borderWidth: 1,
+            borderColor: colors.divider,
+          }}
+        >
+          <Text style={{ color: colors.ink2, fontFamily: fonts.bodyBold, fontSize: textMin }}>
+            Pads
+          </Text>
+        </Pressable>
+        <Pressable
           onPress={() => openEditor()}
           testID="job-new"
           accessibilityLabel="New job"
@@ -299,7 +317,7 @@ export default function Jobs(): React.ReactElement {
               color: colors.onAccent,
               marginLeft: space.xs,
               fontFamily: fonts.bodyBold,
-              fontSize: 13,
+              fontSize: textMin,
             }}
           >
             New

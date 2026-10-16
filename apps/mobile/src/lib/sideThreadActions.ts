@@ -2,10 +2,15 @@
 // press menu / branch-again inside the screen) and the screen's own
 // composer/controls. Mirrors web's `lib/sideThreadActions.ts`.
 
-import type { WireEvent } from '@patch/wire';
+import { headCodePoints, type WireEvent } from '@patch/wire';
 import { getWs } from '../api/ws';
 import { useUiStore } from '../stores/uiStore';
 import { useSideThreadsStore } from '../stores/sideThreadsStore';
+
+/** The `Off "…"` line over a side thread: the quoted message, cut on a code point. */
+export function offQuoteLabel(quoted: string): string {
+  return `Off "${headCodePoints(quoted, 90)}"`;
+}
 
 function makeLocalId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -32,11 +37,14 @@ export function openExistingSideThread(chatId: string, branchId: string): void {
   useSideThreadsStore.getState().openThread(chatId, branchId);
 }
 
-function send(event: WireEvent): void {
+/** Whether the frame went out; a throw is toasted and returns false. */
+function send(event: WireEvent): boolean {
   try {
     getWs().send(event);
+    return true;
   } catch (e) {
     useUiStore.getState().pushError((e as Error).message);
+    return false;
   }
 }
 
@@ -47,7 +55,7 @@ export function startSideThread(
   fromBranchId?: string,
 ): void {
   useSideThreadsStore.getState().expectNewTab(chatId);
-  send({
+  const sent = send({
     type: 'chat.side_request',
     chatId,
     seq,
@@ -55,6 +63,9 @@ export function startSideThread(
     localId: makeLocalId('side'),
     ...(fromBranchId !== undefined ? { branchId: fromBranchId } : {}),
   });
+  // Nothing was asked for, so no tab is coming: another surface's branch must
+  // not be taken for this one's (it would drop the unsent draft).
+  if (!sent) useSideThreadsStore.getState().cancelNewTab(chatId);
 }
 
 export function sendToBranch(chatId: string, branchId: string, message: string): void {

@@ -57,4 +57,14 @@ describe('OfflineBanner — degraded states render the banner', () => {
     expect(useUiStore.getState().diagnosticsOpen).toBe(true);
     useUiStore.setState({ diagnosticsOpen: false });
   });
+
+  // "Ugly" fix: a slim tinted strip with a dot, not a solid amber slab.
+  it('is a slim tinted strip, not a solid amber block', () => {
+    usePresenceStore.setState({ connection: 'reconnecting', outageVisible: true });
+    const r = renderRN(<OfflineBanner />);
+    const style = findHost(r.root, byTestId('offline-banner')).props.style;
+    expect(style.backgroundColor).not.toBe('#c46a12');
+    expect(style.borderWidth).toBe(1);
+    expect(findHost(r.root, byTestId('offline-dot'))).toBeTruthy();
+  });
 });

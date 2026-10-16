@@ -61,7 +61,7 @@ export function ChatNotFound({ chatId }: { chatId: string }): JSX.Element {
             reminder: c.reminder,
             pendingWake: c.pendingWake,
             todos: c.todos,
-            daemonId: c.daemonId,
+            hostId: c.hostId,
             permissionMode: c.permissionMode,
             folder: c.folder,
             activity: c.activity,

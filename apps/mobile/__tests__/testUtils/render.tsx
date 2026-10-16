@@ -117,3 +117,10 @@ export function textOf(i: ReactTestInstance): string {
 export function hasText(root: ReactTestInstance, needle: string): boolean {
   return textOf(root).includes(needle);
 }
+
+/** Let promise continuations settle inside `act`; unlike `flush` it needs no timers, so it works under fake ones. */
+export async function flushMicrotasks(): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  });
+}

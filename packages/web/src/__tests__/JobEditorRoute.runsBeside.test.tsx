@@ -19,7 +19,7 @@ const job = {
   enabled: true,
   trigger: { type: 'cron', expression: '0 9 * * *' },
   filter: null,
-  action: { type: 'continue', daemonId: 'd1', folder: '/tmp', skill: 'why' },
+  action: { type: 'continue', hostId: 'd1', folder: '/tmp', skill: 'why' },
   concurrency: 2,
   createdAt: 1,
   updatedAt: 1,
@@ -54,7 +54,7 @@ describe('job page: runs open beside the job', () => {
   beforeEach(() => {
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
     useLayoutStore.getState()._reset();
     useLayoutStore.getState().openTab({ kind: 'page', page: 'job', jobId: 'j1' });
     vi.stubGlobal(

@@ -44,6 +44,11 @@ export interface NotificationRouterDeps {
    * dev boot (app.ts, gated on PATCH_SPEAKERS_MOCK=1) — never in production.
    */
   speakersRecorder?: SpeakersTtsRecorder;
+  /**
+   * True while the chat is snoozed. A snoozed chat is silent on every channel
+   * (spec/09 § Snoozed chats): nothing routed for it is delivered or replayed.
+   */
+  isChatSnoozed?: (chatId: string) => boolean;
   /** Override clock. */
   nowMs?: () => number;
 }
@@ -138,6 +143,13 @@ export class NotificationRouter {
 
   /** Route an inbound `notify` event from the host. */
   async route(event: NotifyEvent, opts: RouteOptions = {}): Promise<void> {
+    if (this.deps.isChatSnoozed?.(event.chatId)) {
+      this.deps.logger.info(
+        { chatId: event.chatId, kind: event.kind },
+        'notify dropped: chat is snoozed',
+      );
+      return;
+    }
     // No channel means the agent said only what it had to say and how much it
     // matters, which is all it can know. Where that lands is a fact about where
     // the user is: at a computer, the toast is in front of him and a push would

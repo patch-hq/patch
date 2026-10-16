@@ -40,7 +40,7 @@ describe('e2e system context: an injected reminder reaches the surface beside it
       method: 'POST',
       url: '/api/chats',
       headers: { authorization: `Bearer ${jwt}` },
-      payload: { daemonId: h.daemonId, folder: h.folder },
+      payload: { hostId: h.hostId, folder: h.folder },
     });
     expect(spawn.statusCode).toBe(202);
     const chatId = (spawn.json() as { chatId: string }).chatId;

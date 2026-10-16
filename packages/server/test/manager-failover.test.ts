@@ -19,20 +19,20 @@ describe('ManagerFailover', () => {
   let dir: string;
   let online: Set<string>;
   let handlers: Array<(id: string, s: 'online' | 'offline') => void>;
-  let sent: Array<{ daemonId: string; event: WireEvent }>;
+  let sent: Array<{ hostId: string; event: WireEvent }>;
   let log: ChatLogStore;
   let window: number;
 
   const make = (): ManagerFailover => {
     const f = new ManagerFailover({
-      homeDaemonId: () => 'home',
-      registeredDaemonIds: () => ['home', 'other', 'third'],
+      homeHostId: () => 'home',
+      registeredHostIds: () => ['home', 'other', 'third'],
       isOnline: (id) => online.has(id),
       onHostStatus: (h) => {
         handlers.push(h);
         return () => undefined;
       },
-      sendTo: (daemonId, _s, event) => sent.push({ daemonId, event }),
+      sendTo: (hostId, _s, event) => sent.push({ hostId, event }),
       log,
       contextWindow: () => window,
       dataDir: dir,
@@ -75,6 +75,33 @@ describe('ManagerFailover', () => {
     expect(f.specialThreadHost()).toBe('home');
   });
 
+  describe('handoff text is cut on code points', () => {
+    const loneSurrogate = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    const handoffOf = (): string => {
+      make();
+      status('home', 'offline');
+      vi.advanceTimersByTime(FAILOVER_GRACE_MS);
+      return (sent[0]!.event as { handoff: string }).handoff;
+    };
+
+    test('a message cut at the per-message limit does not split an emoji', () => {
+      log.observe(say(2, 'user', `${'a'.repeat(1999)}😀b`));
+      const handoff = handoffOf();
+      expect(handoff).toContain(`user: ${'a'.repeat(1999)}😀`);
+      expect(handoff).not.toContain('😀b');
+      expect(loneSurrogate.test(handoff)).toBe(false);
+    });
+
+    test('the tail cut at the handoff limit does not split an emoji', () => {
+      window = 100;
+      // Odd-length role prefix and all-emoji bodies, so a UTF-16 cut lands inside a pair.
+      for (let i = 0; i < 20; i++) log.observe(say(2 + i, 'assistant', '😀'.repeat(2000)));
+      const handoff = handoffOf();
+      expect(handoff.startsWith('[handoff]')).toBe(true);
+      expect(loneSurrogate.test(handoff)).toBe(false);
+    });
+  });
+
   test('another host takes over after the grace period, with the conversation and the next seq', () => {
     const f = make();
     status('home', 'offline');
@@ -83,7 +110,7 @@ describe('ManagerFailover', () => {
     expect(f.acting()).toBe('other');
     expect(f.specialThreadHost()).toBe('other');
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.daemonId).toBe('other');
+    expect(sent[0]!.hostId).toBe('other');
     const adopt = sent[0]!.event as {
       type: string;
       epoch: number;
@@ -132,9 +159,9 @@ describe('ManagerFailover', () => {
     expect(f.acting()).toBeNull();
     expect(f.specialThreadHost()).toBe('home');
 
-    const release = sent.find((s) => s.daemonId === 'other')!.event;
+    const release = sent.find((s) => s.hostId === 'other')!.event;
     expect(release).toMatchObject({ type: 'host.manager_release' });
-    const toHome = sent.find((s) => s.daemonId === 'home' && s.event.type === 'host.manager_adopt')!
+    const toHome = sent.find((s) => s.hostId === 'home' && s.event.type === 'host.manager_adopt')!
       .event as { handoff: string; nextSeq: number; epoch: number };
     expect(toHome.nextSeq).toBe(4);
     expect(toHome.handoff).toContain('while you were gone');
@@ -148,7 +175,7 @@ describe('ManagerFailover', () => {
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
     sent.length = 0;
     status('home', 'online');
-    expect(sent.filter((s) => s.daemonId === 'home')).toEqual([]);
+    expect(sent.filter((s) => s.hostId === 'home')).toEqual([]);
   });
 
   test('answers the missing stretch from the server copy, and only that', () => {
@@ -184,7 +211,7 @@ describe('ManagerFailover', () => {
     sent.length = 0;
     status('other', 'offline'); // third is not up, so nobody stands in
     status('other', 'online');
-    expect(sent.some((s) => s.daemonId === 'other' && s.event.type === 'host.manager_adopt')).toBe(
+    expect(sent.some((s) => s.hostId === 'other' && s.event.type === 'host.manager_adopt')).toBe(
       true,
     );
   });
@@ -269,7 +296,7 @@ describe('ManagerFailover', () => {
       status('home', 'online');
       expect(f.acting()).toBeNull();
       expect(
-        sent.some((s) => s.daemonId === 'other' && s.event.type === 'host.manager_release'),
+        sent.some((s) => s.hostId === 'other' && s.event.type === 'host.manager_release'),
       ).toBe(true);
     });
 
@@ -277,8 +304,8 @@ describe('ManagerFailover', () => {
       writeFileSync(join(dir, 'manager-failover.json'), '{not json');
       const warned: string[] = [];
       const f = new ManagerFailover({
-        homeDaemonId: () => 'home',
-        registeredDaemonIds: () => ['home', 'other'],
+        homeHostId: () => 'home',
+        registeredHostIds: () => ['home', 'other'],
         isOnline: (id) => online.has(id),
         onHostStatus: () => () => undefined,
         sendTo: () => undefined,
@@ -294,14 +321,14 @@ describe('ManagerFailover', () => {
     test('says so, and carries on, when it cannot write its state', () => {
       const warned: string[] = [];
       const f = new ManagerFailover({
-        homeDaemonId: () => 'home',
-        registeredDaemonIds: () => ['home', 'other'],
+        homeHostId: () => 'home',
+        registeredHostIds: () => ['home', 'other'],
         isOnline: (id) => online.has(id),
         onHostStatus: (h) => {
           handlers.push(h);
           return () => undefined;
         },
-        sendTo: (daemonId, _s, event) => sent.push({ daemonId, event }),
+        sendTo: (hostId, _s, event) => sent.push({ hostId, event }),
         log,
         contextWindow: () => 40,
         dataDir: join(dir, 'not', 'a', 'directory'),
@@ -316,14 +343,14 @@ describe('ManagerFailover', () => {
 
     test('works with no data directory at all, and stops cleanly', () => {
       const f = new ManagerFailover({
-        homeDaemonId: () => 'home',
-        registeredDaemonIds: () => ['home', 'other'],
+        homeHostId: () => 'home',
+        registeredHostIds: () => ['home', 'other'],
         isOnline: (id) => online.has(id),
         onHostStatus: (h) => {
           handlers.push(h);
           return () => undefined;
         },
-        sendTo: (daemonId, _s, event) => sent.push({ daemonId, event }),
+        sendTo: (hostId, _s, event) => sent.push({ hostId, event }),
         log,
         contextWindow: () => 40,
         logger: { info: () => undefined, warn: () => undefined },

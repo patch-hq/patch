@@ -8,13 +8,13 @@
 // have not, and whether each is reconnecting or offline.
 
 import type { ChatRegistry } from './chat-registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { Registry } from './registry.js';
 
 export interface UnknownChatDeps {
   registry: Registry;
   chatRegistry: ChatRegistry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
 }
 
 export interface UnknownChatReply {
@@ -24,12 +24,12 @@ export interface UnknownChatReply {
 
 export function unknownChatReply(deps: UnknownChatDeps, chatId: string): UnknownChatReply {
   const pending = deps.registry
-    .registeredDaemonIds()
+    .registeredHostIds()
     .filter((id) => !deps.chatRegistry.hasSynced(id))
-    .map((daemonId) => ({
-      daemonId,
-      hostName: deps.registry.hostName(daemonId) ?? daemonId,
-      online: deps.daemonLink.isOnline(daemonId),
+    .map((hostId) => ({
+      hostId,
+      hostName: deps.registry.hostName(hostId) ?? hostId,
+      online: deps.hostLink.isOnline(hostId),
     }));
   if (pending.length === 0) {
     return { status: 404, body: { error: `chat not found: ${chatId}` } };

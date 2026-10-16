@@ -89,6 +89,7 @@ import {
   Mic,
   ArrowUp,
   Paperclip,
+  PenLine,
   Image as ImageIcon,
   Camera,
   X,
@@ -99,11 +100,13 @@ import {
   FilePen,
   ClipboardList,
   Sparkles,
+  Pencil,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { harnessForModel, type PermissionMode } from '@patch/wire';
 import { AnchoredMenu } from './AnchoredMenu';
+import { ImageAnnotatorModal, type AnnotatedImage } from './ImageAnnotatorModal';
 import { ModelPicker } from './ModelPicker';
 import { ProviderSwitchModal } from './ProviderSwitchModal';
 import { suppressProviderSwitchWarningOrFalse } from '../lib/preferences';
@@ -126,18 +129,27 @@ import {
 } from '../lib/skillAutocomplete';
 import { SkillPreviewSheet } from './SkillPreviewSheet';
 import { getLastUsedSkill, setLastUsedSkill, orderSkillsByLastUsed } from '../lib/lastUsedSkill';
+import { joinQuotes, splitQuotes } from '../lib/composerQuotes';
 import { getComposerDraft, setComposerDraft, useComposerDraftStore } from '../lib/composerDraft';
-import { radii, space, typography, useTheme } from '../lib/theme';
+import { radii, space, textMin, typography, useTheme } from '../lib/theme';
 import { getWs } from '../api/ws';
 import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT } from '../lib/composerHeight';
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
+import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
-import { daemonControlsDisabled, daemonControlDisabledReason } from '../lib/connection';
+import { hostControlsDisabled, hostControlDisabledReason } from '../lib/connection';
 import { sendMessage } from '../lib/sendQueue';
+import { adviseNotes, checkHooks } from '../lib/hookCheck';
+import { HookBlockSheet } from './HookBlockSheet';
+import { ContextRing } from './ContextRing';
+import { runSlashCommand, SLASH_COMMANDS } from '../lib/slashCommands';
+
+const BUILTIN_COMMAND_NAMES: string[] = SLASH_COMMANDS.map((c) => c.name);
+import type { HookRunResult } from '@patch/wire/hooks';
 import { formatElapsed } from '../lib/callStatus';
 import { StatusDot, useNow } from './CallParts';
 import {
@@ -156,6 +168,8 @@ interface Props {
   folder?: string;
   /** Test seam: inject a dictation-session factory in place of `lib/dictation`. */
   dictationFactory?: typeof startDictation;
+  /** Test seam: inject a dictation-mode (long-press) session factory. */
+  dictationModeFactory?: typeof startDictationMode;
   /**
    * The new-chat screen's composer (spec/15 § New chat flow): `chatId` is then
    * only the draft key, and the chat to send into is resolved on send — the
@@ -229,6 +243,7 @@ export function Composer({
   chatId,
   folder,
   dictationFactory,
+  dictationModeFactory,
   sendTarget,
   onSent,
   autoFocus,
@@ -239,6 +254,9 @@ export function Composer({
   const [draft, setDraft] = React.useState(() => getComposerDraft(chatId));
   const draftRef = React.useRef(draft);
   draftRef.current = draft;
+  // spec/15 § Composer — quotes: leading `> ` blocks of the draft are cards
+  // above the input; the input (cursor, `/` menu, chips) works on `body` only.
+  const { quotes, body } = React.useMemo(() => splitQuotes(draft), [draft]);
   // Persist SYNCHRONOUSLY with the state update rather than from an effect: an
   // effect keyed on [chatId, draft] fires once with the new chatId and the
   // previous chat's text still in state, writing chat A's draft onto chat B.
@@ -298,6 +316,17 @@ export function Composer({
   // that gap, bounded so a send that never gets a `running` back (an offline
   // queue) still settles instead of spinning forever.
   const [pendingSend, setPendingSend] = React.useState(false);
+  // spec/20-hooks.md — Send reads Checking… while the hook check is in flight;
+  // a `block` parks the message here until the user picks Use suggestion /
+  // Edit / Send anyway.
+  const [hookChecking, setHookChecking] = React.useState(false);
+  const [hookBlock, setHookBlock] = React.useState<{
+    text: string;
+    pending: PendingAttachment[];
+    results: HookRunResult[];
+    /** The draft as it stood when Send was pressed (see `sendNow`). */
+    draftAtSend: string;
+  } | null>(null);
   const pendingSendTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPendingSendTimeout = (): void => {
     if (pendingSendTimeoutRef.current !== null) {
@@ -332,12 +361,12 @@ export function Composer({
   // stale false, stealing the call a mocked test's `mockImplementationOnce`
   // meant for the real one).
   const [cursorState, setCursorState] = React.useState({ text: '', pos: 0 });
-  const cursorPos = cursorState.text === draft ? cursorState.pos : draft.length;
+  const cursorPos = cursorState.text === body ? cursorState.pos : body.length;
   // Only `cursorPos` (the selection START) drives rendering/menu state; the
   // END is only needed to tell a collapsed cursor from a real selection for
   // the Backspace-removes-a-chip gesture, so it's a plain ref.
   const selectionEndRef = React.useRef(0);
-  const activeToken = activeSlashToken(draft, cursorPos);
+  const activeToken = activeSlashToken(body, cursorPos);
   const slashQuery = activeToken?.query ?? null;
   const slashActive = activeToken !== null;
   const trimmedFolder = (folder ?? '').trim();
@@ -348,10 +377,10 @@ export function Composer({
     // last loaded list stays on screen while the new one is in flight. NO
     // FALLBACK: a failed fetch surfaces an error rather than a silently empty
     // list.
-    if (!slashActive || trimmedFolder === '' || !row?.daemonId) return;
+    if (!slashActive || trimmedFolder === '' || !row?.hostId) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.daemonId)
+      .skills(trimmedFolder, row.hostId)
       .then((r) => {
         if (!live) return;
         setSkills(r.skills ?? []);
@@ -365,7 +394,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [slashActive, trimmedFolder, row?.daemonId]);
+  }, [slashActive, trimmedFolder, row?.hostId]);
   // spec/15 § Skill autocomplete — chips: a completed `/<skill>` must be
   // recognised (and rendered as a chip, with its preview reachable) even
   // before `/` has ever been opened this session — e.g. reopening a chat
@@ -378,12 +407,12 @@ export function Composer({
   // packages/web/src/components/Composer.tsx's identical guard for why).
   const chipFetchPrimedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (trimmedFolder === '' || slashActive || !row?.daemonId) return;
+    if (trimmedFolder === '' || slashActive || !row?.hostId) return;
     if (chipFetchPrimedRef.current === trimmedFolder) return;
     if (!draft.includes('/')) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.daemonId)
+      .skills(trimmedFolder, row.hostId)
       .then((r) => {
         if (!live) return;
         chipFetchPrimedRef.current = trimmedFolder;
@@ -396,21 +425,31 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [trimmedFolder, draft, slashActive, row?.daemonId]);
+  }, [trimmedFolder, draft, slashActive, row?.hostId]);
   // The skill last completed in this folder sorts to the top (spec/15 § Skill
   // autocomplete) — ordering only, applied AFTER the typed prefix filter.
   const filteredSkills =
     slashQuery !== null
-      ? orderSkillsByLastUsed(filterSkills(skills, slashQuery), getLastUsedSkill(trimmedFolder))
+      ? [
+          ...orderSkillsByLastUsed(
+            filterSkills(skills, slashQuery),
+            getLastUsedSkill(trimmedFolder),
+          ),
+          // Built-in commands (lib/slashCommands.ts) follow the folder's skills, as on web.
+          ...filterSkills(
+            BUILTIN_COMMAND_NAMES.filter((n) => !skills.includes(n)),
+            slashQuery,
+          ),
+        ]
       : [];
   const showSkillMenu = slashActive && filteredSkills.length > 0;
-  // Every name a chip can legitimately be. Mobile has no built-in slash
-  // commands yet (spec/15 § Skill autocomplete lists none), so this is just
-  // the folder's skills.
+  // Every name a chip can legitimately be: the folder's skills. The built-in
+  // commands (lib/slashCommands.ts) are offered in the list but are not
+  // chipped — they run instead of sending, so there is no skill to preview.
   const knownChipNames = React.useMemo(() => new Set(skills), [skills]);
   const chipTokens = React.useMemo(
-    () => findChipTokens(draft, knownChipNames),
-    [draft, knownChipNames],
+    () => findChipTokens(body, knownChipNames),
+    [body, knownChipNames],
   );
   const [previewSkill, setPreviewSkill] = React.useState<{
     name: string;
@@ -424,7 +463,7 @@ export function Composer({
     let cursor = 0;
     chipTokens.forEach((chip: ChipToken, i: number) => {
       if (chip.start > cursor) {
-        nodes.push(<Text key={`t${i}`}>{draft.slice(cursor, chip.start)}</Text>);
+        nodes.push(<Text key={`t${i}`}>{body.slice(cursor, chip.start)}</Text>);
       }
       nodes.push(
         <Text
@@ -444,13 +483,13 @@ export function Composer({
       );
       cursor = chip.end;
     });
-    if (cursor < draft.length) nodes.push(<Text key="tail">{draft.slice(cursor)}</Text>);
+    if (cursor < body.length) nodes.push(<Text key="tail">{body.slice(cursor)}</Text>);
     return nodes;
   }
   const completeSkill = (name: string): void => {
     if (activeToken === null) return;
-    const { text, cursor } = spliceCompletion(draft, activeToken.start, cursorPos, name);
-    updateDraft(text);
+    const { text, cursor } = spliceCompletion(body, activeToken.start, cursorPos, name);
+    updateDraft(joinQuotes(quotes, text));
     pendingCursorRef.current = cursor;
     // Remembered per folder so the next `/` defaults to it.
     setLastUsedSkill(trimmedFolder, name);
@@ -463,9 +502,9 @@ export function Composer({
   // Attach + voice DO require the host (an attachment must be stored on the
   // box; audio is real-time and can't be queued), so they gate on the host.
   const linkDown = conn !== 'connected';
-  const disabled = daemonControlsDisabled(conn, daemon); // attach + voice
-  const disabledReason = daemonControlDisabledReason(conn, daemon);
-  const linkReason = linkDown ? daemonControlDisabledReason(conn, daemon) : null;
+  const disabled = hostControlsDisabled(conn, daemon); // attach + voice
+  const disabledReason = hostControlDisabledReason(conn, daemon);
+  const linkReason = linkDown ? hostControlDisabledReason(conn, daemon) : null;
 
   const running = row?.activity === 'running';
   React.useEffect(() => {
@@ -561,9 +600,9 @@ export function Composer({
     // tests render against — only imperative, so its absence is otherwise
     // harmless there (no real cursor to move).
     inputRef.current?.setNativeProps?.({ selection: { start: pos, end: pos } });
-    setCursorState({ text: draft, pos });
+    setCursorState({ text: body, pos });
     selectionEndRef.current = pos;
-  }, [draft]);
+  }, [body]);
 
   // Dictation (spec/07 § "Dictation into the composer"): the mic streams live
   // to the composer — the interim transcript renders inside the input
@@ -592,19 +631,10 @@ export function Composer({
   // onPartial call, or `finish()` resolving) is dropped instead of reviving
   // the just-discarded dictation.
   const discardedRef = React.useRef(false);
-  // Which gesture started the in-flight recording: only a `hold` commits on
-  // release; a `tap` session needs a second tap (mirrors lib/voiceNote's
-  // VoiceNoteMode split). A second gesture can only land once `micState` has
-  // left `idle` (the mic Pressable's onPress/onLongPress read that state, see
-  // below), so exactly one dictation is ever in flight — no generation
-  // counter needed here (contrast lib/dictation.ts's OWN internal setup, which
-  // guards its async continuations against a `finish()` that arrives first).
-  const micModeRef = React.useRef<'hold' | 'tap'>('tap');
-  // True from the moment a hold session starts until the finger genuinely
-  // leaves the glass. Only a touch-end/touch-cancel clears it — see the
-  // onPressOut note in this file's header.
-  const holdTouchRef = React.useRef(false);
-
+  // Bumped when a dictation begins and when one is cleared, so a commit still
+  // in flight can tell it belongs to a session that is no longer the current
+  // one — `discardedRef` alone is reset by the NEXT dictation.
+  const dictationEpochRef = React.useRef(0);
   // Resolve mic permission + the recording audio mode BEFORE the user ever
   // presses, so `startDictation` has nothing to await before the microphone
   // opens (lib/dictation.ts § TIMING). Rejections are not surfaced from here:
@@ -625,7 +655,7 @@ export function Composer({
     [],
   );
 
-  function beginDictation(mode: 'hold' | 'tap'): void {
+  function beginDictation(): void {
     // Dictation on a backend this chat's host has no key for is refused at the
     // press, not after the user has spoken (the host refuses it too).
     const refusal = voiceKeyRefusal(chatId, 'dictation');
@@ -633,8 +663,8 @@ export function Composer({
       useUiStore.getState().pushError(`voice: ${refusal}`);
       return;
     }
-    micModeRef.current = mode;
     discardedRef.current = false;
+    dictationEpochRef.current += 1;
     // Dictating is talking, not typing: put the keyboard away so the listening
     // strip and the live words have the room (spec/07 § Dictation into the
     // composer). The input is not locked — tapping it brings the keyboard back.
@@ -657,6 +687,11 @@ export function Composer({
         setLivePartial('');
         useUiStore.getState().pushError(`voice: ${message}`);
       },
+      (message: string): void => {
+        // Preview only: the recording carries on and the transcript still lands.
+        if (discardedRef.current) return;
+        useUiStore.getState().pushError(`voice: live preview unavailable — ${message}`);
+      },
     );
   }
 
@@ -669,9 +704,13 @@ export function Composer({
       return;
     }
     setMicState('transcribing');
+    const epoch = dictationEpochRef.current;
+    const superseded = (): boolean => discardedRef.current || epoch !== dictationEpochRef.current;
     try {
       const outcome = await handle.finish(true);
-      if (discardedRef.current) return; // Clear was pressed while the upload was in flight.
+      // Clear was pressed while the upload was in flight (and maybe a new
+      // dictation begun since): this result belongs to nobody now.
+      if (superseded()) return;
       // Every no-text outcome names its own cause. NO FALLBACK: none of them
       // is allowed to be a silent no-op, because a dictation that appears to
       // do nothing is indistinguishable from a broken microphone.
@@ -708,37 +747,62 @@ export function Composer({
         submitRef.current();
       }
     } catch (e) {
+      // A dictation that was cleared (or replaced) failing late is no one's
+      // business now — and must not reset the NEXT dictation's send-after flag.
+      if (superseded()) return;
       sendAfterDictationRef.current = false;
       useUiStore.getState().pushError(`voice transcription failed: ${(e as Error).message}`);
     } finally {
-      if (!discardedRef.current) {
+      if (!superseded()) {
         setMicState('idle');
         setLivePartial('');
       }
     }
   }
 
-  /**
-   * End a hold-to-talk dictation. Called from the mic's `onTouchEnd` /
-   * `onTouchCancel` — a real ACTION_UP or ACTION_CANCEL — never from
-   * `onPressOut`, which also fires on a drift-out (see this file's header).
-   * A cancel commits rather than discards: the words are already captured and
-   * dictation only ever lands editable text in the draft, so throwing them
-   * away would lose real speech for nothing.
-   */
-  function endHoldGesture(): void {
-    if (!holdTouchRef.current) return;
-    holdTouchRef.current = false;
-    if (micModeRef.current !== 'hold') return;
-    if (dictationRef.current === null) return;
-    void commitDictation();
+  // Dictation mode (spec/07 § Dictation mode): long-press the mic and it stays
+  // open — each time the speaker goes quiet for a few seconds what they said is
+  // sent as its own message and it keeps listening. Tapping the mic or the
+  // clear control ends it. Not a call: nothing speaks back.
+  const [dictModeOn, setDictModeOn] = React.useState(false);
+  const [dictPending, setDictPending] = React.useState(0);
+  const dictModeRef = React.useRef<DictationModeHandle | null>(null);
+  function stopDictationMode(): void {
+    const h = dictModeRef.current;
+    dictModeRef.current = null;
+    setDictModeOn(false);
+    setDictPending(0);
+    if (h) void h.stop();
   }
+  function startDictMode(): void {
+    const refusal = voiceKeyRefusal(chatId, 'dictation');
+    if (refusal !== null) {
+      useUiStore.getState().pushError(`voice: ${refusal}`);
+      return;
+    }
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    setDictModeOn(true);
+    const factory = dictationModeFactory ?? startDictationMode;
+    dictModeRef.current = factory({
+      onText: (t: string): void => {
+        const cur = draftRef.current;
+        updateDraft(cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t);
+        submitRef.current();
+      },
+      onBusy: (n: number): void => setDictPending(n),
+      onError: (message: string): void => {
+        useUiStore.getState().pushError(`voice: ${message}`);
+      },
+    });
+  }
+  React.useEffect(() => stopDictationMode, [chatId]);
 
   /** Discard the in-flight dictation (Clear button) — never lands any text. */
   function cancelDictation(): void {
     sendAfterDictationRef.current = false;
     discardedRef.current = true;
-    holdTouchRef.current = false;
+    dictationEpochRef.current += 1;
     const handle = dictationRef.current;
     dictationRef.current = null;
     setMicState('idle');
@@ -751,6 +815,29 @@ export function Composer({
   };
   const removeAttachment = (key: string): void => {
     useComposerAttachmentStore.getState().remove(chatId, key);
+  };
+  // The image being marked up (spec/15 § Composer — attachments). Done swaps
+  // the annotated PNG in for it, in the same place in the chip row.
+  const [annotating, setAnnotating] = React.useState<PendingAttachment | null>(null);
+  const finishAnnotation = (next: AnnotatedImage): void => {
+    const original = annotating;
+    setAnnotating(null);
+    if (original === null) return;
+    try {
+      useComposerAttachmentStore
+        .getState()
+        .replace(chatId, original.key, { ...next, key: newKey(), kind: 'image' });
+    } catch (e) {
+      useUiStore.getState().pushError(`annotate failed: ${(e as Error).message}`);
+    }
+  };
+
+  // Pen button → a blank page to draw on, no photo needed; Done attaches the
+  // drawing as a new image chip.
+  const [sketching, setSketching] = React.useState(false);
+  const finishSketch = (next: AnnotatedImage): void => {
+    setSketching(false);
+    addAttachment({ ...next, key: newKey(), kind: 'image' });
   };
 
   // Image button → photo library. NO FALLBACK: a denied permission surfaces an
@@ -893,10 +980,31 @@ export function Composer({
   // Echo + send (spec/15 § Composer → Attachments): the message is in the
   // stream at once — attachments from their local copies, uploading — and the
   // composer clears. lib/sendQueue.ts uploads and delivers it, in send order.
-  const sendNow = (target: string, text: string, pending: PendingAttachment[]): void => {
-    sendMessage(target, text, pending);
-    if (pending.length > 0) useComposerAttachmentStore.getState().clear(chatId);
-    updateDraft('');
+  // The send can finish well after Send was pressed (a hook check, creating a
+  // new chat), and the box stays editable meanwhile — so it clears only what
+  // was sent: the attachments that went, and the draft only if it is still the
+  // one that was sent. Anything added or typed since is the user's next message.
+  const sendNow = (
+    target: string,
+    text: string,
+    pending: PendingAttachment[],
+    hookResults: HookRunResult[] = [],
+    draftAtSend?: string,
+  ): void => {
+    const localId = sendMessage(target, text, pending);
+    const notes = adviseNotes(hookResults);
+    if (notes.length > 0) {
+      useChatStore.getState().patchLocalMessage(target, localId, { hookAdvise: notes });
+    }
+    const files = useComposerAttachmentStore.getState();
+    for (const a of pending) files.remove(chatId, a.key);
+    // Nothing left: drop the key, as a plain clear always did.
+    if (useComposerAttachmentStore.getState().byKey[chatId]?.length === 0) files.clear(chatId);
+    const now = draftRef.current;
+    if (draftAtSend === undefined || now === draftAtSend) updateDraft('');
+    // Typed on after what was sent: the sent part goes, the rest stays. Edited
+    // somewhere inside it, there is no telling what is left, so it all stays.
+    else if (now.startsWith(draftAtSend)) updateDraft(now.slice(draftAtSend.length).trimStart());
   };
 
   const submit = (): void => {
@@ -904,7 +1012,6 @@ export function Composer({
     // typed; mid-transcription it waits for the words to land.
     if (micState !== 'idle') {
       sendAfterDictationRef.current = true;
-      holdTouchRef.current = false;
       if (micState === 'recording') void commitDictation();
       return;
     }
@@ -918,7 +1025,8 @@ export function Composer({
     // Surface → server disconnect — deliveryTracker already retries
     // regardless of why a send failed).
     // The ref, not state: a dictated send lands its words in the same tick.
-    const text = draftRef.current.trim();
+    const draftAtSend = draftRef.current;
+    const text = draftAtSend.trim();
     if (!text && attachments.length === 0) return;
     const pending = attachments;
 
@@ -938,7 +1046,7 @@ export function Composer({
           setResolving(false);
         }
         if (target === null) return;
-        sendNow(target, text, pending);
+        sendNow(target, text, pending, [], draftAtSend);
         onSent?.(target);
       })();
       return;
@@ -949,6 +1057,56 @@ export function Composer({
     // offline) still settles rather than spinning forever. Only for a plain
     // send: one with an attachment already gets its own "did this land"
     // feedback from the message's `Uploading` status in the stream.
+    if (hookChecking) return;
+    const command = runSlashCommand(text, {
+      chatId,
+      hostId: row?.hostId ?? null,
+      goal: row?.goal ?? null,
+      reminder: row?.reminder ?? null,
+      setGoal: (g) => useChatStore.getState().setGoal(chatId, g),
+      setReminder: (r) => useChatStore.getState().setReminder(chatId, r),
+      clearTimeline: () => useChatStore.getState().clearTimeline(chatId),
+      chooseModel,
+      pushError: (m) => useUiStore.getState().pushError(m),
+      api,
+    });
+    if (command.handled) {
+      updateDraft('');
+      return;
+    }
+    if (command.text !== text) {
+      // `/goal <text>` sets the goal and sends the text as the turn.
+      sendCheckedText(command.text, pending, draftAtSend);
+      return;
+    }
+    sendCheckedText(text, pending, draftAtSend);
+  };
+
+  // Hook check, then delivery (spec/20-hooks.md).
+  const sendCheckedText = (
+    text: string,
+    pending: PendingAttachment[],
+    draftAtSend: string,
+  ): void => {
+    setHookChecking(true);
+    void (async () => {
+      const check = await checkHooks(chatId, text, pending);
+      setHookChecking(false);
+      if (check.decision === 'block') {
+        setHookBlock({ text, pending, results: check.results, draftAtSend });
+        return;
+      }
+      deliver(text, pending, check.results, draftAtSend);
+    })();
+  };
+
+  // The send proper, past the hook check.
+  const deliver = (
+    text: string,
+    pending: PendingAttachment[],
+    hookResults: HookRunResult[],
+    draftAtSend: string,
+  ) => {
     if (!running && pending.length === 0) {
       clearPendingSendTimeout();
       setPendingSend(true);
@@ -957,7 +1115,7 @@ export function Composer({
         PENDING_SEND_TIMEOUT_MS,
       );
     }
-    sendNow(chatId, text, pending);
+    sendNow(chatId, text, pending, hookResults, draftAtSend);
   };
 
   // Send stays enabled whether it's the host or the LINK itself that's
@@ -971,14 +1129,16 @@ export function Composer({
   submitRef.current = sendDraft;
 
   const sendDisabled =
-    resolving || (draft.trim().length === 0 && attachments.length === 0 && micState === 'idle');
+    resolving ||
+    hookChecking ||
+    (draft.trim().length === 0 && attachments.length === 0 && micState === 'idle');
 
   // Un-pressable and DEAD are different things. A send held open while the
   // new chat is created — or by `pendingSend` waiting on the host to confirm
   // the turn — keeps the active leaf colour and swaps its arrow for a
   // spinner, so the tap visibly did something; only a genuinely unavailable
   // send greys out.
-  const sendBusy = resolving || pendingSend;
+  const sendBusy = resolving || pendingSend || hookChecking;
   const sendLooksInactive = sendDisabled && !sendBusy;
 
   // Stop REPLACES Send while a turn runs and there is nothing to send. The
@@ -1012,6 +1172,63 @@ export function Composer({
         borderColor: colors.lineSoft,
       }}
     >
+      {hookBlock ? (
+        <HookBlockSheet
+          results={hookBlock.results}
+          onUseSuggestion={(suggestion) => {
+            updateDraft(suggestion);
+            setHookBlock(null);
+          }}
+          onEdit={() => setHookBlock(null)}
+          onSendAnyway={() => {
+            const b = hookBlock;
+            setHookBlock(null);
+            deliver(b.text, b.pending, b.results, b.draftAtSend);
+          }}
+        />
+      ) : null}
+      {/* Quote cards stacked above the input (spec/15 § Composer — quotes). */}
+      {quotes.length > 0 ? (
+        <View testID="composer-quotes" style={{ gap: space.xs, paddingBottom: space.xs }}>
+          {quotes.map((q, i) => (
+            <View
+              key={i}
+              testID="composer-quote"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: space.xs,
+                paddingVertical: space.xs,
+                paddingLeft: space.sm,
+                paddingRight: space.xs,
+                borderLeftWidth: 3,
+                borderLeftColor: colors.ink2,
+                borderRadius: radii.sm,
+                backgroundColor: colors.paper,
+              }}
+            >
+              <Text style={{ flex: 1, color: colors.ink2 }} numberOfLines={3}>
+                {q}
+              </Text>
+              <Pressable
+                testID="composer-quote-remove"
+                accessibilityLabel="remove quote"
+                hitSlop={8}
+                onPress={() =>
+                  updateDraft(
+                    joinQuotes(
+                      quotes.filter((_, j) => j !== i),
+                      body,
+                    ),
+                  )
+                }
+              >
+                <X size={16} color={colors.ink2} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {/* Removable thumbnails/chips above the input (spec/15 § Composer). */}
       {attachments.length > 0 ? (
         <ScrollView
@@ -1041,9 +1258,23 @@ export function Composer({
               ) : (
                 <FileText size={18} color={colors.ink2} />
               )}
-              <Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 13, flexShrink: 1 }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.ink2, fontSize: textMin, flexShrink: 1 }}
+              >
                 {a.name}
               </Text>
+              {a.kind === 'image' ? (
+                <Pressable
+                  onPress={() => setAnnotating(a)}
+                  disabled={resolving}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Annotate ${a.name}`}
+                  hitSlop={8}
+                >
+                  <Pencil size={16} color={colors.ink3} />
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={() => removeAttachment(a.key)}
                 disabled={resolving}
@@ -1057,6 +1288,18 @@ export function Composer({
           ))}
         </ScrollView>
       ) : null}
+
+      <ImageAnnotatorModal
+        attachment={annotating}
+        onDone={finishAnnotation}
+        onCancel={() => setAnnotating(null)}
+      />
+      <ImageAnnotatorModal
+        attachment={null}
+        sketch={sketching}
+        onDone={finishSketch}
+        onCancel={() => setSketching(false)}
+      />
 
       {/* Skill autocomplete list (spec/15 § Composer). Tap a row to complete. */}
       {showSkillMenu ? (
@@ -1098,6 +1341,25 @@ export function Composer({
       {/* Listening strip (spec/15 § Composer): with the keyboard away, this is
           what says the mic is live — a pulsing dot, the state named, and how
           long it has been listening. */}
+      {dictModeOn ? (
+        <View
+          testID="dictation-mode-status"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: space.sm,
+            paddingHorizontal: space.xs,
+          }}
+        >
+          <StatusDot
+            color={dictPending > 0 ? colors.ink3 : colors.red}
+            pulsing={dictPending === 0}
+          />
+          <Text style={{ ...typography.label, flex: 1, color: colors.ink }}>
+            {dictPending > 0 ? 'Sending…' : 'Dictating'}
+          </Text>
+        </View>
+      ) : null}
       {micState !== 'idle' ? (
         <View
           testID="dictation-status"
@@ -1133,88 +1395,18 @@ export function Composer({
           `position: 'relative'` is explicit because the live-dictation mirror
           below is absolutely positioned against this box. */}
       <View testID="composer-input-row" style={{ position: 'relative' }}>
-        {/* Live-dictation preview (Todoist 6hHGqGVpJqfcXPmm): a mirror of the
-              input showing the committed draft in normal ink plus the
-              in-progress transcript on a tint, sitting
-              behind a text-transparent TextInput so the real input still owns
-              the cursor/selection/editing throughout the recording (spec/07 §
-              "Dictation into the composer" — "the input stays
-              focusable/editable throughout"). Only mounted while there's
-              something to preview, so idle typing is unaffected. */}
-        {micState !== 'idle' && livePartial.length > 0 ? (
-          <View
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
-              // Mirrors the input's own bounds exactly — a preview that clipped
-              // at a different line from the field under it shows the user text
-              // the field is still holding.
-              minHeight: COMPOSER_MIN_HEIGHT,
-              maxHeight: COMPOSER_MAX_HEIGHT,
-            }}
-          >
-            <Text
-              testID="dictation-preview"
-              style={{
-                paddingHorizontal: space.md,
-                paddingVertical: space.sm,
-                fontSize: 16,
-              }}
-            >
-              <Text style={{ color: colors.ink }}>{draft}</Text>
-              {draft.trim().length > 0 ? ' ' : ''}
-              {/* Grey: in progress — rewritten as the user talks and replaced
-                  outright by the committed transcript. */}
-              <Text testID="dictation-live-words" style={{ color: colors.ink3 }}>
-                {livePartial}
-              </Text>
-            </Text>
-          </View>
-        ) : showChipMirror ? (
-          // spec/15 § Skill autocomplete — chips: the same text-transparent-
-          // TextInput trick as the dictation preview above, generalised: the
-          // real input keeps the cursor and every editing gesture, and this
-          // mirror draws the draft back over it with each completed
-          // `/<skill>` boxed and tappable instead of plain.
-          <View
-            pointerEvents="box-none"
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
-              minHeight: COMPOSER_MIN_HEIGHT,
-              maxHeight: COMPOSER_MAX_HEIGHT,
-            }}
-          >
-            <Text
-              testID="chip-mirror"
-              style={{
-                paddingHorizontal: space.md,
-                paddingVertical: space.sm,
-                fontSize: 16,
-                color: colors.ink,
-              }}
-            >
-              {renderChipMirror()}
-            </Text>
-          </View>
-        ) : null}
         <TextInput
           ref={inputRef}
           autoFocus={autoFocus}
-          value={draft}
+          value={body}
           onChangeText={(text) => {
             // spec/15 § Composer — a long paste becomes a document attachment.
-            const pasted = extractLongPaste(draft, text);
+            const pasted = extractLongPaste(body, text);
             if (pasted !== null) {
               void attachPastedText(pasted.inserted);
               text = pasted.remaining;
             }
-            updateDraft(text);
+            updateDraft(joinQuotes(quotes, text));
             // Typing always lands the cursor at the end of what was just
             // typed — the same default a real browser textarea applies on a
             // programmatic value change. `onSelectionChange` (below) is the
@@ -1224,7 +1416,7 @@ export function Composer({
             selectionEndRef.current = text.length;
           }}
           onSelectionChange={(e) => {
-            setCursorState({ text: draft, pos: e.nativeEvent.selection.start });
+            setCursorState({ text: body, pos: e.nativeEvent.selection.start });
             selectionEndRef.current = e.nativeEvent.selection.end;
           }}
           onKeyPress={(e) => {
@@ -1233,9 +1425,9 @@ export function Composer({
             // collapsed cursor — a real selection deletes normally.
             if (e.nativeEvent.key !== 'Backspace') return;
             if (selectionEndRef.current !== cursorPos) return;
-            const chip = chipEndingAt(draft, cursorPos, knownChipNames);
+            const chip = chipEndingAt(body, cursorPos, knownChipNames);
             if (!chip) return;
-            updateDraft(draft.slice(0, chip.start) + draft.slice(cursorPos));
+            updateDraft(joinQuotes(quotes, body.slice(0, chip.start) + body.slice(cursorPos)));
             pendingCursorRef.current = chip.start;
           }}
           onFocus={() => useComposerDraftStore.getState().setFocused(chatId, true)}
@@ -1282,13 +1474,86 @@ export function Composer({
             fontSize: 16,
           }}
         />
+        {/* Drawn AFTER the input: the input has an opaque `paper` background, so
+            a mirror mounted before it is painted over and the live words are
+            invisible (Todoist 6hj4XRHrpRCQp8Fc). */}
+        {/* Live-dictation preview (Todoist 6hHGqGVpJqfcXPmm): a mirror of the
+              input showing the committed draft in normal ink plus the
+              in-progress transcript on a tint, sitting
+              behind a text-transparent TextInput so the real input still owns
+              the cursor/selection/editing throughout the recording (spec/07 §
+              "Dictation into the composer" — "the input stays
+              focusable/editable throughout"). Only mounted while there's
+              something to preview, so idle typing is unaffected. */}
+        {micState !== 'idle' && livePartial.length > 0 ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              // Mirrors the input's own bounds exactly — a preview that clipped
+              // at a different line from the field under it shows the user text
+              // the field is still holding.
+              minHeight: COMPOSER_MIN_HEIGHT,
+              maxHeight: COMPOSER_MAX_HEIGHT,
+            }}
+          >
+            <Text
+              testID="dictation-preview"
+              style={{
+                paddingHorizontal: space.md + 1,
+                paddingVertical: space.sm + 1,
+                fontSize: 16,
+              }}
+            >
+              <Text style={{ color: colors.ink }}>{body}</Text>
+              {body.trim().length > 0 ? ' ' : ''}
+              {/* Grey: in progress — rewritten as the user talks and replaced
+                  outright by the committed transcript. */}
+              <Text testID="dictation-live-words" style={{ color: colors.ink3 }}>
+                {livePartial}
+              </Text>
+            </Text>
+          </View>
+        ) : showChipMirror ? (
+          // spec/15 § Skill autocomplete — chips: the same text-transparent-
+          // TextInput trick as the dictation preview above, generalised: the
+          // real input keeps the cursor and every editing gesture, and this
+          // mirror draws the draft back over it with each completed
+          // `/<skill>` boxed and tappable instead of plain.
+          <View
+            pointerEvents="box-none"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              minHeight: COMPOSER_MIN_HEIGHT,
+              maxHeight: COMPOSER_MAX_HEIGHT,
+            }}
+          >
+            <Text
+              testID="chip-mirror"
+              style={{
+                paddingHorizontal: space.md + 1,
+                paddingVertical: space.sm + 1,
+                fontSize: 16,
+                color: colors.ink,
+              }}
+            >
+              {renderChipMirror()}
+            </Text>
+          </View>
+        ) : null}
       </View>
       {/* Action row. Everything that acts on the message is here, left to
           right; the send button is pushed to the RIGHT edge by the flexible
           spacer, keeping it where the thumb already expects it. */}
       <View
         testID="composer-actions-row"
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minWidth: 0 }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, minWidth: 0 }}
       >
         {/* Three clear attach controls (spec/15 § Composer): a camera, a
             photo/image picker and an any-type file picker. */}
@@ -1360,6 +1625,27 @@ export function Composer({
           <Paperclip size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
         </Pressable>
         <Pressable
+          onPress={() => {
+            if (disabled || resolving) return;
+            setSketching(true);
+          }}
+          disabled={disabled || resolving}
+          style={({ pressed }) => ({
+            width: ACTION_SIZE,
+            height: ACTION_SIZE,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: radii.md,
+            backgroundColor: pressed ? colors.divider : 'transparent',
+          })}
+          accessibilityRole="button"
+          accessibilityLabel={
+            disabled ? `Sketch unavailable — ${disabledReason ?? 'disconnected'}` : 'Sketch'
+          }
+        >
+          <PenLine size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
+        </Pressable>
+        <Pressable
           onPressIn={() => {
             if (disabled) return;
             // A press-in lands ~350ms before onLongPress, so this is a free
@@ -1369,18 +1655,15 @@ export function Composer({
           }}
           onPress={() => {
             if (disabled) return;
-            if (micState !== 'idle') void commitDictation();
-            else void beginDictation('tap');
+            if (dictModeOn) stopDictationMode();
+            else if (micState !== 'idle') void commitDictation();
+            else void beginDictation();
           }}
           onLongPress={() => {
             if (disabled) return;
-            holdTouchRef.current = true;
-            void beginDictation('hold');
+            if (dictModeOn) stopDictationMode();
+            else if (micState === 'idle') startDictMode();
           }}
-          // The genuine end of a hold gesture. Reads only refs, so it can
-          // never act on a stale render's `micState`.
-          onTouchEnd={endHoldGesture}
-          onTouchCancel={endHoldGesture}
           disabled={disabled || micState === 'transcribing'}
           delayLongPress={350}
           hitSlop={MIC_HIT_SLOP}
@@ -1414,9 +1697,9 @@ export function Composer({
             out from under them mid-gesture). Cancels via `lib/dictation.ts`'s
             `finish(false)` — the mic capture stops, the preview session ends,
             nothing is transcribed or appended to the draft. */}
-        {micState !== 'idle' ? (
+        {micState !== 'idle' || dictModeOn ? (
           <Pressable
-            onPress={cancelDictation}
+            onPress={dictModeOn ? stopDictationMode : cancelDictation}
             style={({ pressed }) => ({
               width: ACTION_SIZE,
               height: ACTION_SIZE,
@@ -1426,7 +1709,7 @@ export function Composer({
               backgroundColor: pressed ? colors.divider : 'transparent',
             })}
             accessibilityRole="button"
-            accessibilityLabel="Clear dictation"
+            accessibilityLabel={dictModeOn ? 'Stop dictation mode' : 'Clear dictation'}
           >
             <X size={ICON_SIZE} color={colors.ink2} />
           </Pressable>
@@ -1434,7 +1717,7 @@ export function Composer({
         <View testID="composer-actions-spacer" style={{ flex: 1, minWidth: space.xs }} />
         {sendTarget === undefined ? (
           <ModelPicker
-            daemonId={row?.daemonId ? row.daemonId : null}
+            hostId={row?.hostId ? row.hostId : null}
             selected={pendingModel ?? chatModel}
             pending={pendingModel !== null}
             onSelect={chooseModel}
@@ -1454,7 +1737,13 @@ export function Composer({
             testID="chat-account"
             numberOfLines={1}
             accessibilityLabel={`The latest turn ran on the ${row.account.label} account`}
-            style={{ ...typography.meta, color: colors.ink3, maxWidth: 96 }}
+            style={{
+              ...typography.meta,
+              color: colors.ink3,
+              maxWidth: 96,
+              flexShrink: 1,
+              marginHorizontal: space.xs,
+            }}
           >
             {row.account.label}
           </Text>
@@ -1487,6 +1776,7 @@ export function Composer({
             />
           </Pressable>
         ) : null}
+        {sendTarget === undefined ? <ContextRing chatId={chatId} size={ACTION_SIZE} /> : null}
         {showStop ? (
           <Pressable
             testID="composer-stop"
@@ -1527,15 +1817,17 @@ export function Composer({
             })}
             accessibilityRole="button"
             accessibilityLabel={
-              resolving
-                ? 'Sending — creating the chat'
-                : pendingSend
-                  ? 'Sending…'
-                  : linkDown || daemon !== 'online'
-                    ? 'Send message (queued until the agent reconnects)'
-                    : running
-                      ? 'Send message (queued after the current turn)'
-                      : 'Send message'
+              hookChecking
+                ? 'Checking…'
+                : resolving
+                  ? 'Sending — creating the chat'
+                  : pendingSend
+                    ? 'Sending…'
+                    : linkDown || daemon !== 'online'
+                      ? 'Send message (queued until the agent reconnects)'
+                      : running
+                        ? 'Send message (queued after the current turn)'
+                        : 'Send message'
             }
           >
             {sendBusy ? (
@@ -1577,7 +1869,7 @@ export function Composer({
         skill={previewSkill}
         frontmatter={skillFrontmatter}
         paths={skillPaths}
-        daemonId={row?.daemonId ?? ''}
+        hostId={row?.hostId ?? ''}
         onClose={() => setPreviewSkill(null)}
       />
     </View>

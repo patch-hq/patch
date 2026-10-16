@@ -70,7 +70,7 @@ test.describe('unknown chat', () => {
           reminder: null,
           pendingWake: null,
           todos: [],
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/home/tom/projects/old',
           activity: 'idle',
           permissionMode: 'auto',

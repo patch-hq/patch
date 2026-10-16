@@ -25,7 +25,7 @@ import type { ChatRow } from '../src/stores/types';
 
 function hit(overrides: Partial<ChatSearchHit> & { chatId: string }): ChatSearchHit {
   return {
-    daemonId: 'd1',
+    hostId: 'd1',
     name: null,
     preview: null,
     folder: '/w',
@@ -169,6 +169,39 @@ describe('localSearchHits', () => {
     expect(out[0]!.jobId).toBeNull();
   });
 
+  it("carries the row's jobId so an automation hit keeps its label", () => {
+    const out = localSearchHits(
+      [chat({ chatId: 'a', name: 'Pancakes', jobId: 'job_1' })],
+      'pancakes',
+    );
+    expect(out[0]!.jobId).toBe('job_1');
+  });
+
+  it("matches every term in any order, and a quoted run as one exact phrase (the server's rule)", () => {
+    const rows = [chat({ chatId: 'a', name: 'deploy the app', preview: null })];
+    expect(localSearchHits(rows, 'app deploy').map((h) => h.chatId)).toEqual(['a']);
+    expect(localSearchHits(rows, '"deploy the"').map((h) => h.chatId)).toEqual(['a']);
+    expect(localSearchHits(rows, '"the deploy"')).toEqual([]);
+    expect(localSearchHits(rows, 'deploy missing')).toEqual([]);
+    expect(localSearchHits(rows, 'app deploy')[0]!.nameHighlights).toEqual([
+      [0, 6],
+      [11, 14],
+    ]);
+  });
+
+  it("matches a quoted phrase across a newline or a run of spaces, as the server's snippets do", () => {
+    const rows = [
+      chat({ chatId: 'a', name: null, preview: 'fix the\nlogin bug' }),
+      chat({ chatId: 'b', name: null, preview: 'fix the  login bug' }),
+    ];
+    const out = localSearchHits(rows, '"the login"');
+    expect(out.map((h) => h.chatId).sort()).toEqual(['a', 'b']);
+    const a = out.find((h) => h.chatId === 'a')!;
+    expect(a.snippet!.highlights).toEqual([[4, 13]]);
+    const b = out.find((h) => h.chatId === 'b')!;
+    expect(b.snippet!.highlights).toEqual([[4, 14]]);
+  });
+
   it('returns nothing for an empty query', () => {
     expect(localSearchHits([chat({ chatId: 'a', name: 'x' })], '  ')).toEqual([]);
   });
@@ -223,7 +256,7 @@ describe('searchHitRoute', () => {
 
 describe('hostMarkerText', () => {
   it('names every unsearched host, and nothing for a searched one', () => {
-    const base = { daemonId: 'd', hostName: null };
+    const base = { hostId: 'd', hostName: null };
     expect(hostMarkerText({ ...base, state: 'searched' }, 'Mac')).toBeNull();
     expect(hostMarkerText({ ...base, state: 'offline' }, 'Mac')).toBe('Mac offline — not searched');
     expect(hostMarkerText({ ...base, state: 'timeout' }, 'Mac')).toBe(
@@ -417,5 +450,11 @@ describe('ChatSearchController', () => {
     vi.advanceTimersByTime(1);
     expect(search).toHaveBeenCalledTimes(1);
     c.dispose();
+  });
+});
+
+describe('findRanges and characters whose lower case is a different length', () => {
+  it('keeps ranges aligned with the original text', () => {
+    expect(findRanges('İstanbul i', 'i')).toEqual([[9, 10]]);
   });
 });

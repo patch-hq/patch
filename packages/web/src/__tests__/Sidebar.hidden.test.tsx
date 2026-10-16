@@ -19,7 +19,7 @@ function seed(hidden: boolean | undefined, status: 'active' | 'archived' = 'acti
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'a chat',
       folder: '~/proj',
@@ -33,7 +33,7 @@ function seed(hidden: boolean | undefined, status: 'active' | 'archived' = 'acti
     },
     {
       chatId: 'c2',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'another chat',
       folder: '~/proj',
@@ -139,7 +139,7 @@ describe('Sidebar — hidden chats', () => {
           snoozedUntil: null,
           hidden: true,
           lastUpdated: 5,
-          daemonId: 'd1',
+          hostId: 'd1',
           permissionMode: 'auto',
           jobId: 'j1',
           statusSummary: null,

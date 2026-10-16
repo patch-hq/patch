@@ -27,7 +27,7 @@ function byRecency(chats: Record<string, ChatRow>): ChatRow[] {
  */
 export function recentModelPicks(
   chats: Record<string, ChatRow>,
-  daemonId: string,
+  hostId: string,
   catalogue: readonly ModelOption[],
 ): ModelOption[] {
   const byId = new Map(catalogue.map((m) => [m.id, m]));
@@ -38,7 +38,7 @@ export function recentModelPicks(
     if (m && !out.some((o) => o.id === id)) out.push(m);
   };
   for (const c of byRecency(chats)) {
-    if (c.daemonId !== daemonId || c.jobId !== null || isReservedSpecialThread(c.chatId)) continue;
+    if (c.hostId !== hostId || c.jobId !== null || isReservedSpecialThread(c.chatId)) continue;
     take(c.model);
   }
   for (const m of catalogue) take(m.id);

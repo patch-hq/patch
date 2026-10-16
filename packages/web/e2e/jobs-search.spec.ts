@@ -13,7 +13,7 @@ const JOBS = [
     enabled: true,
     trigger: { type: 'cron', expression: '57 8 * * 1-5' },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/nearest-bus', skill: 'bus-watch' },
+    action: { type: 'spawn', hostId: 'd1', folder: '~/projects/nearest-bus', skill: 'bus-watch' },
     createdAt: 1,
     updatedAt: 1,
   },
@@ -33,7 +33,7 @@ const JOBS = [
     enabled: true,
     trigger: { type: 'todoist', filter: null },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/portfolio', skill: 'app-update' },
+    action: { type: 'spawn', hostId: 'd1', folder: '~/projects/portfolio', skill: 'app-update' },
     createdAt: 1,
     updatedAt: 1,
   },
@@ -144,8 +144,8 @@ test.describe('jobs search', () => {
         __presenceStore: { getState: () => { setHostReport: (e: unknown) => void } };
       };
       w.__presenceStore.getState().setHostReport({
-        type: 'daemon.host',
-        daemonId: 'd1',
+        type: 'host.host',
+        hostId: 'd1',
         hostName: 'laptop',
         backends: [],
         components: [],

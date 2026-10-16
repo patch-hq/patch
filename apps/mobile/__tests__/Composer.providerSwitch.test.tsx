@@ -108,7 +108,7 @@ function seedChat(model = 'claude-opus-5-5'): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       name: 'Chat',
       folder: '/home/tom/work',
       activity: 'idle',

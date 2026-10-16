@@ -40,7 +40,7 @@ import { AnchoredMenu } from '../src/components/AnchoredMenu';
 import { useChatStore } from '../src/stores/chatStore';
 import { useFolderStore } from '../src/stores/folderStore';
 import { useUiStore } from '../src/stores/uiStore';
-import { defaultDaemonId, hostDefaultModel, usePresenceStore } from '../src/stores/presenceStore';
+import { defaultHostId, hostDefaultModel, usePresenceStore } from '../src/stores/presenceStore';
 import { NEW_CHAT_DRAFT_KEY, newChatRoute } from '../src/lib/newChat';
 import { buildRecentFolders } from '../src/lib/folderPicker';
 import { useModelCatalog } from '../src/lib/models';
@@ -48,6 +48,7 @@ import { recentModelPicks } from '../src/lib/newChatSetup';
 import { loadLastNewChat, saveLastNewChat } from '../src/lib/lastNewChat';
 import {
   PERMISSION_MODE_ORDER,
+  modeForModel,
   offeredPermissionModes,
   permissionModeLabel,
 } from '../src/lib/permissionModes';
@@ -89,7 +90,7 @@ function Chip({
         borderRadius: radii.lg,
         borderWidth: 1,
         borderColor: selected ? colors.leaf : colors.divider,
-        backgroundColor: selected ? colors.accentTint : pressed ? colors.divider : colors.paper,
+        backgroundColor: selected ? colors.leaf : pressed ? colors.divider : colors.paper,
         opacity: dimmed ? 0.5 : 1,
         maxWidth: 220,
       })}
@@ -98,7 +99,7 @@ function Chip({
       <Text
         numberOfLines={1}
         style={{
-          color: selected ? colors.leaf : colors.ink2,
+          color: selected ? colors.onAccent : colors.ink2,
           fontFamily: selected ? fonts.bodyBold : fonts.body,
           fontSize: 14,
           flexShrink: 1,
@@ -152,20 +153,18 @@ export default function NewChat(): React.ReactElement {
   // chat: "another one here") passes that host + folder, and the screen opens
   // on them instead of the most recent pair — still type-first, nothing is
   // created until the first send.
-  const here = useLocalSearchParams<{ daemonId?: string; folder?: string }>();
-  const hereDaemonId = typeof here.daemonId === 'string' && here.daemonId ? here.daemonId : null;
+  const here = useLocalSearchParams<{ hostId?: string; folder?: string }>();
+  const hereHostId = typeof here.hostId === 'string' && here.hostId ? here.hostId : null;
   const hereFolder = typeof here.folder === 'string' && here.folder ? here.folder : null;
-  const [daemonId, setDaemonId] = React.useState<string | null>(
-    hereDaemonId ?? last?.daemonId ?? null,
-  );
+  const [hostId, setHostId] = React.useState<string | null>(hereHostId ?? last?.hostId ?? null);
   const [folder, setFolder] = React.useState<string | null>(
-    hereDaemonId ? hereFolder : (last?.folder ?? null),
+    hereHostId ? hereFolder : (last?.folder ?? null),
   );
-  const seededRef = React.useRef(hereDaemonId !== null || last !== null);
+  const seededRef = React.useRef(hereHostId !== null || last !== null);
   React.useEffect(() => {
     if (seededRef.current || hostIds.length === 0) return;
     seededRef.current = true;
-    setDaemonId(defaultDaemonId(hosts));
+    setHostId(defaultHostId(hosts));
   }, [hosts, hostIds]);
 
   // Every folder the sheet offers, across hosts. The SELECTOR returns the
@@ -177,11 +176,11 @@ export default function NewChat(): React.ReactElement {
   const [folderSheetOpen, setFolderSheetOpen] = React.useState(false);
 
   // ── Model ─────────────────────────────────────────────────────────────────
-  const hostModel = usePresenceStore((s) => hostDefaultModel(s.hosts, daemonId));
+  const hostModel = usePresenceStore((s) => hostDefaultModel(s.hosts, hostId));
   // The explicit choice, or null while there is none — only an explicit
   // choice rides on the spawn, so this is never seeded from `hostModel`.
   const [model, setModel] = React.useState<string | null>(
-    hereDaemonId ? null : (last?.model ?? null),
+    hereHostId ? null : (last?.model ?? null),
   );
   const effectiveModel = model ?? hostModel;
   // The shared accounts a chat on this model could start on (spec/10 —
@@ -200,20 +199,23 @@ export default function NewChat(): React.ReactElement {
       setPreferredAccountId(null);
     }
   }, [preferable, preferredAccountId]);
-  const catalog = useModelCatalog(daemonId);
+  const catalog = useModelCatalog(hostId);
   const modelPicks = React.useMemo(
-    () => (daemonId ? recentModelPicks(chats, daemonId, catalog.models) : []),
-    [chats, daemonId, catalog.models],
+    () => (hostId ? recentModelPicks(chats, hostId, catalog.models) : []),
+    [chats, hostId, catalog.models],
   );
 
   // ── Permission mode ───────────────────────────────────────────────────────
   const hostModeDefault = usePresenceStore((s) =>
-    daemonId ? (s.hosts[daemonId]?.host?.permissionModeDefault ?? null) : null,
+    hostId ? (s.hosts[hostId]?.host?.permissionModeDefault ?? null) : null,
   );
-  const [mode, setMode] = React.useState<PermissionMode | null>(
-    hereDaemonId ? null : (last?.permissionMode ?? null),
+  const [pickedMode, setMode] = React.useState<PermissionMode | null>(
+    hereHostId ? null : (last?.permissionMode ?? null),
   );
-  const effectiveMode = mode ?? hostModeDefault;
+  // The mode stands only while the model can run it: pick Auto, then a model
+  // without it, and Claude Code would quietly run `default` under an "Auto" label.
+  const mode = modeForModel(pickedMode, effectiveModel);
+  const effectiveMode = mode ?? modeForModel(hostModeDefault, effectiveModel);
   const [modeMenuOpen, setModeMenuOpen] = React.useState(false);
   const offeredModes = offeredPermissionModes(effectiveModel);
   const ModeIcon = permissionModeIcon(effectiveMode ?? 'default');
@@ -226,13 +228,13 @@ export default function NewChat(): React.ReactElement {
         .pushError(`${h.host?.hostName ?? id} is offline — start the chat on another host`);
       return;
     }
-    if (id !== daemonId) {
+    if (id !== hostId) {
       // A model and a mode belong to the machine they were picked on; neither
       // carries over to another.
       setModel(null);
       setMode(null);
     }
-    setDaemonId(id);
+    setHostId(id);
     setFolder(picked);
     setFolderSheetOpen(false);
   };
@@ -242,7 +244,7 @@ export default function NewChat(): React.ReactElement {
   // there), so there is never a created chat left to retry into or discard.
   const sendTarget = async (): Promise<string | null> => {
     const pushError = useUiStore.getState().pushError;
-    if (daemonId === null) {
+    if (hostId === null) {
       pushError('Choose which host to start the chat on.');
       return null;
     }
@@ -252,7 +254,7 @@ export default function NewChat(): React.ReactElement {
     }
     try {
       const res = await api.createChat({
-        daemonId,
+        hostId,
         folder,
         ...(model === null ? {} : { model }),
         ...(mode === null ? {} : { permissionMode: mode }),
@@ -263,7 +265,7 @@ export default function NewChat(): React.ReactElement {
       // the WS replay loop, so it would never receive a reply. The server's
       // echoed folder is the canonical path `chat.spawned` will carry.
       useChatStore.getState().ensureChat(res.chatId, res.folder);
-      saveLastNewChat({ daemonId, folder, model, permissionMode: mode });
+      saveLastNewChat({ hostId, folder, model, permissionMode: mode });
       return res.chatId;
     } catch (e) {
       // The host's `chat.error` for a refused spawn may already have seeded
@@ -282,7 +284,7 @@ export default function NewChat(): React.ReactElement {
 
   const hostLabel = (id: string): string => hosts[id]?.host?.hostName ?? id;
   const pickerHosts = Object.values(hosts)
-    .map((h) => ({ daemonId: h.daemonId, name: hostLabel(h.daemonId), online: h.online }))
+    .map((h) => ({ hostId: h.hostId, name: hostLabel(h.hostId), online: h.online }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
@@ -317,12 +319,14 @@ export default function NewChat(): React.ReactElement {
               label={
                 folder === null
                   ? 'Choose a folder…'
-                  : `${folderName(folder)}${daemonId ? ` · ${hostLabel(daemonId)}` : ''}`
+                  : `${folderName(folder)}${hostId ? ` · ${hostLabel(hostId)}` : ''}`
               }
               selected={folder !== null}
               onPress={() => setFolderSheetOpen(true)}
-              icon={<Folder size={14} color={folder !== null ? colors.leaf : colors.ink3} />}
-              trailing={<ChevronDown size={14} color={colors.ink3} />}
+              icon={<Folder size={14} color={folder !== null ? colors.onAccent : colors.ink3} />}
+              trailing={
+                <ChevronDown size={14} color={folder !== null ? colors.onAccent : colors.ink3} />
+              }
             />
           </PickRow>
 
@@ -337,9 +341,10 @@ export default function NewChat(): React.ReactElement {
               />
             ))}
             <ModelPicker
-              daemonId={daemonId}
+              hostId={hostId}
               selected={effectiveModel}
               onSelect={setModel}
+              highlighted={effectiveModel !== null}
               variant="compact"
             />
           </PickRow>
@@ -394,7 +399,7 @@ export default function NewChat(): React.ReactElement {
         visible={folderSheetOpen}
         recents={recents}
         hosts={pickerHosts}
-        currentDaemonId={daemonId}
+        currentHostId={hostId}
         onPick={chooseFolder}
         onDismiss={() => setFolderSheetOpen(false)}
       />

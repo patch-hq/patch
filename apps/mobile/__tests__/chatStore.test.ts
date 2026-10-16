@@ -45,6 +45,83 @@ describe('mobile chatStore', () => {
     expect(useChatStore.getState().timelines['c1']?.length).toBe(1);
   });
 
+  it("a replayed chat.message does not turn a read chat unread (lastUpdated is the host's, not arrival time)", () => {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      folder: '~/x',
+      activity: 'idle',
+      lastUpdated: 1000,
+    } as never);
+    s.markRead('c1');
+    const row = () => {
+      const r = useChatStore.getState().chats['c1'];
+      if (!r) throw new Error('row missing');
+      return r;
+    };
+    expect(deriveBadge(row())).toBe('read');
+    s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 1, role: 'user', content: 'hi' });
+    s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 2, role: 'assistant', content: 'yo' });
+    expect(row().lastUpdated).toBe(1000);
+    expect(deriveBadge(row())).toBe('read');
+  });
+
+  it('ignores a chat.state older than the row (a replay or race must not roll activity back)', () => {
+    const s = useChatStore.getState();
+    const state = (activity: 'idle' | 'running', lastUpdated: number) =>
+      s.applyEvent({
+        type: 'chat.state',
+        chatId: 'c1',
+        folder: '~/x',
+        activity,
+        lastUpdated,
+        permissionMode: 'default',
+      } as never);
+    state('idle', 200);
+    state('running', 100);
+    const row = useChatStore.getState().chats['c1']!;
+    expect(row.activity).toBe('idle');
+    expect(row.lastUpdated).toBe(200);
+  });
+
+  it("sending in an open chat does not mark it unread, and the host's next state still lands", async () => {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      folder: '~/x',
+      activity: 'idle',
+      lastUpdated: 1000,
+      permissionMode: 'default',
+    } as never);
+    s.markRead('c1');
+    await new Promise((r) => setTimeout(r, 5));
+    s.appendLocalUserMessage('c1', 'hi', 'l1');
+    const row = () => useChatStore.getState().chats['c1']!;
+    expect(deriveBadge(row())).toBe('read');
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      folder: '~/x',
+      activity: 'running',
+      lastUpdated: 1500,
+      permissionMode: 'default',
+    } as never);
+    expect(row().activity).toBe('running');
+  });
+
+  it('applyEvent: a preview cut at 140 never ends on half of an emoji', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'assistant',
+      content: `${'a'.repeat(139)}😀 tail`,
+    });
+    expect(useChatStore.getState().chats['c1']?.preview).toBe(`${'a'.repeat(139)}😀`);
+  });
+
   it('reconciles an optimistic user echo with its persisted copy by content (no duplicate)', () => {
     const store = useChatStore.getState();
     store.appendLocalUserMessage('c1', 'hi there', 'L1');
@@ -267,6 +344,44 @@ describe('mobile chatStore', () => {
 
     useChatStore.getState().resolveSideThreadPermission('c1', 'c1-b1', 'side-req-1');
     expect(useChatStore.getState().sideThreadPermissions['c1::c1-b1']).toHaveLength(0);
+  });
+
+  it("the host's own answer to a side thread's question clears it from the side thread too", () => {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.branches',
+      chatId: 'c1',
+      activeBranchId: 'c1-b0',
+      branches: [
+        { branchId: 'c1-b0', parentBranchId: null, forkFromSeq: null, label: 'main', createdAt: 1 },
+        {
+          branchId: 'c1-b1',
+          parentBranchId: 'c1-b0',
+          forkFromSeq: 0,
+          label: 'side 1',
+          createdAt: 1,
+          sideThread: true,
+        },
+      ],
+    });
+    s.applyEvent({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      requestId: 'side-req-1',
+      request: { tool: 'Bash', args: { cmd: 'ls' }, description: 'list files' },
+      seq: 1,
+      branchId: 'c1-b1',
+    });
+    expect(useChatStore.getState().sideThreadPermissions['c1::c1-b1']).toHaveLength(1);
+
+    // Answered elsewhere — another surface, a spoken yes, or an expiry.
+    s.applyEvent({
+      type: 'chat.permission_response',
+      chatId: 'c1',
+      requestId: 'side-req-1',
+      approve: true,
+    } as never);
+    expect(useChatStore.getState().sideThreadPermissions['c1::c1-b1'] ?? []).toHaveLength(0);
   });
 
   it('chat.permission_expiry_update moves the card to a focus-driven reset (spec/02 § Questions are not approvals)', () => {
@@ -712,23 +827,23 @@ describe('mobile chatStore', () => {
     it('chat.spawned creates/updates the row folder AND its host', () => {
       useChatStore
         .getState()
-        .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/new' });
+        .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/new' });
       expect(useChatStore.getState().chats['c1']!.folder).toBe('~/new');
-      // Dropping `daemonId` left every mobile chat row without a host, so
+      // Dropping `hostId` left every mobile chat row without a host, so
       // nothing could ask which machine's credential gates it, or whose disk
       // the folder is on (spec/04 § Spawn — paths are scoped to their host).
-      expect(useChatStore.getState().chats['c1']!.daemonId).toBe('d1');
+      expect(useChatStore.getState().chats['c1']!.hostId).toBe('d1');
     });
 
     it('keeps each row on its OWN host when two chats spawn on different machines', () => {
       useChatStore
         .getState()
-        .applyEvent({ type: 'chat.spawned', daemonId: 'host-a', chatId: 'ca', folder: '/work' });
+        .applyEvent({ type: 'chat.spawned', hostId: 'host-a', chatId: 'ca', folder: '/work' });
       useChatStore
         .getState()
-        .applyEvent({ type: 'chat.spawned', daemonId: 'host-b', chatId: 'cb', folder: '/work' });
-      expect(useChatStore.getState().chats['ca']!.daemonId).toBe('host-a');
-      expect(useChatStore.getState().chats['cb']!.daemonId).toBe('host-b');
+        .applyEvent({ type: 'chat.spawned', hostId: 'host-b', chatId: 'cb', folder: '/work' });
+      expect(useChatStore.getState().chats['ca']!.hostId).toBe('host-a');
+      expect(useChatStore.getState().chats['cb']!.hostId).toBe('host-b');
     });
 
     it('chat.state updates activity/status/pinned/name/folder/lastUpdated and derives awaitingPermission', () => {
@@ -1090,6 +1205,48 @@ describe('a turn that goes wrong, and one that arrives twice', () => {
     expect(users[0]?.seq).toBe(0);
   });
 
+  it('a re-delivered echo whose text drifted from what was typed is still the same turn', () => {
+    const echo = {
+      type: 'chat.message',
+      chatId: 'c-drift',
+      role: 'user',
+      content: 'hey ',
+      seq: 5,
+      localId: 'lid-d',
+    } as never;
+    useChatStore.getState().appendLocalUserMessage('c-drift', 'hey', 'lid-d');
+    useChatStore.getState().applyEvent(echo);
+    // A second replay (open + connect) hands the same persisted turn back.
+    useChatStore.getState().applyEvent(echo);
+    const users = (useChatStore.getState().timelines['c-drift'] ?? []).filter(
+      (e) => e.kind === 'message' && e.role === 'user',
+    );
+    expect(users).toHaveLength(1);
+  });
+
+  it('but a different message at the same seq is still its own turn', () => {
+    useChatStore.getState().appendLocalUserMessage('c-coll', 'hey', 'lid-c');
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c-coll',
+      role: 'user',
+      content: 'hey ',
+      seq: 5,
+      localId: 'lid-c',
+    } as never);
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c-coll',
+      role: 'user',
+      content: 'something else entirely',
+      seq: 5,
+    } as never);
+    const users = (useChatStore.getState().timelines['c-coll'] ?? []).filter(
+      (e) => e.kind === 'message' && e.role === 'user',
+    );
+    expect(users).toHaveLength(2);
+  });
+
   it('renders a failed turn in the transcript, with its code', () => {
     useChatStore.getState().appendLocalUserMessage('c-err', 'hey', 'lid-2');
     useChatStore.getState().applyEvent({
@@ -1164,7 +1321,7 @@ describe('a resolved daemon_unavailable notice clears itself', () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c-blip',
       folder: '~/p',
     } as never);
@@ -1215,7 +1372,7 @@ describe('a resolved daemon_unavailable notice clears itself', () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c-blip',
       folder: '~/p',
     } as never);
@@ -1255,7 +1412,7 @@ describe('a re-sent turn folds onto the bubble it already has', () => {
 
   it('draws one bubble across three attempts, not three', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'go', seq: 2 });
     s.applyEvent({
       type: 'chat.message',
@@ -1279,9 +1436,92 @@ describe('a re-sent turn folds onto the bubble it already has', () => {
 
   it('leaves a message the USER re-typed alone — that is a new turn', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'go', seq: 2 });
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'go', seq: 7 });
     expect(userBubbles()).toHaveLength(2);
+  });
+});
+
+describe('removeChat — nothing of the chat is left behind', () => {
+  it('drops its branch graph, tool summaries, delegate updates and side-thread questions', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.branches',
+      chatId: 'gone',
+      activeBranchId: 'b0',
+      branches: [
+        { branchId: 'b0', parentBranchId: null, forkFromSeq: null, label: 'main', createdAt: 1 },
+        {
+          branchId: 'b1',
+          parentBranchId: 'b0',
+          forkFromSeq: 0,
+          label: 'side',
+          createdAt: 1,
+          sideThread: true,
+        },
+      ],
+    });
+    s.applyEvent({
+      type: 'chat.permission_request',
+      chatId: 'gone',
+      requestId: 'r1',
+      request: { tool: 'Bash', args: {}, description: 'x' },
+      seq: 1,
+      branchId: 'b1',
+    });
+    s.applyEvent({
+      type: 'chat.tool_run_summary',
+      chatId: 'gone',
+      callIds: ['k1'],
+      summary: 'did things',
+    } as never);
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'stays',
+      seq: 1,
+      role: 'assistant',
+      content: 'x',
+    });
+
+    s.removeChat('gone');
+
+    const st = useChatStore.getState();
+    expect(st.branchGraphs['gone']).toBeUndefined();
+    expect(st.toolRunSummaries['gone']).toBeUndefined();
+    expect(st.delegateUpdates['gone']).toBeUndefined();
+    expect(Object.keys(st.sideThreadPermissions).filter((k) => k.startsWith('gone::'))).toEqual([]);
+    expect(st.timelines['stays']).toBeDefined();
+  });
+});
+
+describe('pending message is not swallowed by an older same-text echo', () => {
+  it('an echo carrying a DIFFERENT localId never folds into the pending bubble', () => {
+    useChatStore.getState()._reset();
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: 'ok',
+      seq: 1,
+      localId: 'old',
+    });
+    s.appendLocalUserMessage('c1', 'ok', 'new');
+    // A replayed earlier "ok" must leave the pending one where it is.
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: 'ok',
+      seq: 3,
+      localId: 'other',
+    });
+    const tl = useChatStore.getState().timelines['c1'] ?? [];
+    const pending = tl.find((e) => e.localId === 'new');
+    expect(pending).toBeDefined();
+    expect(pending?.deliveryPending).toBe(true);
+    expect(tl.filter((e) => e.role === 'user')).toHaveLength(3);
   });
 });

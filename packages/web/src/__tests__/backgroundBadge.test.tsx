@@ -25,7 +25,7 @@ import { matchesStateFilter, needsAttention } from '../lib/chatGroups.js';
 function row(over: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     name: 'a chat',
     preview: null,
     goal: null,
@@ -240,7 +240,7 @@ describe('chatStore — the count reaches the row', () => {
 
   it('takes the count off chat.state, and an ABSENT field leaves it alone', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // Nothing has said anything yet: unknown, not zero.
     expect(useChatStore.getState().chats['c1']?.backgroundTasks).toBeNull();
 
@@ -285,7 +285,7 @@ describe('chatStore — the count reaches the row', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'auto',
         name: 'a chat',
         folder: '~/p',
@@ -322,7 +322,7 @@ describe('Sidebar row', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'auto',
         name: 'backgrounded build',
         folder: '~/p',

@@ -6,12 +6,12 @@
 // folder, which left anything outside a chat (a skill in `~/.claude/skills`, a
 // dotfile, a machine with no chat on it) out of reach.
 //
-//   GET /api/hosts/:daemonId/files?path=<abs>          list (no path = home)
-//   GET /api/hosts/:daemonId/files/content?path=<abs>  read
-//   PUT /api/hosts/:daemonId/files/content             write {path, content, baseVersion}
+//   GET /api/hosts/:hostId/files?path=<abs>          list (no path = home)
+//   GET /api/hosts/:hostId/files/content?path=<abs>  read
+//   PUT /api/hosts/:hostId/files/content             write {path, content, baseVersion}
 //
 // Auth is exactly the folder browser's: a live surface credential, and a
-// daemonId that names a machine this account registered. Each call round-trips
+// hostId that names a machine this account registered. Each call round-trips
 // one `patch.host_files.request` to that machine. NO FALLBACK: an offline host
 // is refused up front (503) rather than left to time out, a timeout is a 504,
 // and every host refusal keeps its own status — a save can never read as
@@ -21,14 +21,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from './host-addressing.js';
 import { requireAuth } from './folder-routes.js';
 
 export interface HostFilesRoutesDeps {
   logger: Logger;
   registry: Registry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   idGenerator: () => string;
 }
 
@@ -41,7 +41,7 @@ export const HOST_FILES_BODY_LIMIT = 8 * 1024 * 1024;
 type Response = Extract<WireEvent, { type: 'patch.host_files.response' }>;
 type RequestBody = Omit<
   Extract<WireEvent, { type: 'patch.host_files.request' }>,
-  'type' | 'requestId' | 'daemonId'
+  'type' | 'requestId' | 'hostId'
 >;
 type ErrorCode = NonNullable<Response['error']>['code'];
 
@@ -60,17 +60,17 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
 export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRoutesDeps): void {
   const pending = new Map<
     string,
-    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; daemonId: string }
+    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
   >();
-  deps.daemonLink.onEvent((event: WireEvent, from) => {
+  deps.hostLink.onEvent((event: WireEvent, from) => {
     if (event.type !== 'patch.host_files.response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
     // Only the machine that was asked may answer — a reply naming another host
     // is a routing bug, not an answer.
-    if (event.daemonId !== w.daemonId || (from !== null && from !== w.daemonId)) {
+    if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
-        { requestId: event.requestId, asked: w.daemonId, answered: event.daemonId, from },
+        { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
         'host files: response from a machine that was not asked; ignoring',
       );
       return;
@@ -88,7 +88,7 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
    * nothing about what a valid body looks like.
    */
   async function roundTrip(
-    req: FastifyRequest<{ Params: { daemonId: string } }>,
+    req: FastifyRequest<{ Params: { hostId: string } }>,
     reply: FastifyReply,
     build: () => RequestBody | string,
   ): Promise<Response | null> {
@@ -101,17 +101,17 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
         .send({ error: (e as Error).message });
       return null;
     }
-    const daemonId = req.params.daemonId;
-    const unknownHost = checkRegisteredHost(deps.registry, daemonId);
+    const hostId = req.params.hostId;
+    const unknownHost = checkRegisteredHost(deps.registry, hostId);
     if (unknownHost) {
-      deps.logger.warn({ daemonId }, 'host files rejected: unregistered daemonId');
+      deps.logger.warn({ hostId }, 'host files rejected: unregistered hostId');
       await reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
       return null;
     }
-    if (!deps.daemonLink.isOnline(daemonId)) {
+    if (!deps.hostLink.isOnline(hostId)) {
       await reply
         .code(503)
-        .send({ error: 'host_offline', message: `${daemonId} is offline`, daemonId });
+        .send({ error: 'host_offline', message: `${hostId} is offline`, hostId });
       return null;
     }
     const body = build();
@@ -125,11 +125,11 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
         pending.delete(requestId);
         resolve('timeout');
       }, HOST_FILES_TIMEOUT_MS);
-      pending.set(requestId, { resolve, timeout, daemonId });
-      deps.daemonLink.sendTo(daemonId, auth.surfaceId, {
+      pending.set(requestId, { resolve, timeout, hostId });
+      deps.hostLink.sendTo(hostId, auth.surfaceId, {
         type: 'patch.host_files.request',
         requestId,
-        daemonId,
+        hostId,
         ...body,
       });
     });
@@ -147,8 +147,8 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
     return result;
   }
 
-  app.get<{ Params: { daemonId: string }; Querystring: { path?: string } }>(
-    '/api/hosts/:daemonId/files',
+  app.get<{ Params: { hostId: string }; Querystring: { path?: string } }>(
+    '/api/hosts/:hostId/files',
     async (req, reply) => {
       const path = (req.query?.path ?? '').toString();
       const res = await roundTrip(req, reply, () => ({
@@ -162,8 +162,8 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
     },
   );
 
-  app.get<{ Params: { daemonId: string }; Querystring: { path?: string } }>(
-    '/api/hosts/:daemonId/files/content',
+  app.get<{ Params: { hostId: string }; Querystring: { path?: string } }>(
+    '/api/hosts/:hostId/files/content',
     async (req, reply) => {
       const path = (req.query?.path ?? '').toString();
       const res = await roundTrip(req, reply, () =>
@@ -177,10 +177,10 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
   );
 
   app.put<{
-    Params: { daemonId: string };
+    Params: { hostId: string };
     Body: { path?: unknown; content?: unknown; baseVersion?: unknown };
   }>(
-    '/api/hosts/:daemonId/files/content',
+    '/api/hosts/:hostId/files/content',
     // The editor's cap is 1 MiB of content; JSON escaping can grow that, and
     // the server-wide default body limit is exactly 1 MiB.
     { bodyLimit: HOST_FILES_BODY_LIMIT },

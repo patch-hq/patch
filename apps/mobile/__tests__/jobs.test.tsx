@@ -72,6 +72,14 @@ describe('Jobs — header', () => {
     expect(routerMock.push).toHaveBeenCalledWith('/settings/job-editor');
   });
 
+  it('the Pads button opens the Pads screen', async () => {
+    vi.mocked(api.listJobs).mockResolvedValue({ jobs: [] });
+    const r = renderRN(<Jobs />);
+    await flush();
+    findHost(r.root, byTestId('pads-open')).props.onPress();
+    expect(routerMock.push).toHaveBeenCalledWith('/pads');
+  });
+
   it('renders the "Jobs" title', async () => {
     vi.mocked(api.listJobs).mockResolvedValue({ jobs: [] });
     const r = renderRN(<Jobs />);

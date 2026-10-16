@@ -129,9 +129,15 @@ export interface ClaudeUsageOptions {
   now?: () => number;
 }
 
+/** A header's value, or undefined when it is absent or blank. */
+function text(headers: Headers, name: string): string | undefined {
+  const raw = headers.get(name)?.trim();
+  return raw ? raw : undefined;
+}
+
 function num(headers: Headers, name: string): number | undefined {
-  const raw = headers.get(name);
-  if (raw === null) return undefined;
+  const raw = text(headers, name);
+  if (raw === undefined) return undefined;
   const n = Number(raw);
   return Number.isFinite(n) ? n : undefined;
 }
@@ -164,12 +170,12 @@ function readWindow(headers: Headers, prefix: string): ClaudeUsageWindow | undef
   if (s === undefined) return undefined;
   const utilization = num(headers, `${prefix}-utilization`);
   const resetsAtSec = num(headers, `${prefix}-reset`);
-  const disabledReason = headers.get(`${prefix}-disabled-reason`);
+  const disabledReason = text(headers, `${prefix}-disabled-reason`);
   return {
     status: s,
     ...(utilization !== undefined ? { utilization } : {}),
     ...(resetsAtSec !== undefined && resetsAtSec > 0 ? { resetsAt: resetsAtSec * 1000 } : {}),
-    ...(disabledReason !== null && disabledReason.length > 0 ? { disabledReason } : {}),
+    ...(disabledReason !== undefined ? { disabledReason } : {}),
   };
 }
 
@@ -190,8 +196,8 @@ export function readUsageHeaders(headers: Headers, at: number): ClaudeUsageReadi
   if (week) windows.week = week;
   if (overage) windows.overage = overage;
 
-  const organizationId = headers.get(ORGANIZATION_HEADER) ?? undefined;
-  const representativeClaim = headers.get(`${P}-representative-claim`) ?? undefined;
+  const organizationId = text(headers, ORGANIZATION_HEADER);
+  const representativeClaim = text(headers, `${P}-representative-claim`);
   // The unified status is Anthropic's own verdict on the account as a whole.
   // Preferred over deriving one from the windows: it already accounts for
   // whichever pool is allowed to cover for another, which is a rule we would
@@ -308,7 +314,7 @@ export async function fetchClaudeOrganizationId(
         'user-agent': USER_AGENT,
       },
     });
-    return res.headers.get(ORGANIZATION_HEADER) ?? undefined;
+    return text(res.headers, ORGANIZATION_HEADER);
   } catch {
     // Identity is an enrichment, not a gate: a token that validates is stored
     // whether or not we could name its organisation. Returning undefined says

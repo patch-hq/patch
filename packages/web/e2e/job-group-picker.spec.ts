@@ -18,7 +18,7 @@ const JOBS = {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'x' },
       createdAt: 1,
       updatedAt: 1,
     },
@@ -29,7 +29,7 @@ const JOBS = {
       enabled: true,
       trigger: { type: 'cron', expression: '0 9 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'x' },
       createdAt: 1,
       updatedAt: 1,
     },
@@ -42,7 +42,7 @@ async function stub(page: import('@playwright/test').Page): Promise<void> {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        hosts: [{ daemonId: 'd1', roots: ['/home/tom/projects/alpha'], recent: [] }],
+        hosts: [{ hostId: 'd1', roots: ['/home/tom/projects/alpha'], recent: [] }],
       }),
     }),
   );

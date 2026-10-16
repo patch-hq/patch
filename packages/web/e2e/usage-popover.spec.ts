@@ -11,12 +11,18 @@ const HARNESS = '/app/dev-harness.html?chat=chat_md';
 type W = {
   __store: {
     getState: () => {
-      chats: Record<string, { daemonId: string; folder: string }>;
+      chats: Record<string, { hostId: string; folder: string }>;
       applyEvent: (e: unknown) => void;
     };
   };
   __presenceStore: {
     getState: () => { setHostAccount: (e: unknown) => void; setHostReport: (e: unknown) => void };
+  };
+  __preferencesStore: {
+    getState: () => {
+      preferences: unknown;
+      apply: (state: unknown) => void;
+    };
   };
 };
 
@@ -25,15 +31,15 @@ async function seed(page: Page, context: Record<string, unknown> | null): Promis
     const w = window as unknown as W;
     const row = w.__store.getState().chats['chat_md']!;
     w.__presenceStore.getState().setHostReport({
-      type: 'daemon.host',
-      daemonId: row.daemonId,
+      type: 'host.host',
+      hostId: row.hostId,
       hostName: 'box',
       backends: [],
       components: [],
     });
     w.__presenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: row.daemonId,
+      type: 'host.account',
+      hostId: row.hostId,
       backendId: 'claude-code',
       connected: true,
       accountEmail: 'dev@example.com',
@@ -59,10 +65,24 @@ async function seed(page: Page, context: Record<string, unknown> | null): Promis
         },
       ],
     });
+    const preferences = w.__preferencesStore.getState();
+    preferences.apply({
+      version: 1,
+      settings: preferences.preferences,
+      secrets: {
+        claude: [
+          { id: 'a1', label: 'Default', connected: true, email: 'dev@example.com' },
+          { id: 'a2', label: 'work', connected: true, email: 'work@example.com' },
+        ],
+        codex: [],
+        providerKeys: [],
+      },
+      hosts: [],
+    });
     w.__store.getState().applyEvent({
       type: 'chat.state',
       chatId: 'chat_md',
-      daemonId: row.daemonId,
+      hostId: row.hostId,
       activity: 'idle',
       folder: row.folder,
       lastUpdated: Date.now(),
@@ -90,14 +110,13 @@ test.describe('usage popover', () => {
     expect(Math.abs(r!.y + r!.height / 2 - (s!.y + s!.height / 2))).toBeLessThan(2);
   });
 
-  test('the header crumb has a bar and opens every usage figure', async ({ page }) => {
+  test('usage stays out of the header and in the bottom control', async ({ page }) => {
     await page.goto(HARNESS);
     await seed(page, { usedTokens: 50_000, windowTokens: 200_000, at: Date.now() });
-    const crumb = page.getByTestId('chat-usage');
-    await expect(crumb).toBeVisible();
-    await expect(crumb).toHaveAttribute('aria-label', '5-hour 42%');
-    await expect(crumb.locator('.chat-usage-bar i')).toHaveAttribute('style', /width: 42%/);
-    await crumb.click();
+    await expect(page.getByTestId('chat-head').getByTestId('chat-usage')).toHaveCount(0);
+    const ring = page.getByTestId('context-ring');
+    await expect(ring).toBeVisible();
+    await ring.click();
     await expect(page.getByTestId('usage-popover')).toBeVisible();
   });
 
@@ -107,10 +126,18 @@ test.describe('usage popover', () => {
     await expect(page.getByTestId('context-ring')).toHaveAttribute('title', 'Context ? · 50k / ?');
   });
 
-  test('no ring until the chat has been measured', async ({ page }) => {
+  test('the bottom usage control remains available before the chat has been measured', async ({
+    page,
+  }) => {
     await page.goto(HARNESS);
     await seed(page, null);
-    await expect(page.getByTestId('context-ring')).toHaveCount(0);
+    const ring = page.getByTestId('context-ring');
+    await expect(ring).toBeVisible();
+    await expect(ring).toHaveClass(/unknown/);
+    await expect(ring).toHaveAttribute('title', 'Usage details · context not measured yet');
+    await ring.click();
+    await expect(page.getByTestId('usage-popover')).toBeVisible();
+    await expect(page.getByTestId('usage-pop-context')).toHaveCount(0);
   });
 
   // spec/14 § Chat panel header — the header's usage bar is gone; the
@@ -136,6 +163,48 @@ test.describe('usage popover', () => {
 
     await page.keyboard.press('Escape');
     await expect(pop).toHaveCount(0);
+  });
+
+  test('shared accounts appear once without acquiring the host that read their usage', async ({
+    page,
+  }) => {
+    await page.goto(`${HARNESS}&hosts=two`);
+    await seed(page, { usedTokens: 50_000, windowTokens: 200_000, at: Date.now() });
+    await page.evaluate(() => {
+      const w = window as unknown as W;
+      w.__presenceStore.getState().setHostAccount({
+        type: 'host.account',
+        hostId: 'd2',
+        backendId: 'claude-code',
+        connected: true,
+        accountEmail: 'dev@example.com',
+        accounts: [
+          {
+            id: 'a1',
+            label: 'Default',
+            connected: true,
+            usage: { at: Date.now() + 1_000, session: { status: 'allowed', utilization: 0.61 } },
+          },
+          {
+            id: 'a2',
+            label: 'work',
+            connected: true,
+            usage: { at: Date.now() + 1_000, session: { status: 'allowed', utilization: 0.72 } },
+          },
+        ],
+      });
+    });
+
+    await page.getByTestId('context-ring').click();
+    const accounts = page.getByTestId('usage-pop-account');
+    await expect(accounts).toHaveCount(2);
+    await expect(accounts.nth(0)).toContainText('Claude · Default');
+    await expect(accounts.nth(0)).toContainText('61%');
+    await expect(accounts.nth(1)).toContainText('Claude · work');
+    await expect(accounts.nth(1)).toContainText('72%');
+    const pop = page.getByTestId('usage-popover');
+    await expect(pop).not.toContainText('dev-host');
+    await expect(pop).not.toContainText('mac');
   });
 
   test('the ring opens the same popover, upwards, and a click outside closes it', async ({

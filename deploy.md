@@ -41,10 +41,10 @@ anything.
 
 Both the server and host run as native systemd user services — not Docker.
 
-| Service | Unit file                                     | Command                                 |
-| ------- | --------------------------------------------- | --------------------------------------- |
-| Server  | `~/.config/systemd/user/patch-server.service` | `systemctl --user restart patch-server` |
-| Host    | `~/.config/systemd/user/patch-daemon.service` | `systemctl --user restart patch-daemon` |
+| Service | Unit file                                     | Command                                                                           |
+| ------- | --------------------------------------------- | --------------------------------------------------------------------------------- |
+| Server  | `~/.config/systemd/user/patch-server.service` | `systemctl --user restart patch-server`                                           |
+| Host    | `~/.config/systemd/user/patch-daemon.service` | `systemctl --user restart patch-host` (`patch-daemon` on a host not yet migrated) |
 
 The server runs from an installed **release**, never from a git checkout. A
 deploy builds one (`scripts/build-server.mjs`: the server's dist and production
@@ -123,7 +123,7 @@ of these stops the deploy instead of half-shipping.
 Hetzner's host is built on the box; the macOS one (`darwin-arm64`) can only be
 built on the Mac, where its codesigning identity is. The `daemon-mac` step does
 that over ssh in a tree pinned to the commit, copies the artifact back and adds
-it to the `daemon-latest.json` the box just published, then checks the server
+it to the `host-latest.json` the box just published, then checks the server
 serves both. It needs `~/.patch-daemon-build/` on the Mac: `vendor/` (the macOS
 Node, onnxruntime-node's `darwin-arm64` prebuild, `silero_vad.onnx`) and the same
 `artifact-signing.key` as the box's. A sleeping Mac fails this step on its own
@@ -195,6 +195,16 @@ build has no artifact for it until a deploy runs with the Mac awake.
   than silently skipping it. It runs _first_, before the server restart: that
   restart is what reconnects every surface, and the reconnect is what tells the
   running shell to update (below).
+- **The desktop shell cannot be built between 22:00 and 02:00**, because
+  nightlock is in `full` mode on the Mac and kills everything outside its
+  `allowDuringFull` whitelist — including Xcode, and so `swiftc`, which
+  `packages/desktop/native/patch-audio` needs. It reads as a build failure with
+  no compiler output at all: `Command failed: swiftc …` with `status: null,
+signal: 'SIGTERM'`. That is the lock working as designed, not a bug to route
+  around; the Mac's own log (`/usr/local/nightlock/nightlock.log`, Mac local
+  time) names what it killed. Everything else ships fine at night — only this
+  surface has to wait, so run `pnpm run deploy --only=desktop` after the lock
+  lifts rather than re-running the whole deploy.
 
 The shell is not restarted _by_ the deploy. It updates itself: the SPA sees a new
 bundle hash on its post-deploy reconnect and asks the shell to check its own feed
@@ -257,7 +267,7 @@ What it removes:
 | `~/.patch-deploy-build/tree*`                                 | the newest 2 and anything younger than 2h (`TREE_POLICY` in `build-tree.mjs` — the one policy), then `git worktree prune`                                                                                  |
 | APK build output in a tree                                    | nothing: `apps/mobile/android/{app/build,app/.cxx,build,.gradle}` and each native module's `android/{build,.cxx}` go once the APK is published (box `--apk-here`, Mac `--apk-local`); `node_modules` stays |
 | `~/.patch-deploy/logs/*.log` (box)                            | the 30 newest, and anything younger than 30 days                                                                                                                                                           |
-| `~/.patch-server/downloads` (box)                             | whatever `android-latest.json` / `daemon-latest.json` / `desktop-latest.json` / `latest-mac.yml` name, plus the build before each (rollback) — `prune-downloads.mjs`                                       |
+| `~/.patch-server/downloads` (box)                             | whatever `android-latest.json` / `host-latest.json` / `desktop-latest.json` / `latest-mac.yml` name, plus the build before each (rollback) — `prune-downloads.mjs`                                         |
 | `~/.patch/versions/*`                                         | the version `~/.patch/current` points at, anything newer, the newest older one (rollback), anything under 2h                                                                                               |
 | `~/.patch-deploy/apk-incoming-*.apk`, `$TMPDIR/patch-smoke-*` | anything under 2h                                                                                                                                                                                          |
 

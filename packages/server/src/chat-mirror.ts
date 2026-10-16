@@ -136,10 +136,29 @@ export class ChatMirror {
     return join(this.dir, `${chatId}.jsonl`);
   }
 
+  /**
+   * A crash can leave a last line with no newline. End it, or the next append
+   * would share its line and be skipped on every later read along with it.
+   */
+  private endTornLine(chatId: string): void {
+    const path = this.path(chatId);
+    if (!existsSync(path)) return;
+    try {
+      const text = readFileSync(path, 'utf8');
+      if (text !== '' && !text.endsWith('\n')) appendFileSync(path, '\n', 'utf8');
+    } catch (err) {
+      this.logger.warn(
+        { err: (err as Error).message, chatId },
+        'chat mirror: could not end a torn last line',
+      );
+    }
+  }
+
   private seenFor(chatId: string): Set<number> {
     let s = this.seen.get(chatId);
     if (!s) {
       s = new Set(this.messages(chatId).map((m) => m.seq));
+      this.endTornLine(chatId);
       this.seen.set(chatId, s);
     }
     return s;

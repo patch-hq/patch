@@ -87,7 +87,7 @@ async function seedEverything(page: Page): Promise<void> {
   });
   await setClaudeSettings(page, MEMORIES);
   await setHostAccount(page, {
-    daemonId: 'd1',
+    hostId: 'd1',
     backendId: 'claude-code',
     connected: true,
     activeAccountId: 'a1',
@@ -348,7 +348,7 @@ test.describe('Settings — behaviour', () => {
     await page.getByTestId('mcp-server-playwright-enabled').click({ force: true });
     expect(await wsSent(page)).toContainEqual({
       type: 'host.settings',
-      daemonId: 'd1',
+      hostId: 'd1',
       harnessMcpServers: [{ ...PLAYWRIGHT_MCP, enabled: false }],
     });
 
@@ -369,7 +369,7 @@ test.describe('Settings — behaviour', () => {
     expect(sent).toHaveLength(before + 1);
     expect(sent[sent.length - 1]).toEqual({
       type: 'host.settings',
-      daemonId: 'd1',
+      hostId: 'd1',
       harnessMcpServers: [
         PLAYWRIGHT_MCP,
         {
@@ -423,7 +423,7 @@ test.describe('Settings — behaviour', () => {
     await body.press('Control+Enter');
     expect(await wsSent(page)).toContainEqual({
       type: 'host.claude_memory_set',
-      daemonId: 'd1',
+      hostId: 'd1',
       project: '-home-tom-portfolio',
       file: 'feedback_tests.md',
       body: 'Always write real tests.',
@@ -523,7 +523,7 @@ test.describe('Settings — behaviour', () => {
     await page.getByTestId('settings-nav-updates').click();
     await expect(page.getByTestId('version-behind-d1')).toContainText('dev-host');
     await page.getByTestId('host-d1-update').click();
-    expect(await wsSent(page)).toContainEqual({ type: 'host.update', daemonId: 'd1' });
+    expect(await wsSent(page)).toContainEqual({ type: 'host.update', hostId: 'd1' });
 
     await reportHost(page, { updateAvailable: false });
     await expect(page.getByTestId('settings-nav-updates-pip')).toHaveCount(0);

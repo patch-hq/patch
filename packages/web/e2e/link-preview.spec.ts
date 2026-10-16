@@ -141,4 +141,34 @@ test.describe('a message link carries an inline preview toggle', () => {
     expect(popup.url()).toContain('example.com/foraging-guide');
     expect(page.url()).toContain('dev-harness.html');
   });
+
+  // Todoist: "patch preview doesnt work" — opening a preview threw the link's
+  // line out of order: the wrap was an inline-block holding the card, so the
+  // link lined up with the card's last line and the icons sat on a line above
+  // it. The icons must stay on the link's line and the card open below it.
+  test('opening the preview keeps the icons on the link line and the card below', async ({
+    page,
+  }) => {
+    await page.route('**/api/link-preview**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ url: 'https://example.com/foraging-guide', title: 'Jira' }),
+      });
+    });
+    await page.goto(HARNESS);
+    const link = page.locator(MESSAGE_LINK);
+    const toggle = page.locator('[data-testid="link-preview-toggle"]');
+    await toggle.click();
+    const card = page.locator('[data-testid="link-preview-card"]');
+    await expect(card).toBeVisible();
+
+    const linkBox = await link.boundingBox();
+    const toggleBox = await toggle.boundingBox();
+    const cardBox = await card.boundingBox();
+    if (!linkBox || !toggleBox || !cardBox) throw new Error('missing box');
+    const mid = (b: { y: number; height: number }): number => b.y + b.height / 2;
+    expect(Math.abs(mid(toggleBox) - mid(linkBox))).toBeLessThan(linkBox.height);
+    expect(cardBox.y).toBeGreaterThanOrEqual(linkBox.y + linkBox.height - 1);
+  });
 });

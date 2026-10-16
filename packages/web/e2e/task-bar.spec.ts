@@ -112,6 +112,11 @@ test.describe('task bar', () => {
     const add = page.getByTestId('task-add-input');
     await add.fill('benchmark it');
     await add.press('Enter');
+    // Queued, not yet on the agent's list.
+    await expect(page.getByTestId('task-draft-row')).toHaveCount(1);
+    await expect(page.getByTestId('task-row')).toHaveCount(3);
+    await page.getByTestId('task-draft-done').click();
+    await expect(page.getByTestId('task-draft-row')).toHaveCount(0);
     await expect(page.getByTestId('task-row')).toHaveCount(4);
     await expect(page.getByTestId('task-row').nth(3)).toContainText('benchmark it');
     await expect(add).toHaveValue('');
@@ -132,9 +137,41 @@ test.describe('task bar', () => {
     );
   });
 
-  test('a chat with no task list shows no bar', async ({ page }) => {
+  test('a chat with no task list offers Add tasks and queues several before Done', async ({
+    page,
+  }) => {
+    await acceptWrites(page);
     await page.goto('/app/dev-harness.html?chat=chat_md');
     await expect(page.getByTestId('chat-main')).toBeVisible();
     await expect(page.getByTestId('task-bar')).toHaveCount(0);
+    await page.getByTestId('action-more').click();
+    await page.getByTestId('action-add-tasks').click();
+    await expect(page.getByTestId('task-bar-head')).toHaveText('Add tasks');
+    const add = page.getByTestId('task-add-input');
+    for (const t of ['x', 'y', 'z']) {
+      await add.fill(t);
+      await add.press('Enter');
+    }
+    await expect(page.getByTestId('task-draft-row')).toHaveCount(3);
+    await expect(page.getByTestId('task-bar-queued')).toHaveText('3 queued');
+    await page.getByTestId('task-draft-done').click();
+    await expect(page.getByTestId('task-row')).toHaveCount(3);
+    await expect(page.getByTestId('task-bar-count')).toHaveText('0/3');
+  });
+
+  test('right-click Send ▸ Add to todo list queues the composer input as a task', async ({
+    page,
+  }) => {
+    await acceptWrites(page);
+    await page.goto(HARNESS);
+    await page.getByTestId('composer-input').fill('investigate the flaky deploy');
+    await page.getByTestId('send-btn').click({ button: 'right' });
+    await page.getByText('Add to todo list').click();
+    await expect(page.getByTestId('composer-input')).toHaveValue('');
+    await expect(page.getByTestId('task-bar-count')).toContainText('1/4');
+    await page.getByTestId('task-bar-summary').click();
+    const rows = page.getByTestId('task-row');
+    await expect(rows).toHaveCount(4);
+    await expect(rows.nth(3)).toContainText('investigate the flaky deploy');
   });
 });

@@ -30,7 +30,7 @@ import {
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
-import type { WireEvent } from '@patch/wire';
+import { headCodePoints, type WireEvent } from '@patch/wire';
 
 const MAX_EVENTS_PER_CHAT = 50_000;
 
@@ -49,7 +49,7 @@ function isBlobRef(value: unknown): boolean {
 
 /** The start of a result's text, so a reader that never opens the blob has something to show. */
 function previewOf(result: unknown, json: string): string {
-  if (typeof result === 'string') return result.slice(0, PREVIEW_CHARS);
+  if (typeof result === 'string') return headCodePoints(result, PREVIEW_CHARS);
   const blocks = Array.isArray(result) ? result : [result];
   const parts: string[] = [];
   for (const b of blocks) {
@@ -59,7 +59,7 @@ function previewOf(result: unknown, json: string): string {
     else if (block.type === 'image') parts.push('[image]');
   }
   const text = parts.length > 0 ? parts.join('\n') : json;
-  return text.slice(0, PREVIEW_CHARS);
+  return headCodePoints(text, PREVIEW_CHARS);
 }
 
 /** The events a replay is made of: the transcript, as opposed to live-only frames. */
@@ -158,10 +158,7 @@ export class ChatLogStore {
       outcome = 'updated';
     }
     log.set(seq, stored as WireEvent);
-    if (log.size > this.maxEvents) {
-      const oldest = Math.min(...log.keys());
-      log.delete(oldest);
-    }
+    this.trim(log);
     this.append(chatId, json, event.type === 'chat.message' && event.role === 'user');
     return outcome;
   }
@@ -283,6 +280,15 @@ export class ChatLogStore {
       this.logger.warn({ err, chatId }, 'chat-log-store: could not read the chat log');
       return log;
     }
+    // A crash can leave a last line with no newline. End it, or the next append
+    // would share its line and be skipped on every later load along with it.
+    if (text !== '' && !text.endsWith('\n')) {
+      try {
+        appendFileSync(path, '\n');
+      } catch (err) {
+        this.logger.warn({ err, chatId }, 'chat-log-store: could not end a torn last line');
+      }
+    }
     for (const line of text.split('\n')) {
       if (line === '') continue;
       try {
@@ -294,7 +300,26 @@ export class ChatLogStore {
         continue;
       }
     }
+    this.trim(log);
     return log;
+  }
+
+  /**
+   * Hold a chat to the cap, dropping its lowest seqs. Seqs do not arrive in
+   * order, and a chat can hold too many to spread into `Math.min`, so the
+   * oldest is found by a scan (one over the cap, on commit) or a sort (many, on load).
+   */
+  private trim(log: Map<number, WireEvent>): void {
+    const excess = log.size - this.maxEvents;
+    if (excess <= 0) return;
+    if (excess === 1) {
+      let oldest = Infinity;
+      for (const seq of log.keys()) if (seq < oldest) oldest = seq;
+      log.delete(oldest);
+      return;
+    }
+    const seqs = [...log.keys()].sort((a, b) => a - b);
+    for (const seq of seqs.slice(0, excess)) log.delete(seq);
   }
 }
 

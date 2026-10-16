@@ -13,7 +13,7 @@ import { WsHub, type WsHubDeps } from '../src/ws-hub.js';
 import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
 import { ChatRegistry } from '../src/chat-registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const silentLogger = pino({ level: 'silent' });
 
@@ -24,19 +24,19 @@ function setup(over: Partial<WsHubDeps> = {}) {
   const registry = Registry.load(mkdtempSync(join(tmpdir(), 'patch-replay-held-')));
   registry.bootstrapAccount();
   const chats = new ChatRegistry();
-  chats.observe({ type: 'chat.spawned', chatId: 'c1', daemonId: 'd1', folder: '/w' } as WireEvent);
+  chats.observe({ type: 'chat.spawned', chatId: 'c1', hostId: 'd1', folder: '/w' } as WireEvent);
   chats.observe({
     type: 'chat.spawned',
     chatId: 'thread_manager',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/m',
   } as WireEvent);
-  const link = new InProcessDaemonLink();
+  const link = new InProcessHostLink();
   const hub = new WsHub({
     logger: silentLogger,
     registry,
     presence: new PresenceTracker(),
-    daemonLink: link,
+    hostLink: link,
     chatRegistry: chats,
     idGenerator: () => 'id',
     ...over,

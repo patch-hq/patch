@@ -1,4 +1,4 @@
-// Group 7 integration: server + host wired via InProcessDaemonLink that
+// Group 7 integration: server + host wired via InProcessHostLink that
 // calls the Host's actions directly. Exercises spawn → message → pin →
 // archive → resume → replay.
 
@@ -11,31 +11,31 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
 import { OUT_OF_BAND_SEQ, type WireEvent, type ChatErrorCode } from '@patch/wire';
-import { Daemon, FolderNotFoundError, ChatNotFoundError } from '../../daemon/src/chatRunner.js';
-import { createMetaStore } from '../../daemon/src/meta.js';
-import { createMockSdkBackend } from '../../daemon/src/sdkBackend.js';
-import { createHistoryReader } from '../../daemon/src/history.js';
+import { Daemon, FolderNotFoundError, ChatNotFoundError } from '../../host/src/chatRunner.js';
+import { createMetaStore } from '../../host/src/meta.js';
+import { createMockSdkBackend } from '../../host/src/sdkBackend.js';
+import { createHistoryReader } from '../../host/src/history.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import type { DaemonLink } from '../src/daemon-link.js';
+import type { HostLink } from '../src/host-link.js';
 
 const silent = pino({ level: 'silent' });
 
 /**
- * A DaemonLink that wires the *real* Host class in-process. Server-bound
+ * A HostLink that wires the *real* Host class in-process. Server-bound
  * frames are dispatched to Host actions; daemon-emitted events fan out
  * via `onEvent`.
  */
-class WiredDaemonLink implements DaemonLink {
+class WiredHostLink implements HostLink {
   // Presence names the machine it describes; a stand-in link is still a
   // host, so it answers with one.
-  daemonId(): string | null {
+  hostId(): string | null {
     return 'd1';
   }
   private readonly handlers = new Set<(e: WireEvent) => void>();
   private readonly statusHandlers = new Set<(s: 'online' | 'offline') => void>();
   private readonly hostStatusHandlers = new Set<
-    (daemonId: string, s: 'online' | 'offline') => void
+    (hostId: string, s: 'online' | 'offline') => void
   >();
   daemon!: Daemon;
 
@@ -92,7 +92,7 @@ class WiredDaemonLink implements DaemonLink {
         // ignored
       }
     } catch (err) {
-      // Mirror the REAL host control path (packages/daemon/src/index.ts):
+      // Mirror the REAL host control path (packages/host/src/index.ts):
       // classify the error code and allocate the seq through the host's
       // `allocErrorSeq` so an out-of-band spawn-time error carries the same
       // OUT_OF_BAND_SEQ (-1) the production path emits. This is what proves the
@@ -123,26 +123,26 @@ class WiredDaemonLink implements DaemonLink {
     return () => this.handlers.delete(h);
   }
 
-  // The multi-machine surface of DaemonLink (spec/03 § Host events): a stand-in
+  // The multi-machine surface of HostLink (spec/03 § Host events): a stand-in
   // link still answers per machine, because the hub greets and routes by
-  // `daemonId` rather than by "the host".
-  onlineDaemonIds(): string[] {
+  // `hostId` rather than by "the host".
+  onlineHostIds(): string[] {
     return ['d1'];
   }
-  isOnline(daemonId: string): boolean {
-    return daemonId === 'd1';
+  isOnline(hostId: string): boolean {
+    return hostId === 'd1';
   }
-  sendTo(_daemonId: string, surfaceId: string, event: WireEvent): void {
+  sendTo(_hostId: string, surfaceId: string, event: WireEvent): void {
     this.send(surfaceId, event);
   }
-  onHostStatus(h: (daemonId: string, s: 'online' | 'offline') => void): () => void {
+  onHostStatus(h: (hostId: string, s: 'online' | 'offline') => void): () => void {
     this.hostStatusHandlers.add(h);
     return () => this.hostStatusHandlers.delete(h);
   }
   lastConnectedAt(): number | null {
     return Date.now();
   }
-  injectDaemonEvent(event: WireEvent): void {
+  injectHostEvent(event: WireEvent): void {
     this.emit(event);
   }
   forget(): boolean {
@@ -191,7 +191,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
     registry.bootstrapAccount({ keypair: user });
     // `d1` is the machine every spawn in this file names — it must be REGISTERED,
     // because a host-addressed ingress refuses an unknown id (spec/04 § Spawn).
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
       surfaceId: 'srf-int',
       surfaceKind: 'web',
@@ -206,10 +206,10 @@ describe('integration: spawn → message → pin → archive → resume → repl
     });
 
     // 2. Build the wired host link.
-    const link = new WiredDaemonLink();
+    const link = new WiredHostLink();
     const sdk = createMockSdkBackend();
     const daemon = new Daemon({
-      daemonId: 'd1',
+      hostId: 'd1',
       metaStore: createMetaStore(patchHome),
       sdkBackend: sdk,
       oauthAccessToken: 'fake',
@@ -220,21 +220,21 @@ describe('integration: spawn → message → pin → archive → resume → repl
     link.daemon = daemon;
 
     // 3. Build server.
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     try {
       const addr = built.app.server.address() as AddressInfo;
       const url = `ws://127.0.0.1:${addr.port}/ws`;
       const c1 = new WireTestClient({ url, auth: jwt });
       await c1.connect();
-      await c1.waitFor('daemon.online');
+      await c1.waitFor('host.online');
 
       // 4. Spawn (no prompt) via REST.
       const spawnRes = await built.app.inject({
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder },
+        payload: { hostId: 'd1', folder },
       });
       expect(spawnRes.statusCode).toBe(202);
       const chatId = (spawnRes.json() as { chatId: string }).chatId;
@@ -303,7 +303,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
       });
       const c2 = new WireTestClient({ url, auth: jwt2 });
       await c2.connect();
-      await c2.waitFor('daemon.online');
+      await c2.waitFor('host.online');
       const replayMessages: string[] = [];
       c2.on('chat.message', (e) => replayMessages.push(e.content));
       c2.replay(chatId, 0);
@@ -324,7 +324,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
     registry.bootstrapAccount({ keypair: user });
     // `d1` is the machine every spawn in this file names — it must be REGISTERED,
     // because a host-addressed ingress refuses an unknown id (spec/04 § Spawn).
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
       surfaceId: 'srf-err',
       surfaceKind: 'web',
@@ -338,10 +338,10 @@ describe('integration: spawn → message → pin → archive → resume → repl
       label: 'browser',
     });
 
-    const link = new WiredDaemonLink();
+    const link = new WiredHostLink();
     const sdk = createMockSdkBackend();
     const daemon = new Daemon({
-      daemonId: 'd1',
+      hostId: 'd1',
       metaStore: createMetaStore(patchHome),
       sdkBackend: sdk,
       oauthAccessToken: 'fake',
@@ -351,14 +351,14 @@ describe('integration: spawn → message → pin → archive → resume → repl
     });
     link.daemon = daemon;
 
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     try {
       const addr = built.app.server.address() as AddressInfo;
       const url = `ws://127.0.0.1:${addr.port}/ws`;
       const c1 = new WireTestClient({ url, auth: jwt });
       await c1.connect();
-      await c1.waitFor('daemon.online');
+      await c1.waitFor('host.online');
 
       // Spawn into a folder that does not exist on the host.
       const errorPromise = c1.waitFor('chat.error', (e) => e.error.code === 'folder_not_found');
@@ -366,7 +366,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/tmp/does-not-exist-xyz-123' },
+        payload: { hostId: 'd1', folder: '/tmp/does-not-exist-xyz-123' },
       });
       // POST resolves to a synchronous 400 from the host's chat.error.
       expect(spawnRes.statusCode).toBe(400);
@@ -394,7 +394,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
     registry.bootstrapAccount({ keypair: user });
     // `d1` is the machine every spawn in this file names — it must be REGISTERED,
     // because a host-addressed ingress refuses an unknown id (spec/04 § Spawn).
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
       surfaceId: 'srf-rep',
       surfaceKind: 'web',
@@ -408,10 +408,10 @@ describe('integration: spawn → message → pin → archive → resume → repl
       label: 'browser',
     });
 
-    const link = new WiredDaemonLink();
+    const link = new WiredHostLink();
     const sdk = createMockSdkBackend();
     const daemon = new Daemon({
-      daemonId: 'd1',
+      hostId: 'd1',
       metaStore: createMetaStore(patchHome),
       sdkBackend: sdk,
       oauthAccessToken: 'fake',
@@ -422,14 +422,14 @@ describe('integration: spawn → message → pin → archive → resume → repl
     });
     link.daemon = daemon;
 
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     try {
       const addr = built.app.server.address() as AddressInfo;
       const url = `ws://127.0.0.1:${addr.port}/ws`;
       const c1 = new WireTestClient({ url, auth: jwt });
       await c1.connect();
-      await c1.waitFor('daemon.online');
+      await c1.waitFor('host.online');
 
       // Spawn (no prompt) then focus + send input so the surface is subscribed
       // to detail-level events before the assistant turn streams.
@@ -437,7 +437,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder },
+        payload: { hostId: 'd1', folder },
       });
       expect(spawnRes.statusCode).toBe(202);
       const chatId = (spawnRes.json() as { chatId: string }).chatId;
@@ -469,7 +469,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
       });
       const c2 = new WireTestClient({ url, auth: jwt2 });
       await c2.connect();
-      await c2.waitFor('daemon.online');
+      await c2.waitFor('host.online');
       const replayMessages: string[] = [];
       const replayErrors: string[] = [];
       c2.on('chat.message', (e) => replayMessages.push(e.content));
@@ -482,6 +482,95 @@ describe('integration: spawn → message → pin → archive → resume → repl
     } finally {
       await built.app.close();
       daemon.shutdown();
+    }
+  });
+});
+
+describe('integration: archiving on one surface reaches the other', () => {
+  it('a REST archive from one surface is a chat.state(archived) on a second surface', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'patch-int-data-'));
+    const patchHome = mkdtempSync(join(tmpdir(), 'patch-int-home-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-int-folder-')));
+    try {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(51));
+      const registry = Registry.load(dataDir);
+      registry.bootstrapAccount({ keypair: user });
+      registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+      const creds: Record<string, string> = {};
+      for (const [surfaceId, surfaceKind] of [
+        ['srf-web', 'web'],
+        ['srf-phone', 'mobile'],
+      ] as const) {
+        registry.upsertSurface({ surfaceId, surfaceKind, label: surfaceId, issuedAt: 1 });
+        creds[surfaceId] = await mintSurfaceCredential({
+          userPrivateKey: user.privateKey,
+          surfaceId,
+          surfaceKind,
+          label: surfaceId,
+        });
+      }
+      const link = new WiredHostLink();
+      const daemon = new Daemon({
+        hostId: 'd1',
+        metaStore: createMetaStore(patchHome),
+        sdkBackend: createMockSdkBackend(),
+        oauthAccessToken: 'fake',
+        emit: (e) => link.emit(e),
+        logger: silent,
+        historyReader: createHistoryReader({ claudeProjectsRoot: patchHome }),
+      });
+      link.daemon = daemon;
+      const built = await buildAll({ logger: false, registry, hostLink: link });
+      await built.app.listen({ port: 0, host: '127.0.0.1' });
+      try {
+        const url = `ws://127.0.0.1:${(built.app.server.address() as AddressInfo).port}/ws`;
+        const web = new WireTestClient({ url, auth: creds['srf-web']! });
+        const phone = new WireTestClient({ url, auth: creds['srf-phone']! });
+        await web.connect();
+        await phone.connect();
+        await web.waitFor('host.online');
+        await phone.waitFor('host.online');
+        const spawn = await built.app.inject({
+          method: 'POST',
+          url: '/api/chats',
+          headers: { authorization: `Bearer ${creds['srf-web']}` },
+          payload: { hostId: 'd1', folder },
+        });
+        expect(spawn.statusCode).toBe(202);
+        const chatId = (spawn.json() as { chatId: string }).chatId;
+        await phone.waitFor('chat.spawned', (e) => e.chatId === chatId);
+
+        const res = await built.app.inject({
+          method: 'POST',
+          url: `/api/chats/${chatId}/archive`,
+          headers: { authorization: `Bearer ${creds['srf-web']}` },
+          payload: { archived: true },
+        });
+        expect(res.statusCode).toBe(200);
+        const seen = await phone.waitFor(
+          'chat.state',
+          (e) => e.chatId === chatId && e.status === 'archived',
+        );
+        expect(seen.status).toBe('archived');
+
+        await built.app.inject({
+          method: 'POST',
+          url: `/api/chats/${chatId}/archive`,
+          headers: { authorization: `Bearer ${creds['srf-phone']}` },
+          payload: { archived: false },
+        });
+        const back = await web.waitFor(
+          'chat.state',
+          (e) => e.chatId === chatId && e.status === 'active',
+        );
+        expect(back.status).toBe('active');
+      } finally {
+        await built.app.close();
+      }
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+      rmSync(patchHome, { recursive: true, force: true });
+      rmSync(folder, { recursive: true, force: true });
     }
   });
 });

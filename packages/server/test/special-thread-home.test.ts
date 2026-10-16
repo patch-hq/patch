@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import { encode, type WireEvent } from '@patch/wire';
-import { InboundDaemonLink } from '../src/daemon-link.js';
+import { InboundHostLink } from '../src/host-link.js';
 
 class FakeSocket extends EventEmitter {
   send(): void {}
@@ -27,9 +27,9 @@ const frame = (chatId: string): Buffer =>
 
 describe('special threads come only from the home machine', () => {
   function setup(home: string | null) {
-    const link = new InboundDaemonLink({
+    const link = new InboundHostLink({
       logger: pino({ level: 'silent' }),
-      homeDaemonId: () => home,
+      homeHostId: () => home,
     });
     const heard: Array<[string, string | null]> = [];
     link.onEvent((e, from) => {
@@ -70,9 +70,9 @@ describe('special threads come only from the home machine', () => {
   });
 
   it('follows the host that stands in for the home machine, not the home machine', () => {
-    const link = new InboundDaemonLink({
+    const link = new InboundHostLink({
       logger: pino({ level: 'silent' }),
-      homeDaemonId: () => 'home',
+      homeHostId: () => 'home',
       specialThreadHost: () => 'other',
     });
     const heard: Array<[string, string | null]> = [];

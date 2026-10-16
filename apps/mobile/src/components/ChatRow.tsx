@@ -34,8 +34,10 @@ import { deriveBadge, isHidden, isSnoozed } from '../stores/types';
 import { StatusBadge } from './StatusBadge';
 import { previewLine } from '../lib/badge';
 import { deriveChatTitle } from '../lib/labels';
+import { useAmbiguousHostLabel } from '../lib/hostLabel';
 import { formatWakeTime, formatWakeTimeCompact } from '../lib/snooze';
-import { radii, space, typography, useTheme } from '../lib/theme';
+import { rowBack } from '@patch/wire';
+import { fonts, radii, space, typography, useTheme } from '../lib/theme';
 import { useChatStore } from '../stores/chatStore';
 import {
   applySnooze,
@@ -110,11 +112,15 @@ export function ChatRowItem({ row }: Props): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
   const badge = deriveBadge(row);
+  // Back from a snooze (spec/04 § Snooze → Back): only on a row that is drawn live,
+  // never in the Snoozed section or Archived.
+  const back = isSnoozed(row) || row.status === 'archived' ? null : rowBack(row);
 
   const activeId = useChatStore((s) => s.activeChatId);
   const isActive = activeId === row.chatId;
 
   const preview = useSettledPreview(row);
+  const hostLabel = useAmbiguousHostLabel(row);
 
   // Swipe-to-reveal (spec/15 § Row tools — re-added alongside the ⋯/long-press
   // sheet, not instead of it). `translateX` slides the row itself; the tray
@@ -259,6 +265,9 @@ export function ChatRowItem({ row }: Props): React.ReactElement {
           backgroundColor: isActive ? colors.accentTint : colors.paperRaised,
           borderColor: isActive ? colors.accentSoft : colors.lineSoft,
           borderWidth: 1,
+          // A chat back from a snooze carries a subtle inset on its left
+          // (spec/04 § Snooze → Back).
+          ...(back ? { borderLeftWidth: 3, borderLeftColor: colors.accentSoft } : {}),
           borderRadius: radii.md,
         }}
       >
@@ -289,10 +298,37 @@ export function ChatRowItem({ row }: Props): React.ReactElement {
                 {deriveChatTitle(row)}
               </Text>
             </View>
+            {back?.line ? (
+              <Text
+                testID={`snooze-back-line-${row.chatId}`}
+                numberOfLines={1}
+                style={{
+                  ...typography.meta,
+                  marginTop: 2,
+                  color:
+                    back.line.tone === 'ok'
+                      ? colors.leafSoft
+                      : back.line.tone === 'error'
+                        ? colors.red
+                        : back.line.tone === 'ask'
+                          ? colors.ink
+                          : colors.ink3,
+                  fontFamily: back.line.tone === 'ask' ? fonts.bodyBold : fonts.body,
+                }}
+              >
+                {back.line.text}
+              </Text>
+            ) : null}
             <Text
               numberOfLines={1}
               style={{ ...typography.meta, color: colors.ink3, marginTop: 2 }}
             >
+              {hostLabel ? (
+                <>
+                  <Text testID={`row-host-${row.chatId}`}>{hostLabel}</Text>
+                  {' · '}
+                </>
+              ) : null}
               {preview}
             </Text>
           </View>

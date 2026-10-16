@@ -80,6 +80,9 @@ function chatLinkPath(href: string | undefined): string | null {
   return `/chats/${m[1]}`;
 }
 
+// Root-relative paths that are real routes of the SPA.
+const APP_ROUTE = /^\/(?:chats|pads|jobs|settings|lifecycle)(?:[/?#]|$)/;
+
 // A plain click moves to the chat inside the SPA (no reload); a modified
 // click or middle click keeps the browser's own new-tab meaning.
 function ChatLink({ path, children }: { path: string; children: unknown }): JSX.Element {
@@ -100,7 +103,16 @@ function ChatLink({ path, children }: { path: string; children: unknown }): JSX.
 }
 
 const components = {
-  code({ className, children, ...props }: { className?: string; children?: unknown }) {
+  code({
+    className,
+    children,
+    node: _node,
+    ...props
+  }: {
+    className?: string;
+    children?: unknown;
+    node?: unknown;
+  }) {
     const text = String(children ?? '');
     // Fenced block: className like `language-ts`. Inline code has no
     // language and (in our content) no newline.
@@ -129,16 +141,31 @@ const components = {
   // A link gets an icon that expands an inline mini-preview next to
   // it (spec/14 § Message links) — the link itself still navigates
   // normally.
-  a({ href, children, ...props }: { href?: string; children?: unknown }) {
+  a({
+    href,
+    children,
+    node: _node,
+    ...props
+  }: {
+    href?: string;
+    children?: unknown;
+    node?: unknown;
+  }) {
     if (href?.startsWith(SKILL_HREF_PREFIX))
       return <SkillRef name={href.slice(SKILL_HREF_PREFIX.length)} />;
     const chatPath = chatLinkPath(href);
     if (chatPath) return <ChatLink path={chatPath}>{children}</ChatLink>;
-    // Any other root-relative href (e.g. a file path an agent wrote as a link)
-    // resolves against the app origin. A real page load of it hits the server's
-    // 404 and replaces the whole app, so route it through the SPA instead.
+    // Any other root-relative href is either an app route or a local file path
+    // an agent wrote as a link. Patch cannot open the latter (the app origin has
+    // no such page and the route table answers 404), so show it as plain text
+    // rather than a link that is certain to be broken.
     if (href && href.startsWith('/') && !href.startsWith('//')) {
-      return <ChatLink path={href}>{children}</ChatLink>;
+      if (APP_ROUTE.test(href)) return <ChatLink path={href}>{children}</ChatLink>;
+      return (
+        <span className="md-unlinked-path" data-unlinked-path={href} title={href}>
+          {children as JSX.Element}
+        </span>
+      );
     }
     return (
       <>
@@ -153,7 +180,7 @@ const components = {
   // wider than the measure spills into both gutters evenly (spec/14 § Wide
   // tables). The wrapper is the box that spans the panel; the table centres
   // inside it with auto margins.
-  table({ children, ...props }: { children?: unknown }) {
+  table({ children, node: _node, ...props }: { children?: unknown; node?: unknown }) {
     return (
       <div className="md-table-wrap">
         <table {...props}>{children as JSX.Element}</table>

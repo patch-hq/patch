@@ -124,7 +124,10 @@ export default function Share(): React.ReactElement | null {
               ) : (
                 <FileText size={18} color={colors.ink2} />
               )}
-              <Text numberOfLines={1} style={{ color: colors.ink2, fontSize: 13, flexShrink: 1 }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.ink2, fontSize: textMin, flexShrink: 1 }}
+              >
                 {f.name}
               </Text>
             </View>
@@ -185,7 +188,7 @@ export default function Share(): React.ReactElement | null {
       {destinations.length === 0 ? (
         <Text
           testID="share-no-chats"
-          style={{ color: colors.ink3, paddingHorizontal: space.lg, fontSize: 13 }}
+          style={{ color: colors.ink3, paddingHorizontal: space.lg, fontSize: textMin }}
         >
           {query.trim() === '' ? 'No chats yet.' : 'No chats match.'}
         </Text>

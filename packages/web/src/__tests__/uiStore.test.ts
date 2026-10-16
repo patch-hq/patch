@@ -343,6 +343,16 @@ describe('uiStore error toast dedupe + dismiss', () => {
     expect(useUiStore.getState().errors).toHaveLength(0);
   });
 
+  it("a repeated error restarts the toast's auto-dismiss clock", () => {
+    useUiStore.getState().pushError('boom');
+    vi.advanceTimersByTime(5000);
+    useUiStore.getState().pushError('boom');
+    vi.advanceTimersByTime(1500); // 6.5s after the first push, 1.5s after the repeat
+    expect(useUiStore.getState().errors).toHaveLength(1);
+    vi.advanceTimersByTime(5000);
+    expect(useUiStore.getState().errors).toHaveLength(0);
+  });
+
   it('dismissError removes a specific toast by id', () => {
     useUiStore.getState().pushError('a');
     const id = useUiStore.getState().errors[0]!.id;

@@ -35,7 +35,7 @@ function chatState(activity: string): WireEvent {
   return {
     type: 'chat.state',
     chatId: CHAT_ID,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     activity,
     lastUpdated: Date.now(),
@@ -139,5 +139,33 @@ test.describe('the < > pager reaches the failed attempt', () => {
     await expect(page.getByTestId('msg')).toHaveCount(1);
     await expect(page.getByTestId('msg-meta-retries')).toHaveText('Retried once');
     await expect(page.getByTestId('attempt-switcher')).toHaveCount(0);
+  });
+});
+
+test.describe('the < > pager tabs the replies of each attempt', () => {
+  const reply = (seq: number, content: string) =>
+    ({
+      type: 'chat.message',
+      chatId: CHAT_ID,
+      role: 'assistant',
+      content,
+      seq,
+    }) as unknown as WireEvent;
+
+  test('one reply at a time, not stacked', async ({ page }) => {
+    await page.goto(HARNESS);
+    await applyEvent(page, userMessage(2));
+    await applyEvent(page, reply(3, 'first answer'));
+    await applyEvent(page, userMessage(7, 2));
+    await applyEvent(page, reply(8, 'second answer'));
+
+    await expect(page.getByText('second answer')).toBeVisible();
+    await expect(page.getByText('first answer')).toHaveCount(0);
+    await expect(page.getByTestId('attempt-count')).toHaveText('2/2');
+
+    await page.getByTestId('attempt-prev').click();
+    await expect(page.getByText('first answer')).toBeVisible();
+    await expect(page.getByText('second answer')).toHaveCount(0);
+    await expect(page.getByTestId('attempt-count')).toHaveText('1/2');
   });
 });

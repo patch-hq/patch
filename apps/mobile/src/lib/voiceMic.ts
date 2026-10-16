@@ -91,7 +91,10 @@ export async function startMicCapture(
   const m = getModule();
   if (!m) return;
   const emitter = new NativeEventEmitter(m as unknown as never);
-  _sub = emitter.addListener(EVENT, (ev: MicFrameEvent) => {
+  // A capture still holding the subscription would be orphaned by this one and
+  // go on delivering frames to a caller that has moved on.
+  _sub?.remove();
+  const mine = emitter.addListener(EVENT, (ev: MicFrameEvent) => {
     if (ev.error) {
       onError(ev.error);
       return;
@@ -103,7 +106,16 @@ export async function startMicCapture(
     const pcm = new Int16Array(bytes.buffer, 0, bytes.byteLength >>> 1);
     onFrame(pcm);
   });
-  await m.start();
+  _sub = mine;
+  try {
+    await m.start();
+  } catch (e) {
+    // Nothing is capturing, so nobody will call stop: drop the subscription now
+    // — this attempt's own, not a newer capture's that has replaced it since.
+    mine.remove();
+    if (_sub === mine) _sub = null;
+    throw e;
+  }
 }
 
 /** Stop mic capture and drop the frame subscription. Idempotent. No-op on non-Android. */

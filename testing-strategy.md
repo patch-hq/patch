@@ -34,13 +34,13 @@ Two environment facts about the browser layer, both of which look like a broken 
 
 The rest of this doc drives the _deployed / containerised_ stack surface-by-surface. That is deliberately heavyweight and skips the one failure mode that keeps biting in production: **a chat turn that gets "stuck with no response and no error".** Every unit test mocks the network or host seam, so a turn that never completes — or a host link that drops mid-turn — is structurally invisible to them.
 
-`packages/server/test/e2e/` closes that gap. It boots the **REAL Fastify server + REAL `Daemon` connected over a REAL WebSocket link** (the host dials in with a genuine Ed25519 daemonKey and the server accepts it via `InboundDaemonLink`, exactly like production `packages/daemon/src/index.ts`). The ONLY mock is the SDK backend (`createMockSdkBackend`), so turns complete deterministically without hitting Anthropic. It is NOT the in-memory `link.emit` shortcut some older integration tests use — frames travel over an actual socket.
+`packages/server/test/e2e/` closes that gap. It boots the **REAL Fastify server + REAL `Daemon` connected over a REAL WebSocket link** (the host dials in with a genuine Ed25519 daemonKey and the server accepts it via `InboundHostLink`, exactly like production `packages/host/src/index.ts`). The ONLY mock is the SDK backend (`createMockSdkBackend`), so turns complete deterministically without hitting Anthropic. It is NOT the in-memory `link.emit` shortcut some older integration tests use — frames travel over an actual socket.
 
 Full round trip exercised:
 
 ```
 surface WS client (WireTestClient)
-  → server /ws hub (InboundDaemonLink)
+  → server /ws hub (InboundHostLink)
     → server ↔ daemon serverLink WS (real createServerLink)
       → real Daemon (chatRunner) → mock SDK backend
     ← back out to the surface WS
@@ -127,7 +127,7 @@ The test/fix loop iterates against a local `docker compose -f docker-compose.tes
 
    ```bash
    pnpm --filter @patch/server test --watch <pattern>
-   pnpm --filter @patch/daemon test --watch <pattern>
+   pnpm --filter @patch/host test --watch <pattern>
    ```
 
 3. **Run cross-component WS tests** against the compose stack (server URL = `http://localhost:3000`).
@@ -136,7 +136,7 @@ The test/fix loop iterates against a local `docker compose -f docker-compose.tes
    - **Host-side dev (fast loop)** — run the package directly with `tsx watch`:
      ```bash
      pnpm --filter @patch/server dev   # tsx watch src/index.ts
-     pnpm --filter @patch/daemon dev   # tsx watch src/index.ts
+     pnpm --filter @patch/host dev   # tsx watch src/index.ts
      ```
      Point each at the other via env (`PATCH_DAEMON_UPSTREAM_URL`, `PATCH_DAEMON_HEALTHZ_URL`, etc.) and use the compose stack only for a real host dependency or for full integration tests.
    - **Container rebuild (full integration)** — `docker compose -f docker-compose.test.yml up -d --build`. This is the only path that exercises the Caddy front + the real network topology. Use it after substantive changes and before commit.
@@ -207,7 +207,7 @@ End-to-end voice on phone / web / device is exercised via:
 
 - **Host-side unit tests** for the Whisper, Kokoro, VAD, AEC pipeline using fixture audio.
 - **Surface-level smoke** — open the voice overlay, press-and-hold to record a fixture, assert the chat receives a `chat.message` with the expected transcript prefix `[voice • <surface>]`.
-- **Latency budgets** — `pnpm --filter @patch/daemon test:latency` measures STT + Kokoro + WSS round-trip against a fixture; should pass on the test compose stack with `WHISPER_BACKEND=groq`.
+- **Latency budgets** — `pnpm --filter @patch/host test:latency` measures STT + Kokoro + WSS round-trip against a fixture; should pass on the test compose stack with `WHISPER_BACKEND=groq`.
 
 See `testing/voice.md` for the test fixtures and assertion thresholds.
 

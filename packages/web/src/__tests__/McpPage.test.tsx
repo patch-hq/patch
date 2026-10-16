@@ -117,7 +117,7 @@ describe('Settings → MCP', () => {
     expect(sent).toEqual([
       {
         type: 'host.settings',
-        daemonId: 'd1',
+        hostId: 'd1',
         harnessMcpServers: [PLAYWRIGHT, { ...DEVTOOLS, enabled: true }],
       },
     ]);
@@ -148,7 +148,7 @@ describe('Settings → MCP', () => {
     expect(sent).toEqual([
       {
         type: 'host.settings',
-        daemonId: 'd1',
+        hostId: 'd1',
         harnessMcpServers: [
           PLAYWRIGHT,
           {
@@ -229,7 +229,7 @@ describe('Settings → MCP', () => {
     expect(sent).toEqual([
       {
         type: 'host.settings',
-        daemonId: 'd1',
+        hostId: 'd1',
         // Same place in the list, same on/off.
         harnessMcpServers: [
           PLAYWRIGHT,
@@ -278,7 +278,7 @@ describe('Settings → MCP', () => {
     fireEvent.click(await screen.findByTestId('confirm-ok'));
     await waitFor(() =>
       expect(sent).toEqual([
-        { type: 'host.settings', daemonId: 'd1', harnessMcpServers: [DEVTOOLS] },
+        { type: 'host.settings', hostId: 'd1', harnessMcpServers: [DEVTOOLS] },
       ]),
     );
     await waitFor(() => expect(screen.queryByTestId('mcp-editor')).toBeNull());
@@ -321,6 +321,17 @@ describe('MCP helpers', () => {
       'node "/opt/my tools/x.js" ""',
     );
     expect(splitCommandLine(joinCommandLine(['a b', 'c']))).toEqual(['a b', 'c']);
+  });
+
+  it('keeps quotes inside a word together, and round-trips arguments that contain quotes', () => {
+    expect(splitCommandLine('npx --root="/my dir" -y x')).toEqual([
+      'npx',
+      '--root=/my dir',
+      '-y',
+      'x',
+    ]);
+    const words = ['cmd', 'say "hi there"', 'back\\slash and space', "it's", 'C:\\plain\\path'];
+    expect(splitCommandLine(joinCommandLine(words))).toEqual(words);
   });
 
   it('parses KEY=VALUE lines, and round-trips them', () => {

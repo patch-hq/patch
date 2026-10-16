@@ -11,7 +11,7 @@
 //   - patch.onNavigate(cb)                    → main asks the renderer to navigate
 //   - patch.onStartVoiceNote(cb)              → ⌃Space global hotkey hit
 //   - patch.getDesktopEvents()                → test/inspection hook
-//   - patch.localDaemon.status()/install()    → the host on this Mac
+//   - patch.localHost.status()/install()    → the host on this Mac
 //   - patch.overlayTitleBar                   → this platform's windows have no
 //                                               native title bar (spec/05
 //                                               § Window chrome)
@@ -156,6 +156,14 @@ contextBridge.exposeInMainWorld('patch', {
   closePanel(): void {
     ipcRenderer.send('patch:panel:close');
   },
+  // The chat this window has open, for the front-chat file (front-chat.ts).
+  reportOpenChat(chat: {
+    chatId: string | null;
+    name: string | null;
+    folder: string | null;
+  }): void {
+    ipcRenderer.send('patch:open-chat', chat);
+  },
   // Width (px) the panel is occupying, so the app can inset itself by exactly
   // that much and stay usable beside it. 0 means the panel is closed.
   onPanelInset(cb: (e: { width: number }) => void): () => void {
@@ -185,15 +193,15 @@ contextBridge.exposeInMainWorld('patch', {
     return (await ipcRenderer.invoke('patch:system-idle-ms')) as number;
   },
   // spec/02 § Desktop app and the local host.
-  localDaemon: {
-    status(): Promise<{ installed: boolean; daemonId: string | null }> {
-      return ipcRenderer.invoke('patch:local-daemon:status') as Promise<{
+  localHost: {
+    status(): Promise<{ installed: boolean; hostId: string | null }> {
+      return ipcRenderer.invoke('patch:local-host:status') as Promise<{
         installed: boolean;
-        daemonId: string | null;
+        hostId: string | null;
       }>;
     },
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }> {
-      return ipcRenderer.invoke('patch:local-daemon:install', { code }) as Promise<{
+      return ipcRenderer.invoke('patch:local-host:install', { code }) as Promise<{
         ok: boolean;
         exitCode: number | null;
         output: string;

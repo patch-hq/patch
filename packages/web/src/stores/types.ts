@@ -13,6 +13,7 @@ import type {
   GoalProgress,
   PendingWake,
   PermissionMode,
+  SnoozeRecord,
   StatusKind,
   TodoItem,
 } from '@patch/wire';
@@ -26,7 +27,7 @@ export interface ChatRow {
    * host's `chat.spawned` reconciled it — every host-scoped action on the
    * chat refuses while it is empty rather than guessing a machine.
    */
-  daemonId: string;
+  hostId: string;
   folder: string;
   activity: ChatActivity;
   /** The effective permission mode the chat's next turn will use (`chat.state`). */
@@ -125,6 +126,14 @@ export interface ChatRow {
    */
   snoozedUntil: number | null;
   /**
+   * What each snooze of the chat was and what happened in it (spec/04 § Snooze),
+   * oldest first. Drives the Back state and the transcript divider. Optional
+   * like `hidden`; absent is none.
+   */
+  snoozeRecords?: SnoozeRecord[];
+  /** ms epoch the chat's current run began; `null`/absent when it is not running. */
+  runningSince?: number | null;
+  /**
    * Running out of the active list (spec/04 § Hidden), from `chat.state`. A
    * separate axis from `status`, like `snoozedUntil`: the chat is drawn hidden
    * only while it is also `active` (`isHidden`) — an archived chat may keep the
@@ -191,6 +200,11 @@ export interface ChatRow {
    * credentials). Null until a turn has run on the host holding the chat.
    */
   account?: { id: string; label: string } | null;
+  /**
+   * The shared account the chat's turns START on (`chat.state`); null is "by
+   * strategy". Undefined until a host that knows the field has said.
+   */
+  preferredAccountId?: string | null;
   /**
    * How many of this chat's backgrounded commands and sub-agents are still
    * RUNNING, as the host counted them (`chat.state`, spec/02 § Background
@@ -365,18 +379,18 @@ export function isSnoozed(row: { snoozedUntil: number | null }, now: number = Da
 }
 
 /**
- * spec/04 § Hidden — drawn in the Hidden section, and nowhere else, only while
- * the chat is still `active`. An archived chat that keeps `hidden: true` is
- * archived: the flag is where a machine message starting it again returns it to.
+ * spec/04 § Hidden — drawn in the Hidden section, and nowhere else, while it is
+ * active OR errored. A background job does not stop being hidden merely because
+ * it failed. Archived/deleted lifecycle states still take precedence.
  */
 export function isHidden(row: { status: ChatStatus; hidden?: boolean }): boolean {
-  return row.status === 'active' && row.hidden === true;
+  return row.status !== 'archived' && row.status !== 'deleted' && row.hidden === true;
 }
 
 /**
  * One row of the server's folder roster (`GET /api/chats/folders`, spec/04
  * § Folders → Folder roster): a folder holding at least one non-deleted chat —
- * ARCHIVED INCLUDED — on `daemonId`, stamped with its most-recent chat's
+ * ARCHIVED INCLUDED — on `hostId`, stamped with its most-recent chat's
  * `lastUpdated`.
  *
  * Lives here rather than in `chatGroups.ts` because `chatGroups` already
@@ -385,7 +399,7 @@ export function isHidden(row: { status: ChatStatus; hidden?: boolean }): boolean
  */
 export interface FolderRosterEntry {
   folder: string;
-  daemonId: string;
+  hostId: string;
   lastUpdated: number;
 }
 

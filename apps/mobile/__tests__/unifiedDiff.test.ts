@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { diffFromToolCall } from '../src/components/UnifiedDiff';
+import { diffFromToolCall, unifiedLines } from '../src/components/UnifiedDiff';
 
 describe('diffFromToolCall — maps Edit/Write/MultiEdit tool calls to diff pairs', () => {
   it('extracts old→new from an Edit tool call', () => {
@@ -42,5 +42,34 @@ describe('diffFromToolCall — maps Edit/Write/MultiEdit tool calls to diff pair
 
   it('returns null for a MultiEdit with no well-formed edits', () => {
     expect(diffFromToolCall('MultiEdit', { edits: [{ nope: 1 }] })).toBeNull();
+  });
+});
+
+describe('unifiedLines — a final newline ends the last line, it does not add one', () => {
+  it('a written file ending in a newline is its lines, with no blank added line', () => {
+    expect(unifiedLines('', 'a\nb\n')).toEqual([
+      { kind: 'add', text: 'a' },
+      { kind: 'add', text: 'b' },
+    ]);
+  });
+
+  it('deleting a file ending in a newline shows only its lines', () => {
+    expect(unifiedLines('x\n', '')).toEqual([{ kind: 'del', text: 'x' }]);
+  });
+
+  it('an edit inside a text keeps its context and changes one line', () => {
+    expect(unifiedLines('a\nb\nc\n', 'a\nB\nc\n')).toEqual([
+      { kind: 'context', text: 'a' },
+      { kind: 'del', text: 'b' },
+      { kind: 'add', text: 'B' },
+      { kind: 'context', text: 'c' },
+    ]);
+  });
+
+  it('text with no final newline is unchanged', () => {
+    expect(unifiedLines('', 'a\nb')).toEqual([
+      { kind: 'add', text: 'a' },
+      { kind: 'add', text: 'b' },
+    ]);
   });
 });

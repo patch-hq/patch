@@ -101,6 +101,7 @@ describe('WebUpdateBanner', () => {
       lastCheckedAt: '2026-09-17T09:00:00Z',
       lastResult: 'downloaded',
       lastError: null,
+      lastErrorKind: null,
       availableVersion: '0.1.971',
       downloaded: true,
       checking: false,
@@ -122,6 +123,7 @@ describe('WebUpdateBanner', () => {
       lastCheckedAt: '2026-09-17T09:00:00Z',
       lastResult: 'update-available',
       lastError: null,
+      lastErrorKind: null,
       availableVersion: '0.1.971',
       downloaded: false,
       checking: false,
@@ -138,5 +140,30 @@ describe('WebUpdateBanner', () => {
     render(<WebUpdateBanner />);
     expect(screen.getByTestId('web-update-banner')).toHaveTextContent('Patch has updated');
     expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Update Patch');
+  });
+
+  it('acknowledges the press, and says so if the page is still here afterwards', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(liveUpdate, 'reloadNow').mockImplementation(() => {});
+    useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
+    render(<WebUpdateBanner />);
+    fireEvent.click(screen.getByTestId('web-update-reload'));
+    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Updating');
+    expect(screen.getByTestId('web-update-reload')).toBeDisabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(screen.getByTestId('web-update-error')).toHaveTextContent('did not reload');
+    expect(screen.getByTestId('web-update-reload')).not.toBeDisabled();
+  });
+
+  it('shows the error when reloading throws', () => {
+    vi.spyOn(liveUpdate, 'reloadNow').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
+    render(<WebUpdateBanner />);
+    fireEvent.click(screen.getByTestId('web-update-reload'));
+    expect(screen.getByTestId('web-update-error')).toHaveTextContent('boom');
   });
 });

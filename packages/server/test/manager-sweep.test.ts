@@ -7,22 +7,23 @@
 
 import { describe, test, expect, beforeEach } from 'vitest';
 import pino from 'pino';
-import type { WireEvent } from '@patch/wire';
+import { SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
 import { ChatRegistry } from '../src/chat-registry.js';
 import {
   ManagerSweeper,
   EVENT_WAKE_DEBOUNCE_MS,
+  IN_FLIGHT_STALE_MS,
   type SweepRunStore,
 } from '../src/manager-sweep.js';
 import { DEFAULT_SETTINGS, type AccountSettings } from '../src/settings.js';
 
 const logger = pino({ level: 'silent' });
 
-function spawned(chatId: string, daemonId = 'd1'): WireEvent {
+function spawned(chatId: string, hostId = 'd1'): WireEvent {
   return {
     type: 'chat.spawned',
     chatId,
-    daemonId,
+    hostId,
     folder: `/work/${chatId}`,
     seq: 1,
     ts: 0,
@@ -33,7 +34,7 @@ function state(chatId: string, over: Partial<Record<string, unknown>> = {}): Wir
   return {
     type: 'chat.state',
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     activity: 'idle',
     permissionMode: 'auto',
     folder: `/work/${chatId}`,
@@ -61,7 +62,7 @@ describe('ManagerSweeper', () => {
   let nowMs: number;
 
   // Production feeds the SAME wire-event stream into both observers
-  // (`app.ts`'s `daemonLink.onEvent`) — the registry for state, the sweeper
+  // (`app.ts`'s `hostLink.onEvent`) — the registry for state, the sweeper
   // for edges. A test that only drives one of them is testing a stream that
   // never happens in production.
   function emit(event: WireEvent): void {
@@ -77,7 +78,7 @@ describe('ManagerSweeper', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeDaemonId: () => 'd1',
+      homeHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs: memoryRunStore(),
       logger,
@@ -112,7 +113,7 @@ describe('ManagerSweeper', () => {
     expect(requested[0]!.candidates).toEqual([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work/c1',
         edge: 'settled',
         idleMinutes: expect.any(Number),
@@ -135,7 +136,7 @@ describe('ManagerSweeper', () => {
     expect(requested[0]!.candidates).toEqual([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work/c1',
         edge: 'stalled',
         idleMinutes: expect.any(Number),
@@ -176,6 +177,18 @@ describe('ManagerSweeper', () => {
     emit(spawned('c2'));
     emit(state('c2', { backgroundTasks: 1 }));
     emit(state('c2', { backgroundTasks: 0 }));
+    expect(sweeper.tick()).toBe(false);
+  });
+
+  test('an edge the sweep drops does not arm the early wake for a later, unrelated edge', () => {
+    nowMs += 5 * 60_000; // well inside the 30 minute interval
+    sweeper.jobRunFailed(SPECIAL_THREAD_IDS.manager); // the sweep is never a candidate on itself
+    expect(sweeper.tick()).toBe(false);
+
+    nowMs += 60_000;
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running' }));
+    emit(state('c1', { activity: 'idle' })); // settled: pending, but not a wake
     expect(sweeper.tick()).toBe(false);
   });
 
@@ -306,11 +319,26 @@ describe('ManagerSweeper', () => {
     expect(sweeper.checkNow()).toBe(true); // now free to run again
   });
 
+  test('a run whose result never comes back stops blocking the sweep once it is stale', () => {
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running' }));
+    emit(state('c1', { activity: 'idle' }));
+    expect(sweeper.checkNow()).toBe(true); // run-0, whose host then restarts
+    emit(spawned('c2'));
+    emit(state('c2', { activity: 'running' }));
+    emit(state('c2', { activity: 'idle' }));
+    nowMs += IN_FLIGHT_STALE_MS - 1;
+    expect(sweeper.checkNow()).toBe(false); // still plausibly running
+    nowMs += 1;
+    expect(sweeper.checkNow()).toBe(true); // given up on run-0
+    expect(requested.map((r) => r.runId)).toEqual(['run-0', 'run-1']);
+  });
+
   test('without a home host registered, a sweep never fires', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeDaemonId: () => undefined,
+      homeHostId: () => undefined,
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs: memoryRunStore(),
       logger,
@@ -340,7 +368,7 @@ describe('ManagerSweeper', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeDaemonId: () => 'd1',
+      homeHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs,
       logger,

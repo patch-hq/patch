@@ -20,6 +20,8 @@ interface SideThreadsState {
   pendingNewTab: Record<string, boolean>;
   draftByChatId: Record<string, SideThreadDraft>;
   expectNewTab(chatId: string): void;
+  /** The request that armed `expectNewTab` never went out. */
+  cancelNewTab(chatId: string): void;
   openThread(chatId: string, branchId: string): void;
   openDraft(chatId: string, draft: SideThreadDraft): void;
   closeDraft(chatId: string): void;
@@ -32,6 +34,13 @@ export const useSideThreadsStore = create<SideThreadsState>((set) => ({
   draftByChatId: {},
   expectNewTab(chatId) {
     set((s) => ({ pendingNewTab: { ...s.pendingNewTab, [chatId]: true } }));
+  },
+  cancelNewTab(chatId) {
+    set((s) => {
+      const { [chatId]: _dropped, ...rest } = s.pendingNewTab;
+      void _dropped;
+      return { pendingNewTab: rest };
+    });
   },
   openThread(chatId, branchId) {
     set((s) => {

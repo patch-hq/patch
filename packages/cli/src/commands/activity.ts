@@ -1,10 +1,11 @@
 // `patch activity` — the user's own messages (spec/17 § CLI, spec/06 §
 // Cross-chat toolset).
 //
-// Always REST, never UDS: unlike `chats list` (which has a meaningful
-// local-only view — this machine's own chats), the answer spans every host's
-// chat logs and only the server gathers them (mirrors `chats move`/`rename`/
-// `pin`, which force REST for the same "only the server has this" reason).
+// On a host machine this goes over UDS to the daemon's `/internal/activity`, which asks the
+// server on the host's behalf (the same path as the `patch_activity` tool) — so a paired host
+// needs no CLI credential. The daemon wants the calling chat to correlate the server round
+// trip, so UDS needs PATCH_CHAT_ID (set inside every chat). Off-host it is REST with the CLI
+// credential. Either way the answer spans every host's chat logs; only the server gathers them.
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
@@ -13,7 +14,7 @@ import { emitJson, emitText, getTransport, run } from './_common.js';
 interface ActivityMessage {
   chatId: string;
   chatName: string | null;
-  daemonId: string;
+  hostId: string;
   folder: string;
   text: string;
   ts: number;
@@ -60,13 +61,24 @@ export function registerActivityCommands(program: Command): void {
             opts.since !== undefined
               ? parseTimestamp(opts.since, '--since')
               : until - 24 * 60 * 60 * 1000;
-          const t = getTransport({ ...opts, remote: true });
+          const t = getTransport(opts);
           const params = new URLSearchParams();
           params.set('since', String(since));
           params.set('until', String(until));
           if (opts.messagesCursor !== undefined) params.set('messagesCursor', opts.messagesCursor);
           if (opts.limit !== undefined) params.set('limit', opts.limit);
-          const res = await t.get<ActivityResult>(`/api/activity?${params.toString()}`);
+          if (t.kind === 'uds') {
+            const callerChatId = process.env['PATCH_CHAT_ID'];
+            if (!callerChatId) {
+              throw new Error(
+                'patch activity over the host socket needs PATCH_CHAT_ID (run it inside a chat), or use --remote with a CLI credential',
+              );
+            }
+            params.set('callerChatId', callerChatId);
+          }
+          const res = await t.get<ActivityResult>(
+            `${t.kind === 'uds' ? '/internal/activity' : '/api/activity'}?${params.toString()}`,
+          );
           if (opts.json) {
             emitJson(res);
             return;

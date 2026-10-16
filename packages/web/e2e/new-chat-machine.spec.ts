@@ -33,7 +33,7 @@ test.describe('new chat — which machine', () => {
     const composer = page.getByTestId('composer-input');
     await composer.fill('hello mac');
     await composer.press('Meta+Enter');
-    await expect.poll(() => spawnBody).toMatchObject({ daemonId: 'd2', folder: '/Users/dev/code' });
+    await expect.poll(() => spawnBody).toMatchObject({ hostId: 'd2', folder: '/Users/dev/code' });
   });
 
   test('the machine row and the project row do not overlap', async ({ page }) => {

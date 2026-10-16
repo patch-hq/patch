@@ -337,3 +337,18 @@ describe('parseTaskNotificationBlock', () => {
     ).toBeNull();
   });
 });
+
+describe('parseBackgroundTaskNotice — multi-line command', () => {
+  it('still ends a task whose description spans several lines', () => {
+    expect(
+      parseBackgroundTaskNotice(
+        'Background command "pnpm test\n  --watch" completed (exit code 0)',
+      ),
+    ).toEqual({
+      kind: 'command',
+      description: 'pnpm test\n  --watch',
+      status: 'completed',
+      exitCode: 0,
+    });
+  });
+});

@@ -24,7 +24,7 @@ export interface SkillPreviewSheetProps {
   skill: { name: string; description: string | undefined } | null;
   frontmatter: Record<string, Record<string, string>> | undefined;
   paths: Record<string, string> | undefined;
-  daemonId: string;
+  hostId: string;
   onClose(): void;
 }
 
@@ -32,7 +32,7 @@ export function SkillPreviewSheet({
   skill,
   frontmatter,
   paths,
-  daemonId,
+  hostId,
   onClose,
 }: SkillPreviewSheetProps): React.ReactElement {
   const colors = useTheme();
@@ -44,7 +44,7 @@ export function SkillPreviewSheet({
   const extraFields = fields
     ? Object.entries(fields).filter(([key]) => !SHOWN_ELSEWHERE.has(key))
     : [];
-  const editTarget = resolveSkillEditTarget({ skill: skill.name, paths, daemonId });
+  const editTarget = resolveSkillEditTarget({ skill: skill.name, paths, hostId });
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -96,13 +96,13 @@ export function SkillPreviewSheet({
                 ))}
               </View>
             ) : null}
-            {editTarget && 'daemonId' in editTarget ? (
+            {editTarget && 'hostId' in editTarget ? (
               <Pressable
                 testID="skill-preview-edit"
                 style={{ marginTop: space.sm }}
                 onPress={() => {
                   onClose();
-                  router.push(editRoute(editTarget.daemonId, editTarget.path));
+                  router.push(editRoute(editTarget.hostId, editTarget.path));
                 }}
               >
                 <Text

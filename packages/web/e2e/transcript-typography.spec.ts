@@ -30,19 +30,31 @@ test.describe('transcript typography', () => {
     expect(Number(opacity)).toBeLessThanOrEqual(0.6);
   });
 
-  // todo: "Slightly bigger font." — the base body size read a touch small at
-  // 15px. It floors at 16px now so the transcript prose is comfortably readable.
-  test('the base body font is slightly bigger — at least 16px', async ({ page }) => {
+  // todo: "font too small" — the base body size read small at
+  // 16px. It floors at 17px now so the transcript prose is comfortably readable.
+  test('the base body font is slightly bigger — at least 17px', async ({ page }) => {
     await page.goto(MD);
     const bodyFontSize = await page.evaluate(() =>
       parseFloat(getComputedStyle(document.body).fontSize),
     );
-    expect(bodyFontSize).toBeGreaterThanOrEqual(16);
+    expect(bodyFontSize).toBeGreaterThanOrEqual(17);
     // Assistant prose inherits the base size, so it lifts too.
     const proseFontSize = await page
       .locator('.msg-assistant .content p')
       .first()
       .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-    expect(proseFontSize).toBeGreaterThanOrEqual(16);
+    expect(proseFontSize).toBeGreaterThanOrEqual(17);
+  });
+
+  // todo: "font too small" — tool rows and their expanded detail sat well
+  // under the prose, so the transcript read small.
+  test('tool rows are close to prose size', async ({ page }) => {
+    await page.goto('/app/dev-harness.html?chat=chat_tools');
+    const row = page
+      .locator('.tool-call:not(.compaction):not(.trigger):not(.system-context), .tool-group')
+      .first();
+    if ((await row.count()) === 0) throw new Error('harness chat_tools has no tool row');
+    const size = await row.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(size).toBeGreaterThanOrEqual(16);
   });
 });

@@ -28,7 +28,7 @@ import { verifySurfaceCredential } from '@patch/auth';
 import type { VoiceAppSurfaceKind, WireEvent } from '@patch/wire';
 import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
-import type { DaemonLink } from '../daemon-link.js';
+import type { HostLink } from '../host-link.js';
 
 const TRANSCRIBE_REQUEST_TIMEOUT_MS = 30_000;
 /** Reject clips larger than this before spending a host round-trip on them. */
@@ -73,7 +73,7 @@ export interface VoiceNoteRouteDeps {
   logger: Logger;
   registry: Registry;
   chatRegistry: ChatRegistry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   idGenerator: () => string;
 }
 
@@ -87,7 +87,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.voice_note.transcribe_response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
@@ -96,7 +96,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     w.resolve(event);
   });
 
-  function awaitDaemon(
+  function awaitHost(
     surfaceId: string,
     build: (requestId: string) => WireEvent,
   ): Promise<Extract<WireEvent, { type: 'patch.voice_note.transcribe_response' }> | 'timeout'> {
@@ -107,7 +107,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
         resolveP('timeout');
       }, TRANSCRIBE_REQUEST_TIMEOUT_MS);
       pending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(surfaceId, build(requestId));
+      deps.hostLink.send(surfaceId, build(requestId));
     });
   }
 
@@ -171,7 +171,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     audio: Buffer,
   ): Promise<{ ok: true; transcript: string } | { ok: false; status: number; body: object }> {
     const audioBase64 = audio.toString('base64');
-    const result = await awaitDaemon(surfaceId, (requestId) => ({
+    const result = await awaitHost(surfaceId, (requestId) => ({
       type: 'patch.voice_note.transcribe_request',
       requestId,
       surfaceKind,
@@ -245,7 +245,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     // the two legitimate attachers of `source` (the voice-device
     // hook, and this route); it goes straight to the host link (not the surface
     // ingress path, which strips `source`). The host prepends `[voice • <kind>]`.
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.input',
       chatId,
       message: text,

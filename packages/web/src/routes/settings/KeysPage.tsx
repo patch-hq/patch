@@ -119,7 +119,7 @@ function ProviderKeys(): JSX.Element {
                       data-testid={`${row}-adopt`}
                       disabled={!reachable || busy}
                       onClick={() =>
-                        void run(`${label} key`, () => api.adoptProviderKey(k.id, env[0]!.daemonId))
+                        void run(`${label} key`, () => api.adoptProviderKey(k.id, env[0]!.hostId))
                       }
                     >
                       Use for every host

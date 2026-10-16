@@ -3,7 +3,11 @@
 
 import { assertVersionReport } from '@patch/wire';
 import type {
+  SnoozeRecord,
+  DocAction,
+  DocView,
   AccountStrategy,
+  ChatContextUsage,
   AuthOkHost,
   ProviderKeyId,
   SettingsChangedEvent,
@@ -16,8 +20,12 @@ import type {
   StatusKind,
   TodoItem,
   WatchTaskRow,
+  UsageSample,
+  ChatTokenUsage,
 } from '@patch/wire';
+import type { Hook, HookCreateBody, HookPatchBody } from '@patch/wire/hooks';
 import { loadCredential } from '../lib/credential';
+import { bytesToBase64 } from '../lib/base64';
 import { apiUrl } from '../config';
 
 /** One row of a host directory listing (spec/03 § Host files). */
@@ -90,7 +98,7 @@ export interface ChatListEntry {
   chatId: string;
   name: string | null;
   /** The host the chat runs on (spec/04 § Spawn) — paths are scoped to it. */
-  daemonId: string;
+  hostId: string;
   folder: string;
   activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
   /** The effective mode the chat's next turn will use (spec/02 § Permission mode). */
@@ -114,12 +122,18 @@ export interface ChatListEntry {
    * its own section rather than hidden, so the roster has to carry it.
    */
   snoozedUntil: number | null;
+  /** What each snooze was and what happened in it (spec/04 § Snooze). */
+  snoozeRecords?: SnoozeRecord[];
+  /** ms epoch the current run began, or null. */
+  runningSince?: number | null;
   /**
    * Running out of the active list (spec/04 § Hidden). Only `?hidden=only`
    * returns a hidden chat — the default roster leaves them out. Optional: an
    * older server does not send the field.
    */
   hidden?: boolean;
+  /** How full the chat's context window is (spec/14 § Composer — context ring). */
+  context?: ChatContextUsage | null;
   /**
    * The model the chat's next turn runs on (spec/04 § Model), or `null` when
    * its host reports none. Optional: an older server does not send the field.
@@ -157,6 +171,15 @@ export type AccountPreferences = SharedSettings;
 /** What a shared-settings write answers with: the committed state. */
 export type SharedState = Omit<SettingsChangedEvent, 'type'>;
 
+export interface WebBotAuthStatus {
+  ready: boolean;
+  issue: string | null;
+  origin: string;
+  agentUrl: string;
+  directoryUrl: string;
+  keyId: string;
+}
+
 /** The backends whose accounts are shared settings. */
 export type SharedBackendId = 'claude-code' | 'codex';
 
@@ -189,7 +212,114 @@ export interface VoiceSurfaceConfig {
   handoff: VoiceHandoff;
 }
 
+/** One Pad as the server serves it (spec/14 § Pads). */
+export interface PadView {
+  id: string;
+  name: string;
+  /** The app the Pad designs for, or null for a blank one. */
+  app: string | null;
+  chatId: string;
+  device: 'desktop' | 'phone';
+  createdAt: number;
+  updatedAt: number;
+  pending: number;
+  /** A batch was sent and the agent has not replied yet. */
+  working: boolean;
+  screens: { id: string; name: string; path: string; pending: number }[];
+  screensError: string | null;
+  /** Signed, relative URL of the editor page. */
+  frameUrl: string;
+}
+
+/** One screen of an earlier Pad, offered as a starting point for a new one. */
+export interface PadLibraryScreen {
+  padId: string;
+  screenId: string;
+  name: string;
+  /** Signed, relative URL of the thumbnail, or null before one is rendered. */
+  thumbUrl: string | null;
+  device: 'desktop' | 'phone';
+}
+export interface PadLibrary {
+  apps: { app: string; screens: PadLibraryScreen[] }[];
+}
+export interface PadCreateBody {
+  name: string;
+  app?: string;
+  device: 'desktop' | 'phone';
+  chatId: string;
+  /** Screens captured from the live app: each one self-contained HTML. */
+  screens?: { name: string; html: string; width?: number }[];
+  /** Screens of earlier Pads to start from. */
+  from?: { padId: string; screenId: string }[];
+}
+/** GET /api/link-preview — the OpenGraph summary of a link in a message. */
+export interface LinkPreviewData {
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
+/** spec/06 § Sweep — one completed sweep run. */
+export interface SweepRun {
+  at: number;
+  runId: string;
+  candidateCount: number;
+  actions: { chatId: string; action: 'nudge' | 'wake' | 'flag' | 'leave' }[];
+  tokensUsed: number;
+  error?: string;
+}
+
+export type ComputerUseHost = {
+  hostId: string;
+  name: string | null;
+  active?: boolean;
+  actionLabel?: string;
+  since?: number;
+  tabs?: number;
+  lastStoppedAt?: number;
+  closed?: number;
+  /** Present when the machine did not answer. */
+  error?: string;
+};
+
 export const api = {
+  /** Settings → Usage: probe history and per-chat token totals for a window. */
+  usageReport: (params: { since: number; until: number }) =>
+    request<{
+      samples: (UsageSample & { hostId: string })[];
+      chats: (ChatTokenUsage & { hostId: string })[];
+    }>(`/api/usage-report?since=${params.since}&until=${params.until}`),
+  webBotAuthStatus: () => request<WebBotAuthStatus>('/api/web-bot-auth'),
+  getSweepRuns: (limit?: number) =>
+    request<{ runs: SweepRun[] }>(`/api/manager/sweeps${limit ? `?limit=${limit}` : ''}`),
+  checkSweepNow: () =>
+    request<{ fired: boolean }>('/api/manager/sweep/check-now', { method: 'POST' }),
+  listPads: () => request<{ pads: PadView[] }>('/api/pads'),
+  getPad: (id: string) => request<PadView>(`/api/pads/${encodeURIComponent(id)}`),
+  padLibrary: () => request<PadLibrary>('/api/pads/library'),
+  createPad: (body: PadCreateBody) => request<PadView>('/api/pads', { method: 'POST', body }),
+  linkPreview: (url: string) =>
+    request<LinkPreviewData>(`/api/link-preview?url=${encodeURIComponent(url)}`),
+  patchPad: (id: string, body: { name?: string; device?: 'desktop' | 'phone' }) =>
+    request<PadView>(`/api/pads/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  deletePad: (id: string) =>
+    request<null>(`/api/pads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Settings → Computer use: is an agent driving each machine's browser. */
+  computerUse: () => request<{ hosts: ComputerUseHost[] }>('/api/browser-use'),
+  stopComputerUse: (hostId: string) =>
+    request<ComputerUseHost>(`/api/browser-use/${encodeURIComponent(hostId)}/stop`, {
+      method: 'POST',
+    }),
+  // spec/20-hooks.md — hook CRUD (the pre-send check is lib/hookCheck.ts).
+  listHooks: () => request<{ hooks: Hook[] }>('/api/hooks'),
+  createHook: (body: HookCreateBody) => request<Hook>('/api/hooks', { method: 'POST', body }),
+  patchHook: (id: string, body: HookPatchBody) =>
+    request<Hook>(`/api/hooks/${id}`, { method: 'PATCH', body }),
+  deleteHook: (id: string) => request<void>(`/api/hooks/${id}`, { method: 'DELETE' }),
+  enableHook: (id: string) => request<Hook>(`/api/hooks/${id}/enable`, { method: 'POST' }),
+  disableHook: (id: string) => request<Hook>(`/api/hooks/${id}/disable`, { method: 'POST' }),
   // GET /api/auth/me — the server returns the account + surface NESTED
   // (matches packages/server auth-routes `{ account, surface }`). A flat
   // `{accountId, surfaceId}` shape would read `undefined` identity into the
@@ -203,7 +333,8 @@ export const api = {
   // GET /api/settings — the same payload web's Settings page reads: linked
   // devices, push count, and the account-wide preferences (spec/14 §
   // `/settings` details).
-  settings: () => request<SettingsResponse>('/api/settings'),
+  settings: (signal?: AbortSignal) =>
+    request<SettingsResponse>('/api/settings', signal ? { signal } : {}),
   // GET /api/healthz — the server this surface is actually talking to and its
   // commit, for Settings → Connection (spec/14 § Account & connection).
   healthz: () => request<{ ok: boolean; version: string; gitSha: string }>('/api/healthz'),
@@ -247,7 +378,7 @@ export const api = {
   },
   createChat: (body: {
     /** The host to run on. Required (spec/04 § Spawn). */
-    daemonId: string;
+    hostId: string;
     folder: string;
     prompt?: string;
     name?: string;
@@ -266,10 +397,22 @@ export const api = {
     request<{ ok: true }>(`/api/chats/${chatId}`, { method: 'DELETE' }),
   // spec/04 § Moving a chat to another host — resolves once the chat is running
   // there; every refusal is an ApiError whose body carries the reason.
-  moveChat: (chatId: string, daemonId: string, folder: string) =>
-    request<{ ok: true; chatId: string; daemonId: string; folder: string }>(
+  // `fromServerCopy` moves from the server's copy of an online host's chat;
+  // an offline host is implied and needs no option.
+  moveChat: (
+    chatId: string,
+    hostId: string,
+    folder: string,
+    options?: { fromServerCopy?: boolean },
+  ) =>
+    request<{ ok: true; chatId: string; hostId: string; folder: string }>(
       `/api/chats/${chatId}/move`,
-      { method: 'POST', body: { daemonId, folder } },
+      {
+        method: 'POST',
+        body: options?.fromServerCopy
+          ? { hostId, folder, fromServerCopy: true }
+          : { hostId, folder },
+      },
     ),
   archiveChat: (chatId: string, archived: boolean) =>
     request<unknown>(`/api/chats/${chatId}/archive`, { method: 'POST', body: { archived } }),
@@ -301,8 +444,20 @@ export const api = {
   // from a preset delta on this surface (spec/04 § Snooze); `null` unsnoozes.
   // The server rejects a past timestamp with 400 and that rejection is left to
   // surface: NO FALLBACK to a quietly-corrected "now".
-  snoozeChat: (chatId: string, snoozedUntil: number | null) =>
-    request<unknown>(`/api/chats/${chatId}/snooze`, { method: 'POST', body: { snoozedUntil } }),
+  // `setId` names the user action (a project snooze sends one id for every
+  // chat), so the host can clear the Back state of the whole set at once.
+  snoozeChat: (chatId: string, snoozedUntil: number | null, setId?: string) =>
+    request<unknown>(`/api/chats/${chatId}/snooze`, {
+      method: 'POST',
+      body: setId === undefined ? { snoozedUntil } : { snoozedUntil, setId },
+    }),
+  // POST /api/chats/:id/snooze/back-clear — the chat was opened; the host
+  // clears the Back state of its whole set (spec/04 § Snooze → Back).
+  clearSnoozeBack: (chatId: string) =>
+    request<unknown>(`/api/chats/${chatId}/snooze/back-clear`, { method: 'POST' }),
+  // spec/04 § Name — rename: a null clears the name back to the derived label.
+  renameChat: (chatId: string, name: string | null) =>
+    request<unknown>(`/api/chats/${chatId}/rename`, { method: 'POST', body: { name } }),
   // POST /api/chats/:id/hide — `hidden: false` is Show (spec/04 § Hidden): the
   // chat moves into the active list without anything being sent to it.
   hideChat: (chatId: string, hidden: boolean) =>
@@ -503,14 +658,14 @@ export const api = {
       method: 'POST',
     }),
   // spec/10 § Host registration: the single-use code a host installer redeems.
-  daemonPairStart: () =>
+  hostPairStart: () =>
     request<{ nonce: string; expiresAt: number }>('/api/auth/daemon/pair/start', {
       method: 'POST',
     }),
   // What host builds the server has published (Add a host).
-  daemonManifest: () =>
-    request<{ version: string; artifacts: { target: string }[] }>('/api/daemon/daemon-latest.json'),
-  daemonInstallCommand: (os: 'macos' | 'linux') =>
+  hostManifest: () =>
+    request<{ version: string; artifacts: { target: string }[] }>('/api/daemon/host-latest.json'),
+  hostInstallCommand: (os: 'macos' | 'linux') =>
     request<{ os: string; version: string; targets: string[]; command: string }>(
       `/api/daemon/install-command?os=${encodeURIComponent(os)}`,
     ),
@@ -552,43 +707,108 @@ export const api = {
    * flat union would make two machines' identical paths indistinguishable.
    */
   folders: () =>
-    request<{ hosts: Array<{ daemonId: string; roots: string[]; recent: string[] }> }>(
+    request<{ hosts: Array<{ hostId: string; roots: string[]; recent: string[] }> }>(
       '/api/folders',
     ),
   // Folder BROWSER (spec/04 § Browsing): list a directory's child directories
   // (or, with no `dir`, the host's browsable roots). Confined to the host's
   // project roots server/host-side — a dir escaping them 404s (NO FALLBACK).
-  browseFolders: (daemonId: string, dir?: string) =>
+  browseFolders: (hostId: string, dir?: string) =>
     request<{
-      daemonId: string;
+      hostId: string;
       dir: string | null;
       parent: string | null;
       entries: Array<{ name: string; path: string }>;
     }>(
-      `/api/folders/browse?daemonId=${encodeURIComponent(daemonId)}${
+      `/api/folders/browse?hostId=${encodeURIComponent(hostId)}${
         dir ? `&dir=${encodeURIComponent(dir)}` : ''
       }`,
     ),
   // Host files (spec/03 § Host files, spec/15 § Host files and terminal): a
   // machine's filesystem by ABSOLUTE path, with no chat in between. No `path`
   // lists the host user's home, and the answer says where that is.
-  hostFilesList: (daemonId: string, path?: string) =>
+  hostFilesList: (hostId: string, path?: string) =>
     request<{ path: string; parent: string | null; entries: HostFileEntry[] }>(
-      `/api/hosts/${encodeURIComponent(daemonId)}/files${
+      `/api/hosts/${encodeURIComponent(hostId)}/files${
         path ? `?path=${encodeURIComponent(path)}` : ''
       }`,
     ),
-  hostFileRead: (daemonId: string, path: string) =>
+  hostFileRead: (hostId: string, path: string) =>
     request<{ path: string; content: string; size: number; version: string }>(
-      `/api/hosts/${encodeURIComponent(daemonId)}/files/content?path=${encodeURIComponent(path)}`,
+      `/api/hosts/${encodeURIComponent(hostId)}/files/content?path=${encodeURIComponent(path)}`,
     ),
   // Saves only over the version it was opened at: a file changed on disk since
   // is a 409 `conflict`, and nothing is written.
-  hostFileWrite: (daemonId: string, body: { path: string; content: string; baseVersion: string }) =>
+  hostFileWrite: (hostId: string, body: { path: string; content: string; baseVersion: string }) =>
     request<{ path: string; size: number; version: string }>(
-      `/api/hosts/${encodeURIComponent(daemonId)}/files/content`,
+      `/api/hosts/${encodeURIComponent(hostId)}/files/content`,
       { method: 'PUT', body },
     ),
+  // Chat folder files (spec/14 § File browser): the folder a chat is pinned to,
+  // by path relative to it ('' lists the folder itself). Writing goes over the
+  // socket (`file.write`), not here — the server has no HTTP write.
+  chatFilesList: (chatId: string, path = '') =>
+    request<{
+      path: string;
+      entries: Array<{ name: string; type: 'file' | 'dir'; dirty?: boolean }>;
+    }>(`/api/chats/${encodeURIComponent(chatId)}/files?path=${encodeURIComponent(path)}`),
+  chatFileRead: (chatId: string, path: string) =>
+    request<{ path: string; content: string; size: number }>(
+      `/api/chats/${encodeURIComponent(chatId)}/files?path=${encodeURIComponent(path)}&content=1`,
+    ),
+  // Document editor (spec/14 § Document editor): mode, suggestions, threads and
+  // versions of one `.md`. Every change is one `docAction`, and the host's
+  // answer is the updated view.
+  getDoc: (chatId: string, path: string) =>
+    request<DocView>(
+      `/api/chats/${encodeURIComponent(chatId)}/doc?path=${encodeURIComponent(path)}`,
+    ),
+  docAction: (chatId: string, path: string, action: DocAction) =>
+    request<DocView>(`/api/chats/${encodeURIComponent(chatId)}/doc/action`, {
+      method: 'POST',
+      body: { path, action },
+    }),
+  // Opening a `.docx` converts it to the `.md` the editor opens; `warnings`
+  // names whatever the conversion could not carry over.
+  convertDocx: (chatId: string, path: string) =>
+    request<{ mdPath: string; warnings: string[]; reused: boolean }>(
+      `/api/chats/${encodeURIComponent(chatId)}/doc/convert`,
+      { method: 'POST', body: { path } },
+    ),
+  // The export's bytes as base64 (the phone writes them to a file), with the
+  // name the host gave it and any images it could not embed.
+  exportDoc: async (
+    chatId: string,
+    path: string,
+    format: 'docx' | 'pdf' | 'md',
+  ): Promise<{ base64: string; filename: string; warnings: string[] }> => {
+    const headers = new Headers({ 'content-type': 'application/json' });
+    const cred = loadCredential();
+    if (cred) headers.set('authorization', `Bearer ${cred}`);
+    const res = await fetch(apiUrl(`/api/chats/${encodeURIComponent(chatId)}/doc/export`), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ path, format }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let parsed: unknown = text;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        // A non-JSON body is reported as the text it is.
+      }
+      throw new ApiError(res.status, errorMessageFrom(parsed, res.status), parsed);
+    }
+    const exported = res.headers.get('x-patch-doc-path');
+    if (exported === null) throw new Error('export: the host named no file');
+    const warnings = JSON.parse(res.headers.get('x-patch-doc-warnings') ?? '[]') as string[];
+    return {
+      base64: bytesToBase64(new Uint8Array(await res.arrayBuffer())),
+      filename: exported.split('/').pop() ?? exported,
+      warnings,
+    };
+  },
   // spec/01 § Settings — every write below is committed on the server and
   // answered with the committed shared state; hosts get it from the snapshot.
   sharedSettings: () => request<SharedState>('/api/settings/shared'),
@@ -601,10 +821,10 @@ export const api = {
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}`, {
       method: 'DELETE',
     }),
-  adoptProviderKey: (keyId: ProviderKeyId, daemonId: string) =>
+  adoptProviderKey: (keyId: ProviderKeyId, hostId: string) =>
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}/adopt`, {
       method: 'POST',
-      body: { daemonId },
+      body: { hostId },
     }),
   addAccount: (
     backendId: SharedBackendId,
@@ -637,23 +857,23 @@ export const api = {
       method: 'PUT',
       body: { strategy },
     }),
-  adoptAccount: (backendId: SharedBackendId, daemonId: string) =>
+  adoptAccount: (backendId: SharedBackendId, hostId: string) =>
     request<SharedState>(`/api/accounts/${backendId}/adopt`, {
       method: 'POST',
-      body: { daemonId },
+      body: { hostId },
     }),
-  adoptClaudeSettings: (daemonId: string, target: 'shared' | 'darwin' | 'linux') =>
+  adoptClaudeSettings: (hostId: string, target: 'shared' | 'darwin' | 'linux') =>
     request<SharedState>('/api/settings/claude/adopt', {
       method: 'POST',
-      body: { daemonId, target },
+      body: { hostId, target },
     }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every
   // connected surface (this one included) is also sent `host.removed
-  // {daemonId}` and should drop the host from its list; the answer carries the
+  // {hostId}` and should drop the host from its list; the answer carries the
   // remaining roster. 404 `unknown_host` for an id the account does not hold.
-  removeHost: (daemonId: string) =>
-    request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(daemonId)}`, {
+  removeHost: (hostId: string) =>
+    request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(hostId)}`, {
       method: 'DELETE',
     }),
   // Skills available in a folder's `.claude/skills` (job-editor Skill picker
@@ -668,20 +888,20 @@ export const api = {
   // must say which — omitting it let the request fall through to "whichever
   // host last attached" and come back missing a skill real on the caller's
   // actual host.
-  skills: (folder: string, daemonId: string) =>
+  skills: (folder: string, hostId: string) =>
     request<{
       skills: string[];
       paths?: Record<string, string>;
       descriptions?: Record<string, string>;
       frontmatter?: Record<string, Record<string, string>>;
-    }>(`/api/skills?folder=${encodeURIComponent(folder)}&daemonId=${encodeURIComponent(daemonId)}`),
+    }>(`/api/skills?folder=${encodeURIComponent(folder)}&hostId=${encodeURIComponent(hostId)}`),
   // The models a chat can run on (job-editor Model picker, spec/15 § Job
   // editor). PER MACHINE (spec/02 § Model catalogue) — the endpoint rejects a
   // call naming no host — and live, never a constant: a hand-kept list here
   // would go stale the next time Anthropic ships a model.
-  models: (daemonId: string) =>
+  models: (hostId: string) =>
     request<{ models: Array<{ id: string; label: string }>; fetchedAt?: string }>(
-      `/api/models?daemonId=${encodeURIComponent(daemonId)}`,
+      `/api/models?hostId=${encodeURIComponent(hostId)}`,
     ),
   // spec/15 § Batch view — one account-wide batch, held server-side (same
   // routes as web).

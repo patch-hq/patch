@@ -18,6 +18,7 @@ import {
   formatReadAt,
   formatReset,
   formatResetDetail,
+  formatResetLocal,
   formatUntil,
   formatUtilization,
   formatTokens,
@@ -59,11 +60,23 @@ describe('formatResetDetail', () => {
   });
 });
 
+describe('formatResetLocal', () => {
+  it('uses one local clock with its zone named', () => {
+    const detail = formatResetLocal(AT, AT - 3 * 86_400_000);
+    expect(detail).toMatch(/^[A-Z][a-z]{2} \d{2}:\d{2} (?:[A-Z]{2,4}|GMT[+-]\d+)$/);
+    expect(detail).not.toContain('UTC ·');
+  });
+});
+
 describe('formatUntil', () => {
   it('counts minutes, then hours, then days', () => {
     expect(formatUntil(AT + 28 * 60_000, AT)).toBe('in 28 min');
     expect(formatUntil(AT + 3 * 3_600_000, AT)).toBe('in 3 h');
     expect(formatUntil(AT + 5 * 86_400_000, AT)).toBe('in 5 d');
+  });
+
+  it('never says "in 0 min" for an instant still ahead', () => {
+    expect(formatUntil(AT + 20_000, AT)).toBe('in 1 min');
   });
 
   it('says now for an instant already past', () => {
@@ -145,16 +158,15 @@ describe('blockingScope', () => {
 // Tom's Default account is a personal subscription. "Extra usage is switched
 // off for this organisation" was both untrue of it and read as an accusation
 // about an account that was perfectly healthy, so the wording is pinned: one
-// sentence, no organisation, and it says outright that nothing was spent.
+// sentence and no organisation.
 describe('the extra-usage-off wording', () => {
   it('never blames an organisation', () => {
     expect(EXTRA_USAGE_OFF_TEXT).not.toMatch(/organisation/i);
     expect(EXTRA_USAGE_OFF_SENTENCE).not.toMatch(/organisation/i);
   });
 
-  it('says it is off and that nothing was overspent', () => {
-    expect(EXTRA_USAGE_OFF_TEXT).toMatch(/not enabled/i);
-    expect(EXTRA_USAGE_OFF_TEXT).toMatch(/nothing has been overspent/i);
+  it('says plainly that it is disabled', () => {
+    expect(EXTRA_USAGE_OFF_TEXT).toBe('Extra usage: disabled');
   });
 
   it('is ONE wording — the sentence form is the same words', () => {
@@ -214,6 +226,25 @@ describe('summariseUsage', () => {
     ).toBe('warn');
   });
 
+  it("honours Anthropic's own warning even when the figure is missing or low", () => {
+    expect(summariseUsage({ session: { status: 'allowed_warning' } }, AT)?.level).toBe('warn');
+    expect(
+      summariseUsage({ session: { status: 'allowed_warning', utilization: 0.5 } }, AT)?.level,
+    ).toBe('warn');
+  });
+
+  it('names the warned pool rather than a fuller pool that is not warning', () => {
+    const out = summariseUsage(
+      {
+        session: { status: 'allowed', utilization: 0.7 },
+        week: { status: 'allowed_warning', utilization: 0.6 },
+      },
+      AT,
+    );
+    expect(out?.text).toBe('Weekly 60%');
+    expect(out?.level).toBe('warn');
+  });
+
   it('puts every window in the tooltip, so the one line is never the whole story', () => {
     const out = summariseUsage(
       {
@@ -226,6 +257,18 @@ describe('summariseUsage', () => {
     expect(out?.title).toContain('5-hour');
     expect(out?.title).toContain('Weekly');
     expect(out?.title).toContain('Extra usage');
+    expect(out?.title).not.toMatch(/\b(allowed|allowed_warning|rejected)\b/);
+    expect(out?.title).toContain('blocked');
+  });
+
+  it('does not expose the provider status name for a healthy window', () => {
+    const out = summariseUsage(
+      { week: { status: 'allowed', utilization: 0.28, resetsAt: AT } },
+      AT - 60_000,
+    );
+    expect(out?.title).toContain('Weekly 28%');
+    expect(out?.title).not.toContain('allowed');
+    expect(out?.title).not.toContain('UTC ·');
   });
 });
 
@@ -247,10 +290,13 @@ describe('hostOutage — is there any credit left on this machine at all', () =>
   const fine = { session: { status: 'allowed' as const, utilization: 0.3 } };
 
   it('reports every account when they are ALL spent, and names the first one back', () => {
-    const out = hostOutage([
-      { id: 'a', label: 'Default', connected: true, usage: spent(AT + 3 * 3_600_000) },
-      { id: 'b', label: 'work', connected: true, usage: spent(AT + 49 * 60_000) },
-    ]);
+    const out = hostOutage(
+      [
+        { id: 'a', label: 'Default', connected: true, usage: spent(AT + 3 * 3_600_000) },
+        { id: 'b', label: 'work', connected: true, usage: spent(AT + 49 * 60_000) },
+      ],
+      AT,
+    );
     expect(out?.accounts.map((a) => a.label)).toEqual(['Default', 'work']);
     // The soonest is what a person actually wants: when can I start again.
     expect(out?.soonest?.label).toBe('work');
@@ -282,10 +328,13 @@ describe('hostOutage — is there any credit left on this machine at all', () =>
   });
 
   it('ignores a disconnected account when judging the connected ones', () => {
-    const out = hostOutage([
-      { id: 'a', label: 'Default', connected: true, usage: spent(AT) },
-      { id: 'gone', label: 'old', connected: false },
-    ]);
+    const out = hostOutage(
+      [
+        { id: 'a', label: 'Default', connected: true, usage: spent(AT) },
+        { id: 'gone', label: 'old', connected: false },
+      ],
+      AT - 1,
+    );
     expect(out?.accounts.map((a) => a.label)).toEqual(['Default']);
   });
 
@@ -296,10 +345,13 @@ describe('hostOutage — is there any credit left on this machine at all', () =>
   });
 
   it('picks the soonest from the accounts that DID state one', () => {
-    const out = hostOutage([
-      { id: 'a', label: 'Default', connected: true, usage: spent() },
-      { id: 'b', label: 'work', connected: true, usage: spent(AT + 60_000) },
-    ]);
+    const out = hostOutage(
+      [
+        { id: 'a', label: 'Default', connected: true, usage: spent() },
+        { id: 'b', label: 'work', connected: true, usage: spent(AT + 60_000) },
+      ],
+      AT,
+    );
     expect(out?.soonest?.label).toBe('work');
   });
 });
@@ -322,6 +374,10 @@ describe('formatTokens', () => {
     expect(formatTokens(46_400)).toBe('46k');
     expect(formatTokens(1_000_000)).toBe('1M');
     expect(formatTokens(1_250_000)).toBe('1.3M');
+  });
+
+  it('rolls a count that rounds up to 1000k over into M', () => {
+    expect(formatTokens(999_600)).toBe('1M');
   });
 });
 

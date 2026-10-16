@@ -72,7 +72,7 @@ describe('Composer — a voice note already in flight', () => {
     const view = render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={props.onSend ?? onSend}
         {...(props.recorderFactory ? { recorderFactory: props.recorderFactory } : {})}
       />,

@@ -33,6 +33,18 @@ function res(status: number, headers: Record<string, string>, body = '{}'): Resp
 }
 
 describe('readUsageHeaders', () => {
+  it('does not read a blank utilization or reset header as 0', () => {
+    const r = readUsageHeaders(
+      new Headers({
+        'anthropic-ratelimit-unified-5h-status': 'allowed',
+        'anthropic-ratelimit-unified-5h-utilization': '',
+        'anthropic-ratelimit-unified-5h-reset': ' ',
+      }),
+      1_000,
+    );
+    expect(r.windows.session).toEqual({ status: 'allowed' });
+  });
+
   it('reads all three windows, converting resets from seconds to ms', () => {
     const r = readUsageHeaders(new Headers(LIVE_429_HEADERS), 1_000);
     expect(r.organizationId).toBe('add21334-bb51-4fcd-8220-9badd3a4aeda');
@@ -153,6 +165,32 @@ describe('readUsageHeaders', () => {
       0,
     );
     expect(r.windows.session?.resetsAt).toBeUndefined();
+  });
+});
+
+describe('readUsageHeaders with blank header values', () => {
+  it("drops a blank utilization rather than reading it as 0% used — Number('') is 0", () => {
+    const r = readUsageHeaders(
+      new Headers({
+        'anthropic-ratelimit-unified-5h-status': 'allowed_warning',
+        'anthropic-ratelimit-unified-5h-utilization': '  ',
+      }),
+      0,
+    );
+    expect(r.windows.session).toEqual({ status: 'allowed_warning' });
+  });
+
+  it('treats blank organisation and representative-claim headers as absent', () => {
+    const r = readUsageHeaders(
+      new Headers({
+        [ORGANIZATION_HEADER]: '',
+        'anthropic-ratelimit-unified-representative-claim': '',
+        'anthropic-ratelimit-unified-5h-status': 'allowed',
+      }),
+      0,
+    );
+    expect(r.organizationId).toBeUndefined();
+    expect(r.representativeClaim).toBeUndefined();
   });
 });
 

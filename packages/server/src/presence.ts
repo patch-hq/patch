@@ -82,13 +82,19 @@ export class PresenceTracker {
     nowMs: number = Date.now(),
     build?: ClientBuildInfo,
   ): void {
+    const prev = this.records.get(key(accountId, surfaceId));
+    // A second hello from a surface that is still connected (another window, a
+    // reconnect overlapping the old socket) must not forget what it reported;
+    // one arriving after it went offline is a new session and starts clean.
+    const carried = prev !== undefined && prev.status !== 'offline' ? prev : undefined;
     this.records.set(key(accountId, surfaceId), {
+      ...carried,
       accountId,
       surfaceId,
       surfaceKind,
       status: 'online',
       lastHeartbeat: nowMs,
-      ...(build ? { build } : {}),
+      ...(build ? { build } : carried?.build ? { build: carried.build } : {}),
     });
   }
 

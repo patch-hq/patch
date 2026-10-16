@@ -14,7 +14,7 @@ import { generateUserKeypair } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const home = (title: string) =>
   `<!doctype html><html><head><title>${title}</title></head><body style="margin:0;font:20px system-ui">
@@ -27,7 +27,7 @@ describe('pad editor in a browser', () => {
   let browser: Browser;
   let pw: { devices: typeof devicesT };
   let built: Awaited<ReturnType<typeof buildAll>>;
-  let link: InProcessDaemonLink;
+  let link: InProcessHostLink;
   let base: string;
 
   beforeAll(async () => {
@@ -35,9 +35,9 @@ describe('pad editor in a browser', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(7));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    link = new InProcessDaemonLink();
-    built = await buildAll({ logger: false, registry, daemonLink: link });
-    link.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+    link = new InProcessHostLink();
+    built = await buildAll({ logger: false, registry, hostLink: link });
+    link.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     base = `http://127.0.0.1:${(built.app.server.address() as AddressInfo).port}`;
     pw = await import('playwright');
@@ -225,4 +225,43 @@ describe('pad editor in a browser', () => {
     await expect.poll(() => page.locator('#editTools').isVisible()).toBe(true);
     await ctx.close();
   }, 30_000);
+
+  it('desktop and phone: shape tools draw a rectangle, ellipse, line and arrow as shape strokes', async () => {
+    const frameUrl = await newPad();
+    for (const opts of [{ viewport: { width: 1280, height: 800 } }, { ...pw.devices['Pixel 7'] }]) {
+      const ctx = await browser.newContext(opts);
+      const page = await ctx.newPage();
+      await page.goto(frameUrl);
+      await page.frameLocator('#frame').locator('#t').waitFor();
+      // Drag clear of the desktop screen list; wait for the screen to be matched.
+      await expect
+        .poll(() => page.locator('#screens button.on, #screenName').count())
+        .toBeGreaterThan(0);
+      const before = (await pending(frameUrl)).length;
+      const shapes = ['rectangle', 'ellipse', 'line', 'arrow'];
+      for (let i = 0; i < shapes.length; i++) {
+        await page.locator(`[data-tool=${shapes[i]}]`).click();
+        const y = 150 + i * 50;
+        await page.mouse.move(250, y);
+        await page.mouse.down();
+        await page.mouse.move(340, y + 30, { steps: 6 });
+        await page.mouse.up();
+      }
+      await expect
+        .poll(async () => (await pending(frameUrl)).length - before, { timeout: 8000 })
+        .toBe(4);
+      const res = await fetch(`${frameUrl}api`);
+      const all = (
+        (await res.json()) as { changes: { kind: string; shape?: string; points: number[][] }[] }
+      ).changes;
+      const drawn = all.slice(before);
+      expect(drawn.map((c) => c.kind)).toEqual(['draw', 'draw', 'draw', 'draw']);
+      expect(drawn.map((c) => c.shape)).toEqual(['rectangle', 'ellipse', 'line', 'arrow']);
+      expect(drawn[0]!.points).toHaveLength(5);
+      expect(drawn[1]!.points.length).toBeGreaterThan(20);
+      expect(drawn[2]!.points).toHaveLength(2);
+      expect(drawn[3]!.points.length).toBeGreaterThan(2);
+      await ctx.close();
+    }
+  }, 60_000);
 });

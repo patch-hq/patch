@@ -337,7 +337,10 @@ export interface TextInputHandle {
   blur(): void;
   clear(): void;
   isFocused(): boolean;
+  setNativeProps(props: Record<string, unknown>): void;
 }
+/** Every `setNativeProps` call any TextInput received, oldest first. */
+export const textInputNativeProps: Array<Record<string, unknown>> = [];
 export const TextInput = React.forwardRef<TextInputHandle, Record<string, unknown>>(
   (props, ref) => {
     const [focused, setFocused] = React.useState(false);
@@ -346,6 +349,9 @@ export const TextInput = React.forwardRef<TextInputHandle, Record<string, unknow
       blur: () => setFocused(false),
       clear: () => (props as { onChangeText?: (t: string) => void }).onChangeText?.(''),
       isFocused: () => focused,
+      setNativeProps: (p: Record<string, unknown>) => {
+        textInputNativeProps.push(p);
+      },
     }));
     const { onFocus, onBlur, ...rest } = props as {
       onFocus?: () => void;

@@ -15,7 +15,7 @@ async function stubApi(page: import('@playwright/test').Page, posted: unknown[])
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: ['/work'], recent: [] }] }),
+      body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: ['/work'], recent: [] }] }),
     }),
   );
   await page.route('**/api/jobs**', (route) => {

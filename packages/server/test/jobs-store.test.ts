@@ -54,7 +54,7 @@ function sampleBody(name = 'test'): JobCreateBody {
   return {
     name,
     trigger: { type: 'cron', expression: '*/5 * * * *' },
-    action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'hi' },
+    action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'hi' },
   };
 }
 
@@ -85,6 +85,24 @@ describe('JobStore', () => {
       expect(store.delete(job.id)).toBe(true);
       expect(store.list()).toEqual([]);
       expect(store.delete(job.id)).toBe(false);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('persists a gate on create and patch, and null removes it', async () => {
+    const store = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
+    try {
+      const gate = { hostId: 'd1', folder: '/work', command: 'test -f ready' };
+      const job = store.create({ ...sampleBody('gated'), gate });
+      expect(job.gate).toEqual(gate);
+      expect(store.get(job.id)?.gate).toEqual(gate);
+
+      const other = { hostId: 'd2', folder: '/w2', command: 'true', timeoutMs: 5000 };
+      expect(store.patch(job.id, { gate: other }).gate).toEqual(other);
+      // An unrelated patch leaves the gate alone.
+      expect(store.patch(job.id, { name: 'renamed' }).gate).toEqual(other);
+      expect(store.patch(job.id, { gate: null }).gate).toBeUndefined();
     } finally {
       await store.close();
     }
@@ -150,7 +168,7 @@ describe('JobStore', () => {
           enabled: true,
           trigger: { type: 'cron', expression: '0 * * * *' },
           filter: null,
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
           createdAt: 1,
           updatedAt: 1,
         };
@@ -224,7 +242,7 @@ describe('JobStore', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '0 * * * *' },
         filter: null,
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         createdAt: 1,
         updatedAt: 1,
       };
@@ -251,39 +269,49 @@ describe('JobStore', () => {
     }
   });
 
-  it('a self-write whose coalescing window has already expired is treated as an external change', async () => {
+  // Drives the store's own event handler with a fake clock instead of waiting
+  // for a real file watcher: this test used to depend on inotify delivery and
+  // timed out (30s) whenever the machine was loaded, though it passed alone
+  // every time. The logic under test is the deadline check, not chokidar.
+  it('a self-write whose coalescing window has already expired is treated as an external change', () => {
     let clock = 1_000_000;
-    const store = new JobStore({
-      dataDir: dir,
-      logger: silentLogger,
-      watch: true,
-      nowMs: () => clock,
+    const store = new JobStore({ dataDir: dir, logger: silentLogger, nowMs: () => clock });
+    const job = store.create({
+      name: 'window-expiry',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
-    await store.watcherReady;
-    try {
-      const job = store.create({
-        name: 'window-expiry',
-        trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
-      });
-      // Push the clock well past the 500ms self-write coalescing window
-      // before the external rewrite lands, so handleFsEvent's deadline
-      // check falls through (treats it as an external edit) instead of
-      // suppressing it as our own write.
-      clock += 10_000;
-      const updated: Job = { ...job, name: 'renamed-externally', updatedAt: clock };
-      const events: Array<{ type: string }> = [];
-      store.onChange((e) => events.push(e));
-      writeFileSync(join(dir, 'jobs', `${job.id}.json`), JSON.stringify(updated, null, 2), 'utf8');
-      const deadline = Date.now() + WATCH_DEADLINE_MS;
-      while (Date.now() < deadline && store.get(job.id)?.name !== 'renamed-externally') {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      expect(store.get(job.id)?.name).toBe('renamed-externally');
-      expect(events.some((e) => e.type === 'updated')).toBe(true);
-    } finally {
-      await store.close();
-    }
+    // Past the 500ms self-write coalescing window, the rewrite is an outside edit.
+    clock += 10_000;
+    const path = join(dir, 'jobs', `${job.id}.json`);
+    const updated: Job = { ...job, name: 'renamed-externally', updatedAt: clock };
+    writeFileSync(path, JSON.stringify(updated, null, 2), 'utf8');
+    const events: Array<{ type: string }> = [];
+    store.onChange((e) => events.push(e));
+    (store as unknown as { handleFsEvent(p: string, k: 'change'): void }).handleFsEvent(
+      path,
+      'change',
+    );
+    expect(store.get(job.id)?.name).toBe('renamed-externally');
+    expect(events.some((e) => e.type === 'updated')).toBe(true);
+  });
+
+  it('the same event inside the coalescing window is our own write and is ignored', () => {
+    let clock = 1_000_000;
+    const store = new JobStore({ dataDir: dir, logger: silentLogger, nowMs: () => clock });
+    const job = store.create({
+      name: 'inside-window',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
+    });
+    clock += 100;
+    const events: Array<{ type: string }> = [];
+    store.onChange((e) => events.push(e));
+    (store as unknown as { handleFsEvent(p: string, k: 'change'): void }).handleFsEvent(
+      join(dir, 'jobs', `${job.id}.json`),
+      'change',
+    );
+    expect(events).toEqual([]);
   });
 
   it('a chokidar fs event with malformed JSON content is logged and ignored', async () => {
@@ -354,13 +382,13 @@ describe('JobStore', () => {
       const patched = store.patch(job.id, {
         trigger: { type: 'cron', expression: '0 8 * * *' },
         filter: 'payload.x = 1',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/elsewhere', prompt: 'new prompt' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/elsewhere', prompt: 'new prompt' },
       });
       expect(patched.trigger).toEqual({ type: 'cron', expression: '0 8 * * *' });
       expect(patched.filter).toBe('payload.x = 1');
       expect(patched.action).toEqual({
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/elsewhere',
         prompt: 'new prompt',
       });
@@ -458,7 +486,7 @@ describe('JobStore', () => {
         store.create({
           name: 'emit-throws',
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         }),
       ).not.toThrow();
       expect(order).toEqual(['first-throws', 'second-created']);

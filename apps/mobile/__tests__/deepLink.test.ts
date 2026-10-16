@@ -40,6 +40,24 @@ describe('resolveDeepLink (launcher long-press shortcuts + patch:// links)', () 
     });
   });
 
+  it('routes a settings page link to that page', () => {
+    expect(resolveDeepLink('patch://settings/updates')).toEqual({
+      kind: 'navigate',
+      route: '/settings/updates',
+    });
+  });
+
+  it('routes patch://home to the tab navigator root', () => {
+    expect(resolveDeepLink('patch://home')).toEqual({
+      kind: 'navigate',
+      route: '/(tabs)/chats',
+    });
+  });
+
+  it('returns null for "settings" with no page', () => {
+    expect(resolveDeepLink('patch://settings')).toBeNull();
+  });
+
   it('returns null for "chats" with no id at all', () => {
     expect(resolveDeepLink('patch://chats')).toBeNull();
   });

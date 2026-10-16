@@ -1,7 +1,7 @@
 // ContextRing — how full the open chat's context window is, as a ring just left
 // of Send (spec/14 § Composer — context ring). Pressing it opens the usage
-// popover. Drawn only once the host has measured the chat: an empty ring
-// would read as an empty window, which nobody has measured.
+// popover. It remains present before the host has measured the chat, using the
+// dashed unknown treatment, so usage details always have one stable home.
 
 import { useRef, useState, type JSX } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
@@ -11,22 +11,26 @@ import { UsagePopover } from './UsagePopover.js';
 const R = 8;
 const C = 2 * Math.PI * R;
 
-export function ContextRing({ chatId }: { chatId: string }): JSX.Element | null {
+export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
   const context = useChatStore((s) => s.chats[chatId]?.context ?? null);
   const ctx = summariseContext(context);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
-  if (!ctx) return null;
+  const level = ctx?.level ?? 'unknown';
+  const label = ctx ? `Context ${ctx.percent}` : 'Usage details';
+  const title = ctx
+    ? `Context ${ctx.percent} · ${ctx.tokens}`
+    : 'Usage details · context not measured yet';
   return (
     <>
       <button
         ref={ref}
         type="button"
-        className={`context-ring ${ctx.level}`}
+        className={`context-ring ${level}`}
         data-testid="context-ring"
-        aria-label={`Context ${ctx.percent}`}
+        aria-label={label}
         aria-expanded={open}
-        title={`Context ${ctx.percent} · ${ctx.tokens}`}
+        title={title}
         onClick={() => setOpen((v) => !v)}
       >
         <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
@@ -37,7 +41,7 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element | null 
             cy="11"
             r={R}
             strokeDasharray={C}
-            strokeDashoffset={C * (1 - ctx.fraction)}
+            strokeDashoffset={C * (1 - (ctx?.fraction ?? 0))}
             transform="rotate(-90 11 11)"
           />
         </svg>

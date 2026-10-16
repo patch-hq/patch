@@ -38,6 +38,13 @@ const EDGE_RANK: Record<SweepEdge, number> = {
 /** Debounce floor between two event-woken early sweeps (spec/06 § Sweep — "at most once per 2 min"). */
 export const EVENT_WAKE_DEBOUNCE_MS = 2 * 60_000;
 
+/**
+ * How long a requested run may go without its result before the sweep stops
+ * waiting for it. The host's own model call gives up after 30s; this is far
+ * past that, for a result that will never come (the host restarted mid-run).
+ */
+export const IN_FLIGHT_STALE_MS = 10 * 60_000;
+
 export interface SweepRunRecord {
   at: number;
   runId: string;
@@ -57,7 +64,7 @@ export interface ManagerSweeperDeps {
   chats: ChatRegistry;
   settings: () => AccountSettings;
   /** The home host to run the sweep on, or undefined if none is registered yet. */
-  homeDaemonId: () => string | undefined;
+  homeHostId: () => string | undefined;
   /** Ask the home host to run a sweep (fire-and-forget — the result arrives later via `onResult`). */
   runSweep: (req: {
     runId: string;
@@ -94,6 +101,7 @@ export class ManagerSweeper {
   private eventWakeArmed = false;
   /** Set while a run's result hasn't come back yet — only one sweep in flight at a time. */
   private inFlightRunId: string | undefined;
+  private inFlightSince = 0;
 
   constructor(deps: ManagerSweeperDeps) {
     this.deps = deps;
@@ -107,20 +115,23 @@ export class ManagerSweeper {
     this.lastSweepAt = this.now();
   }
 
-  private raise(chatId: string, edge: SweepEdge): void {
-    if (chatId === SPECIAL_THREAD_IDS.manager) return; // the sweep is never a candidate on itself
+  /** True when the chat is pending afterwards; false when the edge was dropped. */
+  private raise(chatId: string, edge: SweepEdge): boolean {
+    if (chatId === SPECIAL_THREAD_IDS.manager) return false; // the sweep is never a candidate on itself
     // Disabled (spec/06 § Disabled) is Manager's real "off" switch — a
     // disabled Manager gets no sweep traffic either, same as it gets no
     // watch turns, rather than silently building a backlog that floods in
     // the moment it's re-enabled.
-    if (this.deps.chats.get(SPECIAL_THREAD_IDS.manager)?.disabled) return;
+    if (this.deps.chats.get(SPECIAL_THREAD_IDS.manager)?.disabled) return false;
     // A chat that already holds a sweep message has been told; another one
     // would only stack behind it. Real needs (a question or permission) still
     // come through, because they are the user's, not the sweep's.
-    if (this.awaitingSweepMessage.has(chatId) && EDGE_RANK[edge] > EDGE_RANK['task-ended']) return;
+    if (this.awaitingSweepMessage.has(chatId) && EDGE_RANK[edge] > EDGE_RANK['task-ended'])
+      return false;
     const existing = this.pending.get(chatId);
-    if (existing !== undefined && EDGE_RANK[existing] <= EDGE_RANK[edge]) return;
+    if (existing !== undefined && EDGE_RANK[existing] <= EDGE_RANK[edge]) return true;
     this.pending.set(chatId, edge);
+    return true;
   }
 
   /**
@@ -199,8 +210,7 @@ export class ManagerSweeper {
       const prev = this.lastBackgroundTasks.get(chatId) ?? null;
       this.lastBackgroundTasks.set(chatId, event.backgroundTasks);
       if (prev !== null && prev > 0 && event.backgroundTasks === 0) {
-        this.raise(chatId, 'task-ended');
-        this.wakeEarly();
+        if (this.raise(chatId, 'task-ended')) this.wakeEarly();
       }
     }
   }
@@ -208,8 +218,8 @@ export class ManagerSweeper {
   /** A job run failure wakes a sweep early. No-op without a chat to flag — see `jobs/logs.ts`'s `isJobRunFailure`. */
   jobRunFailed(chatId: string | null): void {
     if (chatId === null) return;
-    this.raise(chatId, 'job-failed');
-    this.wakeEarly();
+    // A dropped edge leaves nothing for a sweep to look at, so it must not wake one.
+    if (this.raise(chatId, 'job-failed')) this.wakeEarly();
   }
 
   private toCandidate(chatId: string, edge: SweepEdge): ManagerSweepCandidate | undefined {
@@ -217,7 +227,7 @@ export class ManagerSweeper {
     if (!chat) return undefined; // vanished since it was raised — nothing to ask about
     const since = this.runningSince.get(chatId) ?? chat.lastUpdated;
     const idleMinutes = Math.max(0, (this.now() - since) / 60_000);
-    return { chatId, daemonId: chat.daemonId, folder: chat.folder, edge, idleMinutes };
+    return { chatId, hostId: chat.hostId, folder: chat.folder, edge, idleMinutes };
   }
 
   /**
@@ -238,8 +248,7 @@ export class ManagerSweeper {
       const chat = this.deps.chats.get(chatId);
       if (chat?.activity !== 'running') continue;
       this.lastStalledAt.set(chatId, now);
-      this.raise(chatId, 'stalled');
-      this.wakeEarly();
+      if (this.raise(chatId, 'stalled')) this.wakeEarly();
     }
   }
 
@@ -247,9 +256,16 @@ export class ManagerSweeper {
     if (this.pending.size === 0) return false; // NOTHING CHANGED = no model call
     const settings = this.deps.settings();
     if (!settings.sweepEnabled) return false;
-    if (this.inFlightRunId !== undefined) return false;
-    const homeDaemonId = this.deps.homeDaemonId();
-    if (!homeDaemonId) return false;
+    if (this.inFlightRunId !== undefined) {
+      if (this.now() - this.inFlightSince < IN_FLIGHT_STALE_MS) return false;
+      this.deps.logger.warn(
+        { runId: this.inFlightRunId },
+        'manager-sweep: run never reported back, no longer waiting for it',
+      );
+      this.inFlightRunId = undefined;
+    }
+    const homeHostId = this.deps.homeHostId();
+    if (!homeHostId) return false;
     const candidates = [...this.pending.entries()]
       .map(([chatId, edge]) => this.toCandidate(chatId, edge))
       .filter((c): c is ManagerSweepCandidate => c !== undefined);
@@ -260,6 +276,7 @@ export class ManagerSweeper {
     this.lastRunAt = this.lastSweepAt;
     const runId = this.idGenerator();
     this.inFlightRunId = runId;
+    this.inFlightSince = this.lastRunAt;
     this.deps.runSweep({
       runId,
       candidates,

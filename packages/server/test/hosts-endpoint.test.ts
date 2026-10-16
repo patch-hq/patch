@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential, mintDaemonKey } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('GET /api/hosts', () => {
   let dir: string;
@@ -35,31 +35,31 @@ describe('GET /api/hosts', () => {
       label: 'browser',
       issuedAt: 1,
     });
-    registry.setDaemonKey({ daemonId: 'host-a', publicKey: user.publicKey, issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'host-b', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'host-a', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'host-b', publicKey: user.publicKey, issuedAt: 1 });
     const surfaceJwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-hosts',
       surfaceKind: 'web',
       label: 'browser',
     });
-    const daemonJwt = await mintDaemonKey({
+    const hostJwt = await mintDaemonKey({
       userPrivateKey: user.privateKey,
-      daemonId: 'host-a',
+      hostId: 'host-a',
       label: 'host-a',
     });
-    return { registry, surfaceJwt, daemonJwt };
+    return { registry, surfaceJwt, hostJwt };
   }
 
   async function boot() {
-    const { registry, surfaceJwt, daemonJwt } = await bootstrap();
+    const { registry, surfaceJwt, hostJwt } = await bootstrap();
     const built = await buildAll({
       dataDir: dir,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
     });
-    return { app: built.app, surfaceJwt, daemonJwt };
+    return { app: built.app, surfaceJwt, hostJwt };
   }
 
   it('lists every registered machine for a surface credential', async () => {
@@ -71,7 +71,7 @@ describe('GET /api/hosts', () => {
         headers: { authorization: `Bearer ${surfaceJwt}` },
       });
       expect(res.statusCode).toBe(200);
-      const ids = res.json().hosts.map((h: { daemonId: string }) => h.daemonId);
+      const ids = res.json().hosts.map((h: { hostId: string }) => h.hostId);
       expect(ids).toContain('host-a');
       expect(ids).toContain('host-b');
     } finally {
@@ -80,12 +80,12 @@ describe('GET /api/hosts', () => {
   });
 
   it('accepts a daemonKey too — a host has no surface credential to present', async () => {
-    const { app, daemonJwt } = await boot();
+    const { app, hostJwt } = await boot();
     try {
       const res = await app.inject({
         method: 'GET',
         url: '/api/hosts',
-        headers: { authorization: `Bearer ${daemonJwt}` },
+        headers: { authorization: `Bearer ${hostJwt}` },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().hosts.length).toBeGreaterThanOrEqual(2);
@@ -117,7 +117,7 @@ describe('GET /api/hosts', () => {
         url: '/api/hosts',
         headers: { authorization: `Bearer ${surfaceJwt}` },
       });
-      const hostA = res.json().hosts.find((h: { daemonId: string }) => h.daemonId === 'host-a');
+      const hostA = res.json().hosts.find((h: { hostId: string }) => h.hostId === 'host-a');
       // Never spoken: no self-description, so no name and not online — rather
       // than a fabricated label or the other machine's description.
       expect(hostA.hostName).toBeNull();
@@ -162,7 +162,7 @@ describe('GET /api/daemon/install-command', () => {
     const built = await buildAll({
       dataDir: dir,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
     });
     return { app: built.app, jwt };
@@ -228,7 +228,7 @@ describe('server-owned host controls', () => {
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     registry.upsertSurface({ surfaceId: 'srf-c', surfaceKind: 'web', label: 'b', issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'host-a', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'host-a', publicKey: user.publicKey, issuedAt: 1 });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-c',
@@ -238,7 +238,7 @@ describe('server-owned host controls', () => {
     const built = await buildAll({
       dataDir: dir,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
     });
     return { app: built.app, jwt, registry };
@@ -251,7 +251,7 @@ describe('server-owned host controls', () => {
         method: 'POST',
         url: '/api/hosts/rename',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'host-a', hostName: 'laptop' },
+        payload: { hostId: 'host-a', hostName: 'laptop' },
       });
       expect(res.statusCode).toBe(200);
       expect(registry.hostName('host-a')).toBe('laptop');
@@ -267,7 +267,7 @@ describe('server-owned host controls', () => {
         method: 'POST',
         url: '/api/hosts/rename',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'host-a', hostName: '   ' },
+        payload: { hostId: 'host-a', hostName: '   ' },
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe('invalid_name');
@@ -283,10 +283,10 @@ describe('server-owned host controls', () => {
         method: 'POST',
         url: '/api/hosts/set-home',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'host-zzz' },
+        payload: { hostId: 'host-zzz' },
       });
       expect(res.statusCode).toBe(404);
-      expect(res.json().daemonId).toBe('host-zzz');
+      expect(res.json().hostId).toBe('host-zzz');
     } finally {
       await app.close();
     }
@@ -299,10 +299,10 @@ describe('server-owned host controls', () => {
         method: 'POST',
         url: '/api/hosts/set-home',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'host-a' },
+        payload: { hostId: 'host-a' },
       });
       expect(res.statusCode).toBe(200);
-      expect(registry.homeDaemonId()).toBe('host-a');
+      expect(registry.homeHostId()).toBe('host-a');
     } finally {
       await app.close();
     }
@@ -314,7 +314,7 @@ describe('server-owned host controls', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/hosts/rename',
-        payload: { daemonId: 'host-a', hostName: 'x' },
+        payload: { hostId: 'host-a', hostName: 'x' },
       });
       expect(res.statusCode).toBe(401);
     } finally {

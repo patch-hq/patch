@@ -45,8 +45,8 @@ export function registerLogsCommands(program: Command): void {
           'chat.state',
           'chat.stopped',
           'chat.error',
-          'daemon.online',
-          'daemon.offline',
+          'host.online',
+          'host.offline',
           'notify',
         ] as const;
         await new Promise<void>((resolve, reject) => {

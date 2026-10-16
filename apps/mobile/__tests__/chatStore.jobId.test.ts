@@ -12,7 +12,7 @@ function entry(chatId: string, jobId?: string | null): ChatListEntry {
   return {
     chatId,
     name: null,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/f',
     activity: 'idle',
     permissionMode: 'default',
@@ -54,11 +54,11 @@ describe('chatStore jobId', () => {
     applyEvent({
       type: 'chat.spawned',
       chatId: 'c_job',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/f',
       jobId: 'j2',
     });
-    applyEvent({ type: 'chat.spawned', chatId: 'c_mine', daemonId: 'd1', folder: '/f' });
+    applyEvent({ type: 'chat.spawned', chatId: 'c_mine', hostId: 'd1', folder: '/f' });
     const chats = useChatStore.getState().chats;
     expect(chats['c_job']?.jobId).toBe('j2');
     expect(chats['c_mine']?.jobId).toBeNull();
@@ -68,7 +68,7 @@ describe('chatStore jobId', () => {
     hydrate(entry('jobchat-j1', 'j1'));
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', chatId: 'jobchat-j1', daemonId: 'd1', folder: '/f' });
+      .applyEvent({ type: 'chat.spawned', chatId: 'jobchat-j1', hostId: 'd1', folder: '/f' });
     expect(useChatStore.getState().chats['jobchat-j1']?.jobId).toBe('j1');
   });
 });

@@ -53,6 +53,12 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
     // a server that does not serve preferences, which is worth saying out loud
     // rather than storing `undefined` as though it were the account's answer.
     if (!settings.preferences) throw new Error('server returned no account preferences');
+    // A read can race a push, as a reply can (see apply).
+    const current = get().shared;
+    if (current !== null && settings.shared && current.version > settings.shared.version) {
+      set({ loaded: true });
+      return;
+    }
     set({
       preferences: settings.preferences,
       ...(settings.shared ? { shared: settings.shared } : {}),
@@ -73,4 +79,30 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
 export function addressWordOrNull(): string | null {
   const { preferences, loaded } = usePreferencesStore.getState();
   return loaded ? preferences.addressWord : null;
+}
+
+/**
+ * Whether a chat on `model` has a connected provider account to run on. The
+ * accounts are the server's, shared by every host (spec/10), so this never
+ * names a machine. `null` until the shared state has loaded: not known yet is
+ * not "signed out".
+ */
+export function providerConnectedForModel(
+  shared: PreferencesState['shared'],
+  model?: string | null,
+): boolean | null {
+  const secrets = shared?.secrets;
+  if (!secrets) return null;
+  const openai = model?.startsWith('openai/') === true;
+  const list = openai ? secrets.codex : secrets.claude;
+  if (!openai) return list.some((a) => a.connected);
+  const kind = model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt';
+  return secrets.codex.some((a) => a.connected && a.kind === kind);
+}
+
+/** Any provider at all connected, for any model. `null` until loaded. */
+export function anyProviderConnected(shared: PreferencesState['shared']): boolean | null {
+  const secrets = shared?.secrets;
+  if (!secrets) return null;
+  return [...secrets.claude, ...secrets.codex].some((a) => a.connected);
 }

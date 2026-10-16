@@ -38,3 +38,13 @@ export function isSubmitChord(e: SubmitChordEvent): boolean {
   if (e.shiftKey || e.altKey) return false;
   return e.metaKey || e.ctrlKey;
 }
+
+/**
+ * Is this keydown a plain Enter that means "accept"? Not while an IME is
+ * composing: there `↵` picks the candidate, and treating it as a commit sends or
+ * saves half-typed Japanese, Chinese or Korean text.
+ */
+export function isPlainEnter(e: SubmitChordEvent): boolean {
+  if (e.key !== 'Enter') return false;
+  return !(e.isComposing === true || e.nativeEvent?.isComposing === true);
+}

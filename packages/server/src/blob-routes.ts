@@ -27,13 +27,13 @@ import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type { WireEvent } from '@patch/wire';
 import type { ChatRegistry } from './chat-registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { ChatLogStore } from './chat-log-store.js';
 
 export interface BlobRoutesDeps {
   logger: Logger;
   chatRegistry: ChatRegistry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   /** The server's own log: a big result it stored is served from here, with no host involved. */
   chatLogStore?: Pick<ChatLogStore, 'readBlob'>;
   idGenerator: () => string;
@@ -58,18 +58,18 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
 export function registerBlobRoutes(app: FastifyInstance, deps: BlobRoutesDeps): void {
   const pending = new Map<
     string,
-    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; daemonId: string }
+    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
   >();
 
-  deps.daemonLink.onEvent((event: WireEvent, from) => {
+  deps.hostLink.onEvent((event: WireEvent, from) => {
     if (event.type !== 'patch.blob.response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
     // Only the machine that was asked may answer — a reply naming another
     // host is a routing bug, not an answer.
-    if (event.daemonId !== w.daemonId || (from !== null && from !== w.daemonId)) {
+    if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
-        { requestId: event.requestId, asked: w.daemonId, answered: event.daemonId, from },
+        { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
         'blob: response from a machine that was not asked; ignoring',
       );
       return;
@@ -102,11 +102,11 @@ export function registerBlobRoutes(app: FastifyInstance, deps: BlobRoutesDeps): 
           .header('cache-control', 'public, max-age=31536000, immutable')
           .send(held.bytes);
       }
-      const daemonId = chat.daemonId;
-      if (!deps.daemonLink.isOnline(daemonId)) {
+      const hostId = chat.hostId;
+      if (!deps.hostLink.isOnline(hostId)) {
         return reply
           .code(503)
-          .send({ error: 'host_offline', message: `${daemonId} is offline`, daemonId });
+          .send({ error: 'host_offline', message: `${hostId} is offline`, hostId });
       }
 
       const requestId = deps.idGenerator();
@@ -115,21 +115,21 @@ export function registerBlobRoutes(app: FastifyInstance, deps: BlobRoutesDeps): 
           pending.delete(requestId);
           resolve('timeout');
         }, BLOB_TIMEOUT_MS);
-        pending.set(requestId, { resolve, timeout, daemonId });
-        deps.daemonLink.sendTo(daemonId, BRIDGE_SURFACE_ID, {
+        pending.set(requestId, { resolve, timeout, hostId });
+        deps.hostLink.sendTo(hostId, BRIDGE_SURFACE_ID, {
           type: 'patch.blob.request',
           requestId,
-          daemonId,
+          hostId,
           chatId,
           sha,
         });
       });
 
       if (result === 'timeout') {
-        deps.logger.warn({ chatId, sha, daemonId }, 'blob: host did not answer in time');
+        deps.logger.warn({ chatId, sha, hostId }, 'blob: host did not answer in time');
         return reply
           .code(504)
-          .send({ error: 'host_timeout', message: `${daemonId} did not answer in time` });
+          .send({ error: 'host_timeout', message: `${hostId} did not answer in time` });
       }
       if (!result.ok || result.data === undefined) {
         const code = result.error?.code ?? 'internal';

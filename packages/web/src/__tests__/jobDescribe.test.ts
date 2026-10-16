@@ -98,7 +98,7 @@ describe('describeTrigger', () => {
 describe('action verb + target', () => {
   const spawnSkill: Job['action'] = {
     type: 'spawn',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '~/p',
     skill: 'bus-watch',
   };
@@ -111,10 +111,20 @@ describe('action verb + target', () => {
     expect(actionVerb(messagePrompt)).toBe('message · prompt');
     expect(actionTarget(messagePrompt)).toBe('"do the thing"');
   });
+  it('clips a long prompt on code points, never splitting a surrogate pair', () => {
+    const prompt = `${'a'.repeat(46)}😀${'b'.repeat(5)}`;
+    const target = actionTarget({ type: 'message', chatId: 'c1', prompt });
+    expect(target).toBe(`"${'a'.repeat(46)}😀…"`);
+  });
+  it('clips a long script line on code points, never splitting a surrogate pair', () => {
+    const command = `echo ${'a'.repeat(41)}😀${'b'.repeat(5)}`;
+    const target = actionTarget({ type: 'script', hostId: 'd1', folder: '~/p', command });
+    expect(target).toBe(`"echo ${'a'.repeat(41)}😀…"`);
+  });
   it('renders spawn · prompt with the folder alongside the quoted prompt', () => {
     const spawnPrompt: Job['action'] = {
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '~/proj',
       prompt: 'go',
     };
@@ -136,21 +146,21 @@ describe('action verb + target', () => {
     expect(actionTarget(action)).toBe('c-42');
   });
   it('falls back to the folder for a spawn/ensure action with no prompt/skill', () => {
-    const spawn = { type: 'spawn', daemonId: 'd1', folder: '~/p' } as Job['action'];
+    const spawn = { type: 'spawn', hostId: 'd1', folder: '~/p' } as Job['action'];
     expect(actionTarget(spawn)).toBe('~/p');
-    const ensure = { type: 'continue', daemonId: 'd1', folder: '~/e' } as Job['action'];
+    const ensure = { type: 'continue', hostId: 'd1', folder: '~/e' } as Job['action'];
     expect(actionTarget(ensure)).toBe('~/e');
   });
   it('threads the host name in alongside the folder when given one (spec/14 § Jobs view)', () => {
     expect(actionTarget(spawnSkill, 'laptop')).toBe('bus-watch · laptop · ~/p');
     const spawnPrompt: Job['action'] = {
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '~/proj',
       prompt: 'go',
     };
     expect(actionTarget(spawnPrompt, 'laptop')).toBe('"go" · laptop · ~/proj');
-    const spawn = { type: 'spawn', daemonId: 'd1', folder: '~/p' } as Job['action'];
+    const spawn = { type: 'spawn', hostId: 'd1', folder: '~/p' } as Job['action'];
     expect(actionTarget(spawn, 'laptop')).toBe('laptop · ~/p');
   });
   it('leaves a non-folder-addressed target alone even when a host name is given', () => {
@@ -231,7 +241,7 @@ describe('jobTriggerLabel', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '0 8 * * *' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '~/p', skill: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '~/p', skill: 'x' },
       createdAt: 0,
       updatedAt: 0,
     } as Job;
@@ -251,7 +261,7 @@ describe('jobTriggerLabel', () => {
         enabled: true,
         trigger: { type: 'cron', expression: '0 8 * * *' },
         filter,
-        action: { type: 'spawn', daemonId: 'd1', folder: '~/p', skill: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '~/p', skill: 'x' },
         createdAt: 0,
         updatedAt: 0,
       } as Job;
@@ -313,7 +323,7 @@ describe('jobChatId', () => {
   it('returns the canonical ensure chat id for an "continue" action', () => {
     const job = {
       ...base,
-      action: { type: 'continue', daemonId: 'd1', folder: '~/p', skill: 'x' },
+      action: { type: 'continue', hostId: 'd1', folder: '~/p', skill: 'x' },
     } as Job;
     expect(jobChatId(job, undefined)).toBe('jobchat-j1');
   });
@@ -326,7 +336,7 @@ describe('jobChatId', () => {
   it('returns the latest run chatId for a "spawn" action', () => {
     const job = {
       ...base,
-      action: { type: 'spawn', daemonId: 'd1', folder: '~/p', skill: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '~/p', skill: 'x' },
     } as Job;
     expect(jobChatId(job, 'latest-run-chat')).toBe('latest-run-chat');
   });
@@ -334,8 +344,17 @@ describe('jobChatId', () => {
   it('returns null for a "spawn" action with no runs yet', () => {
     const job = {
       ...base,
-      action: { type: 'spawn', daemonId: 'd1', folder: '~/p', skill: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '~/p', skill: 'x' },
     } as Job;
     expect(jobChatId(job, undefined)).toBeNull();
+  });
+});
+
+describe('describeTrigger — follows', () => {
+  it('says whether failures count', () => {
+    expect(describeTrigger({ type: 'follows', jobId: 'j_a' })).toBe('After another job succeeds');
+    expect(describeTrigger({ type: 'follows', jobId: 'j_a', on: 'any' })).toBe(
+      'After another job runs',
+    );
   });
 });

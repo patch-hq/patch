@@ -55,7 +55,7 @@ function seedChat(chatId: string): void {
   useChatStore.getState().hydrate([
     {
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'repo',

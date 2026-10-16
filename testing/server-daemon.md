@@ -36,7 +36,7 @@ Per-package suites live in `packages/<name>/test/`. Run a focused subset:
 
 ```bash
 pnpm --filter @patch/server test --watch <pattern>
-pnpm --filter @patch/daemon test --watch <pattern>
+pnpm --filter @patch/host test --watch <pattern>
 pnpm --filter @patch/wire test --watch
 ```
 
@@ -89,7 +89,7 @@ Omitting `clientType`/`clientVersion`, or wrapping it in a different envelope,
 closes the socket with `4400 'malformed frame'`. Always drive `/ws` with
 `WireTestClient` from `@patch/wire/test-client` — it builds the correct hello
 and handles replay/reconnect. A valid hello is accepted and the socket kept
-alive (`integration-lifecycle.test.ts` asserts this via `daemon.online`).
+alive (`integration-lifecycle.test.ts` asserts this via `host.online`).
 
 ### 3. Spawn-time errors surface as `chat.error` (out-of-band seq)
 
@@ -110,7 +110,7 @@ to include `seq 0`; `replayFromLastSeen` does this automatically. See the
 
 ## Latency budgets
 
-`pnpm --filter @patch/daemon test:latency` measures end-to-end voice round-trip against a fixture clip. Thresholds (CI runner, `WHISPER_BACKEND=groq`):
+`pnpm --filter @patch/host test:latency` measures end-to-end voice round-trip against a fixture clip. Thresholds (CI runner, `WHISPER_BACKEND=groq`):
 
 - STT: < 800 ms
 - Kokoro first audio frame: < 600 ms

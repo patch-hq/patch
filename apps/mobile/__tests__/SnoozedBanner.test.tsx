@@ -25,7 +25,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'c1',
     name: null,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: 'work',
     activity: 'idle',
     permissionMode: 'auto',
@@ -81,7 +81,7 @@ describe('SnoozedBanner', () => {
       {
         chatId: 'c1',
         name: null,
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: 'work',
         activity: 'idle',
         permissionMode: 'auto',
@@ -106,7 +106,7 @@ describe('SnoozedBanner', () => {
       {
         chatId: 'c1',
         name: null,
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: 'work',
         activity: 'idle',
         permissionMode: 'auto',

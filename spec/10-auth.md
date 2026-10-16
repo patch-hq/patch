@@ -26,6 +26,10 @@ Each OpenAI account has an isolated Codex runtime profile. Existing credentials 
 
 Credit selection takes the first connected, eligible account for the chosen provider and model. Each turn records the account it uses. Exhausted accounts wait for their reported reset, authentication failures require reconnecting, and unknown usage is distinct from available credit. ChatGPT usage is read without generating a response. Credit-source changes do not change a chat's provider or model.
 
+An account refusal is host state, not chat state. The host persists each exhausted account and its stated reset under `~/.patch`, restores that routing gate before accepting turns after a daemon update/restart, and removes it when the reset passes or a later authoritative usage reading says credit returned. Restarting Patch must never make a known-spent account eligible.
+
+Provider session IDs are caches owned by the account that created them. Patch records that owner. When routing selects a different account, it never sends the old account's session ID; it creates a fresh provider session and reconstructs it from Patch's own durable chat history. Account failover therefore preserves the conversation without assuming provider-session IDs are portable.
+
 OpenAI API keys use the same native secure store. API models have IDs `openai/api/<model>` and are labelled “OpenAI API (paid)”. They are selected explicitly; ChatGPT subscription exhaustion never rotates into an API account. No billed generation runs during credential validation.
 
 ## Backend credentials
@@ -62,10 +66,12 @@ The one thing deliberately left behind is the ancient turn. A turn that failed d
 Which key a turn ran on is a property of THAT TURN: it is what the failure names, and what a `rate_limit_event` usage reading is attributed to. It is never stored on the chat. It is shown, though: the chat's state names the account its latest turn ran on, and a surface draws it beside the model. When a turn runs on a different account from the chat's previous turn BECAUSE that one ran out of credit, the chat gets a system line saying so — which account it moved from and to, and when the spent one comes back if the limit said, in the reader's own time. A move that is the strategy working (round-robin moving on, a reset key taking over again) is not news and writes no line.
 
 - The credential is the OAuth token Claude Code persists after `claude login`. Claude Code stores it under the key `claudeAiOauth` (`{ accessToken, refreshToken, expiresAt, … }`) in a platform-native store — `~/.claude/.credentials.json` on a Linux host and the macOS Keychain (service `Claude Code-credentials`) on a Mac host. It is not in `~/.claude.json`; that file holds account metadata under `oauthAccount` (email, plan, uuids) but no access token. The Claude Agent SDK reads its own credential from that native store directly. Patch passes no `ANTHROPIC_API_KEY` in env and leaves the credential to the backend. Those three locations (env `CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` → Keychain, in that order) are that machine's own login, which Settings can adopt as a shared account (below). A host that already held accounts before settings were shared — including the one its first boot seeded from that login — sends them to the server once, the first time it connects (`01-server.md` § Settings), so a single-machine install works without touching Settings. From then on the shared accounts are what patch reads to gate queries and to pass the SDK as `CLAUDE_CODE_OAUTH_TOKEN`.
-- First run: host checks for a valid `claudeAiOauth.accessToken` on the account a chat resolves to (via the resolution order above, for the first account; from the store thereafter). If absent/expired, the host refuses to start any `query()` against that account and emits `daemon.unauthenticated` naming the backend; the host's other backends, and its other Claude accounts, keep running (`02-daemon.md` § Agent backends). Settings surfaces this as "not connected" on that account's row under that host, with the connect controls below.
-- A credential the check accepts can still be refused by Claude when the turn runs, because a token can be revoked while its stored expiry says otherwise. That refusal means the same thing as an absent one and is reported the same way: `daemon.unauthenticated` for that backend, the chat told in words that the host's sign-in is no longer valid and where to renew it, and the chat left idle so it runs as soon as the credential is replaced. It is not reported as a fault of that chat, and the backend's own error text is not what the chat shows.
+- First run: host checks for a valid `claudeAiOauth.accessToken` on the account a chat resolves to (via the resolution order above, for the first account; from the store thereafter). If absent/expired, the host refuses to start any `query()` against that account and emits `host.unauthenticated` naming the backend; the host's other backends, and its other Claude accounts, keep running (`02-daemon.md` § Agent backends). Settings surfaces this as "not connected" on that account's row under that host, with the connect controls below.
+- A credential the check accepts can still be refused by Claude when the turn runs, because a token can be revoked while its stored expiry says otherwise. That refusal means the same thing as an absent one and is reported the same way: `host.unauthenticated` for that backend, the chat told in words that the host's sign-in is no longer valid and where to renew it, and the chat left idle so it runs as soon as the credential is replaced. It is not reported as a fault of that chat, and the backend's own error text is not what the chat shows.
 - The server renews shared credentials and distributes updated access tokens. Hosts do not receive refresh tokens or renew these credentials independently.
 - `ANTHROPIC_API_KEY` is stripped from the env passed to `query()`, so the SDK uses OAuth even when the user has the key set globally. Authentication for this backend is OAuth only.
+
+Provider accounts have NO host tie. Whether a chat can run — the composer, the new-chat screen, the "not signed in" banner — is answered from the server's shared accounts for the chat's model (any connected Claude account; any connected ChatGPT or API-key account of the right kind), never from what one host reports and never naming a machine. A host that is offline, or has not yet applied the latest settings, does not make an account look signed out: it receives the account on reconnect, and a chat sent to it queues until then. Until the shared state has loaded nothing is blocked.
 
 Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), once per backend for the whole account — the accounts are shared settings, held by the server and sent to every host (`01-server.md` § Settings):
 
@@ -102,19 +108,23 @@ THREE WINDOWS, NOT TWO. `five_hour` (the session), `seven_day` (the week) and
 `overage` — the extra-usage pool the other two spill into. Overage was
 previously discarded as per-model detail. It is not: its refusal is what Claude
 Code renders as `You've hit your monthly spend limit`, and its
-`disabled-reason` of `org_level_disabled_until` means extra usage is not
-enabled on the account — nobody has overspent anything, there was simply no
-overflow pool when the 5-hour window emptied. Extra usage is a paid add-on, so
+`disabled-reason` of `org_level_disabled_until` means extra usage is disabled
+on that account and surfaces say `Extra usage: disabled`, linked to that
+account's Claude Usage settings where the user can enable it.
+`org_level_disabled` means organisation policy prevents it and surfaces say
+`Extra usage: disabled by organisation`. Extra usage is a paid add-on, so
 an account that has never turned it on reports a rejected overage permanently;
 that is a healthy account's steady state, not a fault, and not a transient. Discarding it left that sentence
 with no structured counterpart anywhere in patch, which is why nobody could
 explain it. (The per-model `seven_day_opus`/`seven_day_sonnet` variants remain
 unsurfaced.)
 
+USAGE HISTORY. Settings → Usage opens with two groups above the accounts. "Allowance left" is a burndown: for a chosen period (Day = last 24 h, Week = 7 d, Month = 30 d, or a Custom from/to date) one line per Claude account of the percent of the weekly window still unspent at each probe, rising back at the weekly reset. "Chats by tokens" ranks chats with a completed turn in the period by tokens (fresh + cached input + output, summed from each chat's `turn.end` usage in its own log). Both come from `GET /api/usage-report?since&until`, which asks every online host (`patch.usage.read.request`) and merges. History starts when a host first records it: each probe is appended to `logs/usage-history.jsonl` (bounded), so a period reaching back before that shows only the readings since; per-chat tokens go back as far as the chat logs do. A host that does not answer fails the call (no partial answer).
+
 Each window carries `status` (`allowed`/`allowed_warning`/`rejected`),
 `utilization` (0–1), `resetsAt` (epoch ms) and an optional `disabledReason`.
 They fold onto the account's entry in the same per-host-per-backend
-`daemon.account` report as `usage: { session?, week?, overage?, at? }`, so they
+`host.account` report as `usage: { session?, week?, overage?, at? }`, so they
 reach every surface through the existing cache/replay/store path with no new
 wire message. `at` is when the reading was taken, and a surface must show it:
 without it a stale figure is indistinguishable from a live one, which is how a
@@ -223,7 +233,7 @@ flow as the first.
 
 1. On a linked surface, the user opens Add host; the surface requests a single-use daemon-registration nonce from the server and renders it as a QR and as a short code, for a host where the code is typed rather than scanned. The QR and the short code carry the same nonce, so a host that scans and a host where it is typed submit the same value.
 2. The host on the new host submits the nonce and its public key, as the installer's final step: run the install command, enter the pairing code, and the host appears in Settings → Hosts.
-3. The server registers the host, issues its `daemonKey`, and records the host's self-description (`daemonId`, host name, platform, versions). With the `daemonKey` it hands over the voice-session secret every host verifies voice session tokens with (`PATCH_INTERNAL_TOKEN`), so the pairing code is the only thing a person gives the installer. An installer that is not already holding the secret pairs before it registers the service, since the service cannot start without it.
+3. The server registers the host, issues its `daemonKey`, and records the host's self-description (`hostId`, host name, platform, versions). With the `daemonKey` it hands over the voice-session secret every host verifies voice session tokens with (`PATCH_INTERNAL_TOKEN`), so the pairing code is the only thing a person gives the installer. An installer that is not already holding the secret pairs before it registers the service, since the service cannot start without it.
 4. The host stores `~/.patch/daemon.key` and authenticates to the server with it thereafter.
 
 The code travels in one direction: the server mints it at a linked surface's

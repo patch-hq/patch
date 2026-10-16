@@ -150,6 +150,11 @@ export function gradleArgs({ box }) {
   return [...args, '--no-daemon', '-Pkotlin.compiler.execution.strategy=in-process'];
 }
 
+/** The argv a smoke build passes: the same stamps a published build carries. */
+export function smokeBuildArgs(info) {
+  return ['--version', info.version, '--sha', info.gitSha, '--built-at', info.builtAt];
+}
+
 /** `--name value` pairs; every one of version, sha and built-at is required. */
 export function parseArgs(argv) {
   const get = (n) => {

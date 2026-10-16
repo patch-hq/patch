@@ -18,6 +18,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Job, JobAction, JobLatestRun } from '@patch/wire/jobs';
 import { api } from '../api/rest.js';
+import { JobDefaults } from './JobDefaults.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { Toggle } from '../components/Toggle.js';
@@ -60,7 +61,7 @@ type JobWithGates = Job & {
  */
 function actionHostName(action: JobAction, hostNames: Record<string, string>): string | undefined {
   if (action.type !== 'spawn' && action.type !== 'continue') return undefined;
-  return hostNames[action.daemonId];
+  return hostNames[action.hostId];
 }
 
 /**
@@ -101,7 +102,7 @@ export function JobsRoute(): JSX.Element {
   const setFilter = useUiStore((s) => s.setJobsFilter);
   const [query, setQuery] = useState('');
   // Same source and shape as `JobEditorRoute`'s `hostNames` — every registered
-  // host's live self-reported name, falling back to its daemonId until it has
+  // host's live self-reported name, falling back to its hostId until it has
   // reported one (spec/14 § Jobs view).
   const hosts = usePresenceStore((s) => s.hosts);
   const hostNames = useMemo(
@@ -222,6 +223,7 @@ export function JobsRoute(): JSX.Element {
           + New job
         </Link>
       </header>
+      <JobDefaults />
       {isLoading ? (
         <p>Loading…</p>
       ) : jobs.length === 0 ? (

@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
-import { clearHosts, reportAccount } from './presenceHelpers.js';
+import {
+  clearHosts,
+  clearSharedAccounts,
+  reportAccount,
+  setSharedAccounts,
+} from './presenceHelpers.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { composerMicFor } from '../lib/composerMic.js';
@@ -27,12 +32,12 @@ vi.mock('../components/ImageAnnotator.js', () => ({
     onDone,
     onCancel,
   }: {
-    file: File;
+    file?: File;
     onDone: (f: File) => void;
     onCancel: () => void;
   }) => (
     <div data-testid="mock-annotator">
-      <span data-testid="mock-annotator-filename">{file.name}</span>
+      <span data-testid="mock-annotator-filename">{file?.name ?? 'blank'}</span>
       <button
         type="button"
         data-testid="mock-annotator-done"
@@ -49,6 +54,7 @@ vi.mock('../components/ImageAnnotator.js', () => ({
 
 describe('Composer', () => {
   beforeEach(() => {
+    clearSharedAccounts();
     usePresenceStore.getState().setConnection('connected');
     // Voice controls require an online host (audio can't be queued — spec/12).
     usePresenceStore.getState().setHostOnline('d1', true);
@@ -74,7 +80,7 @@ describe('Composer', () => {
   }
 
   it('keeps overflow hidden and grows to fit while content is under the cap', () => {
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     stubLayout(input, 80); // 80 + 2px border = 82px, well under the 200px cap
     fireEvent.change(input, { target: { value: 'a\nfew\nlines' } });
@@ -83,7 +89,7 @@ describe('Composer', () => {
   });
 
   it('caps the height and reveals an internal scrollbar once content exceeds the cap', () => {
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     stubLayout(input, 500); // 500 + 2 = 502px, far over the 200px cap
     fireEvent.change(input, { target: { value: 'lots\nand\nlots\nof\nlines' } });
@@ -93,7 +99,7 @@ describe('Composer', () => {
 
   it('sends on form submit and clears the input', () => {
     const onSend = vi.fn();
-    render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'hello' } });
     fireEvent.click(screen.getByTestId('send-btn'));
@@ -103,7 +109,7 @@ describe('Composer', () => {
 
   it('sends on cmd+enter', () => {
     const onSend = vi.fn();
-    render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'hi' } });
     fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
@@ -119,7 +125,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={onSend}
           onStartVoiceNote={() => {}}
           running
@@ -155,12 +161,25 @@ describe('Composer', () => {
       expect(onStop).not.toHaveBeenCalled();
     });
 
-    it('⇧↵ still inserts a newline even with ⌘ held', () => {
+    it('⇧↵ alone inserts a newline', () => {
       const { onSend, input } = renderRunning();
       fireEvent.change(input, { target: { value: 'line' } });
-      fireEvent.keyDown(input, { key: 'Enter', metaKey: true, shiftKey: true });
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
       expect(onSend).not.toHaveBeenCalled();
     });
+
+    it.each([{ metaKey: true }, { ctrlKey: true }])(
+      '⌘⇧↵ / Ctrl⇧↵ sends and interrupts immediately (%o)',
+      (mod) => {
+        const { onSend, onStop, input } = renderRunning();
+        fireEvent.change(input, { target: { value: 'after you finish' } });
+        fireEvent.keyDown(input, { key: 'Enter', shiftKey: true, ...mod });
+        expect(onSend).toHaveBeenCalledWith('after you finish', undefined, undefined, {
+          interrupt: true,
+        });
+        expect(onStop).not.toHaveBeenCalled();
+      },
+    );
   });
 
   // spec/04 ## Message queueing + Claude Code interrupt parity: while running, a
@@ -170,7 +189,7 @@ describe('Composer', () => {
     const { rerender } = render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={false}
@@ -181,7 +200,7 @@ describe('Composer', () => {
     rerender(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={true}
@@ -198,7 +217,7 @@ describe('Composer', () => {
     render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={true}
@@ -223,7 +242,7 @@ describe('Composer', () => {
     const { rerender } = render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={true}
@@ -239,7 +258,7 @@ describe('Composer', () => {
     rerender(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={false}
@@ -255,7 +274,7 @@ describe('Composer', () => {
     const { rerender } = render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={false}
@@ -267,7 +286,7 @@ describe('Composer', () => {
     rerender(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={true}
@@ -283,7 +302,7 @@ describe('Composer', () => {
     render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={onSend}
         onStartVoiceNote={() => {}}
         running={true}
@@ -300,7 +319,7 @@ describe('Composer', () => {
     render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={onSend}
         onStartVoiceNote={() => {}}
         running={true}
@@ -325,7 +344,7 @@ describe('Composer', () => {
       useVoiceStore.getState().startNote(chatId, 'ptt');
     });
     render(
-      <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
+      <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
     );
     const mic = screen.getByTestId('voice-note-btn');
 
@@ -353,7 +372,7 @@ describe('Composer', () => {
   // ("— Enter to send, Shift+Enter for a new line"); Tom asked for that back
   // out, so this locks the bare string against it creeping in again.
   it('shows a bare placeholder with no helper text', () => {
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     expect(input.placeholder).toBe('Type a message');
   });
@@ -361,7 +380,7 @@ describe('Composer', () => {
   it('swaps the placeholder for connection state while offline', () => {
     // State, not instruction — the one permitted placeholder change.
     usePresenceStore.getState().setConnection('reconnecting');
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).placeholder).toBe(
       'Reconnecting…',
     );
@@ -374,7 +393,7 @@ describe('Composer', () => {
     // daemon-offline.
     const onSend = vi.fn();
     usePresenceStore.getState().setConnection('reconnecting');
-    render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     expect(input.disabled).toBe(false);
     fireEvent.change(input, { target: { value: 'hello' } });
@@ -391,7 +410,7 @@ describe('Composer', () => {
     // front rather than queued.
     const onSend = vi.fn();
     usePresenceStore.getState().setConnection('reconnecting');
-    render(<Composer chatId="new" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="new" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     expect(input.disabled).toBe(false);
     fireEvent.change(input, { target: { value: 'hello' } });
@@ -407,8 +426,8 @@ describe('Composer', () => {
     // because those messages queue and deliver on reconnect. With no credential
     // the turn can never run, so accepting the message would be a lie — this is
     // the "new chat cannot work but doesn't say so" case.
-    reportAccount('d1', false);
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    setSharedAccounts({ claude: [{ connected: false }] });
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     expect(input.disabled).toBe(true);
     expect(input.title).toMatch(/Claude isn’t connected/);
@@ -421,47 +440,45 @@ describe('Composer', () => {
     // real feature (spec/12) and disabling it here would break it.
     usePresenceStore.getState().setHostOnline('d1', false);
     reportAccount('d1', true);
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(false);
   });
 
-  it('ignores ANOTHER host being logged out (the account-wide-report bug)', () => {
-    // Three hosts report different credential states at once on the real rig.
-    // With one account-wide slot, host-logged-out's report blocked sending in a
-    // chat pinned to host-a, whose credential was fine (spec/10 § Backend
-    // credentials — per host, per backend).
-    reportAccount('host-a', true);
-    reportAccount('host-logged-out', false);
-    render(
-      <Composer chatId="c1" daemonId="host-a" onSend={() => {}} onStartVoiceNote={() => {}} />,
-    );
-    expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(false);
-  });
-
-  it('blocks sending in a chat on the host that IS logged out', () => {
+  it('ignores any host being logged out: the accounts are shared, not per host', () => {
+    // A host reporting itself signed out (a stale snapshot, a machine that has
+    // not picked the account up yet) must not block a chat while the user has
+    // a connected account (spec/10).
+    setSharedAccounts({ claude: [{ connected: true }] });
     reportAccount('host-a', true);
     reportAccount('host-logged-out', false);
     render(
       <Composer
         chatId="c1"
-        daemonId="host-logged-out"
+        hostId="host-logged-out"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
       />,
     );
+    expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it('blocks sending in any chat when no account is connected, whichever host it is on', () => {
+    reportAccount('host-a', true);
+    setSharedAccounts({ claude: [{ connected: false }] });
+    render(<Composer chatId="c1" hostId="host-a" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(true);
   });
 
   it('does not pre-emptively disable before the host has reported', () => {
     clearHosts();
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(false);
   });
 
   // Item 3 (desktop): the separate image + file buttons are collapsed into ONE
   // attach button that opens a single dialog accepting images AND any file.
   it('has a single attach button (no duplicate image button) on web', () => {
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect(screen.getByTestId('attach-btn')).toBeInTheDocument();
     // The old image-only button + its input are gone.
     expect(screen.queryByTestId('attach-image-btn')).toBeNull();
@@ -477,7 +494,7 @@ describe('Composer', () => {
     render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         onSend={() => {}}
         onStartVoiceNote={() => {}}
         running={true}
@@ -499,7 +516,7 @@ describe('Composer', () => {
   // Monaco diff rail. It moved to the chat header ⋯ menu, so the composer must
   // NOT render it any more.
   it('does not render the editor button on the composer row (C2)', () => {
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect(screen.queryByTestId('editor-btn')).toBeNull();
   });
 
@@ -510,7 +527,7 @@ describe('Composer', () => {
     // Even with getDisplayMedia available, the button is gone for good.
     const getDisplayMedia = vi.fn();
     vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia } } as never);
-    render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect(screen.queryByTestId('screenshot-btn')).toBeNull();
     // Attach paperclip still there.
     expect(screen.getByTestId('attach-btn')).toBeInTheDocument();
@@ -544,7 +561,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -582,7 +599,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -603,7 +620,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -621,7 +638,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={onSend}
           onStartVoiceNote={() => {}}
@@ -638,7 +655,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -657,7 +674,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -684,7 +701,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -706,7 +723,7 @@ describe('Composer', () => {
           }),
       );
       vi.stubGlobal('fetch', fetchSpy);
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: '/pl' } });
       // No folder prop → the skills-fetch effect's guard short-circuits.
@@ -725,7 +742,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -760,7 +777,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -791,7 +808,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -822,7 +839,7 @@ describe('Composer', () => {
       const { rerender } = render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj-a"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -836,7 +853,7 @@ describe('Composer', () => {
       rerender(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj-b"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -867,7 +884,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -902,7 +919,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={onSend}
           onStartVoiceNote={() => {}}
@@ -943,7 +960,7 @@ describe('Composer', () => {
       const first = render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -960,7 +977,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -991,7 +1008,7 @@ describe('Composer', () => {
       const first = render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -1005,7 +1022,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c2"
-          daemonId="d1"
+          hostId="d1"
           folder="/other"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -1035,7 +1052,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -1055,7 +1072,7 @@ describe('Composer', () => {
 
     it('does not persist anything when the composer has no folder', async () => {
       const apiSkillsSpy = vi.spyOn(api, 'skills');
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: '/' } });
       await new Promise((r) => setTimeout(r, 0));
@@ -1095,7 +1112,7 @@ describe('Composer', () => {
     });
 
     it('attaching an image via the file input shows a thumbnail; a non-image shows a file icon', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const fileInput = screen.getByTestId('composer-file-input') as HTMLInputElement;
       const img = new File(['bytes'], 'photo.png', { type: 'image/png' });
       const doc = new File(['bytes'], 'notes.txt', { type: 'text/plain' });
@@ -1111,7 +1128,7 @@ describe('Composer', () => {
     });
 
     it('an unnamed image falls back to "image" as the display name', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const fileInput = screen.getByTestId('composer-file-input') as HTMLInputElement;
       const img = new File(['bytes'], '', { type: 'image/png' });
       fireEvent.change(fileInput, { target: { files: [img] } });
@@ -1121,7 +1138,7 @@ describe('Composer', () => {
     });
 
     it('an unnamed non-image file falls back to "file" as the display name', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const fileInput = screen.getByTestId('composer-file-input') as HTMLInputElement;
       const doc = new File(['bytes'], '', { type: 'application/octet-stream' });
       fireEvent.change(fileInput, { target: { files: [doc] } });
@@ -1131,7 +1148,7 @@ describe('Composer', () => {
     });
 
     it('the attach button opens the hidden file picker', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const fileInput = screen.getByTestId('composer-file-input') as HTMLInputElement;
       const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => {});
       fireEvent.click(screen.getByTestId('attach-btn'));
@@ -1139,14 +1156,14 @@ describe('Composer', () => {
     });
 
     it('selecting zero files (cancelled dialog) does not add an attachment chip', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const fileInput = screen.getByTestId('composer-file-input') as HTMLInputElement;
       fireEvent.change(fileInput, { target: { files: [] } });
       expect(screen.queryByTestId('composer-attachments')).toBeNull();
     });
 
     it('remove (×) drops the attachment and revokes its preview URL', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const fileInput = screen.getByTestId('composer-file-input') as HTMLInputElement;
       const img = new File(['bytes'], 'photo.png', { type: 'image/png' });
       fireEvent.change(fileInput, { target: { files: [img] } });
@@ -1156,7 +1173,7 @@ describe('Composer', () => {
     });
 
     it('pasting a clipboard image attaches it and prevents the default paste', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       const file = new File(['bytes'], 'clip.png', { type: 'image/png' });
       const item = { kind: 'file', type: 'image/png', getAsFile: () => file };
@@ -1168,7 +1185,7 @@ describe('Composer', () => {
     });
 
     it('pasting non-image clipboard content is a no-op (text paste flows through normally)', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       const item = { kind: 'string', type: 'text/plain', getAsFile: () => null };
       const evt = fireEvent.paste(input, { clipboardData: { items: [item] } });
@@ -1177,7 +1194,7 @@ describe('Composer', () => {
     });
 
     it('pasting a long block of text attaches it as a document instead of filling the input', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       const long = 'line of pasted text\n'.repeat(600);
       const evt = fireEvent.paste(input, {
@@ -1190,7 +1207,7 @@ describe('Composer', () => {
     });
 
     it('a 5,000-character paste (long dictation) stays in the input', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       const evt = fireEvent.paste(input, {
         clipboardData: { items: [], getData: () => 'word '.repeat(1000) },
@@ -1200,7 +1217,7 @@ describe('Composer', () => {
     });
 
     it('pasting a short block of text is left to the input', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       const evt = fireEvent.paste(input, {
         clipboardData: { items: [], getData: () => 'a short note' },
@@ -1210,16 +1227,14 @@ describe('Composer', () => {
     });
 
     it('pasting with no clipboardData.items at all does not throw', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       expect(() => fireEvent.paste(input, { clipboardData: {} })).not.toThrow();
     });
 
     describe('drag-and-drop', () => {
       it('dragging a file over shows the drop hint; dragleave hides it', () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         const composer = screen.getByTestId('composer');
         expect(screen.queryByTestId('composer-drop-hint')).toBeNull();
         fireEvent.dragEnter(composer, { dataTransfer: { types: ['Files'] } });
@@ -1229,9 +1244,7 @@ describe('Composer', () => {
       });
 
       it('a dragenter/dragleave on a nested child does not flicker the hint off (depth counter)', () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         const composer = screen.getByTestId('composer');
         fireEvent.dragEnter(composer, { dataTransfer: { types: ['Files'] } }); // enter composer
         fireEvent.dragEnter(composer, { dataTransfer: { types: ['Files'] } }); // enter a child element
@@ -1242,9 +1255,7 @@ describe('Composer', () => {
       });
 
       it('a drag carrying no Files (e.g. a text selection) is ignored — no hint, no preventDefault', () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         const composer = screen.getByTestId('composer');
         const evt = fireEvent.dragEnter(composer, { dataTransfer: { types: ['text/plain'] } });
         expect(evt).toBe(true); // not prevented
@@ -1252,9 +1263,7 @@ describe('Composer', () => {
       });
 
       it('dropping plain files (no directory entries) attaches them, same as the file picker', async () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         const composer = screen.getByTestId('composer');
         const file = new File(['bytes'], 'report.pdf', { type: 'application/pdf' });
         fireEvent.dragEnter(composer, { dataTransfer: { types: ['Files'] } });
@@ -1269,9 +1278,7 @@ describe('Composer', () => {
       });
 
       it('dropping a .zip attaches it as a single file, unexpanded', async () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         const composer = screen.getByTestId('composer');
         const zip = new File(['bytes'], 'archive.zip', { type: 'application/zip' });
         fireEvent.drop(composer, { dataTransfer: { types: ['Files'], files: [zip] } });
@@ -1283,9 +1290,7 @@ describe('Composer', () => {
       });
 
       it('dropping a folder walks it recursively via webkitGetAsEntry, naming each file with its relative path', async () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         const composer = screen.getByTestId('composer');
 
         // Minimal fakes for the DOM FileSystemEntry API a real drop would hand
@@ -1341,10 +1346,8 @@ describe('Composer', () => {
       });
 
       it('dropping while Claude is disconnected shows the blocked hint and does not attach', async () => {
-        reportAccount('d1', false);
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        setSharedAccounts({ claude: [{ connected: false }] });
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         const composer = screen.getByTestId('composer');
         fireEvent.dragEnter(composer, { dataTransfer: { types: ['Files'] } });
         expect(screen.getByTestId('composer-drop-hint')).toHaveTextContent(
@@ -1364,7 +1367,7 @@ describe('Composer', () => {
     it('sends text + attachments together at once: onSend gets the files and the chatId, nothing is uploaded here', () => {
       const uploadSpy = vi.spyOn(api, 'uploadAttachment');
       const onSend = vi.fn();
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const file = new File(['bytes'], 'photo.png', { type: 'image/png' });
       fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
@@ -1391,7 +1394,7 @@ describe('Composer', () => {
 
     it('a false return from onSend puts the text and the files back', async () => {
       const onSend = vi.fn(async () => false);
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       fireEvent.change(screen.getByTestId('composer-file-input'), {
         target: { files: [new File(['b'], 'x.png', { type: 'image/png' })] },
       });
@@ -1408,7 +1411,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="new"
-          daemonId="d1"
+          hostId="d1"
           onSend={onSend}
           onStartVoiceNote={() => {}}
           resolveChatId={resolveChatId}
@@ -1433,7 +1436,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="new"
-          daemonId="d1"
+          hostId="d1"
           onSend={onSend}
           onStartVoiceNote={() => {}}
           resolveChatId={resolveChatId}
@@ -1460,7 +1463,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="new"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           resolveChatId={resolveChatId}
@@ -1480,22 +1483,40 @@ describe('Composer', () => {
 
     it('unmount keeps the chat s attachments (and their previews) for when you return', () => {
       const { unmount } = render(
-        <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
       );
       fireEvent.change(screen.getByTestId('composer-file-input'), {
         target: { files: [new File(['b'], 'x.png', { type: 'image/png' })] },
       });
       unmount();
       expect(revokeObjectURLSpy).not.toHaveBeenCalled();
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       expect(screen.getAllByTestId('composer-attachment')).toHaveLength(1);
+    });
+
+    describe('preview', () => {
+      it('clicking an image thumbnail opens the lightbox; non-images have no preview', () => {
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+        fireEvent.change(screen.getByTestId('composer-file-input'), {
+          target: {
+            files: [
+              new File(['b'], 'photo.png', { type: 'image/png' }),
+              new File(['b'], 'notes.txt', { type: 'text/plain' }),
+            ],
+          },
+        });
+        expect(screen.getAllByTestId('composer-attachment-preview')).toHaveLength(1);
+        fireEvent.click(screen.getByTestId('composer-attachment-preview'));
+        expect(screen.getByTestId('image-lightbox')).toBeTruthy();
+        fireEvent.click(screen.getByTestId('lightbox-close'));
+        expect(screen.queryByTestId('image-lightbox')).toBeNull();
+        expect(screen.getAllByTestId('composer-attachment')).toHaveLength(2);
+      });
     });
 
     describe('markup', () => {
       it('shows a markup button on an image thumbnail but not on a non-image', () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         fireEvent.change(screen.getByTestId('composer-file-input'), {
           target: {
             files: [
@@ -1510,9 +1531,7 @@ describe('Composer', () => {
       });
 
       it('opens the annotator on the clicked attachment', () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         fireEvent.change(screen.getByTestId('composer-file-input'), {
           target: { files: [new File(['b'], 'photo.png', { type: 'image/png' })] },
         });
@@ -1520,10 +1539,26 @@ describe('Composer', () => {
         expect(screen.getByTestId('mock-annotator-filename').textContent).toBe('photo.png');
       });
 
+      it('sketch button opens a blank annotator and attaches the result as a new chip', () => {
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+        fireEvent.click(screen.getByTestId('sketch-btn'));
+        expect(screen.getByTestId('mock-annotator-filename').textContent).toBe('blank');
+        fireEvent.click(screen.getByTestId('mock-annotator-done'));
+        expect(screen.queryByTestId('mock-annotator')).toBeNull();
+        expect(
+          screen.getByTestId('composer-attachment').querySelector('.att-name')?.textContent,
+        ).toBe('annotated.png');
+      });
+
+      it('cancelling a sketch attaches nothing', () => {
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+        fireEvent.click(screen.getByTestId('sketch-btn'));
+        fireEvent.click(screen.getByTestId('mock-annotator-cancel'));
+        expect(screen.queryByTestId('composer-attachment')).toBeNull();
+      });
+
       it('cancelling leaves the attachment unchanged', () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         fireEvent.change(screen.getByTestId('composer-file-input'), {
           target: { files: [new File(['b'], 'photo.png', { type: 'image/png' })] },
         });
@@ -1536,9 +1571,7 @@ describe('Composer', () => {
       });
 
       it('done replaces the attachment file/name and revokes the old preview URL', () => {
-        render(
-          <Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
-        );
+        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
         fireEvent.change(screen.getByTestId('composer-file-input'), {
           target: { files: [new File(['b'], 'photo.png', { type: 'image/png' })] },
         });
@@ -1564,7 +1597,7 @@ describe('Composer', () => {
 
     it('Shift+Enter inserts a newline instead of sending', () => {
       const onSend = vi.fn();
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: 'line one' } });
       fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
@@ -1573,7 +1606,7 @@ describe('Composer', () => {
 
     it('Enter during IME composition does not send', () => {
       const onSend = vi.fn();
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: 'こんにちは' } });
       fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
@@ -1582,14 +1615,14 @@ describe('Composer', () => {
 
     it('submitting with empty text and no attachments is a no-op', () => {
       const onSend = vi.fn();
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       fireEvent.click(screen.getByTestId('send-btn'));
       expect(onSend).not.toHaveBeenCalled();
     });
 
     it('pressing Enter with empty text and no attachments is also a no-op (bypasses the disabled send button)', () => {
       const onSend = vi.fn();
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.keyDown(input, { key: 'Enter' });
       expect(onSend).not.toHaveBeenCalled();
@@ -1607,7 +1640,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="new"
-          daemonId="d1"
+          hostId="d1"
           onSend={onSend}
           onStartVoiceNote={() => {}}
           resolveChatId={resolveChatId}
@@ -1632,7 +1665,7 @@ describe('Composer', () => {
 
     it('a synchronous false return from onSend restores the typed text', () => {
       const onSend = vi.fn(() => false);
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: 'retry me' } });
       fireEvent.click(screen.getByTestId('send-btn'));
@@ -1641,7 +1674,7 @@ describe('Composer', () => {
 
     it('a Promise<false> return from onSend restores the typed text asynchronously', async () => {
       const onSend = vi.fn(async () => false);
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: 'retry me too' } });
       fireEvent.click(screen.getByTestId('send-btn'));
@@ -1652,7 +1685,7 @@ describe('Composer', () => {
     it('a Promise<false> return does NOT clobber text the user already retyped while it was in flight', async () => {
       let resolveSend!: (v: boolean) => void;
       const onSend = vi.fn(() => new Promise<boolean>((r) => (resolveSend = r)));
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: 'first attempt' } });
       fireEvent.click(screen.getByTestId('send-btn'));
@@ -1667,7 +1700,7 @@ describe('Composer', () => {
 
     it('a Promise<true> (success) leaves the input cleared', async () => {
       const onSend = vi.fn(async () => true);
-      render(<Composer chatId="c1" daemonId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: 'ok' } });
       fireEvent.click(screen.getByTestId('send-btn'));
@@ -1677,7 +1710,7 @@ describe('Composer', () => {
 
     it('the voice-note button title reflects daemon-offline unavailability vs the normal hint', () => {
       usePresenceStore.getState().setHostOnline('d1', false);
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       expect(screen.getByTestId('voice-note-btn').getAttribute('title')).toContain('unavailable');
       usePresenceStore.getState().setHostOnline('d1', true);
     });
@@ -1686,12 +1719,7 @@ describe('Composer', () => {
       usePresenceStore.getState().setHostOnline('d1', false);
       const onStartVoiceNote = vi.fn();
       render(
-        <Composer
-          chatId="c1"
-          daemonId="d1"
-          onSend={() => {}}
-          onStartVoiceNote={onStartVoiceNote}
-        />,
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
       );
       const mic = screen.getByTestId('voice-note-btn');
       fireEvent.mouseDown(mic);
@@ -1703,12 +1731,7 @@ describe('Composer', () => {
     it('mic mouseUp without a preceding mousedown is a no-op', () => {
       const onStartVoiceNote = vi.fn();
       render(
-        <Composer
-          chatId="c1"
-          daemonId="d1"
-          onSend={() => {}}
-          onStartVoiceNote={onStartVoiceNote}
-        />,
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
       );
       expect(() => fireEvent.mouseUp(screen.getByTestId('voice-note-btn'))).not.toThrow();
       expect(onStartVoiceNote).not.toHaveBeenCalled();
@@ -1719,12 +1742,7 @@ describe('Composer', () => {
         useVoiceStore.getState().startNote(chatId, 'ptt');
       });
       render(
-        <Composer
-          chatId="c1"
-          daemonId="d1"
-          onSend={() => {}}
-          onStartVoiceNote={onStartVoiceNote}
-        />,
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
       );
       const mic = screen.getByTestId('voice-note-btn');
       fireEvent.mouseDown(mic);
@@ -1744,12 +1762,7 @@ describe('Composer', () => {
         useVoiceStore.getState().startNote(chatId, 'ptt');
       });
       render(
-        <Composer
-          chatId="c1"
-          daemonId="d1"
-          onSend={() => {}}
-          onStartVoiceNote={onStartVoiceNote}
-        />,
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
       );
       const mic = screen.getByTestId('voice-note-btn');
       fireEvent.mouseDown(mic);
@@ -1760,7 +1773,7 @@ describe('Composer', () => {
     });
 
     it('mic mouseLeave with nothing pressed is a no-op', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       expect(() => fireEvent.mouseLeave(screen.getByTestId('voice-note-btn'))).not.toThrow();
     });
 
@@ -1769,12 +1782,7 @@ describe('Composer', () => {
         useVoiceStore.getState().startNote(chatId, 'ptt');
       });
       render(
-        <Composer
-          chatId="c1"
-          daemonId="d1"
-          onSend={() => {}}
-          onStartVoiceNote={onStartVoiceNote}
-        />,
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
       );
       const mic = screen.getByTestId('voice-note-btn');
       // Quick tap → toggle session.
@@ -1860,7 +1868,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={onSend}
           previewFactory={preview.factory}
           recorderFactory={recorderFactory}
@@ -1889,7 +1897,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={recorderFactory}
@@ -1925,7 +1933,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -1947,7 +1955,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -1968,7 +1976,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -1996,7 +2004,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={opts.onSend}
           previewFactory={preview.factory}
           recorderFactory={async () => opts.rec as unknown as VoiceRecording}
@@ -2053,7 +2061,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={onSend}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2088,6 +2096,29 @@ describe('Composer', () => {
       await waitFor(() => expect(onSend).toHaveBeenCalledWith('late words'));
       expect(rec.stop).toHaveBeenCalledOnce();
       expect(input().value).toBe('');
+    });
+
+    it('shows a status line: Listening while recording, Transcribing while the upload runs, gone after', async () => {
+      let resolveT: ((v: { transcript: string }) => void) | undefined;
+      const mic = renderDictating({
+        onSend: vi.fn(),
+        rec: makeRec(),
+        transcribeClip: () => new Promise((r) => (resolveT = r)),
+      });
+      expect(screen.queryByTestId('dictation-status')).toBeNull();
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      await waitFor(() => expect(preview.opened()).toBe(1));
+      expect(screen.getByTestId('dictation-status').textContent).toBe('Listening…');
+      fireEvent.mouseDown(mic);
+      await waitFor(() =>
+        expect(screen.getByTestId('dictation-status').textContent).toMatch(/^Transcribing…/),
+      );
+      expect(screen.getByTestId('dictation-status').getAttribute('data-state')).toBe(
+        'transcribing',
+      );
+      resolveT!({ transcript: 'done' });
+      await waitFor(() => expect(screen.queryByTestId('dictation-status')).toBeNull());
     });
 
     it('send while dictating with nothing heard sends nothing and says so', async () => {
@@ -2141,7 +2172,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={onSend}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2169,19 +2200,14 @@ describe('Composer', () => {
 
     it('a note-mode composer does not take ⌘; — it stays a voice note', () => {
       render(
-        <Composer chatId="c-note" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
+        <Composer chatId="c-note" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
       );
       expect(composerMicFor('c-note')).toBeUndefined();
     });
 
     it('unmounting the composer releases ⌘;', () => {
       const { unmount } = render(
-        <Composer
-          chatId="c-gone"
-          daemonId="d1"
-          onSend={() => {}}
-          previewFactory={preview.factory}
-        />,
+        <Composer chatId="c-gone" hostId="d1" onSend={() => {}} previewFactory={preview.factory} />,
       );
       expect(composerMicFor('c-gone')).toBeDefined();
       unmount();
@@ -2194,7 +2220,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => recs[n++] as unknown as VoiceRecording}
@@ -2220,7 +2246,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2246,7 +2272,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => {
@@ -2270,7 +2296,7 @@ describe('Composer', () => {
       const apiSpy = vi
         .spyOn(api, 'voiceTranscribe')
         .mockResolvedValue({ ok: true, transcript: 'default path' });
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} />);
       const mic = screen.getByTestId('voice-note-btn');
       fireEvent.mouseDown(mic);
       fireEvent.mouseUp(mic);
@@ -2288,7 +2314,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={() => new Promise<VoiceRecording>((r) => (resolveStart = r))}
@@ -2309,7 +2335,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={() => new Promise<VoiceRecording>((_r, rej) => (rejectStart = rej))}
@@ -2334,7 +2360,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => {
@@ -2360,7 +2386,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2387,7 +2413,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2430,7 +2456,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2459,7 +2485,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2490,7 +2516,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={() => {
             throw new Error('no token');
@@ -2519,7 +2545,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           previewFactory={preview.factory}
           recorderFactory={async () => rec as unknown as VoiceRecording}
@@ -2544,7 +2570,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           autoFocus
@@ -2558,7 +2584,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           autoFocus
@@ -2583,7 +2609,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           autoFocus
@@ -2601,7 +2627,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           autoFocus
@@ -2619,7 +2645,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           autoFocus
@@ -2653,7 +2679,7 @@ describe('Composer', () => {
     });
 
     it('sits beside attach and the mic, sharing their icon size', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const call = screen.getByTestId('call-btn');
       expect(call).toBeInTheDocument();
       const attachIcon = screen.getByTestId('attach-btn').querySelector('svg')!;
@@ -2664,7 +2690,7 @@ describe('Composer', () => {
 
     it('starts a call on this chat directly when the chat already exists', async () => {
       const { startVoiceCall } = await import('../lib/voiceController.js');
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       fireEvent.click(screen.getByTestId('call-btn'));
       await waitFor(() => expect(startVoiceCall).toHaveBeenCalledWith('c1'));
     });
@@ -2677,7 +2703,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="new"
-          daemonId={null}
+          hostId={null}
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           resolveChatId={resolveChatId}
@@ -2694,7 +2720,7 @@ describe('Composer', () => {
       render(
         <Composer
           chatId="new"
-          daemonId={null}
+          hostId={null}
           onSend={() => {}}
           onStartVoiceNote={() => {}}
           resolveChatId={resolveChatId}
@@ -2707,7 +2733,7 @@ describe('Composer', () => {
 
     it('is disabled while the agent is offline, same as the mic', () => {
       usePresenceStore.getState().setHostOnline('d1', false);
-      render(<Composer chatId="c1" daemonId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       expect(screen.getByTestId('call-btn')).toBeDisabled();
       expect(screen.getByTestId('voice-note-btn')).toBeDisabled();
     });

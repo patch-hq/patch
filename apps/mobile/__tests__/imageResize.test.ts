@@ -22,6 +22,23 @@ beforeEach(() => {
 });
 
 describe('downscaleImage', () => {
+  it('never asks for a zero-pixel edge on an extreme aspect ratio (a tall strip or a panorama)', async () => {
+    manipulateSpy.mockResolvedValue({ uri: 'file:///out/strip.jpg', width: 0, height: 0 });
+    await downscaleImage({
+      uri: 'file:///in/strip.png',
+      name: 'strip.png',
+      mimeType: 'image/png',
+      width: 40000,
+      height: 10,
+    });
+    const [, ops] = manipulateSpy.mock.calls[0] as [
+      string,
+      Array<{ resize: { width: number; height: number } }>,
+    ];
+    expect(ops[0]!.resize.width).toBe(MAX_IMAGE_EDGE);
+    expect(ops[0]!.resize.height).toBeGreaterThanOrEqual(1);
+  });
+
   it('caps the longest edge and re-encodes to JPEG when the image is too large', async () => {
     manipulateSpy.mockResolvedValue({ uri: 'file:///out/resized.jpg', width: 0, height: 0 });
     const res = await downscaleImage({

@@ -20,7 +20,7 @@ const JOB = {
   trigger: { type: 'cron', expression: '0 9 * * *', timezone: 'Europe/London' },
   action: {
     type: 'spawn',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/home/tom/alpha',
     prompt: 'sweep the thing',
     notifyOnComplete: true,
@@ -33,7 +33,7 @@ async function stub(page: import('@playwright/test').Page): Promise<void> {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: ['/home/tom/alpha'], recent: [] }] }),
+      body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: ['/home/tom/alpha'], recent: [] }] }),
     }),
   );
   await page.route('**/api/skills**', (route) =>
@@ -86,7 +86,7 @@ test.describe('job editor — unsaved changes', () => {
   test('a new-job form nobody has touched shows no unsaved indicator', async ({ page }) => {
     await stub(page);
     await page.goto(NEW_JOB);
-    await expect(page.getByTestId('job-editor-back')).toBeVisible();
+    await expect(page.getByTestId('nav-back')).toBeVisible();
     await page.waitForTimeout(300);
     await expect(page.getByTestId('job-editor-unsaved')).toHaveCount(0);
   });
@@ -117,7 +117,7 @@ test.describe('job editor — unsaved changes', () => {
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
     await page.getByTestId('job-name').fill('Nightly sweep (edited)');
-    await page.getByTestId('job-editor-back').click();
+    await page.getByTestId('nav-back').click();
 
     const modal = page.getByTestId('confirm-modal');
     await expect(modal).toBeVisible();
@@ -138,7 +138,7 @@ test.describe('job editor — unsaved changes', () => {
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
     await page.getByTestId('job-name').fill('Nightly sweep (edited)');
-    await page.getByTestId('job-editor-back').click();
+    await page.getByTestId('nav-back').click();
     await page.getByTestId('confirm-ok').click();
     await expect(page.getByTestId('jobs-route')).toBeVisible();
   });
@@ -147,7 +147,7 @@ test.describe('job editor — unsaved changes', () => {
     await stub(page);
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
-    await page.getByTestId('job-editor-back').click();
+    await page.getByTestId('nav-back').click();
     await expect(page.getByTestId('jobs-route')).toBeVisible();
     await expect(page.getByTestId('confirm-modal')).toHaveCount(0);
   });

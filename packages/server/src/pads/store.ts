@@ -31,6 +31,8 @@ export class PadError extends Error {
   }
 }
 
+/** A drawn change may be a shape: its points are the outline, so every surface can still replay it as a stroke. */
+export const SHAPES = ['rectangle', 'ellipse', 'line', 'arrow'];
 export const KINDS = ['move', 'resize', 'text', 'delete', 'note', 'draw', 'duplicate'] as const;
 export type ChangeKind = (typeof KINDS)[number];
 // Repeat edits of one element while pending fold into one change; notes,
@@ -262,9 +264,29 @@ export class PadStore {
     const c = pad.changes.find((x) => x.id === changeId);
     if (!c) throw new PadError(404, `no change "${changeId}"`);
     if (c.status !== 'pending') throw new PadError(409, 'only a pending change can be edited');
-    for (const key of ['text', 'offset', 'dx', 'dy', 'width', 'height', 'after']) {
-      if (patch[key] !== undefined) c[key] = patch[key];
+    // The same rules `validateChange` applies on the way in: a wrong-typed value
+    // stored here would make every later Send throw. Nothing is applied until
+    // every field has passed.
+    const next: Record<string, unknown> = {};
+    for (const key of ['dx', 'dy', 'width', 'height']) {
+      if (patch[key] !== undefined) next[key] = num(patch[key], key);
     }
+    for (const key of ['text', 'after']) {
+      if (patch[key] === undefined) continue;
+      const v = patch[key];
+      if (typeof v !== 'string') throw new PadError(400, `${key} must be a string`);
+      if (key === 'text' && c.kind === 'note') {
+        if (!v.trim()) throw new PadError(400, 'a note needs text');
+        next[key] = v.trim();
+      } else next[key] = v;
+    }
+    if (patch['offset'] !== undefined) {
+      const o = patch['offset'];
+      if (!o || typeof o !== 'object') throw new PadError(400, 'offset must be an object');
+      const { x, y } = o as Record<string, unknown>;
+      next['offset'] = { x: num(x ?? 0, 'offset.x'), y: num(y ?? 0, 'offset.y') };
+    }
+    Object.assign(c, next);
     c.updatedAt = Date.now();
     this.save(pad);
     this.journal(id, 'update', c);
@@ -363,6 +385,8 @@ export function validateChange(input: unknown): NewChange {
   if (typeof target.context === 'string' && target.context)
     out['target'].context = target.context.slice(0, 300);
   if (inp['viewport'] !== undefined) {
+    if (!inp['viewport'] || typeof inp['viewport'] !== 'object')
+      throw new PadError(400, 'viewport must be an object with w and h');
     const w = num(inp['viewport'].w, 'viewport.w');
     const h = num(inp['viewport'].h, 'viewport.h');
     if (w < 200 || w > 4000 || h < 200 || h > 4000)
@@ -396,6 +420,11 @@ export function validateChange(input: unknown): NewChange {
     out['color'] = inp['color'];
     out['width'] = num(inp['width'], 'width');
     if (out['width'] < 1 || out['width'] > 24) throw new PadError(400, 'width must be 1–24');
+    if (inp['shape'] !== undefined) {
+      if (!SHAPES.includes(inp['shape']))
+        throw new PadError(400, `shape must be one of ${SHAPES.join(', ')}`);
+      out['shape'] = inp['shape'];
+    }
     out['over'] = Array.isArray(inp['over'])
       ? inp['over']
           .filter((x: unknown) => typeof x === 'string')

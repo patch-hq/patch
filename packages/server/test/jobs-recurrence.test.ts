@@ -2,7 +2,7 @@
 // lifecycle (register, fire, deregister, re-arm, filter), mirroring
 // jobs-cron.test.ts's coverage of CronScheduler.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,12 +15,36 @@ import {
   nextOccurrence,
   InvalidRecurrenceError,
 } from '../src/jobs/recurrence.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { hostConfirms } from './host-answer.js';
 
 const silentLogger = pino({ level: 'silent' });
 
 describe('nextOccurrence', () => {
+  it('answers an hourly rule at once instead of enumerating every hour since 2000', () => {
+    const started = Date.now();
+    const next = nextOccurrence(
+      'FREQ=HOURLY;BYMINUTE=0',
+      'Europe/London',
+      new Date('2026-10-11T00:00:00Z'),
+    );
+    expect(next?.toISOString()).toBe('2026-10-11T01:00:00.000Z');
+    expect(Date.now() - started).toBeLessThan(2_000);
+  }, 20_000);
+
+  it('keeps the phase of a sub-daily INTERVAL (every 5th hour counted from the 2000 anchor)', () => {
+    const next = nextOccurrence(
+      'FREQ=HOURLY;INTERVAL=5;BYMINUTE=0',
+      'UTC',
+      new Date('2026-10-11T00:00:00Z'),
+    );
+    const anchor = Date.UTC(2000, 0, 1);
+    const hoursSince = ((next as Date).getTime() - anchor) / 3_600_000;
+    expect(hoursSince % 5).toBe(0);
+    expect((next as Date).getTime()).toBeGreaterThan(Date.parse('2026-10-11T00:00:00Z'));
+    expect((next as Date).getTime()).toBeLessThanOrEqual(Date.parse('2026-10-11T05:00:00Z'));
+  }, 20_000);
+
   it('computes "every 3rd Sunday, May through August at 9am" correctly', () => {
     const rrule = 'FREQ=MONTHLY;BYDAY=SU;BYSETPOS=3;BYMONTH=5,6,7,8;BYHOUR=9;BYMINUTE=0';
     const after = new Date('2026-09-18T12:00:00Z');
@@ -87,10 +111,10 @@ describe('RecurrenceScheduler', () => {
 
   it('registers + fires + re-arms + deregisters a recurrence job', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -115,7 +139,7 @@ describe('RecurrenceScheduler', () => {
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0'),
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'gm at {{payload.firedAt}}',
       },
@@ -151,10 +175,10 @@ describe('RecurrenceScheduler', () => {
 
   it('disabled jobs do not run', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -173,7 +197,7 @@ describe('RecurrenceScheduler', () => {
     const job = jobs.create({
       name: 'x',
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0'),
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y' },
     });
     jobs.disable(job.id);
     expect(tasks.has(job.id)).toBe(false);
@@ -184,10 +208,10 @@ describe('RecurrenceScheduler', () => {
 
   it('a non-recurrence trigger job is left alone by the scheduler (no timer, no crash)', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -206,7 +230,7 @@ describe('RecurrenceScheduler', () => {
     const job = jobs.create({
       name: 'cron-job',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
     });
     expect(registrations).not.toContain(job.id);
     expect(scheduler.hasLiveTimer(job.id)).toBe(false);
@@ -217,10 +241,10 @@ describe('RecurrenceScheduler', () => {
 
   it('filter rejection logs filter-rejected, does not dispatch, and re-arms', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -242,7 +266,7 @@ describe('RecurrenceScheduler', () => {
       name: 'gated',
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0'),
       filter: 'payload.firedAt = "never"',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y' },
     });
     await tasks.get(job.id)!();
     expect(link.sent.find((s) => s.event.type === 'chat.spawn_request')).toBeUndefined();
@@ -256,10 +280,10 @@ describe('RecurrenceScheduler', () => {
 
   it('runtime JSONata filter error fails closed and still re-arms', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -281,7 +305,7 @@ describe('RecurrenceScheduler', () => {
       name: 'broken',
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0'),
       filter: '$assert(false, "boom")',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y' },
     });
     await tasks.get(job.id)!();
     expect(link.sent.find((s) => s.event.type === 'chat.spawn_request')).toBeUndefined();
@@ -295,10 +319,10 @@ describe('RecurrenceScheduler', () => {
 
   it('a dispatcher.dispatch() throw is caught, logged as dispatch-error, and still re-arms', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -319,7 +343,7 @@ describe('RecurrenceScheduler', () => {
     const job = jobs.create({
       name: 'bad-template',
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0'),
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: '{{#unclosed}}oops' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: '{{#unclosed}}oops' },
     });
     await tasks.get(job.id)!();
     hostConfirms(link);
@@ -334,11 +358,18 @@ describe('RecurrenceScheduler', () => {
   });
 
   it('a rule with no future occurrences logs a loud dispatch-error run and never registers a timer', async () => {
-    const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    // Saved in 2019, while its UNTIL was still ahead — the store refuses a
+    // rule that has already run out, so this is how one reaches the scheduler.
+    const jobs = new JobStore({
+      dataDir: dir,
+      logger: silentLogger,
+      watch: false,
+      nowMs: () => Date.UTC(2019, 0, 1),
+    });
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -358,7 +389,7 @@ describe('RecurrenceScheduler', () => {
     const job = jobs.create({
       name: 'expired-rule',
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0;UNTIL=20200201T000000Z'),
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y', prompt: 'go' },
     });
     // Never registered — there is nothing to arm a timer for.
     expect(tasks.has(job.id)).toBe(false);
@@ -374,10 +405,10 @@ describe('RecurrenceScheduler', () => {
 
   it('registers with a REAL setTimeout (no registerTimer hook) and hasLiveTimer reflects it', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -391,7 +422,7 @@ describe('RecurrenceScheduler', () => {
     const job = jobs.create({
       name: 'real-timer',
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0'),
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     expect(scheduler.hasLiveTimer(job.id)).toBe(true);
     expect(scheduler.hasLiveTimer('j_never_registered')).toBe(false);
@@ -402,12 +433,43 @@ describe('RecurrenceScheduler', () => {
     await jobs.close();
   });
 
-  it("editing a job's rrule re-arms immediately via onChange, not just on the next process restart", async () => {
+  it('never arms a setTimeout past the 32-bit limit (Node fires those after 1ms)', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: new InProcessHostLink(),
+      logger: silentLogger,
+      logs: new JobLogs(dir),
+    });
+    const scheduler = new RecurrenceScheduler({
+      jobs,
+      dispatcher,
+      logs: new JobLogs(dir),
+      logger: silentLogger,
+    });
+    const spy = vi.spyOn(globalThis, 'setTimeout');
+    scheduler.start();
+    // Yearly: the next fire is months away, far beyond 2^31-1 ms (~24.8 days).
+    jobs.create({
+      name: 'yearly',
+      trigger: recurrenceTrigger('FREQ=YEARLY;BYMONTH=1;BYMONTHDAY=1;BYHOUR=9;BYMINUTE=0'),
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
+    });
+    const delays = spy.mock.calls.map((c) => c[1] as number).filter((d) => typeof d === 'number');
+    spy.mockRestore();
+    expect(delays.length).toBeGreaterThan(0);
+    expect(Math.max(...delays)).toBeLessThanOrEqual(2 ** 31 - 1);
+    scheduler.stop();
+    dispatcher.close();
+    await jobs.close();
+  });
+
+  it("editing a job's rrule re-arms immediately via onChange, not just on the next process restart", async () => {
+    const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
+    const link = new InProcessHostLink();
+    const dispatcher = new JobDispatcher({
+      dataDir: dir,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -429,7 +491,7 @@ describe('RecurrenceScheduler', () => {
     const job = jobs.create({
       name: 'editable',
       trigger: recurrenceTrigger('FREQ=WEEKLY;BYDAY=SU;BYHOUR=9;BYMINUTE=0'),
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     const firstFireAt = seenFireAt.get(job.id);
     expect(firstFireAt).toBeDefined();
@@ -448,10 +510,10 @@ describe('RecurrenceScheduler', () => {
 
   it('fireForTesting throws for an unknown jobId', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });

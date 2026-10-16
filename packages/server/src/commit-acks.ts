@@ -10,25 +10,25 @@ export const COMMIT_ACK_DELAY_MS = 100;
 const SERVER_SURFACE = '_server';
 
 export interface CommitAcksDeps {
-  sendTo: (daemonId: string, surfaceId: string, event: WireEvent) => void;
-  isOnline: (daemonId: string) => boolean;
+  sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
+  isOnline: (hostId: string) => boolean;
   delayMs?: number;
 }
 
 export class CommitAcks {
-  private readonly pending = new Map<string, { daemonId: string; through: number }>();
+  private readonly pending = new Map<string, { hostId: string; through: number }>();
   private timer: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: CommitAcksDeps) {}
 
-  /** The server committed `seq` for this chat, which lives on `daemonId`. */
-  note(chatId: string, daemonId: string, seq: number): void {
+  /** The server committed `seq` for this chat, which lives on `hostId`. */
+  note(chatId: string, hostId: string, seq: number): void {
     const held = this.pending.get(chatId);
     if (held) {
-      held.daemonId = daemonId;
+      held.hostId = hostId;
       if (seq > held.through) held.through = seq;
     } else {
-      this.pending.set(chatId, { daemonId, through: seq });
+      this.pending.set(chatId, { hostId, through: seq });
     }
     if (!this.timer) {
       this.timer = setTimeout(() => this.send(), this.deps.delayMs ?? COMMIT_ACK_DELAY_MS);
@@ -42,10 +42,10 @@ export class CommitAcks {
     this.timer = null;
     const batch = [...this.pending.entries()];
     this.pending.clear();
-    for (const [chatId, { daemonId, through }] of batch) {
+    for (const [chatId, { hostId, through }] of batch) {
       // A host that is gone is told by `patch.log_sync` when it returns.
-      if (!this.deps.isOnline(daemonId)) continue;
-      this.deps.sendTo(daemonId, SERVER_SURFACE, { type: 'chat.committed', chatId, through });
+      if (!this.deps.isOnline(hostId)) continue;
+      this.deps.sendTo(hostId, SERVER_SURFACE, { type: 'chat.committed', chatId, through });
     }
   }
 

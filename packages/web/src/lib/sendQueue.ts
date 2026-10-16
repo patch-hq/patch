@@ -44,6 +44,10 @@ export interface SendMessageOptions {
   folder?: string;
   /** The socket to deliver on (the route's `ws`); retries use the live one. */
   send?: (event: WireEvent) => void;
+  /** "Send, wait until agent finished": the host holds it until the running turn ends. */
+  afterTurn?: boolean;
+  /** Called once the turn has been handed to delivery (after any upload), e.g. to promote it. */
+  onDelivered?: (localId: string) => void;
 }
 
 interface Outgoing {
@@ -145,7 +149,10 @@ function drain(chatId: string): void {
       item.refs!.length > 0 ? item.refs! : undefined,
       item.opts.send,
       item.disabledTools,
+      undefined,
+      item.opts.afterTurn,
     );
+    item.opts.onDelivered?.(item.localId);
   }
   if (chain.length === 0) chains.delete(chatId);
 }

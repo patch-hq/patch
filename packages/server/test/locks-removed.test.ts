@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { generateUserKeypair } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('lock system removed', () => {
   let dir: string;
@@ -26,8 +26,8 @@ describe('lock system removed', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(41));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const daemonLink = new InProcessDaemonLink();
-    return await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    return await buildAll({ logger: false, registry, hostLink });
   }
 
   // 404, not 401: the routes are gone entirely, not merely gated. A 401 would

@@ -53,7 +53,7 @@ export function formatReset(at: number, now: number = Date.now()): string {
 export function formatUntil(at: number, now: number = Date.now()): string {
   const ms = at - now;
   if (ms <= 0) return 'now';
-  const min = Math.round(ms / 60_000);
+  const min = Math.max(1, Math.round(ms / 60_000));
   if (min < 60) return `in ${min} min`;
   const hours = ms / 3_600_000;
   if (hours < 48) return `in ${Math.round(hours)} h`;

@@ -13,6 +13,8 @@ import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { Sidebar } from './components/Sidebar.js';
+import { SnoozeSheet } from './components/SnoozeSheet.js';
+import { loadSnoozedChats } from './lib/snoozedRows.js';
 import { MiniSidebar } from './components/MiniSidebar.js';
 import { SidebarExpandButton } from './components/SidebarExpandButton.js';
 import { SidebarBackdrop } from './components/SidebarBackdrop.js';
@@ -20,7 +22,7 @@ import { ToolsPanel } from './components/ToolsPanel.js';
 import { SideThreadsPanel } from './components/SideThreadsPanel.js';
 import { ColumnDivider } from './components/ColumnDivider.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
-import { DaemonOfflineBanner } from './components/DaemonOfflineBanner.js';
+import { HostOfflineBanner } from './components/HostOfflineBanner.js';
 import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
 import { WebUpdateBanner } from './components/WebUpdateBanner.js';
 import { ConnectionDiagnosticsGate } from './components/ConnectionDiagnostics.js';
@@ -36,12 +38,13 @@ import { TooltipHost } from './components/TooltipHost.js';
 import { ChatPaneRoute } from './routes/ChatPaneRoute.js';
 import { openMostRecentEditDiff, relativeToChatFolder } from './lib/openDiff.js';
 import { permissionDeliveryTracker } from './lib/permissionDeliveryTracker.js';
-import { navigateAfterArchive } from './lib/archiveNav.js';
+import { navigateAfterArchive, useLeaveWhenArchivedElsewhere } from './lib/archiveNav.js';
 import { PageNotFound } from './components/PageNotFound.js';
 import { AppErrorBoundary } from './components/AppErrorBoundary.js';
 import { NewChatRoute } from './routes/NewChatRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { PadsPaneRoute } from './routes/PadsPaneRoute.js';
+import { ViewPositionSync } from './components/ViewPositionSync.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
@@ -56,7 +59,10 @@ import { useShiftClickGuard } from './lib/shiftClickGuard.js';
 import { useResponsiveShell } from './lib/responsiveShell.js';
 import { useSectionCounts } from './lib/sectionCounts.js';
 import { useDocumentTitleSync } from './lib/documentTitle.js';
+import { useFrontChatReport } from './lib/frontChat.js';
 import { useChatStore, deriveBadge } from './stores/chatStore.js';
+import { useSelectionStore } from './stores/selectionStore.js';
+import { stepVisibleChat } from './lib/chatGroups.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { isMeetingOpen, useMeetingStore } from './stores/meetingStore.js';
 import { endMeeting, startMeeting } from './lib/meetingControl.js';
@@ -111,11 +117,12 @@ export function AppShell(): JSX.Element {
   // (spec/14 § New chat drafts).
   useDiscardUnsentNewChats();
   const activeChatId = useChatStore((s) => s.activeChatId);
+  useLeaveWhenArchivedElsewhere(navigate);
   const hydrate = useChatStore((s) => s.hydrate);
   const pushError = useUiStore((s) => s.pushError);
 
   // Cold-start: GET /api/chats → hydrate sidebar BEFORE the WS arrives.
-  const { error: chatsError } = useQuery({
+  const { error: chatsError, isSuccess: chatsLoaded } = useQuery({
     queryKey: ['chats'],
     queryFn: async () => {
       const r = await api.listChats();
@@ -123,7 +130,7 @@ export function AppShell(): JSX.Element {
         r.chats.map((c) => ({
           chatId: c.chatId,
           name: c.name,
-          daemonId: c.daemonId,
+          hostId: c.hostId,
           permissionMode: c.permissionMode,
           // G2-d4: the daemon-captured first-message snippet — lets the sidebar
           // label unnamed/archived rows distinctly even when several share a
@@ -160,6 +167,22 @@ export function AppShell(): JSX.Element {
       return r;
     },
   });
+
+  // The snapshot above leaves snoozed chats out; the sidebar folds them into
+  // their project, so they follow it in (after it, because hydrate replaces).
+  const { error: snoozedError } = useQuery({
+    queryKey: ['chats-snoozed'],
+    queryFn: async () => {
+      await loadSnoozedChats();
+      return true;
+    },
+    enabled: chatsLoaded,
+  });
+  useEffect(() => {
+    if (snoozedError) {
+      pushError(`failed to load snoozed chats: ${(snoozedError as Error).message}`);
+    }
+  }, [snoozedError, pushError]);
 
   useEffect(() => {
     if (chatsError) {
@@ -205,6 +228,7 @@ export function AppShell(): JSX.Element {
   // Dock / browser tabs can tell Patch windows apart without clicking into
   // each one (see lib/documentTitle.ts).
   useDocumentTitleSync();
+  useFrontChatReport();
 
   // The account preferences the voice layer reads without an await — the
   // address word a quiet call gates utterances on (spec/07 § Session modes).
@@ -578,13 +602,14 @@ export function AppShell(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell">
       <OfflineBanner />
+      <ViewPositionSync ws={wsRef.current} />
       {/* App-level, not per-chat: the WS can be connected while every daemon
           is offline, and that is just as true on Jobs/Settings/New chat as it
           is inside an open chat (Patch Updates: "a bar when something not
           connected on main screen"). Rendering it once here, instead of inside
           ChatRoute, means it is never missing on the screens that aren't a
           chat, and never doubled on the ones that are. */}
-      <DaemonOfflineBanner />
+      <HostOfflineBanner />
       {/* Standing chrome, not an interruption: the shell has a newer build
           staged and is waiting to be asked. Renders nothing in a browser. */}
       <DesktopUpdateBanner />
@@ -695,6 +720,7 @@ export function AppShell(): JSX.Element {
       <ShortcutCheatSheet />
       <ConnectionDiagnosticsGate />
       <ErrorToasts />
+      <SnoozeSheet />
       <ConfirmModal />
       <PromptModal />
       <TooltipHost />
@@ -707,22 +733,12 @@ function navigateChat(
   location: { pathname: string },
   navigate: (to: string) => void,
 ): void {
-  const chats = useChatStore.getState().chats;
-  const ordered = Object.values(chats)
-    .filter((c) => c.status !== 'archived')
-    .sort((a, b) => b.lastUpdated - a.lastUpdated);
-  if (ordered.length === 0) return;
+  // The sidebar publishes the order it draws; stepping through anything else
+  // lands on chats the user cannot see (hidden, snoozed, collapsed).
+  const order = useSelectionStore.getState().order;
   const match = location.pathname.match(/\/chats\/([^/]+)/);
-  const currentId = match ? match[1] : null;
-  const idx = currentId ? ordered.findIndex((c) => c.chatId === currentId) : -1;
-  let nextIdx: number;
-  if (idx < 0) {
-    nextIdx = delta > 0 ? 0 : ordered.length - 1;
-  } else {
-    nextIdx = (idx + delta + ordered.length) % ordered.length;
-  }
-  const next = ordered[nextIdx];
-  if (next) navigate(`/chats/${next.chatId}`);
+  const next = stepVisibleChat(order, match?.[1] ?? null, delta);
+  if (next) navigate(`/chats/${next}`);
 }
 
 /**

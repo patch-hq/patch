@@ -136,13 +136,13 @@ describe('the host rename commits from the field', () => {
   it('commits on ↵', () => {
     fireEvent.change(field(), { target: { value: 'desk' } });
     fireEvent.keyDown(field(), { key: 'Enter' });
-    expect(renames()).toEqual([{ type: 'host.rename', daemonId: 'host-a', hostName: 'desk' }]);
+    expect(renames()).toEqual([{ type: 'host.rename', hostId: 'host-a', hostName: 'desk' }]);
   });
 
   it('commits on ⌘↵ too', () => {
     fireEvent.change(field(), { target: { value: 'desk' } });
     fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true });
-    expect(renames()).toEqual([{ type: 'host.rename', daemonId: 'host-a', hostName: 'desk' }]);
+    expect(renames()).toEqual([{ type: 'host.rename', hostId: 'host-a', hostName: 'desk' }]);
   });
 
   it('refuses an empty name on the chord exactly as it does on blur', () => {

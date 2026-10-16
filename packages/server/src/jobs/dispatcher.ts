@@ -6,7 +6,7 @@
 //      `chat.input` (action.type === 'message') wire event.
 //   3. If the job is at its concurrency limit → queue the fire
 //      (spec/08 ## Concurrency) and stop here.
-//   4. If the ACTION'S OWN HOST is online → send via daemon-link.
+//   4. If the ACTION'S OWN HOST is online → send via host-link.
 //      If offline → buffer to `<dataDir>/pending/<jobId>-<ulid>.jsonl`.
 //   5. On host online transition → flush per-job in order, max 100 per
 //      job (drop-oldest with WARN).
@@ -52,6 +52,7 @@
 //   - Mustache reference to a missing payload key → empty string (this is
 //     mustache's standard behaviour). Logged at debug.
 
+import { parsePersisted } from '../persisted-json.js';
 import {
   appendFileSync,
   existsSync,
@@ -64,7 +65,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import Mustache from 'mustache';
-import { ulid } from 'ulid';
+import { monotonicFactory } from 'ulid';
 import type { Logger } from 'pino';
 import type {
   ChatActivity,
@@ -86,9 +87,15 @@ import {
   DEFAULT_JOB_AUTONOMY_PROMPT,
 } from '@patch/wire/jobs';
 import type { JobGate, JobTrigger } from '@patch/wire/jobs';
-import type { DaemonLink } from '../daemon-link.js';
+import type { HostLink } from '../host-link.js';
 import { digestPayload, type JobLogs, type RunLogEntry } from './logs.js';
-import type { Job, JobAction, JobsInterface } from './types.js';
+import { evaluateFilter, filterContext } from './filter.js';
+import { jobFires, type Job, type JobAction, type JobsInterface } from './types.js';
+
+// Mustache without escaping: what it renders is delivered to a Claude chat as a
+// user turn or slugged into a chat key, never shown as HTML. Set at load, since
+// the key renders run before any prompt render does.
+Mustache.escape = (s): string => s;
 
 const DEFAULT_PENDING_CAP_PER_JOB = 100;
 /**
@@ -155,7 +162,7 @@ export interface JobQueueInFlightEntry {
   startedAt: number;
   trigger: RunTrigger;
   actionType: JobAction['type'];
-  daemonId: string | null;
+  hostId: string | null;
   folder?: string;
 }
 
@@ -167,7 +174,7 @@ export interface JobQueueWaitingEntry {
   chatId: string;
   trigger: RunTrigger;
   actionType: JobAction['type'];
-  daemonId: string | null;
+  hostId: string | null;
   folder?: string;
 }
 
@@ -189,9 +196,34 @@ export interface JobQueueView {
 /** Which trigger fired this dispatch — carried onto the run entry. */
 export type RunTrigger = RunLogEntry['trigger'];
 
+/** A buffered fire that has waited past `lateAfterMs` for its host. */
+export interface LateFireInfo {
+  jobId: string;
+  jobName: string;
+  fireId: string;
+  /** The host the fire is waiting for. */
+  hostId: string | null;
+  /** When the fire was due (ms epoch). */
+  dueAt: number;
+  /** The chat the fire will land in, once it runs. */
+  chatId: string;
+  /** The job's cron timezone, for showing `dueAt` as its schedule reads. */
+  timezone?: string;
+}
+
+/** A buffered fire counts as late — alerted, and labelled when it runs — past this. */
+const DEFAULT_LATE_AFTER_MS = 10 * 60_000;
+
 export interface DispatcherOptions {
   dataDir: string;
-  daemonLink: DaemonLink;
+  /**
+   * Called once per buffered fire when it has waited more than `lateAfterMs`
+   * for its host (spec/12 § Cron fires while a host is down). Without it a fire
+   * for a sleeping machine sits unseen until the machine wakes.
+   */
+  onLate?: (info: LateFireInfo) => void;
+  lateAfterMs?: number;
+  hostLink: HostLink;
   logger: Logger;
   /** Run log — the dispatcher owns the run entry for every fire it takes. */
   logs: JobLogs;
@@ -214,6 +246,13 @@ export interface DispatcherOptions {
    */
   chatHost?: (chatId: string) => string | null;
   /**
+   * The model a chat is running on right now (ChatRegistry mirror), null when
+   * unknown. A `continue` fire into an existing chat compares it with the
+   * job's stored model and switches the chat when they differ (spec/08 ##
+   * Action). Defaults to "unknown".
+   */
+  chatModel?: (chatId: string) => string | null;
+  /**
    * Has this host re-announced its chats since the server started
    * (ChatRegistry.hasSynced)? Until it has, `chatExists` answering false for a
    * chat on it means "not known yet", not "missing": the mirror is in memory
@@ -221,7 +260,7 @@ export interface DispatcherOptions {
    * report rather than spawning its durable chat a second time. Defaults to
    * "reported" — callers without a registry keep the old behaviour.
    */
-  hostReported?: (daemonId: string) => boolean;
+  hostReported?: (hostId: string) => boolean;
   /**
    * The model a job's chat runs on when the job's action names none — the
    * account's `defaultModel` (spec/08 § Action).
@@ -288,7 +327,7 @@ export interface DispatcherOptions {
    * second settle a genuine no-op: the stamp lives in one place instead of in
    * dispatcher memory that would have to be kept in step with it.
    */
-  jobs?: Pick<JobsInterface, 'expireOneOff' | 'get'>;
+  jobs?: Pick<JobsInterface, 'expireOneOff' | 'get' | 'list'>;
 }
 
 /**
@@ -319,11 +358,11 @@ function gateFireKey(fireId: string): string {
  * told that 1 means hold and that a hold has to say why, not that their command
  * exited 1 (`gateVerdict`).
  */
-function gateFaultMessage(exitCode: number | null, daemonError: string | undefined): string {
+function gateFaultMessage(exitCode: number | null, hostError: string | undefined): string {
   if (exitCode === 1) {
     return 'gate exited 1, which means hold, but printed no reason on stdout — a hold must say why, so this is a fault rather than a quiet week';
   }
-  if (daemonError !== undefined) return daemonError;
+  if (hostError !== undefined) return hostError;
   return `gate exited ${exitCode === null ? 'without a code' : String(exitCode)}`;
 }
 
@@ -388,6 +427,11 @@ interface GatingFire {
 }
 
 interface PendingEntry {
+  /** The job's name and cron timezone when the fire was buffered, for the late alert and label. */
+  jobName?: string;
+  timezone?: string;
+  /** Set once `onLate` has been called for this fire, so a restart does not repeat it. */
+  lateNotified?: boolean;
   /** A passing gate's output, carried onto the run row this fire eventually writes. */
   gateOutput?: string;
   jobId: string;
@@ -404,7 +448,7 @@ interface PendingEntry {
   payloadDigest: string;
   actionType: JobAction['type'];
   /** The host this fire is queued for (spawn/ensure), else the chat's host. */
-  daemonId: string | null;
+  hostId: string | null;
   folder?: string;
   /**
    * The job's limit when the fire was made, if it had one. Carried so a fire
@@ -425,6 +469,8 @@ interface PendingEntry {
    * out is decided when the host has reported, at release — never before.
    */
   ensureInput?: ChatInputEvent;
+  /** The job's stored model on a `continue` fire — what the chat should run on. */
+  model?: string;
 }
 
 /** The queue a fire or slot counts against: its keyed scope, else the whole job. */
@@ -475,7 +521,7 @@ interface HeldSlotRecord {
    */
   trigger: RunTrigger;
   actionType: JobAction['type'];
-  daemonId: string | null;
+  hostId: string | null;
   folder?: string;
 }
 
@@ -500,7 +546,7 @@ interface AwaitedOutcome {
   chatId: string;
   localId: string;
   /** The host the fire was addressed to — named in the log either way. */
-  daemonId: string | null;
+  hostId: string | null;
   folder?: string;
   /** Fire time — the run entry is stamped when it FIRED, not when it settled. */
   ts: number;
@@ -512,7 +558,7 @@ interface AwaitedOutcome {
 export class JobDispatcher {
   private readonly pendingDir: string;
   private readonly logger: Logger;
-  private readonly daemonLink: DaemonLink;
+  private readonly hostLink: HostLink;
   private readonly idGenerator: () => string;
   private readonly cap: number;
   private readonly chatExists: (chatId: string) => boolean;
@@ -521,7 +567,7 @@ export class JobDispatcher {
    * race where two fires land before the host's `chat.spawned` round-trips
    * back into the registry: the second fire sees this set and sends `chat.input`
    * instead of a duplicate spawn (the host throws on a re-spawn of the same
-   * chatId). The daemon-link is ordered, so a spawn followed by an input both
+   * chatId). The host-link is ordered, so a spawn followed by an input both
    * arrive in order and the input lands in the just-created chat.
    */
   private readonly ensureSpawned = new Set<string>();
@@ -549,13 +595,14 @@ export class JobDispatcher {
   private eventUnsub: (() => void) | null = null;
   private readonly logs: JobLogs;
   private readonly chatHost: (chatId: string) => string | null;
-  private readonly hostReported: (daemonId: string) => boolean;
+  private readonly chatModel: (chatId: string) => string | null;
+  private readonly hostReported: (hostId: string) => boolean;
   private readonly ackTimeoutMs: number;
   private readonly nowMs: () => number;
   /**
    * Fires waiting on their host's answer, keyed by the chatId the fire names.
    * A list per chat because an `ensure`/`message` job can have two fires in
-   * flight at once; they settle in order (the daemon-link is ordered).
+   * flight at once; they settle in order (the host-link is ordered).
    */
   private readonly awaiting = new Map<string, AwaitedOutcome[]>();
   private readonly queuedDir: string;
@@ -581,7 +628,7 @@ export class JobDispatcher {
   private readonly chatLinks:
     | { record: (chatId: string, jobId: string) => void; get: (chatId: string) => string | null }
     | undefined;
-  private readonly jobs: Pick<JobsInterface, 'expireOneOff' | 'get'> | undefined;
+  private readonly jobs: Pick<JobsInterface, 'expireOneOff' | 'get' | 'list'> | undefined;
   private readonly heldDir: string;
   private heldTimer: ReturnType<typeof setInterval> | null = null;
   /**
@@ -605,6 +652,8 @@ export class JobDispatcher {
   /** Each job's limit as of its most recent fire, for its views. Absent → none. */
   private readonly jobLimits = new Map<string, number>();
   private readonly appendDir: string;
+  private readonly onLate: ((info: LateFireInfo) => void) | undefined;
+  private readonly lateAfterMs: number;
 
   constructor(opts: DispatcherOptions) {
     this.pendingDir = join(opts.dataDir, 'pending');
@@ -613,13 +662,16 @@ export class JobDispatcher {
     this.appendDir = join(opts.dataDir, 'append');
     this.heldDir = join(opts.dataDir, 'held');
     this.logger = opts.logger;
-    this.daemonLink = opts.daemonLink;
+    this.hostLink = opts.hostLink;
     this.logs = opts.logs;
-    this.idGenerator = opts.idGenerator ?? ((): string => ulid());
+    // Monotonic: plain ulid()s from the same millisecond sort randomly, and held,
+    // queued and buffered fires are replayed in id order within a timestamp.
+    this.idGenerator = opts.idGenerator ?? monotonicFactory();
     this.cap = opts.pendingCapPerJob ?? DEFAULT_PENDING_CAP_PER_JOB;
     this.slotTimeoutMs = opts.slotTimeoutMs ?? DEFAULT_SLOT_TIMEOUT_MS;
     this.chatExists = opts.chatExists ?? ((): boolean => false);
     this.chatHost = opts.chatHost ?? ((): string | null => null);
+    this.chatModel = opts.chatModel ?? ((): string | null => null);
     this.hostReported = opts.hostReported ?? ((): boolean => true);
     this.chatActivity = opts.chatActivity ?? ((): ChatActivity | null => null);
     this.chatHasWorked = opts.chatHasWorked;
@@ -629,13 +681,15 @@ export class JobDispatcher {
     this.jobs = opts.jobs;
     this.ackTimeoutMs = opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS;
     this.nowMs = opts.nowMs ?? ((): number => Date.now());
+    this.onLate = opts.onLate;
+    this.lateAfterMs = opts.lateAfterMs ?? DEFAULT_LATE_AFTER_MS;
     if (!existsSync(this.pendingDir)) mkdirSync(this.pendingDir, { recursive: true });
     // Slots and queued fires are server-owned state that must outlive a
     // restart (spec/08 ## Concurrency), so both are read back at construction:
     // the queue so nothing queued is lost, the slots so a restart does not
     // start a second build on top of one still running.
     this.loadSlots();
-    this.statusUnsub = this.daemonLink.onStatus((s) => {
+    this.statusUnsub = this.hostLink.onStatus((s) => {
       if (s === 'online') {
         // Reconcile BEFORE releasing anything: the chat mirror is only seeded
         // once a host is back, so this is the first moment the server can tell
@@ -646,11 +700,11 @@ export class JobDispatcher {
       }
     });
     // The run entry for every fire comes from what the host says back.
-    this.eventUnsub = this.daemonLink.onEvent((event, fromDaemonId) => {
-      this.onDaemonEvent(event, fromDaemonId);
+    this.eventUnsub = this.hostLink.onEvent((event, fromHostId) => {
+      this.onHostEvent(event, fromHostId);
     });
     // If we boot up with the host already online, flush at startup too.
-    if (this.daemonLink.status() === 'online') {
+    if (this.hostLink.status() === 'online') {
       // Defer to next tick so callers wiring this up have a chance to attach.
       queueMicrotask(() => {
         this.reconcileSlots();
@@ -660,7 +714,10 @@ export class JobDispatcher {
     }
     // Held fires wait on the clock, not on a host event, so something has to
     // look at the clock. Once a minute is finer than the window's HH:MM edges.
-    this.heldTimer = setInterval(() => this.releaseHeld(), HELD_CHECK_MS);
+    this.heldTimer = setInterval(() => {
+      this.releaseHeld();
+      this.checkLate();
+    }, HELD_CHECK_MS);
     this.heldTimer.unref();
   }
 
@@ -709,10 +766,10 @@ export class JobDispatcher {
       if (!w) return;
       this.writeRun(w, {
         status: 'dispatch-error',
-        error: `no answer from host ${w.daemonId ?? 'unknown'} within ${bound}ms — the fire was sent but never confirmed`,
+        error: `no answer from host ${w.hostId ?? 'unknown'} within ${bound}ms — the fire was sent but never confirmed`,
       });
       this.logger.error(
-        { jobId: w.jobId, daemonId: w.daemonId, chatId: w.chatId },
+        { jobId: w.jobId, hostId: w.hostId, chatId: w.chatId },
         'jobs: dispatch unconfirmed by host, recorded dispatch-error',
       );
       // Unconfirmed means it never landed, so nothing is running behind this
@@ -752,7 +809,7 @@ export class JobDispatcher {
     return this.take(newest.chatId, newest.w.localId);
   }
 
-  private onDaemonEvent(event: WireEvent, fromDaemonId: string | null): void {
+  private onHostEvent(event: WireEvent, fromHostId: string | null): void {
     // A host's folders.list closes its chat re-announcement: any `ensure` held
     // for it can now be decided. Deferred a tick so the ChatRegistry, which
     // observes the same frame, has marked the host reported whatever order the
@@ -772,7 +829,7 @@ export class JobDispatcher {
     // This is the same stream the ChatRegistry mirrors, so the gate sees a
     // chat's activity at the moment the registry does.
     if (event.type === 'chat.state') {
-      this.observeChatActivity(event.chatId, event.activity);
+      this.observeChatActivity(event.chatId, event.activity, event.rateLimitResumingAt ?? null);
       return;
     }
     if (event.type === 'chat.spawned') {
@@ -848,19 +905,19 @@ export class JobDispatcher {
       // it: a spawn that lands and then dies is indistinguishable, in the run
       // log, from one that worked.
       if (!w) {
-        this.recordChatError(event.chatId, event.error, fromDaemonId);
+        this.recordChatError(event.chatId, event.error, fromHostId);
         return;
       }
-      // spec/08 ## Logs: name the host and carry ITS error text. `fromDaemonId`
+      // spec/08 ## Logs: name the host and carry ITS error text. `fromHostId`
       // is the machine that actually raised it (authoritative); the addressed
       // host is the fallback label when the link could not attribute it.
-      const host = fromDaemonId ?? w.daemonId ?? 'unknown';
+      const host = fromHostId ?? w.hostId ?? 'unknown';
       this.writeRun(w, {
         status: 'dispatch-error',
         error: `host ${host} refused the action: ${event.error.code}: ${event.error.message}`,
       });
       this.logger.error(
-        { jobId: w.jobId, daemonId: host, code: event.error.code, err: event.error.message },
+        { jobId: w.jobId, hostId: host, code: event.error.code, err: event.error.message },
         'jobs: host refused the dispatched action',
       );
       // A refused fire is not in flight — its slot goes back now rather than
@@ -880,7 +937,7 @@ export class JobDispatcher {
   private recordChatError(
     chatId: string,
     error: { code: string; message: string },
-    fromDaemonId: string | null,
+    fromHostId: string | null,
   ): void {
     // A session the host refused to resume is RECOVERABLE, and only here can
     // anyone act on it: the refusal has just marked the chat `errored`, which
@@ -902,13 +959,13 @@ export class JobDispatcher {
       jobId: string;
       trigger: RunTrigger;
       actionType: JobAction['type'];
-      daemonId: string | null;
+      hostId: string | null;
       folder?: string;
     }> = held.map((slot) => ({
       jobId: slot.jobId,
       trigger: slot.trigger,
       actionType: slot.actionType,
-      daemonId: slot.daemonId,
+      hostId: slot.hostId,
       ...(slot.folder !== undefined ? { folder: slot.folder } : {}),
     }));
     if (attributions.length === 0) {
@@ -922,7 +979,7 @@ export class JobDispatcher {
           jobId: linkedJobId,
           trigger: 'manual',
           actionType: 'spawn',
-          daemonId: fromDaemonId,
+          hostId: fromHostId,
         });
       }
     }
@@ -938,12 +995,12 @@ export class JobDispatcher {
         action: {
           type: at.actionType,
           chatId,
-          ...(at.daemonId !== null ? { daemonId: at.daemonId } : {}),
+          ...(at.hostId !== null ? { hostId: at.hostId } : {}),
           ...(at.folder !== undefined ? { folder: at.folder } : {}),
         },
       });
       this.logger.error(
-        { jobId: at.jobId, chatId, daemonId: fromDaemonId ?? at.daemonId, code: error.code },
+        { jobId: at.jobId, chatId, hostId: fromHostId ?? at.hostId, code: error.code },
         'jobs: a chat this job spawned has errored',
       );
     }
@@ -1013,7 +1070,7 @@ export class JobDispatcher {
         // the `run` half of the same record that a hold writes (spec/08 § Gate).
         // A `script` action has output of its own and keeps it.
         ...(!script && w.gateOutput !== undefined ? { output: w.gateOutput } : {}),
-        ...(w.daemonId !== null ? { daemonId: w.daemonId } : {}),
+        ...(w.hostId !== null ? { hostId: w.hostId } : {}),
         ...(w.folder !== undefined ? { folder: w.folder } : {}),
       },
     });
@@ -1023,6 +1080,55 @@ export class JobDispatcher {
     // decides whether there is anything to retire (not one-off / already
     // stamped → no-op), so a second fire settling ok changes nothing.
     if (outcome.status === 'ok') this.expireIfOneOff(w.jobId);
+    this.fireFollowers(w.jobId, outcome.status, outcome.chatId);
+  }
+
+  /**
+   * Fire every enabled job whose `follows` trigger names `jobId` and accepts
+   * this outcome (spec/08 § Follows). Isolated like `expireIfOneOff`: a
+   * follower that fails to fire is logged on its own run row and can never
+   * cost the followed job its run entry.
+   */
+  private fireFollowers(jobId: string, status: 'ok' | 'dispatch-error', chatId?: string): void {
+    if (!this.jobs) return;
+    for (const follower of this.jobs.list()) {
+      const t = follower.trigger;
+      if (t.type !== 'follows' || t.jobId !== jobId || !jobFires(follower)) continue;
+      if (t.on !== 'any' && status !== 'ok') continue;
+      const payload = filterContext(this.nowMs(), {
+        followedJobId: jobId,
+        status,
+        ...(chatId !== undefined ? { chatId } : {}),
+      });
+      void this.fireFollower(follower, payload);
+    }
+  }
+
+  private async fireFollower(
+    follower: Job,
+    payload: ReturnType<typeof filterContext>,
+  ): Promise<void> {
+    const base = {
+      ts: this.nowMs(),
+      jobId: follower.id,
+      trigger: 'follows' as const,
+      payloadDigest: digestPayload(payload),
+    };
+    try {
+      if (!(await evaluateFilter(follower.filter, payload))) {
+        this.logs.appendRun({ ...base, status: 'filter-rejected' });
+        return;
+      }
+      this.dispatch(follower, payload, 'follows');
+    } catch (err) {
+      const message = (err as Error).message;
+      this.logger.error({ jobId: follower.id, err: message }, 'jobs: follower dispatch failed');
+      this.logs.appendRun({
+        ...base,
+        status: follower.filter ? 'filter-error' : 'dispatch-error',
+        error: message,
+      });
+    }
   }
 
   /**
@@ -1065,7 +1171,7 @@ export class JobDispatcher {
     const now = this.nowMs();
     const file = join(this.appendDir, `${ensureChatId(job.id, keySlug)}.json`);
     let state: AppendState | undefined;
-    if (existsSync(file)) state = JSON.parse(readFileSync(file, 'utf8')) as AppendState;
+    if (existsSync(file)) state = parsePersisted(readFileSync(file, 'utf8')) as AppendState;
     if (
       state === undefined ||
       (q.idleTimeoutMs !== undefined && now - state.lastFireAt >= q.idleTimeoutMs) ||
@@ -1115,7 +1221,7 @@ export class JobDispatcher {
           startedAt: s.acquiredAt,
           trigger: s.trigger,
           actionType: s.actionType,
-          daemonId: s.daemonId,
+          hostId: s.hostId,
           ...(s.folder !== undefined ? { folder: s.folder } : {}),
         });
       }
@@ -1131,7 +1237,7 @@ export class JobDispatcher {
       chatId: e.chatId,
       trigger: e.trigger,
       actionType: e.actionType,
-      daemonId: e.daemonId,
+      hostId: e.hostId,
       ...(e.folder !== undefined ? { folder: e.folder } : {}),
     }));
     return { concurrency: this.jobLimits.get(jobId) ?? null, inFlight, queued };
@@ -1151,10 +1257,8 @@ export class JobDispatcher {
     return (this.slots.get(chatId) ?? []).some((s) => s.jobId === jobId);
   }
 
-  private hostOnline(daemonId: string | null): boolean {
-    return daemonId !== null
-      ? this.daemonLink.isOnline(daemonId)
-      : this.daemonLink.status() === 'online';
+  private hostOnline(hostId: string | null): boolean {
+    return hostId !== null ? this.hostLink.isOnline(hostId) : this.hostLink.status() === 'online';
   }
 
   /** Take a slot for a fire about to go out. No limit on the job → no slot. */
@@ -1170,7 +1274,7 @@ export class JobDispatcher {
       concurrency,
       trigger: entry.trigger,
       actionType: entry.actionType,
-      daemonId: entry.daemonId,
+      hostId: entry.hostId,
       ...(entry.folder !== undefined ? { folder: entry.folder } : {}),
     };
     if (!existsSync(this.inflightDir)) mkdirSync(this.inflightDir, { recursive: true });
@@ -1208,7 +1312,7 @@ export class JobDispatcher {
         action: {
           type: taken.actionType,
           chatId: taken.chatId,
-          ...(taken.daemonId !== null ? { daemonId: taken.daemonId } : {}),
+          ...(taken.hostId !== null ? { hostId: taken.hostId } : {}),
           ...(taken.folder !== undefined ? { folder: taken.folder } : {}),
         },
       });
@@ -1250,15 +1354,22 @@ export class JobDispatcher {
   /**
    * A chat the gate is watching changed activity. A freshly-spawned chat is
    * reported idle BEFORE its first turn, so only an idle that FOLLOWS work
-   * frees a slot; an errored chat frees one either way (it is not going to do
-   * anything else).
+   * frees a slot. A chat parked for an automatic retry is still the same
+   * in-flight job even though its activity is idle/errored: it keeps the slot
+   * until the retry runs and genuinely finishes. Otherwise the next timed fire
+   * starts beside it and both perform the same work when the retry wakes.
    */
-  private observeChatActivity(chatId: string, activity: ChatActivity): void {
+  private observeChatActivity(
+    chatId: string,
+    activity: ChatActivity,
+    rateLimitResumingAt: number | null,
+  ): void {
     if (!this.slots.has(chatId)) return;
     if (WORKING_ACTIVITIES.has(activity)) {
       this.workedSince.add(chatId);
       return;
     }
+    if (rateLimitResumingAt !== null) return;
     if (activity === 'idle' && !this.workedSince.has(chatId)) return;
     this.workedSince.delete(chatId);
     this.releaseSlot(chatId);
@@ -1277,7 +1388,7 @@ export class JobDispatcher {
       if (!filename.endsWith('.json')) continue;
       let record: HeldSlotRecord;
       try {
-        record = JSON.parse(
+        record = parsePersisted(
           readFileSync(join(this.inflightDir, filename), 'utf8'),
         ) as HeldSlotRecord;
       } catch {
@@ -1386,7 +1497,7 @@ export class JobDispatcher {
       payloadDigest: entry.payloadDigest,
       action: {
         type: entry.actionType,
-        ...(entry.daemonId !== null ? { daemonId: entry.daemonId } : {}),
+        ...(entry.hostId !== null ? { hostId: entry.hostId } : {}),
         ...(entry.folder !== undefined ? { folder: entry.folder } : {}),
       },
     });
@@ -1413,7 +1524,7 @@ export class JobDispatcher {
       const firstLine = raw.split('\n').find((l) => l.length > 0);
       if (!firstLine) continue;
       try {
-        out.push(JSON.parse(firstLine) as QueuedEntry);
+        out.push(parsePersisted(firstLine) as QueuedEntry);
       } catch {
         this.logger.warn({ filename: name }, 'jobs: malformed queued entry, skipping');
       }
@@ -1437,7 +1548,7 @@ export class JobDispatcher {
     while (this.inFlightFor(scope) < limit) {
       const next = this.listQueuedForJob(scope)[0];
       if (!next) return;
-      if (!this.hostOnline(next.daemonId)) return;
+      if (!this.hostOnline(next.hostId)) return;
       try {
         rmSync(join(this.queuedDir, next.filename));
       } catch (err) {
@@ -1468,7 +1579,26 @@ export class JobDispatcher {
    * messages rather than working chats.
    */
   private send(entry: PendingEntry, opts?: { takeSlot?: boolean; isRetry?: boolean }): void {
-    this.daemonLink.send(DISPATCH_SURFACE_ID, entry.event);
+    // A job's model belongs to the job: editing it must reach the durable
+    // chats it already owns, not only the next one it creates (spec/08 ##
+    // Action). The switch rides ahead of the input so the input's turn runs
+    // on the new model. Skipped when the chat is already on it, or its model
+    // is unknown (a host that reports none) — nothing to compare.
+    if (
+      entry.actionType === 'continue' &&
+      entry.event.type === 'chat.input' &&
+      entry.model !== undefined
+    ) {
+      const current = this.chatModel(entry.event.chatId);
+      if (current !== null && current !== entry.model) {
+        this.hostLink.send(DISPATCH_SURFACE_ID, {
+          type: 'chat.model_request',
+          chatId: entry.event.chatId,
+          model: entry.model,
+        });
+      }
+    }
+    this.hostLink.send(DISPATCH_SURFACE_ID, entry.event);
     // Retain only what a retry could actually re-send: an `ensure` fire that
     // appends to an existing chat. A spawn creates the chat, so it cannot hit
     // the missing-session guard at all.
@@ -1494,7 +1624,7 @@ export class JobDispatcher {
         chatId: entry.chatId,
         localId: entry.localId,
         ...(entry.gateOutput !== undefined ? { gateOutput: entry.gateOutput } : {}),
-        daemonId: entry.daemonId,
+        hostId: entry.hostId,
         ...(entry.folder !== undefined ? { folder: entry.folder } : {}),
         ts: entry.createdAt,
       },
@@ -1543,9 +1673,6 @@ export class JobDispatcher {
     if (action.type === 'script') return undefined;
     const hasSkill = action.skill !== undefined && action.skill.length > 0;
     const hasPrompt = action.prompt !== undefined && action.prompt.length > 0;
-    // Mustache without escaping: this is delivered to a Claude chat as a
-    // user-turn, not rendered as HTML.
-    Mustache.escape = (s): string => s;
     const view = renderView(payload, gated);
     // A todoist/webhook event carries fields no template thought to pick out (a
     // comment's `file_attachment`), so the whole event follows the prompt. A
@@ -1648,9 +1775,7 @@ export class JobDispatcher {
       payloadDigest: digestPayload(payload),
       action: {
         type: job.action.type,
-        ...('daemonId' in job.action && job.action.daemonId
-          ? { daemonId: job.action.daemonId }
-          : {}),
+        ...('hostId' in job.action && job.action.hostId ? { hostId: job.action.hostId } : {}),
       },
     });
     this.logger.info(
@@ -1668,7 +1793,7 @@ export class JobDispatcher {
       try {
         out.push({
           name,
-          entry: JSON.parse(readFileSync(join(this.heldDir, name), 'utf8')) as HeldFire,
+          entry: parsePersisted(readFileSync(join(this.heldDir, name), 'utf8')) as HeldFire,
         });
       } catch (err) {
         this.logger.error({ filename: name, err }, 'jobs: malformed held fire, skipping');
@@ -1692,17 +1817,34 @@ export class JobDispatcher {
     for (const { name, entry } of this.listHeld()) {
       if (!this.jobs) throw new Error('run windows need the dispatcher to be given `jobs`');
       const job = this.jobs.get(entry.jobId);
-      if (!job || !job.enabled) {
+      if (!job || !jobFires(job)) {
         this.logger.error(
           { jobId: entry.jobId, fireId: entry.fireId },
-          'jobs: job deleted or disabled while a fire was held, dropped it',
+          'jobs: job deleted, disabled or archived while a fire was held, dropped it',
         );
         rmSync(join(this.heldDir, name));
         continue;
       }
       if (job.window && !inRunWindow(job.window, this.nowMs())) continue;
       rmSync(join(this.heldDir, name));
-      this.dispatch(job, entry.payload, entry.trigger);
+      try {
+        this.dispatch(job, entry.payload, entry.trigger);
+      } catch (err) {
+        // The timer that calls this has nobody above it to catch a throw (a
+        // template that will not render, say): the fire is already off the
+        // held list, so say what became of it in the run log, as cron does.
+        const message = (err as Error).message;
+        this.logger.error({ jobId: job.id, err: message }, 'jobs: held fire dispatch threw');
+        this.logs.appendRun({
+          ts: this.nowMs(),
+          jobId: job.id,
+          status: 'dispatch-error',
+          trigger: entry.trigger,
+          payloadDigest: digestPayload(entry.payload),
+          error: message,
+        });
+        continue;
+      }
       released += 1;
     }
     return { released };
@@ -1725,18 +1867,18 @@ export class JobDispatcher {
     // Deliberately not `buffered` either, which the action path uses for the
     // same offline host: replaying a gate when the machine comes back would be
     // answering "is this due?" hours after it was asked.
-    if (!this.hostOnline(gate.daemonId)) {
+    if (!this.hostOnline(gate.hostId)) {
       this.logs.appendRun({
         ts,
         jobId: job.id,
         status: 'gate-error',
         trigger,
         payloadDigest,
-        error: `gate host ${gate.daemonId} is offline, so the gate could not be asked`,
-        action: { type: job.action.type, daemonId: gate.daemonId, folder: gate.folder },
+        error: `gate host ${gate.hostId} is offline, so the gate could not be asked`,
+        action: { type: job.action.type, hostId: gate.hostId, folder: gate.folder },
       });
       this.logger.warn(
-        { jobId: job.id, fireId, daemonId: gate.daemonId },
+        { jobId: job.id, fireId, hostId: gate.hostId },
         'jobs: gate host offline, fire not dispatched',
       );
       return { status: 'rejected', id: fireId };
@@ -1745,15 +1887,15 @@ export class JobDispatcher {
     this.gating.set(gateFireKey(fireId), { job, payload, trigger, ts, payloadDigest });
     const event: JobExecRequestEvent = {
       type: 'job.exec_request',
-      daemonId: gate.daemonId,
+      hostId: gate.hostId,
       jobId: job.id,
       fireId,
       folder: gate.folder,
       command: gate.command,
       timeoutMs: gate.timeoutMs ?? GATE_DEFAULT_TIMEOUT_MS,
     };
-    // Routed by the event's own `daemonId`, exactly as a script action's is.
-    this.daemonLink.send(DISPATCH_SURFACE_ID, event);
+    // Routed by the event's own `hostId`, exactly as a script action's is.
+    this.hostLink.send(DISPATCH_SURFACE_ID, event);
     return { status: 'gating', id: fireId, event };
   }
 
@@ -1792,7 +1934,7 @@ export class JobDispatcher {
         exitCode,
         ...(output.length > 0 ? { output } : {}),
         ...(job.gate !== undefined && job.gate !== null
-          ? { daemonId: job.gate.daemonId, folder: job.gate.folder }
+          ? { hostId: job.gate.hostId, folder: job.gate.folder }
           : {}),
       },
     });
@@ -1860,7 +2002,7 @@ export class JobDispatcher {
       targetChatId = execFireKey(fireId);
       event = {
         type: 'job.exec_request',
-        daemonId: action.daemonId,
+        hostId: action.hostId,
         jobId: job.id,
         fireId,
         folder: action.folder,
@@ -1876,7 +2018,7 @@ export class JobDispatcher {
       this.chatLinks?.record(chatId, job.id);
       event = {
         type: 'chat.spawn_request',
-        daemonId: action.daemonId,
+        hostId: action.hostId,
         folder: action.folder,
         chatId,
         ...(rendered ? { prompt: rendered } : {}),
@@ -1961,11 +2103,11 @@ export class JobDispatcher {
         // Before that (right after a server restart) the durable chat may well
         // exist, and spawning it again is refused by the host as a duplicate id
         // — the fire is lost. So the choice is held until the host reports.
-        if (this.hostReported(action.daemonId)) this.ensureSpawned.add(chatId);
+        if (this.hostReported(action.hostId)) this.ensureSpawned.add(chatId);
         else ensureInput = input;
         event = {
           type: 'chat.spawn_request',
-          daemonId: action.daemonId,
+          hostId: action.hostId,
           folder: action.folder,
           chatId,
           ...(rendered ? { prompt: rendered } : {}),
@@ -1999,11 +2141,11 @@ export class JobDispatcher {
     }
 
     // The host THIS fire is addressed to. For a folder-addressed action that is
-    // the action's own `daemonId`; for a `message` it is the host its target
+    // the action's own `hostId`; for a `message` it is the host its target
     // chat lives on. Whether that ONE machine is reachable decides sent vs
     // buffered — "any host is attached" would queue a fire for a machine that
     // is up while the machine the job names is down (spec/08 ## Action).
-    const daemonId = action.type === 'message' ? this.chatHost(action.chatId) : action.daemonId;
+    const hostId = action.type === 'message' ? this.chatHost(action.chatId) : action.hostId;
     const folder = action.type === 'message' ? undefined : action.folder;
     const ts = this.nowMs();
     const payloadDigest = digestPayload(payload);
@@ -2013,6 +2155,10 @@ export class JobDispatcher {
     // re-taken later: a fire that queued as a spawn dispatches as a spawn.
     const filename = `${job.id}-${fireId}.jsonl`;
     const entry: PendingEntry = {
+      jobName: job.name,
+      ...(job.trigger.type === 'cron' && job.trigger.timezone !== undefined
+        ? { timezone: job.trigger.timezone }
+        : {}),
       jobId: job.id,
       fireId,
       event,
@@ -2023,11 +2169,12 @@ export class JobDispatcher {
       trigger,
       payloadDigest,
       actionType: action.type,
-      daemonId,
+      hostId,
       ...(folder !== undefined ? { folder } : {}),
       ...(limit !== undefined ? { concurrency: limit } : {}),
       ...(scope !== undefined ? { scope } : {}),
       ...(ensureInput !== undefined ? { ensureInput } : {}),
+      ...(action.type === 'continue' && action.model !== undefined ? { model: action.model } : {}),
       // What the gate said when it let this fire through (spec/08 § Gate). One
       // fire is one row, so the gate's reason rides along to the row the action
       // writes rather than writing a second one for the same fire.
@@ -2068,7 +2215,7 @@ export class JobDispatcher {
       }
     }
 
-    if (ensureInput === undefined && this.hostOnline(daemonId)) {
+    if (ensureInput === undefined && this.hostOnline(hostId)) {
       // The run is written when this host answers — not now.
       this.send(entry, { takeSlot: !intoOwnInFlightChat });
       return { status: 'sent', id: fireId, event };
@@ -2085,12 +2232,12 @@ export class JobDispatcher {
       payloadDigest,
       action: {
         type: action.type,
-        ...(daemonId !== null ? { daemonId } : {}),
+        ...(hostId !== null ? { hostId } : {}),
         ...(folder !== undefined ? { folder } : {}),
       },
     });
     this.logger.warn(
-      { jobId: job.id, fireId, daemonId, eventType: event.type },
+      { jobId: job.id, fireId, hostId, eventType: event.type },
       ensureInput !== undefined
         ? 'jobs: ensure chat not yet reported by its host, buffered until it reports'
         : 'jobs: addressed host offline, buffered action',
@@ -2149,7 +2296,7 @@ export class JobDispatcher {
       const firstLine = raw.split('\n').find((l) => l.length > 0);
       if (!firstLine) continue;
       try {
-        out.push(JSON.parse(firstLine) as PendingEntry);
+        out.push(parsePersisted(firstLine) as PendingEntry);
       } catch {
         // Malformed pending file — surface and skip.
         this.logger.warn({ filename: name }, 'jobs: malformed pending entry, skipping');
@@ -2165,7 +2312,7 @@ export class JobDispatcher {
 
   /**
    * Flush every pending entry across all jobs to the host. Called on
-   * `daemon.online` transitions; idempotent and safe to call repeatedly.
+   * `host.online` transitions; idempotent and safe to call repeatedly.
    */
   /**
    * Settle an undecided `ensure` now that its host has reported: input if the
@@ -2181,17 +2328,72 @@ export class JobDispatcher {
     return rest;
   }
 
+  /**
+   * Alert once for every buffered fire that has waited past `lateAfterMs`. Run
+   * on the dispatcher's minute tick. The mark is written back to the pending
+   * file so a restart does not alert twice.
+   */
+  checkLate(): void {
+    if (!this.onLate) return;
+    const now = this.nowMs();
+    for (const entry of this.listPending()) {
+      if (entry.lateNotified === true || now - entry.createdAt <= this.lateAfterMs) continue;
+      const marked = { ...entry, lateNotified: true };
+      writeFileSync(join(this.pendingDir, entry.filename), `${JSON.stringify(marked)}\n`, 'utf8');
+      this.onLate({
+        jobId: entry.jobId,
+        jobName: entry.jobName ?? entry.jobId,
+        fireId: entry.fireId,
+        hostId: entry.hostId,
+        dueAt: entry.createdAt,
+        chatId: entry.chatId,
+        ...(entry.timezone !== undefined ? { timezone: entry.timezone } : {}),
+      });
+    }
+  }
+
+  /**
+   * A fire released more than `lateAfterMs` after it was due says so: a spawn is
+   * named "<job> — ran late (due 03:00)", a message into an existing chat leads
+   * with the same note, since that chat is not the fire's to rename. A script
+   * has no chat to label.
+   */
+  private labelIfLate(entry: PendingEntry): PendingEntry {
+    if (this.nowMs() - entry.createdAt <= this.lateAfterMs) return entry;
+    const due = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      ...(entry.timezone !== undefined ? { timeZone: entry.timezone } : {}),
+    }).format(entry.createdAt);
+    const ev = entry.event;
+    if (ev.type === 'chat.spawn_request') {
+      const base = ev.name ?? entry.jobName ?? entry.jobId;
+      return { ...entry, event: { ...ev, name: `${base} — ran late (due ${due})` } };
+    }
+    if (ev.type === 'chat.input') {
+      return {
+        ...entry,
+        event: {
+          ...ev,
+          message: `[Ran late (due ${due}): its host was offline.]\n\n${ev.message}`,
+        },
+      };
+    }
+    return entry;
+  }
+
   flush(): { flushed: number } {
-    if (this.daemonLink.status() !== 'online') return { flushed: 0 };
+    if (this.hostLink.status() !== 'online') return { flushed: 0 };
     let flushed = 0;
     for (let entry of this.listPending()) {
       // Only release a fire to the machine it was queued FOR. Another host
       // coming online says nothing about this one.
-      if (entry.daemonId !== null && !this.daemonLink.isOnline(entry.daemonId)) continue;
+      if (entry.hostId !== null && !this.hostLink.isOnline(entry.hostId)) continue;
       // An undecided `ensure` waits for its host's chat list, not just its link:
       // the link comes up before the chats are re-announced.
       if (entry.ensureInput !== undefined) {
-        if (entry.daemonId === null || !this.hostReported(entry.daemonId)) continue;
+        if (entry.hostId === null || !this.hostReported(entry.hostId)) continue;
         entry = this.decideEnsure(entry);
       }
       // The gate applies here too (spec/08 ## Concurrency). A host that has
@@ -2209,7 +2411,7 @@ export class JobDispatcher {
         continue;
       }
       // A released fire settles like any other: its outcome comes from the host.
-      this.send({ ...entry, createdAt: this.nowMs() });
+      this.send({ ...this.labelIfLate(entry), createdAt: this.nowMs() });
       this.removePending(entry.filename);
       flushed += 1;
     }

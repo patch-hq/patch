@@ -7,13 +7,13 @@
 //   - the deps.nowSec override branch (app.ts never wires this — only a
 //     directly-constructed WsHub can exercise it)
 //   - onCallResponse's configured (true) branch
-//   - onDaemonEvent's forSurfaceId-found success path
+//   - onHostEvent's forSurfaceId-found success path
 //   - terminateSurface's two defensive catch branches (throwing socket)
 //
 // Pattern: construct a bare WsHub directly (not via buildAll) and drive its
 // private methods (`hub['onConnect']`, `hub['handleHello']`, etc.) with a
 // minimal EventEmitter-based FakeSocket — the same technique test/daemon-
-// link.test.ts uses for InboundDaemonLink.
+// link.test.ts uses for InboundHostLink.
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
@@ -28,7 +28,7 @@ import { WsHub } from '../src/ws-hub.js';
 import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
 import { ChatRegistry } from '../src/chat-registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const silentLogger = pino({ level: 'silent' });
 
@@ -58,7 +58,7 @@ describe('WsHub — onConnect low-level edge cases', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       helloTimeoutMs: 60_000,
@@ -77,7 +77,7 @@ describe('WsHub — onConnect low-level edge cases', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       helloTimeoutMs: 60_000,
@@ -95,7 +95,7 @@ describe('WsHub — onConnect low-level edge cases', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       helloTimeoutMs: 60_000,
@@ -133,7 +133,7 @@ describe('WsHub — handleHello edge cases needing direct construction', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       nowSec: () => {
@@ -183,7 +183,7 @@ describe('WsHub — handleHello edge cases needing direct construction', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       helloTimeoutMs: 60_000,
@@ -208,6 +208,49 @@ describe('WsHub — handleHello edge cases needing direct construction', () => {
     expect(fs.closed[0]?.reason).toBe('auth error');
   });
 
+  it('a socket that closes while its credential is being verified leaves no connection or presence behind', async () => {
+    const dir = makeDir();
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(94));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    registry.upsertSurface({ surfaceId: 'srf-gone', surfaceKind: 'web', label: 'b', issuedAt: 1 });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'srf-gone',
+      surfaceKind: 'web',
+      label: 'browser',
+    });
+    const presence = new PresenceTracker();
+    const hub = new WsHub({
+      logger: silentLogger,
+      registry,
+      presence,
+      hostLink: new InProcessHostLink(),
+      chatRegistry: new ChatRegistry(),
+      idGenerator: () => 'id-1',
+      helloTimeoutMs: 60_000,
+    });
+    const fs = new FakeSocket();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (hub as any).onConnect(fs as unknown as WebSocket, 'req-gone');
+    fs.emit(
+      'message',
+      Buffer.from(
+        encode({
+          type: 'hello',
+          clientType: 'surface-web',
+          clientVersion: '0.0.0-test',
+          auth: jwt,
+        } satisfies WireEvent),
+      ),
+    );
+    fs.emit('close'); // the browser went away mid-verification
+    await new Promise((r) => setTimeout(r, 50));
+    expect(hub.connectedSurfaceIds()).toEqual([]);
+    const accountId = registry.getAccount()!.accountId;
+    expect(presence.get(accountId, 'srf-gone')?.status).not.toBe('online');
+  });
+
   it('the auth-error catch path itself swallows a throwing socket.close() (double failure)', async () => {
     const dir = makeDir();
     const user = generateUserKeypair(() => new Uint8Array(32).fill(93));
@@ -227,7 +270,7 @@ describe('WsHub — handleHello edge cases needing direct construction', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       helloTimeoutMs: 60_000,
@@ -269,12 +312,12 @@ describe('WsHub — fragmented (array) raw message payload on a surface socket',
       surfaceKind: 'web',
       label: 'browser',
     });
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const hub = new WsHub({
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink,
+      hostLink,
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       helloTimeoutMs: 60_000,
@@ -307,7 +350,7 @@ describe('WsHub — fragmented (array) raw message payload on a surface socket',
     const mid = Math.floor(full.length / 2);
     fs.emit('message', [full.subarray(0, mid), full.subarray(mid)]);
     await new Promise((r) => setTimeout(r, 20));
-    const forwarded = daemonLink.sent.find((s) => s.event.type === 'chat.input');
+    const forwarded = hostLink.sent.find((s) => s.event.type === 'chat.input');
     expect(forwarded).toBeDefined();
     expect((forwarded!.event as { localId: string }).localId).toBe('L-frag');
   });
@@ -322,7 +365,7 @@ describe('WsHub — onCallResponse configured (true branch)', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       onCallResponse: (surfaceId, event) => {
@@ -354,7 +397,7 @@ describe('WsHub — onCallResponse configured (true branch)', () => {
   });
 });
 
-describe('WsHub — onDaemonEvent forSurfaceId success path', () => {
+describe('WsHub — onHostEvent forSurfaceId success path', () => {
   it('routes a forSurfaceId-tagged event to the matching connected surface, stripping the tag', () => {
     const registry = Registry.load(makeDir());
     registry.bootstrapAccount();
@@ -362,7 +405,7 @@ describe('WsHub — onDaemonEvent forSurfaceId success path', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
     });
@@ -381,7 +424,7 @@ describe('WsHub — onDaemonEvent forSurfaceId success path', () => {
       'srf-target',
       new Set([fakeConn]),
     );
-    (hub as unknown as { onDaemonEvent: (event: WireEvent) => void }).onDaemonEvent({
+    (hub as unknown as { onHostEvent: (event: WireEvent) => void }).onHostEvent({
       type: 'chat.replay',
       chatId: 'chat-1',
       fromSeq: 0,
@@ -401,7 +444,7 @@ describe('WsHub — shutdown() defensive catch branch', () => {
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
     });
@@ -438,12 +481,12 @@ describe('WsHub — drained-buffer loop stops once state leaves authed mid-drain
       surfaceKind: 'web',
       label: 'browser',
     });
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const hub = new WsHub({
       logger: silentLogger,
       registry,
       presence: new PresenceTracker(),
-      daemonLink,
+      hostLink,
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
       helloTimeoutMs: 60_000,
@@ -497,7 +540,7 @@ describe('WsHub — terminateSurface defensive catch branches', () => {
       logger: silentLogger,
       registry,
       presence,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       chatRegistry: new ChatRegistry(),
       idGenerator: () => 'id-1',
     });

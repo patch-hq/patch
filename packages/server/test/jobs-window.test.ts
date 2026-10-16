@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import { inRunWindow, JobCreateBody, JobPatchBody, RunWindow } from '@patch/wire/jobs';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import type { Job } from '../src/jobs/types.js';
@@ -24,7 +24,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     enabled: true,
     trigger: { type: 'todoist' },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+    action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     window: { start: '07:00', end: '09:00', timezone: 'UTC' },
     createdAt: 1,
     updatedAt: 1,
@@ -32,7 +32,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   };
 }
 
-function spawns(link: InProcessDaemonLink): number {
+function spawns(link: InProcessHostLink): number {
   return link.sent.filter((s) => s.event.type === 'chat.spawn_request').length;
 }
 
@@ -82,7 +82,7 @@ describe('RunWindow schema', () => {
     const create = JobCreateBody.safeParse({
       name: 'x',
       trigger: { type: 'todoist' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'p' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'p' },
       window,
     });
     expect(create.success).toBe(true);
@@ -93,14 +93,14 @@ describe('RunWindow schema', () => {
 describe('dispatcher run window', () => {
   let dir: string;
   let now: number;
-  let link: InProcessDaemonLink;
+  let link: InProcessHostLink;
   let stored: Map<string, Job>;
   let disp: JobDispatcher;
   const build = (): JobDispatcher =>
     new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: (() => {
         let n = 0;
@@ -113,7 +113,7 @@ describe('dispatcher run window', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-window-'));
     now = at(23);
-    link = new InProcessDaemonLink();
+    link = new InProcessHostLink();
     stored = new Map([[JOB_ID, makeJob()]]);
     disp = build();
   });
@@ -177,6 +177,18 @@ describe('dispatcher run window', () => {
     expect(spawns(link)).toBe(1);
   });
 
+  it('a held fire whose dispatch throws is logged as a dispatch-error, not thrown from the timer', () => {
+    const bad = makeJob({
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'hi {{payload.x' },
+    });
+    stored.set(JOB_ID, bad);
+    disp.dispatch(bad, { x: 1 }, 'todoist');
+    expect(disp.heldCount(JOB_ID)).toBe(1);
+    now = at(7, 30, 8);
+    expect(() => disp.releaseHeld()).not.toThrow();
+    expect(new JobLogs(dir).readRuns(JOB_ID)[0]).toMatchObject({ status: 'dispatch-error' });
+  });
+
   it('a job deleted or disabled while held drops its held fires, loudly', () => {
     disp.dispatch(makeJob(), {}, 'todoist');
     stored.delete(JOB_ID);
@@ -186,8 +198,42 @@ describe('dispatcher run window', () => {
     expect(disp.heldCount(JOB_ID)).toBe(0);
   });
 
+  it('a job archived while held drops its held fires too, even though it is still enabled', () => {
+    disp.dispatch(makeJob(), {}, 'todoist');
+    stored.set(JOB_ID, makeJob({ archived: true }));
+    now = at(7, 30, 8);
+    expect(disp.releaseHeld()).toEqual({ released: 0 });
+    expect(spawns(link)).toBe(0);
+    expect(disp.heldCount(JOB_ID)).toBe(0);
+  });
+
+  it('releases fires held in the same millisecond in the order they arrived (default ids)', () => {
+    disp.close();
+    disp = new JobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
+      logger: silentLogger,
+      nowMs: () => now,
+      jobs: { expireOneOff: () => null, get: (id) => stored.get(id) ?? null },
+    });
+    const job = makeJob({
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
+    });
+    stored.set(JOB_ID, job);
+    for (let n = 0; n < 40; n++) disp.dispatch(job, { n }, 'todoist');
+    now = at(7, 0, 8);
+    expect(disp.releaseHeld()).toEqual({ released: 40 });
+    const order = link.sent.map((s) => {
+      const prompt = (s.event as { prompt?: string }).prompt ?? '';
+      // The prompt ends with the trigger event's JSON, which carries n.
+      return Number(/"n": (\d+)/.exec(prompt)?.[1]);
+    });
+    expect(order).toEqual(Array.from({ length: 40 }, (_, n) => n));
+  });
+
   it('holds a fire that has a gate too — the window comes first', () => {
-    const job = makeJob({ gate: { command: 'true', daemonId: 'd1' } as Job['gate'] });
+    const job = makeJob({ gate: { command: 'true', hostId: 'd1' } as Job['gate'] });
     expect(disp.dispatch(job, {}, 'todoist').status).toBe('queued');
     expect(link.sent).toHaveLength(0);
   });

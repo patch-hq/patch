@@ -91,6 +91,11 @@ export class CronScheduler {
     return this.tasks.has(jobId);
   }
 
+  /** The next instant this job's live cron task will fire, or null if it has none. */
+  nextRun(jobId: string): Date | null {
+    return this.tasks.get(jobId)?.getNextRun() ?? null;
+  }
+
   /** Test hook: trigger a job's cron callback as if cron had ticked. */
   async fireForTesting(jobId: string): Promise<void> {
     const job = this.jobs.get(jobId);

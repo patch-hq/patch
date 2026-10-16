@@ -22,7 +22,7 @@ function spawned(chatId: string): WireEvent {
   return {
     type: 'chat.spawned',
     chatId,
-    daemonId: 'hetzner',
+    hostId: 'hetzner',
     folder: '/home/tom/.patch/threads/manager',
     seq: 1,
     ts: 0,
@@ -33,7 +33,7 @@ function state(chatId: string, over: Partial<Record<string, unknown>> = {}): Wir
   return {
     type: 'chat.state',
     chatId,
-    daemonId: 'hetzner',
+    hostId: 'hetzner',
     activity: 'idle',
     permissionMode: 'auto',
     folder: '/home/tom/.patch/threads/manager',
@@ -147,8 +147,8 @@ describe('ThreadRotator against the real settings store', () => {
   const makeService = () =>
     new SharedSettingsService({
       dataDir: dir,
-      sendToDaemon: () => {},
-      onlineDaemonIds: () => [],
+      sendToHost: () => {},
+      onlineHostIds: () => [],
       broadcast: () => {},
       validateClaude: async () => ({ kind: 'valid' }),
       validateOpenAIKey: async () => ({ ok: true }),

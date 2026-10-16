@@ -31,7 +31,7 @@ function seed(): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder: 'foo',

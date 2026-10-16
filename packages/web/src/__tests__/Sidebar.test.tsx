@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
+import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -51,7 +52,7 @@ function rowFixture(overrides: Partial<ChatRow> = {}): RowFixture {
     todos: [],
     snoozedUntil: null,
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'a chat',
     folder: '~/proj',
@@ -101,6 +102,7 @@ function renderInRouter(opts: { standalone?: boolean; path?: string } = {}): voi
     <MemoryRouter initialEntries={[opts.path ?? '/']}>
       <Sidebar standalone={opts.standalone} />
       <ConfirmModal />
+      <SnoozeSheet />
     </MemoryRouter>,
   );
 }
@@ -116,7 +118,7 @@ describe('Sidebar', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
-    usePresenceStore.setState({ daemonOnline: true });
+    usePresenceStore.setState({ hostOnline: true });
     useVoiceStore.setState({ activeDevices: {} });
     useUiStore.getState().setChannelsOpen(false);
     useUiStore.getState().setArchivedOpen(false);
@@ -186,7 +188,7 @@ describe('Sidebar', () => {
   // 'connected' while every host is unreachable (spec/12 § Surface
   // connection state model). The dot must not read as healthy in that case.
   it('the connection dot shows offline styling + "Agent offline" tooltip when the WS is connected but the host is not', () => {
-    usePresenceStore.setState({ connection: 'connected', daemonOnline: false });
+    usePresenceStore.setState({ connection: 'connected', hostOnline: false });
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).toContain('offline');
@@ -194,11 +196,41 @@ describe('Sidebar', () => {
   });
 
   it('the connection dot shows connected styling + "Connected" tooltip when the WS is connected and the host is online', () => {
-    usePresenceStore.setState({ connection: 'connected', daemonOnline: true });
+    usePresenceStore.setState({ connection: 'connected', hostOnline: true });
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).not.toContain('offline');
     expect(dot.getAttribute('title')).toBe('Connected');
+  });
+
+  it('the connection dot tooltip lists every host with its state', () => {
+    usePresenceStore.setState({
+      connection: 'connected',
+      hostOnline: true,
+      hosts: {
+        'd-mac': {
+          hostId: 'd-mac',
+          online: true,
+          lastSeenAt: null,
+          host: null,
+          accounts: {},
+          claudeSettings: null,
+          folders: null,
+        },
+        'd-box': {
+          hostId: 'd-box',
+          online: false,
+          lastSeenAt: null,
+          host: null,
+          accounts: {},
+          claudeSettings: null,
+          folders: null,
+        },
+      },
+    });
+    renderInRouter();
+    const dot = screen.getByTestId('conn-dot');
+    expect(dot.getAttribute('title')).toBe('Connected\nd-box: offline\nd-mac: online');
   });
 
   it('shows the empty manager slot when none exists', () => {
@@ -213,7 +245,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -239,7 +271,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c-goal',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'ship it',
         folder: '/work',
@@ -253,7 +285,7 @@ describe('Sidebar', () => {
       },
       {
         chatId: 'c-no-goal',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'ordinary chat',
         folder: '/work',
@@ -277,7 +309,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -290,7 +322,7 @@ describe('Sidebar', () => {
       },
       rowFixture({
         chatId: 'c-plain',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'plain',
         folder: '/proj/x',
@@ -313,7 +345,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -357,7 +389,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -401,7 +433,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -414,7 +446,7 @@ describe('Sidebar', () => {
       },
       rowFixture({
         chatId: 'c-plain',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'plain',
         folder: '/proj/x',
@@ -436,7 +468,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -497,7 +529,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -519,7 +551,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_speakers',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: '/home/tom/.patch/threads/speakers',
@@ -546,7 +578,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_speakers',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: '/home/tom/.patch/threads/speakers',
@@ -592,7 +624,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'p1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'pinned',
         folder: '~/proj',
@@ -605,7 +637,7 @@ describe('Sidebar', () => {
       },
       {
         chatId: 'r1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'regular',
         folder: '~/proj',
@@ -627,7 +659,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'a1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'old',
         folder: '~/proj',
@@ -654,7 +686,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'arch-r',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'nightly backup',
         folder: '~/proj',
@@ -686,7 +718,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'a-tmp-1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         preview: 'fix the sidebar ordering bug',
@@ -700,7 +732,7 @@ describe('Sidebar', () => {
       },
       {
         chatId: 'a-tmp-2',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         preview: 'add a dark mode toggle',
@@ -737,7 +769,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       rowFixture({
         chatId: 'plain-1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'My chat',
         preview: 'the first user message',
@@ -756,7 +788,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       rowFixture({
         chatId: 'pin-1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'Pinned chat',
         preview: 'a snippet',
@@ -811,7 +843,7 @@ describe('Sidebar', () => {
     useChatStore
       .getState()
       .hydrate([
-        rowFixture({ chatId: 'no-folder', name: null, folder: '', daemonId: '' }),
+        rowFixture({ chatId: 'no-folder', name: null, folder: '', hostId: '' }),
         rowFixture({ chatId: 'in-proj', folder: '~/proj' }),
       ]);
     renderInRouter();
@@ -1326,16 +1358,25 @@ describe('Sidebar', () => {
     const snoozeSpy = vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
     renderInRouter();
     fireEvent.click(screen.getByTestId('folder-snooze-/home/tom/projects/snz'));
-    fireEvent.click(screen.getByTestId('project-snooze-preset-5-minutes'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-5-minutes'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     const expected = Date.now() + 5 * 60_000;
     expect(useChatStore.getState().chats['s1']?.snoozedUntil).toBe(expected);
     expect(useChatStore.getState().chats['s2']?.snoozedUntil).toBe(expected);
     expect(useChatStore.getState().chats['s3']?.snoozedUntil).toBe(expected);
     expect(useChatStore.getState().chats[SPECIAL_THREAD_IDS.speakers]?.snoozedUntil).toBeNull();
-    expect(snoozeSpy).toHaveBeenCalledWith('s1', expected);
-    expect(snoozeSpy).toHaveBeenCalledWith('s2', expected);
-    expect(snoozeSpy).toHaveBeenCalledWith('s3', expected);
-    expect(snoozeSpy).not.toHaveBeenCalledWith(SPECIAL_THREAD_IDS.speakers, expect.anything());
+    // One set id for the whole project, so its Back state clears together.
+    const setIds = snoozeSpy.mock.calls.map((c) => c[2]);
+    expect(setIds[0]).toEqual(expect.any(String));
+    expect(new Set(setIds).size).toBe(1);
+    expect(snoozeSpy).toHaveBeenCalledWith('s1', expected, setIds[0]);
+    expect(snoozeSpy).toHaveBeenCalledWith('s2', expected, setIds[0]);
+    expect(snoozeSpy).toHaveBeenCalledWith('s3', expected, setIds[0]);
+    expect(snoozeSpy).not.toHaveBeenCalledWith(
+      SPECIAL_THREAD_IDS.speakers,
+      expect.anything(),
+      expect.anything(),
+    );
     vi.useRealTimers();
   });
 
@@ -1351,11 +1392,14 @@ describe('Sidebar', () => {
     );
     renderInRouter();
     fireEvent.click(screen.getByTestId('folder-snooze-/home/tom/projects/fail-snz'));
-    fireEvent.click(await screen.findByTestId('project-snooze-preset-1-hour'));
+    fireEvent.click(await screen.findByTestId('snooze-sheet-preset-1-hour'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await vi.waitFor(() => {
-      expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
+      expect(useUiStore.getState().errors.some((e) => e.level === 'error')).toBe(true);
     });
-    expect(useUiStore.getState().errors[0]?.message).toContain('Snooze failed');
+    expect(useUiStore.getState().errors.find((e) => e.level === 'error')?.message).toContain(
+      'Snooze failed',
+    );
     expect(useChatStore.getState().chats['t2']?.snoozedUntil).toBeNull();
     expect(useChatStore.getState().chats['t1']?.snoozedUntil).not.toBeNull();
   });
@@ -1491,7 +1535,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -1532,6 +1576,19 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('row-when-w-zero').querySelector('.when-time')?.textContent).toBe('');
   });
 
+  it('archived rows label their time as the archive time, not a bare relative age', () => {
+    const at = new Date(2026, 9, 12, 10, 5).getTime();
+    useChatStore
+      .getState()
+      .hydrate([
+        rowFixture({ chatId: 'a-when', folder: '~/w', status: 'archived', lastUpdated: at }),
+      ]);
+    renderInRouter();
+    fireEvent.click(screen.getByTestId('archived-toggle'));
+    const when = screen.getByTestId('row-when-a-when');
+    expect(when.querySelector('.when-time')?.textContent).toBe('Archived 12 Oct, 10:05');
+  });
+
   it('strips markdown syntax from titles/previews so the sidebar shows plain text', () => {
     useChatStore.getState().hydrate([
       rowFixture({
@@ -1568,7 +1625,7 @@ describe('Sidebar', () => {
       chats: [
         {
           chatId: 'lazy-archived-1',
-          daemonId: 'd1',
+          hostId: 'd1',
           permissionMode: 'bypassPermissions' as const,
           name: 'old thing',
           preview: 'a snippet',
@@ -1741,7 +1798,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_speakers',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: '/home/tom/.patch/threads/speakers',
@@ -1863,7 +1920,7 @@ describe('Sidebar', () => {
       chats: [
         {
           chatId: 'lazy-del-1',
-          daemonId: 'd1',
+          hostId: 'd1',
           permissionMode: 'bypassPermissions' as const,
           name: 'gone',
           preview: 'a snippet',
@@ -2014,21 +2071,21 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       rowFixture({
         chatId: 'att-done',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'done one',
         folder: '~/pa',
       }), // fresh → done (unread)
       rowFixture({
         chatId: 'att-read',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'read one',
         folder: '~/pa',
       }), // marked read below
       rowFixture({
         chatId: 'att-work',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'work one',
         folder: '~/pb',
@@ -2036,7 +2093,7 @@ describe('Sidebar', () => {
       }), // working
       rowFixture({
         chatId: 'att-perm',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'perm one',
         folder: '~/pc',
@@ -2100,7 +2157,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       rowFixture({
         chatId: 'pin-done',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'pd',
         folder: '~/pa',
@@ -2110,7 +2167,7 @@ describe('Sidebar', () => {
       }),
       rowFixture({
         chatId: 'pin-read',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'pr',
         folder: '~/pa',
@@ -2143,8 +2200,8 @@ describe('Sidebar', () => {
     useChatStore
       .getState()
       .hydrate([
-        rowFixture({ chatId: 'hold-a', daemonId: 'd1', name: 'a', folder: '~/holdfolder' }),
-        rowFixture({ chatId: 'hold-b', daemonId: 'd1', name: 'b', folder: '~/holdfolder' }),
+        rowFixture({ chatId: 'hold-a', hostId: 'd1', name: 'a', folder: '~/holdfolder' }),
+        rowFixture({ chatId: 'hold-b', hostId: 'd1', name: 'b', folder: '~/holdfolder' }),
       ]);
     renderInRouter();
     selectUnreadView();
@@ -2187,7 +2244,7 @@ describe('Sidebar', () => {
     window.localStorage.clear();
     useChatStore
       .getState()
-      .hydrate([rowFixture({ chatId: 'notif-a', daemonId: 'd1', name: 'a', folder: '~/nf' })]);
+      .hydrate([rowFixture({ chatId: 'notif-a', hostId: 'd1', name: 'a', folder: '~/nf' })]);
     // Activate (and thereby mark read) BEFORE the Sidebar ever mounts/renders
     // — the same order a notification or deep link produces.
     act(() => useChatStore.getState().setActiveChat('notif-a'));
@@ -2206,7 +2263,7 @@ describe('Sidebar', () => {
     window.localStorage.clear();
     useChatStore
       .getState()
-      .hydrate([rowFixture({ chatId: 'reply-a', daemonId: 'd1', name: 'a', folder: '~/rf' })]);
+      .hydrate([rowFixture({ chatId: 'reply-a', hostId: 'd1', name: 'a', folder: '~/rf' })]);
     renderInRouter();
     selectUnreadView();
     expect(screen.getByTestId('chat-row-reply-a')).toBeInTheDocument();
@@ -2261,7 +2318,7 @@ describe('Sidebar', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
@@ -2274,7 +2331,7 @@ describe('Sidebar', () => {
       },
       {
         chatId: 'thread_speakers',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: '/home/tom/.patch/threads/speakers',

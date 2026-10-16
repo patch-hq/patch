@@ -33,12 +33,12 @@ const DOW_NAME: Record<string, number> = {
   sat: 6,
 };
 
-/** Parse a clock time like `9am`, `9:30am`, `17:00`, `noon`, `midnight`, `9`. */
+/** Parse a clock time like `9am`, `9:30am`, `7.30pm`, `17:00`, `noon`, `midnight`, `9`. */
 function parseTime(raw: string): { h: number; m: number } | null {
   const t = raw.trim().toLowerCase();
   if (t === 'noon') return { h: 12, m: 0 };
   if (t === 'midnight') return { h: 0, m: 0 };
-  const m = t.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  const m = t.match(/^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$/);
   if (!m) return null;
   let h = parseInt(m[1]!, 10);
   const min = m[2] ? parseInt(m[2]!, 10) : 0;
@@ -51,25 +51,48 @@ function parseTime(raw: string): { h: number; m: number } | null {
 
 /**
  * A time-of-day window: "between 9am and 5pm", "from 9 to 17", "9am-5pm".
- * Returns the start/end HOURS (cron hour ranges are hour-granular) or null.
+ * Returns the start/end HOURS (cron hour ranges are hour-granular), null when
+ * there is no window, or 'invalid' when there is one cron can't express.
  * The end hour is inclusive — "between 9am and 5pm" → hours 9-17.
  */
-const TIME_TOKEN = '(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|noon|midnight)';
-function parseTimeWindow(text: string): { startH: number; endH: number } | null {
+const TIME_TOKEN = '(\\d{1,2}(?:[:.]\\d{2})?\\s*(?:am|pm)?|noon|midnight)';
+function parseTimeWindow(text: string): { startH: number; endH: number } | 'invalid' | null {
   const re = new RegExp(
     `\\b(?:between|from)\\s+${TIME_TOKEN}\\s+(?:and|to|until|–|—|-)\\s+${TIME_TOKEN}`,
   );
-  const m = text.match(re);
+  // The compact form needs am/pm on both ends so a bare "9-5" is not guessed at.
+  const compact = new RegExp(
+    '\\b(\\d{1,2}(?:[:.]\\d{2})?\\s*(?:am|pm))\\s*(?:–|—|-)\\s*(\\d{1,2}(?:[:.]\\d{2})?\\s*(?:am|pm))\\b',
+  );
+  const m = text.match(re) ?? text.match(compact);
   if (!m) return null;
   const start = parseTime(m[1]!);
   const end = parseTime(m[2]!);
-  if (!start || !end) return null;
-  if (start.h > end.h) return null; // a window that wraps midnight isn't a simple cron range
+  if (!start || !end) return 'invalid';
+  if (start.h > end.h) return 'invalid'; // a window that wraps midnight isn't a simple cron range
   return { startH: start.h, endH: end.h };
 }
 
+const DAY_ALT = Object.keys(DOW_NAME)
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+const DAY_RANGE = new RegExp(
+  `\\b(${DAY_ALT})s?\\s*(?:to|through|thru|until|–|—|-)\\s*(${DAY_ALT})s?\\b`,
+);
+
 /** Day-of-week field from a phrase fragment, or '*' for every day. */
 function parseDow(text: string): string | null {
+  // A range of named days ("monday to friday", "mon-fri"), which may wrap the week.
+  const range = text.match(DAY_RANGE);
+  if (range) {
+    const lo = DOW_NAME[range[1]!]!;
+    const hi = DOW_NAME[range[2]!]!;
+    if (lo === hi) return String(lo);
+    if (lo < hi) return `${lo}-${hi}`;
+    const days: number[] = [];
+    for (let d = lo; d % 7 !== (hi + 1) % 7; d++) days.push(d % 7);
+    return days.sort((a, b) => a - b).join(',');
+  }
   if (/\bweekdays?\b/.test(text) || /\bevery weekday\b/.test(text)) return '1-5';
   if (/\bweekends?\b/.test(text)) return '0,6';
   if (/\b(every ?day|daily|day)\b/.test(text)) return '*';
@@ -97,10 +120,23 @@ export function parseNaturalSchedule(input: string): string | null {
   const text = input.trim().toLowerCase().replace(/\s+/g, ' ');
   if (text === '') return null;
 
+  // A cadence this cannot express (every 2 days, weekly, monthly) must not
+  // collapse into a daily schedule: refuse it rather than guess.
+  if (
+    /\b(?:weeks?|months?|years?|weekly|monthly|yearly|annually|fortnightly|fortnight|biweekly|quarterly)\b/.test(
+      text,
+    ) ||
+    /\bevery (?:other|second|alternate|\d+) (?:days?|weekdays?|weekends?)\b/.test(text)
+  ) {
+    return null;
+  }
+
   // An optional time-of-day window ("between 9am and 5pm") and day-of-week
   // ("on weekdays") constrain the interval forms below. The hour field is the
   // window range (or `*`); the day field is the parsed days (or `*`).
+  // A window that is there but can't be expressed must not widen to all day.
   const window = parseTimeWindow(text);
+  if (window === 'invalid') return null;
   const hourField = window ? `${window.startH}-${window.endH}` : '*';
   const dowField = parseDow(text) ?? '*';
 
@@ -124,13 +160,16 @@ export function parseNaturalSchedule(input: string): string | null {
   }
   if (/^(?:hourly|every hour)\b/.test(text)) return `0 ${hourField} * * ${dowField}`;
 
+  // A window only bounds an interval; with none, its end time is not "the" time.
+  if (window) return null;
+
   // Time-of-day forms. Pull an explicit "at <time>" (or a list of them —
   // "at 9am and 10pm", "at 9am, 1pm and 10pm") first; else a trailing time.
   // Cron's minute and hour fields are independent, so a list can only be
   // expressed when every time shares one minute; otherwise → null, never a guess.
   let times: { h: number; m: number }[] = [];
   const atMatch = text.match(
-    new RegExp(`\\bat (${TIME_TOKEN}(?:\\s*(?:,|&|\\band\\b)\\s*${TIME_TOKEN})*)(?![0-9:])`),
+    new RegExp(`\\bat (${TIME_TOKEN}(?:\\s*(?:,|&|\\band\\b)\\s*${TIME_TOKEN})*)(?![0-9:]|\\.\\d)`),
   );
   if (atMatch) {
     const parts = atMatch[1]!.split(/\s*(?:,|&|\band\b)\s*/).filter((p) => p !== '');
@@ -141,15 +180,15 @@ export function parseNaturalSchedule(input: string): string | null {
   }
   if (times.length === 0) {
     // A leading time ("8am every day", "17:30 weekdays"): a bare number is
-    // too ambiguous here, so it needs am/pm, a colon, or noon/midnight.
+    // too ambiguous here, so it needs am/pm, a colon or dot, or noon/midnight.
     const lead = text.match(
-      /^(\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm)|noon|midnight)(?=\s|$)/,
+      /^(\d{1,2}[:.]\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm)|noon|midnight)(?=\s|$)/,
     );
     const t = lead ? parseTime(lead[1]!) : null;
     if (t) times = [t];
   }
   if (times.length === 0) {
-    const tail = text.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)|noon|midnight)\s*$/);
+    const tail = text.match(/(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)|noon|midnight)\s*$/);
     const t = tail ? parseTime(tail[1]!) : null;
     if (t) times = [t];
   }

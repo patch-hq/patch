@@ -430,7 +430,7 @@
     document.querySelectorAll('[data-tool]').forEach(function (b) { b.classList.toggle('on', b.dataset.tool === t); });
     layer.classList.toggle('interact', t === 'interact');
     layer.classList.toggle('text-tool', t === 'text');
-    layer.classList.toggle('draw-tool', t === 'draw');
+    layer.classList.toggle('draw-tool', t === 'draw' || SHAPE_TOOLS.indexOf(t) >= 0);
     if (t !== 'select') hoverEl = null;
     draw();
   }
@@ -475,6 +475,7 @@
     var pt = local(e);
     if (tool === 'text') { e.preventDefault(); startNote(pt); return; }
     if (tool === 'draw') { e.preventDefault(); startStroke(e, pt); return; }
+    if (SHAPE_TOOLS.indexOf(tool) >= 0) { e.preventDefault(); startStroke(e, pt, tool); return; }
     var t = hit(pt);
     var onSel = sel && t && (t === sel || sel.contains(t));
     drag = {
@@ -555,8 +556,36 @@
 
   // ---------- draw ----------
   var PEN = { color: '#e5484d', width: 3 };
-  function startStroke(e, pt) {
+  var SHAPE_TOOLS = ['rectangle', 'ellipse', 'line', 'arrow'];
+  /** The outline of a shape dragged from a to b, as the polyline a stroke is. Shift keeps it square, round or at 45°. */
+  function outline(shape, a, b, constrain) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    if (constrain) {
+      if (shape === 'line' || shape === 'arrow') {
+        var ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4), len = Math.hypot(dx, dy);
+        dx = Math.cos(ang) * len; dy = Math.sin(ang) * len;
+      } else {
+        var m = Math.max(Math.abs(dx), Math.abs(dy));
+        dx = Math.sign(dx || 1) * m; dy = Math.sign(dy || 1) * m;
+      }
+    }
+    var x2 = a.x + dx, y2 = a.y + dy, pts;
+    if (shape === 'rectangle') pts = [[a.x, a.y], [x2, a.y], [x2, y2], [a.x, y2], [a.x, a.y]];
+    else if (shape === 'ellipse') {
+      var cx = a.x + dx / 2, cy = a.y + dy / 2; pts = [];
+      for (var i = 0; i <= 48; i++) pts.push([cx + Math.cos(i / 48 * 2 * Math.PI) * dx / 2, cy + Math.sin(i / 48 * 2 * Math.PI) * dy / 2]);
+    } else if (shape === 'line') pts = [[a.x, a.y], [x2, y2]];
+    else {
+      var th = Math.atan2(dy, dx), h = Math.min(18, Math.hypot(dx, dy) / 2);
+      pts = [[a.x, a.y], [x2, y2],
+        [x2 - h * Math.cos(th - 0.5), y2 - h * Math.sin(th - 0.5)], [x2, y2],
+        [x2 - h * Math.cos(th + 0.5), y2 - h * Math.sin(th + 0.5)]];
+    }
+    return pts.map(function (p) { return [Math.round(p[0]), Math.round(p[1])]; });
+  }
+  function startStroke(e, pt, shape) {
     var pts = [[Math.round(pt.x), Math.round(pt.y)]];
+    var origin = { x: pt.x, y: pt.y }, dragged = false;
     var wet = document.createElementNS(SVGNS, 'svg');
     wet.setAttribute('class', 'stroke wet');
     var pl = document.createElementNS(SVGNS, 'polyline');
@@ -568,13 +597,18 @@
     drag = { stroke: true };
     var move = function (ev) {
       var q = local(ev), last = pts[pts.length - 1];
+      if (shape) {
+        if (Math.hypot(q.x - origin.x, q.y - origin.y) >= 6) dragged = true;
+        if (dragged) { pts = outline(shape, origin, q, ev.shiftKey); paint(); }
+        return;
+      }
       if (Math.abs(q.x - last[0]) + Math.abs(q.y - last[1]) < 2 || pts.length >= 1500) return;
       pts.push([Math.round(q.x), Math.round(q.y)]); paint();
     };
     var up = function () {
       layer.removeEventListener('pointermove', move); layer.removeEventListener('pointerup', up); layer.removeEventListener('pointercancel', up);
       drag = null;
-      if (pts.length < 2) { wet.remove(); return; }
+      if (pts.length < 2 || (shape && !dragged)) { wet.remove(); return; }
       // Anchor to what the stroke is around, so it scrolls with it.
       var xs = pts.map(function (p) { return p[0]; }), ys = pts.map(function (p) { return p[1]; });
       var mid = { x: (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2, y: (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2 };
@@ -585,7 +619,7 @@
         if (n && seen.indexOf(n) < 0 && over.length < 8) { seen.push(n); over.push(labelFor(n)); }
       }
       post({
-        kind: 'draw', target: target(anchor), color: PEN.color, width: PEN.width, over: over,
+        kind: 'draw', target: target(anchor), color: PEN.color, width: PEN.width, over: over, shape: shape,
         points: pts.map(function (p) { return [Math.round(p[0] - ar.left), Math.round(p[1] - ar.top)]; }),
       }).then(function () { wet.remove(); });
     };
@@ -749,6 +783,10 @@
     else if (k === 'v' && editingOn) setTool('select');
     else if ((k === 'n' || k === 't') && editingOn) setTool('text');
     else if (k === 'd' && editingOn) setTool('draw');
+    else if (k === 'r' && editingOn) setTool('rectangle');
+    else if (k === 'o' && editingOn) setTool('ellipse');
+    else if (k === 'l' && editingOn) setTool('line');
+    else if (k === 'a' && editingOn) setTool('arrow');
     else if (k === 'pageup' || k === 'pagedown') { var i = state.screens.indexOf(screen) + (k === 'pageup' ? -1 : 1); if (state.screens[i]) setScreen(state.screens[i]); }
     else if (!(sel && tool === 'select')) return;
     else if (k === 'delete' || k === 'backspace') deleteSelected();

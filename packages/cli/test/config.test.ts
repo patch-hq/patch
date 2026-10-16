@@ -40,7 +40,7 @@ test('loadConfig: returns defaults when no file', () => {
   withTempPatchHome(() => {
     const c = loadConfig();
     assert.equal(c.serverUrl, 'http://localhost:3000');
-    assert.equal(c.daemonSocket, null);
+    assert.equal(c.hostSocket, null);
     assert.equal(c.daemonLocalKey, null);
     assert.deepEqual(c.defaultFlags, []);
   });
@@ -109,5 +109,63 @@ test('loadConfig: malformed JSON throws (NO FALLBACK)', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'config.json'), 'not json');
     assert.throws(() => loadConfig());
+  });
+});
+
+test('configHomeDir: an empty PATCH_HOME counts as unset, so PATCH_CONFIG_DIR wins', () => {
+  const prevHome = process.env.PATCH_HOME;
+  const prevCfg = process.env.PATCH_CONFIG_DIR;
+  process.env.PATCH_HOME = '';
+  process.env.PATCH_CONFIG_DIR = '/tmp/cdir';
+  try {
+    assert.equal(configHomeDir(), '/tmp/cdir');
+  } finally {
+    if (prevHome === undefined) delete process.env.PATCH_HOME;
+    else process.env.PATCH_HOME = prevHome;
+    if (prevCfg === undefined) delete process.env.PATCH_CONFIG_DIR;
+    else process.env.PATCH_CONFIG_DIR = prevCfg;
+  }
+});
+
+test('loadConfig: empty PATCH_SERVER_URL is treated as unset (file wins)', () => {
+  withTempPatchHome((dir) => {
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({ serverUrl: 'https://from-file.example' }),
+    );
+    process.env.PATCH_SERVER_URL = '';
+    assert.equal(loadConfig().serverUrl, 'https://from-file.example');
+  });
+});
+
+test('loadConfig: empty PATCH_SERVER_URL with no file gives the default', () => {
+  withTempPatchHome(() => {
+    process.env.PATCH_SERVER_URL = '';
+    assert.equal(loadConfig().serverUrl, 'http://localhost:3000');
+  });
+});
+
+test('loadConfig: PATCH_SERVER_URL set outranks the file', () => {
+  withTempPatchHome((dir) => {
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({ serverUrl: 'https://from-file.example' }),
+    );
+    process.env.PATCH_SERVER_URL = 'https://from-env.example';
+    assert.equal(loadConfig().serverUrl, 'https://from-env.example');
+  });
+});
+
+test('loadConfig: empty serverUrl in the file throws, naming the file', () => {
+  withTempPatchHome((dir) => {
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ serverUrl: '' }));
+    assert.throws(() => loadConfig(), /serverUrl.*config\.json/);
+  });
+});
+
+test('loadConfig: invalid PATCH_SERVER_URL throws, naming the env var', () => {
+  withTempPatchHome(() => {
+    process.env.PATCH_SERVER_URL = 'not a url';
+    assert.throws(() => loadConfig(), /PATCH_SERVER_URL/);
   });
 });

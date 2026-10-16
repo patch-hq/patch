@@ -23,21 +23,21 @@ function stage({ repoRoot, desktopDir, buildServer }) {
   rmSync(staged, { recursive: true, force: true });
   mkdirSync(staged, { recursive: true });
 
-  const daemonOut = path.join(repoRoot, 'dist', 'daemon');
-  if (!existsSync(path.join(daemonOut, 'daemon-latest.json'))) {
+  const hostOut = path.join(repoRoot, 'dist', 'host');
+  if (!existsSync(path.join(hostOut, 'host-latest.json'))) {
     throw new Error(
-      `No daemon build at ${daemonOut}. Run \`pnpm build:daemon\` first: the app carries the host it sets up on this Mac.`,
+      `No host build at ${hostOut}. Run \`pnpm build:host\` first: the app carries the host it sets up on this Mac.`,
     );
   }
-  mkdirSync(path.join(staged, 'daemon'));
+  mkdirSync(path.join(staged, 'host'));
   let carried = 0;
-  for (const name of readdirSync(daemonOut)) {
+  for (const name of readdirSync(hostOut)) {
     if (!wanted(name)) continue;
-    cpSync(path.join(daemonOut, name), path.join(staged, 'daemon', name), { recursive: true });
+    cpSync(path.join(hostOut, name), path.join(staged, 'host', name), { recursive: true });
     if (/darwin-arm64/.test(name)) carried++;
   }
   if (carried === 0) {
-    throw new Error(`${daemonOut} has no darwin-arm64 host build; the app would have no host to install.`);
+    throw new Error(`${hostOut} has no darwin-arm64 host build; the app would have no host to install.`);
   }
 
   const release = buildServer(path.join(staged, 'server-build'));

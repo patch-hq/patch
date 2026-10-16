@@ -260,7 +260,7 @@ deployments — artifacts a person installs:
 ```sh
 pnpm build:desktop   # Mac app → /Applications (signed release needs Apple creds); carries the server release and this Mac's daemon build
 pnpm build:android   # APK — no server address is built in
-pnpm build:daemon    # daemon artifacts per OS/arch → published for install + self-update
+pnpm build:host    # daemon artifacts per OS/arch → published for install + self-update
 ```
 
 The host artifacts are published to the server, which serves them with a
@@ -365,7 +365,7 @@ Rules.
   semver, not shas. The web build emits `dist/version.json`; the desktop build
   emits `dist/build-info.json`; the server takes `PATCH_VERSION` /
   `PATCH_GIT_SHA` / `PATCH_BUILT_AT` from the Docker build; the host carries the
-  same three stamped into its artifact and reports them on `daemon.host`; the APK
+  same three stamped into its artifact and reports them on `host.host`; the APK
   inlines `EXPO_PUBLIC_PATCH_*`.
 - Clients report themselves. The WS `hello` carries `clientVersion` plus
   optional `clientGitSha` / `clientBuiltAt`, recorded into presence. This is the

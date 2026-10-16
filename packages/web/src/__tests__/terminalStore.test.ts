@@ -30,7 +30,7 @@ describe('terminalStore', () => {
 
   it('ignores non-terminal frames and frames for unknown sessions', () => {
     store().startSession('c1', '/p', 's1');
-    store().ingest({ type: 'daemon.online', daemonId: 'd1' });
+    store().ingest({ type: 'host.online', hostId: 'd1' });
     store().ingest({
       type: 'patch.terminal.output',
       sessionId: 'not-mine',

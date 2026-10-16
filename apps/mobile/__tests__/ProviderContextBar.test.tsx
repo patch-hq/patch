@@ -44,12 +44,12 @@ beforeEach(() => {
   useChatStore.getState()._reset();
   useSettingsStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
       name: 'Chat',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/p',
       activity: 'idle',
       permissionMode: 'auto',

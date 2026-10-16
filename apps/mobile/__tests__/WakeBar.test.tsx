@@ -14,6 +14,7 @@ import {
   textOf,
   actSync,
   actAsync,
+  update,
 } from './testUtils/render';
 import { useUiStore } from '../src/stores/uiStore';
 import { WakeBar } from '../src/components/WakeBar';
@@ -28,7 +29,7 @@ function row(pendingWake: ChatRow['pendingWake']): ChatRow {
   return {
     chatId: 'c1',
     name: 'bus watch',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '~/f',
     activity: 'idle',
     permissionMode: 'bypassPermissions',
@@ -92,6 +93,21 @@ describe('WakeBar', () => {
   it('reads "now" once the fire time has passed but the turn has not landed', () => {
     const r = renderRN(<WakeBar row={row({ message: 'overdue', fireAt: NOW - 1_000 })} />);
     expect(textOf(queryHost(r.root, byTestId('wake-bar-countdown'))!)).toContain('now');
+  });
+
+  it('a detail sheet left open when the wake fires does not reopen itself over the next wake', () => {
+    const r = renderRN(<WakeBar row={row({ message: 'first', fireAt: NOW + 60_000 })} />);
+    actSync(() => {
+      (findHost(r.root, byTestId('wake-bar')).props.onPress as () => void)();
+    });
+    expect(queryHost(r.root, byTestId('wake-modal'))).not.toBeNull();
+
+    // The wake fires: nothing pending, then the agent arms another.
+    update(r, <WakeBar row={row(null)} />);
+    update(r, <WakeBar row={row({ message: 'second', fireAt: NOW + 120_000 })} />);
+
+    expect(queryHost(r.root, byTestId('wake-bar'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('wake-modal'))).toBeNull();
   });
 
   const press = (r: ReturnType<typeof renderRN>, id: string): void =>

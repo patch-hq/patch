@@ -22,7 +22,7 @@ import type {
   TodoItem,
   WireEvent,
 } from '@patch/wire';
-import { clearsLimitPause, isTransientChatError } from '@patch/wire';
+import { clearsLimitPause, headCodePoints, isTransientChatError } from '@patch/wire';
 import {
   deriveBadge,
   type ChatRow,
@@ -435,6 +435,10 @@ interface ChatState {
   clearDelivery(chatId: string, localId: string): void;
   failDelivery(chatId: string, localId: string): void;
   retryDelivery(chatId: string, localId: string): void;
+  /** Retry in place: open a pending attempt on the turn whose original seq this is. */
+  beginRetryAttempt(chatId: string, retryOfSeq: number): void;
+  /** The retry never reached the host: drop the pending attempt it opened. */
+  cancelRetryAttempt(chatId: string, retryOfSeq: number): void;
   markRead(chatId: string): void;
   setKebabOpen(chatId: string | null): void;
   /** Local optimistic update for archive (REST POST issued by component). */
@@ -508,6 +512,14 @@ interface ChatState {
  */
 export interface TurnAttempt {
   seq: number;
+  /**
+   * A retry the user has asked for that the host has not yet echoed. It owns no
+   * replies (its seq is past every real one) so the pager is parked on it at
+   * once: the earlier reply leaves the transcript the instant Retry is pressed
+   * and the new run's content is all that appears. The host's `retryOfSeq`
+   * message replaces it with the real seq.
+   */
+  pending?: true;
   error?: string;
   errorCode?: string;
 }
@@ -527,6 +539,8 @@ export interface ToolRunSummary {
   /** Null exactly when generation failed; `error` then says why. */
   summary: string | null;
   error?: string;
+  /** The run is still open and `summary` narrates it as it happens; the closed label replaces it. */
+  live?: boolean;
 }
 
 /** A `patch_delegate` subagent's live state (spec/14 § Main chat panel —
@@ -644,6 +658,12 @@ export interface ChatEventEntry {
    */
   jobTrigger?: boolean;
   /**
+   * This user-role turn was started by the host, not a person (self-wake,
+   * sweep nudge, delegate relay, todo advance). Mirrors the wire
+   * `ChatMessageEvent.origin` field; only ever 'machine'.
+   */
+  origin?: 'machine';
+  /**
    * spec/20-hooks.md § On the agent's response, spec/14 § Agent-response
    * hooks — this user-role turn is a `block` resubmit the host fired
    * because a hook needed the agent to redo its answer, not something Tom
@@ -666,6 +686,8 @@ export interface ChatEventEntry {
    * `ChatMessageEvent.synthetic` field untouched.
    */
   synthetic?: boolean;
+  /** A `system` line marking a turn that moved to another account — a status note, not a message. */
+  accountSwitch?: boolean;
   /**
    * spec/07 § The fast voice and the chat's agent — a request the call's fast
    * voice handed to the agent, not words the user said. Rendered as a quiet
@@ -712,6 +734,8 @@ export interface ChatEventEntry {
    * with a remove (×) affordance.
    */
   queued?: boolean;
+  /** On a queued turn: it needs a run of its own, so it waits for the running turn to end rather than a tool boundary. */
+  queuedOwnTurn?: boolean;
   /**
    * This user message reached the agent at a tool boundary of the turn that was
    * already running (spec/04 § Message delivery). `midTurnStep` is how many tool
@@ -805,7 +829,7 @@ export interface ChatEventEntry {
    * `activity` is still `running` — the drain never went idle in between). The
    * agent DID see this turn; the promoted turn's run is what resumed the same
    * session, so there is nothing to retry and re-sending would duplicate it.
-   * Rendered as a muted "Interrupted." with no action.
+   * Rendered as a muted "Interrupted by a newer message." with no action.
    */
   turnInterrupted?: boolean;
   /**
@@ -871,7 +895,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     name: null,
     // Unknown until `chat.spawned` names it. Empty is the honest value for an
     // optimistic row, and every host-scoped action checks for it.
-    daemonId: '',
+    hostId: '',
     folder,
     activity: 'idle',
     permissionMode: 'auto',
@@ -897,6 +921,8 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     statusKind: null,
     statusDeclared: null,
     snoozedUntil: null,
+    snoozeRecords: [],
+    runningSince: null,
     hidden: false,
     pendingPermissions: [],
     lastSeq: 0,
@@ -934,6 +960,10 @@ function emptyRow(chatId: string, folder: string): ChatRow {
  * days, and an unbounded set of ULIDs is a leak.
  */
 const retractedChatIds = new Set<string>();
+/** Chats confirmed by the REST roster or a live chat.spawned event. */
+const rosteredChatIds = new Set<string>();
+/** `${chatId}::${localId}` of turns whose persisted echo has landed, so a late `chat.queued` is ignored. */
+const settledLocalIds = new Set<string>();
 const RETRACTED_LIMIT = 200;
 
 /** A turn's move to another account, with when the spent one comes back. */
@@ -992,6 +1022,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // on refetch — the roster showed zero `read` badges no matter how many
     // chats you'd opened.
     const prev = get().chats;
+    rosteredChatIds.clear();
+    for (const row of rows) rosteredChatIds.add(row.chatId);
     // Persisted per-surface read watermarks (localStorage). The REST snapshot
     // carries no read state, so without this every reload reset visited chats
     // back to `done`. Seed `lastReadSeq` from here so a visit's mark-read
@@ -1086,6 +1118,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           pendingWake,
           todos,
           snoozedUntil,
+          snoozeRecords: r.snoozeRecords ?? existing?.snoozeRecords ?? [],
+          runningSince:
+            r.runningSince !== undefined ? r.runningSince : (existing?.runningSince ?? null),
           hidden,
           jobId,
           model,
@@ -1111,6 +1146,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           pendingWake,
           todos,
           snoozedUntil,
+          snoozeRecords: r.snoozeRecords ?? [],
+          runningSince: r.runningSince ?? null,
           hidden,
           jobId,
           model,
@@ -1137,6 +1174,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const persistedRead = loadReadState();
     const next: Record<string, ChatRow> = { ...prev };
     for (const r of rows) {
+      rosteredChatIds.add(r.chatId);
       const existing = prev[r.chatId];
       const persisted = persistedRead[r.chatId];
       const preview = r.preview ?? existing?.preview ?? null;
@@ -1199,6 +1237,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           pendingWake,
           todos,
           snoozedUntil,
+          snoozeRecords: r.snoozeRecords ?? existing?.snoozeRecords ?? [],
+          runningSince:
+            r.runningSince !== undefined ? r.runningSince : (existing?.runningSince ?? null),
           hidden,
           jobId,
           model,
@@ -1224,6 +1265,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           pendingWake,
           todos,
           snoozedUntil,
+          snoozeRecords: r.snoozeRecords ?? [],
+          runningSince: r.runningSince ?? null,
           hidden,
           jobId,
           model,
@@ -1410,13 +1453,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Idempotent: a replay hands the same re-send back, and an attempt must
       // not be counted twice (that is how "Retried twice" becomes a lie).
       if (prior.some((a) => a.seq === seq)) return true;
+      // The user's own Retry opened a placeholder attempt; this is its echo.
+      const lastPrior = prior[prior.length - 1]!;
+      const withoutPending = lastPrior.pending ? prior.slice(0, -1) : prior;
       // Whatever ended the PREVIOUS attempt belongs to that attempt. The
       // server's out-of-band `daemon_unavailable` card was already filed there
       // by `clearTransientErrors`; this is the other shape — a generic
       // `sdk_error`, which is marked on the bubble itself rather than drawn as
       // a card of its own.
-      const settled = prior.map((a, i) =>
-        i !== prior.length - 1 ||
+      const settled = withoutPending.map((a, i) =>
+        i !== withoutPending.length - 1 ||
         a.error !== undefined ||
         anchor.turnFailed !== true ||
         anchor.turnErrorMessage === undefined
@@ -1461,19 +1507,79 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // PatchWs turns them into a toast; recording one as a chat would draw a
       // stray "New chat" row in the sidebar.
       if (event.type === 'chat.error' && event.chatId === 'pending-spawn') continue;
+      // Once GET /api/chats has supplied the account roster, a bare state frame
+      // cannot establish a brand-new chat. The host may replay state for local
+      // metadata whose server chat has been deleted; accepting that frame is
+      // what recreated the phantom rows even after their one-shot error was no
+      // longer replayed. Real new chats arrive through chat.spawned (and
+      // optimistic voice/message creation already has a row), so ignore only a
+      // state frame that is unknown to both the roster and this surface.
+      if (
+        event.type === 'chat.state' &&
+        state.hydrated &&
+        !rosteredChatIds.has(event.chatId) &&
+        chats[event.chatId] === undefined
+      ) {
+        continue;
+      }
+      // Any other chat-scoped frame is likewise evidence about an existing chat,
+      // never a chat-creation event: after a host restart it replays events for
+      // chats the account no longer has, and `ensureRow` would draw each as an
+      // empty "New chat" row. Only `chat.spawned` (handled below) creates one.
+      if (
+        event.type !== 'chat.spawned' &&
+        'chatId' in event &&
+        typeof event.chatId === 'string' &&
+        state.hydrated &&
+        !rosteredChatIds.has(event.chatId) &&
+        chats[event.chatId] === undefined
+      ) {
+        continue;
+      }
+      // An error reports the outcome of a turn in an existing chat; it is not
+      // a chat-creation event. Failed job dispatches can replay several errors
+      // for an allocated `jobchat-*` id that the server never admitted to the
+      // roster. Whichever error arrives first, none may manufacture a row.
+      // Optimistic new-chat flows already have a local row, so their actionable
+      // spawn failure still lands and is then retracted by the request path.
+      if (
+        event.type === 'chat.error' &&
+        state.hydrated &&
+        !rosteredChatIds.has(event.chatId) &&
+        chats[event.chatId] === undefined
+      ) {
+        continue;
+      }
+      // An invalid-session error can be replayed after the chat it belonged to
+      // has already disappeared from the account roster. It is evidence about
+      // a session, not evidence that the addressed chat still exists. Creating
+      // a row here turns a batch of stale errors into a batch of phantom
+      // "New chat" rows. Real chats are already seeded by hydration,
+      // chat.spawned, chat.state, or chat.message, so retain the error for those
+      // and discard only the orphan.
+      if (
+        event.type === 'chat.error' &&
+        event.error.code === 'claude_session_invalid' &&
+        !rosteredChatIds.has(event.chatId)
+      ) {
+        delete chats[event.chatId];
+        delete timelines[event.chatId];
+        continue;
+      }
       switch (event.type) {
         case 'chat.spawned': {
+          rosteredChatIds.add(event.chatId);
           const row = ensureRow(event.chatId, event.folder);
           chats[event.chatId] = {
             ...row,
-            daemonId: event.daemonId,
+            hostId: event.hostId,
             folder: event.folder,
             // spec/08 § Action, spec/14 § Sidebar — Automations: set ONCE, at
             // spawn, never re-derived later. `event.jobId` is absent both for a
             // user-started chat and for an old-daemon frame (wire back-compat);
             // either way `null` (never a job) is correct — an old host never
             // spawns jobs of its own for this field to be lying about.
-            jobId: event.jobId ?? null,
+            jobId: event.jobId ?? row.jobId ?? null,
             // spec/04 § Spawn: set ONCE, at spawn, never re-derived later.
             // `event.model` is absent for an old-daemon frame (wire back-compat)
             // or a host with no model catalogue support — either way `null`
@@ -1543,6 +1649,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // it when the snooze elapses — so only keep the existing value when
             // the field is OMITTED (a payload predating the feature).
             snoozedUntil: event.snoozedUntil !== undefined ? event.snoozedUntil : row.snoozedUntil,
+            // What each snooze was and did (spec/04 § Snooze → Back). Omitted
+            // by a host predating the field, which keeps what is known.
+            snoozeRecords:
+              event.snoozeRecords !== undefined ? event.snoozeRecords : (row.snoozeRecords ?? []),
+            runningSince:
+              event.runningSince !== undefined ? event.runningSince : (row.runningSince ?? null),
             // Hidden (spec/04 § Hidden). ABSENT from a host predating the
             // field, so keep what is known; `false` is meaningful (shown).
             hidden: event.hidden !== undefined ? event.hidden : row.hidden,
@@ -1589,6 +1701,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // spec/10 § Backend credentials — the account the latest turn ran
             // on. Absent until this host has run one; keep what is known.
             account: event.account !== undefined ? event.account : (row.account ?? null),
+            // The account the next turn starts on. Absent = a host that does
+            // not know the field: keep what is known.
+            preferredAccountId:
+              event.preferredAccountId !== undefined
+                ? event.preferredAccountId
+                : row.preferredAccountId,
             // spec/02 § Background task completions — how much of this chat's
             // work is still in flight now the turn has ended. `0` is meaningful
             // (the last task finished), so only an ABSENT field keeps the known
@@ -1601,14 +1719,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
             context: event.context !== undefined ? event.context : (row.context ?? null),
           };
           // The host is speaking for this chat again. If it reports anything
-          // other than `errored`, the daemon-link-lost notice the SERVER raised
+          // other than `errored`, the host-link-lost notice the SERVER raised
           // while the host was gone has resolved — the turn carried on, or was
           // re-sent on restart, exactly as the message promised. Clear it.
-          // Nothing else clears it: no timer, and not `daemon.online` on its own
+          // Nothing else clears it: no timer, and not `host.online` on its own
           // (a host returning says nothing about whether THIS chat's turn did).
           // If the host never comes back there is no such event and the notice
           // stays, which is the truth.
           if (event.activity !== 'errored') clearTransientErrors(event.chatId);
+          // A generic `sdk_error` is marked on the turn's own bubble, and the
+          // host then retries that turn on its own. The mark is cleared when
+          // the re-send folds in (`foldRetryAttempt`), but a turn that carries
+          // on without one (no re-persisted message) kept saying "Turn failed"
+          // above text that was visibly still arriving. The host reporting the
+          // chat `running` again is the turn being in flight. Only the NEWEST
+          // user message can be that turn; an older failure stays failed.
+          if (event.activity === 'running') {
+            const held = timelines[event.chatId];
+            if (held) {
+              let newest = -1;
+              for (let i = held.length - 1; i >= 0; i--) {
+                const e = held[i]!;
+                if (e.kind === 'message' && e.role === 'user' && !e.queued) {
+                  newest = i;
+                  break;
+                }
+              }
+              if (newest >= 0 && held[newest]!.turnFailed === true) {
+                const list = ownTimeline(event.chatId);
+                list[newest] = {
+                  ...list[newest]!,
+                  turnFailed: false,
+                  turnErrorMessage: undefined,
+                  turnFailedSeq: undefined,
+                };
+              }
+            }
+          }
+          // A chat that is not running cannot be holding anything behind a turn
+          // (the server's QueueTracker applies the same rule). `chat.dequeued`
+          // is live-only, so a missed one would leave the message QUEUED for good.
+          if (event.activity === 'idle') {
+            const held = timelines[event.chatId];
+            if (held?.some((e) => e.queued === true)) {
+              timelines[event.chatId] = held.map((e) =>
+                e.queued === true ? { ...e, queued: false } : e,
+              );
+            }
+          }
           // The chat's turn is in flight, so it is not parked on a limit — the
           // host clears the pause as the next turn starts, and the two states
           // cannot both be true (spec/12 § A usage or rate limit). Drop the
@@ -1788,7 +1946,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Durable first-user-message label: seed it ONCE from the first user
             // message and never let a later message (user or assistant) overwrite
             // it, so the sidebar row preview stays stable instead of flipping.
-            preview: row.preview ?? (event.role === 'user' ? content.slice(0, 140) : row.preview),
+            preview:
+              row.preview ?? (event.role === 'user' ? headCodePoints(content, 140) : row.preview),
             lastSeq: Math.max(row.lastSeq, event.seq),
             // A user message after a call means that call is over: a cancelled
             // call never gets a tool_result, so a replay would otherwise
@@ -1869,7 +2028,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const idx =
               byLocalId >= 0
                 ? byLocalId
-                : list
+                : // An echo that names a localId is a different turn from any
+                  // pending one (a replayed earlier same-text message, another
+                  // surface): folding it in moved the pending bubble up the
+                  // transcript, and the real echo then re-added it at the tail.
+                  list && event.localId === undefined
                   ? list.findIndex(
                       (e) =>
                         e.localId !== undefined &&
@@ -1902,6 +2065,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (prev && list) {
               const updated = [...list];
               // The persisted echo confirms delivery — drop any delivery marks.
+              // Remember the turn has settled: a `chat.queued` for it can still
+              // arrive after this echo and must not draw a second QUEUED bubble.
+              if (prev.localId !== undefined)
+                settledLocalIds.add(`${event.chatId}::${prev.localId}`);
               updated[finalIdx] = {
                 ...prev,
                 content,
@@ -1923,6 +2090,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   ? { systemContext: event.systemContext }
                   : {}),
                 ...(event.jobTrigger ? { jobTrigger: true } : {}),
+                ...(event.origin === 'machine' ? { origin: 'machine' as const } : {}),
                 ...(event.hookTrigger ? { hookTrigger: event.hookTrigger } : {}),
                 ...(event.goalTrigger ? { goalTrigger: event.goalTrigger } : {}),
               };
@@ -1949,9 +2117,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ? { systemContext: event.systemContext }
               : {}),
             ...(event.jobTrigger ? { jobTrigger: true } : {}),
+            ...(event.origin === 'machine' ? { origin: 'machine' as const } : {}),
             ...(event.hookTrigger ? { hookTrigger: event.hookTrigger } : {}),
             ...(event.goalTrigger ? { goalTrigger: event.goalTrigger } : {}),
             ...(event.synthetic ? { synthetic: true } : {}),
+            ...(event.accountSwitch ? { accountSwitch: true } : {}),
             ...(event.role === 'user' && isVoiceHandoff(event.content)
               ? { voiceHandoff: true }
               : {}),
@@ -1976,6 +2146,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const row = ensureRow(event.chatId);
           chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
           const cur = timelines[event.chatId] ?? [];
+          // The host-link error is manufactured by the server while the host
+          // is absent.  On reconnect the host and server streams can cross: a
+          // fresh `running`/`awaiting-permission` state may land before the older error frame.
+          // In that ordering the host has already proved this chat recovered,
+          // so putting the transient card back would leave a red failure beside
+          // visibly live work until another state change happened by chance.
+          // Real turn failures are never discarded here.
+          if (
+            isTransientChatError(event.error.code) &&
+            (row.activity === 'running' || row.activity === 'awaiting-permission')
+          )
+            break;
           // An unclassified agent/SDK failure (as opposed to a specific,
           // recoverable case like an offline host or invalid session) is
           // attached to the message that failed, not rendered as its own
@@ -2060,7 +2242,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Already queued: this is the host re-announcing it after its
             // text was edited (spec/04 ## Message queueing § Edit). Update the
             // text IN PLACE — the turn keeps its place in the queue.
-            list[idx] = { ...list[idx]!, content: event.message };
+            list[idx] = {
+              ...list[idx]!,
+              content: event.message,
+              ...(event.ownTurn ? { queuedOwnTurn: true } : {}),
+            };
           } else if (idx >= 0) {
             // `chat.queued` is a positive delivery signal (spec/12): the host
             // received and parked this turn — clear the delivery-pending mark so
@@ -2072,9 +2258,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             list.push({
               ...msg!,
               queued: true,
+              ...(event.ownTurn ? { queuedOwnTurn: true } : {}),
               deliveryPending: false,
               deliveryFailed: false,
             });
+          } else if (settledLocalIds.has(`${event.chatId}::${event.localId}`)) {
+            // Late announcement for a turn whose persisted echo already landed.
+            break;
           } else {
             list.push({
               // Local-timestamp seq sorts after real stream seqs (see addLocalMessage).
@@ -2084,6 +2274,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               content: event.message,
               localId: event.localId,
               queued: true,
+              ...(event.ownTurn ? { queuedOwnTurn: true } : {}),
               at: Date.now(),
             });
           }
@@ -2179,6 +2370,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 callIds: event.callIds,
                 summary: event.summary,
                 ...(event.error !== undefined ? { error: event.error } : {}),
+                ...(event.live === true ? { live: true } : {}),
               },
             },
           };
@@ -2620,7 +2812,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.chats,
         // Seed the durable first-user-message preview ONCE — a later optimistic
         // send must not overwrite it, or the sidebar label flips around.
-        [chatId]: { ...row, preview: row.preview ?? content.slice(0, 140) },
+        [chatId]: { ...row, preview: row.preview ?? headCodePoints(content, 140) },
       },
     });
   },
@@ -2735,6 +2927,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
       deliveryPending: false,
       deliveryFailed: true,
     });
+  },
+
+  beginRetryAttempt(chatId, retryOfSeq) {
+    const list = get().timelines[chatId];
+    if (!list) return;
+    const idx = list.findIndex(
+      (e) =>
+        e.kind === 'message' &&
+        e.role === 'user' &&
+        (e.seq === retryOfSeq || (e.attempts?.some((a) => a.seq === retryOfSeq) ?? false)),
+    );
+    if (idx === -1) return;
+    const anchor = list[idx]!;
+    const prior = anchor.attempts ?? [{ seq: anchor.seq }];
+    if (prior[prior.length - 1]!.pending) return;
+    const next = [...list];
+    next[idx] = {
+      ...anchor,
+      attempts: [...prior, { seq: Number.MAX_SAFE_INTEGER, pending: true }],
+    };
+    set({ timelines: { ...get().timelines, [chatId]: next } });
+  },
+
+  cancelRetryAttempt(chatId, retryOfSeq) {
+    const list = get().timelines[chatId];
+    if (!list) return;
+    const idx = list.findIndex(
+      (e) =>
+        e.kind === 'message' &&
+        e.role === 'user' &&
+        (e.seq === retryOfSeq || (e.attempts?.some((a) => a.seq === retryOfSeq) ?? false)),
+    );
+    const anchor = idx === -1 ? undefined : list[idx]!;
+    const attempts = anchor?.attempts;
+    if (!anchor || !attempts || !attempts[attempts.length - 1]!.pending) return;
+    const kept = attempts.slice(0, -1);
+    const next = [...list];
+    const { attempts: _drop, ...rest } = anchor;
+    next[idx] = kept.length > 1 ? { ...anchor, attempts: kept } : (rest as ChatEventEntry);
+    set({ timelines: { ...get().timelines, [chatId]: next } });
   },
 
   retryDelivery(chatId, localId) {
@@ -2926,6 +3158,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   _reset() {
     retractedChatIds.clear();
+    rosteredChatIds.clear();
+    settledLocalIds.clear();
     set({
       chats: {},
       hydrated: false,

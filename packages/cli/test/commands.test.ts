@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
+import { bearerToken, CredentialExpiredError } from '../src/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -210,6 +211,24 @@ test('chats archive --json: REST happy path', async () => {
   );
 });
 
+test('chats set-model --json: REST happy path', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/chats/01M3N32N9T7V75JCV7XHY9NRHM/model' && req.method === 'POST')
+        return { status: 200, body: { ok: true } };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(
+        ['chats', 'set-model', '01M3N32N9T7V75JCV7XHY9NRHM', 'claude-opus-5-5', '--json'],
+        env,
+      );
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      assert.equal((JSON.parse(r.stdout) as { ok: boolean }).ok, true);
+    },
+  );
+});
+
 test('chats pin --json: REST happy path', async () => {
   await withSetup(
     (req) => {
@@ -376,6 +395,23 @@ test('chats list with corrupt credential.jwt: exit 1 with actionable error', asy
   );
 });
 
+test('bearerToken: a credential whose exp is this very second is expired, as the server (jose) judges it', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'patch-cli-exp-'));
+  const prev = process.env['PATCH_HOME'];
+  process.env['PATCH_HOME'] = dir;
+  try {
+    const exp = 1_800_000_000;
+    const payload = Buffer.from(JSON.stringify({ exp })).toString('base64url');
+    writeFileSync(join(dir, 'credential.jwt'), `aGVhZA.${payload}.c2ln\n`, { mode: 0o600 });
+    t.mock.method(Date, 'now', () => exp * 1000);
+    assert.throws(() => bearerToken(), CredentialExpiredError);
+  } finally {
+    if (prev === undefined) delete process.env['PATCH_HOME'];
+    else process.env['PATCH_HOME'] = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('chats list with no credential: exit 1 with run `patch auth login`', async () => {
   await withSetup(
     () => ({ status: 200, body: { chats: [] } }),
@@ -388,6 +424,22 @@ test('chats list with no credential: exit 1 with run `patch auth login`', async 
       const parsed = JSON.parse(r.stdout) as { error: string };
       assert.match(parsed.error, /no credential/);
       assert.match(parsed.error, /patch auth login/);
+    },
+  );
+});
+
+test('auth login: the pairing payload for an http server carries s=http', async () => {
+  await withSetup(
+    () => ({
+      status: 200,
+      body: { type: 'pairing.nonce', nonce: 'N1', expiresAt: Date.now() + 60_000 },
+    }),
+    async (env, url) => {
+      const r = await runCli(['auth', 'login', '--json'], env);
+      assert.equal(r.code, 0, r.stderr);
+      const { payload } = JSON.parse(r.stdout) as { payload: string };
+      const host = new URL(url).host;
+      assert.equal(payload, `patch-pair://${host}?nonce=N1&s=http`);
     },
   );
 });
@@ -549,6 +601,34 @@ test('unknown top-level command alone: names the command, exits non-zero', async
   );
 });
 
+test('"help" is commander\'s built-in command, not an unknown one', async () => {
+  await withSetup(
+    () => ({ status: 200, body: {} }),
+    async (env) => {
+      const r = await runCli(['help'], env);
+      assert.equal(r.code, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stdout, /Usage:/);
+      assert.doesNotMatch(r.stderr + r.stdout, /unknown command/);
+      const sub = await runCli(['help', 'chats'], env);
+      assert.equal(sub.code, 0, `stdout=${sub.stdout} stderr=${sub.stderr}`);
+      assert.match(sub.stdout, /Usage: patch chats/);
+    },
+  );
+});
+
+test('threads sweeps --limit goes through the shared --limit contract', async () => {
+  await withSetup(
+    () => ({ status: 200, body: { runs: [] } }),
+    async (env) => {
+      for (const bad of ['abc', '0', '-5']) {
+        const r = await runCli(['threads', 'sweeps', '--limit', bad], env);
+        assert.equal(r.code, 1, `limit ${bad}: stdout=${r.stdout} stderr=${r.stderr}`);
+        assert.match(r.stderr + r.stdout, /--limit must be a positive integer/);
+      }
+    },
+  );
+});
+
 test('unknown flag: exits non-zero with a clear message (no silent drop)', async () => {
   await withSetup(
     () => ({ status: 200, body: { chats: [] } }),
@@ -605,7 +685,7 @@ test('healthz --json: works against an http server', async () => {
 // surface JWT bearer (same as `patch host status`). A by-design anonymous
 // 401 must NOT be read as the host being offline; a 200 {ok:true} means
 // online; a 503 means genuinely offline.
-test('doctor --json: REST probe sends bearer → daemonOnline true on 200', async () => {
+test('doctor --json: REST probe sends bearer → hostOnline true on 200', async () => {
   await withSetup(
     (req) => {
       if (req.url === '/api/healthz') return { status: 200, body: { ok: true, version: 'v' } };
@@ -620,14 +700,14 @@ test('doctor --json: REST probe sends bearer → daemonOnline true on 200', asyn
     async (env) => {
       const r = await runCli(['doctor', '--json'], env);
       assert.equal(r.code, 0, `stderr=${r.stderr}`);
-      const parsed = JSON.parse(r.stdout) as { daemonOnline: boolean; daemonProbe: string };
-      assert.equal(parsed.daemonOnline, true);
-      assert.match(parsed.daemonProbe, /\(200\)/);
+      const parsed = JSON.parse(r.stdout) as { hostOnline: boolean; hostProbe: string };
+      assert.equal(parsed.hostOnline, true);
+      assert.match(parsed.hostProbe, /\(200\)/);
     },
   );
 });
 
-test('doctor --json: REST probe reads a 503 as daemonOnline false', async () => {
+test('doctor --json: REST probe reads a 503 as hostOnline false', async () => {
   await withSetup(
     (req) => {
       if (req.url === '/api/healthz') return { status: 200, body: { ok: true, version: 'v' } };
@@ -640,9 +720,9 @@ test('doctor --json: REST probe reads a 503 as daemonOnline false', async () => 
     async (env) => {
       const r = await runCli(['doctor', '--json'], env);
       assert.equal(r.code, 0, `stderr=${r.stderr}`);
-      const parsed = JSON.parse(r.stdout) as { daemonOnline: boolean; daemonProbe: string };
-      assert.equal(parsed.daemonOnline, false);
-      assert.match(parsed.daemonProbe, /\(503\)/);
+      const parsed = JSON.parse(r.stdout) as { hostOnline: boolean; hostProbe: string };
+      assert.equal(parsed.hostOnline, false);
+      assert.match(parsed.hostProbe, /\(503\)/);
     },
   );
 });
@@ -929,4 +1009,70 @@ test('help names the host command and no longer offers a daemon one', async () =
       assert.notEqual(old.code, 0);
     },
   );
+});
+
+test('chats archive --archived 0: refused, not read as true (and nothing is archived)', async () => {
+  let posted = 0;
+  await withSetup(
+    (req) => {
+      if (req.method === 'POST') posted += 1;
+      return { status: 200, body: { ok: true } };
+    },
+    async (env) => {
+      const r = await runCli(
+        ['chats', 'archive', '01M3N32N9T7V75JCV7XHY9NRHM', '--archived', '0', '--json'],
+        env,
+      );
+      assert.notEqual(r.code, 0);
+      assert.match(r.stderr + r.stdout, /--archived must be true or false/);
+      assert.equal(posted, 0);
+    },
+  );
+});
+
+// --- activity: host socket when local, REST otherwise ---
+
+test('activity --json: REST hits /api/activity with the window', async () => {
+  await withSetup(
+    (req) =>
+      req.url.startsWith('/api/activity?since=1&until=2')
+        ? { status: 200, body: { messages: [{ text: 'hi' }], messagesTruncated: false } }
+        : { status: 404, body: { error: 'not found' } },
+    async (env) => {
+      const r = await runCli(['activity', '--since', '1', '--until', '2', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      assert.equal((JSON.parse(r.stdout) as { messages: unknown[] }).messages.length, 1);
+    },
+  );
+});
+
+test('activity --json: over the host socket it asks /internal/activity as the calling chat, no credential needed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'patch-cli-act-'));
+  const sock = join(dir, 'host.sock');
+  let seen = '';
+  const server: Server = createServer((req, res) => {
+    seen = req.url ?? '';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ messages: [{ text: 'hi' }], messagesTruncated: false }));
+  });
+  await new Promise<void>((ok) => server.listen(sock, ok));
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATCH_HOME: dir,
+      PATCH_DAEMON_SOCKET: sock,
+      PATCH_DAEMON_LOCAL_KEY: 'k',
+      PATCH_CHAT_ID: 'chat-1',
+    };
+    const r = await runCli(['activity', '--since', '1', '--until', '2', '--json'], env);
+    assert.equal(r.code, 0, `stderr=${r.stderr}`);
+    assert.match(seen, /^\/internal\/activity\?since=1&until=2&callerChatId=chat-1$/);
+    delete env['PATCH_CHAT_ID'];
+    const bad = await runCli(['activity', '--since', '1', '--until', '2', '--json'], env);
+    assert.notEqual(bad.code, 0);
+    assert.match(bad.stdout, /needs PATCH_CHAT_ID/);
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

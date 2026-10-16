@@ -32,7 +32,7 @@ const cronJob = (id, extra = {}) => ({
   enabled: true,
   trigger: { type: 'cron', expression: '0 9 * * *', ...extra },
   filter: null,
-  action: { type: 'spawn', daemonId: 'd1', folder: '~/p', skill: 's' },
+  action: { type: 'spawn', hostId: 'd1', folder: '~/p', skill: 's' },
   createdAt: 1,
   updatedAt: 2,
 });
@@ -53,7 +53,7 @@ test('migrating touches nothing else about the job', () => {
   const after = read(jobsDir, 'j_absent');
   assert.equal(after.trigger.expression, '0 9 * * *');
   assert.equal(after.updatedAt, 2); // a data correction, not a user edit
-  assert.deepEqual(after.action, { type: 'spawn', daemonId: 'd1', folder: '~/p', skill: 's' });
+  assert.deepEqual(after.action, { type: 'spawn', hostId: 'd1', folder: '~/p', skill: 's' });
 });
 
 test('an explicit UTC zone is left alone — it is a choice, not an absence', () => {

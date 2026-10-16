@@ -18,7 +18,7 @@ import { Toggle } from '../components/Toggle.js';
 import { PERMISSION_MODES } from '../components/Composer.js';
 import { permissionModeLabel } from '../lib/permissionModeLabel.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { usePresenceStore, defaultDaemonId, hostDefaultModel } from '../stores/presenceStore.js';
+import { usePresenceStore, defaultHostId } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { jobChatId } from '../lib/jobDescribe.js';
@@ -44,6 +44,7 @@ import { useNavigationGuard } from '../lib/useNavigationGuard.js';
 import { useGoBack } from '../lib/useGoBack.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { failed } from '../lib/errorCopy.js';
+import { isPlainEnter } from '../lib/submitChord.js';
 
 /**
  * Monaco, behind the same self-hosted bootstrap the editor rail uses — the
@@ -208,7 +209,7 @@ export function buildGroupOptions(jobs: readonly { group?: string }[]): string[]
 
 /** One machine's folders in the picker. */
 interface FolderGroup {
-  daemonId: string;
+  hostId: string;
   /** What the user reads: the host's name, disambiguated by its id. */
   label: string;
   folders: string[];
@@ -219,18 +220,18 @@ interface FolderGroup {
  * unit the action stores (spec/08 § Action), so the option has to carry both —
  * a bare path cannot say which machine it is on.
  */
-export function folderChoiceValue(daemonId: string, folder: string): string {
-  return JSON.stringify([daemonId, folder]);
+export function folderChoiceValue(hostId: string, folder: string): string {
+  return JSON.stringify([hostId, folder]);
 }
 
-export function parseFolderChoice(value: string): { daemonId: string; folder: string } | null {
+export function parseFolderChoice(value: string): { hostId: string; folder: string } | null {
   try {
     const parsed = JSON.parse(value) as unknown;
     if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-    const [daemonId, folder] = parsed as [unknown, unknown];
-    if (typeof daemonId !== 'string' || typeof folder !== 'string') return null;
-    if (daemonId === '' || folder === '') return null;
-    return { daemonId, folder };
+    const [hostId, folder] = parsed as [unknown, unknown];
+    if (typeof hostId !== 'string' || typeof folder !== 'string') return null;
+    if (hostId === '' || folder === '') return null;
+    return { hostId, folder };
   } catch {
     // The only non-encoded option is the disabled "Select…" placeholder.
     return null;
@@ -256,36 +257,36 @@ export function parseFolderChoice(value: string): { daemonId: string; folder: st
  * has no project history on.
  */
 export function buildFolderGroups(input: {
-  registry: Array<{ daemonId: string; roots: string[]; recent: string[] }>;
-  chats: Array<{ chatId: string; folder: string; daemonId: string }>;
+  registry: Array<{ hostId: string; roots: string[]; recent: string[] }>;
+  chats: Array<{ chatId: string; folder: string; hostId: string }>;
   hostNames: Record<string, string>;
-  includeDaemonId?: string;
+  includeHostId?: string;
 }): FolderGroup[] {
   const byHost = new Map<string, string[]>();
-  const add = (daemonId: string, folder?: string): void => {
-    if (!daemonId) return;
-    const list = byHost.get(daemonId) ?? [];
+  const add = (hostId: string, folder?: string): void => {
+    if (!hostId) return;
+    const list = byHost.get(hostId) ?? [];
     if (folder && !list.includes(folder)) list.push(folder);
-    byHost.set(daemonId, list);
+    byHost.set(hostId, list);
   };
   for (const host of input.registry) {
-    add(host.daemonId);
-    for (const f of host.roots) add(host.daemonId, f);
-    for (const f of host.recent) if (!isJunkFolder(f)) add(host.daemonId, f);
+    add(host.hostId);
+    for (const f of host.roots) add(host.hostId, f);
+    for (const f of host.recent) if (!isJunkFolder(f)) add(host.hostId, f);
   }
   for (const c of input.chats) {
     // The host is registered either way — a machine you only ever ran a
     // special thread on is still a machine you can aim a job at, via its
     // Custom path… option. Only the FOLDER is withheld.
     const offerable = !isReservedSpecialThread(c.chatId) && !isJunkFolder(c.folder);
-    add(c.daemonId, offerable ? c.folder : undefined);
+    add(c.hostId, offerable ? c.folder : undefined);
   }
-  if (input.includeDaemonId) add(input.includeDaemonId);
-  return Array.from(byHost.entries()).map(([daemonId, folders]) => {
-    const name = input.hostNames[daemonId];
+  if (input.includeHostId) add(input.includeHostId);
+  return Array.from(byHost.entries()).map(([hostId, folders]) => {
+    const name = input.hostNames[hostId];
     return {
-      daemonId,
-      label: name && name !== daemonId ? `${name} (${daemonId})` : daemonId,
+      hostId,
+      label: name && name !== hostId ? `${name} (${hostId})` : hostId,
       folders,
     };
   });
@@ -308,17 +309,17 @@ export function buildFolderGroups(input: {
  * plausible-looking wrong one.
  */
 export function mostRecentPair(
-  chats: Array<{ chatId: string; folder: string; daemonId: string; lastUpdated: number }>,
-): { folder: string; daemonId: string } | null {
-  let best: { folder: string; daemonId: string; at: number } | null = null;
+  chats: Array<{ chatId: string; folder: string; hostId: string; lastUpdated: number }>,
+): { folder: string; hostId: string } | null {
+  let best: { folder: string; hostId: string; at: number } | null = null;
   for (const c of chats) {
-    if (!c.folder || !c.daemonId) continue;
+    if (!c.folder || !c.hostId) continue;
     if (isReservedSpecialThread(c.chatId) || isJunkFolder(c.folder)) continue;
     if (!best || c.lastUpdated > best.at) {
-      best = { folder: c.folder, daemonId: c.daemonId, at: c.lastUpdated };
+      best = { folder: c.folder, hostId: c.hostId, at: c.lastUpdated };
     }
   }
-  return best ? { folder: best.folder, daemonId: best.daemonId } : null;
+  return best ? { folder: best.folder, hostId: best.hostId } : null;
 }
 
 /**
@@ -345,10 +346,10 @@ export function resolveSkillLink(input: {
   /** Absolute host-side file per skill name, as reported by GET /api/skills. */
   paths: Record<string, string> | undefined;
   /** The action's host + folder. */
-  daemonId: string;
+  hostId: string;
   folder: string;
   /** Every chat the client knows about. */
-  chats: Array<{ chatId: string; folder: string; daemonId: string }>;
+  chats: Array<{ chatId: string; folder: string; hostId: string }>;
 }): SkillLinkTarget {
   // No skill chosen — there is nothing to link to and nothing to explain.
   if (input.skill === '') return null;
@@ -362,7 +363,7 @@ export function resolveSkillLink(input: {
   if (input.paths === undefined) return { reason: 'host does not report skill files' };
   const file = input.paths[input.skill];
   if (file === undefined) return { reason: 'skill not found on this host' };
-  const chat = input.chats.find((c) => c.daemonId === input.daemonId && c.folder === input.folder);
+  const chat = input.chats.find((c) => c.hostId === input.hostId && c.folder === input.folder);
   if (!chat) return { reason: 'no chat in this folder to open it through' };
   // The separator is part of the test: `/project-other/x` starts with
   // `/project` as a string but is a different directory.
@@ -549,6 +550,9 @@ interface FormState {
   autonomyPromptText: string;
   enabled: boolean;
   triggerType: JobTrigger['type'];
+  /** `follows` trigger: the followed job's id, and whether failures count. */
+  followsJobId: string;
+  followsAny: boolean;
   /** Natural-language schedule text the user typed (cron triggers only). */
   scheduleText: string;
   cronExpression: string;
@@ -588,6 +592,12 @@ interface FormState {
   webhookSecret: string;
   filter: string;
   /**
+   * The trigger type the job was LOADED with (empty for a new job). A cron or
+   * recurrence job that already carries a custom filter keeps it on save; only
+   * leftover text from a different trigger type picked during this edit is dropped.
+   */
+  loadedTriggerType: JobTrigger['type'] | '';
+  /**
    * The Starts/Stops widget's own state (spec/08 § Filter) — a `datetime-local`
    * value (browser-local wall clock, empty means unset), kept separate from
    * `filter` itself: `filter` holds only the custom-JSONata REMAINDER once the
@@ -596,18 +606,27 @@ interface FormState {
    */
   dateStart: string;
   dateStop: string;
+  /**
+   * The exact instants the job was loaded with. The date inputs only hold
+   * minutes, so saving without touching one must send the original back rather
+   * than a copy rounded down to the minute (which cut the last 59 seconds off
+   * an end-of-day stop).
+   */
+  loadedDateStartIso: string | null;
+  loadedDateStopIso: string | null;
   actionType: JobAction['type'];
   /**
    * The host the spawned/ensured chat runs on. A job action is dispatched to
    * the host it names (spec/08 § Action), and a folder without a host is
    * ambiguous once there is more than one machine.
    */
-  spawnDaemonId: string;
+  spawnHostId: string;
   spawnFolder: string;
   spawnPrompt: string;
+  spawnGoal: string;
   spawnSkill: string;
   /**
-   * The model each fire's chat runs on, from `spawnDaemonId`'s catalogue.
+   * The model each fire's chat runs on, from `spawnHostId`'s catalogue.
    * Empty string is the `Account default` row (spec/14 § Jobs view): a
    * deliberate choice to store NO model, so every fire takes the account's
    * `defaultModel` rather than a pinned id that will be retired.
@@ -654,7 +673,7 @@ interface FormState {
    * behaviour does not throw the script away.
    */
   gateOn: boolean;
-  gateDaemonId: string;
+  gateHostId: string;
   gateFolder: string;
   gateCommand: string;
   /** Empty string means the 60s default. */
@@ -665,7 +684,7 @@ interface FormState {
   windowEnd: string;
   windowTimezone: string;
   /**
-   * `script` only — the command each fire runs on `spawnDaemonId`, in
+   * `script` only — the command each fire runs on `spawnHostId`, in
    * `spawnFolder` (spec/08 § Action). A script job has no chat, so it has no
    * skill, prompt, model or permission mode to set.
    */
@@ -681,6 +700,8 @@ const DEFAULT_FORM: FormState = {
   autonomyPromptText: '',
   enabled: true,
   triggerType: 'cron',
+  followsJobId: '',
+  followsAny: false,
   scheduleText: '',
   cronExpression: '0 9 * * *',
   cronTimezone: browserTimeZone(),
@@ -695,15 +716,19 @@ const DEFAULT_FORM: FormState = {
   webhookScheme: 'none',
   webhookSecret: '',
   filter: '',
+  loadedTriggerType: '',
   dateStart: '',
   dateStop: '',
+  loadedDateStartIso: null,
+  loadedDateStopIso: null,
   actionType: 'spawn',
-  spawnDaemonId: '',
+  spawnHostId: '',
   // Seeded together with the host, from the most-recently-used (host, folder)
   // pair (see the effect below). Empty until then so the picker shows a
   // "Select a host and folder…" prompt rather than a path with no machine.
   spawnFolder: '',
   spawnPrompt: '',
+  spawnGoal: '',
   spawnSkill: '',
   // A new job starts on the account default (spec/14 § Jobs view) — it tracks
   // one setting instead of freezing a model id at the moment the job was
@@ -720,7 +745,7 @@ const DEFAULT_FORM: FormState = {
   messagePrompt: '',
   messageSkill: '',
   gateOn: false,
-  gateDaemonId: '',
+  gateHostId: '',
   gateFolder: '',
   gateCommand: '',
   gateTimeoutMs: '',
@@ -752,6 +777,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [autonomyOpen, setAutonomyOpen] = useState(false);
   const accountAutonomyPrompt = usePreferencesStore((s) => s.preferences.jobAutonomyPrompt);
+  const jobDefaultModel = usePreferencesStore((s) => s.preferences.jobDefaultModel);
   // What the form looked like when it was last LOADED from the server or last
   // SAVED — the thing `form` is dirty against (spec/14 § Jobs view — Unsaved
   // changes). Held separately from `form` so the non-interactive writes that
@@ -792,25 +818,38 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     chats: chatList.map((c) => ({
       chatId: c.chatId,
       folder: c.folder,
-      daemonId: c.daemonId,
+      hostId: c.hostId,
     })),
     hostNames: Object.fromEntries(
       Object.entries(hosts).map(([id, h]) => [id, h.host?.hostName ?? id]),
     ),
     // Always keep the job's own host as a group, even if it is offline and
     // publishes nothing right now — an edited job must still show its machine.
-    includeDaemonId: form.spawnDaemonId,
+    includeHostId: form.spawnHostId,
   });
   // Folders offered for the CHOSEN host — the ad-hoc test is per host, since
   // the same path can be a listed folder on one machine and ad-hoc on another.
   const foldersOnChosenHost =
-    folderGroups.find((g) => g.daemonId === form.spawnDaemonId)?.folders ?? [];
+    folderGroups.find((g) => g.hostId === form.spawnHostId)?.folders ?? [];
   // When the spawn folder isn't one of the chosen host's options it's an ad-hoc
   // path: the picker drops into a free-text "Custom path…" mode (the latch also
   // lets the user choose Custom explicitly before typing anything).
   const [folderCustom, setFolderCustom] = useState(false);
   const folderIsAdHoc =
     folderCustom || (form.spawnFolder !== '' && !foldersOnChosenHost.includes(form.spawnFolder));
+  // A path on a machine patch has no history on: complete it from that host's
+  // own filesystem (the directory typed so far) so a never-used folder is
+  // reachable without knowing its exact spelling. A browse error just offers
+  // no suggestions; the typed path is still what is saved.
+  const customDir = form.spawnFolder.startsWith('/')
+    ? form.spawnFolder.slice(0, form.spawnFolder.lastIndexOf('/') + 1)
+    : '';
+  const { data: customBrowse } = useQuery({
+    queryKey: ['folders-browse', form.spawnHostId, customDir],
+    queryFn: () => api.browseFolders(form.spawnHostId, customDir),
+    enabled: folderIsAdHoc && form.spawnHostId !== '' && customDir !== '',
+    retry: false,
+  });
 
   // Group picker source: the same live jobs list the Jobs view itself reads
   // (spec/14 § Jobs view — "every distinct group already in use"), so a group
@@ -834,12 +873,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   const skillFolder = form.actionType === 'message' ? messageChatFolder : form.spawnFolder;
   // The host that folder is on — a path alone can't say which machine, and the
   // Edit link has to open the file through a chat on the SAME machine.
-  const skillDaemonId =
-    form.actionType === 'message' ? (messageChat?.daemonId ?? '') : form.spawnDaemonId;
+  const skillHostId =
+    form.actionType === 'message' ? (messageChat?.hostId ?? '') : form.spawnHostId;
   const { data: skillsData } = useQuery({
-    queryKey: ['skills', skillFolder, skillDaemonId],
-    queryFn: () => api.skills(skillFolder, skillDaemonId),
-    enabled: skillFolder.trim().length > 0 && skillDaemonId.trim().length > 0,
+    queryKey: ['skills', skillFolder, skillHostId],
+    queryFn: () => api.skills(skillFolder, skillHostId),
+    enabled: skillFolder.trim().length > 0 && skillHostId.trim().length > 0,
   });
   const availableSkills = skillsData?.skills ?? [];
 
@@ -850,11 +889,11 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // spawn/ensure name a host; a `message` action has none, so nothing loads.
   const modelCatalog = useModelCatalog();
   const usesSpawnFields = form.actionType === 'spawn' || form.actionType === 'continue';
-  const modelDaemonId = usesSpawnFields && form.spawnDaemonId !== '' ? form.spawnDaemonId : null;
+  const modelHostId = usesSpawnFields && form.spawnHostId !== '' ? form.spawnHostId : null;
   useEffect(() => {
-    if (modelDaemonId === null) return;
-    void loadModels(modelDaemonId);
-  }, [modelDaemonId]);
+    if (modelHostId === null) return;
+    void loadModels(modelHostId);
+  }, [modelHostId]);
 
   // Seed from the list-route cache so navigation from /jobs never shows
   // a "Loading…" spinner — the job was just visible in the list so its data
@@ -912,25 +951,18 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // save refuses (spec/08 § Action), which is better than a silent wrong host.
   const mruPair = mostRecentPair(chatList);
   useEffect(() => {
-    if (!isNew || form.spawnFolder !== '' || form.spawnDaemonId !== '' || folderCustom) return;
+    if (!isNew || form.spawnFolder !== '' || form.spawnHostId !== '' || folderCustom) return;
     if (!mruPair) return;
     const seed = (f: FormState): FormState =>
-      f.spawnFolder === '' && f.spawnDaemonId === ''
-        ? { ...f, spawnFolder: mruPair.folder, spawnDaemonId: mruPair.daemonId }
+      f.spawnFolder === '' && f.spawnHostId === ''
+        ? { ...f, spawnFolder: mruPair.folder, spawnHostId: mruPair.hostId }
         : f;
     setForm(seed);
     // The seed is the app's own doing, not the user's, so it moves the baseline
     // with it — otherwise a new-job page nobody has touched is already dirty
     // and prompts on the way out.
     setBaseline(seed);
-  }, [
-    isNew,
-    mruPair?.folder,
-    mruPair?.daemonId,
-    form.spawnFolder,
-    form.spawnDaemonId,
-    folderCustom,
-  ]);
+  }, [isNew, mruPair?.folder, mruPair?.hostId, form.spawnFolder, form.spawnHostId, folderCustom]);
 
   // Unsaved-edit tracking (spec/14 § Jobs view — Unsaved changes). The guard
   // below runs from a history call rather than from a render, so it reads a
@@ -1008,6 +1040,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   useNavigationGuard({
     shouldBlock: () => shouldPromptOnLeave({ dirty: dirtyRef.current, saving: savingRef.current }),
     confirm: () => useUiStore.getState().confirm({ ...UNSAVED_CONFIRM, danger: true }),
+    dismiss: () => useUiStore.getState().resolveConfirm(false),
   });
 
   /**
@@ -1028,8 +1061,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   async function handleTranslateRecurrence(): Promise<void> {
     const phrase = form.recurrenceNlText.trim();
     if (!phrase) return;
-    const daemonId = form.spawnDaemonId || defaultDaemonId(hosts);
-    if (!daemonId) {
+    const hostId = form.spawnHostId || defaultHostId(hosts);
+    if (!hostId) {
       setRecurrenceNlError('No host is available to run the translation on yet.');
       return;
     }
@@ -1037,7 +1070,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     setRecurrenceNlError(null);
     setRecurrenceNlConfirmed(null);
     try {
-      const result = await api.translateRecurrenceRule(daemonId, phrase);
+      const result = await api.translateRecurrenceRule(hostId, phrase);
       setForm({ ...form, recurrenceRule: result.rrule });
       setRecurrenceNlConfirmed(result.description);
       setShowRawRecurrence(true);
@@ -1126,7 +1159,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // A job fires while nobody is watching, so a host it cannot name is a job
     // that would dispatch nowhere. Refuse at save time, where there is someone
     // to tell (spec/08 § Action).
-    if (usesSpawnFields && !form.spawnDaemonId.trim()) {
+    if (usesSpawnFields && !form.spawnHostId.trim()) {
       pushError('Choose which host the chat runs on.');
       return;
     }
@@ -1134,7 +1167,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // `JobGate` refuses it — say so here, where there is someone to tell, rather
     // than as a 400 about a field name (spec/08 § Gate).
     if (form.gateOn && form.gateCommand.trim().length > 0) {
-      if (!form.gateDaemonId.trim()) {
+      if (!form.gateHostId.trim()) {
         pushError('Choose which host the gate command runs on.');
         return;
       }
@@ -1232,16 +1265,11 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     const value = form.spawnModel;
     const extra = value && !ids.includes(value) ? [{ id: value, label: value }] : [];
     const opts = [...extra, ...modelCatalog.models];
-    // Which model "Account default" actually is, so choosing it isn't a
-    // leap of faith — unknown until a host is chosen, since the default is
-    // mirrored per host (spec/04 § Spawn).
-    const defaultModelId = modelDaemonId === null ? null : hostDefaultModel(hosts, modelDaemonId);
+    // Which model the job default actually is, so choosing it isn't a leap of
+    // faith. It is the account's `jobDefaultModel`, set in Settings → Jobs.
     const defaultModelLabel =
-      defaultModelId === null
-        ? null
-        : (modelCatalog.models.find((m) => m.id === defaultModelId)?.label ?? defaultModelId);
-    const defaultOptionLabel =
-      defaultModelLabel === null ? 'Account default' : `Account default (${defaultModelLabel})`;
+      modelCatalog.models.find((m) => m.id === jobDefaultModel)?.label ?? jobDefaultModel;
+    const defaultOptionLabel = `Job default (${defaultModelLabel})`;
     return (
       <label>
         Model
@@ -1268,7 +1296,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             </option>
           ))}
         </select>
-        {modelDaemonId === null ? (
+        {modelHostId === null ? (
           <p className="field-hint">Pick a folder first. Models are per host.</p>
         ) : modelCatalog.status === 'error' ? (
           <p className="field-hint" data-testid="job-spawn-model-error">
@@ -1286,7 +1314,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     const target = resolveSkillLink({
       skill: value,
       paths: skillsData?.paths,
-      daemonId: skillDaemonId,
+      hostId: skillHostId,
       folder: skillFolder,
       chats: chatList,
     });
@@ -1325,9 +1353,6 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     <main className="job-editor" data-testid="job-editor">
       <header className="route-head">
         <NavHistoryControls />
-        <button type="button" className="back-btn" data-testid="job-editor-back" onClick={goBack}>
-          ← Back
-        </button>
         <h1 className="display">{isNew ? 'New job' : `Edit · ${form.name || id}`}</h1>
         {/* The job's END CONDITION (spec/08 § One-off jobs) — invisible
             everywhere on this page until now, even though the list groups a
@@ -1482,11 +1507,34 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               <option value="cron">cron</option>
               <option value="recurrence">recurrence</option>
               <option value="webhook">webhook</option>
+              <option value="follows">follows another job</option>
               {form.triggerType === 'todoist' ? (
                 <option value="todoist">todoist (legacy)</option>
               ) : null}
             </select>
           </label>
+
+          {form.triggerType === 'follows' ? (
+            <>
+              <label>
+                Followed job id
+                <input
+                  value={form.followsJobId}
+                  onChange={(e) => setForm({ ...form, followsJobId: e.target.value })}
+                  data-testid="job-follows-id"
+                />
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={form.followsAny}
+                  onChange={(e) => setForm({ ...form, followsAny: e.target.checked })}
+                  data-testid="job-follows-any"
+                />
+                Also after failures
+              </label>
+            </>
+          ) : null}
 
           {form.triggerType === 'cron' ? (
             <>
@@ -1722,7 +1770,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     data-testid="job-recurrence-nl"
                     onChange={(e) => setForm({ ...form, recurrenceNlText: e.target.value })}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                      if (isPlainEnter(e)) {
                         e.preventDefault();
                         void handleTranslateRecurrence();
                       }
@@ -1842,7 +1890,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 gateOn: on,
                 // Seed the host and folder from the action, which is where the
                 // work happens and so almost always where the question belongs.
-                ...(on && form.gateDaemonId === '' ? { gateDaemonId: form.spawnDaemonId } : {}),
+                ...(on && form.gateHostId === '' ? { gateHostId: form.spawnHostId } : {}),
                 ...(on && form.gateFolder === '' ? { gateFolder: form.spawnFolder } : {}),
               })
             }
@@ -1854,8 +1902,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               <label>
                 Host
                 <input
-                  value={form.gateDaemonId}
-                  onChange={(e) => setForm({ ...form, gateDaemonId: e.target.value })}
+                  value={form.gateHostId}
+                  onChange={(e) => setForm({ ...form, gateHostId: e.target.value })}
                   data-testid="job-gate-daemon"
                 />
               </label>
@@ -1969,8 +2017,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <label>
                   Host
                   <input
-                    value={form.spawnDaemonId}
-                    onChange={(e) => setForm({ ...form, spawnDaemonId: e.target.value })}
+                    value={form.spawnHostId}
+                    onChange={(e) => setForm({ ...form, spawnHostId: e.target.value })}
                     data-testid="job-script-daemon"
                     required
                   />
@@ -2006,10 +2054,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   Folder
                   <select
                     value={
-                      form.spawnDaemonId === '' && form.spawnFolder === '' && !folderCustom
+                      form.spawnHostId === '' && form.spawnFolder === '' && !folderCustom
                         ? ''
                         : folderChoiceValue(
-                            form.spawnDaemonId,
+                            form.spawnHostId,
                             folderIsAdHoc ? CUSTOM_FOLDER : form.spawnFolder,
                           )
                     }
@@ -2021,19 +2069,19 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                       // (spec/14 § Jobs view, spec/08 § Action).
                       if (picked.folder === CUSTOM_FOLDER) {
                         setFolderCustom(true);
-                        setForm({ ...form, spawnDaemonId: picked.daemonId, spawnFolder: '' });
+                        setForm({ ...form, spawnHostId: picked.hostId, spawnFolder: '' });
                       } else {
                         setFolderCustom(false);
                         setForm({
                           ...form,
-                          spawnDaemonId: picked.daemonId,
+                          spawnHostId: picked.hostId,
                           spawnFolder: picked.folder,
                         });
                       }
                     }}
                     data-testid="job-spawn-folder"
                   >
-                    {form.spawnDaemonId === '' && form.spawnFolder === '' && !folderCustom ? (
+                    {form.spawnHostId === '' && form.spawnFolder === '' && !folderCustom ? (
                       <option value="" disabled>
                         {folderGroups.length === 0
                           ? 'No hosts connected'
@@ -2041,21 +2089,21 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                       </option>
                     ) : null}
                     {folderGroups.map((g) => (
-                      <optgroup key={g.daemonId} label={g.label}>
+                      <optgroup key={g.hostId} label={g.label}>
                         {g.folders.map((f) => (
-                          <option key={f} value={folderChoiceValue(g.daemonId, f)}>
+                          <option key={f} value={folderChoiceValue(g.hostId, f)}>
                             {f}
                           </option>
                         ))}
-                        <option value={folderChoiceValue(g.daemonId, CUSTOM_FOLDER)}>
+                        <option value={folderChoiceValue(g.hostId, CUSTOM_FOLDER)}>
                           Custom path on {g.label}…
                         </option>
                       </optgroup>
                     ))}
                   </select>
                   <p className="field-hint" data-testid="job-spawn-host">
-                    {form.spawnDaemonId
-                      ? `Runs on ${folderGroups.find((g) => g.daemonId === form.spawnDaemonId)?.label ?? form.spawnDaemonId}`
+                    {form.spawnHostId
+                      ? `Runs on ${folderGroups.find((g) => g.hostId === form.spawnHostId)?.label ?? form.spawnHostId}`
                       : 'No host chosen. Pick a folder under the machine it lives on.'}
                   </p>
                   {folderIsAdHoc ? (
@@ -2065,7 +2113,18 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                       data-testid="job-spawn-folder-custom"
                       placeholder="/home/tom/projects/example"
                       aria-label="custom folder path"
+                      list="job-spawn-folder-suggestions"
                     />
+                  ) : null}
+                  {folderIsAdHoc ? (
+                    <datalist
+                      id="job-spawn-folder-suggestions"
+                      data-testid="job-spawn-folder-suggestions"
+                    >
+                      {(customBrowse?.entries ?? []).map((e) => (
+                        <option key={e.path} value={e.path} />
+                      ))}
+                    </datalist>
                   ) : null}
                 </label>
                 {modelField()}
@@ -2078,6 +2137,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   (v) => setForm({ ...form, spawnSkill: v }),
                   'job-spawn-skill',
                 )}
+                <Toggle
+                  checked={form.includePayload}
+                  onChange={(next) => setForm({ ...form, includePayload: next })}
+                  label="Send agent trigger payload"
+                  testid="job-include-payload"
+                />
                 <label>
                   Prompt
                   <textarea
@@ -2086,6 +2151,15 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     value={form.spawnPrompt}
                     onChange={(e) => setForm({ ...form, spawnPrompt: e.target.value })}
                     data-testid="job-spawn-prompt"
+                  />
+                </label>
+                <label>
+                  Goal
+                  <textarea
+                    rows={2}
+                    value={form.spawnGoal}
+                    onChange={(e) => setForm({ ...form, spawnGoal: e.target.value })}
+                    data-testid="job-spawn-goal"
                   />
                 </label>
                 {form.actionType === 'continue' ? (
@@ -2144,12 +2218,6 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   label="Notify when job complete"
                   testid="job-spawn-notify-on-complete"
                 />
-                <Toggle
-                  checked={form.includePayload}
-                  onChange={(next) => setForm({ ...form, includePayload: next })}
-                  label="Include trigger event"
-                  testid="job-include-payload"
-                />
               </>
             ) : (
               <>
@@ -2177,6 +2245,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   (v) => setForm({ ...form, messageSkill: v }),
                   'job-message-skill',
                 )}
+                <Toggle
+                  checked={form.includePayload}
+                  onChange={(next) => setForm({ ...form, includePayload: next })}
+                  label="Send agent trigger payload"
+                  testid="job-include-payload"
+                />
                 <label>
                   Prompt
                   <textarea
@@ -2187,12 +2261,6 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     data-testid="job-message-prompt"
                   />
                 </label>
-                <Toggle
-                  checked={form.includePayload}
-                  onChange={(next) => setForm({ ...form, includePayload: next })}
-                  label="Include trigger event"
-                  testid="job-include-payload"
-                />
               </>
             )}
             {/* No Enabled checkbox: a job is created enabled. Enable/disable an
@@ -2471,6 +2539,12 @@ function runListKeyDown(e: ReactKeyboardEvent<HTMLElement>, jobId: string): void
   openChatBesideJob(jobId, next.dataset['chatId'] ?? '');
 }
 
+/** The instant a date input stands for: the loaded one, if the input still shows it untouched. */
+function dateInstant(inputValue: string, loadedIso: string | null): string | null {
+  if (loadedIso !== null && inputValue === isoToLocalInputValue(loadedIso)) return loadedIso;
+  return localInputValueToIso(inputValue);
+}
+
 /**
  * One fire in the Recent runs list.
  *
@@ -2548,9 +2622,16 @@ function jobToForm(job: Job): FormState {
   f.enabled = job.enabled;
   const { start, stop, remainder } = parseDateRangeFromFilter(job.filter);
   f.filter = remainder ?? '';
+  f.loadedTriggerType = job.trigger.type;
   f.dateStart = isoToLocalInputValue(start);
   f.dateStop = isoToLocalInputValue(stop);
+  f.loadedDateStartIso = start;
+  f.loadedDateStopIso = stop;
   f.triggerType = job.trigger.type;
+  if (job.trigger.type === 'follows') {
+    f.followsJobId = job.trigger.jobId;
+    f.followsAny = job.trigger.on === 'any';
+  }
   if (job.trigger.type === 'cron') {
     f.cronExpression = job.trigger.expression;
     // No stored zone means the server evaluates it in UTC, so that is what the
@@ -2587,7 +2668,7 @@ function jobToForm(job: Job): FormState {
   }
   if (job.gate) {
     f.gateOn = true;
-    f.gateDaemonId = job.gate.daemonId;
+    f.gateHostId = job.gate.hostId;
     f.gateFolder = job.gate.folder;
     f.gateCommand = job.gate.command;
     f.gateTimeoutMs = job.gate.timeoutMs === undefined ? '' : String(job.gate.timeoutMs);
@@ -2601,9 +2682,10 @@ function jobToForm(job: Job): FormState {
   f.actionType = job.action.type;
   if (job.action.type === 'spawn' || job.action.type === 'continue') {
     // spawn + ensure share the folder + skill/prompt fields.
-    f.spawnDaemonId = job.action.daemonId;
+    f.spawnHostId = job.action.hostId;
     f.spawnFolder = job.action.folder;
     f.spawnPrompt = job.action.prompt ?? '';
+    f.spawnGoal = job.action.goal ?? '';
     f.spawnSkill = job.action.skill ?? '';
     // No stored model → the `Account default` row, which is what re-saving must
     // write back (i.e. still no model), not the host's current last-used id.
@@ -2624,7 +2706,7 @@ function jobToForm(job: Job): FormState {
       f.ensureKey = job.action.key ?? '';
     }
   } else if (job.action.type === 'script') {
-    f.spawnDaemonId = job.action.daemonId;
+    f.spawnHostId = job.action.hostId;
     f.spawnFolder = job.action.folder;
     f.scriptCommand = job.action.command;
     f.scriptTimeoutMs = job.action.timeoutMs === undefined ? '' : String(job.action.timeoutMs);
@@ -2660,6 +2742,13 @@ function formToBody(form: FormState): JobCreateBody {
     case 'todoist':
       trigger = { type: 'todoist' };
       break;
+    case 'follows':
+      trigger = {
+        type: 'follows',
+        jobId: form.followsJobId.trim(),
+        ...(form.followsAny ? { on: 'any' as const } : {}),
+      };
+      break;
     case 'recurrence':
       trigger = {
         type: 'recurrence',
@@ -2674,9 +2763,11 @@ function formToBody(form: FormState): JobCreateBody {
     // spawn (fresh chat each fire) and ensure (one durable chat) share shape.
     action = {
       type: form.actionType,
-      daemonId: form.spawnDaemonId,
+      hostId: form.spawnHostId,
       folder: form.spawnFolder,
       ...(form.spawnPrompt ? { prompt: form.spawnPrompt } : {}),
+      // Creation-time chat goal (spec/08 ## Action); absent when empty.
+      ...(form.spawnGoal.trim() ? { goal: form.spawnGoal.trim() } : {}),
       ...(form.spawnSkill ? { skill: form.spawnSkill } : {}),
       // `Account default` is the empty string, and it must persist as an ABSENT
       // field: omitting `model` is what makes each fire take the host's
@@ -2708,7 +2799,7 @@ function formToBody(form: FormState): JobCreateBody {
   } else if (form.actionType === 'script') {
     action = {
       type: 'script',
-      daemonId: form.spawnDaemonId,
+      hostId: form.spawnHostId,
       folder: form.spawnFolder,
       command: form.scriptCommand,
       // Empty means "the default" and must persist as an ABSENT field, the
@@ -2745,14 +2836,18 @@ function formToBody(form: FormState): JobCreateBody {
     // The date range applies to every trigger type; the custom-JSONata
     // remainder does not — cron/recurrence triggers have no payload beyond
     // `{ firedAt }` to filter on, hence the raw Filter group being hidden for
-    // them above (spec/08 § Filter), so their remainder is never persisted
-    // even if the form still carries leftover text from a different trigger
-    // type picked earlier in this same edit.
+    // them above (spec/08 § Filter), so leftover text from a different trigger
+    // type picked earlier in this same edit is not persisted. A cron or
+    // recurrence job that was LOADED with a filter (set from the CLI, say) keeps
+    // it: the hidden field must not silently wipe what the form never showed.
     filter: buildFilterFromDateRange(
-      localInputValueToIso(form.dateStart),
-      localInputValueToIso(form.dateStop),
-      form.triggerType !== 'cron' && form.triggerType !== 'recurrence' && form.filter.length > 0
-        ? form.filter
+      dateInstant(form.dateStart, form.loadedDateStartIso),
+      dateInstant(form.dateStop, form.loadedDateStopIso),
+      (form.triggerType !== 'cron' && form.triggerType !== 'recurrence') ||
+        form.loadedTriggerType === form.triggerType
+        ? form.filter.length > 0
+          ? form.filter
+          : null
         : null,
     ),
     // An unticked gate, or one with nothing written in it, is written as `null`
@@ -2762,7 +2857,7 @@ function formToBody(form: FormState): JobCreateBody {
     gate:
       form.gateOn && form.gateCommand.trim().length > 0
         ? {
-            daemonId: form.gateDaemonId,
+            hostId: form.gateHostId,
             folder: form.gateFolder,
             command: form.gateCommand,
             // Empty means the default, which must persist as an ABSENT field —

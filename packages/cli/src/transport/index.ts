@@ -40,9 +40,9 @@ export function buildTransport(
   config: ResolvedConfig,
   opts: BuildTransportOptions = {},
 ): Transport {
-  const useUds = !opts.forceRest && config.daemonSocket !== null && config.daemonLocalKey !== null;
+  const useUds = !opts.forceRest && config.hostSocket !== null && config.daemonLocalKey !== null;
 
-  if (opts.forceUds && (config.daemonSocket === null || config.daemonLocalKey === null)) {
+  if (opts.forceUds && (config.hostSocket === null || config.daemonLocalKey === null)) {
     throw new Error(
       'forceUds: requires PATCH_DAEMON_SOCKET (or ~/.patch/daemon.sock) and PATCH_DAEMON_LOCAL_KEY',
     );
@@ -50,7 +50,7 @@ export function buildTransport(
 
   if (useUds) {
     const uds = new UdsClient({
-      socketPath: config.daemonSocket!,
+      socketPath: config.hostSocket!,
       localKey: config.daemonLocalKey,
     });
     return {

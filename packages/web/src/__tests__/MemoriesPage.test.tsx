@@ -198,7 +198,7 @@ describe('Settings → Memories — the entries', () => {
     expect(sent).toEqual([
       {
         type: 'host.claude_memory_set',
-        daemonId: 'd1',
+        hostId: 'd1',
         project: ROLE.project,
         file: ROLE.file,
         body: 'Tom works for himself.',
@@ -249,7 +249,7 @@ describe('Settings → Memories — the entries', () => {
       expect(sent).toEqual([
         {
           type: 'host.claude_memory_delete',
-          daemonId: 'd1',
+          hostId: 'd1',
           project: ROLE.project,
           file: ROLE.file,
         },

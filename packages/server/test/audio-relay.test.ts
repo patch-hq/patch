@@ -2,10 +2,10 @@
 // capability) — real server, real WSS on both legs of `/audio/:sessionId`
 // (the surface-facing socket AND a bare `ws` server standing in for the
 // host's own :3003 audio WSS, which this relay never talks to in-process —
-// it only knows the address a `daemon.host` report names). The host LINK
-// itself is `InProcessDaemonLink` (a synchronous test seam already used by
+// it only knows the address a `host.host` report names). The host LINK
+// itself is `InProcessHostLink` (a synchronous test seam already used by
 // `voice-token.test.ts`): a real host socket's hello handshake is async and
-// its own `daemon.host`/`chat.spawned` frames race the auth completing (b1's
+// its own `host.host`/`chat.spawned` frames race the auth completing (b1's
 // own daemon-connect test proves the handshake elsewhere), which has nothing
 // to do with what this file actually verifies — the relay's routing/piping.
 
@@ -20,7 +20,7 @@ import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 function waitOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -78,11 +78,11 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
   let serverPort: number;
   let closeServer: () => Promise<void>;
   let user: { publicKey: string; privateKey: string };
-  let daemonLink: InProcessDaemonLink;
+  let hostLink: InProcessHostLink;
   let fakeUpstream: WebSocketServer;
   let fakeUpstreamPort: number;
 
-  const DAEMON_ID = 'daemon-mac-1';
+  const HOST_ID = 'daemon-mac-1';
   const CHAT_ID = 'chat-on-mac-1';
 
   beforeEach(async () => {
@@ -92,7 +92,7 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
     registry.setDaemonKey({
-      daemonId: DAEMON_ID,
+      hostId: HOST_ID,
       publicKey: user.publicKey,
       issuedAt: Math.floor(Date.now() / 1000),
     });
@@ -110,15 +110,15 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
     await new Promise<void>((resolve) => fakeUpstream.once('listening', resolve));
     fakeUpstreamPort = (fakeUpstream.address() as AddressInfo).port;
 
-    daemonLink = new InProcessDaemonLink();
-    daemonLink.setDaemonId(DAEMON_ID);
+    hostLink = new InProcessHostLink();
+    hostLink.setHostId(HOST_ID);
 
     const { app } = await buildAll({
       registry,
       presence: new PresenceTracker(),
       logger: false,
       internalToken: 'test-internal-token-not-for-prod-aaaa',
-      daemonLink,
+      hostLink,
     });
     await app.listen({ port: 0, host: '127.0.0.1' });
 
@@ -126,15 +126,15 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
     // fake upstream, and spawns the chat this test relays a session for —
     // AFTER buildAll, whose wiring (chatRegistry.observe, wsHub's host cache)
     // is what actually listens for these; emitting earlier is emitting to no
-    // one, since `InProcessDaemonLink.emit` delivers synchronously to
+    // one, since `InProcessHostLink.emit` delivers synchronously to
     // whatever is subscribed at the moment it is called.
-    daemonLink.emit({
-      type: 'daemon.host',
-      daemonId: DAEMON_ID,
+    hostLink.emit({
+      type: 'host.host',
+      hostId: HOST_ID,
       hostName: 'Mac',
       platform: 'darwin',
       arch: 'arm64',
-      daemonVersion: '0.1.0',
+      hostVersion: '0.1.0',
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
@@ -143,10 +143,10 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
       backends: [],
       components: [],
     } as unknown as WireEvent);
-    daemonLink.emit({
+    hostLink.emit({
       type: 'chat.spawned',
       chatId: CHAT_ID,
-      daemonId: DAEMON_ID,
+      hostId: HOST_ID,
       folder: '/home/tom/project',
     });
     const addr = app.server.address() as AddressInfo;
@@ -238,9 +238,21 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
     expect(await closePromise).toBe(4400);
   });
 
+  it('still closes with 4400 when the unknown sessionId is too long for a close reason (123 bytes)', async () => {
+    const client = new WebSocket(`${serverUrl}/audio/${'é'.repeat(100)}`);
+    const clientLog = new MessageLog(client);
+    const closePromise = waitClose(client);
+    const got = await clientLog.next();
+    expect(JSON.parse(got.data.toString('utf8'))).toMatchObject({
+      type: 'audio.error',
+      code: 'session_not_found',
+    });
+    expect(await closePromise).toBe(4400);
+  });
+
   it('refuses a session whose host has gone offline since the token was minted (host_unreachable)', async () => {
     const { audioUrl } = await mintToken();
-    daemonLink.forget(DAEMON_ID);
+    hostLink.forget(HOST_ID);
     const client = new WebSocket(`${serverUrl}${audioUrl}`);
     const clientLog = new MessageLog(client);
     const closePromise = waitClose(client);
@@ -278,9 +290,9 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
   let serverPort: number;
   let closeServer: () => Promise<void>;
   let user: { publicKey: string; privateKey: string };
-  let daemonLink: InProcessDaemonLink;
+  let hostLink: InProcessHostLink;
 
-  const DAEMON_ID = 'daemon-remote-1';
+  const HOST_ID = 'daemon-remote-1';
   const CHAT_ID = 'chat-on-remote-1';
 
   beforeEach(async () => {
@@ -290,7 +302,7 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
     registry.setDaemonKey({
-      daemonId: DAEMON_ID,
+      hostId: HOST_ID,
       publicKey: user.publicKey,
       issuedAt: Math.floor(Date.now() / 1000),
     });
@@ -301,27 +313,27 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
       issuedAt: Math.floor(Date.now() / 1000),
     });
 
-    daemonLink = new InProcessDaemonLink();
-    daemonLink.setDaemonId(DAEMON_ID);
+    hostLink = new InProcessHostLink();
+    hostLink.setHostId(HOST_ID);
 
     const { app } = await buildAll({
       registry,
       presence: new PresenceTracker(),
       logger: false,
       internalToken: 'test-internal-token-not-for-prod-aaaa',
-      daemonLink,
+      hostLink,
     });
     await app.listen({ port: 0, host: '127.0.0.1' });
 
     // This host reports NO audioRelayHost at all — the real-world default for
     // any host that isn't co-located with the server (config.ts).
-    daemonLink.emit({
-      type: 'daemon.host',
-      daemonId: DAEMON_ID,
+    hostLink.emit({
+      type: 'host.host',
+      hostId: HOST_ID,
       hostName: 'Tom’s MacBook Pro',
       platform: 'darwin',
       arch: 'arm64',
-      daemonVersion: '0.1.0',
+      hostVersion: '0.1.0',
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
@@ -329,10 +341,10 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
       backends: [],
       components: [],
     } as unknown as WireEvent);
-    daemonLink.emit({
+    hostLink.emit({
       type: 'chat.spawned',
       chatId: CHAT_ID,
-      daemonId: DAEMON_ID,
+      hostId: HOST_ID,
       folder: '/home/tom/project',
     });
     const addr = app.server.address() as AddressInfo;
@@ -370,16 +382,14 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
 
     // The server asked THIS host (not a direct dial) to bridge the session.
     const openFrame = await waitFor(() =>
-      daemonLink.sent.find(
-        (s) => s.event.type === 'patch.audio_relay.open' && s.daemonId === DAEMON_ID,
-      ),
+      hostLink.sent.find((s) => s.event.type === 'patch.audio_relay.open' && s.hostId === HOST_ID),
     );
     expect((openFrame.event as { sessionId: string }).sessionId).toBe(sessionId);
 
     // Up leg: the surface's text frame is tunnelled, base64, tagged with this sessionId.
     client.send(JSON.stringify({ type: 'audio.session_start', chatId: CHAT_ID }));
     const upFrame = await waitFor(() =>
-      daemonLink.sent.find(
+      hostLink.sent.find(
         (s) =>
           s.event.type === 'patch.audio_relay.frame' &&
           (s.event as { sessionId: string }).sessionId === sessionId,
@@ -395,14 +405,14 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     // Down leg: the "daemon" (simulated) tunnels a binary PCM frame back; the
     // surface receives it as a real binary WS frame, not the JSON envelope.
     const pcm = Buffer.from(new Int16Array([1, 2, 3, -1]).buffer);
-    daemonLink.emit(
+    hostLink.emit(
       {
         type: 'patch.audio_relay.frame',
         sessionId,
         data: pcm.toString('base64'),
         binary: true,
       } as unknown as WireEvent,
-      DAEMON_ID,
+      HOST_ID,
     );
     const down = await clientLog.next();
     expect(down.isBinary).toBe(true);
@@ -417,14 +427,14 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     const clientLog = new MessageLog(client);
     const closePromise = waitClose(client);
     await waitOpen(client);
-    daemonLink.emit(
+    hostLink.emit(
       {
         type: 'patch.audio_relay.error',
         sessionId,
         code: 'connect_failed',
         message: 'voice is not installed on this host',
       } as unknown as WireEvent,
-      DAEMON_ID,
+      HOST_ID,
     );
     const got = await clientLog.next();
     expect(JSON.parse(got.data.toString('utf8'))).toMatchObject({
@@ -440,7 +450,7 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     const clientLog = new MessageLog(client);
     const closePromise = waitClose(client);
     await waitOpen(client);
-    daemonLink.forget(DAEMON_ID);
+    hostLink.forget(HOST_ID);
     const got = await clientLog.next();
     expect(JSON.parse(got.data.toString('utf8'))).toMatchObject({
       type: 'audio.error',
@@ -453,16 +463,16 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     const { sessionId, audioUrl } = await mintToken();
     const client = new WebSocket(`${serverUrl}${audioUrl}`);
     await waitOpen(client);
-    await waitFor(() => daemonLink.sent.find((s) => s.event.type === 'patch.audio_relay.open'));
+    await waitFor(() => hostLink.sent.find((s) => s.event.type === 'patch.audio_relay.open'));
     client.close();
     const closeFrame = await waitFor(() =>
-      daemonLink.sent.find(
+      hostLink.sent.find(
         (s) =>
           s.event.type === 'patch.audio_relay.close' &&
           (s.event as { sessionId: string }).sessionId === sessionId,
       ),
     );
-    expect(closeFrame.daemonId).toBe(DAEMON_ID);
+    expect(closeFrame.hostId).toBe(HOST_ID);
   });
 
   it("a patch.audio_relay.close FROM the host closes the surface's own socket", async () => {
@@ -470,10 +480,7 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     const client = new WebSocket(`${serverUrl}${audioUrl}`);
     const closePromise = waitClose(client);
     await waitOpen(client);
-    daemonLink.emit(
-      { type: 'patch.audio_relay.close', sessionId } as unknown as WireEvent,
-      DAEMON_ID,
-    );
+    hostLink.emit({ type: 'patch.audio_relay.close', sessionId } as unknown as WireEvent, HOST_ID);
     await closePromise;
   });
 });

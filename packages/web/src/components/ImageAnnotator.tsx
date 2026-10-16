@@ -58,7 +58,8 @@ const COLORS = ['#e0393e', '#f5a623', '#3d8bfd', '#2ecc71', '#111111'];
 const DEFAULT_COLOR: string = COLORS[0] ?? '#e0393e';
 
 export interface ImageAnnotatorProps {
-  file: File;
+  /** The image to mark up. Omit to sketch on a blank white page. */
+  file?: File;
   onDone(file: File): void;
   onCancel(): void;
 }
@@ -66,6 +67,8 @@ export interface ImageAnnotatorProps {
 export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bitmapRef = useRef<ImageBitmap | null>(null);
+  // Natural size of the page being drawn on: the decoded image, or the blank page.
+  const sizeRef = useRef<{ width: number; height: number }>({ width: 800, height: 600 });
   const [ready, setReady] = useState(false);
   const [tool, setTool] = useState<Tool>('box');
   const [color, setColor] = useState<string>(DEFAULT_COLOR);
@@ -91,12 +94,24 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
   // would if the box had an explicit size to fit into.
   useEffect(() => {
     let cancelled = false;
+    if (!file) {
+      sizeRef.current = blankPageSize();
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.width = sizeRef.current.width;
+        canvas.height = sizeRef.current.height;
+        applyDisplaySize(canvas);
+      }
+      setReady(true);
+      return;
+    }
     createImageBitmap(file).then((bmp) => {
       if (cancelled) {
         bmp.close();
         return;
       }
       bitmapRef.current = bmp;
+      sizeRef.current = { width: bmp.width, height: bmp.height };
       const canvas = canvasRef.current;
       if (canvas) {
         canvas.width = bmp.width;
@@ -115,34 +130,32 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
   useEffect(() => {
     const onResize = (): void => {
       const canvas = canvasRef.current;
-      if (canvas && bitmapRef.current) applyDisplaySize(canvas);
+      if (canvas && ready) applyDisplaySize(canvas);
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
+  }, [ready]);
 
-  const lineWidth = useCallback(
-    () => Math.max(3, Math.round((bitmapRef.current?.width ?? 800) / 260)),
-    [],
-  );
-  const fontSize = useCallback(
-    () => Math.max(18, Math.round((bitmapRef.current?.width ?? 800) / 32)),
-    [],
-  );
+  const lineWidth = useCallback(() => Math.max(3, Math.round(sizeRef.current.width / 260)), []);
+  const fontSize = useCallback(() => Math.max(18, Math.round(sizeRef.current.width / 32)), []);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const bmp = bitmapRef.current;
-    if (!canvas || !bmp) return;
+    if (!canvas || (file && !bmp)) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bmp, 0, 0);
+    if (bmp) ctx.drawImage(bmp, 0, 0);
+    else {
+      ctx.fillStyle = BLANK_PAGE_COLOR;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
     const lw = lineWidth();
     const fs = fontSize();
     for (const s of shapes) drawShape(ctx, s, lw, fs);
     if (draft) drawShape(ctx, draft, lw, fs);
-  }, [shapes, draft, lineWidth, fontSize]);
+  }, [file, shapes, draft, lineWidth, fontSize]);
 
   useEffect(() => {
     draw();
@@ -235,8 +248,12 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
     if (!canvas) return;
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
     if (!blob) return;
-    const baseName = file.name.replace(/\.[^.]+$/, '') || 'image';
-    onDone(new File([blob], `${baseName}-annotated.png`, { type: 'image/png' }));
+    const baseName = file?.name.replace(/\.[^.]+$/, '') || 'sketch';
+    onDone(
+      new File([blob], file ? `${baseName}-annotated.png` : `${baseName}-${Date.now()}.png`, {
+        type: 'image/png',
+      }),
+    );
   }
 
   return createPortal(
@@ -244,7 +261,7 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
       className="annotator-backdrop"
       role="dialog"
       aria-modal="true"
-      aria-label="Annotate image"
+      aria-label={file ? 'Annotate image' : 'Sketch'}
       data-testid="image-annotator"
     >
       <div className="annotator-toolbar">
@@ -361,6 +378,15 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
     </div>,
     document.body,
   );
+}
+
+const BLANK_PAGE_COLOR = '#ffffff';
+
+/** Blank sketch page: 4:3 matching the window's orientation. */
+function blankPageSize(): { width: number; height: number } {
+  return window.innerWidth >= window.innerHeight
+    ? { width: 1600, height: 1200 }
+    : { width: 1200, height: 1600 };
 }
 
 /** Toolbar height + canvas-wrap padding, roughly — kept out of the fit box. */

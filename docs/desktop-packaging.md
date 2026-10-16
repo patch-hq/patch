@@ -69,3 +69,14 @@ bundle is non-adhoc and passes `codesign --verify --deep --strict` before shippi
 - The menu-bar heartbeat gate is driven from imperative call sites rather than window events. `BrowserWindow.hide()` is unreliable on macOS — it genuinely hides the window yet the `'hide'` event frequently does not fire. So `patch:menubar-visibility` is sent from `showTrayPopover` (true) / `hideTrayPopover` (false), not `win.on('show'/'hide')`. Otherwise the dropdown closes but the renderer keeps beating `surface.heartbeat` forever.
 - An update installs itself, and the install must actually quit. `update-downloaded` calls `installUpdate()` unconditionally — there is no "restart to install" prompt, because Patch deploys ~20x a day and the answer was always yes. That makes the `app.isQuitting` rule load-bearing rather than incidental: `quitAndInstall` closes every window and then quits, and the main window's `close` handler cancels any close it hasn't been told is a real quit, so without the flag ~20 prompts a day become ~20 silent app deaths on the old build. One wrapper (`quitAndInstallNow`, `updater.ts`) sets the flag, force-relaunches, and hands a refusal to the version panel.
 - Main→renderer "start" IPC must be readiness-gated (`sendWhenReady`). A freshly created window's `loadURL` is async; a synchronous `webContents.send` right after creation is dropped because the renderer hasn't registered its listeners. The voice-note overlay is lazily created, so the first ⌃Space press would open the overlay without starting recording. Sends defer to `did-finish-load` while loading.
+
+## Changing the app id breaks every installed Mac
+
+ShipIt unpacks an update and looks for a bundle whose identifier matches the running
+app. After the 2026-10-09 rename (`com.tomchambers.patch` → `io.github.tomchambers2.patch`)
+a Mac still running the old id downloads the new zip fine, then fails with
+`Could not locate update bundle for com.tomchambers.patch within …ShipIt/update.…`,
+and the Update button does nothing. The old binary cannot be fixed from here: that Mac
+needs one manual reinstall of the new build (`pnpm --filter @patch/desktop install:app`
+after a `dist`, or copy the zip's `Patch.app` into /Applications). `src/app-id.test.ts`
+pins the id so it cannot change again by accident.

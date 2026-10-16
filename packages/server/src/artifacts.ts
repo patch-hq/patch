@@ -2,7 +2,7 @@
 // § Artifacts, spec/01 § Endpoints).
 //
 // Two pieces:
-//   1. A daemon-link bridge for `patch.artifact.publish_request` (mirrors
+//   1. A host-link bridge for `patch.artifact.publish_request` (mirrors
 //      jobs/rpc-bridge.ts): write the page under `<artifactsDir>/<chatId>/`,
 //      reply `patch.artifact.publish_response` with the URL it is now served
 //      from. The host only stamps the chat card AFTER this reply, so a
@@ -24,7 +24,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { PatchArtifactPublishRequestEvent, type WireEvent } from '@patch/wire';
 import { verifySurfaceCredential } from '@patch/auth';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { Registry } from './registry.js';
 
 const BRIDGE_SURFACE_ID = 'artifact-bridge';
@@ -32,6 +32,8 @@ const BRIDGE_SURFACE_ID = 'artifact-bridge';
 const ID_RE = /^[0-9a-f]{2,64}$/;
 /** Mirrors the host-side ceiling (spec/14 § Artifacts), post-wrapping. */
 const MAX_ARTIFACT_BYTES = 3 * 1024 * 1024;
+/** Raw (image) bodies are base64 of up to 7 MB of source, so they get their own ceiling. */
+const MAX_RAW_ARTIFACT_BYTES = 10 * 1024 * 1024;
 /** Opaque origin: agent-authored script cannot touch the SPA's origin. */
 export const ARTIFACT_CSP = 'sandbox allow-scripts';
 
@@ -44,7 +46,7 @@ interface RawArtifactSidecar {
 
 export interface ArtifactRoutesDeps {
   logger: Logger;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   registry: Registry;
   /** Root artifacts are written under: `<dir>/<chatId>/<artifactId>.html`. */
   artifactsDir: string;
@@ -78,8 +80,13 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
   const secret = loadLinkSecret(deps.artifactsDir);
   const sign = (...parts: (string | number)[]): string =>
     createHmac('sha256', secret).update(parts.join('|')).digest('hex');
-  const same = (a: string, b: string): boolean =>
-    a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  const same = (a: string, b: string): boolean => {
+    // Lengths in BYTES: `timingSafeEqual` throws on unequal buffers, and 64
+    // multi-byte characters are 64 long but not 64 bytes.
+    const x = Buffer.from(a);
+    const y = Buffer.from(b);
+    return x.length === y.length && timingSafeEqual(x, y);
+  };
   const appSig = (chatId: string, artifactId: string): string => sign('app', chatId, artifactId);
   const epochFile = (chatId: string, artifactId: string): string =>
     join(deps.artifactsDir, chatId, `${artifactId}.share-epoch`);
@@ -111,10 +118,17 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     existsSync(join(deps.artifactsDir, chatId, `${artifactId}.html`)) ||
     existsSync(join(deps.artifactsDir, chatId, `${artifactId}.meta.json`));
 
-  const unsub = deps.daemonLink.onEvent((event: WireEvent) => {
+  const unsub = deps.hostLink.onEvent((event: WireEvent, fromHostId: string | null) => {
     if (event.type !== 'patch.artifact.publish_request') return;
     const parsed = PatchArtifactPublishRequestEvent.safeParse(event);
-    const reply = (out: WireEvent): void => deps.daemonLink.send(BRIDGE_SURFACE_ID, out);
+    // Answer the machine that asked. `send()` would route by the chat's registry
+    // entry or the account's home machine — a chat the server has not mapped yet,
+    // or one on a non-home machine, never got its answer and the host sat out its
+    // timeout (`502 view_file_publish_failed: artifact publish timed out`).
+    const reply = (out: WireEvent): void => {
+      if (fromHostId !== null) deps.hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, out);
+      else deps.hostLink.send(BRIDGE_SURFACE_ID, out);
+    };
     if (!parsed.success) {
       reply({
         type: 'patch.artifact.publish_response',
@@ -143,7 +157,8 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       });
       return;
     }
-    if (Buffer.byteLength(html ?? raw!.base64, 'utf8') > MAX_ARTIFACT_BYTES) {
+    const limit = raw !== undefined ? MAX_RAW_ARTIFACT_BYTES : MAX_ARTIFACT_BYTES;
+    if (Buffer.byteLength(html ?? raw!.base64, 'utf8') > limit) {
       reply({
         type: 'patch.artifact.publish_response',
         requestId,

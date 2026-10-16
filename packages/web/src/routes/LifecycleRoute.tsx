@@ -12,10 +12,12 @@
 // there is one implementation of "what an Archived row looks like", not two.
 
 import type { JSX } from 'react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { ChatSearchResults } from '../components/ChatSearch.js';
+import { searchableQuery } from '../lib/chatSearch.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { groupChats } from '../lib/chatGroups.js';
 import { isNearScrollBottom } from '../lib/scrollPaging.js';
@@ -37,6 +39,10 @@ const LABELS = {
 
 type Kind = keyof typeof LABELS;
 
+// Sections the chat search can place a hit in; Deleted and Automations are not
+// among them, so those pages carry no search field.
+const SEARCHABLE = ['hidden', 'archived', 'snoozed'] as const;
+
 function isKind(v: string | undefined): v is Kind {
   return v !== undefined && v in LABELS;
 }
@@ -46,7 +52,11 @@ export function LifecycleRoute(): JSX.Element {
   const chats = useChatStore((s) => s.chats);
   const folderRoster = useChatStore((s) => s.folderRoster);
   const activeChatId = useChatStore((s) => s.activeChatId);
+  const sectionCount = useChatStore((s) =>
+    s.sectionCounts && isKind(kind) ? s.sectionCounts[kind] : null,
+  );
   const bumpLifecycleScrollTick = useUiStore((s) => s.bumpLifecycleScrollTick);
+  const [query, setQuery] = useState('');
   const grouped = useMemo(
     () => groupChats(Object.values(chats), folderRoster),
     [chats, folderRoster],
@@ -59,6 +69,11 @@ export function LifecycleRoute(): JSX.Element {
       </div>
     );
   }
+
+  const searchSection = (SEARCHABLE as readonly string[]).includes(kind)
+    ? (kind as (typeof SEARCHABLE)[number])
+    : null;
+  const searched = searchSection === null ? null : searchableQuery(query);
 
   return (
     <main
@@ -73,22 +88,47 @@ export function LifecycleRoute(): JSX.Element {
           <NavHistoryControls />
           <h1 className="display">{LABELS[kind]}</h1>
         </div>
+        {searchSection !== null && (
+          <input
+            type="search"
+            className="jobs-search"
+            data-testid="lifecycle-search"
+            data-search-input
+            placeholder={`Search ${LABELS[kind].toLowerCase()} chats`}
+            aria-label={`Search ${LABELS[kind].toLowerCase()} chats`}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
       </header>
-      <div className="lifecycle-route-body" data-testid={`lifecycle-route-${kind}`}>
-        {kind === 'hidden' && <HiddenSection hidden={grouped.hidden} activeChatId={activeChatId} />}
-        {kind === 'archived' && (
-          <ArchivedSection archived={grouped.archived} activeChatId={activeChatId} />
-        )}
-        {kind === 'snoozed' && (
-          <SnoozedSection snoozed={grouped.snoozed} activeChatId={activeChatId} />
-        )}
-        {kind === 'deleted' && (
-          <DeletedSection deleted={grouped.deleted} activeChatId={activeChatId} />
-        )}
-        {kind === 'automations' && (
-          <AutomationsSection automations={grouped.automations} activeChatId={activeChatId} />
-        )}
-      </div>
+      {searched !== null && searchSection !== null ? (
+        <div className="lifecycle-route-body" data-testid="lifecycle-search-results">
+          <ChatSearchResults query={searched} activeChatId={activeChatId} section={searchSection} />
+        </div>
+      ) : (
+        <div className="lifecycle-route-body" data-testid={`lifecycle-route-${kind}`}>
+          {sectionCount === 0 && (
+            <div className="empty-hint" data-testid="lifecycle-route-empty">
+              No {LABELS[kind].toLowerCase()} chats
+            </div>
+          )}
+          {kind === 'hidden' && (
+            <HiddenSection hidden={grouped.hidden} activeChatId={activeChatId} />
+          )}
+          {kind === 'archived' && (
+            <ArchivedSection archived={grouped.archived} activeChatId={activeChatId} />
+          )}
+          {kind === 'snoozed' && (
+            <SnoozedSection snoozed={grouped.snoozed} activeChatId={activeChatId} />
+          )}
+          {kind === 'deleted' && (
+            <DeletedSection deleted={grouped.deleted} activeChatId={activeChatId} />
+          )}
+          {kind === 'automations' && (
+            <AutomationsSection automations={grouped.automations} activeChatId={activeChatId} />
+          )}
+        </div>
+      )}
     </main>
   );
 }

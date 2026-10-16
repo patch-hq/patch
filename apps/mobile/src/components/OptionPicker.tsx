@@ -57,6 +57,8 @@ export function OptionPicker({
           alignItems: 'center',
           gap: space.xs,
           alignSelf: 'flex-start',
+          minWidth: 160,
+          justifyContent: 'space-between',
           paddingHorizontal: space.md,
           paddingVertical: space.sm,
           borderRadius: radii.md,
@@ -69,6 +71,7 @@ export function OptionPicker({
         <Text
           numberOfLines={1}
           style={{
+            flexShrink: 0,
             color: colors.ink,
             fontFamily: fonts.body,
             fontSize: textMin,
@@ -111,7 +114,7 @@ export function OptionPicker({
                   color: colors.ink3,
                   paddingHorizontal: space.md,
                   paddingVertical: space.sm,
-                  fontSize: 13,
+                  fontSize: textMin,
                 }}
               >
                 {emptyText}

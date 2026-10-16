@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { ChatRegistry } from '../src/chat-registry.js';
 
 const T0 = 1_700_000_000_000;
@@ -21,8 +21,8 @@ function silentLogger() {
 
 function seeded(now: () => number): ChatRegistry {
   const reg = new ChatRegistry({ logger: silentLogger(), now });
-  reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
-  reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '/y' });
+  reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
+  reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '/y' });
   reg.observe({
     type: 'chat.state',
     permissionMode: 'bypassPermissions',
@@ -154,23 +154,23 @@ describe('POST /api/chats/:id/snooze', () => {
   async function withApp(
     fn: (ctx: {
       app: Awaited<ReturnType<typeof buildAll>>['app'];
-      daemonLink: InProcessDaemonLink;
+      hostLink: InProcessHostLink;
       jwt: string;
     }) => Promise<void>,
   ): Promise<void> {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink, spawnErrorWaitMs: 50 });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink, spawnErrorWaitMs: 50 });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
-      await fn({ app: built.app, daemonLink, jwt });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
+      await fn({ app: built.app, hostLink, jwt });
     } finally {
       await built.app.close();
     }
   }
 
   it('forwards chat.snooze_request to the host', async () => {
-    await withApp(async ({ app, daemonLink, jwt }) => {
+    await withApp(async ({ app, hostLink, jwt }) => {
       const until = Date.now() + 60_000;
       const res = await app.inject({
         method: 'POST',
@@ -179,13 +179,13 @@ describe('POST /api/chats/:id/snooze', () => {
         payload: { snoozedUntil: until },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.snooze_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.snooze_request');
       expect(sent?.event).toMatchObject({ chatId: 'c1', snoozedUntil: until });
     });
   });
 
   it('accepts null (unsnooze)', async () => {
-    await withApp(async ({ app, daemonLink, jwt }) => {
+    await withApp(async ({ app, hostLink, jwt }) => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/chats/c1/snooze',
@@ -193,13 +193,13 @@ describe('POST /api/chats/:id/snooze', () => {
         payload: { snoozedUntil: null },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.snooze_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.snooze_request');
       expect(sent?.event).toMatchObject({ chatId: 'c1', snoozedUntil: null });
     });
   });
 
   it('rejects a snoozedUntil in the past with 400 (NO FALLBACK)', async () => {
-    await withApp(async ({ app, daemonLink, jwt }) => {
+    await withApp(async ({ app, hostLink, jwt }) => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/chats/c1/snooze',
@@ -207,7 +207,7 @@ describe('POST /api/chats/:id/snooze', () => {
         payload: { snoozedUntil: Date.now() - 1000 },
       });
       expect(res.statusCode).toBe(400);
-      expect(daemonLink.sent.some((s) => s.event.type === 'chat.snooze_request')).toBe(false);
+      expect(hostLink.sent.some((s) => s.event.type === 'chat.snooze_request')).toBe(false);
     });
   });
 
@@ -224,9 +224,9 @@ describe('POST /api/chats/:id/snooze', () => {
   });
 
   it('GET /api/chats?snoozed=only returns only snoozed chats; a bogus value is 400', async () => {
-    await withApp(async ({ app, daemonLink, jwt }) => {
+    await withApp(async ({ app, hostLink, jwt }) => {
       const until = Date.now() + 60_000;
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
@@ -236,7 +236,7 @@ describe('POST /api/chats/:id/snooze', () => {
         folder: '/x',
         snoozedUntil: until,
       });
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '/y' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '/y' });
       const only = await app.inject({
         method: 'GET',
         url: '/api/chats?snoozed=only',
@@ -267,9 +267,9 @@ describe('POST /api/chats/:id/snooze', () => {
   // holding both, and needs `snoozedUntil` on the entry to tell them apart and
   // to name the wake time.
   it('GET /api/chats?snoozed=include returns active + snoozed, each carrying snoozedUntil', async () => {
-    await withApp(async ({ app, daemonLink, jwt }) => {
+    await withApp(async ({ app, hostLink, jwt }) => {
       const until = Date.now() + 60_000;
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
@@ -279,7 +279,7 @@ describe('POST /api/chats/:id/snooze', () => {
         folder: '/x',
         snoozedUntil: until,
       });
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '/y' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '/y' });
 
       const res = await app.inject({
         method: 'GET',

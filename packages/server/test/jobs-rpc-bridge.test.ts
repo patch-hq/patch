@@ -1,4 +1,4 @@
-// Group 10 BLOCKER B.8: server-side daemon-link bridge for patch.jobs.*.
+// Group 10 BLOCKER B.8: server-side host-link bridge for patch.jobs.*.
 //
 // Verifies a daemon-issued `patch.jobs.request` round-trips through the
 // server's JobsInterface and produces a `patch.jobs.response` on the link.
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('jobs RPC bridge', () => {
   let dir: string;
@@ -21,10 +21,10 @@ describe('jobs RPC bridge', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('create via daemon-link RPC writes the file on the SERVER', async () => {
+  it('create via host-link RPC writes the file on the SERVER', async () => {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     try {
       // Host-side: emit a patch.jobs.request as if from RemoteJobsStore.
       const request: WireEvent = {
@@ -34,7 +34,7 @@ describe('jobs RPC bridge', () => {
         body: {
           name: 'morning bus',
           trigger: { type: 'cron', expression: '0 7 * * 1-5' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'check' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'check' },
         },
       };
       link.emit(request);
@@ -56,8 +56,8 @@ describe('jobs RPC bridge', () => {
 
   it('not_found maps to error response', async () => {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     try {
       link.emit({
         type: 'patch.jobs.request',
@@ -84,8 +84,8 @@ describe('jobs RPC bridge', () => {
   // consistent and a bad-cron job is never silently persisted.
   it('rejects invalid cron expression with invalid_input (no persist)', async () => {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     try {
       link.emit({
         type: 'patch.jobs.request',
@@ -94,7 +94,7 @@ describe('jobs RPC bridge', () => {
         body: {
           name: 'bad cron',
           trigger: { type: 'cron', expression: 'not a cron' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         },
       });
       const reply = link.sent.find(
@@ -113,8 +113,8 @@ describe('jobs RPC bridge', () => {
 
   it('rejects invalid JSONata filter with invalid_input (no persist)', async () => {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     try {
       link.emit({
         type: 'patch.jobs.request',
@@ -124,7 +124,7 @@ describe('jobs RPC bridge', () => {
           name: 'bad filter',
           trigger: { type: 'cron', expression: '0 9 * * *' },
           filter: 'payload.x = = bad',
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
         },
       });
       const reply = link.sent.find(
@@ -142,8 +142,8 @@ describe('jobs RPC bridge', () => {
 
   it('invalid_input on malformed body', async () => {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     try {
       link.emit({
         type: 'patch.jobs.request',

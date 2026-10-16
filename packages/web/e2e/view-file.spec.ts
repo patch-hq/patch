@@ -85,7 +85,9 @@ test.describe('view_file', () => {
     await expect(lightbox).toHaveCount(0);
   });
 
-  test('a PDF result renders in the same sandboxed frame as an HTML page', async ({ page }) => {
+  test('a PDF result renders in an unsandboxed frame so the PDF viewer can start', async ({
+    page,
+  }) => {
     await page.goto(VIEW_FILE_PDF_CHAT);
 
     const card = page.getByTestId('view-file');
@@ -94,10 +96,10 @@ test.describe('view_file', () => {
     await expect(page.getByTestId('tool-call')).toHaveCount(0);
     await expect(page.getByTestId('tool-result')).toHaveCount(0);
 
-    // Not the image/lightbox path: a sandboxed frame, same as HTML.
+    // Not the image/lightbox path: a frame, but unsandboxed (see above).
     const frame = page.getByTestId('view-file-frame');
     await expect(frame).toHaveAttribute('src', '/api/chats/chat_view_file_pdf/artifact/pdf001');
-    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(await frame.getAttribute('sandbox')).toBeNull();
     await expect(page.getByTestId('view-file-image')).toHaveCount(0);
 
     await expect(page.getByTestId('view-file-expand')).toContainText('invoice.pdf');

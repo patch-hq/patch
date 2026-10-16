@@ -22,6 +22,7 @@ let ctx: {
   closePath: ReturnType<typeof vi.fn>;
   fill: ReturnType<typeof vi.fn>;
   fillText: ReturnType<typeof vi.fn>;
+  fillRect: ReturnType<typeof vi.fn>;
 };
 let getContextSpy: ReturnType<typeof vi.spyOn>;
 let rectSpy: ReturnType<typeof vi.spyOn>;
@@ -48,6 +49,7 @@ beforeEach(() => {
     closePath: vi.fn(),
     fill: vi.fn(),
     fillText: vi.fn(),
+    fillRect: vi.fn(),
   };
   getContextSpy = vi
     .spyOn(HTMLCanvasElement.prototype, 'getContext' as never)
@@ -202,5 +204,33 @@ describe('ImageAnnotator', () => {
     const out = onDone.mock.calls[0]![0] as File;
     expect(out.name).toBe('photo-annotated.png');
     expect(out.type).toBe('image/png');
+  });
+
+  describe('without a file (blank sketch)', () => {
+    it('shows a white page without decoding anything', async () => {
+      stubDecode(1, 1);
+      render(<ImageAnnotator onDone={() => {}} onCancel={() => {}} />);
+      const canvas = (await screen.findByTestId('annotator-canvas')) as HTMLCanvasElement;
+      await waitFor(() => expect(canvas.width).toBeGreaterThan(0));
+      expect(globalThis.createImageBitmap).not.toHaveBeenCalled();
+      expect(ctx.drawImage).not.toHaveBeenCalled();
+      expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, canvas.width, canvas.height);
+    });
+
+    it('draws marks and Done exports a "sketch-*.png"', async () => {
+      const onDone = vi.fn();
+      render(<ImageAnnotator onDone={onDone} onCancel={() => {}} />);
+      const canvas = await screen.findByTestId('annotator-canvas');
+      fireEvent.click(screen.getByLabelText('Box tool'));
+      fireEvent.pointerDown(canvas, { clientX: 10, clientY: 10, pointerId: 1 });
+      fireEvent.pointerMove(canvas, { clientX: 60, clientY: 50, pointerId: 1 });
+      fireEvent.pointerUp(canvas, { pointerId: 1 });
+      await waitFor(() => expect(ctx.strokeRect).toHaveBeenCalledWith(10, 10, 50, 40));
+      fireEvent.click(screen.getByTestId('annotator-done'));
+      await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+      const out = onDone.mock.calls[0]![0] as File;
+      expect(out.name).toMatch(/^sketch-\d+\.png$/);
+      expect(out.type).toBe('image/png');
+    });
   });
 });

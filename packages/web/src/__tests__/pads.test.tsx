@@ -52,7 +52,7 @@ beforeEach(() => {
   usePadsStore.setState({ pads: null, error: null });
   useChatStore
     .getState()
-    .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' } as never);
+    .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' } as never);
   useChatStore.getState().setName('c1', 'Puppy Care Logging');
 });
 afterEach(() => vi.restoreAllMocks());

@@ -26,7 +26,7 @@ const HOST = 'd1';
 // be. Pin it to UTC (which `formToBody` omits) so the shapes are stable; the
 // zone's own behaviour is covered in jobEditor.timezone.test.ts.
 function form(overrides: Partial<FormState>): FormState {
-  return { ...DEFAULT_FORM, cronTimezone: 'UTC', spawnDaemonId: HOST, ...overrides };
+  return { ...DEFAULT_FORM, cronTimezone: 'UTC', spawnHostId: HOST, ...overrides };
 }
 
 describe('buildGroupOptions', () => {
@@ -48,6 +48,38 @@ describe('buildGroupOptions', () => {
 });
 
 describe('validateForm', () => {
+  it.each(['30s', '-5', '0', '1.5', 'abc'])(
+    'refuses a script or gate timeout of "%s" instead of sending NaN',
+    (bad) => {
+      expect(
+        validateForm(
+          form({
+            name: 'n',
+            actionType: 'script',
+            spawnHostId: 'd',
+            spawnFolder: '/f',
+            scriptCommand: 'ls',
+            scriptTimeoutMs: bad,
+          }),
+        ),
+      ).toMatch(/timeout/i);
+      expect(
+        validateForm(
+          form({
+            name: 'n',
+            spawnFolder: '/p',
+            spawnPrompt: 'go',
+            gateOn: true,
+            gateCommand: 'true',
+            gateHostId: 'd',
+            gateFolder: '/f',
+            gateTimeoutMs: bad,
+          }),
+        ),
+      ).toMatch(/timeout/i);
+    },
+  );
+
   it('requires a name', () => {
     expect(validateForm(form({ name: '', spawnFolder: '/p', spawnPrompt: 'go' }))).toMatch(
       /name is required/i,
@@ -66,7 +98,7 @@ describe('validateForm', () => {
         form({
           name: 'j',
           actionType: 'spawn',
-          spawnDaemonId: '',
+          spawnHostId: '',
           spawnFolder: '/p',
           spawnPrompt: 'go',
         }),
@@ -80,7 +112,7 @@ describe('validateForm', () => {
         form({
           name: 'j',
           actionType: 'continue',
-          spawnDaemonId: '',
+          spawnHostId: '',
           spawnFolder: '/p',
           spawnPrompt: 'go',
         }),
@@ -98,6 +130,20 @@ describe('validateForm', () => {
     expect(
       validateForm(form({ name: 'j', actionType: 'continue', spawnFolder: '', spawnPrompt: 'go' })),
     ).toMatch(/choose a folder/i);
+  });
+
+  it('requires the followed job id for a follows trigger', () => {
+    expect(
+      validateForm(
+        form({
+          name: 'After',
+          triggerType: 'follows',
+          followsJobId: '  ',
+          spawnFolder: '/p',
+          spawnPrompt: 'go',
+        }),
+      ),
+    ).toBe('Name the job to follow. Its id is empty.');
   });
 
   it('requires a recipient chat for a message action', () => {
@@ -161,7 +207,7 @@ describe('formToBody', () => {
       gate: null,
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/home/tom/p',
         prompt: 'brief me',
         skill: 'life-coach',
@@ -232,6 +278,41 @@ describe('formToBody', () => {
     expect(() => JobCreateBody.parse(body)).not.toThrow();
   });
 
+  // The `follows` trigger shipped on web and the server (spec/08 § Follows)
+  // while mobile's editor had no case for it at all — which left mobile unable
+  // to build or even typecheck one. Parity, both directions.
+  it('shapes a follows trigger, omitting `on` when only successes count', () => {
+    const body = formToBody(
+      form({
+        name: 'After the sweep',
+        triggerType: 'follows',
+        followsJobId: 'j_ABC',
+        followsAny: false,
+        actionType: 'spawn',
+        spawnFolder: '/p',
+        spawnPrompt: 'go',
+      }),
+    );
+    expect(body.trigger).toEqual({ type: 'follows', jobId: 'j_ABC' });
+    expect(() => JobCreateBody.parse(body)).not.toThrow();
+  });
+
+  it('writes on: any when failures count too', () => {
+    const body = formToBody(
+      form({
+        name: 'After the sweep',
+        triggerType: 'follows',
+        followsJobId: '  j_ABC  ',
+        followsAny: true,
+        actionType: 'spawn',
+        spawnFolder: '/p',
+        spawnPrompt: 'go',
+      }),
+    );
+    expect(body.trigger).toEqual({ type: 'follows', jobId: 'j_ABC', on: 'any' });
+    expect(() => JobCreateBody.parse(body)).not.toThrow();
+  });
+
   it('omits an empty message prompt/skill', () => {
     const body = formToBody(
       form({
@@ -273,7 +354,7 @@ describe('formToBody', () => {
         spawnSkill: '',
       }),
     );
-    expect(body.action).toEqual({ type: 'spawn', daemonId: 'd1', folder: '/p' });
+    expect(body.action).toEqual({ type: 'spawn', hostId: 'd1', folder: '/p' });
   });
 
   it('always sends group, trimmed, even when empty', () => {
@@ -297,7 +378,7 @@ describe('formToBody', () => {
     );
     expect(body.action).toEqual({
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/p',
       prompt: 'go',
       permissionMode: 'plan',
@@ -333,7 +414,7 @@ describe('jobToForm', () => {
       name: 'Brief',
       trigger: { type: 'cron', expression: '30 8 * * 1' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go', skill: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go', skill: 'x' },
     };
     const f = jobToForm(job);
     expect(f.name).toBe('Brief');
@@ -346,6 +427,34 @@ describe('jobToForm', () => {
     expect(f.group).toBe('');
   });
 
+  it('loads a follows job, and round-trips it unchanged', () => {
+    const job: Job = {
+      ...base,
+      name: 'After',
+      trigger: { type: 'follows', jobId: 'j_ABC', on: 'any' },
+      filter: null,
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go' },
+    };
+    const f = jobToForm(job);
+    expect(f.triggerType).toBe('follows');
+    expect(f.followsJobId).toBe('j_ABC');
+    expect(f.followsAny).toBe(true);
+    expect(formToBody(f).trigger).toEqual(job.trigger);
+  });
+
+  it('a follows job with no stored `on` round-trips with the field still absent', () => {
+    const job: Job = {
+      ...base,
+      name: 'After',
+      trigger: { type: 'follows', jobId: 'j_ABC' },
+      filter: null,
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go' },
+    };
+    const f = jobToForm(job);
+    expect(f.followsAny).toBe(false);
+    expect(formToBody(f).trigger).toEqual({ type: 'follows', jobId: 'j_ABC' });
+  });
+
   it('loads a job carrying a group', () => {
     const job: Job = {
       ...base,
@@ -353,7 +462,7 @@ describe('jobToForm', () => {
       group: 'Home',
       trigger: { type: 'cron', expression: '30 8 * * 1' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go' },
     };
     expect(jobToForm(job).group).toBe('Home');
   });
@@ -364,7 +473,7 @@ describe('jobToForm', () => {
       name: 'Brief',
       trigger: { type: 'cron', expression: '30 8 * * 1' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go' },
     };
     expect(jobToForm(job).spawnPermissionMode).toBe('auto');
   });
@@ -375,7 +484,7 @@ describe('jobToForm', () => {
       name: 'Hook job',
       trigger: { type: 'webhook', scheme: 'hmac-sha256', secret: 's3cret' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go' },
     };
     const f = jobToForm(job);
     expect(f.triggerType).toBe('webhook');
@@ -389,7 +498,7 @@ describe('jobToForm', () => {
       name: 'Hook job 2',
       trigger: { type: 'webhook', scheme: 'none' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go' },
     };
     const f = jobToForm(job);
     expect(f.webhookSecret).toBe('');
@@ -429,11 +538,11 @@ describe('jobToForm', () => {
       name: 'RT',
       trigger: { type: 'cron', expression: '0 12 * * *' },
       filter: null,
-      action: { type: 'continue', daemonId: 'd1', folder: '/p', skill: 's' },
+      action: { type: 'continue', hostId: 'd1', folder: '/p', skill: 's' },
     };
     const body = formToBody(jobToForm(job));
     expect(body.trigger).toEqual({ type: 'cron', expression: '0 12 * * *' });
-    expect(body.action).toEqual({ type: 'continue', daemonId: 'd1', folder: '/p', skill: 's' });
+    expect(body.action).toEqual({ type: 'continue', hostId: 'd1', folder: '/p', skill: 's' });
   });
 
   // spec/15 § Job editor — Model, matching web. The absence of a model is a
@@ -446,7 +555,7 @@ describe('jobToForm', () => {
         name: 'No model',
         trigger: { type: 'cron', expression: '0 9 * * *' },
         filter: null,
-        action: { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go' },
       };
       const f = jobToForm(job);
       expect(f.spawnModel).toBe('');
@@ -461,7 +570,7 @@ describe('jobToForm', () => {
         filter: null,
         action: {
           type: 'spawn',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/p',
           prompt: 'go',
           model: 'claude-opus-5',
@@ -471,7 +580,7 @@ describe('jobToForm', () => {
       expect(f.spawnModel).toBe('claude-opus-5');
       expect(formToBody(f).action).toEqual({
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/p',
         prompt: 'go',
         model: 'claude-opus-5',
@@ -486,7 +595,7 @@ describe('jobToForm', () => {
         filter: null,
         action: {
           type: 'continue',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/p',
           skill: 's',
           model: 'claude-haiku-4-5',
@@ -494,7 +603,7 @@ describe('jobToForm', () => {
       };
       expect(formToBody(jobToForm(job)).action).toEqual({
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/p',
         skill: 's',
         model: 'claude-haiku-4-5',
@@ -509,7 +618,7 @@ describe('jobToForm', () => {
         filter: null,
         action: {
           type: 'spawn',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/p',
           prompt: 'go',
           model: 'claude-opus-5',
@@ -572,7 +681,7 @@ describe('fields with no mobile control still survive a save', () => {
       ...base,
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/p',
         skill: 'app-update',
         key: '{{payload.event_data.id}}',
@@ -590,7 +699,7 @@ describe('fields with no mobile control still survive a save', () => {
       ...base,
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/p',
         prompt: 'go',
         startHidden: true,
@@ -609,7 +718,7 @@ describe('fields with no mobile control still survive a save', () => {
       ...base,
       action: JobAction.parse({
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/p',
         prompt: 'go',
         startArchived: true,
@@ -620,7 +729,7 @@ describe('fields with no mobile control still survive a save', () => {
     const body = formToBody({ ...form, name: 'renamed' });
     expect(body.action).toEqual({
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/p',
       prompt: 'go',
       startHidden: true,
@@ -636,7 +745,7 @@ describe('fields with no mobile control still survive a save', () => {
       ...base,
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/p',
         prompt: 'go',
         notifyOnComplete: false,
@@ -652,7 +761,7 @@ describe('fields with no mobile control still survive a save', () => {
       ...base,
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/p',
         skill: 'app-update',
         key: '{{payload.event_data.id}}',
@@ -667,7 +776,7 @@ describe('fields with no mobile control still survive a save', () => {
 
   it('round-trips includePayload: false on spawn and message, and drops a redundant true', () => {
     for (const action of [
-      { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go', includePayload: false },
+      { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go', includePayload: false },
       { type: 'message', chatId: 'c1', prompt: 'go', includePayload: false },
     ] as const) {
       const body = formToBody({ ...jobToForm({ ...base, action }), name: 'renamed' });
@@ -689,11 +798,11 @@ describe('fields with no mobile control still survive a save', () => {
   it('a redundant stored notifyOnComplete: true normalises to no key', () => {
     const job: Job = {
       ...base,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/p', prompt: 'go', notifyOnComplete: true },
+      action: { type: 'spawn', hostId: 'd1', folder: '/p', prompt: 'go', notifyOnComplete: true },
     };
     const body = formToBody(jobToForm(job));
     expect(body.action).not.toHaveProperty('notifyOnComplete');
-    expect(Object.keys(body.action).sort()).toEqual(['daemonId', 'folder', 'prompt', 'type']);
+    expect(Object.keys(body.action).sort()).toEqual(['folder', 'hostId', 'prompt', 'type']);
   });
 
   // WIRE COMPATIBILITY: the actions are `.strict()` and a host OTAs its host
@@ -703,10 +812,10 @@ describe('fields with no mobile control still survive a save', () => {
   it('adds no key at all to an action that carries none of them', () => {
     const job: Job = {
       ...base,
-      action: { type: 'continue', daemonId: 'd1', folder: '/p', skill: 'app-update' },
+      action: { type: 'continue', hostId: 'd1', folder: '/p', skill: 'app-update' },
     };
     const body = formToBody(jobToForm(job));
-    expect(Object.keys(body.action).sort()).toEqual(['daemonId', 'folder', 'skill', 'type']);
+    expect(Object.keys(body.action).sort()).toEqual(['folder', 'hostId', 'skill', 'type']);
     expect(JSON.stringify(body.action)).toBe(JSON.stringify(job.action));
   });
 });
@@ -719,19 +828,19 @@ describe('fields with no mobile control still survive a save', () => {
 // avoid.
 describe('resolveSkillEditTarget', () => {
   it('is null when no skill is chosen — nothing to link to or explain', () => {
-    expect(resolveSkillEditTarget({ skill: '', paths: { a: '/p/a' }, daemonId: 'd1' })).toBeNull();
+    expect(resolveSkillEditTarget({ skill: '', paths: { a: '/p/a' }, hostId: 'd1' })).toBeNull();
   });
 
   it('gives a reason when no host is known yet', () => {
-    expect(resolveSkillEditTarget({ skill: 'life-coach', paths: undefined, daemonId: '' })).toEqual(
-      { reason: 'pick a host first' },
-    );
+    expect(resolveSkillEditTarget({ skill: 'life-coach', paths: undefined, hostId: '' })).toEqual({
+      reason: 'pick a host first',
+    });
   });
 
   it('gives a reason when the host answers with no paths at all (an older host)', () => {
-    expect(
-      resolveSkillEditTarget({ skill: 'life-coach', paths: undefined, daemonId: 'd1' }),
-    ).toEqual({ reason: 'host does not report skill files' });
+    expect(resolveSkillEditTarget({ skill: 'life-coach', paths: undefined, hostId: 'd1' })).toEqual(
+      { reason: 'host does not report skill files' },
+    );
   });
 
   // Todoist 6hfrrmrhG6GM3V36 — distinct from "no paths at all" above: the host
@@ -740,7 +849,7 @@ describe('resolveSkillEditTarget', () => {
   // being incapable even when it answered fine for every other skill.
   it('gives a DIFFERENT reason when the host answered but this skill is missing from it', () => {
     expect(
-      resolveSkillEditTarget({ skill: 'life-coach', paths: { plant: '/p/plant' }, daemonId: 'd1' }),
+      resolveSkillEditTarget({ skill: 'life-coach', paths: { plant: '/p/plant' }, hostId: 'd1' }),
     ).toEqual({ reason: 'skill not found on this host' });
   });
 
@@ -749,9 +858,9 @@ describe('resolveSkillEditTarget', () => {
       resolveSkillEditTarget({
         skill: 'life-coach',
         paths: { 'life-coach': '/home/tom/.claude/skills/life-coach/SKILL.md' },
-        daemonId: 'd1',
+        hostId: 'd1',
       }),
-    ).toEqual({ daemonId: 'd1', path: '/home/tom/.claude/skills/life-coach/SKILL.md' });
+    ).toEqual({ hostId: 'd1', path: '/home/tom/.claude/skills/life-coach/SKILL.md' });
   });
 });
 

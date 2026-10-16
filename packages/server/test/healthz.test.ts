@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { build } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 /** Bootstrap an account on `registry` and mint a surface JWT for it. */
 async function authFor(registry: Registry): Promise<string> {
@@ -30,7 +30,7 @@ describe('healthz', () => {
 
   it('GET /api/healthz returns ok + version + gitSha', async () => {
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/healthz' });
       expect(res.statusCode).toBe(200);
@@ -46,8 +46,8 @@ describe('healthz', () => {
   it('GET /api/daemon/healthz returns 200 ok when the host WS is online (authed)', async () => {
     const registry = Registry.load(dir);
     const credential = await authFor(registry);
-    const link = new InProcessDaemonLink(); // defaults to online
-    const app = await build({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink(); // defaults to online
+    const app = await build({ logger: false, registry, hostLink: link });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -65,9 +65,9 @@ describe('healthz', () => {
   it('GET /api/daemon/healthz returns 503 when the host WS is offline (authed)', async () => {
     const registry = Registry.load(dir);
     const credential = await authFor(registry);
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
-    const app = await build({ logger: false, registry, daemonLink: link });
+    const app = await build({ logger: false, registry, hostLink: link });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -86,8 +86,8 @@ describe('healthz', () => {
   it('GET /api/daemon/healthz returns 401 without a Bearer token (E1-d5)', async () => {
     const registry = Registry.load(dir);
     await authFor(registry);
-    const link = new InProcessDaemonLink(); // online — but no auth header
-    const app = await build({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink(); // online — but no auth header
+    const app = await build({ logger: false, registry, hostLink: link });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/daemon/healthz' });
       expect(res.statusCode).toBe(401);
@@ -104,7 +104,7 @@ describe('healthz', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Assembles the vendored build inputs for `scripts/build-daemon.mjs` from public
+// Assembles the vendored build inputs for `scripts/build-host.mjs` from public
 // sources, so a clean machine (CI, a contributor) can build a host without a
 // directory somebody copied around by hand.
 //
@@ -17,7 +17,7 @@
 //
 //   node scripts/fetch-vendor.mjs --out=DIR [--targets=darwin-arm64,linux-x64,linux-arm64]
 //
-// Then:  PATCH_BUILD_VENDOR=DIR node scripts/build-daemon.mjs
+// Then:  PATCH_BUILD_VENDOR=DIR node scripts/build-host.mjs
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -34,6 +34,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './lib/is-main.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -142,7 +143,7 @@ async function main() {
   console.log(`vendor ready: ${resolve(out)}`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`fetch-vendor: ${err.message}`);
     process.exit(1);

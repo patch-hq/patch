@@ -10,20 +10,20 @@
 // the point: an `ok` that needs no host is exactly the lie this helper's
 // absence used to hide.
 
-import type { InProcessDaemonLink } from '../src/daemon-link.js';
+import type { InProcessHostLink } from '../src/host-link.js';
 
 /**
  * Answer every fire on the link as a host that took it successfully:
  * `chat.spawned` for a spawn, `chat.input_ack` for an input. Idempotent —
  * already-settled fires are ignored, so it is safe to call after each step.
  */
-export function hostConfirms(link: InProcessDaemonLink): void {
+export function hostConfirms(link: InProcessHostLink): void {
   for (const s of link.sent) {
     if (s.event.type === 'chat.spawn_request' && s.event.chatId) {
       link.emit({
         type: 'chat.spawned',
         chatId: s.event.chatId,
-        daemonId: s.event.daemonId,
+        hostId: s.event.hostId,
         folder: s.event.folder,
       });
     } else if (s.event.type === 'chat.input') {
@@ -40,7 +40,7 @@ export function hostConfirms(link: InProcessDaemonLink): void {
  * Answer the most recent spawn as a host that REFUSED it (the folder is not on
  * that machine), so the run lands as `dispatch-error` naming the host.
  */
-export function hostRefusesLastSpawn(link: InProcessDaemonLink, message: string): void {
+export function hostRefusesLastSpawn(link: InProcessHostLink, message: string): void {
   for (let i = link.sent.length - 1; i >= 0; i--) {
     const e = link.sent[i]?.event;
     if (e && e.type === 'chat.spawn_request' && e.chatId) {

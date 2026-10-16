@@ -24,12 +24,12 @@ import React from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, ChevronDown } from 'lucide-react-native';
-import { useModelCatalog } from '../lib/models';
+import { useModelCatalog, RECENT_MODEL_COUNT } from '../lib/models';
 import { compactModelLabel } from '../lib/modelLabel';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 export function ModelPicker({
-  daemonId,
+  hostId,
   selected,
   onSelect,
   disabled = false,
@@ -37,9 +37,10 @@ export function ModelPicker({
   testID = 'new-chat-model-pill',
   pending = false,
   note,
+  highlighted = false,
 }: {
   /** The host this chat will run on — the catalogue is that machine's. */
-  daemonId: string | null;
+  hostId: string | null;
   /** The model in force as an id, or null when there is none to name yet. */
   selected: string | null;
   onSelect: (modelId: string) => void;
@@ -51,6 +52,8 @@ export function ModelPicker({
   pending?: boolean;
   /** One line above the options, e.g. which turn a change applies to. */
   note?: string;
+  /** Fill the pill solid: a model has been chosen and it should read at a glance. */
+  highlighted?: boolean;
 }): React.ReactElement {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
@@ -59,7 +62,7 @@ export function ModelPicker({
   // Latches on the first open, so a compact pill's catalogue — once read —
   // stays for the label and the next open instead of being dropped on close.
   const [wanted, setWanted] = React.useState(!compact);
-  const catalog = useModelCatalog(wanted ? daemonId : null);
+  const catalog = useModelCatalog(wanted ? hostId : null);
 
   // An id the catalogue does not carry (retired since, or not loaded yet) reads
   // as the raw id — surfaced, never blanked or swapped for a neighbour. The
@@ -93,8 +96,12 @@ export function ModelPicker({
           paddingVertical: space.xs,
           borderRadius: radii.pill,
           borderWidth: 1,
-          borderColor: colors.divider,
-          backgroundColor: pressed ? colors.accentTint : colors.paperRaised,
+          borderColor: highlighted ? colors.leaf : colors.divider,
+          backgroundColor: highlighted
+            ? colors.leaf
+            : pressed
+              ? colors.accentTint
+              : colors.paperRaised,
           // Capped so a long model id can't squeeze the screen title it sits
           // beside; the label ellipsises inside it. The compact pill also
           // SHRINKS: on a 360dp phone it is the one thing on the composer row
@@ -107,15 +114,15 @@ export function ModelPicker({
         <Text
           numberOfLines={1}
           style={{
-            color: colors.ink2,
-            fontFamily: fonts.body,
+            color: highlighted ? colors.onAccent : colors.ink2,
+            fontFamily: highlighted ? fonts.bodyBold : fonts.body,
             fontSize: textMin,
             flexShrink: 1,
           }}
         >
           {label}
         </Text>
-        <ChevronDown size={14} color={colors.ink3} />
+        <ChevronDown size={14} color={highlighted ? colors.onAccent : colors.ink3} />
       </Pressable>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -168,7 +175,7 @@ export function ModelPicker({
                   color: colors.red,
                   paddingHorizontal: space.md,
                   paddingVertical: space.sm,
-                  fontSize: 13,
+                  fontSize: textMin,
                 }}
               >
                 {catalog.error}
@@ -180,7 +187,7 @@ export function ModelPicker({
                   color: colors.ink3,
                   paddingHorizontal: space.md,
                   paddingVertical: space.sm,
-                  fontSize: 13,
+                  fontSize: textMin,
                 }}
               >
                 Loading models…
@@ -192,14 +199,14 @@ export function ModelPicker({
                   color: colors.ink3,
                   paddingHorizontal: space.md,
                   paddingVertical: space.sm,
-                  fontSize: 13,
+                  fontSize: textMin,
                 }}
               >
                 No models on this host.
               </Text>
             ) : (
               <ScrollView>
-                {catalog.models.map((m) => {
+                {catalog.models.slice(0, RECENT_MODEL_COUNT).map((m) => {
                   const active = m.id === selected;
                   return (
                     <Pressable

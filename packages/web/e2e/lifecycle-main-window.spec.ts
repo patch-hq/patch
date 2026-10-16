@@ -105,4 +105,23 @@ test.describe('Open a cold-storage section in the main window', () => {
     await expect(page.getByTestId('archived-section')).toBeAttached();
     await expect(page.getByTestId('archived-open-main')).toHaveCount(0);
   });
+
+  test('an empty section opened in the main window says so', async ({ page }) => {
+    await page.route('**/api/chats/counts', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ hidden: 0, archived: 0, snoozed: 0, deleted: 0, automations: 0 }),
+      }),
+    );
+    await page.route('**/api/chats?archived=include', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ chats: [] }),
+      }),
+    );
+    await page.goto('/app/dev-harness.html?chat=chat_bus&route=/lifecycle/archived');
+    await expect(page.getByTestId('lifecycle-route-empty')).toHaveText('No archived chats');
+  });
 });

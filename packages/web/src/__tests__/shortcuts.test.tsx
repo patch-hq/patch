@@ -434,6 +434,30 @@ describe('useShortcuts — quote / voice / editor chords', () => {
     expect(handlers.onVoiceHoldEnd).toHaveBeenCalledTimes(1);
   });
 
+  it('a re-render with new handlers mid-hold does not lose the hold: releasing still ends dictation', () => {
+    cleanup();
+    const first = makeHandlers();
+    const view = render(<Harness handlers={first} />);
+    press({ key: 'D', code: 'KeyD', metaKey: true, shiftKey: true });
+    expect(first.onVoiceHoldStart).toHaveBeenCalledTimes(1);
+    const second = makeHandlers();
+    view.rerender(<Harness handlers={second} />);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'D', code: 'KeyD', bubbles: true }));
+    expect(second.onVoiceHoldEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('⌘P and ⌘K still work with Caps Lock on (key arrives upper-case)', () => {
+    press({ key: 'P', code: 'KeyP', metaKey: true });
+    expect(handlers.onFilePicker).toHaveBeenCalledTimes(1);
+    press({ key: 'K', code: 'KeyK', metaKey: true });
+    expect(handlers.onSearch).toHaveBeenCalledWith('k');
+  });
+
+  it('⌥E toggles the editor even where Option+E is a dead key (macOS)', () => {
+    press({ key: 'Dead', code: 'KeyE', altKey: true });
+    expect(handlers.onToggleEditor).toHaveBeenCalledTimes(1);
+  });
+
   it('keyup for D when not held is a no-op', () => {
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'D', code: 'KeyD', bubbles: true }));
     expect(handlers.onVoiceHoldEnd).not.toHaveBeenCalled();

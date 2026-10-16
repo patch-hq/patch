@@ -168,7 +168,7 @@ export function ThreadsStrip(): JSX.Element {
               state === 'permission'
                 ? row.pendingPermissions.find((p) => p.tool !== ASK_USER_QUESTION)
                 : undefined;
-            const hostName = hosts[row.daemonId]?.host?.hostName ?? row.daemonId;
+            const hostName = hosts[row.hostId]?.host?.hostName ?? row.hostId;
             return (
               <div className="thread-row" data-testid={`thread-row-${row.chatId}`} key={row.chatId}>
                 <StatusBadge badge={deriveBadge(row)} pendingWake={row.pendingWake} />

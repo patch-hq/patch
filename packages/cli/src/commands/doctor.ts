@@ -3,7 +3,7 @@
 // Reports, against the live stack:
 //   - server reachability (GET /api/healthz)
 //   - host online/offline state (UDS /healthz when daemon-local, else the
-//     server's GET /api/daemon/healthz which mirrors the daemon-link state)
+//     server's GET /api/daemon/healthz which mirrors the host-link state)
 //   - errored-chat count (chats whose activity === 'errored')
 //   - the chat history log's replay comparison (daemon-local only)
 //   - pending cron/webhook backlog (buffered fires in <dataDir>/pending/, the
@@ -108,7 +108,7 @@ export function registerDoctorCommand(program: Command): void {
           identity: existsSync(identityFilePath()),
           credential: existsSync(credentialFilePath()),
           serverUrl: config.serverUrl,
-          daemonSocket: config.daemonSocket,
+          hostSocket: config.hostSocket,
           daemonLocalKey: config.daemonLocalKey !== null ? '<set>' : null,
         };
 
@@ -125,17 +125,17 @@ export function registerDoctorCommand(program: Command): void {
         // --- host online/offline ---
         // Prefer the host's own UDS /healthz when we have a local socket; it
         // is the most direct liveness signal. Otherwise read the server's
-        // /api/daemon/healthz, which reflects the daemon-link state (503 when
+        // /api/daemon/healthz, which reflects the host-link state (503 when
         // the host is not connected).
-        let daemonOnline = false;
-        if (config.daemonSocket !== null && config.daemonLocalKey !== null) {
+        let hostOnline = false;
+        if (config.hostSocket !== null && config.daemonLocalKey !== null) {
           try {
             const t = buildTransport(config, { forceUds: true });
             await t.get<{ ok: boolean }>('/healthz');
-            daemonOnline = true;
-            checks['daemonProbe'] = 'uds:/healthz';
+            hostOnline = true;
+            checks['hostProbe'] = 'uds:/healthz';
           } catch (err) {
-            checks['daemonProbe'] = `uds error: ${(err as Error).message}`;
+            checks['hostProbe'] = `uds error: ${(err as Error).message}`;
           }
         } else {
           // REST path: the server's /api/daemon/healthz is account-internal
@@ -150,25 +150,25 @@ export function registerDoctorCommand(program: Command): void {
           try {
             const t = buildTransport(config, { forceRest: true });
             const res = await t.get<{ ok: boolean }>('/api/daemon/healthz');
-            daemonOnline = res.ok === true;
-            checks['daemonProbe'] = `server:/api/daemon/healthz (200)`;
+            hostOnline = res.ok === true;
+            checks['hostProbe'] = `server:/api/daemon/healthz (200)`;
           } catch (err) {
             if (err instanceof RestError) {
               // 503 is the server's authoritative "host link down" signal.
               if (err.status === 503) {
-                daemonOnline = false;
-                checks['daemonProbe'] = `server:/api/daemon/healthz (503)`;
+                hostOnline = false;
+                checks['hostProbe'] = `server:/api/daemon/healthz (503)`;
               } else {
                 // 401/other: not a daemon-liveness signal — surface it, don't
                 // pretend the host is down.
-                checks['daemonProbe'] = `server:/api/daemon/healthz (${err.status})`;
+                checks['hostProbe'] = `server:/api/daemon/healthz (${err.status})`;
               }
             } else {
-              checks['daemonProbe'] = `server error: ${(err as Error).message}`;
+              checks['hostProbe'] = `server error: ${(err as Error).message}`;
             }
           }
         }
-        checks['daemonOnline'] = daemonOnline;
+        checks['hostOnline'] = hostOnline;
 
         // --- errored-chat count ---
         try {

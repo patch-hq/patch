@@ -18,7 +18,7 @@ import { WireTestClient } from '@patch/wire/test-client';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const PAGE = '<!doctype html><html><body><h1>hello artifact</h1></body></html>';
 
@@ -39,7 +39,7 @@ function publishRequest(
 
 /** Emit a publish_request as the host and wait for the server's response. */
 async function publish(
-  link: InProcessDaemonLink,
+  link: InProcessHostLink,
   event: Extract<WireEvent, { type: 'patch.artifact.publish_request' }>,
 ): Promise<Extract<WireEvent, { type: 'patch.artifact.publish_response' }>> {
   link.emit(event);
@@ -76,16 +76,16 @@ describe('artifacts', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(7));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
-    return { built, daemonLink, registry, user };
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+    return { built, hostLink, registry, user };
   }
 
   it('stores a published page and serves it back with the sandbox CSP', async () => {
-    const { built, daemonLink } = await makeApp();
+    const { built, hostLink } = await makeApp();
     try {
-      const res = await publish(daemonLink, publishRequest());
+      const res = await publish(hostLink, publishRequest());
       expect(res.ok).toBe(true);
       expect(res.url).toMatch(/^\/api\/chats\/c1\/artifact\/a1\?sig=[0-9a-f]{64}$/);
 
@@ -100,11 +100,11 @@ describe('artifacts', () => {
   });
 
   it('republishing the same artifactId replaces the page at the same URL', async () => {
-    const { built, daemonLink } = await makeApp();
+    const { built, hostLink } = await makeApp();
     try {
-      const first = await publish(daemonLink, publishRequest());
+      const first = await publish(hostLink, publishRequest());
       const second = await publish(
-        daemonLink,
+        hostLink,
         publishRequest({ requestId: 'r2', title: 'Hello v2', html: '<p>v2</p>' }),
       );
       expect(second.url).toBe(first.url);
@@ -120,15 +120,44 @@ describe('artifacts', () => {
   // the browser with a real image content-type + real bytes, because the
   // frontend puts this exact URL straight into an `<img src>` — an HTML
   // document at that URL, whatever it wraps, is a broken image icon.
+  it('accepts a multi-MB raw image (a 3.25 MB screenshot) but still refuses an absurd one', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const big = Buffer.alloc(3_254_449, 7);
+      const ok = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab02',
+          html: undefined,
+          raw: { contentType: 'image/png', base64: big.toString('base64') },
+        }),
+      );
+      expect(ok.ok).toBe(true);
+      const huge = await publish(
+        hostLink,
+        publishRequest({
+          requestId: 'req-huge',
+          artifactId: 'a1ab03',
+          html: undefined,
+          raw: { contentType: 'image/png', base64: Buffer.alloc(8_000_000, 7).toString('base64') },
+        }),
+      );
+      expect(huge.ok).toBe(false);
+      expect(huge.error?.message).toMatch(/too large/);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('serves a `raw` publish with its own content-type and exact bytes, no CSP', async () => {
-    const { built, daemonLink } = await makeApp();
+    const { built, hostLink } = await makeApp();
     try {
       const png = Buffer.from(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
         'base64',
       );
       const res = await publish(
-        daemonLink,
+        hostLink,
         publishRequest({
           artifactId: 'a1ab01',
           html: undefined,
@@ -156,7 +185,7 @@ describe('artifacts', () => {
   // never holds a path back to it, only the bytes — so deleting the source
   // after publish must not touch what gets served.
   it('keeps serving a raw artifact after the source file that produced it is deleted', async () => {
-    const { built, daemonLink } = await makeApp();
+    const { built, hostLink } = await makeApp();
     const sourceDir = mkdtempSync(join(tmpdir(), 'patch-artifact-source-'));
     try {
       const png = Buffer.from(
@@ -167,7 +196,7 @@ describe('artifacts', () => {
       writeFileSync(sourcePath, png);
 
       const res = await publish(
-        daemonLink,
+        hostLink,
         publishRequest({
           artifactId: 'dead6eef',
           html: undefined,
@@ -189,17 +218,17 @@ describe('artifacts', () => {
   });
 
   it('rejects a publish_request with zero or both of html/raw', async () => {
-    const { built, daemonLink, user } = await makeApp();
+    const { built, hostLink, user } = await makeApp();
     try {
       const neither = await publish(
-        daemonLink,
+        hostLink,
         publishRequest({ requestId: 'r-neither', html: undefined }),
       );
       expect(neither.ok).toBe(false);
       expect(neither.error?.message).toMatch(/exactly one of html\/raw/);
 
       const both = await publish(
-        daemonLink,
+        hostLink,
         publishRequest({
           requestId: 'r-both',
           raw: { contentType: 'image/png', base64: 'Zm9v' },
@@ -270,8 +299,8 @@ describe('artifacts', () => {
       label: 'browser',
       issuedAt: 1,
     });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
     const jwt = await mintSurfaceCredential({
@@ -282,7 +311,7 @@ describe('artifacts', () => {
     });
     const client = new WireTestClient({ url: `ws://127.0.0.1:${addr.port}/ws`, auth: jwt });
     await client.connect();
-    await client.waitFor('daemon.online');
+    await client.waitFor('host.online');
     try {
       client.send({ type: 'chat.focus_change', chatId: 'c1' });
       await new Promise((r) => setTimeout(r, 50));
@@ -290,8 +319,8 @@ describe('artifacts', () => {
       const leaked: WireEvent[] = [];
       client.on('patch.artifact.publish_request', (e) => leaked.push(e));
 
-      daemonLink.emit(publishRequest());
-      daemonLink.emit({
+      hostLink.emit(publishRequest());
+      hostLink.emit({
         type: 'chat.artifact',
         chatId: 'c1',
         artifactId: 'a1',
@@ -311,16 +340,16 @@ describe('artifacts', () => {
   });
   describe('access control', () => {
     it('refuses an unsigned, mis-signed or tampered request', async () => {
-      const { built, daemonLink } = await makeApp();
+      const { built, hostLink } = await makeApp();
       try {
-        const res = await publish(daemonLink, publishRequest());
+        const res = await publish(hostLink, publishRequest());
         const base = '/api/chats/c1/artifact/a1';
         expect((await built.app.inject({ method: 'GET', url: base })).statusCode).toBe(401);
         const bad = `${base}?sig=${'0'.repeat(64)}`;
         expect((await built.app.inject({ method: 'GET', url: bad })).statusCode).toBe(401);
         // A signature for one artifact does not open another.
         const sig = new URL(res.url!, 'http://x').searchParams.get('sig');
-        await publish(daemonLink, publishRequest({ requestId: 'r9', artifactId: 'b2' }));
+        await publish(hostLink, publishRequest({ requestId: 'r9', artifactId: 'b2' }));
         const other = await built.app.inject({
           method: 'GET',
           url: `/api/chats/c1/artifact/b2?sig=${sig}`,
@@ -338,10 +367,22 @@ describe('artifacts', () => {
       }
     });
 
-    it('serves a valid bearer without a signature', async () => {
-      const { built, daemonLink, user } = await makeApp();
+    it('answers a signature of multi-byte characters with 401, not a 500', async () => {
+      const { built, hostLink } = await makeApp();
       try {
-        await publish(daemonLink, publishRequest());
+        await publish(hostLink, publishRequest());
+        // 64 characters, 128 bytes: the length of a signature only by counting characters.
+        const forged = `/api/chats/c1/artifact/a1?sig=${encodeURIComponent('é'.repeat(64))}`;
+        expect((await built.app.inject({ method: 'GET', url: forged })).statusCode).toBe(401);
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('serves a valid bearer without a signature', async () => {
+      const { built, hostLink, user } = await makeApp();
+      try {
+        await publish(hostLink, publishRequest());
         const get = await built.app.inject({
           method: 'GET',
           url: '/api/chats/c1/artifact/a1',
@@ -355,14 +396,14 @@ describe('artifacts', () => {
     });
 
     it('keeps signed links valid across a server restart', async () => {
-      const { built, daemonLink } = await makeApp();
-      const res = await publish(daemonLink, publishRequest());
+      const { built, hostLink } = await makeApp();
+      const res = await publish(hostLink, publishRequest());
       await built.app.close();
       const registry = Registry.load(dir);
       const again = await buildAll({
         logger: false,
         registry,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
       });
       try {
         const get = await again.app.inject({ method: 'GET', url: res.url! });
@@ -373,9 +414,9 @@ describe('artifacts', () => {
     });
 
     it('mints an expiring share link only for an authenticated caller', async () => {
-      const { built, daemonLink, user } = await makeApp();
+      const { built, hostLink, user } = await makeApp();
       try {
-        await publish(daemonLink, publishRequest());
+        await publish(hostLink, publishRequest());
         const share = '/api/chats/c1/artifact/a1/share';
         expect((await built.app.inject({ method: 'POST', url: share })).statusCode).toBe(401);
         const headers = { authorization: `Bearer ${await bearerFor(user)}` };
@@ -407,9 +448,9 @@ describe('artifacts', () => {
     });
 
     it('refuses an expired share link', async () => {
-      const { built, daemonLink, user } = await makeApp();
+      const { built, hostLink, user } = await makeApp();
       try {
-        await publish(daemonLink, publishRequest());
+        await publish(hostLink, publishRequest());
         const headers = { authorization: `Bearer ${await bearerFor(user)}` };
         const minted = await built.app.inject({
           method: 'POST',
@@ -431,9 +472,9 @@ describe('artifacts', () => {
     });
 
     it('revoking shares kills share links but not the in-app link', async () => {
-      const { built, daemonLink, user } = await makeApp();
+      const { built, hostLink, user } = await makeApp();
       try {
-        const published = await publish(daemonLink, publishRequest());
+        const published = await publish(hostLink, publishRequest());
         const headers = { authorization: `Bearer ${await bearerFor(user)}` };
         const share = '/api/chats/c1/artifact/a1/share';
         const { url } = (

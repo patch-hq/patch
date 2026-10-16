@@ -11,12 +11,12 @@
 // arbitrary JSONata text.
 //
 // Deliberately narrow: this recognises exactly the shape it itself produces
-// (a flat top-level `and` of plain field/operator/value rules, `now`
-// comparisons among them) and falls back to treating the ENTIRE filter as
-// opaque custom text otherwise — an OR at the top, a nested group, or a `now`
-// comparison with an operator it doesn't understand (`=`, `!=`, ...) all
-// count as "can't represent this as a date range," not "partially represent
-// it and silently drop the rest."
+// (a top-level `and` of `now` comparisons and plain rules, plus the bracketed
+// group it writes for a remainder that ORs) and falls back to treating the
+// ENTIRE filter as opaque custom text otherwise — an OR at the top, a `now`
+// inside a nested group, or a `now` comparison with an operator it doesn't
+// understand (`=`, `!=`, ...) all count as "can't represent this as a date
+// range," not "partially represent it and silently drop the rest."
 
 import { formatQuery, isRuleGroup, type RuleGroupType, type RuleType } from 'react-querybuilder';
 import { parseJSONata } from 'react-querybuilder/parseJSONata';
@@ -59,16 +59,20 @@ export function parseDateRangeFromFilter(filter: string | null): ParsedDateRange
     return NOTHING_RECOGNISED(filter);
   }
 
-  if (tree.combinator !== 'and' || tree.rules.length === 0 || tree.rules.some(isRuleGroup)) {
-    return NOTHING_RECOGNISED(filter);
-  }
+  if (tree.combinator !== 'and' || tree.rules.length === 0) return NOTHING_RECOGNISED(filter);
 
-  const rules = tree.rules as RuleType[];
   let start: string | null = null;
   let stop: string | null = null;
-  const rest: RuleType[] = [];
+  const rest: (RuleType | RuleGroupType)[] = [];
 
-  for (const rule of rules) {
+  for (const rule of tree.rules) {
+    if (isRuleGroup(rule)) {
+      // A bracketed group is remainder (build writes one for an OR), but a
+      // `now` inside it is not a date range this widget can show.
+      if (mentionsNow(rule)) return NOTHING_RECOGNISED(filter);
+      rest.push(rule);
+      continue;
+    }
     if (rule.field !== 'now') {
       rest.push(rule);
       continue;
@@ -91,9 +95,20 @@ export function parseDateRangeFromFilter(filter: string | null): ParsedDateRange
 
   if (start === null && stop === null) return NOTHING_RECOGNISED(filter);
 
+  // A lone group is formatted on its own so its brackets don't pile up on
+  // each build/parse cycle.
+  const lone = rest.length === 1 ? rest[0]! : null;
   const remainder =
-    rest.length > 0 ? formatQuery({ combinator: 'and', rules: rest }, { format: 'jsonata' }) : null;
+    rest.length === 0
+      ? null
+      : formatQuery(lone && isRuleGroup(lone) ? lone : { combinator: 'and', rules: rest }, {
+          format: 'jsonata',
+        });
   return { start, stop, remainder };
+}
+
+function mentionsNow(group: RuleGroupType): boolean {
+  return group.rules.some((r) => (isRuleGroup(r) ? mentionsNow(r) : r.field === 'now'));
 }
 
 /**
@@ -115,7 +130,12 @@ export function buildFilterFromDateRange(
 
   const trimmedRemainder = remainder && remainder.trim() !== '' ? remainder.trim() : null;
 
-  if (dateClause && trimmedRemainder) return `${dateClause} and ${trimmedRemainder}`;
+  // `and` binds tighter than `or`: an unparenthesised `a or b` would let the
+  // `b` branch fire outside the date range.
+  if (dateClause && trimmedRemainder) {
+    const rest = /\bor\b/i.test(trimmedRemainder) ? `(${trimmedRemainder})` : trimmedRemainder;
+    return `${dateClause} and ${rest}`;
+  }
   return dateClause ?? trimmedRemainder;
 }
 

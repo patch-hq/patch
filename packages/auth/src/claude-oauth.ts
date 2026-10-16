@@ -846,7 +846,7 @@ export interface RefreshClaudeOAuthOptions {
  * Exchange a refresh token for a fresh access token via the Claude OAuth token
  * endpoint. Returns the rotated `{ accessToken, refreshToken, expiresAt }`. NO
  * FALLBACK — a non-2xx or malformed response throws (the caller surfaces
- * `daemon.unauthenticated`, never an API-key fallback).
+ * `host.unauthenticated`, never an API-key fallback).
  */
 export async function refreshClaudeOAuth(
   refreshToken: string,
@@ -1048,11 +1048,18 @@ export function persistClaudeOAuth(
       activeAccountId: null,
     };
     const prior = existing.accounts.find((a) => a.id === cred.accountId);
+    // Disconnected (or removed) while this refresh was in flight: writing the
+    // rotated token back would reconnect an account the user just cut off.
+    if (!prior?.credential) return;
     const nextCredential: PatchStoredCredential = {
       accessToken: refreshed.accessToken,
       refreshToken: refreshed.refreshToken,
       expiresAt: refreshed.expiresAt,
       ...(prior?.credential?.email ? { email: prior.credential.email } : {}),
+      // Identity captured at validation; a refresh does not change who the token is.
+      ...(prior?.credential?.organizationId
+        ? { organizationId: prior.credential.organizationId }
+        : {}),
     };
     const accounts = existing.accounts.map((a) =>
       a.id === cred.accountId ? { ...a, credential: nextCredential } : a,

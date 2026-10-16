@@ -24,7 +24,7 @@ function hiddenFixture(chatId: string, name: string, extra: Record<string, unkno
     snoozedUntil: null,
     hidden: true,
     lastUpdated: 100,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     jobId: null,
     statusSummary: null,

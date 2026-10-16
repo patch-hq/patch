@@ -6,7 +6,7 @@
 // § Host registration) — so a surface reaching the server for a chat that
 // lives on any other host has nowhere to send its audio WSS directly, UNLESS
 // that host has separately declared a reachable address
-// (`daemon.host.audioRelayHost`). Two paths out of here, in priority order:
+// (`host.host.audioRelayHost`). Two paths out of here, in priority order:
 //
 //   1. DIRECT (optimisation): the host declared an `audioRelayHost` — true by
 //      default only for a host co-located with the server (loopback), or
@@ -32,29 +32,29 @@ import type { Logger } from 'pino';
 import WebSocket from 'ws';
 import { CLOSE_MALFORMED_FRAME } from '@patch/wire';
 import type { PatchAudioRelayCloseEvent, PatchAudioRelayFrameEvent, WireEvent } from '@patch/wire';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 
 /** Matches `voice/token.ts`'s VOICE_TOKEN_TTL_MS — a route outlives the token that named it, never the other way round. */
 export const AUDIO_SESSION_ROUTE_TTL_MS = 5 * 60_000;
 
 /**
- * `sessionId → daemonId`, recorded when `POST /api/voice/token` mints a
+ * `sessionId → hostId`, recorded when `POST /api/voice/token` mints a
  * session and consulted when that session's WSS actually connects. Mirrors
  * `cross-host.ts`'s `relayRoutes` map: the only place that knows where a bare
  * id belongs is whoever resolved it in the first place.
  */
 export class AudioSessionRouter {
-  private readonly routes = new Map<string, { daemonId: string; timer: NodeJS.Timeout }>();
+  private readonly routes = new Map<string, { hostId: string; timer: NodeJS.Timeout }>();
 
-  record(sessionId: string, daemonId: string): void {
+  record(sessionId: string, hostId: string): void {
     const timer = setTimeout(() => this.routes.delete(sessionId), AUDIO_SESSION_ROUTE_TTL_MS);
     timer.unref();
-    this.routes.set(sessionId, { daemonId, timer });
+    this.routes.set(sessionId, { hostId, timer });
   }
 
   /** The host a session was minted for, or undefined for an id this server never minted (or has since expired). */
-  daemonFor(sessionId: string): string | undefined {
-    return this.routes.get(sessionId)?.daemonId;
+  hostFor(sessionId: string): string | undefined {
+    return this.routes.get(sessionId)?.hostId;
   }
 
   /** Test/shutdown cleanup. */
@@ -67,14 +67,14 @@ export class AudioSessionRouter {
 export interface AudioRelayDeps {
   logger: Logger;
   router: AudioSessionRouter;
-  daemonLink: Pick<DaemonLink, 'isOnline' | 'sendTo' | 'onEvent' | 'onHostStatus'>;
+  hostLink: Pick<HostLink, 'isOnline' | 'sendTo' | 'onEvent' | 'onHostStatus'>;
   /** `WsHub.audioRelayHost` — where the server can reach a host's own audio WSS DIRECTLY, if it has declared one. Absent is normal; the tunnelled path needs nothing declared. */
-  audioRelayHostFor: (daemonId: string) => string | undefined;
+  audioRelayHostFor: (hostId: string) => string | undefined;
   /** Test seam: substitute the upstream WebSocket client (direct-dial path only). */
   wsCtor?: new (url: string) => WebSocket;
 }
 
-/** Surface id this relay uses when addressing frames through `daemonLink.sendTo` — it is not a real surface, just the bridge's own identity for buffering. */
+/** Surface id this relay uses when addressing frames through `hostLink.sendTo` — it is not a real surface, just the bridge's own identity for buffering. */
 const AUDIO_RELAY_BRIDGE_SURFACE_ID = 'audio-relay-bridge';
 
 /** Minimal shape both a real `ws` socket and Fastify's wrapped one satisfy. */
@@ -88,13 +88,26 @@ interface RelaySocket {
   on(event: 'open', handler: () => void): void;
 }
 
+/** A WebSocket close reason is capped at 123 BYTES (not chars); `ws` throws past it. Cut on a code point. */
+function closeReason(message: string): string {
+  let out = '';
+  let bytes = 0;
+  for (const ch of message) {
+    const n = Buffer.byteLength(ch);
+    if (bytes + n > 123) break;
+    out += ch;
+    bytes += n;
+  }
+  return out;
+}
+
 function sendAudioError(socket: RelaySocket, code: string, message: string): void {
   try {
     socket.send(JSON.stringify({ type: 'audio.error', code, message }));
   } catch {
     /* socket already gone — the close() right after is what actually matters */
   }
-  socket.close(CLOSE_MALFORMED_FRAME, message.slice(0, 123));
+  socket.close(CLOSE_MALFORMED_FRAME, closeReason(message));
 }
 
 /** Pipe every frame from `a` to `b` verbatim (binary stays binary, text stays text) once `b` is open. */
@@ -128,13 +141,13 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
   const WsCtor = deps.wsCtor ?? WebSocket;
 
   /** sessionId → the tunnelled session's surface-facing socket + owning host, for as long as the bridge is open. */
-  const tunnelled = new Map<string, { socket: RelaySocket; daemonId: string }>();
+  const tunnelled = new Map<string, { socket: RelaySocket; hostId: string }>();
 
-  const sendToDaemon = (daemonId: string, event: WireEvent): void =>
-    deps.daemonLink.sendTo(daemonId, AUDIO_RELAY_BRIDGE_SURFACE_ID, event);
+  const sendToHost = (hostId: string, event: WireEvent): void =>
+    deps.hostLink.sendTo(hostId, AUDIO_RELAY_BRIDGE_SURFACE_ID, event);
 
-  const unsubEvent = deps.daemonLink.onEvent((event, fromDaemonId) => {
-    if (fromDaemonId === null) return;
+  const unsubEvent = deps.hostLink.onEvent((event, fromHostId) => {
+    if (fromHostId === null) return;
     if (
       event.type !== 'patch.audio_relay.ready' &&
       event.type !== 'patch.audio_relay.frame' &&
@@ -144,7 +157,7 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
       return;
     }
     const entry = tunnelled.get(event.sessionId);
-    if (!entry || entry.daemonId !== fromDaemonId) return;
+    if (!entry || entry.hostId !== fromHostId) return;
     if (event.type === 'patch.audio_relay.ready') return; // informational only
     if (event.type === 'patch.audio_relay.frame') {
       const data = Buffer.from(event.data, 'base64');
@@ -154,14 +167,10 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     tunnelled.delete(event.sessionId);
     if (event.type === 'patch.audio_relay.error') {
       deps.logger.warn(
-        { sessionId: event.sessionId, daemonId: fromDaemonId, message: event.message },
+        { sessionId: event.sessionId, hostId: fromHostId, message: event.message },
         'audio relay: tunnelled bridge failed on the host end',
       );
-      sendAudioError(
-        entry.socket,
-        'host_unreachable',
-        `could not reach ${fromDaemonId}'s audio WSS`,
-      );
+      sendAudioError(entry.socket, 'host_unreachable', `could not reach ${fromHostId}'s audio WSS`);
       return;
     }
     entry.socket.close();
@@ -170,12 +179,12 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
   // A host carrying one or more tunnelled sessions drops: each is refused
   // loudly rather than left open against a host that will never answer it —
   // same discipline as the pre-connection isOnline() check, for mid-session.
-  const unsubStatus = deps.daemonLink.onHostStatus((daemonId, status) => {
+  const unsubStatus = deps.hostLink.onHostStatus((hostId, status) => {
     if (status !== 'offline') return;
     for (const [sessionId, entry] of tunnelled) {
-      if (entry.daemonId !== daemonId) continue;
+      if (entry.hostId !== hostId) continue;
       tunnelled.delete(sessionId);
-      sendAudioError(entry.socket, 'host_unreachable', `${daemonId} went offline mid-session`);
+      sendAudioError(entry.socket, 'host_unreachable', `${hostId} went offline mid-session`);
     }
   });
 
@@ -185,10 +194,10 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     tunnelled.clear();
   });
 
-  function relayTunnelled(socket: RelaySocket, sessionId: string, daemonId: string): void {
-    tunnelled.set(sessionId, { socket, daemonId });
+  function relayTunnelled(socket: RelaySocket, sessionId: string, hostId: string): void {
+    tunnelled.set(sessionId, { socket, hostId });
     socket.on('message', (data, isBinary) => {
-      sendToDaemon(daemonId, {
+      sendToHost(hostId, {
         type: 'patch.audio_relay.frame',
         sessionId,
         data: data.toString('base64'),
@@ -197,14 +206,14 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     });
     const closeTunnel = (): void => {
       if (!tunnelled.delete(sessionId)) return;
-      sendToDaemon(daemonId, {
+      sendToHost(hostId, {
         type: 'patch.audio_relay.close',
         sessionId,
       } as PatchAudioRelayCloseEvent);
     };
     socket.on('close', closeTunnel);
     socket.on('error', closeTunnel);
-    sendToDaemon(daemonId, { type: 'patch.audio_relay.open', sessionId });
+    sendToHost(hostId, { type: 'patch.audio_relay.open', sessionId });
   }
 
   app.get<{ Params: { sessionId: string } }>(
@@ -212,23 +221,23 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     { websocket: true },
     (socket: RelaySocket, req) => {
       const sessionId = req.params.sessionId;
-      const daemonId = deps.router.daemonFor(sessionId);
-      if (!daemonId) {
+      const hostId = deps.router.hostFor(sessionId);
+      if (!hostId) {
         deps.logger.warn({ sessionId }, 'audio relay: no route for this session; refusing');
         sendAudioError(socket, 'session_not_found', `no voice session: ${sessionId}`);
         return;
       }
-      if (!deps.daemonLink.isOnline(daemonId)) {
-        deps.logger.warn({ sessionId, daemonId }, 'audio relay: owning host is offline; refusing');
-        sendAudioError(socket, 'host_unreachable', `${daemonId} is offline`);
+      if (!deps.hostLink.isOnline(hostId)) {
+        deps.logger.warn({ sessionId, hostId }, 'audio relay: owning host is offline; refusing');
+        sendAudioError(socket, 'host_unreachable', `${hostId} is offline`);
         return;
       }
-      const relayHost = deps.audioRelayHostFor(daemonId);
+      const relayHost = deps.audioRelayHostFor(hostId);
       if (!relayHost) {
         // No direct address declared (the common case — see the module
         // comment's path 2): tunnel the session over this host's existing
         // outbound link instead of refusing it.
-        relayTunnelled(socket, sessionId, daemonId);
+        relayTunnelled(socket, sessionId, hostId);
         return;
       }
       const upstream = new WsCtor(`ws://${relayHost}/audio/${sessionId}`) as unknown as RelaySocket;
@@ -238,11 +247,11 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
       });
       upstream.on('error', (err) => {
         deps.logger.warn(
-          { sessionId, daemonId, relayHost, err: err.message },
+          { sessionId, hostId, relayHost, err: err.message },
           'audio relay: upstream connection failed',
         );
         if (!upstreamOpen) {
-          sendAudioError(socket, 'host_unreachable', `could not reach ${daemonId}'s audio WSS`);
+          sendAudioError(socket, 'host_unreachable', `could not reach ${hostId}'s audio WSS`);
         } else {
           socket.close(CLOSE_MALFORMED_FRAME, 'upstream audio connection failed');
         }

@@ -51,7 +51,7 @@ export function modeRequiresAddress(mode: AudioSessionMode): boolean {
 //
 // Shared with the zod schemas in packages/server/src/settings.ts,
 // packages/wire/src/events.ts (`host.settings` → `voiceConfig`) and
-// packages/daemon/src/hostState.ts, which each declare their own zod copy of
+// packages/host/src/hostState.ts, which each declare their own zod copy of
 // this shape (this codebase's established pattern — see e.g. the repeated
 // `z.enum(['fallback','native'])` this superseded). This module holds the
 // plain TS types and the one place that decides WHICH of the four surfaces
@@ -169,7 +169,7 @@ export const VOICE_SURFACE_LABEL: Record<VoiceSurface, string> = {
 };
 
 /**
- * Which provider keys one host holds (reported on `daemon.host.voiceKeys`).
+ * Which provider keys one host holds (reported on `host.host.voiceKeys`).
  * A key being absent is not a host fault — it only matters for a surface
  * configured onto that provider, and it fails that surface's sessions, never
  * the host.

@@ -18,7 +18,7 @@
 // existing call sites trigger via showChatLongPressSheet(row).
 
 import React from 'react';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { Modal, Pressable, Text, TextInput, View } from 'react-native';
 import {
   Archive,
   AlarmClock,
@@ -27,6 +27,7 @@ import {
   EyeOff,
   Mic,
   PackageOpen,
+  Pencil,
   Pin,
   Trash2,
 } from 'lucide-react-native';
@@ -37,7 +38,7 @@ import { isHidden, isSnoozed } from '../stores/types';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { startVoiceNote } from '../lib/voiceNote';
-import { SNOOZE_PRESETS, resolvePreset } from '../lib/snooze';
+import { showSnoozeSheet } from './SnoozeSheet';
 import { api } from '../api/rest';
 import { fonts, radii, space, typography, useTheme } from '../lib/theme';
 
@@ -48,7 +49,7 @@ interface SheetState {
    * expanding beneath them — a phone sheet that grew to eleven rows would push
    * its own bottom off the screen.
    */
-  page: 'actions' | 'presets';
+  page: 'actions' | 'rename';
   show(row: ChatRowT, page?: SheetState['page']): void;
   close(): void;
   setPage(page: SheetState['page']): void;
@@ -72,12 +73,50 @@ export function showChatLongPressSheet(row: ChatRowT): void {
   useSheetStore.getState().show(row);
 }
 
-/**
- * Open straight onto the preset list — the chat-detail kebab's "Snooze chat"
- * route, which has already made the choice the row sheet's Snooze item makes.
- */
+/** Open the Snooze sheet for a chat (spec/15 § Snooze sheet) — the row sheet's and the chat-detail kebab's "Snooze chat". */
 export function showChatSnoozeSheet(row: ChatRowT): void {
-  useSheetStore.getState().show(row, 'presets');
+  showSnoozeSheet({ kind: 'chat', chatId: row.chatId });
+}
+
+/**
+ * Optimistic rename with an honest revert. Seeded from the STORED name, never
+ * the displayed label, so a derived folder name is not promoted into a real one.
+ * Empty clears the name back to the derived label.
+ */
+export function renameChatRow(chatId: string, raw: string): void {
+  const previous = useChatStore.getState().chats[chatId]?.name ?? null;
+  const next = raw.trim() === '' ? null : raw.trim();
+  if (next === previous) return;
+  useChatStore.getState().setName(chatId, next);
+  void api.renameChat(chatId, next).catch((e: Error) => {
+    useChatStore.getState().setName(chatId, previous);
+    useUiStore.getState().pushError(`rename failed: ${e.message}`);
+  });
+}
+
+function RenamePage({ row, onDone }: { row: ChatRowT; onDone: () => void }): React.ReactElement {
+  const colors = useTheme();
+  const [value, setValue] = React.useState(row.name ?? '');
+  const commit = (): void => {
+    onDone();
+    renameChatRow(row.chatId, value);
+  };
+  return (
+    <View style={{ paddingHorizontal: space.lg }}>
+      <TextInput
+        testID="rename-input"
+        accessibilityLabel="Chat name"
+        value={value}
+        onChangeText={setValue}
+        onSubmitEditing={commit}
+        autoFocus
+        selectTextOnFocus
+        returnKeyType="done"
+        style={{ ...typography.body, color: colors.ink, paddingVertical: space.sm }}
+      />
+      <Item icon={<Pencil size={18} color={colors.ink2} />} label="Save name" onPress={commit} />
+    </View>
+  );
 }
 
 /** Archive/unarchive toggle — the one implementation the row sheet's Item and
@@ -86,13 +125,35 @@ export function showChatSnoozeSheet(row: ChatRowT): void {
 export function toggleArchive(row: ChatRowT): void {
   const archived = row.status !== 'archived';
   useChatStore.getState().setArchived(row.chatId, archived);
-  void api.archiveChat(row.chatId, archived);
+  void api.archiveChat(row.chatId, archived).catch((e: Error) => {
+    useChatStore.getState().setArchived(row.chatId, !archived);
+    useUiStore.getState().pushError(`${archived ? 'archive' : 'unarchive'} failed: ${e.message}`);
+  });
 }
 
 /** Pin/unpin toggle — same reasoning as `toggleArchive`. */
 export function togglePin(row: ChatRowT): void {
-  useChatStore.getState().setPinned(row.chatId, !row.pinned);
-  void api.pinChat(row.chatId, !row.pinned);
+  const pinned = !row.pinned;
+  useChatStore.getState().setPinned(row.chatId, pinned);
+  void api.pinChat(row.chatId, pinned).catch((e: Error) => {
+    // Back to what it was, pin time included: a refused unpin must not turn
+    // into a fresh pin that jumps to the top of Pinned.
+    useChatStore.getState().setPinned(row.chatId, row.pinned, row.pinnedAt);
+    useUiStore.getState().pushError(`${pinned ? 'pin' : 'unpin'} failed: ${e.message}`);
+  });
+}
+
+/**
+ * Delete a chat. Optimistic like the rest, so a refusal has to put the chat
+ * back — the row AND its transcript — and say so, or it would vanish from the
+ * list while it still exists on the host.
+ */
+export function deleteChatRow(row: ChatRowT): void {
+  const held = useChatStore.getState().removeChat(row.chatId);
+  void api.deleteChat(row.chatId).catch((e: Error) => {
+    if (held) useChatStore.getState().restoreChat(held);
+    useUiStore.getState().pushError(`delete failed: ${e.message}`);
+  });
 }
 
 /**
@@ -207,18 +268,8 @@ export function ChatLongPressSheet(): React.ReactElement {
               {row.name ?? row.chatId}
             </Text>
           </View>
-          {page === 'presets' ? (
-            SNOOZE_PRESETS.map((preset) => (
-              <Item
-                key={preset.id}
-                icon={<AlarmClock size={18} color={colors.ink2} />}
-                label={preset.label}
-                onPress={() => {
-                  close();
-                  applySnooze(row.chatId, resolvePreset(preset));
-                }}
-              />
-            ))
+          {page === 'rename' ? (
+            <RenamePage row={row} onDone={close} />
           ) : (
             <>
               {isHidden(row) && (
@@ -229,6 +280,13 @@ export function ChatLongPressSheet(): React.ReactElement {
                     close();
                     showHiddenChat(row.chatId);
                   }}
+                />
+              )}
+              {!isReservedSpecialThread(row.chatId) && (
+                <Item
+                  icon={<Pencil size={18} color={colors.ink2} />}
+                  label="Rename chat"
+                  onPress={() => setPage('rename')}
                 />
               )}
               <Item
@@ -255,7 +313,10 @@ export function ChatLongPressSheet(): React.ReactElement {
                   <Item
                     icon={<AlarmClock size={18} color={colors.ink2} />}
                     label="Snooze chat"
-                    onPress={() => setPage('presets')}
+                    onPress={() => {
+                      close();
+                      showChatSnoozeSheet(row);
+                    }}
                   />
                 ))}
               {!isReservedSpecialThread(row.chatId) &&
@@ -298,8 +359,7 @@ export function ChatLongPressSheet(): React.ReactElement {
                 destructive
                 onPress={() => {
                   close();
-                  void api.deleteChat(row.chatId);
-                  useChatStore.getState().removeChat(row.chatId);
+                  deleteChatRow(row);
                 }}
               />
             </>

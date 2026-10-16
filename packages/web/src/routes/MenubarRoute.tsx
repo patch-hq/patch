@@ -24,6 +24,7 @@ import { startVoiceNote } from '../lib/voiceController.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { getActiveWs } from '../api/ws.js';
 import { failed } from '../lib/errorCopy.js';
+import { isPlainEnter } from '../lib/submitChord.js';
 
 /** Electron preload bridge (window.patch), present only in the desktop shell. */
 interface MenubarBridge {
@@ -221,7 +222,7 @@ export function MenubarRoute(): JSX.Element {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (isPlainEnter(e) && !e.shiftKey) {
                 e.preventDefault();
                 sendToManager();
               }

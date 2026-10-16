@@ -6,6 +6,7 @@ import {
   chatsInProject,
   groupChats,
   nextChatAfterArchive,
+  stepVisibleChat,
   sortAttentionQueue,
 } from '../lib/chatGroups.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
@@ -14,7 +15,7 @@ import type { ChatRow } from '../stores/types.js';
 function row(overrides: Partial<ChatRow> = {}): ChatRow {
   const merged = {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions',
     name: 'a chat',
     folder: '~/proj',
@@ -142,6 +143,21 @@ describe('nextChatAfterArchive', () => {
 // snooze — a hidden chat is drawn in the Hidden section and nowhere else, and
 // only while it is active.
 describe('groupChats — hidden', () => {
+  it('keeps an errored hidden job out of the main folder list', () => {
+    const chats = [
+      row({
+        chatId: 'failed-job',
+        status: 'errored',
+        activity: 'errored',
+        hidden: true,
+        jobId: 'j1',
+      }),
+    ];
+    const grouped = groupChats(chats);
+    expect(grouped.hidden.map((c) => c.chatId)).toEqual(['failed-job']);
+    expect(grouped.folders).toEqual([]);
+  });
+
   it('keeps a hidden chat out of pinned and the folders, and lists it under hidden', () => {
     const chats = [
       row({ chatId: 'plain', lastUpdated: 300 }),
@@ -360,8 +376,8 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
     // Exactly the post-reload state: /arch has NO row at all.
     const chats = [row({ chatId: 'live', folder: '~/live', lastUpdated: 20 })];
     const roster = [
-      { folder: '~/live', daemonId: 'd1', lastUpdated: 20 },
-      { folder: '~/arch', daemonId: 'd1', lastUpdated: 10 },
+      { folder: '~/live', hostId: 'd1', lastUpdated: 20 },
+      { folder: '~/arch', hostId: 'd1', lastUpdated: 10 },
     ];
     expect(groupChats(chats).recentFolders).toEqual([]);
     // ~/live is already drawn as an open Folders section, so only ~/arch is
@@ -374,9 +390,9 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
       row({ chatId: 'p', folder: '~/pinned', lastUpdated: 50, pinned: true, pinnedAt: 1 }),
     ];
     const roster = [
-      { folder: '~/old', daemonId: 'd1', lastUpdated: 1 },
-      { folder: '~/new', daemonId: 'd1', lastUpdated: 99 },
-      { folder: '~/mid', daemonId: 'd1', lastUpdated: 40 },
+      { folder: '~/old', hostId: 'd1', lastUpdated: 1 },
+      { folder: '~/new', hostId: 'd1', lastUpdated: 99 },
+      { folder: '~/mid', hostId: 'd1', lastUpdated: 40 },
     ];
     const { recentFolders } = groupChats(chats, roster);
     expect(recentFolders).toEqual(['~/new', '~/mid', '~/old']);
@@ -387,8 +403,8 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
     // bumping its lastUpdated past the roster's stale value.
     const chats = [row({ chatId: 'a', folder: '~/proj', status: 'archived', lastUpdated: 900 })];
     const roster = [
-      { folder: '~/proj', daemonId: 'd1', lastUpdated: 10 },
-      { folder: '~/other', daemonId: 'd1', lastUpdated: 500 },
+      { folder: '~/proj', hostId: 'd1', lastUpdated: 10 },
+      { folder: '~/other', hostId: 'd1', lastUpdated: 500 },
     ];
     const { recentFolders } = groupChats(chats, roster);
     expect(recentFolders).toEqual(['~/proj', '~/other']);
@@ -398,13 +414,13 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
     // Soft-delete is the one thing that DOES retire a folder. The roster row is
     // stale (it predates the delete), but the live `deleted` row must win.
     const chats = [row({ chatId: 'd', folder: '~/gone', status: 'deleted', lastUpdated: 5 })];
-    const roster = [{ folder: '~/gone', daemonId: 'd1', lastUpdated: 5 }];
+    const roster = [{ folder: '~/gone', hostId: 'd1', lastUpdated: 5 }];
     expect(groupChats(chats, roster).recentFolders).toEqual([]);
   });
 
   it('never offers a special thread\u2019s folder', () => {
     const chats: ChatRow[] = [];
-    const roster = [{ folder: '~/proj', daemonId: 'd1', lastUpdated: 5 }];
+    const roster = [{ folder: '~/proj', hostId: 'd1', lastUpdated: 5 }];
     expect(groupChats(chats, roster).recentFolders).toEqual(['~/proj']);
     // Manager/Speakers folders are filtered server-side, but the
     // store's own special rows must not sneak one in either.
@@ -530,6 +546,11 @@ describe('groupChats ordering choice', () => {
     expect(g.folders.map((f) => f.folder)).toEqual(['~/beta', '~/alpha']);
     expect(g.folders[1]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
   });
+  it('projects follow the chat sort when Same as chats is selected', () => {
+    const g = groupChats(rows, [], { chatSort: 'last-update', groupSort: 'same-as-chats' });
+    expect(g.folders.map((f) => f.folder)).toEqual(['~/beta', '~/alpha']);
+    expect(g.folders[1]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
+  });
   it('chat sort and project sort are independent; name is A-Z', () => {
     const g = groupChats(rows, [], { chatSort: 'name', groupSort: 'last-action' });
     expect(g.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
@@ -545,5 +566,24 @@ describe('groupChats ordering choice', () => {
       },
     );
     expect(r.folders.map((f) => f.folder)).toEqual(['~/beta', '~/zzz']);
+  });
+});
+
+describe('stepVisibleChat', () => {
+  const order = ['a', 'b', 'c'];
+  it('steps down and up the drawn order', () => {
+    expect(stepVisibleChat(order, 'a', 1)).toBe('b');
+    expect(stepVisibleChat(order, 'c', -1)).toBe('b');
+  });
+  it('wraps at the ends', () => {
+    expect(stepVisibleChat(order, 'c', 1)).toBe('a');
+    expect(stepVisibleChat(order, 'a', -1)).toBe('c');
+  });
+  it('starts from the top/bottom when the open chat is not drawn (e.g. hidden)', () => {
+    expect(stepVisibleChat(order, 'hidden', 1)).toBe('a');
+    expect(stepVisibleChat(order, null, -1)).toBe('c');
+  });
+  it('returns null when nothing is drawn', () => {
+    expect(stepVisibleChat([], 'a', 1)).toBeNull();
   });
 });

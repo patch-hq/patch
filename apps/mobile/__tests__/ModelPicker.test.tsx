@@ -12,6 +12,7 @@
 //   - a host that has not been resolved yet is not asked for a catalogue
 
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   renderRN,
@@ -42,13 +43,27 @@ async function renderPicker(
 ): Promise<ReturnType<typeof renderRN>> {
   let r!: ReturnType<typeof renderRN>;
   await actAsync(async () => {
-    r = renderRN(<ModelPicker daemonId={HOST} selected={null} onSelect={() => {}} {...props} />);
+    r = renderRN(<ModelPicker hostId={HOST} selected={null} onSelect={() => {}} {...props} />);
     await flush();
   });
   return r;
 }
 
 describe('ModelPicker — the pill', () => {
+  it('fills the pill solid when asked to highlight a chosen model', async () => {
+    modelsSpy.mockResolvedValue({ models: [{ id: 'claude-opus-5', label: 'Opus 5' }] });
+    const r = await renderPicker({ selected: 'claude-opus-5', highlighted: true });
+    const style = StyleSheet.flatten(findHost(r.root, byTestId('new-chat-model-pill')).props.style);
+    expect(style.backgroundColor).toBe('#46802f');
+  });
+
+  it('leaves the pill plain when not highlighted', async () => {
+    modelsSpy.mockResolvedValue({ models: [{ id: 'claude-opus-5', label: 'Opus 5' }] });
+    const r = await renderPicker({ selected: 'claude-opus-5' });
+    const style = StyleSheet.flatten(findHost(r.root, byTestId('new-chat-model-pill')).props.style);
+    expect(style.backgroundColor).not.toBe('#46802f');
+  });
+
   it('prefers the catalogue label for the model in force', async () => {
     modelsSpy.mockResolvedValue({ models: [{ id: 'claude-opus-5', label: 'Opus 5' }] });
     const r = await renderPicker({ selected: 'claude-opus-5' });
@@ -77,7 +92,7 @@ describe('ModelPicker — the catalogue', () => {
   });
 
   it('does not ask when no host has been resolved', async () => {
-    await renderPicker({ daemonId: null });
+    await renderPicker({ hostId: null });
     expect(modelsSpy).not.toHaveBeenCalled();
   });
 
@@ -85,7 +100,7 @@ describe('ModelPicker — the catalogue', () => {
     modelsSpy.mockResolvedValue({ models: [] });
     const r = await renderPicker();
     await actAsync(async () => {
-      update(r, <ModelPicker daemonId="d2" selected={null} onSelect={() => {}} />);
+      update(r, <ModelPicker hostId="d2" selected={null} onSelect={() => {}} />);
       await flush();
     });
     expect(modelsSpy).toHaveBeenCalledTimes(2);
@@ -159,5 +174,18 @@ describe('ModelPicker — choosing', () => {
     actSync(() => findHost(r.root, byLabel('Dismiss model list')).props.onPress());
     expect(onSelect).not.toHaveBeenCalled();
     expect(queryHost(r.root, byTestId('new-chat-model-option-claude-opus-5'))).toBeNull();
+  });
+});
+
+describe('ModelPicker — recent models only', () => {
+  it('lists only the first five of the catalogue', async () => {
+    const models = Array.from({ length: 8 }, (_, i) => ({ id: `m${i}`, label: `Model ${i}` }));
+    modelsSpy.mockResolvedValue({ models });
+    const r = await renderPicker({ selected: 'm0' });
+    actSync(() => findHost(r.root, byTestId('new-chat-model-pill')).props.onPress());
+    for (let i = 0; i < 5; i++) {
+      expect(queryHost(r.root, byTestId(`new-chat-model-option-m${i}`))).toBeTruthy();
+    }
+    expect(queryHost(r.root, byTestId('new-chat-model-option-m5'))).toBeFalsy();
   });
 });

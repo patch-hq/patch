@@ -17,22 +17,22 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
 import { LogRecord, type WireEvent } from '@patch/wire';
-import { Daemon } from '../../daemon/src/chatRunner.js';
-import { createMetaStore } from '../../daemon/src/meta.js';
-import { createMockSdkBackend } from '../../daemon/src/sdkBackend.js';
-import { createHistoryReader, encodeFolder } from '../../daemon/src/history.js';
+import { Daemon } from '../../host/src/chatRunner.js';
+import { createMetaStore } from '../../host/src/meta.js';
+import { createMockSdkBackend } from '../../host/src/sdkBackend.js';
+import { createHistoryReader, encodeFolder } from '../../host/src/history.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import type { DaemonLink } from '../src/daemon-link.js';
+import type { HostLink } from '../src/host-link.js';
 // The REAL TUI transport — the exact code ChatView mounts behind.
 import { PatchWsClient } from '../../cli/src/transport/ws.js';
 
 const silent = pino({ level: 'silent' });
 
-class WiredDaemonLink implements DaemonLink {
+class WiredHostLink implements HostLink {
   // Presence names the machine it describes; a stand-in link is still a
   // host, so it answers with one.
-  daemonId(): string | null {
+  hostId(): string | null {
     return 'd1';
   }
   private readonly handlers = new Set<(e: WireEvent) => void>();
@@ -81,15 +81,15 @@ class WiredDaemonLink implements DaemonLink {
   onStatus(): () => void {
     return () => undefined;
   }
-  // The multi-machine surface of DaemonLink (spec/03 § Host events): the hub
+  // The multi-machine surface of HostLink (spec/03 § Host events): the hub
   // greets and routes per machine, so a stand-in link answers per machine too.
-  onlineDaemonIds(): string[] {
+  onlineHostIds(): string[] {
     return ['d1'];
   }
-  isOnline(daemonId: string): boolean {
-    return daemonId === 'd1';
+  isOnline(hostId: string): boolean {
+    return hostId === 'd1';
   }
-  sendTo(_daemonId: string, surfaceId: string, event: WireEvent): void {
+  sendTo(_hostId: string, surfaceId: string, event: WireEvent): void {
     this.send(surfaceId, event);
   }
   onHostStatus(): () => void {
@@ -98,7 +98,7 @@ class WiredDaemonLink implements DaemonLink {
   lastConnectedAt(): number | null {
     return Date.now();
   }
-  injectDaemonEvent(event: WireEvent): void {
+  injectHostEvent(event: WireEvent): void {
     this.emit(event);
   }
   forget(): boolean {
@@ -136,7 +136,7 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
     registry.bootstrapAccount({ keypair: user });
     // The machine this fixture spawns on has to be registered — a host-addressed
     // ingress refuses an unknown id (spec/04 § Spawn).
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
       surfaceId: 'srf-a',
       surfaceKind: 'terminal',
@@ -162,10 +162,10 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
       label: 'attacher',
     });
 
-    const link = new WiredDaemonLink();
+    const link = new WiredHostLink();
     const sdk = createMockSdkBackend();
     const daemon = new Daemon({
-      daemonId: 'd1',
+      hostId: 'd1',
       metaStore: createMetaStore(patchHome),
       sdkBackend: sdk,
       oauthAccessToken: 'fake',
@@ -175,7 +175,7 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
     });
     link.daemon = daemon;
 
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
     const url = `ws://127.0.0.1:${addr.port}/ws`;
@@ -183,13 +183,13 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
     // Driver surface (WireTestClient is fine here — it's just producing output).
     const driver = new WireTestClient({ url, auth: jwtDriver, clientType: 'surface-cli' });
     await driver.connect();
-    await driver.waitFor('daemon.online');
+    await driver.waitFor('host.online');
 
     const spawnRes = await built.app.inject({
       method: 'POST',
       url: '/api/chats',
       headers: { authorization: `Bearer ${jwtDriver}` },
-      payload: { daemonId: 'd1', folder },
+      payload: { hostId: 'd1', folder },
     });
     expect(spawnRes.statusCode).toBe(202);
     const chatId = (spawnRes.json() as { chatId: string }).chatId;
@@ -253,7 +253,7 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
     const user = generateUserKeypair(() => new Uint8Array(32).fill(71));
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
       surfaceId: 'srf-h',
       surfaceKind: 'terminal',
@@ -266,10 +266,10 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
       surfaceKind: 'terminal',
       label: 'h',
     });
-    const link = new WiredDaemonLink();
-    const startDaemon = (): Daemon => {
+    const link = new WiredHostLink();
+    const startHost = (): Daemon => {
       const d = new Daemon({
-        daemonId: 'd1',
+        hostId: 'd1',
         metaStore: createMetaStore(patchHome),
         sdkBackend: createMockSdkBackend({ claudeProjectsRoot: claudeRoot }),
         oauthAccessToken: 'fake',
@@ -280,8 +280,8 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
       link.daemon = d;
       return d;
     };
-    let daemon = startDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    let daemon = startHost();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
     const client = new WireTestClient({
@@ -290,12 +290,12 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
       clientType: 'surface-cli',
     });
     await client.connect();
-    await client.waitFor('daemon.online');
+    await client.waitFor('host.online');
     const spawnRes = await built.app.inject({
       method: 'POST',
       url: '/api/chats',
       headers: { authorization: `Bearer ${jwt}` },
-      payload: { daemonId: 'd1', folder },
+      payload: { hostId: 'd1', folder },
     });
     const chatId = (spawnRes.json() as { chatId: string }).chatId;
     await client.waitFor('chat.spawned', (e) => e.chatId === chatId);
@@ -353,7 +353,7 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
 
     // Restart the host under the same server.
     daemon.shutdown();
-    daemon = startDaemon();
+    daemon = startHost();
     daemon.hydrate();
     // A surface redelivering the first turn's input is recognised across the restart.
     client.sendInput({ chatId, message: '[[tool]] first turn', localId: 'H1' });

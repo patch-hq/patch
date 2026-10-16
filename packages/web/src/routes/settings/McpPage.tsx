@@ -1,7 +1,7 @@
 // Settings → MCP: the MCP servers one host wires into every chat it runs,
 // beside Patch's own tools server, which is always on.
 //
-// The host holds the list (`harnessMcpServers` in `daemon.host`) and every
+// The host holds the list (`harnessMcpServers` in `host.host`) and every
 // edit sends the WHOLE list back (`host.settings`), checked against the wire's
 // own `McpServerList` first so a bad name or a duplicate is refused here, in
 // the wire's words, rather than by the host after the fact. Nothing is
@@ -17,18 +17,51 @@ import { hostLabel } from './hostScope.js';
 import { sendHostSettings } from './hostWrite.js';
 import { Group, Note, Row, SettingsPage, useHostGate } from './ui.js';
 
-/** `npx -y @playwright/mcp --headless` → command + args. Quotes group words. */
+/**
+ * `npx -y @playwright/mcp --headless` → command + args. Quotes group words and
+ * may sit inside one (`--root="/my dir"`); inside double quotes `\"` and `\\`
+ * are escapes, inside single quotes nothing is.
+ */
 export function splitCommandLine(line: string): string[] {
   const out: string[] = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(line)) !== null) out.push(m[1] ?? m[2] ?? m[3] ?? '');
+  let word = '';
+  let started = false;
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i] as string;
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      else word += c;
+    } else if (quote === '"') {
+      const next = line[i + 1];
+      if (c === '\\' && (next === '"' || next === '\\')) {
+        word += next;
+        i++;
+      } else if (c === '"') quote = null;
+      else word += c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      started = true;
+    } else if (/\s/.test(c)) {
+      if (started) out.push(word);
+      word = '';
+      started = false;
+    } else {
+      word += c;
+      started = true;
+    }
+  }
+  if (started) out.push(word);
   return out;
 }
 
-/** The reverse, quoting any word with a space in it. */
+/** The reverse, quoting any word that is empty or holds a space or a quote. */
 export function joinCommandLine(words: string[]): string {
-  return words.map((w) => (/\s/.test(w) || w === '' ? `"${w}"` : w)).join(' ');
+  return words
+    .map((w) =>
+      /[\s"']/.test(w) || w === '' ? `"${w.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : w,
+    )
+    .join(' ');
 }
 
 /** `KEY=VALUE` lines → env. A line with no `=` is an error, named. */

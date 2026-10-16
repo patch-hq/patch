@@ -34,9 +34,15 @@ let _expoPushToken: { data: string } = { data: 'ExponentPushToken[test-token]' }
 export function __setExpoPushToken(t: { data: string }): void {
   _expoPushToken = t;
 }
+let _expoPushError: Error | null = null;
+/** Make the next token mints reject (offline, project misconfigured); null to stop. */
+export function __setExpoPushTokenError(e: Error | null): void {
+  _expoPushError = e;
+}
 export async function getExpoPushTokenAsync(_opts?: {
   projectId?: string;
 }): Promise<{ data: string }> {
+  if (_expoPushError) throw _expoPushError;
   return _expoPushToken;
 }
 
@@ -111,6 +117,9 @@ export function addNotificationResponseReceivedListener(cb: (r: unknown) => void
 }
 export function __emitNotificationResponse(r: unknown): void {
   for (const cb of _responseListeners) cb(r);
+}
+export function __responseListenerCount(): number {
+  return _responseListeners.size;
 }
 export function __clearResponseListeners(): void {
   _responseListeners.clear();

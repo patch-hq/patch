@@ -25,6 +25,7 @@ import {
 } from '../auth.js';
 import { RestClient } from '../transport/rest.js';
 import { generateUserKeypair, verifySurfaceCredential } from '@patch/auth';
+import { encodePairingUri } from '@patch/wire';
 
 interface NonceResponse {
   type: 'pairing.nonce';
@@ -95,8 +96,7 @@ export function registerAuthCommands(program: Command): void {
         // URI every other generator emits (spec/05-surfaces.md § Canonical QR
         // payload). The QR carries only the nonce; the scanning surface binds
         // its own device key at /pair/complete, so no key travels in the QR.
-        const host = config.serverUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-        const payload = `patch-pair://${host}?nonce=${encodeURIComponent(res.nonce)}`;
+        const payload = encodePairingUri({ nonce: res.nonce, server: config.serverUrl });
         if (opts.json) {
           emitJson({
             status: 'awaiting-pair',

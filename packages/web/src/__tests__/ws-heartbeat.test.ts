@@ -214,7 +214,7 @@ describe('PatchWs chat.replay cursor (I1-d1/d2)', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c-cold',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/x',
@@ -243,7 +243,7 @@ describe('PatchWs chat.replay cursor (I1-d1/d2)', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c-warm',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/x',

@@ -194,7 +194,7 @@ test.describe('edit pencil on a user turn at phone width', () => {
     const turnBox = (await turn.boundingBox())!;
     const bubble = (await turn.getByTestId('msg-content').boundingBox())!;
     // Reserving the pencil's gutter must not eat into the bubble: a long turn
-    // still runs to the 82% cap and still ends flush with the turn's right edge.
+    // still runs to the full column and still ends flush with the turn's right edge.
     expect(bubble.width).toBeGreaterThan(turnBox.width * 0.75);
     expect(bubble.x + bubble.width).toBeCloseTo(turnBox.x + turnBox.width, 0);
 

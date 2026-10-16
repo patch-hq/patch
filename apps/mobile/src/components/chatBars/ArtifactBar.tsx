@@ -4,22 +4,36 @@
 // card, but finding an earlier one again means scrolling back to find it.
 // This bar is the standing index: one chip per artifact, newest first,
 // tapping a chip opens exactly what tapping its card would. Nothing to show
-// when the chat has published nothing.
+// when the chat has published nothing. It is a slim strip, and it steps aside
+// while the keyboard is up: that is when vertical space is scarcest and the
+// transcript is what is being read.
 
-import React, { type ReactElement } from 'react';
-import { Pressable, ScrollView, Text } from 'react-native';
+import React, { useEffect, useState, type ReactElement } from 'react';
+import { Keyboard, Pressable, ScrollView, Text } from 'react-native';
+import { useRouter, type Href } from 'expo-router';
 import { LayoutTemplate } from 'lucide-react-native';
 import { apiUrl } from '../../config';
 import { useChatStore } from '../../stores/chatStore';
 import { deriveArtifacts } from '../../lib/artifacts';
+import { openArtifactTarget } from '../../lib/pads';
 import { openArtifactViewer } from '../ArtifactViewer';
 import { radii, space, textMin, useTheme } from '../../lib/theme';
 
 export function ArtifactBar({ chatId }: { chatId: string }): ReactElement | null {
   const colors = useTheme();
+  const router = useRouter();
   const timeline = useChatStore((s) => s.timelines[chatId]);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const artifacts = deriveArtifacts(timeline ?? []);
-  if (artifacts.length === 0) return null;
+  if (artifacts.length === 0 || keyboardOpen) return null;
 
   return (
     <ScrollView
@@ -27,11 +41,14 @@ export function ArtifactBar({ chatId }: { chatId: string }): ReactElement | null
       accessibilityRole="toolbar"
       horizontal
       showsHorizontalScrollIndicator={false}
+      // A horizontal ScrollView is flexGrow: 1 by default: in the chat column it
+      // took the whole height and stretched the chip into a tall capsule.
+      style={{ flexGrow: 0 }}
       contentContainerStyle={{
         flexDirection: 'row',
+        alignItems: 'flex-start',
         gap: space.xs,
         paddingHorizontal: space.sm,
-        paddingTop: space.xs,
       }}
     >
       {artifacts.map((artifact) => (
@@ -40,7 +57,14 @@ export function ArtifactBar({ chatId }: { chatId: string }): ReactElement | null
           testID="artifact-bar-chip"
           accessibilityRole="button"
           accessibilityLabel={artifact.title}
-          onPress={() => openArtifactViewer(apiUrl(artifact.url), artifact.title)}
+          onPress={() =>
+            openArtifactTarget(
+              artifact.url,
+              artifact.title,
+              { pushRoute: (r) => router.push(r as Href), viewer: openArtifactViewer },
+              apiUrl,
+            )
+          }
           style={{
             flexDirection: 'row',
             alignItems: 'center',
@@ -50,7 +74,7 @@ export function ArtifactBar({ chatId }: { chatId: string }): ReactElement | null
             borderWidth: 1,
             borderRadius: radii.pill,
             paddingHorizontal: space.sm,
-            paddingVertical: 6,
+            paddingVertical: 2,
           }}
         >
           <LayoutTemplate size={14} color={colors.ink2} />

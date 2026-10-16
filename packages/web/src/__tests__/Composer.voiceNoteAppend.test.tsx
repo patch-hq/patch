@@ -86,7 +86,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
     // is what puts the composer in note mode rather than dictation mode.
     const onStartVoiceNote = vi.fn();
     render(
-      <Composer chatId="c1" daemonId="d1" onSend={vi.fn()} onStartVoiceNote={onStartVoiceNote} />,
+      <Composer chatId="c1" hostId="d1" onSend={vi.fn()} onStartVoiceNote={onStartVoiceNote} />,
     );
     fireEvent.change(input(), { target: { value: 'remind me to' } });
     fireEvent.mouseDown(screen.getByTestId('voice-note-btn'));
@@ -98,7 +98,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
   it('an empty composer starts a note with no prefix', () => {
     const onStartVoiceNote = vi.fn();
     render(
-      <Composer chatId="c1" daemonId="d1" onSend={vi.fn()} onStartVoiceNote={onStartVoiceNote} />,
+      <Composer chatId="c1" hostId="d1" onSend={vi.fn()} onStartVoiceNote={onStartVoiceNote} />,
     );
     fireEvent.mouseDown(screen.getByTestId('voice-note-btn'));
     expect(onStartVoiceNote).toHaveBeenCalledWith('c1', 'ptt', '');
@@ -135,7 +135,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
 
   it('a FAILED upload puts the typed text back into the composer', async () => {
     voiceNote.mockRejectedValue(new Error('groq 500'));
-    render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
     expect(input().value).toBe('');
 
     await startVoiceNote('c1', 'toggle', 'remind me to buy milk');
@@ -156,7 +156,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
   });
 
   it('CANCELLING a note (esc) puts the typed text back into the composer', async () => {
-    render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
     await startVoiceNote('c1', 'toggle', 'half a thought');
     act(() => {
       cancelVoiceNote();
@@ -171,7 +171,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
     __setRecorderFactoryForTests(
       () => new Promise<VoiceRecording>(() => {}), // never resolves
     );
-    render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
     void startVoiceNote('c1', 'ptt', 'quick note');
     await act(async () => {
       await sendVoiceNote();
@@ -183,7 +183,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
 
   it('text typed WHILE the note ran survives too, with the owed words leading', async () => {
     voiceNote.mockRejectedValue(new Error('offline'));
-    render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
     await startVoiceNote('c1', 'toggle', 'remind me to');
     // The user carries on typing into the composer while the note is running.
     fireEvent.change(input(), { target: { value: 'and also' } });
@@ -197,7 +197,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
   it('the owed text goes to the note’s OWN chat, never into another one', async () => {
     voiceNote.mockRejectedValue(new Error('groq 500'));
     // The composer on screen belongs to a different chat than the note.
-    render(<Composer chatId="other-chat" daemonId="d1" onSend={vi.fn()} />);
+    render(<Composer chatId="other-chat" hostId="d1" onSend={vi.fn()} />);
     await startVoiceNote('c1', 'toggle', 'private thought');
     await act(async () => {
       await sendVoiceNote();
@@ -213,7 +213,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
   });
 
   it('a note that DELIVERS owes nothing back', async () => {
-    render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+    render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
     await startVoiceNote('c1', 'toggle', 'remind me to');
     await act(async () => {
       await sendVoiceNote();
@@ -242,12 +242,12 @@ describe('voice note — the typed message is appended to, never erased', () => 
     }
 
     it('an idle composer still names the field', () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
       expect(input().getAttribute('placeholder')).toBe('Type a message');
     });
 
     it('drops the placeholder while a voice NOTE is recording', async () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
       await startVoiceNote('c1', 'toggle', '');
       // Nothing is typed, so without this the placeholder paints in the same box
       // as the note's live text — two strings on top of each other.
@@ -265,7 +265,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
       render(
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={vi.fn()}
           previewFactory={preview.factory}
           recorderFactory={async () => dictationRec as unknown as VoiceRecording}
@@ -285,7 +285,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
     });
 
     it('the placeholder comes back once voice is over', async () => {
-      render(<Composer chatId="c1" daemonId="d1" onSend={vi.fn()} />);
+      render(<Composer chatId="c1" hostId="d1" onSend={vi.fn()} />);
       await startVoiceNote('c1', 'toggle', '');
       await waitFor(() => expect(input().getAttribute('placeholder')).toBeNull());
       act(() => {

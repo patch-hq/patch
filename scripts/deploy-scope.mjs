@@ -41,14 +41,17 @@ export const ALL_SURFACES = [
 export const SURFACE_PATHS = [
   ['packages/web/', ['web']],
   ['packages/server/', ['server']],
-  ['packages/daemon/', ['daemon', 'daemon-mac', 'apply']],
+  ['packages/host/', ['daemon', 'daemon-mac', 'apply']],
   // The host installer lays the patch CLI down, so it ships with the host.
   ['packages/cli/', ['daemon', 'daemon-mac', 'apply']],
   ['packages/desktop/', ['desktop']],
   ['apps/mobile/', ['ota', 'apk', 'smoke']],
   // Shared libs: everything that resolves them at build or run time.
-  ['packages/wire/', ['web', 'server', 'daemon', 'daemon-mac', 'apply', 'ota', 'apk', 'smoke']],
-  ['packages/auth/', ['server', 'daemon', 'daemon-mac', 'apply']],
+  [
+    'packages/wire/',
+    ['web', 'server', 'daemon', 'daemon-mac', 'apply', 'desktop', 'ota', 'apk', 'smoke'],
+  ],
+  ['packages/auth/', ['server', 'daemon', 'daemon-mac', 'apply', 'desktop']],
   // Docs and specs ship nothing on their own.
   ['spec/', []],
   ['docs/', []],

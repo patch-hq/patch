@@ -100,6 +100,12 @@ describe('toolCallSummary', () => {
     );
     expect(toolCallSummary('Bash', { description: 'first line\nsecond line' })).toBe('First line');
   });
+
+  it('clips on code points, never splitting a surrogate pair', () => {
+    expect(toolCallSummary('Bash', { command: `${'x'.repeat(38)}😀yy` })).toBe(
+      `Running "${'x'.repeat(38)}😀…"`,
+    );
+  });
 });
 
 // The bug this rule exists for (Todoist "can't see filename", 28 Aug 2026): the
@@ -226,5 +232,16 @@ describe('toolRunNarrative', () => {
         { tool: 'SomethingNew' },
       ]),
     ).toBe('Called playwright 2 times, called view_file, called SomethingNew');
+  });
+});
+
+describe('toolCallSummary — description that does not start on its first line', () => {
+  it('summarises the first non-empty line when the description opens with a newline', () => {
+    expect(toolCallSummary('Bash', { description: '\nRun the tests' })).toBe('Run the tests');
+  });
+
+  it('cuts a long description on a code point, never through half of an emoji', () => {
+    const out = toolCallSummary('Bash', { description: `${'A'.repeat(58)}😀${'b'.repeat(10)}` });
+    expect(out).toBe(`${'A'.repeat(58)}😀…`);
   });
 });

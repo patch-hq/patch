@@ -14,7 +14,7 @@ export function sendToNewChat(chatId: string, text: string): string {
   const id = drafts.create(chat.folder);
   drafts.update(id, {
     text: withQuotedSelection('', text),
-    ...(chat.daemonId ? { daemonId: chat.daemonId } : {}),
+    ...(chat.hostId ? { hostId: chat.hostId } : {}),
   });
   return `/chats/new?draft=${encodeURIComponent(id)}`;
 }

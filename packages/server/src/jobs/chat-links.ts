@@ -20,7 +20,8 @@
 // Capped at a bounded number of entries — an unbounded map would grow
 // forever on a busy webhook job.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { parsePersisted } from '../persisted-json.js';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 
@@ -61,7 +62,7 @@ export class JobChatLinks {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      parsed = parsePersisted(raw);
     } catch (err) {
       this.logger?.warn(
         { err: (err as Error).message },
@@ -78,7 +79,9 @@ export class JobChatLinks {
   private persist(): void {
     const dir = join(this.path, '..');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.path, JSON.stringify(Object.fromEntries(this.links)), 'utf8');
+    const tmp = `${this.path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.links)), 'utf8');
+    renameSync(tmp, this.path);
   }
 
   /** Record that `chatId` was created by `jobId`'s `spawn`/`ensure` action. */

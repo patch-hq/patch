@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attemptDue, clearPending, markAttempt, readPending } from './mac-pending.mjs';
+import { isMain } from './lib/is-main.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE = process.env.PATCH_DEPLOY_STATE ?? join(homedir(), '.patch-deploy');
@@ -84,7 +85,7 @@ async function main() {
   console.log(`mac-catch-up: started deploy --only=${only} for ${rec.sha}; log ${logFile}`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`mac-catch-up: ${err.message}`);
     process.exit(1);

@@ -11,7 +11,7 @@ export function toChatListRow(c: ChatListEntry): ChatListRow {
   return {
     chatId: c.chatId,
     name: c.name,
-    daemonId: c.daemonId,
+    hostId: c.hostId,
     folder: c.folder,
     activity: c.activity,
     permissionMode: c.permissionMode,
@@ -25,6 +25,8 @@ export function toChatListRow(c: ChatListEntry): ChatListRow {
     lastUserActivity: c.lastUserActivity ?? c.lastUpdated,
     pendingWake: c.pendingWake,
     snoozedUntil: c.snoozedUntil,
+    ...(c.snoozeRecords !== undefined ? { snoozeRecords: c.snoozeRecords } : {}),
+    ...(c.runningSince !== undefined ? { runningSince: c.runningSince } : {}),
     hidden: c.hidden,
     model: c.model,
     jobId: c.jobId,

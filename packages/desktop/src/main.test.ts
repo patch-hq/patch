@@ -748,7 +748,11 @@ test('a downloaded update is staged, and the user decides when it lands', () => 
     src.indexOf("autoUpdater.on('update-downloaded'"),
     src.indexOf("autoUpdater.on('error'"),
   );
-  assert.doesNotMatch(body, /^\s*installUpdate\(\);/m, 'a download must not install itself');
+  assert.doesNotMatch(
+    body,
+    /^\s*(if \(updaterState\) )?installUpdate\(/m,
+    'a download must not install itself',
+  );
   assert.match(body, /applyUpdaterEvent\(\{ type: 'downloaded'/, 'but it must be recorded');
   assert.doesNotMatch(src, /installWhenDownloaded/, 'the old one-shot flag stays gone');
 });
@@ -780,10 +784,14 @@ test('every install path goes through quitAndInstallNow, not a bare quitAndInsta
     /autoUpdater\.quitAndInstall\(/,
     'call quitAndInstallNow({ app, autoUpdater }) — a bare quitAndInstall is swallowed by the close guard',
   );
-  assert.match(src, /quitAndInstallNow/);
+  assert.match(
+    src,
+    /createInstaller\(/,
+    'createInstaller wraps quitAndInstallNow and is single-flight',
+  );
 
   // One wrapper, so a future call site can't miss the flag or the error report.
-  const helper = src.slice(src.indexOf('function installUpdate('));
+  const helper = src.slice(src.indexOf('const installUpdate = createInstaller('));
   assert.match(helper.slice(0, 600), /app: app as unknown as \{ isQuitting: boolean \}/);
   assert.match(helper.slice(0, 600), /autoUpdater,/);
   assert.match(
@@ -813,12 +821,12 @@ test('a finished download does NOT install itself', () => {
   const body = handler.slice(0, handler.indexOf('\n  });'));
   assert.doesNotMatch(
     body,
-    /^\s*installUpdate\(\);/m,
+    /^\s*(if \(updaterState\) )?installUpdate\(/m,
     'a download must stage the update and stop there',
   );
   assert.match(
     src,
-    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*installUpdate\(\);/,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*if \(updaterState\) installUpdate\(updaterState\);/,
     'the only install path is the one the user presses',
   );
 });

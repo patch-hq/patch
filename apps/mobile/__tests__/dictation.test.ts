@@ -218,12 +218,59 @@ describe('startDictation — live preview (best-effort, never affects the final 
     voiceTokenMock.mockRejectedValueOnce(new Error('network down'));
     const { startDictation } = await import('../src/lib/dictation');
     const onError = vi.fn();
-    const handle = startDictation('c1', vi.fn(), onError);
+    const onPreviewError = vi.fn();
+    const handle = startDictation('c1', vi.fn(), onError, onPreviewError);
     await flush();
     expect(onError).not.toHaveBeenCalled();
+    expect(onPreviewError).toHaveBeenCalledWith('network down');
     speak(400);
     const result = await handle.finish(true);
     expect(result).toEqual({ kind: 'text', text: 'hello world' });
+  });
+
+  it('a preview socket that errors or closes mid-recording is reported once, and the recording survives', async () => {
+    const { startDictation } = await import('../src/lib/dictation');
+    const onError = vi.fn();
+    const onPreviewError = vi.fn();
+    const handle = startDictation('c1', vi.fn(), onError, onPreviewError);
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    sock.emitError();
+    sock.emitClose(1006, 'gone');
+    expect(onPreviewError).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    speak(400);
+    expect(await handle.finish(true)).toEqual({ kind: 'text', text: 'hello world' });
+  });
+
+  it('a host audio.error other than a missing key is reported as a preview failure', async () => {
+    const { startDictation } = await import('../src/lib/dictation');
+    const onPreviewError = vi.fn();
+    const handle = startDictation('c1', vi.fn(), vi.fn(), onPreviewError);
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    sock.emitMessage(
+      encodeAudio({
+        type: 'audio.error',
+        sessionId: 'sess-1',
+        code: 'host_unreachable',
+        message: 'stt down',
+      }),
+    );
+    expect(onPreviewError).toHaveBeenCalledWith('stt down');
+    await handle.finish(false);
+  });
+
+  it('finishing the dictation does not report its own socket close as a failure', async () => {
+    const { startDictation } = await import('../src/lib/dictation');
+    const onPreviewError = vi.fn();
+    const handle = startDictation('c1', vi.fn(), vi.fn(), onPreviewError);
+    await flush();
+    FakeWebSocket.last().emitOpen();
+    await handle.finish(false);
+    expect(onPreviewError).not.toHaveBeenCalled();
   });
 
   it('a genuine local mic read failure DOES call onError (NO FALLBACK — surfaced, not swallowed)', async () => {

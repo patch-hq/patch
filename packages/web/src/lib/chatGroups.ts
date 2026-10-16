@@ -12,7 +12,12 @@ export interface Grouped {
   manager: ChatRow | null;
   speakers: ChatRow | null;
   pinned: ChatRow[];
-  folders: Array<{ folder: string; rows: ChatRow[] }>;
+  /**
+   * Each project's active rows, plus the chats of the project that are snoozed
+   * (spec/04 § Snooze), which the sidebar folds into one line after the rows. A
+   * project with only snoozed chats keeps its place with `rows` empty.
+   */
+  folders: Array<{ folder: string; rows: ChatRow[]; snoozed: ChatRow[] }>;
   archived: ChatRow[];
   /** Soft-deleted chats (spec/04 § Lifecycle → E5). */
   deleted: ChatRow[];
@@ -91,9 +96,12 @@ export function chatsInProject(all: ChatRow[], folder: string): ChatRow[] {
  */
 export type ChatSort = 'last-action' | 'last-update' | 'name';
 
+/** Projects normally follow the chat sort; choosing a concrete value decouples them. */
+export type GroupSort = ChatSort | 'same-as-chats';
+
 export const CHAT_SORTS: ReadonlyArray<{ value: ChatSort; label: string }> = [
-  { value: 'last-action', label: 'Last action' },
-  { value: 'last-update', label: 'Last update' },
+  { value: 'last-action', label: 'My recent activity' },
+  { value: 'last-update', label: 'Latest updates' },
   { value: 'name', label: 'Name' },
 ];
 
@@ -102,12 +110,12 @@ export const DEFAULT_CHAT_SORT: ChatSort = 'last-action';
 /** Independent choices: how chats order within a project, and how projects order. */
 export interface ChatOrdering {
   chatSort: ChatSort;
-  groupSort: ChatSort;
+  groupSort: GroupSort;
 }
 
 export const DEFAULT_CHAT_ORDERING: ChatOrdering = {
   chatSort: DEFAULT_CHAT_SORT,
-  groupSort: DEFAULT_CHAT_SORT,
+  groupSort: 'same-as-chats',
 };
 
 function chatLabel(c: ChatRow): string {
@@ -172,6 +180,7 @@ export function groupChats(
   // lapses simply stops matching — no event needed to bring the chat back.
   const now = Date.now();
   const byFolder = new Map<string, ChatRow[]>();
+  const snoozedByFolder = new Map<string, ChatRow[]>();
   // Folder → most-recent lastUpdated across its non-deleted chats, for the
   // Recent folders list. Special threads never contribute (E2).
   //
@@ -232,6 +241,11 @@ export function groupChats(
     }
     if (isSnoozed(c, now)) {
       snoozed.push(c);
+      if (c.folder) {
+        const inFolder = snoozedByFolder.get(c.folder) ?? [];
+        inFolder.push(c);
+        snoozedByFolder.set(c.folder, inFolder);
+      }
       continue;
     }
     if (c.pinned) {
@@ -253,12 +267,22 @@ export function groupChats(
   // creation, never an agent reply, a status change, a job tick or a
   // finished turn. Unread/needs-you is shown by the badge (deriveBadge),
   // not by position, so there is no separate floating rank here any more.
-  const folders = Array.from(byFolder.entries())
-    .map(([folder, rows]) => {
+  // A project with snoozed chats keeps its place, so they count toward its order.
+  const folderCmp = cmpFolders(
+    ordering.groupSort === 'same-as-chats' ? ordering.chatSort : ordering.groupSort,
+  );
+  const folders = Array.from(new Set([...byFolder.keys(), ...snoozedByFolder.keys()]))
+    .map((folder) => {
+      const rows = byFolder.get(folder) ?? [];
       rows.sort(cmpChats(ordering.chatSort));
-      return { folder, rows };
+      return { folder, rows, snoozed: snoozedByFolder.get(folder) ?? [] };
     })
-    .sort(cmpFolders(ordering.groupSort));
+    .sort((a, b) =>
+      folderCmp(
+        { folder: a.folder, rows: [...a.rows, ...a.snoozed] },
+        { folder: b.folder, rows: [...b.rows, ...b.snoozed] },
+      ),
+    );
   archived.sort((a, b) => b.lastUpdated - a.lastUpdated || cmpId(a, b));
   deleted.sort((a, b) => b.lastUpdated - a.lastUpdated || cmpId(a, b));
   // Soonest to wake, first.
@@ -285,7 +309,7 @@ export function groupChats(
   for (const folder of deletedFolders) {
     if (!liveFolders.has(folder)) folderRecency.delete(folder);
   }
-  const shownFolders = new Set<string>(byFolder.keys());
+  const shownFolders = new Set<string>([...byFolder.keys(), ...snoozedByFolder.keys()]);
   for (const p of pinned) if (p.folder) shownFolders.add(p.folder);
   const recentFolders = Array.from(folderRecency.entries())
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -466,4 +490,22 @@ export function nextChatAfterArchive(
     .reverse()
     .find((id) => !leaving.has(id));
   return above ?? null;
+}
+
+/**
+ * ⌘↑ / ⌘↓ — the chat `delta` rows from `currentChatId` in the order the sidebar
+ * draws them (`order` is the selection store's drawn order: hidden, snoozed,
+ * archived, collapsed and filtered-out rows are not in it). Wraps at the ends.
+ * With no open chat in the list, ⌘↓ goes to the first row and ⌘↑ to the last.
+ * `null` when nothing is drawn.
+ */
+export function stepVisibleChat(
+  order: readonly string[],
+  currentChatId: string | null,
+  delta: number,
+): string | null {
+  if (order.length === 0) return null;
+  const idx = currentChatId ? order.indexOf(currentChatId) : -1;
+  if (idx < 0) return (delta > 0 ? order[0] : order[order.length - 1]) ?? null;
+  return order[(idx + delta + order.length) % order.length] ?? null;
 }

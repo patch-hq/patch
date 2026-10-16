@@ -13,7 +13,9 @@ import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { setActiveWs } from '../api/ws.js';
 import { api } from '../api/rest.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
-import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { DEFAULT_SHARED_SETTINGS, type WireEvent } from '@patch/wire';
+import { fireEvent } from '@testing-library/react';
+import { setModelCatalog, resetModelCatalog } from '../lib/models.js';
 
 vi.mock('../api/rest.js', () => ({
   api: {
@@ -21,6 +23,7 @@ vi.mock('../api/rest.js', () => ({
     getFileContent: vi.fn(async () => ({ path: '', content: '', size: 0 })),
     getFileContentAtHead: vi.fn(async () => ({ path: '', content: '', size: 0 })),
     skills: vi.fn(async () => ({ skills: [] })),
+    models: vi.fn(async () => ({ models: [], fetchedAt: '' })),
     setGoal: vi.fn(async () => undefined),
     setReminder: vi.fn(async () => undefined),
     setPreferences: vi.fn(async (patch: Record<string, unknown>) => ({
@@ -39,7 +42,7 @@ function seed(
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'test chat',
       folder: '/tmp/foo',
@@ -118,6 +121,35 @@ describe('ChatRoute — the limit bubble', () => {
     expect(stream.contains(screen.getByTestId('rate-limit-bar'))).toBe(true);
   });
 
+  it('offers a Change model button that moves the chat to the chosen model', () => {
+    const sent: WireEvent[] = [];
+    setActiveWs({ send: (e: WireEvent) => void sent.push(e) } as never);
+    resetModelCatalog();
+    setModelCatalog({
+      status: 'ready',
+      models: [
+        { id: 'claude-opus-5', label: 'Opus 5' },
+        { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+      ],
+    });
+    seed(RESUME_AT, 'rate_limit');
+    useChatStore.setState((st) => ({
+      chats: { ...st.chats, c1: { ...st.chats.c1!, model: 'claude-opus-5' } },
+    }));
+    renderChat();
+    const bar = screen.getByTestId('rate-limit-bar');
+    const btn = screen.getByTestId('rate-limit-change-model');
+    expect(bar.contains(btn)).toBe(true);
+    expect(btn.textContent).toMatch(/change model/i);
+    fireEvent.click(btn);
+    fireEvent.click(screen.getByText('Sonnet 5'));
+    expect(sent).toContainEqual({
+      type: 'chat.model_request',
+      chatId: 'c1',
+      model: 'claude-sonnet-5',
+    });
+  });
+
   it('disappears when rateLimitResumingAt is cleared via chat.state', () => {
     seed(RESUME_AT, 'rate_limit');
     renderChat();
@@ -128,7 +160,7 @@ describe('ChatRoute — the limit bubble', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.state',
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         activity: 'running',
         folder: '/tmp/foo',
         lastUpdated: 1,
@@ -165,7 +197,7 @@ describe('ChatRoute — the limit bubble', () => {
       expect(screen.getByTestId('rate-limit-account')).toHaveTextContent('work');
     });
 
-    it('states the routing strategy and how many accounts are out', () => {
+    it('says plainly whether another account is available', () => {
       seed(RESUME_AT, 'rate_limit', {
         scope: 'week',
         resetsAt: RESUME_AT,
@@ -180,8 +212,21 @@ describe('ChatRoute — the limit bubble', () => {
       renderChat();
       const line = screen.getByTestId('rate-limit-routing');
       expect(line).toHaveTextContent(
-        /^Round robin — all 3 accounts out, next resets .+ \(personal\)$/,
+        /^All 3 accounts are out\. The first is back .+ \(personal\)\.$/,
       );
+    });
+
+    it('reassures when another account still has room', () => {
+      seed(RESUME_AT, 'rate_limit', {
+        scope: 'session',
+        resetsAt: RESUME_AT,
+        routing: { strategy: 'priority', accounts: 2, exhausted: 1 },
+      });
+      renderChat();
+      expect(screen.getByTestId('rate-limit-routing')).toHaveTextContent(
+        'Another account is still available.',
+      );
+      expect(screen.getByTestId('rate-limit-bar')).not.toHaveTextContent(/1 of 2/);
     });
 
     it('says nothing about routing when the host reported none', () => {
@@ -211,8 +256,7 @@ describe('ChatRoute — the limit bubble', () => {
       // and a control that pretends to is worse than none. The explanation
       // that used to be a paragraph lives on it.
       expect(link.getAttribute('href')).toMatch(/claude\.ai/);
-      expect(link.getAttribute('title')).toMatch(/not enabled/i);
-      expect(link.getAttribute('title')).toMatch(/nothing has been overspent/i);
+      expect(link.getAttribute('title')).toMatch(/Extra usage: disabled\./i);
       // Not "this organisation": a personal subscription has no organisation
       // that did anything, and the sentence read as an accusation.
       expect(link.getAttribute('title')).not.toMatch(/organisation/i);

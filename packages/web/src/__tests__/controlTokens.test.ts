@@ -30,4 +30,22 @@ describe('stripControlTokens (G2-d1)', () => {
   it('tidies punctuation adjacency after a removal', () => {
     expect(stripControlTokens('do it [[edit]], now')).toBe('do it, now');
   });
+
+  it('leaves text that has [[ but no control token exactly as written', () => {
+    const code = 'if [[ -f x ]]; then\n    echo  hi\nfi';
+    expect(stripControlTokens(code)).toBe(code);
+  });
+
+  it('leaves [[…]] inside code alone — a TOML array table is content', () => {
+    const fenced = 'Add this:\n\n```toml\n[[bin]]\nname = "x"\n```';
+    expect(stripControlTokens(fenced)).toBe(fenced);
+    expect(stripControlTokens('use `[[redirects]]` here')).toBe('use `[[redirects]]` here');
+  });
+
+  it('keeps the indentation of the rest of the message when a marker is removed', () => {
+    expect(stripControlTokens('[[edit]] fix this:\n\n    if x:\n        return  1')).toBe(
+      'fix this:\n\n    if x:\n        return  1',
+    );
+    expect(stripControlTokens('[[tool]]\n  indented')).toBe('  indented');
+  });
 });

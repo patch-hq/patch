@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { hostConfirms } from './host-answer.js';
 
 const SECRET = 'fake-app-client-secret';
@@ -44,8 +44,8 @@ describe('shared todoist webhook ingress', () => {
 
   async function setup() {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     return { built, link };
   }
 
@@ -99,7 +99,7 @@ describe('shared todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'todoist-unconfigured',
         trigger: { type: 'todoist' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const { raw } = signed(ADDED);
       // Signed with nothing at all — and even a "correct" signature can't help,
@@ -133,7 +133,7 @@ describe('shared todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'todoist-badsig',
         trigger: { type: 'todoist' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const { raw } = signed(ADDED, 'not-the-app-secret');
       const wrong = createHmac('sha256', 'not-the-app-secret').update(raw).digest('base64');
@@ -287,6 +287,44 @@ describe('shared todoist webhook ingress', () => {
     }
   });
 
+  it('one job whose dispatch THROWS gets a dispatch-error run and does not stop the others firing', async () => {
+    const { built, link } = await setup();
+    try {
+      const broken = built.jobs.create({
+        name: 'template-throws',
+        trigger: { type: 'todoist' },
+        // An unclosed mustache section throws when the prompt is rendered.
+        action: { type: 'message', chatId: 'c_broken', prompt: 'hi {{#event_name}}' },
+      });
+      const ok = built.jobs.create({
+        name: 'still-fires',
+        trigger: { type: 'todoist' },
+        action: { type: 'message', chatId: 'c_ok', prompt: 'go' },
+      });
+
+      const { raw, sig } = signed(ADDED);
+      const res = await post(built, raw, sig);
+      expect(res.statusCode).toBe(200);
+
+      const byJob = new Map(
+        (res.json() as { results: FanoutResult[] }).results.map((r) => [r.jobId, r]),
+      );
+      expect(byJob.get(broken.id)?.status).toBe('dispatch-error');
+      expect(byJob.get(ok.id)?.status).toBe('sent');
+      expect(runLines(broken.id).at(-1)).toMatchObject({
+        status: 'dispatch-error',
+        trigger: 'todoist',
+        error: expect.stringMatching(/Unclosed section/),
+      });
+
+      const inputs = link.sent.filter((s) => s.event.type === 'chat.input');
+      expect(inputs).toHaveLength(1);
+      expect(inputs[0]?.event.type === 'chat.input' && inputs[0].event.chatId).toBe('c_ok');
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('skips disabled todoist jobs entirely — no dispatch, no log line', async () => {
     const { built, link } = await setup();
     try {
@@ -352,7 +390,7 @@ describe('shared todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'no-filter',
         trigger: { type: 'todoist' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/work', skill: 'todoist-handler' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/work', skill: 'todoist-handler' },
       });
       const { raw, sig } = signed(ADDED);
       const res = await post(built, raw, sig);

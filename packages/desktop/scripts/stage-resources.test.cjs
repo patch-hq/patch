@@ -7,9 +7,9 @@ const { stage, wanted } = require('./stage-resources.cjs');
 
 function repo(files) {
   const root = mkdtempSync(path.join(tmpdir(), 'patch-stage-'));
-  const daemon = path.join(root, 'repo', 'dist', 'daemon');
-  mkdirSync(daemon, { recursive: true });
-  for (const f of files) writeFileSync(path.join(daemon, f), f);
+  const host = path.join(root, 'repo', 'dist', 'host');
+  mkdirSync(host, { recursive: true });
+  for (const f of files) writeFileSync(path.join(host, f), f);
   return { repoRoot: path.join(root, 'repo'), desktopDir: path.join(root, 'desktop') };
 }
 const fakeRelease = (out) => {
@@ -21,31 +21,31 @@ const fakeRelease = (out) => {
 
 test('carries the manifest, the installer and only this Mac’s host build', () => {
   const r = repo([
-    'daemon-latest.json',
+    'host-latest.json',
     'install.sh',
-    'patch-daemon-1-darwin-arm64.tar.gz',
-    'patch-daemon-1-darwin-arm64.tar.gz.sig',
-    'patch-daemon-1-linux-x64.tar.gz',
-    'patch-daemon-1-linux-arm64.tar.gz',
+    'patch-host-1-darwin-arm64.tar.gz',
+    'patch-host-1-darwin-arm64.tar.gz.sig',
+    'patch-host-1-linux-x64.tar.gz',
+    'patch-host-1-linux-arm64.tar.gz',
   ]);
   const staged = stage({ ...r, buildServer: fakeRelease });
-  assert.deepEqual(readdirSync(path.join(staged, 'daemon')).sort(), [
-    'daemon-latest.json',
+  assert.deepEqual(readdirSync(path.join(staged, 'host')).sort(), [
+    'host-latest.json',
     'install.sh',
-    'patch-daemon-1-darwin-arm64.tar.gz',
-    'patch-daemon-1-darwin-arm64.tar.gz.sig',
+    'patch-host-1-darwin-arm64.tar.gz',
+    'patch-host-1-darwin-arm64.tar.gz.sig',
   ]);
   assert.deepEqual(readdirSync(path.join(staged, 'server')).sort(), ['patch-server', 'server']);
-  assert.deepEqual(readdirSync(staged).sort(), ['daemon', 'server']);
+  assert.deepEqual(readdirSync(staged).sort(), ['host', 'server']);
 });
 
 test('refuses to package an app with no host build, naming what to run', () => {
   const r = repo([]);
-  assert.throws(() => stage({ ...r, buildServer: fakeRelease }), /pnpm build:daemon/);
+  assert.throws(() => stage({ ...r, buildServer: fakeRelease }), /pnpm build:host/);
 });
 
 test('refuses a host directory that has nothing for this Mac', () => {
-  const r = repo(['daemon-latest.json', 'patch-daemon-1-linux-x64.tar.gz']);
+  const r = repo(['host-latest.json', 'patch-host-1-linux-x64.tar.gz']);
   assert.throws(() => stage({ ...r, buildServer: fakeRelease }), /no darwin-arm64/);
 });
 

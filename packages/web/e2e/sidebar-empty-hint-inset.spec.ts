@@ -26,7 +26,7 @@ test.describe('sidebar empty-state inset', () => {
           hits: [],
           total: 0,
           nextOffset: null,
-          hosts: [{ daemonId: 'mac1', hostName: 'Mac', state: 'offline' }],
+          hosts: [{ hostId: 'mac1', hostName: 'Mac', state: 'offline' }],
         }),
       }),
     );

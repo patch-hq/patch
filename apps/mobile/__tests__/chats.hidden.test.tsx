@@ -83,7 +83,7 @@ function indexOfText(r: ReturnType<typeof renderRN>, text: string): number {
 const SERVER_HIDDEN = {
   chatId: 'h9',
   name: 'Background run',
-  daemonId: 'd1',
+  hostId: 'd1',
   folder: '/jobs',
   activity: 'running',
   permissionMode: 'default',

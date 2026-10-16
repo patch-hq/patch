@@ -10,16 +10,16 @@
 //
 // The real path exercised is:
 //   surface WS client (WireTestClient)
-//     → server /ws hub (InboundDaemonLink)
+//     → server /ws hub (InboundHostLink)
 //       → server ↔ host serverLink WS (REAL createServerLink)
 //         → REAL Host (chatRunner)
 //           → mock SDK backend (scripted reply, real JSONL for replay)
 //         ← back out to the surface WS
 //
 // This is NOT the in-memory `link.emit` shortcut some existing tests use — the
-// server's InboundDaemonLink accepts a genuine authenticated host socket and
+// server's InboundHostLink accepts a genuine authenticated host socket and
 // the host dials in with a real Ed25519 daemonKey, exactly like production
-// (packages/daemon/src/index.ts). The host-side frame routing below mirrors
+// (packages/host/src/index.ts). The host-side frame routing below mirrors
 // index.ts's onFrame / onAuthed / emit closures faithfully.
 
 import { mkdtempSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
@@ -35,12 +35,12 @@ import {
   FolderNotFoundError,
   ChatNotFoundError,
   AttachmentChatNotFoundError,
-} from '../../../daemon/src/chatRunner.js';
-import { createMetaStore } from '../../../daemon/src/meta.js';
-import { createMockSdkBackend, type MockSdkBackend } from '../../../daemon/src/sdkBackend.js';
-import { createHistoryReader } from '../../../daemon/src/history.js';
-import { createServerLink, type ServerLink } from '../../../daemon/src/serverLink.js';
-import { ensureSpecialThreads } from '../../../daemon/src/specialThreads.js';
+} from '../../../host/src/chatRunner.js';
+import { createMetaStore } from '../../../host/src/meta.js';
+import { createMockSdkBackend, type MockSdkBackend } from '../../../host/src/sdkBackend.js';
+import { createHistoryReader } from '../../../host/src/history.js';
+import { createServerLink, type ServerLink } from '../../../host/src/serverLink.js';
+import { ensureSpecialThreads } from '../../../host/src/specialThreads.js';
 // J1: the REAL host files handler (server↔host file-content round-trip was
 // previously untested end-to-end — see files.e2e.test.ts). `handleFileOpRequest`
 // is its destructive sibling (create / rename / delete — file-ops.e2e.test.ts).
@@ -51,7 +51,7 @@ import {
   handleDocActionRequest,
   handleDocConvertRequest,
   handleDocExportRequest,
-} from '../../../daemon/src/index.js';
+} from '../../../host/src/index.js';
 import { buildAll, type BuiltApp } from '../../src/app.js';
 import { Registry } from '../../src/registry.js';
 
@@ -96,7 +96,7 @@ export interface HarnessOptions {
    * Host serverLink reconnect backoff. Short by default so reconnect
    * scenarios resolve fast + deterministically (no arbitrary sleeps).
    */
-  daemonBackoffMs?: readonly number[];
+  hostBackoffMs?: readonly number[];
   /** Bootstrap the special threads (thread_manager etc.) on the host. */
   specialThreads?: boolean;
 }
@@ -109,7 +109,7 @@ export interface E2EHarness {
    * host-addressed request a test makes must name THIS id — the server refuses
    * one it has not registered (spec/04 § Spawn).
    */
-  daemonId: string;
+  hostId: string;
   /** http://127.0.0.1:<port> */
   httpBase: string;
   port: number;
@@ -136,11 +136,11 @@ export interface E2EHarness {
    * spec/12 "host → server disconnect" path. The host stays alive and its
    * reconnect loop fires. Returns true if a live socket was dropped.
    */
-  dropDaemonLink(): boolean;
+  dropHostLink(): boolean;
   /** Wait until the server sees the host link online. */
-  waitDaemonOnline(timeoutMs?: number): Promise<void>;
+  waitHostOnline(timeoutMs?: number): Promise<void>;
   /** Wait until the server sees the host link offline. */
-  waitDaemonOffline(timeoutMs?: number): Promise<void>;
+  waitHostOffline(timeoutMs?: number): Promise<void>;
   /**
    * Simulate an in-transit LOSS of the next inbound `chat.input` carrying this
    * `localId` — the frame reaches the host's serverLink but is swallowed
@@ -176,15 +176,15 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
   // ---- Registry: account + host key + a default surface ----
   const registry = Registry.load(dataDir);
   registry.bootstrapAccount({ keypair: user });
-  const daemonId = 'daemon-e2e-1';
+  const hostId = 'daemon-e2e-1';
   registry.setDaemonKey({
-    daemonId,
+    hostId,
     publicKey: user.publicKey,
     issuedAt: Math.floor(Date.now() / 1000),
   });
 
-  // ---- Server (REAL InboundDaemonLink — no daemonLink injected) ----
-  const built = await buildAll({ registry, logger: false });
+  // ---- Server (REAL InboundHostLink — no hostLink injected) ----
+  const built = await buildAll({ registry, logger: false, hostOfflineGraceMs: 0 });
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
   const port = addr.port;
@@ -228,7 +228,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
   };
 
   const daemon = new Daemon({
-    daemonId,
+    hostId,
     metaStore,
     sdkBackend: sdk,
     sdkBackendKind: 'mock',
@@ -256,7 +256,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
 
   const daemonKey = await mintDaemonKey({
     userPrivateKey: user.privateKey,
-    daemonId,
+    hostId,
     label: 'e2e',
   });
 
@@ -265,13 +265,13 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
     daemonKey,
     clientVersion: '1',
     logger: silent,
-    backoffSchedule: opts.daemonBackoffMs ?? [25, 50, 100, 200],
+    backoffSchedule: opts.hostBackoffMs ?? [25, 50, 100, 200],
     onAuthed: (send) => {
       // Mirror index.ts onAuthed: seed the server's ChatRegistry with every
       // currently-known chat so its `chat.state` gate admits them after a
       // (re)connect (Group 8 fix, DX-M1).
       for (const state of daemon.list()) {
-        send({ type: 'chat.spawned', daemonId, chatId: state.chatId, folder: state.folder });
+        send({ type: 'chat.spawned', hostId, chatId: state.chatId, folder: state.folder });
         send({
           type: 'chat.state',
           permissionMode: 'bypassPermissions',
@@ -288,7 +288,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
       }
       // …and closes the burst with folders.list, which is what tells the
       // server this host's chat list is complete (unknown-chat.ts).
-      send({ type: 'folders.list', daemonId, roots: [], recent: [] });
+      send({ type: 'folders.list', hostId, roots: [], recent: [] });
     },
     onFrame: (event, send) => {
       // Flap / server-restart loss simulation: swallow the frame before the
@@ -308,7 +308,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
 
   const harness: E2EHarness = {
     wsUrl,
-    daemonId,
+    hostId,
     httpBase,
     port,
     built,
@@ -346,14 +346,14 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
       await client.waitFor('auth.ok', undefined, 5000);
       return client;
     },
-    dropDaemonLink(): boolean {
+    dropHostLink(): boolean {
       return link.dropLink();
     },
-    async waitDaemonOnline(timeoutMs = 5000): Promise<void> {
-      await until(() => built.daemonLink.status() === 'online', timeoutMs, 'host online');
+    async waitHostOnline(timeoutMs = 5000): Promise<void> {
+      await until(() => built.hostLink.status() === 'online', timeoutMs, 'host online');
     },
-    async waitDaemonOffline(timeoutMs = 5000): Promise<void> {
-      await until(() => built.daemonLink.status() === 'offline', timeoutMs, 'host offline');
+    async waitHostOffline(timeoutMs = 5000): Promise<void> {
+      await until(() => built.hostLink.status() === 'offline', timeoutMs, 'host offline');
     },
     dropNextInput(localId: string): void {
       dropNextInputLocalIds.add(localId);
@@ -369,12 +369,12 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
     },
   };
 
-  await harness.waitDaemonOnline();
+  await harness.waitHostOnline();
   return harness;
 }
 
 /**
- * Faithful subset of packages/daemon/src/index.ts's onFrame routing: translate
+ * Faithful subset of packages/host/src/index.ts's onFrame routing: translate
  * inbound server WS frames into Host action calls, and service the two RPCs
  * the chat modes exercise (attachment store, voice-note transcribe).
  */

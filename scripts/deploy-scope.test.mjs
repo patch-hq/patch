@@ -27,7 +27,7 @@ test('a server-only diff ships the server and nothing else', () => {
 });
 
 test('a host diff also ships the apply step — the restart IS the delivery', () => {
-  const { surfaces } = scope(['packages/daemon/src/index.ts']);
+  const { surfaces } = scope(['packages/host/src/index.ts']);
   assert.deepEqual(surfaces, ['daemon', 'daemon-mac', 'apply']);
 });
 
@@ -43,7 +43,12 @@ test('a wire change reaches everything that resolves it', () => {
   for (const s of ['web', 'server', 'daemon', 'daemon-mac', 'apply', 'ota', 'apk', 'smoke']) {
     assert.ok(surfaces.includes(s), `wire must ship ${s}`);
   }
-  assert.ok(!surfaces.includes('desktop'), 'the desktop shell loads a URL; it embeds no wire code');
+  // The desktop shell bundles wire (the pairing parser) into its first-run code.
+  assert.ok(surfaces.includes('desktop'), 'wire must ship the desktop shell');
+});
+
+test('an auth change reaches the desktop shell, which bundles the keypair code', () => {
+  assert.ok(scope(['packages/auth/src/jwt.ts']).surfaces.includes('desktop'));
 });
 
 test('the patch CLI ships with the host that installs it', () => {
@@ -85,7 +90,7 @@ test('surfaces come back in deploy order, not match order', () => {
   // web before server before host matters: the SPA is a live bind mount, so
   // publishing it after the server restart serves a new UI against the old one.
   const { surfaces } = scope([
-    'packages/daemon/src/index.ts',
+    'packages/host/src/index.ts',
     'packages/web/src/main.tsx',
     'packages/server/src/app.ts',
   ]);

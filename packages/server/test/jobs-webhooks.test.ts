@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { verifySignature } from '../src/jobs/webhooks.js';
 import type { WebhookScheme } from '../src/jobs/types.js';
 
@@ -247,11 +247,11 @@ describe('webhook ingress', () => {
 
   async function setup() {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: link,
+      hostLink: link,
     });
     return { built, link };
   }
@@ -262,7 +262,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'gh',
         trigger: { type: 'webhook', scheme: 'github', secret: 'sekret' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -316,7 +316,7 @@ describe('webhook ingress', () => {
         name: 'gh',
         trigger: { type: 'webhook', scheme: 'github', secret: 'sekret' },
         filter: 'payload.action = "closed"',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'PR {{payload.action}}' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'PR {{payload.action}}' },
       });
       const body = JSON.stringify({ action: 'opened', pull_request: { merged: false } });
       const sig = `sha256=${createHmac('sha256', 'sekret').update(body).digest('hex')}`;
@@ -342,7 +342,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'gh',
         trigger: { type: 'webhook', scheme: 'github', secret: 'sekret' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -369,7 +369,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'cu',
         trigger: { type: 'webhook', scheme: 'hmac-sha256', secret: 'topsecret' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const body = '{"a":1}';
       // Spec/08: bare hex digest, NO `sha256=` prefix.
@@ -411,7 +411,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'st',
         trigger: { type: 'webhook', scheme: 'stripe', secret: 'whsec_x' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const body = '{"id":"evt_1"}';
       // Use a fresh timestamp so the default 5min tolerance is satisfied.
@@ -463,7 +463,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'open',
         trigger: { type: 'webhook', scheme: 'none' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -483,7 +483,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'no-json-parser',
         trigger: { type: 'webhook', scheme: 'none' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -504,7 +504,7 @@ describe('webhook ingress', () => {
         name: 'gh-filter-throws',
         trigger: { type: 'webhook', scheme: 'github', secret: 'sekret' },
         filter: '$assert(false, "boom")',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const body = '{}';
       const sig = `sha256=${createHmac('sha256', 'sekret').update(body).digest('hex')}`;
@@ -530,7 +530,7 @@ describe('webhook ingress', () => {
         name: 'gh-filter-rejects',
         trigger: { type: 'webhook', scheme: 'github', secret: 'sekret' },
         filter: 'payload.action = "never"',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const body = '{"action":"opened"}';
       const sig = `sha256=${createHmac('sha256', 'sekret').update(body).digest('hex')}`;
@@ -556,7 +556,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'offline-dispatch',
         trigger: { type: 'webhook', scheme: 'none' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -573,13 +573,42 @@ describe('webhook ingress', () => {
     }
   });
 
+  it('a dispatch that throws → 200 status:dispatch-error with a dispatch-error run, not a 500', async () => {
+    const { built, link } = await setup();
+    try {
+      const job = built.jobs.create({
+        name: 'template-throws',
+        trigger: { type: 'webhook', scheme: 'none' },
+        // An unclosed mustache section throws when the prompt is rendered.
+        action: { type: 'message', chatId: 'c_manager', prompt: 'hi {{#event_name}}' },
+      });
+      const res = await built.app.inject({
+        method: 'POST',
+        url: `/api/webhooks/${job.id}`,
+        headers: { 'content-type': 'application/json' },
+        payload: '{}',
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { status: string }).status).toBe('dispatch-error');
+      const runLog = readFileSync(join(dir, 'runs', `${job.id}.jsonl`), 'utf8').trim();
+      expect(JSON.parse(runLog.split('\n').at(-1)!)).toMatchObject({
+        status: 'dispatch-error',
+        trigger: 'webhook',
+        error: expect.stringMatching(/Unclosed section/),
+      });
+      expect(link.sent.find((s) => s.event.type === 'chat.input')).toBeUndefined();
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('disabled job → 503', async () => {
     const { built } = await setup();
     try {
       const job = built.jobs.create({
         name: 'd',
         trigger: { type: 'webhook', scheme: 'none' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       built.jobs.disable(job.id);
       const res = await built.app.inject({
@@ -628,7 +657,7 @@ describe('webhook ingress', () => {
         name: 'bf',
         trigger: { type: 'webhook', scheme: 'none' },
         filter: '$assert(false, "boom")',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -688,7 +717,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'not-webhook',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -708,7 +737,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'empty-body',
         trigger: { type: 'webhook', scheme: 'none' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -728,7 +757,7 @@ describe('webhook ingress', () => {
       const job = built.jobs.create({
         name: 'bad-json',
         trigger: { type: 'webhook', scheme: 'none' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -772,7 +801,7 @@ describe('webhook ingress', () => {
         const job = built.jobs.create({
           name: 'gh-audit',
           trigger: { type: 'webhook', scheme: 'github', secret: 'shh' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
         });
         const res = await built.app.inject({
           method: 'POST',

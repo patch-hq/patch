@@ -32,16 +32,34 @@ interface SettingsState {
   _reset(): void;
 }
 
+/** A read that has not answered by now is a failure, not a spinner forever. */
+export const SETTINGS_TIMEOUT_MS = 10_000;
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   data: null,
   error: null,
   async load() {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), SETTINGS_TIMEOUT_MS);
     try {
-      const data = await api.settings();
+      const data = await api.settings(ctrl.signal);
       if (!data.preferences) throw new Error('server returned no account preferences');
-      set({ data, error: null });
+      // A read can race a push; keep a newer shared state than it carries
+      // (the same rule as applyShared).
+      const current = get().data;
+      const stale = current?.shared && data.shared && current.shared.version > data.shared.version;
+      set({
+        data: stale ? { ...data, preferences: current.preferences, shared: current.shared } : data,
+        error: null,
+      });
     } catch (e) {
-      set({ error: (e as Error).message });
+      set({
+        error: ctrl.signal.aborted
+          ? `no answer from the server after ${SETTINGS_TIMEOUT_MS / 1000}s`
+          : (e as Error).message,
+      });
+    } finally {
+      clearTimeout(timer);
     }
   },
   async updatePreferences(patch) {

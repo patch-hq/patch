@@ -29,8 +29,8 @@ const SERVER_SURFACE = '_server';
 export interface LogSyncDeps {
   store: Pick<ChatLogStore, 'highWater' | 'has' | 'read'>;
   chats: Pick<ChatRegistry, 'get'>;
-  sendTo: (daemonId: string, surfaceId: string, event: WireEvent) => void;
-  isOnline: (daemonId: string) => boolean;
+  sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
+  isOnline: (hostId: string) => boolean;
   /** Put an event through the same path a host's own live event takes. */
   inject: (event: WireEvent) => void;
   logger: Pick<Logger, 'info' | 'warn'>;
@@ -64,11 +64,15 @@ export class LogSync {
       }
       return;
     }
-    if (event.type === 'daemon.offline') {
+    if (event.type === 'host.offline') {
       for (const [chatId, timer] of this.timers) {
-        if (this.deps.chats.get(chatId)?.daemonId !== event.daemonId) continue;
+        if (this.deps.chats.get(chatId)?.hostId !== event.hostId) continue;
         clearTimeout(timer);
         this.timers.delete(chatId);
+      }
+      // A request may have been lost with the link: ask again for the same reach.
+      for (const chatId of this.askedAt.keys()) {
+        if (this.deps.chats.get(chatId)?.hostId === event.hostId) this.askedAt.delete(chatId);
       }
     }
   }
@@ -91,7 +95,7 @@ export class LogSync {
   private check(chatId: string): void {
     const hostLast = this.reported.get(chatId);
     if (hostLast === undefined || !this.deps.store.has(chatId)) return;
-    const host = this.deps.chats.get(chatId)?.daemonId;
+    const host = this.deps.chats.get(chatId)?.hostId;
     if (host === undefined || !this.deps.isOnline(host)) return;
     const high = this.deps.store.highWater(chatId);
     if (hostLast > high) {

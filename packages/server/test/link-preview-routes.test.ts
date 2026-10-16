@@ -9,7 +9,21 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
+
+/** A fetch whose headers arrive at once but whose body never finishes, until the
+ * request's signal aborts it — as undici behaves for a stalled upstream. */
+function stalledBodyFetch(contentType: string) {
+  return vi.fn(async (_url: string, init?: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('<html><head><title>x'));
+        init?.signal?.addEventListener('abort', () => c.error(new Error('aborted')));
+      },
+    });
+    return new Response(body, { status: 200, headers: { 'content-type': contentType } });
+  });
+}
 
 describe('GET /api/link-preview', () => {
   let dir: string;
@@ -40,7 +54,7 @@ describe('GET /api/link-preview', () => {
     const built = await buildAll({
       dataDir: dir,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
     });
     return { app: built.app, jwt };
@@ -77,6 +91,66 @@ describe('GET /api/link-preview', () => {
         description: 'An example & description',
         image: 'https://example.com/thumb.png',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps an apostrophe inside a double-quoted content attribute', async () => {
+    const html = `<html><head><meta property="og:title" content="Tom's Blog"></head></html>`;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }),
+      ),
+    );
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/link-preview?url=' + encodeURIComponent('https://example.com/a'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.json().title).toBe("Tom's Blog");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('decodes an entity once: &amp;lt; reads as the text &lt;', async () => {
+    const html = `<html><head><meta property="og:title" content="a &amp;lt; b"></head></html>`;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }),
+      ),
+    );
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/link-preview?url=' + encodeURIComponent('https://example.com/a'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.json().title).toBe('a &lt; b');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects the IPv6 loopback [::1] without fetching it', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/link-preview?url=' + encodeURIComponent('http://[::1]:3000/'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('blocked_host');
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
@@ -171,6 +245,26 @@ describe('GET /api/link-preview', () => {
     }
   });
 
+  it('gives up on a page whose body stalls, rather than hanging the request', async () => {
+    vi.stubGlobal('fetch', stalledBodyFetch('text/html'));
+    const { app, jwt } = await boot();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const pending = app.inject({
+        method: 'GET',
+        url: '/api/link-preview?url=' + encodeURIComponent('https://example.com/slow'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const res = await pending;
+      expect(res.statusCode).toBe(502);
+      expect(res.json().error).toBe('fetch_failed');
+    } finally {
+      vi.useRealTimers();
+      await app.close();
+    }
+  });
+
   it('rejects a non-html response rather than parsing it as one', async () => {
     vi.stubGlobal(
       'fetch',
@@ -225,7 +319,7 @@ describe('GET /api/link-preview/image', () => {
     const built = await buildAll({
       dataDir: dir,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
     });
     return { app: built.app, jwt };
@@ -280,6 +374,58 @@ describe('GET /api/link-preview/image', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe('blocked_host');
       expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('gives up on an image whose body stalls, rather than hanging the request', async () => {
+    vi.stubGlobal('fetch', stalledBodyFetch('image/png'));
+    const { app, jwt } = await boot();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const pending = app.inject({
+        method: 'GET',
+        url: '/api/link-preview/image?url=' + encodeURIComponent('https://example.com/slow.png'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const res = await pending;
+      expect(res.statusCode).toBe(502);
+      expect(res.json().error).toBe('fetch_failed');
+    } finally {
+      vi.useRealTimers();
+      await app.close();
+    }
+  });
+
+  it('stops reading an image with no content-length once it passes the size cap', async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        // 32MB with no content-length: only a cap applied while reading stops early.
+        const body = new ReadableStream<Uint8Array>({
+          pull(c) {
+            if (sent >= 32 * 1024 * 1024) return c.close();
+            sent += chunk.byteLength;
+            c.enqueue(chunk);
+          },
+        });
+        return new Response(body, { status: 200, headers: { 'content-type': 'image/png' } });
+      }),
+    );
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/link-preview/image?url=' + encodeURIComponent('https://example.com/huge.png'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(413);
+      expect(res.json().error).toBe('image_too_large');
+      expect(sent).toBeLessThan(16 * 1024 * 1024);
     } finally {
       await app.close();
     }

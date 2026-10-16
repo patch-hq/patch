@@ -57,10 +57,10 @@ beforeEach(() => {
   useFolderStore.getState()._reset();
   // Every folder list and every browse is scoped to ONE machine (spec/04
   // § Folders / § Browsing), so the roster carries the single registered host
-  // these screens address. Without it `defaultDaemonId` is null and the screen
+  // these screens address. Without it `defaultHostId` is null and the screen
   // correctly refuses to guess — which is a different test.
   usePresenceStore.setState({
-    hosts: { [HOST]: { daemonId: HOST, online: true, lastSeenAt: 1, host: null, accounts: {} } },
+    hosts: { [HOST]: { hostId: HOST, online: true, lastSeenAt: 1, host: null, accounts: {} } },
   });
 });
 
@@ -91,7 +91,7 @@ describe('JobEditor — action type: spawn (default)', () => {
   it('shows the Folder pill, closed on the seeded first folder and its host', async () => {
     useFolderStore
       .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
+      .setHostFolders({ hostId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
     expect(hasText(r.root, 'Folder')).toBe(true);
@@ -102,7 +102,7 @@ describe('JobEditor — action type: spawn (default)', () => {
   it('the pill opens the folder picker sheet; picking a row updates the pill and closes it', async () => {
     useFolderStore
       .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
+      .setHostFolders({ hostId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
     await actAsync(async () => {
@@ -127,9 +127,7 @@ describe('JobEditor — action type: spawn (default)', () => {
 
 describe('JobEditor — action type: ensure', () => {
   it('shows the persistent-chat explainer text and still uses the Folder picker', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
     selectPill(r, 'job-action-type', 'persistent chat');
@@ -186,7 +184,7 @@ describe('JobEditor — action type: message', () => {
         chatId: 'c1',
         name: 'Digest',
         folder: '/home/tom/chatfolder',
-        daemonId: HOST,
+        hostId: HOST,
         activity: 'idle',
         status: 'active',
         pinned: false,
@@ -213,9 +211,7 @@ describe('JobEditor — action type: message', () => {
 
 describe('JobEditor — Skill picker', () => {
   it('offers "none" plus every fetched skill; picking one sets spawnSkill', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockResolvedValue({ skills: ['life-coach', 'plant'] });
     const r = renderRN(<JobEditor />);
     await flush();
@@ -228,9 +224,7 @@ describe('JobEditor — Skill picker', () => {
   });
 
   it('picking "none" clears the skill selection', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockResolvedValue({ skills: ['life-coach'] });
     const r = renderRN(<JobEditor />);
     await flush();
@@ -246,7 +240,7 @@ describe('JobEditor — Skill picker', () => {
         chatId: 'c1',
         name: 'Digest',
         folder: '/home/tom/a',
-        daemonId: HOST,
+        hostId: HOST,
         activity: 'idle',
         status: 'active',
         pinned: false,
@@ -270,9 +264,7 @@ describe('JobEditor — Skill picker', () => {
 // one click from the job that does it.
 describe('JobEditor — Skill Edit link', () => {
   it('is hidden until a skill is chosen', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockResolvedValue({
       skills: ['life-coach'],
       paths: { 'life-coach': '/home/tom/.claude/skills/life-coach/SKILL.md' },
@@ -284,9 +276,7 @@ describe('JobEditor — Skill Edit link', () => {
   });
 
   it('links to the host file editor for the chosen skill once selected', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockResolvedValue({
       skills: ['life-coach'],
       paths: { 'life-coach': '/home/tom/.claude/skills/life-coach/SKILL.md' },
@@ -303,9 +293,7 @@ describe('JobEditor — Skill Edit link', () => {
   });
 
   it('shows the reason instead of a link when the host reports no skill files (an older host)', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockResolvedValue({ skills: ['life-coach'] }); // no `paths`
     const r = renderRN(<JobEditor />);
     await flush();
@@ -320,7 +308,7 @@ describe('JobEditor — Skill Edit link', () => {
         chatId: 'c1',
         name: 'Digest',
         folder: '/home/tom/chatfolder',
-        daemonId: 'other-host',
+        hostId: 'other-host',
         activity: 'idle',
         status: 'active',
         pinned: false,
@@ -347,9 +335,7 @@ describe('JobEditor — Skill Edit link', () => {
 
 describe('JobEditor — Prompt field', () => {
   it('binds to spawnPrompt for spawn/ensure and updates on change', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
     findHost(r.root, byTestId('job-prompt')).props.onChangeText('summarize my day');
@@ -395,9 +381,7 @@ describe('JobEditor — Enabled switch + Name field', () => {
 // fire on, and that `Host default` — storing NO model — stays reachable.
 describe('JobEditor — Model picker', () => {
   it('fetches the chosen host’s catalogue and shows Host default active', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.models).mockResolvedValue({
       models: [{ id: 'claude-opus-5', label: 'Opus 5' }],
     });
@@ -410,9 +394,7 @@ describe('JobEditor — Model picker', () => {
   });
 
   it('picking a model activates it, and Host default takes it back', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.models).mockResolvedValue({
       models: [{ id: 'claude-opus-5', label: 'Opus 5' }],
     });
@@ -425,9 +407,7 @@ describe('JobEditor — Model picker', () => {
   });
 
   it('offers a Codex model only the permission modes Codex can run, resetting `auto`', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.models).mockResolvedValue({
       models: [{ id: 'openai/gpt-5', label: 'GPT-5' }],
     });
@@ -444,9 +424,7 @@ describe('JobEditor — Model picker', () => {
   });
 
   it('is offered for ensure but never for message', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
@@ -489,9 +467,7 @@ describe('JobEditor — Model picker', () => {
 // the surface Tom has on him. spec/08 § Action — `script`.
 describe('JobEditor — action type: script', () => {
   it('offers `run a command`, and choosing it shows Folder + Command, not Skill/Prompt', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
     selectPill(r, 'job-action-type', 'run a command');
@@ -525,9 +501,7 @@ describe('JobEditor — action type: script', () => {
   });
 
   it('saves the command, the folder and the timeout — and no skill or prompt', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const GATE = 'set -euo pipefail\necho "queue empty — holding"\nexit 0';
     const r = renderRN(<JobEditor />);
@@ -547,7 +521,7 @@ describe('JobEditor — action type: script', () => {
     expect(body.action['type']).toBe('script');
     expect(body.action['command']).toBe(GATE);
     expect(body.action['folder']).toBe('/home/tom/a');
-    expect(body.action['daemonId']).toBe(HOST);
+    expect(body.action['hostId']).toBe(HOST);
     expect(body.action['timeoutMs']).toBe(120000);
     expect(body.action['skill']).toBeUndefined();
     expect(body.action['prompt']).toBeUndefined();
@@ -566,7 +540,7 @@ describe('JobEditor — action type: script', () => {
       filter: null,
       action: {
         type: 'script',
-        daemonId: HOST,
+        hostId: HOST,
         folder: '/home/tom/a',
         command: GATE,
         timeoutMs: 120000,
@@ -593,9 +567,7 @@ describe('JobEditor — action type: script', () => {
 // things Tom wants to adjust while away from the desk.
 describe('JobEditor — the gate', () => {
   it('is off by default, and ticking it reveals the command and seeds from the action', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
     // Off by default: most jobs want no gate and the section must not nag.
@@ -619,9 +591,7 @@ describe('JobEditor — the gate', () => {
   });
 
   it('saves the gate alongside an ordinary spawn action', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const GATE = 'set -euo pipefail\ntest -s queue || { echo "empty — holding"; exit 1; }';
     const r = renderRN(<JobEditor />);
@@ -654,8 +624,8 @@ describe('JobEditor — the gate', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '*/15 * * * *', timezone: 'Europe/London' },
       filter: null,
-      gate: { daemonId: HOST, folder: '/home/tom/a', command: GATE, timeoutMs: 120000 },
-      action: { type: 'spawn', daemonId: HOST, folder: '/home/tom/a', skill: 'foreman' },
+      gate: { hostId: HOST, folder: '/home/tom/a', command: GATE, timeoutMs: 120000 },
+      action: { type: 'spawn', hostId: HOST, folder: '/home/tom/a', skill: 'foreman' },
       concurrency: 1,
       createdAt: 1,
       updatedAt: 1,
@@ -683,8 +653,8 @@ describe('JobEditor — the gate', () => {
       enabled: true,
       trigger: { type: 'cron', expression: '*/15 * * * *' },
       filter: null,
-      gate: { daemonId: HOST, folder: '/home/tom/a', command: 'exit 1' },
-      action: { type: 'spawn', daemonId: HOST, folder: '/home/tom/a', skill: 'foreman' },
+      gate: { hostId: HOST, folder: '/home/tom/a', command: 'exit 1' },
+      action: { type: 'spawn', hostId: HOST, folder: '/home/tom/a', skill: 'foreman' },
       createdAt: 1,
       updatedAt: 1,
     });
@@ -720,9 +690,7 @@ describe('JobEditor — the gate', () => {
 // though the form state round-tripped them (jobEditor.test.ts).
 describe('JobEditor — Group field', () => {
   it('is a dropdown of groups already in use, with New group… for free text, trimmed on create', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.listJobs).mockResolvedValue({
       jobs: [{ group: 'Finance' }, { group: 'Watchers' }],
     });
@@ -742,9 +710,7 @@ describe('JobEditor — Group field', () => {
   });
 
   it('picking an existing group needs no free-text field', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.listJobs).mockResolvedValue({ jobs: [{ group: 'Finance' }] });
     const r = renderRN(<JobEditor />);
     await flush();
@@ -756,9 +722,7 @@ describe('JobEditor — Group field', () => {
 
 describe('JobEditor — ensure action extras', () => {
   it('shows a Deduplication key field only for persistent chat, and posts it', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const r = renderRN(<JobEditor />);
     await flush();
@@ -776,9 +740,7 @@ describe('JobEditor — ensure action extras', () => {
 
 describe('JobEditor — Permission mode (spawn only)', () => {
   it('shows the mode picker only for spawn, defaults to Auto, and omits it unless changed', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const r = renderRN(<JobEditor />);
     await flush();
@@ -794,9 +756,7 @@ describe('JobEditor — Permission mode (spawn only)', () => {
   });
 
   it('picking a mode other than Auto is posted, and the control is hidden for persistent chat', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const r = renderRN(<JobEditor />);
     await flush();
@@ -813,11 +773,9 @@ describe('JobEditor — Permission mode (spawn only)', () => {
   });
 });
 
-describe('JobEditor — Include trigger event toggle', () => {
+describe('JobEditor — Send agent trigger payload toggle', () => {
   it('unticking it posts includePayload: false', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const r = renderRN(<JobEditor />);
     await flush();
@@ -834,9 +792,7 @@ describe('JobEditor — Include trigger event toggle', () => {
 
 describe('JobEditor — Hide chat / Notify toggles', () => {
   it('default to off / on, and post only what changed from the default', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const r = renderRN(<JobEditor />);
     await flush();
@@ -852,9 +808,7 @@ describe('JobEditor — Hide chat / Notify toggles', () => {
   });
 
   it('are drawn for persistent chat too, not just spawn', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
     selectPill(r, 'job-action-type', 'persistent chat');

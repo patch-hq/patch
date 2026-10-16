@@ -35,7 +35,7 @@ function seed(chatId: string, folder: string, timeline: unknown[]): void {
   useChatStore.getState().hydrate([
     {
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder,

@@ -1,0 +1,284 @@
+{
+ "screens": [
+  {
+   "id": "desktop-chat-md",
+   "name": "Desktop \u00b7 Chat: markdown",
+   "path": "desktop-chat-md.html"
+  },
+  {
+   "id": "desktop-chat-tools",
+   "name": "Desktop \u00b7 Chat: tool calls",
+   "path": "desktop-chat-tools.html"
+  },
+  {
+   "id": "desktop-chat-table",
+   "name": "Desktop \u00b7 Chat: table",
+   "path": "desktop-chat-table.html"
+  },
+  {
+   "id": "desktop-chat-tasks",
+   "name": "Desktop \u00b7 Chat: tasks",
+   "path": "desktop-chat-tasks.html"
+  },
+  {
+   "id": "desktop-new-chat",
+   "name": "Desktop \u00b7 New chat",
+   "path": "desktop-new-chat.html"
+  },
+  {
+   "id": "desktop-jobs",
+   "name": "Desktop \u00b7 Jobs",
+   "path": "desktop-jobs.html"
+  },
+  {
+   "id": "desktop-job-new",
+   "name": "Desktop \u00b7 New job",
+   "path": "desktop-job-new.html"
+  },
+  {
+   "id": "desktop-life-archived",
+   "name": "Desktop \u00b7 List: Archived",
+   "path": "desktop-life-archived.html"
+  },
+  {
+   "id": "desktop-life-snoozed",
+   "name": "Desktop \u00b7 List: Snoozed",
+   "path": "desktop-life-snoozed.html"
+  },
+  {
+   "id": "desktop-life-hidden",
+   "name": "Desktop \u00b7 List: Hidden",
+   "path": "desktop-life-hidden.html"
+  },
+  {
+   "id": "desktop-life-deleted",
+   "name": "Desktop \u00b7 List: Deleted",
+   "path": "desktop-life-deleted.html"
+  },
+  {
+   "id": "desktop-life-automations",
+   "name": "Desktop \u00b7 List: Automations",
+   "path": "desktop-life-automations.html"
+  },
+  {
+   "id": "desktop-settings-usage",
+   "name": "Desktop \u00b7 Settings: Usage",
+   "path": "desktop-settings-usage.html"
+  },
+  {
+   "id": "desktop-settings-agent",
+   "name": "Desktop \u00b7 Settings: Agent",
+   "path": "desktop-settings-agent.html"
+  },
+  {
+   "id": "desktop-settings-mcp",
+   "name": "Desktop \u00b7 Settings: Mcp",
+   "path": "desktop-settings-mcp.html"
+  },
+  {
+   "id": "desktop-settings-memories",
+   "name": "Desktop \u00b7 Settings: Memories",
+   "path": "desktop-settings-memories.html"
+  },
+  {
+   "id": "desktop-settings-manager",
+   "name": "Desktop \u00b7 Settings: Manager",
+   "path": "desktop-settings-manager.html"
+  },
+  {
+   "id": "desktop-settings-goals",
+   "name": "Desktop \u00b7 Settings: Goals",
+   "path": "desktop-settings-goals.html"
+  },
+  {
+   "id": "desktop-settings-voice",
+   "name": "Desktop \u00b7 Settings: Voice",
+   "path": "desktop-settings-voice.html"
+  },
+  {
+   "id": "desktop-settings-hooks",
+   "name": "Desktop \u00b7 Settings: Hooks",
+   "path": "desktop-settings-hooks.html"
+  },
+  {
+   "id": "desktop-settings-computer",
+   "name": "Desktop \u00b7 Settings: Computer",
+   "path": "desktop-settings-computer.html"
+  },
+  {
+   "id": "desktop-settings-jobs",
+   "name": "Desktop \u00b7 Settings: Jobs",
+   "path": "desktop-settings-jobs.html"
+  },
+  {
+   "id": "desktop-settings-hosts",
+   "name": "Desktop \u00b7 Settings: Hosts",
+   "path": "desktop-settings-hosts.html"
+  },
+  {
+   "id": "desktop-settings-identity",
+   "name": "Desktop \u00b7 Settings: Identity",
+   "path": "desktop-settings-identity.html"
+  },
+  {
+   "id": "desktop-settings-keys",
+   "name": "Desktop \u00b7 Settings: Keys",
+   "path": "desktop-settings-keys.html"
+  },
+  {
+   "id": "desktop-settings-devices",
+   "name": "Desktop \u00b7 Settings: Devices",
+   "path": "desktop-settings-devices.html"
+  },
+  {
+   "id": "desktop-settings-updates",
+   "name": "Desktop \u00b7 Settings: Updates",
+   "path": "desktop-settings-updates.html"
+  },
+  {
+   "id": "desktop-settings-account",
+   "name": "Desktop \u00b7 Settings: Account",
+   "path": "desktop-settings-account.html"
+  },
+  {
+   "id": "phone-chat-md",
+   "name": "Phone \u00b7 Chat: markdown",
+   "path": "phone-chat-md.html"
+  },
+  {
+   "id": "phone-chat-tools",
+   "name": "Phone \u00b7 Chat: tool calls",
+   "path": "phone-chat-tools.html"
+  },
+  {
+   "id": "phone-chat-table",
+   "name": "Phone \u00b7 Chat: table",
+   "path": "phone-chat-table.html"
+  },
+  {
+   "id": "phone-chat-tasks",
+   "name": "Phone \u00b7 Chat: tasks",
+   "path": "phone-chat-tasks.html"
+  },
+  {
+   "id": "phone-new-chat",
+   "name": "Phone \u00b7 New chat",
+   "path": "phone-new-chat.html"
+  },
+  {
+   "id": "phone-jobs",
+   "name": "Phone \u00b7 Jobs",
+   "path": "phone-jobs.html"
+  },
+  {
+   "id": "phone-job-new",
+   "name": "Phone \u00b7 New job",
+   "path": "phone-job-new.html"
+  },
+  {
+   "id": "phone-life-archived",
+   "name": "Phone \u00b7 List: Archived",
+   "path": "phone-life-archived.html"
+  },
+  {
+   "id": "phone-life-snoozed",
+   "name": "Phone \u00b7 List: Snoozed",
+   "path": "phone-life-snoozed.html"
+  },
+  {
+   "id": "phone-life-hidden",
+   "name": "Phone \u00b7 List: Hidden",
+   "path": "phone-life-hidden.html"
+  },
+  {
+   "id": "phone-life-deleted",
+   "name": "Phone \u00b7 List: Deleted",
+   "path": "phone-life-deleted.html"
+  },
+  {
+   "id": "phone-life-automations",
+   "name": "Phone \u00b7 List: Automations",
+   "path": "phone-life-automations.html"
+  },
+  {
+   "id": "phone-settings-usage",
+   "name": "Phone \u00b7 Settings: Usage",
+   "path": "phone-settings-usage.html"
+  },
+  {
+   "id": "phone-settings-agent",
+   "name": "Phone \u00b7 Settings: Agent",
+   "path": "phone-settings-agent.html"
+  },
+  {
+   "id": "phone-settings-mcp",
+   "name": "Phone \u00b7 Settings: Mcp",
+   "path": "phone-settings-mcp.html"
+  },
+  {
+   "id": "phone-settings-memories",
+   "name": "Phone \u00b7 Settings: Memories",
+   "path": "phone-settings-memories.html"
+  },
+  {
+   "id": "phone-settings-manager",
+   "name": "Phone \u00b7 Settings: Manager",
+   "path": "phone-settings-manager.html"
+  },
+  {
+   "id": "phone-settings-goals",
+   "name": "Phone \u00b7 Settings: Goals",
+   "path": "phone-settings-goals.html"
+  },
+  {
+   "id": "phone-settings-voice",
+   "name": "Phone \u00b7 Settings: Voice",
+   "path": "phone-settings-voice.html"
+  },
+  {
+   "id": "phone-settings-hooks",
+   "name": "Phone \u00b7 Settings: Hooks",
+   "path": "phone-settings-hooks.html"
+  },
+  {
+   "id": "phone-settings-computer",
+   "name": "Phone \u00b7 Settings: Computer",
+   "path": "phone-settings-computer.html"
+  },
+  {
+   "id": "phone-settings-jobs",
+   "name": "Phone \u00b7 Settings: Jobs",
+   "path": "phone-settings-jobs.html"
+  },
+  {
+   "id": "phone-settings-hosts",
+   "name": "Phone \u00b7 Settings: Hosts",
+   "path": "phone-settings-hosts.html"
+  },
+  {
+   "id": "phone-settings-identity",
+   "name": "Phone \u00b7 Settings: Identity",
+   "path": "phone-settings-identity.html"
+  },
+  {
+   "id": "phone-settings-keys",
+   "name": "Phone \u00b7 Settings: Keys",
+   "path": "phone-settings-keys.html"
+  },
+  {
+   "id": "phone-settings-devices",
+   "name": "Phone \u00b7 Settings: Devices",
+   "path": "phone-settings-devices.html"
+  },
+  {
+   "id": "phone-settings-updates",
+   "name": "Phone \u00b7 Settings: Updates",
+   "path": "phone-settings-updates.html"
+  },
+  {
+   "id": "phone-settings-account",
+   "name": "Phone \u00b7 Settings: Account",
+   "path": "phone-settings-account.html"
+  }
+ ]
+}

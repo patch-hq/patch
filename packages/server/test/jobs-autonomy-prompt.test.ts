@@ -12,7 +12,7 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { JobStore } from '../src/jobs/store.js';
@@ -22,7 +22,7 @@ import type { Job } from '../src/jobs/types.js';
 const silentLogger = pino({ level: 'silent' });
 
 const TRIGGER = { type: 'cron', expression: '0 7 * * *' } as const;
-const ACTION = { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' } as const;
 
 describe('job autonomy prompt', () => {
   let dir: string;
@@ -136,7 +136,7 @@ describe('job autonomy prompt', () => {
       const built = await buildAll({
         logger: false,
         registry,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
       });
       return { built, auth: { authorization: `Bearer ${jwt}` } };
     }
@@ -246,7 +246,7 @@ describe('job autonomy prompt', () => {
 
     it('inserts the prompt AFTER the /<skill> line, so it stays a recognisable slash command', () => {
       const out = JobDispatcher.withAutonomyPrompt(
-        { type: 'spawn', daemonId: 'd1', folder: '/x', skill: 'bus-watch' },
+        { type: 'spawn', hostId: 'd1', folder: '/x', skill: 'bus-watch' },
         '/bus-watch\n\n{"payload":{}}',
         makeJob(),
         DEFAULT_JOB_AUTONOMY_PROMPT,
@@ -257,7 +257,7 @@ describe('job autonomy prompt', () => {
     it('a script action passes the rendered text through untouched (no chat to preface)', () => {
       const scriptAction = {
         type: 'script',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/x',
         command: 'true',
       } as const;
@@ -267,7 +267,7 @@ describe('job autonomy prompt', () => {
     });
 
     it('an action with no skill and empty rendered text stays empty — nothing to preface', () => {
-      const bareAction = { type: 'spawn', daemonId: 'd1', folder: '/x' } as const;
+      const bareAction = { type: 'spawn', hostId: 'd1', folder: '/x' } as const;
       expect(
         JobDispatcher.withAutonomyPrompt(bareAction, '', makeJob(), DEFAULT_JOB_AUTONOMY_PROMPT),
       ).toBe('');
@@ -289,13 +289,13 @@ describe('job autonomy prompt', () => {
     });
 
     it('end-to-end: an edit to the account prompt reaches the NEXT fire of an uncustomised job', () => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       let account = 'First rule.';
       let n = 0;
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => `fire-${n++}`,
         autonomyPrompt: () => account,
@@ -317,11 +317,11 @@ describe('job autonomy prompt', () => {
     });
 
     it("end-to-end: a customised job's fire carries its own text, not the default", () => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => 'fixed-autonomy',
       });

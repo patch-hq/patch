@@ -108,10 +108,10 @@ const RevokeBody = z
   })
   .strict();
 
-const DaemonRegisterCompleteBody = z
+const HostRegisterCompleteBody = z
   .object({
     nonce: z.string().min(1),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     label: z.string().min(1),
     /**
      * The machine's own Ed25519 public key, base64url (spec/10 § Host
@@ -127,10 +127,12 @@ const DaemonRegisterCompleteBody = z
  * TTL for a daemon-registration nonce. Reuses the surface pairing-nonce TTL
  * (5 min) so the QR-scan window matches the surface linking flow.
  */
-const DAEMON_REGISTER_NONCE_TTL_MS = 5 * 60 * 1000;
+const HOST_REGISTER_NONCE_TTL_MS = 5 * 60 * 1000;
+/** How long a slot is kept past its expiry, so a late attempt hears "expired" or "used", not "unknown". */
+const HOST_REGISTER_SLOT_KEEP_MS = 60 * 60 * 1000;
 
 /** Awaiter for a `register/await` long-poll, resolved when complete posts. */
-interface DaemonRegisterAwaiter {
+interface HostRegisterAwaiter {
   resolve: (daemonKey: string) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -142,33 +144,42 @@ interface DaemonRegisterAwaiter {
  * scanning host claims its own id at `register/complete`; the store relays
  * the minted `daemonKey` from `complete` to the long-polling `await`.
  */
-interface DaemonRegisterEntry {
+interface HostRegisterEntry {
   /**
-   * The daemonId bound to this nonce. `null` until the scanning host claims
+   * The hostId bound to this nonce. `null` until the scanning host claims
    * its own id at `register/complete`.
    */
-  daemonId: string | null;
+  hostId: string | null;
   expiresAt: number;
   daemonKey?: string;
-  awaiters: DaemonRegisterAwaiter[];
+  awaiters: HostRegisterAwaiter[];
 }
 
-class DaemonRegisterStore {
-  private readonly entries = new Map<string, DaemonRegisterEntry>();
+class HostRegisterStore {
+  private readonly entries = new Map<string, HostRegisterEntry>();
 
   /**
-   * Reserve a surface-initiated registration slot with no daemonId yet — the
+   * Reserve a surface-initiated registration slot with no hostId yet — the
    * scanning host supplies its id at `register/complete`. This is the ONLY
    * way to open a registration window, and it is reachable only behind
    * `requireAuth` on `daemon/pair/start` (H1: an unauthenticated caller can no
    * longer self-issue a registration nonce).
    */
-  putPending(nonce: string, expiresAt: number): void {
-    this.entries.set(nonce, { daemonId: null, expiresAt, awaiters: [] });
+  putPending(nonce: string, expiresAt: number, nowMs: number): void {
+    this.sweep(nowMs);
+    this.entries.set(nonce, { hostId: null, expiresAt, awaiters: [] });
   }
 
-  get(nonce: string): DaemonRegisterEntry | undefined {
+  get(nonce: string, nowMs: number): HostRegisterEntry | undefined {
+    this.sweep(nowMs);
     return this.entries.get(nonce);
+  }
+
+  /** Forget slots that expired over an hour ago. */
+  private sweep(nowMs: number): void {
+    for (const [nonce, entry] of this.entries) {
+      if (entry.expiresAt + HOST_REGISTER_SLOT_KEEP_MS <= nowMs) this.entries.delete(nonce);
+    }
   }
 
   /**
@@ -178,7 +189,7 @@ class DaemonRegisterStore {
    * caller must `restore` it if the subsequent mint fails so a transient mint
    * error doesn't burn a legitimate registration window.
    */
-  take(nonce: string): DaemonRegisterEntry | undefined {
+  take(nonce: string): HostRegisterEntry | undefined {
     const entry = this.entries.get(nonce);
     // The route's only call site always `get()`s (peek) the same nonce
     // immediately before `take()`-ing it, synchronously with no intervening
@@ -190,13 +201,14 @@ class DaemonRegisterStore {
   }
 
   /** Re-insert a previously taken slot (failed mint — DoS resistance). */
-  restore(nonce: string, entry: DaemonRegisterEntry): void {
+  restore(nonce: string, entry: HostRegisterEntry): void {
     this.entries.set(nonce, entry);
   }
 
-  /** Stash the relayed credential and wake any waiters. */
-  complete(nonce: string, entry: DaemonRegisterEntry, daemonKey: string): void {
+  /** Stash the relayed credential, collectable for one TTL from now, and wake any waiters. */
+  complete(nonce: string, entry: HostRegisterEntry, daemonKey: string, nowMs: number): void {
     entry.daemonKey = daemonKey;
+    entry.expiresAt = nowMs + HOST_REGISTER_NONCE_TTL_MS;
     // The taken slot was removed by `take`; re-insert it so the long-polling
     // `await` (and any already-parked awaiters) can pick up the credential.
     this.entries.set(nonce, entry);
@@ -206,7 +218,7 @@ class DaemonRegisterStore {
     }
   }
 
-  addAwaiter(nonce: string, awaiter: DaemonRegisterAwaiter): void {
+  addAwaiter(nonce: string, awaiter: HostRegisterAwaiter): void {
     this.entries.get(nonce)?.awaiters.push(awaiter);
   }
 }
@@ -223,9 +235,9 @@ export interface AuthRoutesDeps {
   terminateSurface?: (surfaceId: string) => boolean;
   /**
    * spec/10 ## Revocation — sever the live host WS when the host is
-   * revoked. Production wires `InboundDaemonLink.terminateDaemonSocket`.
+   * revoked. Production wires `InboundHostLink.terminateHostSocket`.
    */
-  terminateDaemon?: (daemonId: string) => boolean;
+  terminateHost?: (hostId: string) => boolean;
   /**
    * The voice-session HMAC secret every host signs with (spec/13). Handed to
    * a new machine along with its `daemonKey` when it collects the credential,
@@ -247,7 +259,7 @@ export interface AuthRoutesDeps {
    * section (`GET /api/settings`). Optional only so unit tests can exercise
    * the registry side in isolation; production always wires the real link.
    */
-  daemonLink?: { status(): 'online' | 'offline'; lastConnectedAt(): number | null };
+  hostLink?: { status(): 'online' | 'offline'; lastConnectedAt(): number | null };
   /**
    * The account-wide preferences store (spec/01 § Responsibilities — Account
    * settings). Read into `GET /api/settings` and written by `PATCH`. Optional
@@ -303,7 +315,7 @@ async function requireAuth(
 
 export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): AuthRoutesHandle {
   const nonceStore = deps.nonceStore ?? new InMemoryPairingNonceStore();
-  const daemonRegisterStore = new DaemonRegisterStore();
+  const hostRegisterStore = new HostRegisterStore();
   const now = (): number => (deps.nowMs ? deps.nowMs() : Date.now());
 
   // ---- POST /api/auth/account ----
@@ -513,7 +525,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     const daemon = deps.registry.getDaemonKey(parsed.data.id);
     let terminated: boolean;
     if (daemon) {
-      terminated = deps.terminateDaemon ? deps.terminateDaemon(daemon.daemonId) : false;
+      terminated = deps.terminateHost ? deps.terminateHost(daemon.hostId) : false;
     } else {
       terminated = deps.terminateSurface ? deps.terminateSurface(parsed.data.id) : false;
     }
@@ -597,18 +609,18 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     // `: 0` / `: undefined` fallback arms are unreachable via the public API.
     /* v8 ignore next 2 */
     const pushTokens = account ? deps.registry.listPushTokens(account.accountId).length : 0;
-    const daemonRegistered = deps.registry.registeredDaemonIds().length > 0;
-    const daemonStatus = deps.daemonLink ? deps.daemonLink.status() : 'offline';
-    const daemonLastConnectedAt = deps.daemonLink ? deps.daemonLink.lastConnectedAt() : null;
+    const hostRegistered = deps.registry.registeredHostIds().length > 0;
+    const hostStatus = deps.hostLink ? deps.hostLink.status() : 'offline';
+    const hostLastConnectedAt = deps.hostLink ? deps.hostLink.lastConnectedAt() : null;
 
     return reply.code(200).send({
       account,
       devices,
       push: { tokenCount: pushTokens },
       daemon: {
-        registered: daemonRegistered,
-        status: daemonStatus,
-        lastConnectedAt: daemonLastConnectedAt,
+        registered: hostRegistered,
+        status: hostStatus,
+        lastConnectedAt: hostLastConnectedAt,
       },
       // Configurable project-launch folders (Settings → Project folders; offered
       // first by the new-chat folder picker — spec/04 § Folders).
@@ -718,7 +730,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
   // (`patch host start --pair <code>`), so the registration window is always
   // opened from a trusted, authenticated linked surface (H1 — there is no
   // unauthenticated daemon-initiated register/start). Surface-JWT gated (same as
-  // /api/settings). The host binds its own daemonId at register/complete time,
+  // /api/settings). The host binds its own hostId at register/complete time,
   // so none is required here.
   app.post(
     '/api/auth/daemon/pair/start',
@@ -743,10 +755,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
         return reply.code(400).send({ error: 'no account bootstrapped' });
       }
       const created = createPairingNonce({ nowMs: now() });
-      const expiresAt = now() + DAEMON_REGISTER_NONCE_TTL_MS;
-      // daemonId/label are claimed by the host when it scans + completes; the
+      const expiresAt = now() + HOST_REGISTER_NONCE_TTL_MS;
+      // hostId/label are claimed by the host when it scans + completes; the
       // surface-issued slot reserves the nonce until then.
-      daemonRegisterStore.putPending(created.nonce, expiresAt);
+      hostRegisterStore.putPending(created.nonce, expiresAt, now());
       deps.logger.info(
         { nonce: created.nonce.slice(0, 8) + '…' },
         'host add-daemon pairing nonce issued (surface-initiated)',
@@ -758,7 +770,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
   // ---- POST /api/auth/daemon/register/complete ----
   // The host scanned the QR shown by a linked surface (the ONLY way a
   // registration window is opened — see `daemon/pair/start`, requireAuth-gated)
-  // and POSTs its chosen { daemonId, label } against that surface-issued nonce.
+  // and POSTs its chosen { hostId, label } against that surface-issued nonce.
   // The SERVER is the credential authority: it MINTS the daemonKey with the
   // account private key, registers the host identity, and stashes the
   // credential for the host's long-poll.
@@ -775,7 +787,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       if (!account) {
         return reply.code(400).send({ error: 'no account bootstrapped' });
       }
-      const parsed = DaemonRegisterCompleteBody.safeParse(req.body);
+      const parsed = HostRegisterCompleteBody.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
       }
@@ -783,18 +795,18 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       // second machine is ADDED, not refused. Re-registering an id that is
       // already live IS refused: silently supplanting a running machine would
       // decommission it without anyone asking for that. Revoke it first.
-      const existing = deps.registry.getDaemonKey(parsed.data.daemonId);
+      const existing = deps.registry.getDaemonKey(parsed.data.hostId);
       if (existing && existing.revoked !== true) {
         return reply
           .code(409)
-          .send({ error: `a machine is already registered as ${parsed.data.daemonId}` });
+          .send({ error: `a machine is already registered as ${parsed.data.hostId}` });
       }
       if (!isValidEd25519PublicKey(parsed.data.publicKey)) {
         return reply.code(400).send({ error: 'invalid publicKey' });
       }
       // Validate the surface-issued slot BEFORE atomically taking it (so a
       // bad/expired/forged nonce never disturbs a legitimate window).
-      const peek = daemonRegisterStore.get(parsed.data.nonce);
+      const peek = hostRegisterStore.get(parsed.data.nonce, now());
       if (!peek) {
         // Never issued, or issued so long ago the slot is gone. The installer
         // reports this verbatim, so it names a cause rather than a status code.
@@ -813,7 +825,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       }
       // M3 TOCTOU: atomically reserve-and-remove the slot before the async
       // mint. Concurrent completes race here; exactly one gets the slot back.
-      const entry = daemonRegisterStore.take(parsed.data.nonce);
+      const entry = hostRegisterStore.take(parsed.data.nonce);
       // peek (above) found the slot synchronously with no intervening await,
       // so take() cannot come back empty here — unreachable via the public
       // API in Node's single-threaded execution model; defensive-only
@@ -823,7 +835,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
         return reply.code(400).send({ error: 'unknown nonce' });
       }
       // The scanning host claims its own id against the surface-issued slot.
-      entry.daemonId = parsed.data.daemonId;
+      entry.hostId = parsed.data.hostId;
 
       const accountPrivateKey = deps.registry.getAccountPrivateKey();
       if (!accountPrivateKey) {
@@ -834,25 +846,25 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       try {
         daemonKey = await mintDaemonKey({
           userPrivateKey: accountPrivateKey,
-          daemonId: parsed.data.daemonId,
+          hostId: parsed.data.hostId,
           label: parsed.data.label,
           now: iat,
         });
       } catch (e) {
         // A failed mint must not burn the legitimate registration window.
-        daemonRegisterStore.restore(parsed.data.nonce, entry);
+        hostRegisterStore.restore(parsed.data.nonce, entry);
         throw e;
       }
 
       deps.registry.setDaemonKey({
-        daemonId: parsed.data.daemonId,
+        hostId: parsed.data.hostId,
         // The MACHINE's key, submitted with the code. (The daemonKey JWT itself
         // is signed by, and verified against, the ACCOUNT key — spec/10.)
         publicKey: parsed.data.publicKey,
         issuedAt: iat,
       });
-      daemonRegisterStore.complete(parsed.data.nonce, entry, daemonKey);
-      deps.logger.info({ daemonId: parsed.data.daemonId }, 'host registered');
+      hostRegisterStore.complete(parsed.data.nonce, entry, daemonKey, now());
+      deps.logger.info({ hostId: parsed.data.hostId }, 'host registered');
       return reply.code(200).send({ ok: true });
     },
   );
@@ -865,19 +877,21 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     if (typeof nonce !== 'string' || nonce.length === 0) {
       return reply.code(400).send({ error: 'nonce query param required' });
     }
-    const entry = daemonRegisterStore.get(nonce);
+    const entry = hostRegisterStore.get(nonce, now());
     if (!entry) {
       return reply.code(404).send({ error: 'unknown nonce' });
     }
     const withSecret = deps.internalToken ? { internalToken: deps.internalToken } : {};
     if (entry.daemonKey) {
+      // The credential is collectable only within its window, not for the life of the process.
+      if (entry.expiresAt <= now()) return reply.code(410).send({ error: 'code expired' });
       return reply.code(200).send({ daemonKey: entry.daemonKey, ...withSecret });
     }
     // Long-poll until complete relays the credential or the nonce TTL elapses.
     const waitMs = Math.max(0, entry.expiresAt - now());
     const daemonKey = await new Promise<string | null>((resolve) => {
       const timer = setTimeout(() => resolve(null), waitMs);
-      daemonRegisterStore.addAwaiter(nonce, { resolve: (k) => resolve(k), timer });
+      hostRegisterStore.addAwaiter(nonce, { resolve: (k) => resolve(k), timer });
     });
     if (daemonKey === null) {
       return reply.code(408).send({ error: 'registration timed out' });

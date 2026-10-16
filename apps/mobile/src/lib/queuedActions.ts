@@ -29,10 +29,10 @@ export function promoteMessage(chatId: string, localId: string): void {
   send('promote', { type: 'chat.promote_request', chatId, localId });
 }
 
-/** Save an edit to a queued message; emptying one with no attachments removes it. */
+/** Save an edit to a queued message; emptying one (or leaving only whitespace) with no attachments removes it. */
 export function editQueuedMessage(chatId: string, entry: ChatEventEntry, text: string): void {
   const localId = entry.localId!;
-  if (text.length === 0 && !(entry.attachments && entry.attachments.length > 0)) {
+  if (text.trim().length === 0 && !(entry.attachments && entry.attachments.length > 0)) {
     unqueueMessage(chatId, localId);
     return;
   }

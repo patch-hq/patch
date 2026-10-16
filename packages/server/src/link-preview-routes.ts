@@ -46,7 +46,8 @@ const FETCH_TIMEOUT_MS = 5_000;
 // a single-user personal app previewing links the account owner pasted, not a
 // public-facing service.
 function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
+  // URL.hostname keeps the brackets on an IPv6 literal: "[::1]".
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (h === 'localhost' || h.endsWith('.localhost') || h === '::1') return true;
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (!m) return false;
@@ -69,17 +70,20 @@ function extractMetaContent(
   const tagRe = new RegExp(`<meta[^>]*\\b${attr}=["']${value}["'][^>]*>`, 'i');
   const tag = tagRe.exec(html)?.[0];
   if (!tag) return undefined;
-  const content = /content=["']([^"']*)["']/i.exec(tag)?.[1];
+  const content = /content=(["'])(.*?)\1/is.exec(tag)?.[2];
   return content?.trim() || undefined;
 }
 
 function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  // One pass, so "&amp;lt;" decodes to the text "&lt;" and not on to "<".
+  const entities: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+  };
+  return s.replace(/&(?:amp|lt|gt|quot|#39);/g, (e) => entities[e]!);
 }
 
 export interface LinkPreview {
@@ -162,36 +166,41 @@ export function registerLinkPreviewRoutes(app: FastifyInstance, deps: LinkPrevie
         .send({ error: validated.error, message: validated.message });
     }
     const { target } = validated;
+    // The timer stays armed through the body read: headers arriving promptly
+    // says nothing about whether the body ever finishes.
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    let res: Response;
     try {
-      res = await fetch(target.toString(), {
-        signal: controller.signal,
-        redirect: 'follow',
-        headers: { accept: 'text/html', 'user-agent': 'Patch-LinkPreview/1.0' },
-      });
-    } catch (e) {
-      deps.logger.warn(
-        { url: target.toString(), err: (e as Error).message },
-        'link-preview fetch failed',
-      );
-      return reply.code(502).send({ error: 'fetch_failed', message: (e as Error).message });
+      let res: Response;
+      let html: string;
+      try {
+        res = await fetch(target.toString(), {
+          signal: controller.signal,
+          redirect: 'follow',
+          headers: { accept: 'text/html', 'user-agent': 'Patch-LinkPreview/1.0' },
+        });
+        if (!res.ok) {
+          return reply.code(502).send({ error: 'fetch_failed', message: `upstream ${res.status}` });
+        }
+        const contentType = res.headers.get('content-type') ?? '';
+        if (!contentType.includes('text/html')) {
+          return reply
+            .code(415)
+            .send({ error: 'unsupported_content_type', message: contentType || 'unknown' });
+        }
+        html = await res.text();
+      } catch (e) {
+        deps.logger.warn(
+          { url: target.toString(), err: (e as Error).message },
+          'link-preview fetch failed',
+        );
+        return reply.code(502).send({ error: 'fetch_failed', message: (e as Error).message });
+      }
+      const preview = parsePreview(html, target.toString());
+      return reply.code(200).send({ url: target.toString(), ...preview } satisfies LinkPreview);
     } finally {
       clearTimeout(timeout);
     }
-    if (!res.ok) {
-      return reply.code(502).send({ error: 'fetch_failed', message: `upstream ${res.status}` });
-    }
-    const contentType = res.headers.get('content-type') ?? '';
-    if (!contentType.includes('text/html')) {
-      return reply
-        .code(415)
-        .send({ error: 'unsupported_content_type', message: contentType || 'unknown' });
-    }
-    const html = await res.text();
-    const preview = parsePreview(html, target.toString());
-    return reply.code(200).send({ url: target.toString(), ...preview } satisfies LinkPreview);
   });
 
   // GET /api/link-preview/image?url=<absolute image url> — proxies the OG
@@ -219,49 +228,58 @@ export function registerLinkPreviewRoutes(app: FastifyInstance, deps: LinkPrevie
         .send({ error: validated.error, message: validated.message });
     }
     const { target } = validated;
+    // Armed through the body read too, like the HTML fetch above.
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
-    let res: Response;
+    const tooLarge = () =>
+      reply.code(413).send({ error: 'image_too_large', message: 'image exceeds size limit' });
     try {
-      res = await fetch(target.toString(), {
-        signal: controller.signal,
-        redirect: 'follow',
-        headers: { accept: 'image/*', 'user-agent': 'Patch-LinkPreview/1.0' },
-      });
-    } catch (e) {
-      deps.logger.warn(
-        { url: target.toString(), err: (e as Error).message },
-        'link-preview image fetch failed',
-      );
-      return reply.code(502).send({ error: 'fetch_failed', message: (e as Error).message });
+      let res: Response;
+      let contentType: string;
+      const chunks: Uint8Array[] = [];
+      try {
+        res = await fetch(target.toString(), {
+          signal: controller.signal,
+          redirect: 'follow',
+          headers: { accept: 'image/*', 'user-agent': 'Patch-LinkPreview/1.0' },
+        });
+        if (!res.ok) {
+          return reply.code(502).send({ error: 'fetch_failed', message: `upstream ${res.status}` });
+        }
+        contentType = res.headers.get('content-type') ?? '';
+        if (!contentType.startsWith('image/')) {
+          return reply
+            .code(415)
+            .send({ error: 'unsupported_content_type', message: contentType || 'unknown' });
+        }
+        const contentLength = Number(res.headers.get('content-length') ?? '0');
+        if (contentLength > MAX_IMAGE_BYTES) return tooLarge();
+        // The cap is enforced while reading, since content-length may be absent or wrong.
+        let total = 0;
+        if (res.body) {
+          for await (const chunk of res.body) {
+            total += chunk.byteLength;
+            if (total > MAX_IMAGE_BYTES) {
+              controller.abort();
+              return tooLarge();
+            }
+            chunks.push(chunk);
+          }
+        }
+      } catch (e) {
+        deps.logger.warn(
+          { url: target.toString(), err: (e as Error).message },
+          'link-preview image fetch failed',
+        );
+        return reply.code(502).send({ error: 'fetch_failed', message: (e as Error).message });
+      }
+      return reply
+        .code(200)
+        .header('content-type', contentType)
+        .header('cache-control', 'private, max-age=3600')
+        .send(Buffer.concat(chunks));
     } finally {
       clearTimeout(timeout);
     }
-    if (!res.ok) {
-      return reply.code(502).send({ error: 'fetch_failed', message: `upstream ${res.status}` });
-    }
-    const contentType = res.headers.get('content-type') ?? '';
-    if (!contentType.startsWith('image/')) {
-      return reply
-        .code(415)
-        .send({ error: 'unsupported_content_type', message: contentType || 'unknown' });
-    }
-    const contentLength = Number(res.headers.get('content-length') ?? '0');
-    if (contentLength > MAX_IMAGE_BYTES) {
-      return reply
-        .code(413)
-        .send({ error: 'image_too_large', message: 'image exceeds size limit' });
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength > MAX_IMAGE_BYTES) {
-      return reply
-        .code(413)
-        .send({ error: 'image_too_large', message: 'image exceeds size limit' });
-    }
-    return reply
-      .code(200)
-      .header('content-type', contentType)
-      .header('cache-control', 'private, max-age=3600')
-      .send(buf);
   });
 }

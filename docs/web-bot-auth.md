@@ -1,18 +1,21 @@
 # Web Bot Auth — Cloudflare / Akamai verified-agent registration
 
-Built, not submitted. Tom submits from his own dashboard.
+Each Patch deployment creates and stores its own identity. No environment
+variable, bundled key or machine setup is involved. Registration is external:
+the deployment operator submits its live directory from its own dashboard.
+Patch exposes the complete setup under Settings → Agent identity on web,
+desktop and Android.
 
-- Key directory: https://patch.tomchambers.me/.well-known/http-message-signatures-directory
-- Description page: https://patch.tomchambers.me/agent
-- Key: Ed25519, 1Password Agents / `env-patch` / `PATCH_WEB_BOT_AUTH_KEY`
-- keyid (JWK thumbprint): `zifIYXzA6uJp3Pxl4QMaKC29BkR3JXbwxICthLtabao`
+- Key directory: `https://<deployment>/.well-known/http-message-signatures-directory`
+- Description page: `https://<deployment>/agent`
+- Key: Ed25519, generated on the server's first start and held in Patch's encrypted secrets store
 
-## Turning it on (deploy step)
+## Deployment check
 
-1. `env-render deploy/web-bot-auth.env.tpl`, load `deploy/web-bot-auth.env` into the
-   server's environment (serves the directory) and each host's.
-2. On each host that should sign: `PATCH_WEB_BOT_AUTH=on`. Default off.
-3. Check: `curl -i https://patch.tomchambers.me/.well-known/http-message-signatures-directory`
+`https://<deployment>/.well-known/http-message-signatures-directory` returns
+200 on a fresh install and retains the same public key after a restart. Every
+connected host asks its paired server for each short-lived request signature.
+The private key never leaves the server.
 
 ## Verifying
 
@@ -20,25 +23,23 @@ Built, not submitted. Tom submits from his own dashboard.
 unknown verified bot ID for keyid` until registered — i.e. the signature is
 parsed and only the registration is missing.
 
-## Cloudflare submission values (Manage Account > Configurations > Bot Submission Form > Request Signature)
+## Cloudflare submission values
 
-- Bot name: Patch
-- Operator: Tom Chambers, tom.chambers@gmail.com
-- Description / info URL: https://patch.tomchambers.me/agent
-- Signature-Agent / key directory: https://patch.tomchambers.me/.well-known/http-message-signatures-directory
-- keyid (JWK thumbprint): `zifIYXzA6uJp3Pxl4QMaKC29BkR3JXbwxICthLtabao`
-- Public key (Ed25519, JWK x): `ukW1sKWt91vJL7mWhNxnEMaMxp8QYlcZYU27Xiv7GHo`
+Open Protect & Connect → Application Security → BotBase → Submission form.
+
+- Bot name: the deployment operator's name for their Patch agent
+- Operator: the deployment operator and their contact address
+- Description / info URL: `https://<deployment>/agent`
+- Signature-Agent / key directory: `https://<deployment>/.well-known/http-message-signatures-directory`
+- keyid and public key: read them from the live key directory after deployment
 - Signed components: `@authority`, `signature-agent`; tag `web-bot-auth`
+- Verification method: Request Signature
+- Operator: Direct
+- Behaviour/content use: User-driven agent; reference use
 
-## Validation (8 Oct 2026)
+## Validation
 
-Cloudflare's `http-signature-directory` v0.7.0 (cargo install; needs libssl headers
-via `OPENSSL_*` env on this box) run against the real route with the real key:
-key valid, `signature_verified: true`. Its only error was "URL must be an HTTPS
-URL" because it was pointed at a local http port — the deployed URL is https.
-The deployed server still returns 503 until the deploy step above is done.
-
-Screwfix (www.screwfix.com, from this Hetzner IP): 403 "request could not be
-satisfied" (CloudFront) both signed and unsigned — signing makes no difference
-while unregistered, and this is an IP-level block rather than a Cloudflare challenge.
-Re-test after registration and deploy.
+Run Cloudflare's `http-signature-directory` validator against the live HTTPS
+route. The directory must be valid and `signature_verified: true` before
+submission. Each independently installed Patch server is registered separately;
+no installation relies on the maintainer's identity or devices.

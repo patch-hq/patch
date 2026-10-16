@@ -12,14 +12,14 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobStore } from '../src/jobs/store.js';
 import type { Job } from '../src/jobs/types.js';
 
 const silentLogger = pino({ level: 'silent' });
 
 const TRIGGER = { type: 'cron', expression: '0 7 * * *' } as const;
-const ACTION = { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' } as const;
 
 describe('job groups', () => {
   let dir: string;
@@ -126,7 +126,7 @@ describe('job groups', () => {
       const built = await buildAll({
         logger: false,
         registry,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
       });
       return { built, auth: { authorization: `Bearer ${jwt}` } };
     }

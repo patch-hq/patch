@@ -15,7 +15,7 @@ function row(chatId: string, overrides: Partial<ChatRow> = {}): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions',
     name: chatId,
     folder: '/tmp',

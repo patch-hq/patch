@@ -16,9 +16,14 @@ import {
   getModelCatalog,
   type ModelOption,
 } from '../lib/models.js';
-import { reportHost, clearHosts } from './presenceHelpers.js';
+import {
+  reportHost,
+  clearHosts,
+  clearSharedAccounts,
+  setSharedAccounts,
+} from './presenceHelpers.js';
 
-// What the HOST reports as its last-used model (spec/03 § `daemon.host`). A
+// What the HOST reports as its last-used model (spec/03 § `host.host`). A
 // spawn that names no model resolves to exactly this, on the machine.
 const ACCOUNT_DEFAULT_MODEL = 'claude-opus-5';
 
@@ -50,7 +55,7 @@ function makeRow(
   chatId: string,
   folder: string,
   lastUpdated: number,
-  daemonId = 'd1',
+  hostId = 'd1',
   model: string | null = null,
   jobId: string | null = null,
 ) {
@@ -59,7 +64,7 @@ function makeRow(
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId,
+    hostId,
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder,
@@ -95,6 +100,7 @@ describe('/chats/new', () => {
     // Start from an empty roster — a host account left signed OUT by one test
     // otherwise blocks every screen that follows it.
     clearHosts();
+    clearSharedAccounts();
     localStorage.removeItem('patch.newChat.last.v1');
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
@@ -602,10 +608,9 @@ describe('/chats/new', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
   }
 
-  // Opens the host pill and picks a host from its list.
-  function chooseHost(daemonId: string): void {
-    fireEvent.click(screen.getByTestId('new-chat-host'));
-    fireEvent.click(screen.getByTestId(`host-option-${daemonId}`));
+  // Picks a host from the switcher.
+  function chooseHost(hostId: string): void {
+    fireEvent.click(screen.getByTestId(`host-option-${hostId}`));
   }
 
   function renderPicker(): void {
@@ -647,37 +652,23 @@ describe('/chats/new', () => {
     expect(label).toHaveAttribute('title', '/home/tom/projects/portfolio');
   });
 
-  it('clicking the ALREADY-selected recent row deselects it and leaves the picker open', async () => {
+  it('clicking the ALREADY-selected recent row keeps it selected and closes the picker', async () => {
     stubPickerFetch();
     renderPicker();
-    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
-
-    const opt = await screen.findByTestId('folder-option-/home/tom/projects/portfolio');
-    fireEvent.click(opt); // select — closes the picker
-    expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
     const pill = screen.getByTestId('new-chat-folder-pill');
+    fireEvent.click(pill);
+    fireEvent.click(await screen.findByTestId('folder-option-/home/tom/projects/portfolio'));
     expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('portfolio');
 
-    // Reopen and click the SAME row: it toggles OFF (spec/14 §8). The folder
-    // clears back to the placeholder and the pop-up stays open — nothing was
-    // picked, so there is nothing to close on.
     fireEvent.click(pill);
     const again = await screen.findByTestId('folder-option-/home/tom/projects/portfolio');
     expect(again).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(again);
-    expect(screen.getByTestId('folder-popup')).toBeInTheDocument();
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('Choose a folder…');
-    const cleared = screen.getByTestId('folder-option-/home/tom/projects/portfolio');
-    expect(cleared).toHaveAttribute('aria-selected', 'false');
-    expect(cleared.className).not.toContain('selected');
-    expect(cleared.querySelector('.folder-option-check')).toBeNull();
-    // The ad-hoc path field is emptied too — it mirrors the chosen folder.
-    expect((screen.getByTestId('new-chat-folder') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
+    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('portfolio');
   });
 
-  it('deselecting does not let the most-recently-used default silently reselect a folder', async () => {
-    // A chat exists in a folder, so the MRU seeding effect is live. Deselect
-    // must STICK: re-seeding here would make the toggle look broken.
+  it('clicking the MRU-preselected recent row keeps the folder', async () => {
     useChatStore.setState({
       chats: { c1: makeRow('c1', '/home/tom/projects/portfolio', 500) },
     });
@@ -686,9 +677,9 @@ describe('/chats/new', () => {
     const pill = screen.getByTestId('new-chat-folder-pill');
     fireEvent.click(pill);
     const opt = await screen.findByTestId('folder-option-/home/tom/projects/portfolio');
-    expect(opt).toHaveAttribute('aria-selected', 'true'); // MRU preselected it
-    fireEvent.click(opt); // toggle OFF
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('Choose a folder…');
+    expect(opt).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(opt);
+    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('portfolio');
   });
 
   it('recent-folder rows add a disambiguating parent path ONLY when two basenames collide', async () => {
@@ -788,7 +779,7 @@ describe('/chats/new', () => {
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
   });
 
-  it('one click on a quick toggle selects that project, and clicking it again deselects', async () => {
+  it('one click on a quick toggle selects that project, and clicking it again keeps it selected', async () => {
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100) } });
     stubPickerFetch({ folders: [] });
     renderPicker();
@@ -798,20 +789,12 @@ describe('/chats/new', () => {
     // MRU already seeded this one, so it reads as pressed from the start.
     expect(quick).toHaveAttribute('aria-pressed', 'true');
 
-    fireEvent.click(quick); // toggle OFF — the escape hatch from the MRU default
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('Choose a folder…');
-    expect(screen.getByTestId('folder-quick-/home/tom/projects/alpha')).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
-
-    fireEvent.click(screen.getByTestId('folder-quick-/home/tom/projects/alpha')); // back ON
+    fireEvent.click(quick);
     expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('alpha');
     expect(screen.getByTestId('folder-quick-/home/tom/projects/alpha')).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-    // Selecting from the row never opens the pop-up.
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
   });
 
@@ -1375,13 +1358,13 @@ describe('/chats/new', () => {
 
     chooseHost('d2');
     expect(screen.getByTestId('new-chat-host')).toHaveAttribute('title', 'd2');
-    // d1's folder is not a directory on d2, so it is not carried across.
+    // d1's folder is not a directory on d2, so it is not carried across;
+    // the first folder in d2's list is selected instead.
     expect(screen.queryByTestId('folder-quick-/home/tom/projects/alpha')).not.toBeInTheDocument();
     expect(
       screen.getByTestId('new-chat-folder-pill').querySelector('.folder-pill-label')?.textContent,
-    ).toBe('Choose a folder…');
+    ).toBe('bravo');
 
-    fireEvent.click(screen.getByTestId('folder-quick-/srv/bravo'));
     const composer = screen.getByTestId('composer-input');
     fireEvent.change(composer, { target: { value: 'go' } });
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
@@ -1390,7 +1373,7 @@ describe('/chats/new', () => {
       const call = fetchMock.mock.calls.find((c) => String(c[0]).startsWith('/api/chats'));
       expect(call).toBeTruthy();
       const body = JSON.parse((call![1] as RequestInit).body as string);
-      expect(body).toMatchObject({ daemonId: 'd2', folder: '/srv/bravo' });
+      expect(body).toMatchObject({ hostId: 'd2', folder: '/srv/bravo' });
     });
   });
 
@@ -1466,28 +1449,25 @@ describe('/chats/new', () => {
     stubPickerFetch({ folders: [] });
     renderPicker();
 
-    fireEvent.click(await screen.findByTestId('new-chat-host'));
-    const mac = screen.getByTestId('host-option-d2');
+    const mac = await screen.findByTestId('host-option-d2');
     expect(mac).toBeDisabled();
     expect(mac).toHaveTextContent('mac · offline');
   });
 
-  it('the host control is a pill that opens a list and closes on choosing', async () => {
+  it('the host control is a switcher showing every host, not a drop-down', async () => {
     usePresenceStore.getState().setHostOnline('d2', true);
     reportHost('d2', { hostName: 'mac' });
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1') } });
     stubPickerFetch({ folders: [] });
     renderPicker();
 
-    const pill = await screen.findByTestId('new-chat-host');
-    expect(pill).toHaveClass('model-pill');
+    expect(await screen.findByTestId('new-chat-host')).toHaveAttribute('role', 'radiogroup');
     expect(screen.queryByTestId('host-popup')).not.toBeInTheDocument();
-    fireEvent.click(pill);
-    expect(screen.getByTestId('host-popup')).toBeInTheDocument();
-    expect(screen.getByTestId('host-option-d1')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('host-option-d1')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('host-option-d2')).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(screen.getByTestId('host-option-d2'));
-    expect(screen.queryByTestId('host-popup')).not.toBeInTheDocument();
-    expect(screen.getByTestId('new-chat-host')).toHaveTextContent('mac');
+    expect(screen.getByTestId('host-option-d2')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('host-option-d2')).toHaveTextContent('mac');
   });
 
   it('shows no machine choice when there is only one machine', async () => {
@@ -1516,8 +1496,8 @@ describe('/chats/new', () => {
       const browsed = fetchMock.mock.calls
         .map((c) => String(c[0]))
         .filter((u) => u.startsWith('/api/folders/browse'));
-      expect(browsed.some((u) => u.includes('daemonId=d1'))).toBe(true);
-      expect(browsed.some((u) => u.includes('daemonId=d2'))).toBe(true);
+      expect(browsed.some((u) => u.includes('hostId=d1'))).toBe(true);
+      expect(browsed.some((u) => u.includes('hostId=d2'))).toBe(true);
     });
   });
 
@@ -1551,13 +1531,7 @@ describe('/chats/new', () => {
   });
 
   it('disables the quick toggles when the host is not signed in, like the pickers beside them', async () => {
-    usePresenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'd1',
-      backendId: 'claude-code',
-      connected: false,
-      accountEmail: null,
-    });
+    setSharedAccounts({ claude: [{ connected: false }] });
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100) } });
     stubPickerFetch({ folders: [] });
     renderPicker();
@@ -2021,7 +1995,7 @@ describe('/chats/new', () => {
 
   // Paths are scoped to their host (spec/04 § Spawn), and the picker's folder
   // and host are ONE choice (spec/14 §8 — "that pairing is what the spawn sends
-  // as `daemonId` + `folder`"). Taking the folder from the most-recent chat
+  // as `hostId` + `folder`"). Taking the folder from the most-recent chat
   // while taking the host from the account default paired host-a's path with
   // host-b's id on the wire.
   it('spawns the MRU folder on the host that folder is ON, not the account default', async () => {
@@ -2054,7 +2028,7 @@ describe('/chats/new', () => {
     )!;
     const body = JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>;
     expect(body['folder']).toBe('/only-on-host-b');
-    expect(body['daemonId']).toBe('host-b');
+    expect(body['hostId']).toBe('host-b');
   });
 
   it('adopts the MRU folder once the roster hydrates AFTER mount (no chats known yet at mount)', () => {
@@ -2384,7 +2358,7 @@ describe('/chats/new', () => {
 
   // The host's own wording for a spawn it refused — written for whoever wrote
   // the host, which is exactly why the surface must not repeat it verbatim.
-  const DAEMON_PARAGRAPH =
+  const HOST_PARAGRAPH =
     'machine dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
     'name a model on the spawn or connect the backend credential on that machine';
 
@@ -2459,7 +2433,7 @@ describe('/chats/new', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.error',
         chatId: ZOMBIE_CHAT_ID,
-        error: { code: 'no_model_catalogue', message: DAEMON_PARAGRAPH },
+        error: { code: 'no_model_catalogue', message: HOST_PARAGRAPH },
         seq: -1,
       });
     });
@@ -2483,12 +2457,12 @@ describe('/chats/new', () => {
       );
     });
     const sentence = document.querySelector('.error-toast .msg')?.textContent ?? '';
-    expect(sentence).not.toContain(DAEMON_PARAGRAPH);
+    expect(sentence).not.toContain(HOST_PARAGRAPH);
     expect(sentence).not.toContain('no_model_catalogue');
     // Kept, not lost: code and the host's own wording live in the disclosure.
     const detail = screen.getByTestId('error-toast-detail-text');
     expect(detail).toHaveTextContent('no_model_catalogue');
-    expect(detail).toHaveTextContent(DAEMON_PARAGRAPH);
+    expect(detail).toHaveTextContent(HOST_PARAGRAPH);
     expect(screen.queryByTestId('new-chat-error')).not.toBeInTheDocument();
 
     // The typed message survives (not discarded).
@@ -2680,7 +2654,7 @@ describe('/chats/new model defaulting', () => {
     // The machine resolves it (spec/03 § chat.spawn_request). Sending the
     // surface's idea of a default here is what clobbered the host's value.
     expect('model' in body).toBe(false);
-    expect(body['daemonId']).toBe('d1');
+    expect(body['hostId']).toBe('d1');
     expect(localStorage.getItem('patch.model.lastUsed')).toBeNull();
   });
 
@@ -2890,7 +2864,7 @@ describe('/chats/new — opens on the last new chat', () => {
       .textContent;
 
   it('uses the recorded folder over a newer chat, and ignores chats changing afterwards', () => {
-    saveLastNewChat({ daemonId: 'd1', folder: '/home/tom/projects/mine', model: null });
+    saveLastNewChat({ hostId: 'd1', folder: '/home/tom/projects/mine', model: null });
     useChatStore.setState({
       chats: { n: makeRow('n', '/home/tom/projects/newer', 900, 'd1') },
     });
@@ -2926,7 +2900,7 @@ describe('/chats/new — opens on the last new chat', () => {
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
     await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
     expect(loadLastNewChat()).toEqual({
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/projects/one',
       model: null,
     });

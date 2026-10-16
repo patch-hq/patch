@@ -31,7 +31,7 @@ describe('chatStore.ensureChat', () => {
     expect(row?.folder).toBe('/home/tom/projects/portfolio');
     // The host is genuinely unknown until `chat.spawned` names it — empty is
     // the honest value, and every host-scoped action already checks for it.
-    expect(row?.daemonId).toBe('');
+    expect(row?.hostId).toBe('');
     expect(row?.chatId).toBe('c_new');
   });
 
@@ -40,7 +40,7 @@ describe('chatStore.ensureChat', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c_new',
-      daemonId: 'd1',
+      hostId: 'd1',
       activity: 'running',
       permissionMode: 'bypassPermissions',
       lastUpdated: 500,
@@ -60,14 +60,14 @@ describe('chatStore.ensureChat', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
       chatId: 'c_new',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/work',
     });
 
     // Still exactly one row, now carrying the host the host named.
     expect(Object.keys(useChatStore.getState().chats)).toEqual(['c_new']);
     const row = useChatStore.getState().chats['c_new'];
-    expect(row?.daemonId).toBe('d1');
+    expect(row?.hostId).toBe('d1');
     expect(row?.folder).toBe('/home/tom/work');
   });
 
@@ -76,7 +76,7 @@ describe('chatStore.ensureChat', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
       chatId: 'c_new',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/work',
     });
     useChatStore.getState().applyEvent({

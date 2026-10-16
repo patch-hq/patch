@@ -11,7 +11,7 @@
 // The `chatFolders` recents are filtered through the shared `isJunkFolder` rule
 // (spec/04 § Folders) so scratch dirs (`/tmp`) and the host's internal
 // `.patch/threads/*` thread dirs never surface as pickable folders. The
-// host-published `daemonFolders` are already filtered at source (the host
+// host-published `hostFolders` are already filtered at source (the host
 // registry applies the SAME rule), so they pass through untouched.
 
 import { isJunkFolder } from '@patch/wire';
@@ -20,11 +20,11 @@ import { isJunkFolder } from '@patch/wire';
  * Build the ordered, de-duped folder option list: host folders first, then
  * (junk-filtered) chat folders. Empty/blank entries are dropped.
  */
-export function folderOptions(daemonFolders: string[], chatFolders: string[]): string[] {
+export function folderOptions(hostFolders: string[], chatFolders: string[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const recents = chatFolders.filter((f) => !isJunkFolder(f));
-  for (const f of [...daemonFolders, ...recents]) {
+  for (const f of [...hostFolders, ...recents]) {
     if (f && !seen.has(f)) {
       seen.add(f);
       out.push(f);
@@ -41,8 +41,8 @@ export function folderOptions(daemonFolders: string[], chatFolders: string[]): s
  * still defaults to a known folder. Returns '' when nothing is known (the
  * custom-path field takes over).
  */
-export function defaultFolder(daemonFolders: string[], chatFolders: string[]): string {
+export function defaultFolder(hostFolders: string[], chatFolders: string[]): string {
   const firstChat = chatFolders.find((f) => f && !isJunkFolder(f));
   if (firstChat) return firstChat;
-  return daemonFolders.find((f) => f) ?? '';
+  return hostFolders.find((f) => f) ?? '';
 }

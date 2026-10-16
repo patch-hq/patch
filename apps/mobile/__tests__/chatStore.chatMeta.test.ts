@@ -13,7 +13,7 @@ import type { ChatListEntry } from '../src/api/rest';
 const ENTRY: ChatListEntry = {
   chatId: 'c1',
   name: 'Chat',
-  daemonId: 'd1',
+  hostId: 'd1',
   folder: '/f',
   activity: 'idle',
   permissionMode: 'auto',

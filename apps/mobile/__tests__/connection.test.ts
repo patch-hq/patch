@@ -9,10 +9,10 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import {
   connectionDotColor,
   offlineBannerText,
-  daemonOfflineBannerText,
-  daemonControlsDisabled,
-  daemonControlDisabledReason,
-  DAEMON_OFFLINE_BANNER,
+  hostOfflineBannerText,
+  hostControlsDisabled,
+  hostControlDisabledReason,
+  HOST_OFFLINE_BANNER,
 } from '../src/lib/connection';
 import { lightColors as colors } from '../src/lib/theme';
 
@@ -61,12 +61,12 @@ describe('connectionDotColor — WS link only', () => {
 
 describe('daemon-offline is a distinct, explained state', () => {
   it('shows the app-level banner only when the host is known-offline', () => {
-    expect(daemonOfflineBannerText('unknown')).toBeNull();
-    expect(daemonOfflineBannerText('online')).toBeNull();
-    expect(daemonOfflineBannerText('offline')).toBe(DAEMON_OFFLINE_BANNER);
+    expect(hostOfflineBannerText('unknown')).toBeNull();
+    expect(hostOfflineBannerText('online')).toBeNull();
+    expect(hostOfflineBannerText('offline')).toBe(HOST_OFFLINE_BANNER);
   });
   it('explains that messages are queued and delivered on reconnect (spec/12)', () => {
-    const text = DAEMON_OFFLINE_BANNER.toLowerCase();
+    const text = HOST_OFFLINE_BANNER.toLowerCase();
     // The daemon-offline state must read as "queued, not lost" — not silent
     // degradation. It names queueing + reconnect, and that voice is paused.
     expect(text).toContain('queued');
@@ -77,32 +77,53 @@ describe('daemon-offline is a distinct, explained state', () => {
 
 describe('daemon-dependent controls disable with an attributed reason', () => {
   it('enabled only when WS connected AND host online', () => {
-    expect(daemonControlsDisabled('connected', 'online')).toBe(false);
-    expect(daemonControlsDisabled('connected', 'offline')).toBe(true);
-    expect(daemonControlsDisabled('reconnecting', 'online')).toBe(true);
-    expect(daemonControlsDisabled('connecting', 'unknown')).toBe(true);
+    expect(hostControlsDisabled('connected', 'online')).toBe(false);
+    expect(hostControlsDisabled('connected', 'offline')).toBe(true);
+    expect(hostControlsDisabled('reconnecting', 'online')).toBe(true);
+    expect(hostControlsDisabled('connecting', 'unknown')).toBe(true);
   });
 
   it('names the host as the reason when the WS is up but the host is down', () => {
-    const reason = daemonControlDisabledReason('connected', 'offline');
+    const reason = hostControlDisabledReason('connected', 'offline');
     expect(reason).not.toBeNull();
     expect(reason!.toLowerCase()).toContain('host');
   });
 
   it('names the connection as the reason when the WS itself is down', () => {
-    expect(daemonControlDisabledReason('reconnecting', 'online')).toMatch(/reconnect/i);
-    expect(daemonControlDisabledReason('offline', 'online')).toMatch(/offline|connection/i);
+    expect(hostControlDisabledReason('reconnecting', 'online')).toMatch(/reconnect/i);
+    expect(hostControlDisabledReason('offline', 'online')).toMatch(/offline|connection/i);
   });
 
   it('returns null (enabled, no reason) when connected + host online', () => {
-    expect(daemonControlDisabledReason('connected', 'online')).toBeNull();
+    expect(hostControlDisabledReason('connected', 'online')).toBeNull();
   });
 
   it('names "Connecting…" while the WS itself is still in its initial connect', () => {
-    expect(daemonControlDisabledReason('connecting', 'unknown')).toBe('Connecting…');
+    expect(hostControlDisabledReason('connecting', 'unknown')).toBe('Connecting…');
   });
 
   it('names the host as "connecting" when the WS is up but host presence is not yet known', () => {
-    expect(daemonControlDisabledReason('connected', 'unknown')).toBe('Connecting to host…');
+    expect(hostControlDisabledReason('connected', 'unknown')).toBe('Connecting to host…');
+  });
+
+  it('names the refused credential when the link is unauthenticated, whatever the host says', () => {
+    for (const daemon of ['unknown', 'online', 'offline'] as const) {
+      const reason = hostControlDisabledReason('unauthenticated', daemon);
+      expect(reason, daemon).toMatch(/link|sign|credential|paired/i);
+    }
+  });
+
+  it('gives a reason exactly when the controls are disabled', () => {
+    for (const conn of [
+      'connecting',
+      'connected',
+      'reconnecting',
+      'offline',
+      'unauthenticated',
+    ] as const)
+      for (const daemon of ['unknown', 'online', 'offline'] as const)
+        expect(hostControlDisabledReason(conn, daemon) !== null, `${conn}/${daemon}`).toBe(
+          hostControlsDisabled(conn, daemon),
+        );
   });
 });

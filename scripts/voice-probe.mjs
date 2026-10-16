@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const require = createRequire(`${REPO}/packages/daemon/`);
+const require = createRequire(`${REPO}/packages/host/`);
 const WebSocket = require('ws');
 
 const arg = (name, fallback) => {
@@ -48,7 +48,7 @@ function envValue(key) {
   return line.slice(key.length + 1).trim().replace(/^["']|["']$/g, '');
 }
 
-/** Byte-identical to the server's mint (see daemon/src/audio/token-verifier.ts). */
+/** Byte-identical to the server's mint (see host/src/audio/token-verifier.ts). */
 function mintVoiceToken({ secret, accountId, surfaceId, sessionId, chatId }) {
   const claims = {
     accountId,

@@ -31,7 +31,8 @@ export function isSaveConflict(err: unknown): boolean {
 /** A byte count as a person reads it: `812 B`, `4.2 KB`, `1.3 MB`. */
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  const kb = (bytes / 1024).toFixed(1);
+  if (bytes < 1024 * 1024 && kb !== '1024.0') return `${kb} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -40,22 +41,22 @@ export function childPath(dir: string, name: string): string {
   return dir === '/' ? `/${name}` : `${dir}/${name}`;
 }
 
-export function filesRoute(daemonId: string, path?: string) {
+export function filesRoute(hostId: string, path?: string) {
   return {
-    pathname: '/hosts/[daemonId]/files' as const,
-    params: path === undefined ? { daemonId } : { daemonId, path },
+    pathname: '/hosts/[hostId]/files' as const,
+    params: path === undefined ? { hostId } : { hostId, path },
   };
 }
 
-export function editRoute(daemonId: string, path: string) {
-  return { pathname: '/hosts/[daemonId]/edit' as const, params: { daemonId, path } };
+export function editRoute(hostId: string, path: string) {
+  return { pathname: '/hosts/[hostId]/edit' as const, params: { hostId, path } };
 }
 
-export function terminalRoute(daemonId: string, folder?: string, command?: string) {
+export function terminalRoute(hostId: string, folder?: string, command?: string) {
   return {
-    pathname: '/hosts/[daemonId]/terminal' as const,
+    pathname: '/hosts/[hostId]/terminal' as const,
     params: {
-      daemonId,
+      hostId,
       ...(folder === undefined ? {} : { folder }),
       ...(command === undefined ? {} : { command }),
     },

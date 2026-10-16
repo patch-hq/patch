@@ -12,7 +12,7 @@
 // process. NO FALLBACK: a corrupt file is reported and the store starts
 // empty, never a silently-wrong draft.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
 
@@ -99,7 +99,9 @@ export class ComposerDraftStore {
   private persist(): void {
     if (!this.path) return;
     mkdirSync(dirname(this.path), { recursive: true });
-    writeFileSync(this.path, JSON.stringify(this.drafts, null, 2), 'utf8');
+    const tmp = `${this.path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(this.drafts, null, 2), 'utf8');
+    renameSync(tmp, this.path);
   }
 
   private emit(change: ComposerDraftChange): void {

@@ -72,6 +72,46 @@ describe('ErrorToasts', () => {
     expect(useUiStore.getState().errors).toHaveLength(0);
   });
 
+  it('gives each toast its own TTL: a later push does not extend an older toast', () => {
+    vi.useFakeTimers();
+    render();
+    actSync(() => {
+      useUiStore.getState().pushError('A');
+    });
+    actSync(() => {
+      vi.advanceTimersByTime(TOAST_TTL_MS - 1000);
+    });
+    actSync(() => {
+      useUiStore.getState().pushError('B');
+    });
+    actSync(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(useUiStore.getState().errors.map((e) => e.message)).toEqual(['B']);
+  });
+
+  it("a repeated message restarts that toast's TTL, and only that toast's", () => {
+    vi.useFakeTimers();
+    render();
+    actSync(() => {
+      useUiStore.getState().pushError('flapping');
+    });
+    actSync(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    actSync(() => {
+      useUiStore.getState().pushError('flapping');
+    });
+    actSync(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(useUiStore.getState().errors.map((e) => e.message)).toEqual(['flapping']);
+    actSync(() => {
+      vi.advanceTimersByTime(3001);
+    });
+    expect(useUiStore.getState().errors).toHaveLength(0);
+  });
+
   it('clears its timers on unmount', () => {
     vi.useFakeTimers();
     const r = render();

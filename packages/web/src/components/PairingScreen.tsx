@@ -67,8 +67,8 @@ export function PairingScreen({
           It prints a long <strong>credential token</strong>, a JWT starting with <code>eyJ…</code>.
         </li>
         <li>
-          Paste that token below. (Not the short <em>pairing code</em>, which authorises a daemon,
-          not a sign-in.)
+          Paste that token below. (Not the short <em>pairing code</em>, which authorises a host, not
+          a sign-in.)
         </li>
       </ol>
       <textarea

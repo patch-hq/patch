@@ -19,7 +19,7 @@ export type TerminalStatus = 'starting' | 'live' | 'ended' | 'error';
 
 export interface HostTerminal {
   sessionId: string;
-  daemonId: string;
+  hostId: string;
   /** Where the shell was asked to start, then where it really did. */
   cwd: string;
   status: TerminalStatus;
@@ -68,7 +68,7 @@ export function undrawn(s: HostTerminal, drawn: number): string {
 interface TerminalState {
   sessions: Record<string, HostTerminal>;
   /** Register a session the caller is about to open on the wire. */
-  start(sessionId: string, daemonId: string, cwd: string): void;
+  start(sessionId: string, hostId: string, cwd: string): void;
   /** Mark a session failed from this side (the open could not even be sent). */
   fail(sessionId: string, message: string): void;
   /** Feed a host → surface terminal frame in. Unknown sessions are ignored. */
@@ -100,13 +100,13 @@ function append(s: HostTerminal, data: string): HostTerminal {
 export const useTerminalStore = create<TerminalState>((set) => ({
   sessions: {},
 
-  start: (sessionId, daemonId, cwd) =>
+  start: (sessionId, hostId, cwd) =>
     set((state) => ({
       sessions: {
         ...state.sessions,
         [sessionId]: {
           sessionId,
-          daemonId,
+          hostId,
           cwd,
           status: 'starting',
           output: [],

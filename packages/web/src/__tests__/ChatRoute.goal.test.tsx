@@ -40,12 +40,13 @@ function seed(
     tokensSpent: number;
     lastVerdict: 'not_met' | null;
     lastReason: string | null;
+    pausedByStop?: boolean;
   } | null = null,
 ): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'fix layout',
       folder: 'foo',
@@ -102,6 +103,35 @@ describe('ChatRoute — /goal command + goal banner', () => {
     const banner = screen.getByTestId('goal-banner');
     expect(banner).toBeInTheDocument();
     expect(banner).toHaveTextContent('Ship the release by Friday');
+  });
+
+  it('shows the goal as paused when the user stopped the chat', () => {
+    seed('Ship the release', {
+      startedAt: Date.now(),
+      turnsEvaluated: 1,
+      tokensSpent: 0,
+      lastVerdict: null,
+      lastReason: null,
+      pausedByStop: true,
+    });
+    renderChat();
+    const banner = screen.getByTestId('goal-banner');
+    expect(banner).toHaveAttribute('data-paused', 'true');
+    expect(screen.getByTestId('goal-banner-reason')).toHaveTextContent(/Paused.*stopped/);
+  });
+
+  it('does not show the goal as paused while it is running', () => {
+    seed('Ship the release', {
+      startedAt: Date.now(),
+      turnsEvaluated: 1,
+      tokensSpent: 0,
+      lastVerdict: null,
+      lastReason: null,
+      pausedByStop: false,
+    });
+    renderChat();
+    expect(screen.getByTestId('goal-banner')).toHaveAttribute('data-paused', 'false');
+    expect(screen.queryByTestId('goal-banner-reason')).not.toBeInTheDocument();
   });
 
   it('does NOT show the goal banner when the chat has no goal', () => {
@@ -174,7 +204,10 @@ describe('ChatRoute — /goal command + goal banner', () => {
       lastReason: 'Tests are still red',
     });
     renderChat();
-    const metrics = screen.getByTestId('goal-banner-metrics');
+    expect(screen.getByTestId('goal-banner-cell-time')).toHaveTextContent('9m');
+    expect(screen.getByTestId('goal-banner-cell-turns')).toHaveTextContent('3 turns');
+    expect(screen.getByTestId('goal-banner-cell-tokens')).toHaveTextContent('8.2k tokens');
+    const metrics = screen.getByTestId('goal-banner-meta');
     expect(metrics).toHaveTextContent('9m');
     expect(metrics).toHaveTextContent('3 turns');
     expect(metrics).toHaveTextContent('8.2k tokens');

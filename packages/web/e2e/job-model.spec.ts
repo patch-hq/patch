@@ -17,8 +17,8 @@ const NEW_JOB = '/app/dev-harness.html?route=/jobs/new';
 
 const HOSTS = {
   hosts: [
-    { daemonId: 'd1', roots: ['/home/tom/alpha'], recent: [] },
-    { daemonId: 'd2', roots: ['/home/tom/beta'], recent: [] },
+    { hostId: 'd1', roots: ['/home/tom/alpha'], recent: [] },
+    { hostId: 'd2', roots: ['/home/tom/beta'], recent: [] },
   ],
 };
 
@@ -44,11 +44,11 @@ async function stub(page: import('@playwright/test').Page): Promise<void> {
     }),
   );
   await page.route('**/api/models**', (route) => {
-    const daemonId = new URL(route.request().url()).searchParams.get('daemonId') ?? '';
+    const hostId = new URL(route.request().url()).searchParams.get('hostId') ?? '';
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ models: CATALOGUE[daemonId] ?? [] }),
+      body: JSON.stringify({ models: CATALOGUE[hostId] ?? [] }),
     });
   });
   await page.route('**/api/skills**', (route) =>

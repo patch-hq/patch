@@ -86,6 +86,30 @@ describe('changes', () => {
     expect(store.journalFor('settings').map((j) => j.op)).toEqual(['add', 'update', 'remove']);
     expect(store.get('settings')!.changes).toHaveLength(0);
   });
+  it('rejects an update whose fields have the wrong type, instead of storing it', () => {
+    const c = store.addChange('settings', {
+      kind: 'note',
+      screen: 'home',
+      target: T,
+      text: 'a',
+      offset: { x: 1, y: 2 },
+    });
+    expect(() => store.updateChange('settings', c.id, { text: null })).toThrow(PadError);
+    expect(() => store.updateChange('settings', c.id, { text: '   ' })).toThrow(PadError);
+    expect(() => store.updateChange('settings', c.id, { offset: 'x' })).toThrow(PadError);
+    expect(() => store.updateChange('settings', c.id, { offset: { x: 'a', y: 1 } })).toThrow(
+      PadError,
+    );
+    expect(() => store.updateChange('settings', c.id, { dx: 'far' })).toThrow(PadError);
+    expect((store.get('settings')!.changes[0] as { text: string }).text).toBe('a');
+  });
+  it('rejects a viewport that is not an object as a 400, not a crash', () => {
+    for (const viewport of [null, 5, 'wide']) {
+      expect(() => validateChange({ kind: 'delete', target: T, screen: 'home', viewport })).toThrow(
+        PadError,
+      );
+    }
+  });
   it('rejects bad input loudly', () => {
     expect(() =>
       validateChange({ kind: 'move', target: T, screen: 'home', dx: 'x', dy: 1 }),
@@ -104,6 +128,25 @@ describe('changes', () => {
         width: 3,
       }),
     ).toThrow(/points/);
+  });
+  it('a drawn shape keeps its outline points and names the shape; unknown shapes are rejected', () => {
+    const base = { kind: 'draw', target: T, screen: 'home', color: '#e5484d', width: 3 };
+    const pts = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+      [0, 0],
+    ];
+    const ok = validateChange({ ...base, points: pts, shape: 'rectangle' }) as Record<
+      string,
+      unknown
+    >;
+    expect(ok['shape']).toBe('rectangle');
+    expect(() => validateChange({ ...base, points: pts, shape: 'blob' })).toThrow(/shape must be/);
+    const c = { ...ok, id: 'x', status: 'pending', createdAt: 0 } as never;
+    expect(describeChange(c)).toContain('Drew a rectangle on');
+    expect(describeChange({ ...(c as object), shape: undefined } as never)).toContain('Drew on');
   });
   it('a corrupt pad.json is a loud failure, not an empty pad', () => {
     writeFileSync(join(store.dir('settings'), 'pad.json'), '{ nope');

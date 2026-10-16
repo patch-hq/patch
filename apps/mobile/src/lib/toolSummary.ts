@@ -10,7 +10,7 @@
 // a pure function here because the mobile transcript is a FlatList and needs
 // its rows as data.
 
-import { folderName, isGroupableToolCall } from '@patch/wire';
+import { folderName, isGroupableToolCall, type SnoozeRecord } from '@patch/wire';
 
 import type { ChatEventEntry } from '../stores/chatStore';
 
@@ -20,20 +20,14 @@ const MAX_DESCRIPTION = 60;
 const MAX_COMMAND = 40;
 
 function clip(text: string, max: number): string {
-  const line = text.split('\n')[0]?.trim() ?? '';
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-}
-
-/** The run's status line: the agent's own sentence just before it ("Researching how to set up shaver…"). */
-const MAX_NARRATION = 80;
-
-export function runNarration(
-  prev: { kind: string; role?: string | undefined; content?: string | undefined } | undefined,
-): string | null {
-  if (!prev || prev.kind !== 'message' || prev.role !== 'assistant') return null;
-  const line = (prev.content ?? '').split('\n').find((l) => l.trim() !== '') ?? '';
-  const text = clip(line.replace(/^[-*#>\s]+/, '').replace(/\*\*/g, ''), MAX_NARRATION);
-  return text === '' ? null : text;
+  const line =
+    text
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l !== '') ?? '';
+  // Cut on code points: a code-unit slice can split an emoji's surrogate pair.
+  const chars = Array.from(line);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : line;
 }
 
 function str(args: Record<string, unknown>, key: string): string | undefined {
@@ -214,7 +208,42 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
 /** A transcript row: either one timeline entry, or a folded run of tool entries. */
 export type TimelineRow =
   | { kind: 'entry'; key: string; entry: ChatEventEntry; result?: ChatEventEntry }
-  | { kind: 'group'; key: string; entries: ChatEventEntry[]; narration: string | null };
+  | { kind: 'group'; key: string; entries: ChatEventEntry[] }
+  /** Where a snooze began (spec/04 § Snooze → Back): a permanent divider, not a message. */
+  | { kind: 'snooze'; key: string; record: SnoozeRecord };
+
+/** The first message seq a row stands for, or `null` for a row that is not a message. */
+export function rowFirstSeq(row: TimelineRow): number | null {
+  if (row.kind === 'snooze') return null;
+  return row.kind === 'group' ? (row.entries[0]?.seq ?? null) : row.entry.seq;
+}
+
+/**
+ * Put each snooze's divider before the first row that comes after the log
+ * position the snooze began at; one that began after everything drawn closes
+ * the transcript. Chronological in, chronological out.
+ */
+export function insertSnoozeDividers(
+  rows: TimelineRow[],
+  records: readonly SnoozeRecord[] | undefined,
+): TimelineRow[] {
+  if (!records || records.length === 0) return rows;
+  const out: TimelineRow[] = [];
+  const placed = new Set<number>();
+  const place = (seq: number | null): void => {
+    records.forEach((record, i) => {
+      if (placed.has(i) || (seq !== null && seq <= record.startSeq)) return;
+      placed.add(i);
+      out.push({ kind: 'snooze', key: `snooze-${record.startedAt}`, record });
+    });
+  };
+  for (const row of rows) {
+    place(rowFirstSeq(row));
+    out.push(row);
+  }
+  place(null);
+  return out;
+}
 
 /**
  * Can this entry be folded into a run? A file-edit call renders its own inline
@@ -254,10 +283,31 @@ export function pairedResult(timeline: ChatEventEntry[], i: number): ChatEventEn
  */
 export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
   const rows: TimelineRow[] = [];
+  // Each `view_file` call paired with its OWN result (matched by `callId`, not
+  // by adjacency: a batch puts the call and its result several entries apart),
+  // and the indices of the results those pairs use up. Its row IS the file, so
+  // it has to take its result; and that result must not be drawn again.
+  const viewFileResult = new Map<number, ChatEventEntry>();
+  const usedByViewFile = new Set<number>();
+  for (let k = 0; k < timeline.length; k++) {
+    const call = timeline[k];
+    if (!call || call.kind !== 'tool_call' || !isViewFileCall(call) || !call.callId) continue;
+    const j = timeline.findIndex(
+      (e, at) => at > k && e.kind === 'tool_result' && e.callId === call.callId,
+    );
+    const found = j === -1 ? undefined : timeline[j];
+    if (!found) continue;
+    viewFileResult.set(k, found);
+    usedByViewFile.add(j);
+  }
   let i = 0;
   while (i < timeline.length) {
     const entry = timeline[i];
     if (!entry) break;
+    if (usedByViewFile.has(i)) {
+      i++;
+      continue;
+    }
     if (isGroupable(entry)) {
       let end = i;
       let calls = 0;
@@ -271,8 +321,7 @@ export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
         rows.push({
           kind: 'group',
           key: `g-${entry.seq}-${i}`,
-          entries: timeline.slice(i, end),
-          narration: runNarration(timeline[i - 1]),
+          entries: timeline.slice(i, end).filter((_, o) => !usedByViewFile.has(i + o)),
         });
         i = end;
         continue;
@@ -286,16 +335,11 @@ export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
         }
       }
     }
-    // A `view_file` is never grouped, but its row IS the file, so it still has
-    // to take its own result: the ack carries the URL the row renders. Left
-    // unpaired, the result became a separate "done" row and no file showed.
-    if (entry.kind === 'tool_call' && isViewFileCall(entry)) {
-      const result = pairedResult(timeline, i);
-      if (result) {
-        rows.push({ kind: 'entry', key: `${entry.seq}-${i}`, entry, result });
-        i += 2;
-        continue;
-      }
+    const fileResult = viewFileResult.get(i);
+    if (fileResult) {
+      rows.push({ kind: 'entry', key: `${entry.seq}-${i}`, entry, result: fileResult });
+      i++;
+      continue;
     }
     rows.push({ kind: 'entry', key: `${entry.seq}-${i}`, entry });
     i++;

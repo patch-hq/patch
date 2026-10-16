@@ -37,6 +37,7 @@ vi.mock('../src/api/rest', () => ({
     orderAccounts: vi.fn(),
     setAccountStrategy: vi.fn(),
     adoptAccount: vi.fn(),
+    usageReport: vi.fn(),
   },
 }));
 
@@ -73,6 +74,7 @@ const query = (r: ReactTestRenderer, id: string) => queryHost(r.root, byTestId(i
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.usageReport).mockResolvedValue({ samples: [], chats: [] });
   __clearLastAlert();
   resetHosts();
   seedSettings({
@@ -102,6 +104,11 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     useSettingsStore.getState()._reset();
     const r1 = await render();
     expect(query(r1, 'usage-loading')).not.toBeNull();
+    useSettingsStore.setState({ error: 'no answer from the server after 10s' });
+    const rErr = await render();
+    expect(textOf(get(rErr, 'usage-error'))).toContain('no answer from the server');
+    expect(query(rErr, 'usage-loading')).toBeNull();
+    useSettingsStore.getState()._reset();
     seedSettings();
     const r2 = await render();
     expect(textOf(get(r2, 'accounts-empty-codex'))).toContain('No ChatGPT accounts yet');
@@ -110,10 +117,10 @@ describe('mobile Settings → Usage — the shared accounts', () => {
   it('shows the freshest usage reading any host took', async () => {
     reportHost('h1', { hostName: 'hetzner' });
     reportHost('h2', { hostName: 'mac', isHomeHost: false });
-    const report = (daemonId: string, utilization: number, at: number) =>
+    const report = (hostId: string, utilization: number, at: number) =>
       usePresenceStore.getState().setHostAccount({
-        type: 'daemon.account',
-        daemonId,
+        type: 'host.account',
+        hostId,
         backendId: 'claude-code',
         connected: true,
         accountEmail: null,
@@ -211,7 +218,7 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'host.backend_add_account',
-        daemonId: 'h1',
+        hostId: 'h1',
         backendId: 'codex',
         authMethod: 'device',
       }),
@@ -229,5 +236,23 @@ describe('mobile Settings → Usage — the shared accounts', () => {
       await flush();
     });
     expect(api.setPreferences).toHaveBeenCalledWith({ autoResumeRateLimit: false });
+  });
+
+  it('title and status generation toggles write the shared settings', async () => {
+    vi.mocked(api.setPreferences).mockImplementation(async (patch) => ({
+      preferences: { ...DEFAULT_SHARED_SETTINGS, ...patch },
+    }));
+    const r = await render();
+    expect(get(r, 'title-generation').props.value).toBe(true);
+    await actAsync(async () => {
+      get(r, 'title-generation').props.onValueChange(false);
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ titleGenerationEnabled: false });
+    await actAsync(async () => {
+      get(r, 'status-generation').props.onValueChange(false);
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ statusGenerationEnabled: false });
   });
 });

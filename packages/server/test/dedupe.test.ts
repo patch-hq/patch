@@ -15,6 +15,16 @@ describe('InputDedupe', () => {
     expect(d.observe('acct', 'chat-1', 'local-2', 1002)).toBe(true);
   });
 
+  it('frees the entries and buckets of chats that went quiet once their retention has passed', () => {
+    const d = new InputDedupe(1_000, 5_000);
+    for (let i = 0; i < 100; i++) d.observe('acct', `chat-${i}`, 'l1', 1000);
+    expect(d.bucketCount()).toBe(100);
+    // Ten minutes on, one unrelated chat speaks: the 100 silent ones are long expired.
+    d.observe('acct', 'other', 'l1', 601_000);
+    expect(d.size()).toBe(1);
+    expect(d.bucketCount()).toBe(1);
+  });
+
   it('evicts entries older than retentionMs', () => {
     const d = new InputDedupe(10_000, 5_000);
     d.observe('a', 'c', 'a', 1000);

@@ -14,7 +14,7 @@
       "path": "packages/server"
     },
     {
-      "path": "packages/daemon"
+      "path": "packages/host"
     },
     {
       "path": "packages/cli"

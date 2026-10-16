@@ -59,7 +59,7 @@ function seed(): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder: 'foo',
@@ -240,6 +240,20 @@ describe('ChatRoute — background task bar', () => {
       expect(preview.textContent!.length).toBeLessThan(long.length);
       fireEvent.click(preview);
       expect(screen.getByTestId('background-task-bar-command').textContent).toBe(long);
+    });
+
+    it('never cuts the preview through the middle of an emoji', async () => {
+      const cmd = `${'a'.repeat(47)}😀${'b'.repeat(20)}`;
+      await renderWithTasks(1, [task({ command: cmd })]);
+      expect(screen.getByTestId('background-task-bar-command').textContent).toBe(
+        `${'a'.repeat(47)}😀…`,
+      );
+    });
+
+    it('a command short in characters but long in UTF-16 units is shown in full, no ellipsis', async () => {
+      const cmd = '😀'.repeat(30);
+      await renderWithTasks(1, [task({ command: cmd })]);
+      expect(screen.getByTestId('background-task-bar-command').textContent).toBe(cmd);
     });
 
     it('clicking the command preview does not also open the terminal', async () => {

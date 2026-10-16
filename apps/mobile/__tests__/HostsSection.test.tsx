@@ -27,7 +27,7 @@ import {
   hostSubtitle,
   platformLabel,
 } from '../src/components/settings/HostsSection';
-import HostScreen from '../app/hosts/[daemonId]/index';
+import HostScreen from '../app/hosts/[hostId]/index';
 import { usePresenceStore, type HostPresence } from '../src/stores/presenceStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { api, ApiError } from '../src/api/rest';
@@ -57,9 +57,9 @@ vi.mock('../src/api/rest', () => {
   return {
     ApiError,
     api: {
-      daemonManifest: vi.fn(),
-      daemonInstallCommand: vi.fn(),
-      daemonPairStart: vi.fn(),
+      hostManifest: vi.fn(),
+      hostInstallCommand: vi.fn(),
+      hostPairStart: vi.fn(),
       removeHost: vi.fn(),
       addAccount: vi.fn(async () => SHARED),
       adoptAccount: vi.fn(async () => SHARED),
@@ -76,8 +76,8 @@ function pressAlertButton(text: string): Promise<void> {
   return actAsync(() => button.onPress?.());
 }
 
-function unreported(daemonId: string): HostPresence {
-  return { daemonId, online: false, lastSeenAt: null, host: null, accounts: {} };
+function unreported(hostId: string): HostPresence {
+  return { hostId, online: false, lastSeenAt: null, host: null, accounts: {} };
 }
 
 // Every tree is unmounted after its test: a host page left mounted would see
@@ -137,6 +137,18 @@ describe('mobile Settings → Hosts → the list', () => {
     );
   });
 
+  it('subtitles a host that reports a battery with its charge and power source', () => {
+    reportHost('mac', { platform: 'darwin', power: { onBattery: true, percent: 12 } });
+    reportHost('desk', { platform: 'darwin', power: { onBattery: false, percent: 80 } });
+    const r = render(<HostsSection />);
+    expect(textOf(findHost(r.root, byTestId('host-mac-status')))).toBe(
+      'macOS · online · 12% on battery',
+    );
+    expect(textOf(findHost(r.root, byTestId('host-desk-status')))).toBe(
+      'macOS · online · 80% plugged in',
+    );
+  });
+
   it('hostSubtitle / platformLabel read the reported platform plainly', () => {
     expect(platformLabel('darwin')).toBe('macOS');
     expect(platformLabel('linux')).toBe('Linux');
@@ -154,7 +166,7 @@ describe('mobile Settings → Hosts → the list', () => {
     const r = render(<HostsSection />);
     expect(queryHost(r.root, byTestId('host-host-a-update'))).toBeNull();
     await actAsync(() => findHost(r.root, byTestId('host-host-b-update')).props.onPress());
-    expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', daemonId: 'host-b' });
+    expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-b' });
   });
 
   it('an update aimed at an offline machine is refused, naming it', async () => {
@@ -181,14 +193,14 @@ describe('mobile Settings → Hosts → the list', () => {
     const r = render(<HostsSection />);
     findHost(r.root, byTestId('host-host-a')).props.onPress();
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]',
-      params: { daemonId: 'host-a' },
+      pathname: '/hosts/[hostId]',
+      params: { hostId: 'host-a' },
     });
     // A machine that has not reported still opens (to be removed, if nothing else).
     findHost(r.root, byTestId('host-quiet')).props.onPress();
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]',
-      params: { daemonId: 'quiet' },
+      pathname: '/hosts/[hostId]',
+      params: { hostId: 'quiet' },
     });
   });
 
@@ -202,17 +214,17 @@ describe('mobile Settings → Hosts → the list', () => {
 
 describe('mobile Settings → Hosts → Add a host', () => {
   beforeEach(() => {
-    vi.mocked(api.daemonManifest).mockResolvedValue({
+    vi.mocked(api.hostManifest).mockResolvedValue({
       version: '0.1.9',
       artifacts: [{ target: 'linux-x64' }, { target: 'darwin-arm64' }],
     });
-    vi.mocked(api.daemonInstallCommand).mockResolvedValue({
+    vi.mocked(api.hostInstallCommand).mockResolvedValue({
       os: 'macos',
       version: '0.1.9',
       targets: [],
       command: 'curl -fsSL https://x/install.sh | sh',
     });
-    vi.mocked(api.daemonPairStart).mockResolvedValue({ nonce: 'ABC-123', expiresAt: 1 });
+    vi.mocked(api.hostPairStart).mockResolvedValue({ nonce: 'ABC-123', expiresAt: 1 });
   });
 
   async function openAddHost(): Promise<ReactTestRenderer> {
@@ -234,14 +246,14 @@ describe('mobile Settings → Hosts → Add a host', () => {
 
   it('opens on demand with the server’s command, published platforms and a pairing code', async () => {
     const r0 = render(<HostsPage />);
-    expect(api.daemonManifest).not.toHaveBeenCalled();
+    expect(api.hostManifest).not.toHaveBeenCalled();
     expect(queryHost(r0.root, byTestId('add-host-panel'))).toBeNull();
     r0.unmount();
 
     const r = await openAddHost();
     // The header button gives way to the panel's own Close.
     expect(queryHost(r.root, byTestId('add-host'))).toBeNull();
-    expect(api.daemonInstallCommand).toHaveBeenCalledWith('macos');
+    expect(api.hostInstallCommand).toHaveBeenCalledWith('macos');
     expect(textOf(findHost(r.root, byTestId('add-host-command')))).toBe(
       'curl -fsSL https://x/install.sh | sh',
     );
@@ -253,33 +265,33 @@ describe('mobile Settings → Hosts → Add a host', () => {
   });
 
   it('offers only the operating systems actually published', async () => {
-    vi.mocked(api.daemonManifest).mockResolvedValue({
+    vi.mocked(api.hostManifest).mockResolvedValue({
       version: '0.1.9',
       artifacts: [{ target: 'linux-arm64' }],
     });
     const r = await openAddHost();
-    expect(api.daemonInstallCommand).toHaveBeenCalledWith('linux');
+    expect(api.hostInstallCommand).toHaveBeenCalledWith('linux');
     expect(textOf(findHost(r.root, byTestId('add-host-platforms')))).toBe('Builds: Linux');
   });
 
   it('nothing published: says so and mints no code', async () => {
-    vi.mocked(api.daemonManifest).mockResolvedValue({ version: '0', artifacts: [] });
+    vi.mocked(api.hostManifest).mockResolvedValue({ version: '0', artifacts: [] });
     const r = await openAddHost();
     expect(findHost(r.root, byTestId('add-host-error'))).toBeTruthy();
-    expect(api.daemonPairStart).not.toHaveBeenCalled();
+    expect(api.hostPairStart).not.toHaveBeenCalled();
     expect(queryHost(r.root, byTestId('pairing-code'))).toBeNull();
   });
 
   it('a manifest that cannot be fetched is treated as nothing published', async () => {
-    vi.mocked(api.daemonManifest).mockRejectedValue(new Error('HTTP 503'));
+    vi.mocked(api.hostManifest).mockRejectedValue(new Error('HTTP 503'));
     const r = await openAddHost();
     expect(findHost(r.root, byTestId('add-host-error'))).toBeTruthy();
-    expect(api.daemonPairStart).not.toHaveBeenCalled();
+    expect(api.hostPairStart).not.toHaveBeenCalled();
   });
 
   it('a refused command and a failed code are each said in words, with Retry for the code', async () => {
-    vi.mocked(api.daemonInstallCommand).mockRejectedValue(new Error('no_public_url: nope'));
-    vi.mocked(api.daemonPairStart).mockRejectedValueOnce(new Error('HTTP 500'));
+    vi.mocked(api.hostInstallCommand).mockRejectedValue(new Error('no_public_url: nope'));
+    vi.mocked(api.hostPairStart).mockRejectedValueOnce(new Error('HTTP 500'));
     const r = await openAddHost();
     expect(textOf(findHost(r.root, byTestId('add-host-command-error')))).toMatch(
       /no public address configured/,
@@ -300,7 +312,7 @@ describe('mobile Settings → Hosts → Add a host', () => {
       ['no_build_for_os: macos', 'No host build has been published for that operating system yet.'],
       ['something else', 'something else'],
     ] as const) {
-      vi.mocked(api.daemonInstallCommand).mockRejectedValueOnce(new Error(code));
+      vi.mocked(api.hostInstallCommand).mockRejectedValueOnce(new Error(code));
       const r = await openAddHost();
       expect(textOf(findHost(r.root, byTestId('add-host-command-error')))).toBe(words);
       r.unmount();
@@ -311,9 +323,9 @@ describe('mobile Settings → Hosts → Add a host', () => {
 // ── one host's page ─────────────────────────────────────────────────────────
 
 describe('mobile Settings → Hosts → a host’s page', () => {
-  it('is routed at /hosts/[daemonId], titled with the host’s name', () => {
+  it('is routed at /hosts/[hostId], titled with the host’s name', () => {
     reportHost('h1', { hostName: 'laptop' });
-    __setLocalSearchParams({ daemonId: 'h1' });
+    __setLocalSearchParams({ hostId: 'h1' });
     const r = render(<HostScreen />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('laptop');
     expect(findHost(r.root, byTestId('host-h1-name-input')).props.value).toBe('laptop');
@@ -321,7 +333,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   });
 
   it('an unknown or removed host says it is gone', () => {
-    const r = render(<HostDetail daemonId="nope" />);
+    const r = render(<HostDetail hostId="nope" />);
     expect(textOf(findHost(r.root, byTestId('host-detail-gone')))).toBe(
       'This host is no longer on the account',
     );
@@ -332,7 +344,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
   it('a host that has not reported shows only that, and can still be removed', () => {
     usePresenceStore.setState({ hosts: { quiet: unreported('quiet') } });
-    const r = render(<HostDetail daemonId="quiet" />);
+    const r = render(<HostDetail hostId="quiet" />);
     expect(textOf(findHost(r.root, byTestId('host-quiet-status')))).toBe('awaiting first report');
     expect(queryHost(r.root, byTestId('host-quiet-name-input'))).toBeNull();
     expect(queryHost(r.root, byTestId('host-quiet-files'))).toBeNull();
@@ -344,15 +356,15 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       hostName: 'laptop',
       platform: 'linux',
       arch: 'x64',
-      daemonVersion: '0.2.0',
+      hostVersion: '0.2.0',
     });
-    const r = render(<HostDetail daemonId="h1" />);
+    const r = render(<HostDetail hostId="h1" />);
     expect(textOf(findHost(r.root, byTestId('host-h1-status')))).toBe('Online');
     expect(textOf(findHost(r.root, byTestId('host-h1-platform')))).toBe('Linux x64');
     expect(textOf(r.root)).toContain('Host 0.2.0');
     expect(queryHost(r.root, byTestId('host-h1-update'))).toBeNull();
     reportHost('h1', { hostName: 'laptop' }, false);
-    const r2 = render(<HostDetail daemonId="h1" />);
+    const r2 = render(<HostDetail hostId="h1" />);
     expect(textOf(findHost(r2.root, byTestId('host-h1-status')))).toBe('Offline');
     expect(textOf(r2.root)).toMatch(/seen \d+s ago/);
   });
@@ -360,7 +372,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   describe('Name', () => {
     it('renames the machine; Save appears only once the name changes', async () => {
       reportHost('h1', { hostName: 'laptop' });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       const input = (): ReturnType<typeof findHost> =>
         findHost(r.root, byTestId('host-h1-name-input'));
       expect(input().props.value).toBe('laptop');
@@ -369,7 +381,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       await actAsync(() => findHost(r.root, byTestId('host-h1-rename-save')).props.onPress());
       expect(wsMock.send).toHaveBeenCalledWith({
         type: 'host.rename',
-        daemonId: 'h1',
+        hostId: 'h1',
         hostName: 'studio',
       });
       // The host's next report settles it.
@@ -380,7 +392,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('an empty name is refused, and the field goes back to the real name', async () => {
       reportHost('h1', { hostName: 'laptop' });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       const input = (): ReturnType<typeof findHost> =>
         findHost(r.root, byTestId('host-h1-name-input'));
       await actAsync(() => input().props.onChangeText('  '));
@@ -396,7 +408,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('submitting the unchanged name sends nothing', async () => {
       reportHost('h1', { hostName: 'laptop' });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await actAsync(() =>
         findHost(r.root, byTestId('host-h1-name-input')).props.onChangeText('laptop '),
       );
@@ -409,7 +421,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('a rename to an offline machine is refused and the field reverts', async () => {
       reportHost('h1', { hostName: 'laptop' }, false);
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       const input = (): ReturnType<typeof findHost> =>
         findHost(r.root, byTestId('host-h1-name-input'));
       await actAsync(() => input().props.onChangeText('studio'));
@@ -423,13 +435,13 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
   it('Update and Make home send their frames; the home machine says so instead', async () => {
     reportHost('h1', { hostName: 'laptop', updateAvailable: true });
-    const r = render(<HostDetail daemonId="h1" />);
+    const r = render(<HostDetail hostId="h1" />);
     expect(queryHost(r.root, byTestId('host-h1-home'))).toBeNull();
     await actAsync(() => findHost(r.root, byTestId('host-h1-update')).props.onPress());
     await actAsync(() => findHost(r.root, byTestId('host-h1-set-home')).props.onPress());
     expect(wsMock.send.mock.calls.map((c) => c[0])).toEqual([
-      { type: 'host.update', daemonId: 'h1' },
-      { type: 'host.set_home', daemonId: 'h1' },
+      { type: 'host.update', hostId: 'h1' },
+      { type: 'host.set_home', hostId: 'h1' },
     ]);
     await actAsync(() => reportHost('h1', { hostName: 'laptop', isHomeHost: true }));
     expect(queryHost(r.root, byTestId('host-h1-set-home'))).toBeNull();
@@ -438,7 +450,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
   it('Make home on an offline machine is refused, naming it', async () => {
     reportHost('h1', { hostName: 'laptop' }, false);
-    const r = render(<HostDetail daemonId="h1" />);
+    const r = render(<HostDetail hostId="h1" />);
     await actAsync(() => findHost(r.root, byTestId('host-h1-set-home')).props.onPress());
     expect(wsMock.send).not.toHaveBeenCalled();
     expect(__getLastAlert()?.title).toBe('Make home failed');
@@ -448,7 +460,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   describe('Agents', () => {
     it('is absent when the host reports no backends', () => {
       reportHost('h1', { hostName: 'laptop' });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       expect(queryHost(r.root, byTestId('host-h1-backends'))).toBeNull();
     });
 
@@ -460,7 +472,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
           { id: 'codex', label: 'Codex', version: null, state: 'failed', error: 'boom' },
         ],
       });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       expect(textOf(findHost(r.root, byTestId('host-h1-backend-claude-code')))).toBe(
         '2.1.0 · present',
       );
@@ -474,7 +486,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
         hostName: 'laptop',
         backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'logged-out' }],
       });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       expect(queryHost(r.root, byTestId('host-h1-signin-token'))).toBeNull();
       await actAsync(() =>
         findHost(r.root, byTestId('host-h1-backend-claude-code-connect')).props.onPress(),
@@ -497,7 +509,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
         hostName: 'laptop',
         backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'absent' }],
       });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       const connect = (): ReturnType<typeof findHost> =>
         findHost(r.root, byTestId('host-h1-backend-claude-code-connect'));
       await actAsync(() => connect().props.onPress());
@@ -514,7 +526,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     it('a settings.json changed on the machine is shown, with Keep and Discard', async () => {
       reportHost('h1', { hostName: 'laptop', platform: 'linux' });
       usePresenceStore.getState().setClaudeSettings('h1', '{"model":"sonnet"}', []);
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       expect(textOf(findHost(r.root, byTestId('host-h1-claude-drift-text')))).toContain('sonnet');
       await actAsync(async () => {
         findHost(r.root, byTestId('host-h1-claude-drift-keep-os')).props.onPress();
@@ -526,7 +538,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       );
       expect(wsMock.send).toHaveBeenCalledWith({
         type: 'host.claude_settings_discard',
-        daemonId: 'h1',
+        hostId: 'h1',
       });
     });
 
@@ -541,7 +553,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
         },
         false,
       );
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await actAsync(() =>
         findHost(r.root, byTestId('host-h1-backend-claude-code-connect')).props.onPress(),
       );
@@ -557,7 +569,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
         hostName: 'laptop',
         backends: [{ id: 'codex', label: 'Codex', version: null, state: 'absent' }],
       });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await actAsync(() =>
         findHost(r.root, byTestId('host-h1-backend-codex-connect')).props.onPress(),
       );
@@ -581,13 +593,13 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('is absent when the host reports none', () => {
       reportHost('h1', { hostName: 'laptop' });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       expect(queryHost(r.root, byTestId('host-h1-components'))).toBeNull();
     });
 
     it('states each component and offers the action its state allows', () => {
       reportHost('h1', { hostName: 'laptop', components: [...COMPONENTS] });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       const row = (id: string): string =>
         textOf(findHost(r.root, byTestId(`host-h1-component-${id}`)));
       expect(row('kokoro')).toContain('340.0 MB');
@@ -606,7 +618,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('Install and Retry send host.component_install', async () => {
       reportHost('h1', { hostName: 'laptop', components: [...COMPONENTS] });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await actAsync(() =>
         findHost(r.root, byTestId('host-h1-component-kokoro-install')).props.onPress(),
       );
@@ -614,14 +626,14 @@ describe('mobile Settings → Hosts → a host’s page', () => {
         findHost(r.root, byTestId('host-h1-component-vad-install')).props.onPress(),
       );
       expect(wsMock.send.mock.calls.map((c) => c[0])).toEqual([
-        { type: 'host.component_install', daemonId: 'h1', componentId: 'kokoro' },
-        { type: 'host.component_install', daemonId: 'h1', componentId: 'vad' },
+        { type: 'host.component_install', hostId: 'h1', componentId: 'kokoro' },
+        { type: 'host.component_install', hostId: 'h1', componentId: 'vad' },
       ]);
     });
 
     it('Install on an offline machine is refused, naming it', async () => {
       reportHost('h1', { hostName: 'laptop', components: [...COMPONENTS] }, false);
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await actAsync(() =>
         findHost(r.root, byTestId('host-h1-component-kokoro-install')).props.onPress(),
       );
@@ -631,7 +643,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('Remove asks first; Cancel sends nothing, Remove sends host.component_remove', async () => {
       reportHost('h1', { hostName: 'laptop', components: [...COMPONENTS] });
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       const remove = (): Promise<void> =>
         actAsync(() =>
           findHost(r.root, byTestId('host-h1-component-whisper-remove')).props.onPress(),
@@ -647,7 +659,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       await pressAlertButton('Remove');
       expect(wsMock.send).toHaveBeenCalledWith({
         type: 'host.component_remove',
-        daemonId: 'h1',
+        hostId: 'h1',
         componentId: 'whisper',
       });
     });
@@ -658,29 +670,29 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   describe('Tools', () => {
     it('opens that machine’s Files and Terminal', () => {
       reportHost('host-a', { hostName: 'laptop' });
-      const r = render(<HostDetail daemonId="host-a" />);
+      const r = render(<HostDetail hostId="host-a" />);
       findHost(r.root, byTestId('host-host-a-files')).props.onPress();
       expect(routerMock.push).toHaveBeenLastCalledWith({
-        pathname: '/hosts/[daemonId]/files',
-        params: { daemonId: 'host-a' },
+        pathname: '/hosts/[hostId]/files',
+        params: { hostId: 'host-a' },
       });
       findHost(r.root, byTestId('host-host-a-terminal')).props.onPress();
       expect(routerMock.push).toHaveBeenLastCalledWith({
-        pathname: '/hosts/[daemonId]/terminal',
-        params: { daemonId: 'host-a' },
+        pathname: '/hosts/[hostId]/terminal',
+        params: { hostId: 'host-a' },
       });
     });
 
     it('are unpressable while the machine is offline or the link is down', () => {
       reportHost('host-a', { hostName: 'laptop' }, false);
-      const offline = render(<HostDetail daemonId="host-a" />);
+      const offline = render(<HostDetail hostId="host-a" />);
       expect(findHost(offline.root, byTestId('host-host-a-files')).props.onPress).toBeUndefined();
       expect(
         findHost(offline.root, byTestId('host-host-a-terminal')).props.onPress,
       ).toBeUndefined();
       usePresenceStore.getState().setHostOnline('host-a', true);
       usePresenceStore.getState().setConnection('offline');
-      const linkDown = render(<HostDetail daemonId="host-a" />);
+      const linkDown = render(<HostDetail hostId="host-a" />);
       expect(findHost(linkDown.root, byTestId('host-host-a-files')).props.onPress).toBeUndefined();
       expect(
         findHost(linkDown.root, byTestId('host-host-a-terminal')).props.onPress,
@@ -699,7 +711,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     }
 
     it('asks first, naming the machine; Cancel does nothing', async () => {
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await askToRemove(r);
       expect(__getLastAlert()).toMatchObject({
         title: 'Remove laptop?',
@@ -713,7 +725,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('on confirm removes it from the account, drops it here and goes back', async () => {
       vi.mocked(api.removeHost).mockResolvedValue(undefined as never);
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await askToRemove(r);
       await pressAlertButton('Remove');
       await flush();
@@ -732,7 +744,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
           resolve = r;
         }) as never,
       );
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await askToRemove(r);
       await pressAlertButton('Remove');
       const button = findHost(r.root, byTestId('host-h1-remove'));
@@ -749,7 +761,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       vi.mocked(api.removeHost).mockRejectedValue(
         new ApiError(404, 'HTTP 404', { error: 'not_found' }),
       );
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await askToRemove(r);
       await pressAlertButton('Remove');
       await flush();
@@ -767,7 +779,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
 
     it('any other failure says the error itself', async () => {
       vi.mocked(api.removeHost).mockRejectedValue(new ApiError(500, 'HTTP 500: boom', null));
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await askToRemove(r);
       await pressAlertButton('Remove');
       await flush();
@@ -782,7 +794,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     });
 
     it('removed from elsewhere while open (host.removed): says it is gone and goes back', async () => {
-      const r = render(<HostDetail daemonId="h1" />);
+      const r = render(<HostDetail hostId="h1" />);
       await actAsync(() => usePresenceStore.getState().removeHost('h1'));
       expect(findHost(r.root, byTestId('host-detail-gone'))).toBeTruthy();
       expect(routerMock.back).toHaveBeenCalledTimes(1);

@@ -1,6 +1,12 @@
 # Principles
 
-Patch is a thin coordination layer. Its only purpose is to add surfaces that make an LLM usable from anywhere — terminal, web, phone, voice, on a schedule, from a webhook.
+## Patch is a public app
+
+Patch is deployed and used by many users on various environments. Everything that gets built must be able to run for them as part of a deployed unit, not just on this machine. All designs/spec must be able to work for a user doing a fresh install of their self hosted server, host and surfaces on their own devices.
+
+## Never use environment variables
+
+Environment variables are not visible as part of deployment. The user has no idea when an agent put them in until it's not there and the deployment breaks or a feature that depends on one is missing. Either the app creates it for itself or its config within the app.
 
 ## No system-prompt injection
 
@@ -26,9 +32,9 @@ The host drives the agent through its backend, not the interactive TUI, and that
 
 The rule:
 
-- The agent owns the in-session coding loop — editing, search, bash, web. Subagents are not part of it: Claude Code's `Agent` (formerly `Task`) and `Workflow` run inside the turn's process, so a restart kills them and the resumed turn cannot get their work back. They are disallowed; a subagent is a `patch_delegate` call — durable, invisible to the user, delivering its full result back to the chat that made it (`02-daemon.md` § Native subagent dispatch) — not `patch_edit`/`patch_task`, which would be pure duplication of the native shape rather than the distinct capability patch actually adds.
+- The agent owns the in-session coding loop — editing, search, bash and web. Patch owns subagents through `patch_agent`, which uses Patch's durable child-chat lifecycle and reports directly to its parent. Claude Code's native `Agent`/`Task` and `Workflow` tools are disallowed.
 - Patch owns platform capabilities — durable scheduling/self-wake, work that outlives the turn that started it, cross-chat orchestration, notification routing, external triggers, voice. These get distinct `patch_`-prefixed names with distinct words (`patch_wake_me`, not `patch_cron`; `patch_job_*`, not `patch_schedule`) so the model faces no two tools with overlapping meaning. We're free to evolve them; the SDK's native tools are a moving target we don't control.
-- Never leave an inert native tool visible. A tool that's dead in the host is a trap — the model is trained to reach for it, "succeeds," and nothing happens. The host passes `disallowedTools` to every `query()` to remove them from the model's context (the `Cron*` family, and the native subagent tools `Agent`/`Task`/`Workflow`). If we supersede another native tool with a patch capability, it joins that list.
+- Never leave an inert native tool visible. A tool that's dead in the host is a trap — the model is trained to reach for it, "succeeds," and nothing happens. The host passes `disallowedTools` to every `query()` to remove them from the model's context (the `Cron*` family and `Workflow`). If we supersede another native tool with a patch capability, it joins that list.
 - A native tool that is only partly inert is corrected, not removed. Running a shell command in the background is dead here — the task belongs to the agent process and ends with the turn — but the tool itself is not, so the host refuses that one request, runs the command in the foreground, and says why (`02-daemon.md` § Background work). Removing the tool over one dead option would cost the agent its shell, and hand us a permission surface coarser than the one it replaced.
 
 ## Configuration

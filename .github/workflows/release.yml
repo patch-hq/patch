@@ -97,7 +97,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: Build the host's JavaScript
-        run: pnpm turbo build --filter=@patch/daemon... --output-logs=errors-only
+        run: pnpm turbo build --filter=@patch/host... --output-logs=errors-only
       - name: Fetch the pinned runtime, native addon and model
         run: node scripts/fetch-vendor.mjs --out="$RUNNER_TEMP/vendor" --targets=${{ matrix.target }}
       - name: Build and sign the host artifact
@@ -115,10 +115,10 @@ jobs:
           PATCH_ARTIFACT_SIGNING_KEY="$RUNNER_TEMP/artifact-signing.key" \
           PATCH_BUILD_TARGETS=${{ matrix.target }} \
           PATCH_BUILD_OUT="$RUNNER_TEMP/out" \
-          node scripts/build-daemon.mjs
+          node scripts/build-host.mjs
           rm -f "$RUNNER_TEMP/artifact-signing.key"
           # One manifest per target; the release consumer merges them.
-          mv "$RUNNER_TEMP/out/daemon-latest.json" "$RUNNER_TEMP/out/daemon-latest-${{ matrix.target }}.json"
+          mv "$RUNNER_TEMP/out/host-latest.json" "$RUNNER_TEMP/out/host-latest-${{ matrix.target }}.json"
       - uses: actions/upload-artifact@v4
         with:
           name: host-${{ matrix.target }}
@@ -126,7 +126,7 @@ jobs:
           path: |
             ${{ runner.temp }}/out/*.tar.gz
             ${{ runner.temp }}/out/*.tar.gz.sig
-            ${{ runner.temp }}/out/daemon-latest-*.json
+            ${{ runner.temp }}/out/host-latest-*.json
 
   android:
     if: github.repository == 'tomchambers2/patch'

@@ -6,13 +6,12 @@
 // `chat.state` events from the host.
 //
 // `POST /api/chats` allocates a ULID server-side, forwards a synthetic
-// `chat.spawn_request` to the host over the daemon-link, and waits up
-// to 5s for a `chat.error` matching the new chatId (or the host's
-// `pending-spawn` placeholder for spawn-time failures). If one fires
-// inside the window we return 400 with the error code synchronously
-// (collapses fast spawn failures into a synchronous REST response —
-// spec/04 implicitly expects this for `folder_not_found`). Otherwise
-// we return 202 + the chatId; the actual `chat.spawned` arrives over WS.
+// `chat.spawn_request` to the host over the host-link, and waits up
+// to 5s for the matching `chat.spawned` or `chat.error`. A confirmed spawn
+// returns 202 and a synchronous refusal returns 400. If neither arrives, the
+// spawn is unconfirmed and returns 503. Claiming success on that timeout used
+// to hand the client a chatId the host had never received, so an immediate
+// attachment upload failed with 404.
 //
 // `archived` query parameter: `archived=only` (only archived) and
 // `archived=include` (active + archived). Default omitted = active only.
@@ -28,12 +27,20 @@ import { verifySurfaceCredential } from '@patch/auth';
 import { isReadOnlyMirrorThread, isReservedSpecialThread, TodoItem } from '@patch/wire';
 import type { ChatErrorCode, ChatSpawnRequestEvent, WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ChatLogStore } from './chat-log-store.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from './host-addressing.js';
 import { unknownChatReply } from './unknown-chat.js';
+
+/**
+ * Does a client-supplied relative path climb out with a `..` SEGMENT? Two dots
+ * inside a name (`notes..md`) are just a name; matching them refused real files.
+ */
+export function hasParentSegment(path: string): boolean {
+  return path.split(/[\\/]/).includes('..');
+}
 
 const SpawnBody = z
   .object({
@@ -42,7 +49,7 @@ const SpawnBody = z
      * a spawn that names no host is a 400 naming the field, never a spawn on
      * whichever host happens to be attached.
      */
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     folder: z.string().min(1),
     prompt: z.string().optional(),
     name: z.string().optional(),
@@ -60,11 +67,11 @@ const SpawnBody = z
   })
   .strict();
 
-/** `GET /api/models?daemonId=` — the host whose catalogue is being read. */
-const ModelsQuery = z.object({ daemonId: z.string().min(1) }).strict();
+/** `GET /api/models?hostId=` — the host whose catalogue is being read. */
+const ModelsQuery = z.object({ hostId: z.string().min(1) }).strict();
 
-/** `GET /api/skills?folder=&daemonId=` — the folder and host being listed. */
-const SkillsQuery = z.object({ folder: z.string().min(1), daemonId: z.string().min(1) }).strict();
+/** `GET /api/skills?folder=&hostId=` — the folder and host being listed. */
+const SkillsQuery = z.object({ folder: z.string().min(1), hostId: z.string().min(1) }).strict();
 
 /** How long POST /api/chats blocks waiting for an immediate spawn-time chat.error. */
 const SPAWN_ERROR_WAIT_MS = 5_000;
@@ -130,7 +137,7 @@ function spawnModelField(
 export interface ChatRoutesDeps {
   logger: Logger;
   registry: Registry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   chatRegistry: ChatRegistry;
   /**
    * Server-owned composer drafts (spec/14 § Composer): a deleted chat's draft
@@ -181,7 +188,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // host emits chat.error (failure) or chat.spawned (success) within
   // the 5s window. If the spawn succeeds, we return 202 immediately rather
   // than holding the request open for the full window.
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type === 'chat.error') {
       let target = event.chatId;
       if (target === PENDING_SPAWN_PLACEHOLDER && pendingPlaceholder) {
@@ -227,18 +234,18 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     // The named machine must be one this account has registered (spec/04
     // § Spawn). Refused BEFORE anything is allocated or forwarded, so an
     // unknown machine leaves no chat behind anywhere.
-    const unknownHost = checkRegisteredHost(deps.registry, parsed.data.daemonId);
+    const unknownHost = checkRegisteredHost(deps.registry, parsed.data.hostId);
     if (unknownHost) {
       deps.logger.warn(
-        { daemonId: parsed.data.daemonId, folder: parsed.data.folder },
-        'POST /api/chats rejected: unregistered daemonId',
+        { hostId: parsed.data.hostId, folder: parsed.data.folder },
+        'POST /api/chats rejected: unregistered hostId',
       );
       return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
     }
     const chatId = deps.idGenerator();
     const event: ChatSpawnRequestEvent = {
       type: 'chat.spawn_request',
-      daemonId: parsed.data.daemonId,
+      hostId: parsed.data.hostId,
       folder: parsed.data.folder,
       chatId,
       ...(parsed.data.prompt !== undefined ? { prompt: parsed.data.prompt } : {}),
@@ -265,14 +272,21 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       pendingPlaceholder = { chatId };
     });
 
-    deps.daemonLink.send(auth.surfaceId, event);
+    deps.hostLink.send(auth.surfaceId, event);
     deps.logger.info(
       { chatId, folder: parsed.data.folder, surfaceId: auth.surfaceId },
       'POST /api/chats forwarded spawn to host',
     );
 
     const result = await waitResult;
-    if (result !== 'timeout' && result !== 'spawned') {
+    if (result === 'timeout') {
+      deps.logger.warn({ chatId }, 'POST /api/chats: host did not confirm spawn');
+      return reply.code(503).send({
+        error: 'daemon_timeout',
+        message: 'The host did not confirm the new chat. Try again.',
+      });
+    }
+    if (result !== 'spawned') {
       deps.logger.warn(
         { chatId, code: result.code, message: result.message },
         'POST /api/chats: synchronous spawn failure',
@@ -442,7 +456,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       automationsOnly,
       order,
     });
-    const chats = limit === undefined ? full : full.slice(offset, offset + limit);
+    const chats = full.slice(offset, limit === undefined ? undefined : offset + limit);
     const nextOffset =
       limit !== undefined && offset + chats.length < full.length ? offset + chats.length : null;
     return reply.code(200).send({ chats, nextOffset });
@@ -529,7 +543,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // ---- GET /api/chats/:id/history?since=<seq>&branchId=<id> ----
   // Returns the chat's events with seq >= since. The host owns Claude Code's
   // persisted JSONL (the server doesn't share its filesystem), so this
-  // round-trips a `patch.chat_history.request` over the daemon-link and waits
+  // round-trips a `patch.chat_history.request` over the host-link and waits
   // up to 5s for the matching response. NO FALLBACK: timeout → 504; host
   // errors bubble up with a typed body; unknown chat → 404. `branchId` reads
   // that branch's own track (spec/04 § Branching) instead of the active one —
@@ -543,7 +557,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.chat_history.response') return;
     const w = historyPending.get(event.requestId);
     if (!w) return;
@@ -590,15 +604,25 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     }
     // A host that is offline cannot answer, but the server holds what passed
     // through it. Side-branch reads name a track the server does not keep.
-    const hostId = deps.chatRegistry.get(req.params.id)?.daemonId;
+    const hostId = deps.chatRegistry.get(req.params.id)?.hostId;
     if (
       deps.chatLogStore &&
       req.query?.branchId === undefined &&
       hostId !== undefined &&
-      !deps.daemonLink.isOnline(hostId) &&
+      !deps.hostLink.isOnline(hostId) &&
       deps.chatLogStore.has(req.params.id)
     ) {
-      const held = deps.chatLogStore.read(req.params.id, (since ?? 0) - 1, limit);
+      // One past the limit, to know whether another page exists.
+      const held = deps.chatLogStore.read(
+        req.params.id,
+        (since ?? 0) - 1,
+        limit === undefined ? undefined : limit + 1,
+      );
+      if (limit !== undefined && held.length > limit) {
+        const events = held.slice(0, limit);
+        const last = events[events.length - 1] as { seq: number };
+        return reply.code(200).send({ events, nextFromSeq: last.seq + 1, fromServerCopy: true });
+      }
       return reply.code(200).send({ events: held, fromServerCopy: true });
     }
     const requestId = deps.idGenerator();
@@ -610,7 +634,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         resolveP('timeout');
       }, HISTORY_REQUEST_TIMEOUT_MS);
       historyPending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(auth.surfaceId, {
+      deps.hostLink.send(auth.surfaceId, {
         type: 'patch.chat_history.request',
         requestId,
         chatId: req.params.id,
@@ -677,7 +701,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           resolveP('timeout');
         }, HISTORY_REQUEST_TIMEOUT_MS);
         historyPending.set(requestId, { resolve: resolveP, timeout });
-        deps.daemonLink.send(auth.surfaceId, {
+        deps.hostLink.send(auth.surfaceId, {
           type: 'patch.chat_history.request',
           requestId,
           chatId: req.params.id,
@@ -703,7 +727,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   );
 
   // ---- POST /api/chats/:id/send-to ----
-  // Forward a user-turn into a chat over the daemon-link as `chat.input`.
+  // Forward a user-turn into a chat over the host-link as `chat.input`.
   const SendToBody = z
     .object({
       message: z.string(),
@@ -746,7 +770,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       parsed.data.voicePrefix !== undefined && parsed.data.voicePrefix.length > 0
         ? parsed.data.voicePrefix + parsed.data.message
         : parsed.data.message;
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.input',
       chatId: req.params.id,
       message,
@@ -757,7 +781,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
 
   // ---- GET /api/chats/:id/files?path=<rel> ----
   // Group 19: surface file-browser fetches. Round-trips a
-  // `patch.files.request` over the daemon-link and waits up to 5s for the
+  // `patch.files.request` over the host-link and waits up to 5s for the
   // matching response. NO FALLBACK: timeout returns 504; host errors
   // bubble up with a typed body.
   const FILES_REQUEST_TIMEOUT_MS = 5_000;
@@ -768,7 +792,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.files.response') return;
     const w = filesPending.get(event.requestId);
     if (!w) return;
@@ -803,7 +827,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     // re-validates inside a sandbox, but rejecting at the boundary is
     // cheaper and removes the foot-gun of trusting host-side checks
     // alone. NO FALLBACK: any escape-attempt is a 400.
-    if (path.includes('..') || path.startsWith('/')) {
+    if (hasParentSegment(path) || path.startsWith('/')) {
       return reply.code(400).send({ error: 'path_invalid', message: 'path must be relative' });
     }
     const wantContent = req.query?.content === '1' || req.query?.content === 'true';
@@ -845,7 +869,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         ...(maxEntries !== undefined ? { maxEntries } : {}),
         ...(ref !== undefined ? { ref } : {}),
       };
-      deps.daemonLink.send(auth.surfaceId, frame);
+      deps.hostLink.send(auth.surfaceId, frame);
     });
     if (result === 'timeout') {
       return reply.code(504).send({ error: 'daemon_timeout' });
@@ -927,7 +951,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     const path = (req.query?.path ?? '').toString();
     // Same defense-in-depth as the JSON route, plus an empty path is never
     // valid here — there is no "raw bytes of the root directory".
-    if (path === '' || path.includes('..') || path.startsWith('/')) {
+    if (path === '' || hasParentSegment(path) || path.startsWith('/')) {
       return reply.code(400).send({ error: 'path_invalid', message: 'path must be relative' });
     }
     const requestId = deps.idGenerator();
@@ -947,7 +971,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         content: true,
         encoding: 'base64',
       };
-      deps.daemonLink.send(auth.surfaceId, frame);
+      deps.hostLink.send(auth.surfaceId, frame);
     });
     if (result === 'timeout') {
       return reply.code(504).send({ error: 'daemon_timeout' });
@@ -973,7 +997,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
 
   // ---- POST /api/chats/:id/files ----
   // The file browser's create / rename / delete (spec/14 § File browser).
-  // Round-trips a `patch.file_op.request` over the daemon-link, same rails and
+  // Round-trips a `patch.file_op.request` over the host-link, same rails and
   // same timeout as the listing above, and answers with what the host did.
   // NO FALLBACK: a timeout is a 504 and every refusal keeps its own status, so
   // a destructive operation can never read as having happened when it did not.
@@ -984,7 +1008,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.file_op.response') return;
     const w = fileOpPending.get(event.requestId);
     if (!w) return;
@@ -1019,8 +1043,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     // re-validates against the real root, but an escape attempt is refused at
     // the boundary too. The chat folder itself is never a target, so an empty
     // path is as invalid as a traversing one.
-    const bad = (p: string | undefined): boolean =>
-      p === undefined || p === '' || p.includes('..') || p.startsWith('/');
+    const bad = (p: unknown): boolean =>
+      typeof p !== 'string' || p === '' || hasParentSegment(p) || p.startsWith('/');
     if (bad(body.path)) {
       return reply
         .code(400)
@@ -1048,7 +1072,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         path: body.path as string,
         ...(op === 'rename' ? { to: body.to as string } : {}),
       };
-      deps.daemonLink.send(auth.surfaceId, frame);
+      deps.hostLink.send(auth.surfaceId, frame);
     });
     if (result === 'timeout') {
       return reply.code(504).send({ error: 'daemon_timeout' });
@@ -1087,7 +1111,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.doc.response') return;
     const w = docPending.get(event.requestId);
     if (!w) return;
@@ -1119,7 +1143,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         return sendUnknownChat(reply, req.params.id);
       }
       const path = (req.query?.path ?? '').toString();
-      if (path === '' || path.includes('..') || path.startsWith('/')) {
+      if (path === '' || hasParentSegment(path) || path.startsWith('/')) {
         return reply.code(400).send({ error: 'path_invalid', message: 'path must be relative' });
       }
       const requestId = deps.idGenerator();
@@ -1131,7 +1155,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           resolveP('timeout');
         }, DOC_REQUEST_TIMEOUT_MS);
         docPending.set(requestId, { resolve: resolveP, timeout });
-        deps.daemonLink.send(auth.surfaceId, {
+        deps.hostLink.send(auth.surfaceId, {
           type: 'patch.doc.request',
           requestId,
           chatId: req.params.id,
@@ -1165,7 +1189,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.doc_action.response') return;
     const w = docActionPending.get(event.requestId);
     if (!w) return;
@@ -1190,7 +1214,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     }
     const body = req.body ?? {};
     const path = body.path ?? '';
-    if (path === '' || path.includes('..') || path.startsWith('/')) {
+    if (typeof path !== 'string' || path === '' || hasParentSegment(path) || path.startsWith('/')) {
       return reply.code(400).send({ error: 'path_invalid', message: 'path must be relative' });
     }
     if (!body.action || typeof body.action.op !== 'string') {
@@ -1205,7 +1229,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         resolveP('timeout');
       }, DOC_REQUEST_TIMEOUT_MS);
       docActionPending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(auth.surfaceId, {
+      deps.hostLink.send(auth.surfaceId, {
         type: 'patch.doc_action.request',
         requestId,
         chatId: req.params.id,
@@ -1236,7 +1260,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.doc_convert.response') return;
     const w = docConvertPending.get(event.requestId);
     if (!w) return;
@@ -1259,7 +1283,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         return sendUnknownChat(reply, req.params.id);
       }
       const path = req.body?.path ?? '';
-      if (path === '' || path.includes('..') || path.startsWith('/')) {
+      if (
+        typeof path !== 'string' ||
+        path === '' ||
+        hasParentSegment(path) ||
+        path.startsWith('/')
+      ) {
         return reply.code(400).send({ error: 'path_invalid', message: 'path must be relative' });
       }
       const requestId = deps.idGenerator();
@@ -1273,7 +1302,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           resolveP('timeout');
         }, DOC_CONVERT_EXPORT_TIMEOUT_MS);
         docConvertPending.set(requestId, { resolve: resolveP, timeout });
-        deps.daemonLink.send(auth.surfaceId, {
+        deps.hostLink.send(auth.surfaceId, {
           type: 'patch.doc_convert.request',
           requestId,
           chatId: req.params.id,
@@ -1310,7 +1339,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.doc_export.response') return;
     const w = docExportPending.get(event.requestId);
     if (!w) return;
@@ -1333,7 +1362,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         return sendUnknownChat(reply, req.params.id);
       }
       const path = req.body?.path ?? '';
-      if (path === '' || path.includes('..') || path.startsWith('/')) {
+      if (
+        typeof path !== 'string' ||
+        path === '' ||
+        hasParentSegment(path) ||
+        path.startsWith('/')
+      ) {
         return reply.code(400).send({ error: 'path_invalid', message: 'path must be relative' });
       }
       const format = req.body?.format ?? '';
@@ -1353,7 +1387,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           resolveP('timeout');
         }, DOC_CONVERT_EXPORT_TIMEOUT_MS);
         docExportPending.set(requestId, { resolve: resolveP, timeout });
-        deps.daemonLink.send(auth.surfaceId, {
+        deps.hostLink.send(auth.surfaceId, {
           type: 'patch.doc_export.request',
           requestId,
           chatId: req.params.id,
@@ -1404,7 +1438,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.background_task_stats.response') return;
     const w = statsPending.get(event.requestId);
     if (!w) return;
@@ -1458,7 +1492,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           resolveP('timeout');
         }, BACKGROUND_TASK_STATS_TIMEOUT_MS);
         statsPending.set(requestId, { resolve: resolveP, timeout });
-        deps.daemonLink.send(auth.surfaceId, {
+        deps.hostLink.send(auth.surfaceId, {
           type: 'patch.background_task_stats.request',
           requestId,
           chatId: req.params.id,
@@ -1505,7 +1539,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type === 'patch.watch_list.response') {
       const w = watchListPending.get(event.requestId);
       if (!w) return;
@@ -1543,7 +1577,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         resolveP('timeout');
       }, WATCH_REQUEST_TIMEOUT_MS);
       watchListPending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(auth.surfaceId, {
+      deps.hostLink.send(auth.surfaceId, {
         type: 'patch.watch_list.request',
         requestId,
         chatId: req.params.id,
@@ -1585,7 +1619,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           resolveP('timeout');
         }, WATCH_REQUEST_TIMEOUT_MS);
         watchStopPending.set(requestId, { resolve: resolveP, timeout });
-        deps.daemonLink.send(auth.surfaceId, {
+        deps.hostLink.send(auth.surfaceId, {
           type: 'patch.watch_stop.request',
           requestId,
           chatId: req.params.id,
@@ -1606,13 +1640,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     },
   );
 
-  // ---- GET /api/skills?folder=&daemonId= ----
+  // ---- GET /api/skills?folder=&hostId= ----
   // Lists the skills available in a folder's `.claude/skills` (backs the job
   // editor's Skill picker, the chat transcript's Skill tool-call link, and the
   // composer's `/` autocomplete). Folder-scoped, not chat-scoped — the chat
   // may not exist yet. Round-trips `patch.skills.request` over the
-  // daemon-link (the host owns the project filesystem) and waits up to 5s.
-  // `daemonId` is REQUIRED (like `/api/models`) and validated against the
+  // host-link (the host owns the project filesystem) and waits up to 5s.
+  // `hostId` is REQUIRED (like `/api/models`) and validated against the
   // registered-host list: skills are per-host, so with more than one
   // registered machine and no home host, falling back to "whichever host
   // last attached" can ask the wrong machine and come back missing a skill
@@ -1626,7 +1660,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.skills.response') return;
     const w = skillsPending.get(event.requestId);
     if (!w) return;
@@ -1647,10 +1681,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!q.success) {
       return reply.code(400).send({ error: 'invalid query', issues: q.error.issues });
     }
-    const { folder, daemonId } = q.data;
-    const unknownHost = checkRegisteredHost(deps.registry, daemonId);
+    const { folder, hostId } = q.data;
+    const unknownHost = checkRegisteredHost(deps.registry, hostId);
     if (unknownHost) {
-      deps.logger.warn({ daemonId }, 'GET /api/skills rejected: unregistered daemonId');
+      deps.logger.warn({ hostId }, 'GET /api/skills rejected: unregistered hostId');
       return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
     }
     const requestId = deps.idGenerator();
@@ -1662,11 +1696,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         resolveP('timeout');
       }, SKILLS_REQUEST_TIMEOUT_MS);
       skillsPending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(auth.surfaceId, {
+      deps.hostLink.send(auth.surfaceId, {
         type: 'patch.skills.request',
         requestId,
         folder,
-        daemonId,
+        hostId,
       });
     });
     if (result === 'timeout') {
@@ -1706,7 +1740,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.models.response') return;
     const w = modelsPending.get(event.requestId);
     if (!w) return;
@@ -1730,10 +1764,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!q.success) {
       return reply.code(400).send({ error: 'invalid query', issues: q.error.issues });
     }
-    const { daemonId } = q.data;
-    const unknownHost = checkRegisteredHost(deps.registry, daemonId);
+    const { hostId } = q.data;
+    const unknownHost = checkRegisteredHost(deps.registry, hostId);
     if (unknownHost) {
-      deps.logger.warn({ daemonId }, 'GET /api/models rejected: unregistered daemonId');
+      deps.logger.warn({ hostId }, 'GET /api/models rejected: unregistered hostId');
       return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
     }
     const requestId = deps.idGenerator();
@@ -1745,7 +1779,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         resolveP('timeout');
       }, MODELS_REQUEST_TIMEOUT_MS);
       modelsPending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(auth.surfaceId, { type: 'patch.models.request', requestId, daemonId });
+      deps.hostLink.send(auth.surfaceId, { type: 'patch.models.request', requestId, hostId });
     });
     if (result === 'timeout') {
       return reply.code(504).send({ error: 'daemon_timeout' });
@@ -1762,7 +1796,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         .send({ error: first.code, message: first.message, errors: result.errors });
     }
     return reply.code(200).send({
-      daemonId: result.daemonId,
+      hostId: result.hostId,
       models: result.models,
       errors: result.errors,
       ...(result.fetchedAt !== undefined ? { fetchedAt: result.fetchedAt } : {}),
@@ -1782,7 +1816,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.stop_request',
       chatId: req.params.id,
     });
@@ -1815,7 +1849,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return reply.code(404).send({ error: `chat not found: ${req.params.id}` });
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.rotate_request',
       chatId: req.params.id,
     });
@@ -1850,11 +1884,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.stop_request',
       chatId: req.params.id,
     });
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.delete_request',
       chatId: req.params.id,
       deleted: true,
@@ -1881,7 +1915,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.delete_request',
       chatId: req.params.id,
       deleted: false,
@@ -1920,10 +1954,39 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.archive_request',
       chatId: req.params.id,
       archived: parsed.data.archived,
+    });
+    return reply.code(200).send({ ok: true });
+  });
+
+  // ---- POST /api/chats/:id/model ----
+  // spec/04 § Model — relays the same `chat.model_request` a surface sends on
+  // the socket. Fire-and-forget like archive: the host validates the id and
+  // answers with `chat.state` (or `chat.error` when it refuses).
+  const ModelBody = z.object({ model: z.string().min(1) }).strict();
+  app.post<{ Params: { id: string } }>('/api/chats/:id/model', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const parsed = ModelBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+    }
+    if (!deps.chatRegistry.get(req.params.id)) {
+      return sendUnknownChat(reply, req.params.id);
+    }
+    deps.hostLink.send(auth.surfaceId, {
+      type: 'chat.model_request',
+      chatId: req.params.id,
+      model: parsed.data.model,
     });
     return reply.code(200).send({ ok: true });
   });
@@ -1953,7 +2016,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.disable_request',
       chatId: req.params.id,
       disabled: parsed.data.disabled,
@@ -1966,7 +2029,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // resolves its preset, so a slow request can't drift the wake time) or null
   // to unsnooze. A timestamp already in the past is a 400 — NO FALLBACK, the
   // caller is never silently given "now".
-  const SnoozeBody = z.object({ snoozedUntil: z.number().int().nullable() }).strict();
+  const SnoozeBody = z
+    .object({
+      snoozedUntil: z.number().int().nullable(),
+      // One id per user action: a project snooze sends the same id for each chat.
+      setId: z.string().min(1).optional(),
+    })
+    .strict();
   app.post<{ Params: { id: string } }>('/api/chats/:id/snooze', async (req, reply) => {
     let auth;
     try {
@@ -1983,14 +2052,37 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    const { snoozedUntil } = parsed.data;
+    const { snoozedUntil, setId } = parsed.data;
     if (snoozedUntil !== null && snoozedUntil <= Date.now()) {
       return reply.code(400).send({ error: `snoozedUntil is in the past: ${snoozedUntil}` });
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.snooze_request',
       chatId: req.params.id,
       snoozedUntil,
+      ...(setId !== undefined ? { setId } : {}),
+    });
+    return reply.code(200).send({ ok: true });
+  });
+
+  // ---- POST /api/chats/:id/snooze/back-clear ----
+  // spec/04 § Snooze → Back. The user opened a chat that came back from a
+  // snooze; the host clears the Back state for its whole set and broadcasts it.
+  app.post<{ Params: { id: string } }>('/api/chats/:id/snooze/back-clear', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    if (!deps.chatRegistry.get(req.params.id)) {
+      return sendUnknownChat(reply, req.params.id);
+    }
+    deps.hostLink.send(auth.surfaceId, {
+      type: 'chat.snooze_back_clear_request',
+      chatId: req.params.id,
     });
     return reply.code(200).send({ ok: true });
   });
@@ -2025,7 +2117,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (parsed.data.hidden && isReservedSpecialThread(req.params.id)) {
       return reply.code(403).send({ error: `special threads cannot be hidden: ${req.params.id}` });
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.hide_request',
       chatId: req.params.id,
       hidden: parsed.data.hidden,
@@ -2051,7 +2143,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.pin_request',
       chatId: req.params.id,
       pinned: parsed.data.pinned,
@@ -2079,7 +2171,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.goal_request',
       chatId: req.params.id,
       goal: parsed.data.goal,
@@ -2108,7 +2200,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.todos_request',
       chatId: req.params.id,
       todos: parsed.data.todos,
@@ -2136,7 +2228,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.rename_request',
       chatId: req.params.id,
       name: parsed.data.name,
@@ -2165,7 +2257,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.reminder_request',
       chatId: req.params.id,
       reminder: parsed.data.reminder,
@@ -2185,8 +2277,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       loop: z
         .object({
           message: z.string().min(1),
-          every: z.union([z.string(), z.number()]),
+          every: z.union([z.string(), z.number()]).optional(),
+          at: z.string().optional(),
           notAfter: z.string().optional(),
+        })
+        .refine((l) => (l.every === undefined) !== (l.at === undefined), {
+          message: "provide exactly one of 'every' or 'at'",
         })
         .nullable(),
     })
@@ -2207,7 +2303,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.loop_request',
       chatId: req.params.id,
       loop: parsed.data.loop,
@@ -2251,7 +2347,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       parsed.data.voicePrefix !== undefined && parsed.data.voicePrefix.length > 0
         ? parsed.data.voicePrefix + parsed.data.message
         : parsed.data.message;
-    deps.daemonLink.send(auth.surfaceId, {
+    deps.hostLink.send(auth.surfaceId, {
       type: 'chat.input',
       chatId,
       message,

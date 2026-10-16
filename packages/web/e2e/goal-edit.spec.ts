@@ -32,7 +32,9 @@ for (const [name, viewport] of [
       expect(posted).toEqual({ goal: LONG });
     });
 
-    test('the full goal text is visible, wrapped, in a readable font', async ({ page }) => {
+    test('a long goal is clamped to two readable lines; full text in the title', async ({
+      page,
+    }) => {
       await page.route('**/api/chats/*/goal', (r) =>
         r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }),
       );
@@ -41,25 +43,34 @@ for (const [name, viewport] of [
       await page.getByTestId('goal-edit-input').fill(LONG);
       await page.getByTestId('goal-edit-save').click();
       const text = page.getByTestId('goal-banner-text');
-      const m = await text.evaluate((el) => ({
-        clipped: el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1,
-        font: parseFloat(getComputedStyle(el).fontSize),
-      }));
-      expect(m.clipped).toBe(false);
+      await expect(text).toHaveAttribute('title', LONG);
+      const m = await text.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return {
+          h: el.getBoundingClientRect().height,
+          lh: parseFloat(cs.lineHeight),
+          font: parseFloat(cs.fontSize),
+        };
+      });
       expect(m.font).toBeGreaterThanOrEqual(15);
-      const bar = await page.getByTestId('goal-banner').boundingBox();
-      const box = await text.boundingBox();
-      expect(box!.width).toBeGreaterThan(bar!.width * 0.7);
+      expect(m.h).toBeLessThanOrEqual(m.lh * 2 + 2);
     });
 
-    test('label, metrics and clear sit on a single line', async ({ page }) => {
+    test('goal bar is two lines at most: goal + clear, then one muted metrics line', async ({
+      page,
+    }) => {
       await page.goto(HARNESS);
-      const meta = page.getByTestId('goal-banner-meta');
-      const clear = page.getByTestId('goal-clear-btn');
-      const a = await meta.boundingBox();
-      const b = await clear.boundingBox();
-      expect(a!.height).toBeLessThan(40);
-      expect(Math.abs(a!.y + a!.height / 2 - (b!.y + b!.height / 2))).toBeLessThan(8);
+      const bar = await page.getByTestId('goal-banner').boundingBox();
+      expect(bar!.height).toBeLessThan(80);
+      const clear = await page.getByTestId('goal-clear-btn').boundingBox();
+      const text = await page.getByTestId('goal-banner-text').boundingBox();
+      expect(Math.abs(text!.y + text!.height / 2 - (clear!.y + clear!.height / 2))).toBeLessThan(
+        text!.height / 2 + 4,
+      );
+      await expect(page.locator('[data-testid^="goal-banner-cell-"]')).toHaveCount(3);
+      const meta = await page.getByTestId('goal-banner-meta').boundingBox();
+      expect(meta!.y).toBeGreaterThanOrEqual(text!.y + text!.height - 1);
+      expect(meta!.height).toBeLessThan(24);
     });
   });
 }

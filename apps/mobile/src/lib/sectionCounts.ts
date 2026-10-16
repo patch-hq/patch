@@ -29,14 +29,17 @@ export function useSectionCounts(): SectionCounts {
 
   React.useEffect(() => {
     let live = true;
+    // Answers can arrive out of order; only the latest ask may set the counts.
+    let asked = 0;
     const load = (): void => {
+      const mine = ++asked;
       api
         .chatSectionCounts()
         .then((r) => {
           if (!isCount(r.archived) || !isCount(r.hidden)) {
             throw new Error(`malformed section counts: ${JSON.stringify(r)}`);
           }
-          if (live) setCounts({ archived: r.archived, hidden: r.hidden });
+          if (live && mine === asked) setCounts({ archived: r.archived, hidden: r.hidden });
         })
         .catch((e: Error) => {
           useUiStore.getState().pushError(`failed to load section counts: ${e.message}`);

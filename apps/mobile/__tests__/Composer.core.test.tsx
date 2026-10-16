@@ -12,7 +12,15 @@
 import React from 'react';
 import { Pressable as RNPressable } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { findHost, findAllHost, byLabel, byType, renderRN, update } from './testUtils/render';
+import {
+  findHost,
+  findAllHost,
+  byLabel,
+  byType,
+  renderRN,
+  update,
+  flushMicrotasks,
+} from './testUtils/render';
 import { lightColors as colors } from '../src/lib/theme';
 import {
   usePresenceStore,
@@ -24,6 +32,12 @@ import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { __clearAllMmkv } from './stubs/mmkv';
+
+// Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
 
 vi.mock('../src/api/rest', () => ({
   api: {
@@ -78,13 +92,14 @@ describe('Composer — draft + text-only send', () => {
     expect(findHost(r.root, byLabel('Send message')).props['disabled']).toBe(false);
   });
 
-  it('pressing Send submits the trimmed text, clears the draft, and never opens the upload path', () => {
+  it('pressing Send submits the trimmed text, clears the draft, and never opens the upload path', async () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const input = findHost(r.root, byType('TextInput'));
     input.props['onChangeText']('  buy oat milk  ');
     update(r, <Composer chatId="c1" folder="work" />);
 
     findHost(r.root, byLabel('Send message')).props['onPress']();
+    await flushMicrotasks();
     expect(submitSpy).toHaveBeenCalledTimes(1);
     const [chatId, text, , attachments] = submitSpy.mock.calls[0] as [
       string,
@@ -110,6 +125,7 @@ describe('Composer — draft + text-only send', () => {
     findHost(r.root, byType('TextInput')).props['onChangeText']('hi');
     update(r, <Composer chatId="c1" folder="work" />);
     findHost(r.root, byLabel('Send message')).props['onPress']();
+    await flushMicrotasks();
     const disabledTools = submitSpy.mock.calls[0]?.[5];
     expect(disabledTools).toEqual(['Bash']);
     useToolsStore.getState()._reset();
@@ -144,7 +160,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     expect(findHost(r.root, byLabel('Send message')).props['disabled']).toBe(false);
   });
 
-  it('WS connected but host offline: attach/mic disabled (named reason), Send still enabled but QUEUED', () => {
+  it('WS connected but host offline: attach/mic disabled (named reason), Send still enabled but QUEUED', async () => {
     setPresence('connected', 'offline');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const reason = 'Host offline — paused until your Hetzner box reconnects.';
@@ -163,10 +179,11 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     const send = findHost(r.root, byLabel('Send message (queued until the agent reconnects)'));
     expect(send.props['disabled']).toBe(false);
     send.props['onPress']();
+    await flushMicrotasks();
     expect(submitSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('WS connecting: attach/voice disabled with "Connecting…"; text still types and sends (queued)', () => {
+  it('WS connecting: attach/voice disabled with "Connecting…"; text still types and sends (queued)', async () => {
     setPresence('connecting', 'unknown');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     for (const b of findAllHost(r.root, byLabel('Attach unavailable — Connecting…'))) {
@@ -186,6 +203,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     const send = findHost(r.root, byLabel('Send message (queued until the agent reconnects)'));
     expect(send.props['disabled']).toBe(false);
     send.props['onPress']();
+    await flushMicrotasks();
     expect(submitSpy).toHaveBeenCalledTimes(1);
   });
 

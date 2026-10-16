@@ -93,9 +93,20 @@ export function makeFetch(overrides: Record<string, unknown> = {}, handler?: Han
     if (own) return own;
     if (u.includes('/api/version')) return json(VERSION_PAYLOAD);
     if (u.includes('/api/auth/me')) return json(ME_PAYLOAD);
+    if (u.includes('/api/web-bot-auth')) {
+      return json({
+        ready: true,
+        issue: null,
+        origin: 'https://patch.example',
+        agentUrl: 'https://patch.example/agent',
+        directoryUrl: 'https://patch.example/.well-known/http-message-signatures-directory',
+        keyId: 'key-123',
+      });
+    }
     if (u.includes('/api/settings') && (init?.method ?? 'GET') === 'GET') {
       return json({ ...SETTINGS_PAYLOAD, ...overrides });
     }
+    if (u.includes('/api/usage-report')) return json({ samples: [], chats: [] });
     if (u.includes('/api/models')) return json({ models: [] });
     if (u.includes('/api/secrets')) return json({ secrets: [] });
     if (u.includes('/api/auth/daemon/pair/start') || u.includes('/pair/start')) {

@@ -64,6 +64,16 @@ describe('DeliveryTracker (spec/12 § Guaranteed input delivery)', () => {
     );
   });
 
+  it('carries retryOfSeq on the chat.input and on its redelivery (retry in place)', () => {
+    const send = vi.fn();
+    const t = new DeliveryTracker({ send, timeoutMs: 1000, maxAttempts: 3 });
+    t.submit('c1', 'hi', 'L1', undefined, undefined, undefined, 4);
+    expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ retryOfSeq: 4 }));
+    vi.advanceTimersByTime(1000);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ retryOfSeq: 4 }));
+  });
+
   it('omits disabledTools entirely when the OFF set is empty (default all-on)', () => {
     const send = vi.fn();
     const t = new DeliveryTracker({ send });
@@ -234,6 +244,30 @@ describe('DeliveryTracker (spec/12 § Guaranteed input delivery)', () => {
     expect(entry('c2', 'L9')?.deliveryFailed).toBe(true);
   });
 
+  it('a transient daemon_unavailable chat.error does NOT retire the pending input; it redelivers the moment the host is back', () => {
+    const send = vi.fn();
+    const t = new DeliveryTracker({ send });
+    useChatStore.getState().addLocalMessage('c1', 'hi', 'L1');
+    t.submit('c1', 'hi', 'L1');
+    send.mockClear();
+
+    t.observe({
+      type: 'chat.error',
+      chatId: 'c1',
+      error: {
+        code: 'daemon_unavailable',
+        message: 'Connection to the host was lost. Message will resend.',
+      },
+      seq: 0,
+    } as WireEvent);
+    expect(t.size()).toBe(1);
+
+    t.onReconnect();
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'chat.input', chatId: 'c1', localId: 'L1' }),
+    );
+  });
+
   it('onReconnect re-sends every still-pending input with a fresh budget', () => {
     const send = vi.fn();
     const t = new DeliveryTracker({ send });
@@ -247,6 +281,31 @@ describe('DeliveryTracker (spec/12 § Guaranteed input delivery)', () => {
     expect(send).toHaveBeenCalledTimes(4); // both re-sent
     expect(entry('c1', 'L1')?.deliveryPending).toBe(true);
     expect(entry('c1', 'L2')?.deliveryPending).toBe(true);
+  });
+
+  it('a reconnect the tracker forced on its last attempt does not refill the budget — the input still ends failed', () => {
+    const wsSend = vi.fn();
+    const t = new DeliveryTracker({ timeoutMs: 8000, maxAttempts: 3 });
+    // The forced reconnect completes a beat later, and auth.ok calls onReconnect.
+    const forceReconnect = vi.fn(() => {
+      setTimeout(() => t.onReconnect(), 100);
+      return true;
+    });
+    setActiveWs({ send: wsSend, forceReconnect } as unknown as PatchWs);
+    useChatStore.getState().addLocalMessage('c1', 'hi', 'L1');
+    t.submit('c1', 'hi', 'L1');
+
+    vi.advanceTimersByTime(8000 * 10);
+    expect(forceReconnect).toHaveBeenCalledTimes(1);
+    expect(entry('c1', 'L1')?.deliveryFailed).toBe(true);
+    expect(entry('c1', 'L1')?.deliveryPending).toBe(false);
+
+    // A genuine reconnect afterwards still heals it with a fresh budget.
+    t.onReconnect();
+    expect(entry('c1', 'L1')?.deliveryPending).toBe(true);
+    vi.advanceTimersByTime(8000);
+    expect(entry('c1', 'L1')?.deliveryFailed).toBeFalsy();
+    setActiveWs(null);
   });
 
   it('uses the default timeout + max-attempts when neither is configured', () => {

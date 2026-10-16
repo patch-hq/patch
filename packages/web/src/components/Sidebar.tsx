@@ -27,6 +27,7 @@ import {
   Mic,
   Plus,
   Archive,
+  Pencil,
   PackageOpen,
   Boxes,
   Calendar,
@@ -75,11 +76,16 @@ import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
 import { hasDraftText } from '../lib/draftText.js';
+import { hostLabel, sortHosts } from '../routes/settings/hostScope.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
+import { formatWakeAt } from '../lib/snoozePresets.js';
+import { snoozedRowsForStore } from '../lib/snoozedRows.js';
+import { folderBackPill, rowBack } from '../lib/snoozeBack.js';
 import { SNOOZE_PRESETS } from '../lib/snoozePresets.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
+import { useAmbiguousHostLabel } from '../lib/hostLabel.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import {
   chatsInProject,
@@ -176,8 +182,9 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   const [routeSearch] = useSearchParams();
   const activeDraftId = routeSearch.get('draft');
   const connection = usePresenceStore((s) => s.connection);
-  const daemonOnline = usePresenceStore((s) => s.daemonOnline);
-  const connectedAndOnline = connection === 'connected' && daemonOnline;
+  const hostOnline = usePresenceStore((s) => s.hostOnline);
+  const hostStates = usePresenceStore((s) => s.hosts);
+  const connectedAndOnline = connection === 'connected' && hostOnline;
   const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed);
   const channelsOpen = useUiStore((s) => s.channelsOpen);
   const setChannelsOpen = useUiStore((s) => s.setChannelsOpen);
@@ -281,6 +288,7 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
               .map(({ folder, rows }) => ({
                 folder,
                 rows: rows.filter((c) => matchesStateFilter(c, stateFilter)),
+                snoozed: [],
               }))
               .filter((f) => f.rows.length > 0),
           };
@@ -288,7 +296,11 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
     const matches = (c: ChatRow): boolean => needsAttention(c) || c.chatId === heldChatId;
     const pinned = sortAttentionQueue(stateFiltered.pinned.filter(matches));
     const folders = stateFiltered.folders
-      .map(({ folder, rows }) => ({ folder, rows: sortAttentionQueue(rows.filter(matches)) }))
+      .map(({ folder, rows }) => ({
+        folder,
+        rows: sortAttentionQueue(rows.filter(matches)),
+        snoozed: [],
+      }))
       .filter((f) => f.rows.length > 0);
     return { ...stateFiltered, pinned, folders };
   }, [grouped, attentionOnly, heldChatId, stateFilter]);
@@ -326,14 +338,17 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
             <span className="brand-mark">patch</span>
             <span
               className={`conn-dot ${connectedAndOnline ? '' : 'offline'}`}
-              aria-label={`connection: ${connection === 'connected' ? (daemonOnline ? 'connected' : 'daemon-offline') : connection}`}
-              title={
+              aria-label={`connection: ${connection === 'connected' ? (hostOnline ? 'connected' : 'host-offline') : connection}`}
+              title={[
                 connection !== 'connected'
                   ? 'Reconnecting…'
-                  : daemonOnline
+                  : hostOnline
                     ? 'Connected'
-                    : 'Agent offline'
-              }
+                    : 'Agent offline',
+                ...sortHosts(Object.values(hostStates)).map(
+                  (h) => `${hostLabel(h)}: ${h.online ? 'online' : 'offline'}`,
+                ),
+              ].join('\n')}
               data-testid="conn-dot"
             />
           </span>
@@ -612,8 +627,9 @@ function RegularSidebar({
           those rows are still listed (hiding a chat is worse), just unheaded
           until the folder is known. */}
             {!showSidebarSkeleton &&
-              view.folders.map(({ folder, rows }) => {
+              view.folders.map(({ folder, rows, snoozed }) => {
                 const collapsed = collapsedFolders.includes(folder);
+                const backPill = folderBackPill(rows);
                 return folderBasename(folder) === '' ? (
                   <section key={folder} className="sb-folder" data-testid="folder-section-unfiled">
                     {rows.map((c) => (
@@ -658,6 +674,11 @@ function RegularSidebar({
                           {rows.length}
                         </span>
                       ) : null}
+                      {backPill === null ? null : (
+                        <span className="snooze-back-pill" data-testid={`folder-back-${folder}`}>
+                          {backPill}
+                        </span>
+                      )}
                       <span className="folder-head-actions">
                         <button
                           type="button"
@@ -701,6 +722,23 @@ function RegularSidebar({
                       : rows.map((c) => (
                           <ChatRowView key={c.chatId} row={c} active={activeChatId} />
                         ))}
+                    {collapsed || snoozed.length === 0 ? null : (
+                      <button
+                        type="button"
+                        className="snooze-away"
+                        data-testid={`folder-snoozed-${folder}`}
+                        onClick={() => setSnoozedOpen(true)}
+                      >
+                        <Clock size={14} aria-hidden />
+                        <span className="snooze-away-count">{snoozed.length} snoozed</span>
+                        <span className="snooze-away-back">
+                          back{' '}
+                          {formatWakeAt(
+                            Math.min(...snoozed.map((c) => c.snoozedUntil ?? Infinity)),
+                          )}
+                        </span>
+                      </button>
+                    )}
                   </section>
                 );
               })}
@@ -853,6 +891,11 @@ function RegularSidebar({
               onClick={() => setSnoozedOpen(!snoozedOpen)}
             >
               <Clock size={18} aria-hidden className="arch-icon" />
+              {grouped.snoozed.length > 0 ? (
+                <span className="arch-pip" data-testid="snoozed-pip">
+                  {grouped.snoozed.length}
+                </span>
+              ) : null}
             </button>
 
             {/* Deleted (soft-delete, spec/04 § Lifecycle → E5). Collapsed by
@@ -1198,7 +1241,7 @@ export function ArchivedSection({
           pinned: boolean;
           pinnedAt: number | null;
           lastUpdated: number;
-          daemonId: string;
+          hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
           statusSummary: string | null;
@@ -1211,7 +1254,7 @@ export function ArchivedSection({
         // G2-d4: carry the first-message preview so archived rows are labelled
         // distinctly even when several chats share a folder basename.
         preview: c.preview,
-        daemonId: c.daemonId,
+        hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
         activity: c.activity,
@@ -1432,7 +1475,7 @@ export function DeletedSection({
           pinned: boolean;
           pinnedAt: number | null;
           lastUpdated: number;
-          daemonId: string;
+          hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
         }>
@@ -1440,7 +1483,7 @@ export function DeletedSection({
         chatId: c.chatId,
         name: c.name,
         preview: c.preview,
-        daemonId: c.daemonId,
+        hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
         activity: c.activity,
@@ -1505,7 +1548,7 @@ export function HiddenSection({
           snoozedUntil: number | null;
           hidden: boolean;
           lastUpdated: number;
-          daemonId: string;
+          hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
           statusSummary: string | null;
@@ -1516,7 +1559,7 @@ export function HiddenSection({
         chatId: c.chatId,
         name: c.name,
         preview: c.preview,
-        daemonId: c.daemonId,
+        hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
         activity: c.activity,
@@ -1574,43 +1617,7 @@ export function SnoozedSection({
 
   const { error } = useLifecyclePaging(
     (opts) => api.listChatsSnoozed(opts),
-    (chats) => {
-      const rows = (
-        chats as Array<{
-          chatId: string;
-          name: string | null;
-          preview: string | null;
-          folder: string;
-          activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
-          status: 'active' | 'archived' | 'errored' | 'deleted';
-          pinned: boolean;
-          pinnedAt: number | null;
-          snoozedUntil: number | null;
-          hidden?: boolean;
-          lastUpdated: number;
-          daemonId: string;
-          permissionMode: PermissionMode;
-          jobId: string | null;
-        }>
-      ).map((c) => ({
-        chatId: c.chatId,
-        name: c.name,
-        preview: c.preview,
-        daemonId: c.daemonId,
-        permissionMode: c.permissionMode,
-        folder: c.folder,
-        activity: c.activity,
-        status: c.status,
-        pinned: c.pinned,
-        pinnedAt: c.pinnedAt,
-        disabled: false,
-        snoozedUntil: c.snoozedUntil,
-        hidden: c.hidden,
-        lastUpdated: c.lastUpdated,
-        jobId: c.jobId,
-      }));
-      mergeChats(rows);
-    },
+    (chats) => mergeChats(snoozedRowsForStore(chats)),
     'snoozed chats',
   );
 
@@ -1671,7 +1678,7 @@ export function AutomationsSection({
            */
           hidden?: boolean;
           lastUpdated: number;
-          daemonId: string;
+          hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
           /**
@@ -1685,7 +1692,7 @@ export function AutomationsSection({
         chatId: c.chatId,
         name: c.name,
         preview: c.preview,
-        daemonId: c.daemonId,
+        hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
         activity: c.activity,
@@ -1769,7 +1776,8 @@ function DraftsSection({ activeDraftId }: { activeDraftId: string | null }): JSX
       </div>
       {rows.map((d) => {
         const text = d.text.trim();
-        const title = text.length > 42 ? `${text.slice(0, 42)}…` : text;
+        const chars = Array.from(text);
+        const title = chars.length > 42 ? `${chars.slice(0, 42).join('')}…` : text;
         return (
           <Link
             key={d.id}
@@ -1837,6 +1845,7 @@ function ChatRowView({
 }): JSX.Element {
   const badge = useSettledBadge(row);
   const hasUnreadNotif = useChatHasUnread(row.chatId);
+  const hostLabel = useAmbiguousHostLabel(row);
   const navigate = useNavigate();
   const menu = useContextMenu();
   // Multi-select (spec/14 § Sidebar → Selecting multiple rows). Only ordinary
@@ -1862,8 +1871,12 @@ function ChatRowView({
   // is no secondary line.
   const rawPreview = archived ? row.preview : null;
   const preview = rawPreview ? stripMarkdown(rawPreview) : null;
+  // spec/04 § Snooze → Back: a chat back from a snooze carries an inset and, if
+  // it did anything, a line saying what.
+  const back = snoozed || archived || deleted || hidden ? null : rowBack(row);
   const cls = [
     'sb-row',
+    back ? 'snooze-back-row' : '',
     pinned ? 'pinned' : '',
     special ? 'special' : '',
     // spec/06 § Disabled — a turned-off special thread greys out in the
@@ -1995,6 +2008,36 @@ function ChatRowView({
     applyShow();
   }
 
+  // Hide from the menu: optimistic set + POST, reverting on failure (NO
+  // FALLBACK) — the mirror of applyShow.
+  function applyHide(): void {
+    useChatStore.getState().setHidden(row.chatId, true);
+    void api.hideChat(row.chatId, true).catch((err) => {
+      useChatStore.getState().setHidden(row.chatId, false);
+      useUiStore.getState().pushError(failed('hide'), undefined, (err as Error).message);
+    });
+  }
+
+  // Rename from the menu: same stored-name seeding and optimistic write as the
+  // chat header's rename (committing the derived `title` would promote a folder
+  // basename into a real name). Empty clears the name back to the derived one.
+  async function applyRename(): Promise<void> {
+    const value = await useUiStore.getState().prompt({
+      title: 'Rename chat',
+      initialValue: row.name ?? '',
+      confirmLabel: 'Rename',
+    });
+    if (value === null) return;
+    const next = value.trim() === '' ? null : value.trim();
+    if (next === row.name) return;
+    const previous = row.name;
+    useChatStore.getState().setName(row.chatId, next);
+    void api.renameChat(row.chatId, next).catch((err) => {
+      useChatStore.getState().setName(row.chatId, previous);
+      useUiStore.getState().pushError(failed('rename'), undefined, (err as Error).message);
+    });
+  }
+
   // Recoverable soft-delete (spec/04 § Lifecycle) behind the same confirm the
   // chat header asks for — the chat moves to Deleted and can be restored.
   async function applyDelete(): Promise<void> {
@@ -2017,6 +2060,11 @@ function ChatRowView({
   // menu is a way of REACHING them on a chat you have not opened rather than a
   // second set of behaviours.
   function contextItems(): ContextMenuItem[] {
+    // Right-clicking a row inside a multi-selection acts on the whole selection.
+    const selection = useSelectionStore.getState().selected;
+    if (selectable && selection.length > 1 && selection.includes(row.chatId)) {
+      return bulkContextItems(selection, navigate);
+    }
     if (deleted) {
       return [
         {
@@ -2070,23 +2118,43 @@ function ChatRowView({
         run: () => openChatInNewWindow(row.chatId),
       },
       {
+        id: 'rename',
+        label: 'Rename',
+        icon: <Pencil size={14} aria-hidden />,
+        run: () => void applyRename(),
+      },
+      {
         id: 'pin',
         label: row.pinned ? 'Unpin' : 'Pin',
         icon: <Pin size={14} aria-hidden />,
         run: applyPin,
       },
-      {
-        id: 'snooze',
-        label: 'Snooze',
-        icon: <Clock size={14} aria-hidden />,
-        run: () => undefined,
-        submenu: SNOOZE_PRESETS.map((p) => ({
-          id: `snooze-${p.id}`,
-          label: p.label,
-          icon: <Clock size={14} aria-hidden />,
-          run: () => applySnoozeUntil(p.resolve()),
-        })),
-      },
+      ...(snoozed
+        ? []
+        : [
+            {
+              id: 'snooze',
+              label: 'Snooze',
+              icon: <Clock size={14} aria-hidden />,
+              run: () => undefined,
+              submenu: SNOOZE_PRESETS.map((p) => ({
+                id: `snooze-${p.id}`,
+                label: p.label,
+                icon: <Clock size={14} aria-hidden />,
+                run: () => applySnoozeUntil(p.resolve()),
+              })),
+            },
+          ]),
+      ...(hidden
+        ? []
+        : [
+            {
+              id: 'hide',
+              label: 'Hide',
+              icon: <EyeOff size={14} aria-hidden />,
+              run: applyHide,
+            },
+          ]),
       {
         id: 'archive',
         label: archived ? 'Unarchive' : 'Archive',
@@ -2152,7 +2220,15 @@ function ChatRowView({
         onClick={handleRowClick}
         onAuxClick={handleRowAuxClick}
         {...(selectable ? { 'aria-selected': isSelected } : {})}
-        {...(special ? {} : { onContextMenu: menu.openAt })}
+        {...(special
+          ? {}
+          : {
+              onContextMenu: (e: ReactMouseEvent) => {
+                // A right-click outside the selection is about that row alone.
+                if (!isSelected) useSelectionStore.getState().clear();
+                menu.openAt(e);
+              },
+            })}
         title={title}
       >
         {special ? (
@@ -2213,6 +2289,19 @@ function ChatRowView({
         {preview ? (
           <span className="preview" data-testid={`row-preview-${row.chatId}`}>
             {preview}
+          </span>
+        ) : null}
+        {back?.line ? (
+          <span
+            className={`snooze-back-line is-${back.line.tone}`}
+            data-testid={`snooze-back-line-${row.chatId}`}
+          >
+            {back.line.text}
+          </span>
+        ) : null}
+        {hostLabel && !special ? (
+          <span className="preview" data-testid={`row-host-${row.chatId}`}>
+            {hostLabel}
           </span>
         ) : null}
         {/* Current status (spec/04 § Current status): what this chat is to the
@@ -2306,7 +2395,9 @@ function ChatRowView({
           </span>
         ) : !special ? (
           <span className="row-when" data-testid={`row-when-${row.chatId}`}>
-            <span className="when-time mono">{formatWhen(row.lastUpdated)}</span>
+            <span className="when-time mono">
+              {archived ? formatArchivedAt(row.lastUpdated) : formatWhen(row.lastUpdated)}
+            </span>
           </span>
         ) : null}
         {deleted || snoozed || hidden ? null : (
@@ -2482,6 +2573,16 @@ function ChatRowView({
 }
 
 /** Compact relative time for sidebar rows (e.g. `2m`, `3h`, `5d`). */
+// An archived row's `lastUpdated` is frozen at archive time, so a bare "3d"
+// would read as the chat's age. Say what it is, with the absolute time.
+function formatArchivedAt(ms: number): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const day = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `Archived ${day}, ${time}`;
+}
+
 function formatWhen(ms: number): string {
   if (!ms) return '';
   const delta = Date.now() - ms;
@@ -2570,6 +2671,82 @@ function SelectionBar(): JSX.Element | null {
       </button>
     </div>
   );
+}
+
+/**
+ * The right-click menu over a multi-selection (spec/14 § Row context menu): the
+ * actions that make sense across several chats, each the single-row action
+ * applied to every selected chat. Pin/Unpin follows the first selected chat.
+ */
+function bulkContextItems(chatIds: string[], navigate: (to: string) => void): ContextMenuItem[] {
+  const chats = useChatStore.getState().chats;
+  const pinTo = !(chats[chatIds[0]!]?.pinned ?? false);
+  const each = (fn: (chatId: string) => void) => () => {
+    for (const chatId of chatIds) fn(chatId);
+    useSelectionStore.getState().clear();
+  };
+  return [
+    {
+      id: 'pin',
+      label: pinTo ? 'Pin' : 'Unpin',
+      icon: <Pin size={14} aria-hidden />,
+      run: each((chatId) => {
+        useChatStore.getState().setPinned(chatId, pinTo);
+        void api.pinChat(chatId, pinTo).catch((err) => {
+          useChatStore.getState().setPinned(chatId, !pinTo);
+          useUiStore.getState().pushError(failed('pin'), undefined, (err as Error).message);
+        });
+      }),
+    },
+    {
+      id: 'snooze',
+      label: 'Snooze',
+      icon: <Clock size={14} aria-hidden />,
+      run: () => undefined,
+      submenu: SNOOZE_PRESETS.map((p) => ({
+        id: `snooze-${p.id}`,
+        label: p.label,
+        icon: <Clock size={14} aria-hidden />,
+        run: () => {
+          const until = p.resolve();
+          navigateAfterArchive(navigate, chatIds);
+          each((chatId) => {
+            const was = useChatStore.getState().chats[chatId]?.snoozedUntil ?? null;
+            useChatStore.getState().setSnoozed(chatId, until);
+            void api.snoozeChat(chatId, until).catch((err) => {
+              useChatStore.getState().setSnoozed(chatId, was);
+              useUiStore.getState().pushError(failed('snooze'), undefined, (err as Error).message);
+            });
+          })();
+        },
+      })),
+    },
+    {
+      id: 'hide',
+      label: 'Hide',
+      icon: <EyeOff size={14} aria-hidden />,
+      run: each((chatId) => {
+        useChatStore.getState().setHidden(chatId, true);
+        void api.hideChat(chatId, true).catch((err) => {
+          useChatStore.getState().setHidden(chatId, false);
+          useUiStore.getState().pushError(failed('hide'), undefined, (err as Error).message);
+        });
+      }),
+    },
+    {
+      id: 'archive',
+      label: 'Archive',
+      icon: <Archive size={14} aria-hidden />,
+      run: () => archiveSelected(chatIds, navigate),
+    },
+    {
+      id: 'delete',
+      label: 'Delete',
+      icon: <DeleteIcon size={14} />,
+      danger: true,
+      run: () => deleteSelected(chatIds),
+    },
+  ];
 }
 
 /**

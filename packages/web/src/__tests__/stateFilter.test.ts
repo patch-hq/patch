@@ -14,7 +14,7 @@ import { matchesStateFilter, needsAttention } from '../lib/chatGroups.js';
 function row(over: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     name: 'a chat',
     preview: null,
     goal: null,

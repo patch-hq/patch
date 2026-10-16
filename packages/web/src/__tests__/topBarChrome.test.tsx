@@ -32,7 +32,7 @@ function row(): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions',
     name: 'fix layout',
     folder: '~/projects/foo',
@@ -160,14 +160,11 @@ describe('the top row stylesheet', () => {
     expect(css).toMatch(/\.sb-brand\s*\{[^}]*padding:\s*18px var\(--sb-inset\) 14px 20px;/);
   });
 
-  it('clusters the two sidebar icons at the same pitch the nav pair uses', () => {
+  it('gives the two sidebar actions the deliberate wider spacing', () => {
     const brandRight = /\.sb-brand-right\s*\{([^}]*)\}/.exec(css);
-    const navHistory = /\.nav-history\s*\{([^}]*)\}/.exec(css);
     expect(brandRight).not.toBeNull();
-    expect(navHistory).not.toBeNull();
     const gap = (block: string): string => /gap:\s*([^;]+);/.exec(block)?.[1] ?? '';
-    expect(gap(brandRight![1]!)).toBe('1px');
-    expect(gap(brandRight![1]!)).toBe(gap(navHistory![1]!));
+    expect(gap(brandRight![1]!)).toBe('8px');
   });
 
   it('gives the chat header left and action zones the flex share that keeps the name centred', () => {

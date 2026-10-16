@@ -1,6 +1,6 @@
 // spec/04 § History — the one client-safe copy of the `openai/` prefix
 // check, so a surface's model picker can tell a same-provider model change
-// from a cross-provider one without depending on @patch/daemon.
+// from a cross-provider one without depending on @patch/host.
 
 import { describe, it, expect } from 'vitest';
 import { harnessForModel } from '../src/events.js';

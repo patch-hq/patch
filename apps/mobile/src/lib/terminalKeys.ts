@@ -90,7 +90,8 @@ export function applyCtrl(data: string): string {
   const rest = data.slice(1);
   if (first === ' ') return `\x00${rest}`;
   if (first === '?') return `\x7f${rest}`;
-  const code = first.toUpperCase().charCodeAt(0);
+  // ASCII only: toUpperCase() would turn ß, ı and ſ into ASCII letters.
+  const code = /^[a-z]$/.test(first) ? first.charCodeAt(0) - 0x20 : first.charCodeAt(0);
   if (code >= 0x40 && code <= 0x5f) return `${String.fromCharCode(code & 0x1f)}${rest}`;
   if (first === '|') return `\x1c${rest}`;
   if (first === '~') return `\x1e${rest}`;

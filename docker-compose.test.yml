@@ -104,7 +104,7 @@ services:
   daemon:
     build:
       context: .
-      dockerfile: packages/daemon/Dockerfile
+      dockerfile: packages/host/Dockerfile
       args:
         PATCH_GIT_SHA: testsha
         PATCH_VERSION: 0.0.0-test

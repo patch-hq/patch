@@ -19,13 +19,14 @@ import {
   Search,
   X,
 } from 'lucide-react-native';
-import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import { SPECIAL_THREAD_IDS, folderBackPill, formatWakeAt } from '@patch/wire';
+import { showSnoozeSheet } from '../../src/components/SnoozeSheet';
 import type { ChatSearchHit, ChatSearchHostResult } from '@patch/wire';
 import { useChatStore } from '../../src/stores/chatStore';
 import { ChatRowItem, useSettledPreview } from '../../src/components/ChatRow';
 import { BatchView } from '../../src/components/BatchView';
 import { OfflineBanner } from '../../src/components/OfflineBanner';
-import { DaemonOfflineBanner } from '../../src/components/DaemonOfflineBanner';
+import { HostOfflineBanner } from '../../src/components/HostOfflineBanner';
 import { EmptyState } from '../../src/components/EmptyState';
 import { EMPTY_STATES } from '../../src/lib/emptyStates';
 import { needsAttention, sortAttentionQueue } from '../../src/lib/attentionQueue';
@@ -257,6 +258,53 @@ function SnoozedSection({ rows }: { rows: ChatRow[] }): React.ReactElement {
   );
 }
 
+function folderName(folder: string): string {
+  return folder.split('/').filter(Boolean).pop() ?? folder;
+}
+
+// A project's snoozed chats as ONE dashed line inside the project (spec/04 §
+// Snooze): "<N> snoozed" and the earliest wake time. No dots, status or
+// progress. Tapping it opens the Snoozed section.
+function FolderSnoozedLine({
+  folder,
+  rows,
+  onPress,
+}: {
+  folder: string;
+  rows: ChatRow[];
+  onPress: () => void;
+}): React.ReactElement {
+  const colors = useTheme();
+  const earliest = Math.min(...rows.map((r) => r.snoozedUntil ?? Infinity));
+  return (
+    <Pressable
+      testID={`folder-snoozed-${folder}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${rows.length} snoozed, back ${formatWakeAt(earliest)}`}
+      onPress={onPress}
+      style={{
+        marginHorizontal: space.lg,
+        marginBottom: space.sm,
+        paddingHorizontal: space.md,
+        paddingVertical: space.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.sm,
+        borderWidth: 1,
+        borderStyle: 'dashed',
+        borderColor: colors.divider,
+        borderRadius: radii.md,
+      }}
+    >
+      <AlarmClock size={14} color={colors.ink3} />
+      <Text style={{ ...typography.rowTitle, color: colors.ink }}>{rows.length} snoozed</Text>
+      <Text style={{ ...typography.meta, marginLeft: 'auto', color: colors.ink3 }}>
+        back {formatWakeAt(earliest)}
+      </Text>
+    </Pressable>
+  );
+}
+
 // The Chats tab's slim header (spec/15 ## Chats tab § Header): the wordmark with
 // its connection dot on the left, the search button on the right; searching
 // swaps the row's content for the search field and a close button. Fixed at
@@ -414,10 +462,16 @@ interface Section {
     | 'channels-empty'
     | 'hidden-row'
     | 'snoozed-section'
+    | 'folder-snoozed'
     | 'archived-row'
     | 'attention-empty'
+    | 'chats-empty'
     | 'search-empty';
   label?: string;
+  /** A project's header: the folder path, so its clock can snooze the project. */
+  folder?: string;
+  /** A project's "back · snoozed 12h" pill (spec/04 § Snooze → Back). */
+  pill?: string | null;
   /** The collapsible section this header opens and closes; absent = a plain label. */
   toggle?: ChatsTabSection;
   /** A collapsible header's count; `null` draws none (not loaded yet). */
@@ -431,6 +485,11 @@ interface Open {
   hidden: boolean;
   snoozed: boolean;
   archived: boolean;
+}
+
+/** Folders by path. A bare `.sort()` would compare each `[path, rows]` pair as the string "path,[object Object]", letting the comma outrank a space. */
+function byFolderPath(a: [string, ChatRow[]], b: [string, ChatRow[]]): number {
+  return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
 }
 
 /**
@@ -511,6 +570,16 @@ function buildSections(
     folders.set(c.folder, list);
   }
 
+  // Each project's snoozed chats, folded into one line inside the project
+  // (spec/04 § Snooze) — pinned ones too, since a pinned chat's project is its folder.
+  const snoozedByFolder = new Map<string, ChatRow[]>();
+  for (const c of snoozed) {
+    if (!c.folder) continue;
+    const list = snoozedByFolder.get(c.folder) ?? [];
+    list.push(c);
+    snoozedByFolder.set(c.folder, list);
+  }
+
   const out: Section[] = [];
   // No section header over Manager: the row is itself named "Manager".
   if (manager && match([manager]).length > 0) out.push({ kind: 'manager', row: manager });
@@ -523,7 +592,7 @@ function buildSections(
       out.push({ kind: 'header', label: 'Pinned' });
       for (const r of pinnedAttention) out.push({ kind: 'pinned-row', row: r });
     }
-    for (const [folder, rows] of [...folders.entries()].sort()) {
+    for (const [folder, rows] of [...folders.entries()].sort(byFolderPath)) {
       const shown = sortAttentionQueue(rows.filter(attentionMatches));
       if (shown.length === 0) continue;
       anyRows = true;
@@ -539,15 +608,50 @@ function buildSections(
     out.push({ kind: 'header', label: 'Pinned' });
     for (const r of pinnedShown) out.push({ kind: 'pinned-row', row: r });
   }
-  for (const [folder, rows] of [...folders.entries()].sort()) {
+  let folderRows = 0;
+  // A project with only snoozed chats keeps its header and shows just the line —
+  // but only in the plain list: a search or a state filter is a narrower question.
+  const lineShown = !searching && stateFilter === 'all';
+  const folderPaths = new Set([...folders.keys(), ...(lineShown ? snoozedByFolder.keys() : [])]);
+  const folderEntries: Array<[string, ChatRow[]]> = [...folderPaths].map((f) => [
+    f,
+    folders.get(f) ?? [],
+  ]);
+  for (const [folder, rows] of folderEntries.sort(byFolderPath)) {
     // spec/14 § Sidebar ordering — sorts by the user's own last activity
     // (when they last sent a message, or chat creation), never `lastUpdated`:
     // an agent reply, a status change, a job tick or a finished turn must
     // not move a row.
     const shown = matchPinnedOrFolder(rows.sort((a, b) => b.lastUserActivity - a.lastUserActivity));
-    if (shown.length === 0) continue;
-    out.push({ kind: 'header', label: folder || '(no folder)' });
+    const snoozedHere = lineShown ? (snoozedByFolder.get(folder) ?? []) : [];
+    if (shown.length === 0 && snoozedHere.length === 0) continue;
+    folderRows += shown.length;
+    out.push({
+      kind: 'header',
+      label: folder || '(no folder)',
+      ...(folder ? { folder } : {}),
+      pill: folderBackPill(shown),
+    });
     for (const r of shown) out.push({ kind: 'folder-row', row: r });
+    if (snoozedHere.length > 0)
+      out.push({ kind: 'folder-snoozed', label: folder, rows: snoozedHere });
+  }
+  // The section headers below always draw, so the list is never empty and the
+  // FlatList's own empty component never shows: say it here (spec/15 § Empty
+  // states). Only on a KNOWN nothing — no chat anywhere, the server's Hidden and
+  // Archived totals included; an unanswered count is not a zero.
+  if (
+    !searching &&
+    pinnedShown.length === 0 &&
+    folderRows === 0 &&
+    stateFilter === 'all' &&
+    snoozed.length === 0 &&
+    userArchived.length === 0 &&
+    hidden.length === 0 &&
+    counts.archived === 0 &&
+    counts.hidden === 0
+  ) {
+    out.push({ kind: 'chats-empty' });
   }
   const archivedChronological = [...userArchived].sort((a, b) => b.lastUpdated - a.lastUpdated);
 
@@ -623,7 +727,7 @@ type SearchItem =
 function buildSearchItems(
   s: ChatSearchState,
   local: ChatSearchHit[],
-  hostName: (daemonId: string, fromServer: string | null) => string,
+  hostName: (hostId: string, fromServer: string | null) => string,
 ): SearchItem[] {
   if (s.status === 'waiting') {
     return [
@@ -638,7 +742,7 @@ function buildSearchItems(
   if (s.nextOffset !== null) out.push({ kind: 'more', busy: s.loadingMore });
   if (s.error !== null) out.push({ kind: 'error', message: s.error });
   for (const host of s.hosts) {
-    const text = hostMarkerText(host, hostName(host.daemonId, host.hostName));
+    const text = hostMarkerText(host, hostName(host.hostId, host.hostName));
     if (text !== null) out.push({ kind: 'host', host, text });
   }
   return out;
@@ -646,7 +750,7 @@ function buildSearchItems(
 
 function searchItemKey(item: SearchItem): string {
   if (item.kind === 'hit') return `hit-${item.hit.chatId}`;
-  if (item.kind === 'host') return `host-${item.host.daemonId}`;
+  if (item.kind === 'host') return `host-${item.host.hostId}`;
   return item.kind;
 }
 
@@ -663,9 +767,9 @@ function SearchResults({
   // A host is named as the app already names it (its self-reported hostName,
   // the Hosts section's label), then by what the server said, then its id.
   const presence = usePresenceStore((s) => s.hosts);
-  const hostName = (daemonId: string, fromServer: string | null): string =>
-    presence[daemonId]?.host?.hostName ?? fromServer ?? daemonId;
-  const serverNames = new Map(search.hosts.map((h) => [h.daemonId, h.hostName]));
+  const hostName = (hostId: string, fromServer: string | null): string =>
+    presence[hostId]?.host?.hostName ?? fromServer ?? hostId;
+  const serverNames = new Map(search.hosts.map((h) => [h.hostId, h.hostName]));
   const waiting = search.status === 'waiting';
   const local = React.useMemo(
     () => (waiting ? localSearchHits(Object.values(chats), query) : []),
@@ -692,7 +796,7 @@ function SearchResults({
             return (
               <ChatSearchHitRow
                 hit={item.hit}
-                hostName={hostName(item.hit.daemonId, serverNames.get(item.hit.daemonId) ?? null)}
+                hostName={hostName(item.hit.hostId, serverNames.get(item.hit.hostId) ?? null)}
                 testID={item.local ? 'chat-search-local-hit' : 'chat-search-hit'}
                 onPress={onHitPress}
               />
@@ -728,7 +832,7 @@ function SearchResults({
           case 'host':
             return (
               <Text
-                testID={`chat-search-host-${item.host.daemonId}`}
+                testID={`chat-search-host-${item.host.hostId}`}
                 style={{ ...quiet, ...noteRow }}
               >
                 {item.text}
@@ -819,6 +923,11 @@ export default function ChatsScreen(): React.ReactElement {
     [chats, open, counts, query, attentionMatches, stateFilter],
   );
 
+  // The project's snoozed line opens the Snoozed section (and leaves it open).
+  const openSection = (section: ChatsTabSection): void => {
+    setSectionOpen(section, true);
+    setOpen({ ...open, [section]: true });
+  };
   const toggle = (section: ChatsTabSection): void => {
     const next = !open[section];
     setSectionOpen(section, next);
@@ -843,7 +952,7 @@ export default function ChatsScreen(): React.ReactElement {
       />
       <SidebarViewMenu />
       <OfflineBanner />
-      <DaemonOfflineBanner />
+      <HostOfflineBanner />
       {batchMode ? (
         <BatchView />
       ) : serverQuery !== null ? (
@@ -858,6 +967,8 @@ export default function ChatsScreen(): React.ReactElement {
               : item.kind === 'search-empty' ||
                   item.kind === 'channels-empty' ||
                   item.kind === 'snoozed-section' ||
+                  item.kind === 'folder-snoozed' ||
+                  item.kind === 'chats-empty' ||
                   item.kind === 'attention-empty'
                 ? `${item.kind}-${idx}`
                 : `r-${item.row?.chatId}`
@@ -881,6 +992,45 @@ export default function ChatsScreen(): React.ReactElement {
                   <Text style={{ ...typography.sectionHeader, color: colors.ink3 }}>
                     {section ? `${item.label} ${open[section] ? '▾' : '▸'}` : item.label}
                   </Text>
+                  {item.pill ? (
+                    <View
+                      testID={`folder-back-${item.folder}`}
+                      style={{
+                        marginLeft: space.sm,
+                        paddingHorizontal: space.sm,
+                        borderRadius: radii.pill,
+                        backgroundColor: colors.accentTint,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          ...typography.meta,
+                          fontFamily: fonts.bodyBold,
+                          color: colors.leafSoft,
+                        }}
+                      >
+                        {item.pill}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {item.folder ? (
+                    <Pressable
+                      testID={`folder-snooze-${item.folder}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Snooze all in project ${folderName(item.folder)}`}
+                      hitSlop={10}
+                      onPress={() =>
+                        showSnoozeSheet({
+                          kind: 'project',
+                          folder: item.folder!,
+                          name: folderName(item.folder!),
+                        })
+                      }
+                      style={{ marginLeft: 'auto' }}
+                    >
+                      <AlarmClock size={16} color={colors.ink3} />
+                    </Pressable>
+                  ) : null}
                   {section && item.count !== undefined && item.count !== null ? (
                     <Text
                       testID={`${section}-count`}
@@ -904,12 +1054,31 @@ export default function ChatsScreen(): React.ReactElement {
             if (item.kind === 'snoozed-section') {
               return <SnoozedSection rows={item.rows ?? []} />;
             }
+            if (item.kind === 'folder-snoozed') {
+              return (
+                <FolderSnoozedLine
+                  folder={item.label ?? ''}
+                  rows={item.rows ?? []}
+                  onPress={() => openSection('snoozed')}
+                />
+              );
+            }
             if (item.kind === 'channels-empty') {
               return (
                 <EmptyState
                   icon={Radio}
                   title={EMPTY_STATES.channels.title}
                   body={EMPTY_STATES.channels.body}
+                />
+              );
+            }
+            if (item.kind === 'chats-empty') {
+              return (
+                <EmptyState
+                  icon={MessageCircle}
+                  title={EMPTY_STATES.chats.title}
+                  body={EMPTY_STATES.chats.body}
+                  action={{ label: 'New chat', onPress: () => router.push('/new-chat') }}
                 />
               );
             }

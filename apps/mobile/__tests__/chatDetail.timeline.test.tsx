@@ -52,7 +52,7 @@ beforeEach(async () => {
   __resetLinkingOpenedUrls();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   const mod = await import('../app/chats/[chatId]');
   ChatDetailScreen = mod.default;
   useChatStore.getState().hydrate([
@@ -527,13 +527,23 @@ describe('delivery status (spec/12 § Guaranteed input delivery)', () => {
     const r = renderRN(<ChatDetailScreen />);
     expect(findHost(r.root, byTestId('delivery-pending'))).toBeDefined();
     expect(hasText(r.root, 'Sending…')).toBe(true);
+    const icon = findHost(r.root, byTestId('delivery-pending-icon'));
+    expect(findHost(icon, (i) => i.type === 'Icon').props['name']).toBe('Clock');
   });
 
-  it('shows the queued copy while pending and the host is offline', () => {
-    usePresenceStore.getState().setDaemon('offline');
+  it('draws the cloud-off icon beside the host-offline copy', () => {
+    usePresenceStore.getState().setHost('offline');
     useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
     const r = renderRN(<ChatDetailScreen />);
-    expect(hasText(r.root, 'Queued')).toBe(true);
+    const icon = findHost(r.root, byTestId('delivery-pending-icon'));
+    expect(findHost(icon, (i) => i.type === 'Icon').props['name']).toBe('CloudOff');
+  });
+
+  it('shows the host-offline copy while pending and the host is offline', () => {
+    usePresenceStore.getState().setHost('offline');
+    useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
+    const r = renderRN(<ChatDetailScreen />);
+    expect(hasText(r.root, 'Host offline')).toBe(true);
   });
 
   it('shows "Not delivered — tap to retry" when failed, and tapping retries', () => {
@@ -705,7 +715,44 @@ describe('tool call / tool result', () => {
     expect(findHost(r.root, byTestId('tool-group-summary-failed'))).toBeTruthy();
   });
 
-  it("a run reads as the agent's own sentence before it until a label arrives", () => {
+  // A lone call is a run of one: narrated live, never a bare static row.
+  it('a lone call reads as the live narration, then the closed label', () => {
+    const applyEvent = useChatStore.getState().applyEvent;
+    applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      tool: 'Read',
+      args: { file_path: '/a/01M4N7ZF-image.png' },
+      callId: 'p1',
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(hasText(r.root, 'Reading 01M4N7ZF-image.png')).toBe(true);
+    actSync(() => {
+      applyEvent({
+        type: 'chat.tool_run_summary',
+        chatId: 'c1',
+        seq: 2,
+        callIds: ['p1'],
+        summary: 'Looking at the picture…',
+        live: true,
+      });
+    });
+    expect(hasText(r.root, 'Looking at the picture…')).toBe(true);
+    expect(hasText(r.root, 'Reading 01M4N7ZF-image.png')).toBe(false);
+    actSync(() => {
+      applyEvent({
+        type: 'chat.tool_run_summary',
+        chatId: 'c1',
+        seq: 3,
+        callIds: ['p1'],
+        summary: 'Looked at the picture',
+      });
+    });
+    expect(hasText(r.root, 'Looked at the picture')).toBe(true);
+  });
+
+  it("a run reads as its tool-call count, not the agent's prose, until a label arrives", () => {
     const applyEvent = useChatStore.getState().applyEvent;
     applyEvent({
       type: 'chat.message',
@@ -728,7 +775,7 @@ describe('tool call / tool result', () => {
       });
     }
     const r = renderRN(<ChatDetailScreen />);
-    expect(hasText(r.root, 'Ran 2 commands')).toBe(false);
+    expect(hasText(r.root, 'Ran 2 commands')).toBe(true);
     expect(findHost(r.root, byTestId('tool-group-summary'))).toBeTruthy();
     actSync(() => {
       applyEvent({
@@ -987,6 +1034,56 @@ describe('permission request', () => {
     expect(() => renderRN(<ChatDetailScreen />)).not.toThrow();
   });
 
+  it('"allow all during this session" sends decision=approve_with_session_allow, not plain approve', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      seq: 1,
+      requestId: 'r1',
+      request: { tool: 'Bash', description: 'rm', args: {} },
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    const allowSession = findAllHost(r.root, (i) => i.type === 'Pressable').find((p) =>
+      hasText(p, 'allow all Bash during this session'),
+    )!;
+    allowSession.props.onPress();
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'chat.permission_response',
+        requestId: 'r1',
+        approve: true,
+        decision: 'approve_with_session_allow',
+      }),
+    );
+  });
+
+  it('under bypass the permission card has no "allow all during this session" option', () => {
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'c1',
+        name: 'My Chat',
+        folder: '~/project',
+        activity: 'idle',
+        status: 'active',
+        pinned: false,
+        pinnedAt: null,
+        lastUpdated: 1,
+        permissionMode: 'bypassPermissions',
+      },
+    ]);
+    useChatStore.getState().applyEvent({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      seq: 1,
+      requestId: 'r1',
+      request: { tool: 'Bash', description: 'rm', args: {} },
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    const pressables = findAllHost(r.root, (i) => i.type === 'Pressable');
+    expect(pressables.some((p) => hasText(p, 'allow all Bash during this session'))).toBe(false);
+    expect(pressables.some((p) => hasText(p, '1. Yes'))).toBe(true);
+  });
+
   it('a permission entry with no tool name falls back to "tools" in the allow-session option label', () => {
     useChatStore.getState().timelines['c1'] = [
       {
@@ -1223,6 +1320,22 @@ describe('empty states', () => {
 
 // spec/07 § The fast voice and the chat's agent / § Call cost — a call's
 // hand-off and its cost are quiet lines, not the user's bubble or the agent's reply.
+describe('account switch line', () => {
+  it("is a muted status line, not the agent's reply", () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 3,
+      role: 'system',
+      content: 'Switched from Default to work — Default is out of credit',
+      accountSwitch: { from: 'Default', to: 'work' },
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('account-switch'))).toHaveLength(1);
+    expect(findAllHost(r.root, byTestId('message-assistant'))).toHaveLength(0);
+  });
+});
+
 describe('voice call lines', () => {
   it("a hand-off reads as what the voice asked the agent, not the user's bubble", () => {
     useChatStore.getState().applyEvent({

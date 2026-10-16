@@ -19,7 +19,7 @@ import { describeRecurrence } from '@patch/wire';
 import type { WireEvent } from '@patch/wire';
 import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
-import type { DaemonLink } from '../daemon-link.js';
+import type { HostLink } from '../host-link.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from '../host-addressing.js';
 import { JobCreateBody, JobPatchBody, type JobsInterface } from './types.js';
 import { JobLogs } from './logs.js';
@@ -78,10 +78,10 @@ export interface JobRoutesDeps {
    * job editor's natural-language schedule input): round-trips a
    * `patch.recurrence.translate.request` to the named host, the same way
    * `GET /api/models` round-trips `patch.models.request` (chat-routes.ts).
-   * Absent in test wiring that has no daemon-link — the route then reports
+   * Absent in test wiring that has no host-link — the route then reports
    * 503 rather than hanging.
    */
-  daemonLink?: DaemonLink;
+  hostLink?: HostLink;
   /** Generates the request id for the translate round-trip. */
   idGenerator?: () => string;
   /** Override for tests — production default is 25s (the one-shot allows up to 20s). */
@@ -147,11 +147,11 @@ function validateActionChatId(
   if (!registry) return { ok: true };
   // If the registry hasn't been seeded yet AND has zero entries, refuse to
   // validate — better to fail closed than silently accept a typo. This is
-  // the MAJOR-M3 race-window note: the daemon-link seeds chats on first
+  // the MAJOR-M3 race-window note: the host-link seeds chats on first
   // connect; until that completes, action.chatId must reject. Once it
   // contains anything we trust the gate.
   if (registry.size() === 0) {
-    // Transient, not a client error: the daemon-link seeds chats on first
+    // Transient, not a client error: the host-link seeds chats on first
     // connect. Callers map this to a retryable 503 rather than a 400 — the
     // request isn't malformed, the server just isn't ready yet.
     return { ok: false, transient: true };
@@ -563,8 +563,8 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
       timeout: NodeJS.Timeout;
     }
   >();
-  if (deps.daemonLink) {
-    deps.daemonLink.onEvent((event: WireEvent) => {
+  if (deps.hostLink) {
+    deps.hostLink.onEvent((event: WireEvent) => {
       if (event.type !== 'patch.recurrence.translate.response') return;
       const waiter = recurrenceTranslatePending.get(event.requestId);
       if (!waiter) return;
@@ -574,7 +574,7 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
     });
   }
   const RecurrenceTranslateBody = z
-    .object({ daemonId: z.string().min(1), phrase: z.string().min(1) })
+    .object({ hostId: z.string().min(1), phrase: z.string().min(1) })
     .strict();
   app.post('/api/jobs/recurrence/translate', async (req, reply) => {
     try {
@@ -593,15 +593,15 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
     }
-    const { daemonId, phrase } = parsed.data;
-    const unknownHost = checkRegisteredHost(deps.registry, daemonId);
+    const { hostId, phrase } = parsed.data;
+    const unknownHost = checkRegisteredHost(deps.registry, hostId);
     if (unknownHost) {
       return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
     }
-    const daemonLink = deps.daemonLink;
+    const hostLink = deps.hostLink;
     const idGenerator = deps.idGenerator;
-    if (!daemonLink || !idGenerator) {
-      return reply.code(503).send({ error: 'daemon-link not configured' });
+    if (!hostLink || !idGenerator) {
+      return reply.code(503).send({ error: 'host-link not configured' });
     }
     const requestId = idGenerator();
     const result = await new Promise<
@@ -612,10 +612,10 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
         resolveP('timeout');
       }, RECURRENCE_TRANSLATE_TIMEOUT_MS);
       recurrenceTranslatePending.set(requestId, { resolve: resolveP, timeout });
-      daemonLink.send(daemonId, {
+      hostLink.send(hostId, {
         type: 'patch.recurrence.translate.request',
         requestId,
-        daemonId,
+        hostId,
         phrase,
       });
     });

@@ -90,7 +90,7 @@ function seedChat(chatId: string, timeline: ChatEventEntry[]): void {
   useChatStore.getState().hydrate([
     {
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto' as const,
       name: chatId,
       folder: 'foo',

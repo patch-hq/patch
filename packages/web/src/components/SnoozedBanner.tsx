@@ -1,9 +1,9 @@
 // SnoozedBanner — shown in the chat panel when the open chat is snoozed
 // (spec/04 § Snooze, spec/14 § Chat lifecycle → Snooze).
 //
-// Snoozing only changes where a chat is listed: it still opens, still runs and
-// still notifies. So the panel names the wake time rather than hiding anything,
-// and carries the same Unsnooze the Snoozed section offers. Optimistic clear,
+// A snoozed chat still opens and still runs, but it is silent until it comes
+// back. So the panel names the wake time rather than hiding anything, and
+// carries the same Unsnooze the Snoozed section offers. Optimistic clear,
 // reverting + toasting on failure (NO FALLBACK).
 
 import type { JSX } from 'react';

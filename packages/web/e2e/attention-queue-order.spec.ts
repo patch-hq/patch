@@ -45,7 +45,7 @@ test.describe('needs-attention queue order', () => {
       w.__store.getState().mergeChats([
         {
           chatId: 'chat_long_text',
-          daemonId: 'd1',
+          hostId: 'd1',
           permissionMode: 'auto',
           name: 'long-text-fixture',
           folder: '/home/tom/projects/portfolio',

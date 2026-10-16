@@ -5,25 +5,26 @@
 // (chatDetail.timeline.test.tsx / chatDetail.scroll.test.tsx /
 // chatDetail.zoom.test.tsx) — this file covers the top chrome: back/call/
 // kebab buttons, the folder/title line, the awaiting-permission pill, the
-// OfflineBanner/DaemonOfflineBanner mount, and the composer-vs-read-only-hint
+// OfflineBanner/HostOfflineBanner mount, and the composer-vs-read-only-hint
 // gate for Manager / Speakers / a regular chat.
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import {
-  renderRN,
+  renderRN as renderRNUntracked,
   findHost,
   findAllHost,
   queryHost,
   byLabel,
   byTestId,
   hasText,
+  actAsync,
   textOf,
 } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
-import { __setLocalSearchParams, routerMock } from './stubs/expo-router';
+import { __resetRouterMock, __setLocalSearchParams, routerMock } from './stubs/expo-router';
 
 const apiMocks = {
   deleteChat: vi.fn(async () => ({ ok: true as const })),
@@ -47,13 +48,26 @@ vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 const startVoiceCallMock = vi.fn();
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: startVoiceCallMock }));
 
+// A screen left mounted would answer later tests' store changes (it listens for
+// its chat being archived elsewhere), so every render is torn down after its test.
+const mounted: Array<ReturnType<typeof renderRNUntracked>> = [];
+function renderRN(element: React.ReactElement): ReturnType<typeof renderRNUntracked> {
+  const r = renderRNUntracked(element);
+  mounted.push(r);
+  return r;
+}
+afterEach(() => {
+  for (const r of mounted.splice(0)) r.unmount();
+});
+
 let ChatDetailScreen: React.ComponentType;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  __resetRouterMock();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   const mod = await import('../app/chats/[chatId]');
   ChatDetailScreen = mod.default;
 });
@@ -64,7 +78,7 @@ function seedChat(
     pinned?: boolean;
     status?: 'active' | 'archived' | 'errored';
     snoozedUntil?: number | null;
-    daemonId?: string;
+    hostId?: string;
   } = {},
 ): void {
   useChatStore.getState().hydrate([
@@ -95,14 +109,14 @@ describe('chat-detail header', () => {
   // several registered hosts the phone's header must say which machine the
   // chat runs on, each segment only when known.
   it('crumb reads `folder · host` when the chat has a known host', () => {
-    seedChat('c1', { daemonId: 'd1' });
+    seedChat('c1', { hostId: 'd1' });
     usePresenceStore.getState().setHostReport({
-      type: 'daemon.host',
-      daemonId: 'd1',
+      type: 'host.host',
+      hostId: 'd1',
       hostName: 'hetzner',
       platform: 'linux',
       arch: 'x64',
-      daemonVersion: '0.1.400',
+      hostVersion: '0.1.400',
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
@@ -278,6 +292,21 @@ describe('chat-detail header', () => {
     expect(startVoiceCallMock).toHaveBeenCalledWith('c1');
   });
 
+  it('the hands-free button starts a hands-free session for a regular (new) chat', () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    const r = renderRN(<ChatDetailScreen />);
+    findHost(r.root, byLabel('Start hands-free')).props.onPress();
+    expect(startVoiceCallMock).toHaveBeenCalledWith('c1', 'hands-free');
+  });
+
+  it('hands-free is hidden on a read-only mirror thread (Speakers)', () => {
+    seedChat(SPECIAL_THREAD_IDS.speakers);
+    __setLocalSearchParams({ chatId: SPECIAL_THREAD_IDS.speakers });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(() => findHost(r.root, byLabel('Start hands-free'))).toThrow();
+  });
+
   it('the call button is hidden on a read-only mirror thread (Speakers)', () => {
     seedChat(SPECIAL_THREAD_IDS.speakers);
     __setLocalSearchParams({ chatId: SPECIAL_THREAD_IDS.speakers });
@@ -392,7 +421,7 @@ describe('chat-detail — kebab menu', () => {
       .props.onPress();
   }
 
-  it('orders the items New chat, Call, Tools, Pin, Snooze, Archive, then Delete last', () => {
+  it('orders the items New chat, Call, Tools, Documents, Pin, Snooze, Archive, then Delete last', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
@@ -401,6 +430,9 @@ describe('chat-detail — kebab menu', () => {
       'New chat',
       'Call',
       'Tools',
+      'Documents',
+      'Add tasks',
+      'Design a change to Chat',
       'Pin chat',
       'Snooze chat',
       'Archive chat',
@@ -414,7 +446,7 @@ describe('chat-detail — kebab menu', () => {
       {
         chatId: 'c1',
         name: 'My Chat',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/home/tom/project',
         activity: 'idle',
         permissionMode: 'auto',
@@ -431,7 +463,7 @@ describe('chat-detail — kebab menu', () => {
     expect(apiMocks.createChat).not.toHaveBeenCalled();
     expect(routerMock.push).toHaveBeenCalledWith({
       pathname: '/new-chat',
-      params: { daemonId: 'd1', folder: '/home/tom/project' },
+      params: { hostId: 'd1', folder: '/home/tom/project' },
     });
   });
 
@@ -445,6 +477,18 @@ describe('chat-detail — kebab menu', () => {
     expect(apiMocks.createChat).not.toHaveBeenCalled();
     const { useUiStore } = await import('../src/stores/uiStore');
     expect(useUiStore.getState().errors.at(-1)?.message).toMatch(/machine isn't known/);
+  });
+
+  it('Design a change to Chat opens New Pad on THIS chat with Patch preselected', () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    const r = renderRN(<ChatDetailScreen />);
+    findHost(r.root, byLabel('More')).props.onPress();
+    tapItem(r.root, 'Design a change to Chat');
+    expect(routerMock.push).toHaveBeenCalledWith({
+      pathname: '/pads/new',
+      params: { chatId: 'c1', app: 'Patch' },
+    });
   });
 
   it('Call in the menu starts the same voice call as the header button', () => {
@@ -468,6 +512,47 @@ describe('chat-detail — kebab menu', () => {
     expect(routerMock.back).toHaveBeenCalled();
   });
 
+  it('archiving from another surface takes the open chat back to the list', async () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    renderRN(<ChatDetailScreen />);
+    expect(routerMock.back).not.toHaveBeenCalled();
+    await actAsync(async () => {
+      useChatStore.getState().applyEvent({
+        type: 'chat.state',
+        chatId: 'c1',
+        activity: 'idle',
+        permissionMode: 'bypassPermissions',
+        status: 'archived',
+        lastUpdated: 10_000,
+      });
+    });
+    expect(routerMock.back).toHaveBeenCalledTimes(1);
+  });
+
+  it('an archive made on this screen goes back once, not twice', async () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    const r = renderRN(<ChatDetailScreen />);
+    findHost(r.root, byLabel('More')).props.onPress();
+    await actAsync(async () => {
+      tapItem(r.root, 'Archive chat');
+    });
+    expect(routerMock.back).toHaveBeenCalledTimes(1);
+  });
+
+  it('Documents opens the chat-folder document browser', () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    const r = renderRN(<ChatDetailScreen />);
+    findHost(r.root, byLabel('More')).props.onPress();
+    tapItem(r.root, 'Documents');
+    expect(routerMock.push).toHaveBeenCalledWith({
+      pathname: '/chats/[chatId]/docs',
+      params: { chatId: 'c1' },
+    });
+  });
+
   it('an archived chat offers Unarchive chat, which restores it and stays put', async () => {
     seedChat('c1', { status: 'archived' });
     __setLocalSearchParams({ chatId: 'c1' });
@@ -477,6 +562,9 @@ describe('chat-detail — kebab menu', () => {
       'New chat',
       'Call',
       'Tools',
+      'Documents',
+      'Add tasks',
+      'Design a change to Chat',
       'Pin chat',
       'Snooze chat',
       'Unarchive chat',
@@ -489,12 +577,21 @@ describe('chat-detail — kebab menu', () => {
     expect(routerMock.back).not.toHaveBeenCalled();
   });
 
-  it('Manager shows the menu with what applies: New chat, Call, Tools, Disable, Clear context', () => {
+  it('Manager shows the menu with what applies: New chat, Call, Tools, Documents, Disable, Clear context', () => {
     seedChat(SPECIAL_THREAD_IDS.manager);
     __setLocalSearchParams({ chatId: SPECIAL_THREAD_IDS.manager });
     const r = renderRN(<ChatDetailScreen />);
     findHost(r.root, byLabel('More')).props.onPress();
-    expect(menuLabels(r.root)).toEqual(['New chat', 'Call', 'Tools', 'Disable', 'Clear context']);
+    expect(menuLabels(r.root)).toEqual([
+      'New chat',
+      'Call',
+      'Tools',
+      'Documents',
+      'Add tasks',
+      'Design a change to Chat',
+      'Disable',
+      'Clear context',
+    ]);
   });
 
   it('Disable on Manager turns it off through the same route as web, then offers Enable', async () => {
@@ -587,7 +684,7 @@ describe('chat-detail — kebab menu', () => {
   // Snooze from the chat detail (spec/15 ## Chat detail; spec/04 § Snooze).
   // The kebab hands off to the SAME preset sheet the Chats-tab row tools open,
   // so there is one preset ladder on the phone, not two.
-  it('Snooze chat opens the preset sheet without committing anything', async () => {
+  it('Snooze chat opens the Snooze sheet without committing anything', async () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
@@ -600,9 +697,10 @@ describe('chat-detail — kebab menu', () => {
 
     // The sheet lives at the app root, not in this screen — render it against
     // the same (shared) store to prove the hand-off actually landed.
-    const { ChatLongPressSheet } = await import('../src/components/ChatLongPressSheet');
-    const sheet = renderRN(<ChatLongPressSheet />);
+    const { SnoozeSheet, useSnoozeSheetStore } = await import('../src/components/SnoozeSheet');
+    const sheet = renderRN(<SnoozeSheet />);
     expect(hasText(sheet.root, '1 hour')).toBe(true);
+    useSnoozeSheetStore.getState().close();
   });
 
   it('a snoozed chat offers Unsnooze chat, clearing it in one tap', async () => {
@@ -632,7 +730,7 @@ describe('chat-detail — kebab menu', () => {
       {
         chatId: 'c1',
         name: 'My Chat',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '~/project',
         activity: 'idle',
         permissionMode: 'auto',
@@ -695,5 +793,55 @@ describe('chat-detail — KeyboardAvoidingView behavior prop (iOS vs Android)', 
     const r = renderRN(<ChatDetailScreen />);
     const kav = findHost(r.root, (i) => i.type === 'KeyboardAvoidingView');
     expect(kav.props.behavior).toBeUndefined();
+  });
+});
+
+describe('chat-detail swipe to change chat', () => {
+  function seedThree(): void {
+    useChatStore.getState().hydrate(
+      ['c1', 'c2', 'c3'].map((id, i) => ({
+        chatId: id,
+        name: id,
+        folder: '~/project',
+        activity: 'idle' as const,
+        status: 'active' as const,
+        pinned: false,
+        pinnedAt: null,
+        lastUpdated: 1,
+        lastUserActivity: 10 - i,
+      })),
+    );
+  }
+  function surface(r: ReturnType<typeof renderRN>): ReturnType<typeof findHost> {
+    return findHost(r.root, byTestId('chat-swipe-surface'));
+  }
+  const g = (dx: number, dy = 0): { dx: number; dy: number } => ({ dx, dy });
+
+  it('swiping right opens the previous chat, left the next', () => {
+    seedThree();
+    __setLocalSearchParams({ chatId: 'c2' });
+    const s = surface(renderRN(<ChatDetailScreen />));
+    s.props['onPanResponderRelease']({}, g(120));
+    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c1');
+    s.props['onPanResponderRelease']({}, g(-120));
+    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c3');
+  });
+
+  it('does nothing past the end of the list or for a short swipe', () => {
+    seedThree();
+    __setLocalSearchParams({ chatId: 'c1' });
+    const s = surface(renderRN(<ChatDetailScreen />));
+    s.props['onPanResponderRelease']({}, g(120));
+    s.props['onPanResponderRelease']({}, g(-30));
+    expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+
+  it('only claims a clearly horizontal drag', () => {
+    seedThree();
+    __setLocalSearchParams({ chatId: 'c2' });
+    const s = surface(renderRN(<ChatDetailScreen />));
+    expect(s.props['onMoveShouldSetPanResponder']({}, g(40, 5))).toBe(true);
+    expect(s.props['onMoveShouldSetPanResponder']({}, g(40, 40))).toBe(false);
+    expect(s.props['onMoveShouldSetPanResponder']({}, g(5, 0))).toBe(false);
   });
 });

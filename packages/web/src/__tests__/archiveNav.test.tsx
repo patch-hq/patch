@@ -2,12 +2,14 @@
 // (spec/04 § Lifecycle) — from whichever control did the archiving.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { JSX } from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import React, { type JSX } from 'react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { resetArchiveNav, useLeaveWhenArchivedElsewhere } from '../lib/archiveNav.js';
 import { ChatHeader } from '../components/ChatHeader.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
+import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -26,7 +28,7 @@ vi.mock('../lib/voiceController.js', () => ({
 function row(overrides: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'r1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions',
     name: 'a chat',
     folder: '~/proj',
@@ -68,8 +70,15 @@ function seedThree(): void {
 
 let loc = { pathname: '/', search: '' };
 
+let navigations = 0;
+
 function LocationProbe(): null {
   const l = useLocation();
+  const last = React.useRef('');
+  if (last.current !== l.key) {
+    last.current = l.key;
+    navigations += 1;
+  }
   loc = { pathname: l.pathname, search: l.search };
   return null;
 }
@@ -83,6 +92,7 @@ function renderAt(chatId: string, ui: JSX.Element): void {
         <Route path="*" element={ui} />
       </Routes>
       <ConfirmModal />
+      <SnoozeSheet />
     </MemoryRouter>,
   );
 }
@@ -90,6 +100,8 @@ function renderAt(chatId: string, ui: JSX.Element): void {
 describe('archiving the open chat moves you on', () => {
   beforeEach(() => {
     loc = { pathname: '/', search: '' };
+    navigations = 0;
+    resetArchiveNav();
     useChatStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
     useVoiceStore.setState({ activeDevices: {} });
@@ -97,7 +109,7 @@ describe('archiving the open chat moves you on', () => {
     useUiStore.getState().setArchivedOpen(false);
     useUiStore.getState().setDeletedOpen(false);
     useUiStore.getState().setAttentionOnly(false);
-    useUiStore.setState({ forgottenFolders: [], errors: [] });
+    useUiStore.setState({ forgottenFolders: [], errors: [], snoozeSheet: null });
     useUiStore.getState().setSearchQuery('');
     useSelectionStore.setState({ order: [], anchor: null, selected: [] });
     vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
@@ -177,7 +189,8 @@ describe('archiving the open chat moves you on', () => {
     renderAt('r2', <ChatHeader row={row({ chatId: 'r2', lastUpdated: 200 })} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-1-hour'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-1-hour'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     expect(loc.pathname).toBe('/chats/r3');
     expect(useChatStore.getState().chats['r2']?.snoozedUntil).not.toBeNull();
   });
@@ -187,7 +200,52 @@ describe('archiving the open chat moves you on', () => {
     renderAt('r1', <ChatHeader row={row({ chatId: 'r1' })} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-preset-1-hour'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-1-hour'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     expect(loc.pathname).toBe('/chats/new');
+  });
+
+  describe('archived from another surface', () => {
+    function Shell(): null {
+      useLeaveWhenArchivedElsewhere(useNavigate());
+      return null;
+    }
+    const archivedElsewhere = (chatId: string): void =>
+      useChatStore.getState().applyEvent({
+        type: 'chat.state',
+        chatId,
+        activity: 'idle',
+        permissionMode: 'bypassPermissions',
+        status: 'archived',
+        lastUpdated: 200,
+      });
+
+    it('the open chat is left for the next one down the list', () => {
+      seedThree();
+      renderAt('r2', <Shell />);
+      act(() => archivedElsewhere('r2'));
+      expect(loc.pathname).toBe('/chats/r3');
+    });
+
+    it('a chat that is not open is left alone', () => {
+      seedThree();
+      renderAt('r2', <Shell />);
+      act(() => archivedElsewhere('r1'));
+      expect(loc.pathname).toBe('/chats/r2');
+    });
+
+    it('an archive made here navigates once, not twice', () => {
+      seedThree();
+      renderAt(
+        'r2',
+        <>
+          <Shell />
+          <ChatHeader row={row({ chatId: 'r2', lastUpdated: 200 })} />
+        </>,
+      );
+      fireEvent.click(screen.getByTestId('action-archive'));
+      expect(loc.pathname).toBe('/chats/r3');
+      expect(navigations).toBe(2); // the initial entry + one move
+    });
   });
 });

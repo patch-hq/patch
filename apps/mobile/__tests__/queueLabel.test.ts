@@ -3,7 +3,7 @@
 // and each names the event that releases it.
 
 import { describe, it, expect } from 'vitest';
-import { queueChipLabel, queueChipTitle } from '../src/lib/queueLabel';
+import { queueChipLabel, queueChipTitle, queueRelease } from '../src/lib/queueLabel';
 
 describe('queueChipLabel', () => {
   it('reads "Queued" at the head of the queue', () => {
@@ -37,5 +37,39 @@ describe('queueChipTitle', () => {
   it('counts what is ahead for the rest, singular and plural', () => {
     expect(queueChipTitle(2)).toBe('Runs after the current turn and 1 message ahead of it');
     expect(queueChipTitle(3)).toBe('Runs after the current turn and 2 messages ahead of it');
+  });
+});
+
+describe('host offline', () => {
+  it('says the host is offline rather than that a turn is running', () => {
+    expect(queueChipLabel(1, false)).toBe('Host offline');
+    expect(queueChipLabel(3, false)).toBe('Host offline');
+    expect(queueChipTitle(1, false)).toBe('Waiting for the host to come back online');
+  });
+});
+
+describe('release event', () => {
+  it('says a plain message goes in at the next tool call', () => {
+    expect(queueChipLabel(1, true, 'tool')).toBe('Queued · next tool call');
+    expect(queueChipLabel(2, true, 'tool')).toBe('2nd in queue · next tool call');
+    expect(queueChipTitle(1, true, 'tool')).toBe(
+      'Goes in when the agent finishes its current tool call',
+    );
+  });
+
+  it('says a turn of its own goes in when the turn ends', () => {
+    expect(queueChipLabel(1, true, 'turn')).toBe('Queued · end of turn');
+    expect(queueChipTitle(1, true, 'turn')).toBe('Runs when the current turn finishes');
+  });
+
+  it('host offline wins over the release event', () => {
+    expect(queueChipLabel(1, false, 'tool')).toBe('Host offline');
+  });
+
+  it('holds everything behind a turn that needs its own run', () => {
+    const block = [{}, { queuedOwnTurn: true }, {}];
+    expect(queueRelease(block, 0)).toBe('tool');
+    expect(queueRelease(block, 1)).toBe('turn');
+    expect(queueRelease(block, 2)).toBe('turn');
   });
 });

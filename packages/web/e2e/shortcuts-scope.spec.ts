@@ -17,7 +17,7 @@ const JOB = {
   enabled: true,
   filter: null,
   trigger: { type: 'cron', expression: '*/5 7-22 * * *', timezone: 'Europe/London' },
-  action: { type: 'spawn', daemonId: 'd1', folder: '/home/tom/projects/bus', prompt: 'watch' },
+  action: { type: 'spawn', hostId: 'd1', folder: '/home/tom/projects/bus', prompt: 'watch' },
 };
 
 async function calls(page: import('@playwright/test').Page): Promise<string[]> {
@@ -55,7 +55,7 @@ async function stubJobEditorApis(page: import('@playwright/test').Page): Promise
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        hosts: [{ daemonId: 'd1', roots: ['/home/tom/projects/bus'], recent: [] }],
+        hosts: [{ hostId: 'd1', roots: ['/home/tom/projects/bus'], recent: [] }],
       }),
     }),
   );

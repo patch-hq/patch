@@ -9,10 +9,12 @@ import { join } from 'node:path';
 import { generateUserKeypair } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const JOB_ID = 'j_00000000000000000000000012';
-const ACQUIRED = 1_700_000_000_000;
+// Recent, not a fixed date: the app runs on the real clock, and a slot older than
+// its 4 hour timeout is released as expired whatever the mirror says.
+const ACQUIRED = Date.now() - 60_000;
 
 describe('the app after a restart', () => {
   let dir: string;
@@ -37,7 +39,7 @@ describe('the app after a restart', () => {
         concurrency: 1,
         trigger: 'todoist',
         actionType: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
       }),
     );
     writeFileSync(
@@ -49,7 +51,7 @@ describe('the app after a restart', () => {
             chatId: 'c1',
             name: null,
             preview: null,
-            daemonId: 'd1',
+            hostId: 'd1',
             folder: '/w',
             activity: opts.activity,
             status: 'active',
@@ -67,8 +69,8 @@ describe('the app after a restart', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(61));
     const registry = Registry.load(dir);
     if (first) registry.bootstrapAccount({ keypair: user });
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     return { built, link };
   }
 
@@ -111,7 +113,7 @@ describe('the app after a restart', () => {
 
   it('writes the mirror out when it shuts down', async () => {
     const { built, link } = await boot();
-    link.emit({ type: 'chat.spawned', chatId: 'c9', daemonId: 'd1', folder: '/w' });
+    link.emit({ type: 'chat.spawned', chatId: 'c9', hostId: 'd1', folder: '/w' });
     await built.app.close();
     const again = await boot(false);
     try {

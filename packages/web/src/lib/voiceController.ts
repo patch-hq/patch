@@ -9,6 +9,7 @@
 import { playCallSound } from './callSound.js';
 import { openAudioSession, type AudioSessionDeps } from './audioSession.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
+import { startDictationPreview, type DictationPreview } from './dictationPreview.js';
 import { startRecording, type VoiceRecording, type VoiceRecorderDeps } from './voiceRecorder.js';
 import { api } from '../api/rest.js';
 import { useVoiceStore, type VoiceNoteGesture } from '../stores/voiceStore.js';
@@ -34,8 +35,22 @@ export function __setRecorderFactoryForTests(r: RecorderFactory | null): void {
   recorderImpl = r ?? startRecording;
 }
 
+/** Test seam: inject the live-transcript session opener for the NOTE path. */
+let previewImpl: typeof startDictationPreview = startDictationPreview;
+export function __setPreviewFactoryForTests(p: typeof startDictationPreview | null): void {
+  previewImpl = p ?? startDictationPreview;
+}
+
 // The in-flight note recording (null until the mic has finished spinning up).
 let activeRecording: VoiceRecording | null = null;
+// The live-transcript leg tee'd off that recording (spec/07 § Live transcript).
+let activePreview: DictationPreview | null = null;
+
+/** Close the note's live-transcript leg, if one is open. Never commits a turn. */
+function endNotePreview(): void {
+  activePreview?.stop();
+  activePreview = null;
+}
 
 function speakerFor(chatId: string): string {
   const chat = useChatStore.getState().chats[chatId];
@@ -65,6 +80,34 @@ export function describeCallError(m: string): string {
 // --------------------------------------------------------------------------
 // Mode 1 — voice note (single turn)
 // --------------------------------------------------------------------------
+
+/**
+ * Tee the note's recording into a host audio session so the overlay paints the
+ * interim transcript while the user is still speaking (spec/07 § Live
+ * transcript). Strictly additive: the clip and the transcript uploaded from it
+ * are what the note actually sends. A failure here is reported, never swallowed,
+ * and never aborts the recording it decorates.
+ */
+function startNotePreview(chatId: string, rec: VoiceRecording): void {
+  const fail = (message: string): void =>
+    useUiStore
+      .getState()
+      .pushError(`voice note: live transcript unavailable (still recording): ${message}`);
+  try {
+    const preview = previewImpl(chatId, {
+      onPartial: (text) => {
+        // A stale leg (note ended or replaced) must not paint into the next note.
+        if (activePreview === preview) useVoiceStore.getState().setNoteTranscript(text);
+      },
+      onPreviewError: fail,
+    });
+    activePreview = preview;
+    rec.onPcm((pcm) => activePreview?.push(pcm));
+  } catch (err) {
+    activePreview = null;
+    fail((err as Error).message);
+  }
+}
 
 /**
  * Begin a voice-note overlay targeting `chatId`. `gesture` records whether the
@@ -107,6 +150,7 @@ export async function startVoiceNote(
       }
       rec.onLevel((l) => useVoiceStore.getState().setNoteLevel(l));
       activeRecording = rec;
+      startNotePreview(chatId, rec);
     } catch (err) {
       activeRecording = null;
       useUiStore.getState().pushError(failed('voice note'), undefined, (err as Error).message);
@@ -135,6 +179,7 @@ export async function sendVoiceNote(): Promise<void> {
   store.setNoteSending(true);
   const rec = activeRecording;
   activeRecording = null;
+  endNotePreview();
   if (!rec) {
     // The gesture was released before the mic finished spinning up, so there is
     // no clip to send. Never drop a send silently; tell the user to hold longer.
@@ -240,6 +285,7 @@ export function releaseVoiceNoteHold(heldMs: number): void {
 export function cancelVoiceNote(): void {
   activeRecording?.cancel();
   activeRecording = null;
+  endNotePreview();
   // Cancelling the NOTE cancels the note, not the message the user had already
   // written. Anything the note carried as its prefix goes back to the composer.
   const note = useVoiceStore.getState().note;
@@ -275,7 +321,7 @@ export async function startVoiceCall(
   // its own if voice really is unavailable. Refusing on "unknown" would stop a
   // legitimate call every time the greeting was slow.
   const chatRow = useChatStore.getState().chats[chatId];
-  const host = chatRow ? usePresenceStore.getState().hosts[chatRow.daemonId] : undefined;
+  const host = chatRow ? usePresenceStore.getState().hosts[chatRow.hostId] : undefined;
   if (host?.host) {
     const cap = voiceCapability(host);
     if (!cap.available) {

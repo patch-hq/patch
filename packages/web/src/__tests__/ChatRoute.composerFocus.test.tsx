@@ -27,7 +27,7 @@ vi.mock('../api/rest.js', () => ({
 function row(chatId: string) {
   return {
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     name: chatId,
     folder: 'foo',

@@ -70,6 +70,11 @@ describe('isJunkFolder', () => {
     expect(isJunkFolder('/var/folders/ab/cd/T/z')).toBe(true);
   });
 
+  it('treats the system scratch roots themselves as junk, not only their children', () => {
+    expect(isJunkFolder('/var/tmp')).toBe(true);
+    expect(isJunkFolder('/private/tmp')).toBe(true);
+  });
+
   it('drops the empty path', () => {
     expect(isJunkFolder('')).toBe(true);
   });

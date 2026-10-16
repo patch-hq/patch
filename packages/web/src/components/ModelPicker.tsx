@@ -17,7 +17,7 @@
 
 import { useLayoutEffect, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { useModelCatalog } from '../lib/models.js';
+import { useModelCatalog, RECENT_MODEL_COUNT } from '../lib/models.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from './ErrorDetail.js';
 
@@ -67,6 +67,11 @@ export interface ModelPickerProps {
    * only marks it as not-yet-settled.
    */
   pending?: boolean;
+  /**
+   * Text for the pill in place of the model's name — for a place that offers
+   * the change as an action ("Change model") rather than reading the model.
+   */
+  triggerLabel?: string;
 }
 
 export function ModelPicker({
@@ -83,6 +88,7 @@ export function ModelPicker({
   placeholder = 'Choose a model…',
   note = null,
   pending = false,
+  triggerLabel,
 }: ModelPickerProps): JSX.Element {
   // The selectable models are LIVE: loaded from the host's catalogue, which
   // reads the backend's model list. NO baked-in array — that is what let the
@@ -177,7 +183,7 @@ export function ModelPicker({
         </div>
       ) : null}
       <ul className="model-popup-list">
-        {catalog.models.map((m) => (
+        {catalog.models.slice(0, RECENT_MODEL_COUNT).map((m) => (
           <li key={m.id}>
             <button
               type="button"
@@ -213,7 +219,9 @@ export function ModelPicker({
         title={selected ?? undefined}
         onClick={onToggle}
       >
-        <span className="model-pill-label mono">{label}</span>
+        <span className={`model-pill-label ${triggerLabel ? '' : 'mono'}`}>
+          {triggerLabel ?? label}
+        </span>
         <span className="model-pill-caret" aria-hidden>
           ▾
         </span>

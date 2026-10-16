@@ -19,7 +19,7 @@ function renderComposer(
     <Composer
       key={chatId}
       chatId={chatId}
-      daemonId="d1"
+      hostId="d1"
       onSend={onSend}
       initialValue={useComposerDraftStore.getState().get(chatId)}
       onValueChange={(t) => useComposerDraftStore.getState().setDraft(chatId, t)}

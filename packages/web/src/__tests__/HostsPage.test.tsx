@@ -25,7 +25,12 @@ import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import { setActiveWs, type PatchWs } from '../api/ws.js';
-import { reportHost, reportClaudeSettings, clearHosts } from './presenceHelpers.js';
+import {
+  reportHost,
+  reportClaudeSettings,
+  clearHosts,
+  setSharedAccounts,
+} from './presenceHelpers.js';
 import { loadShared, resetShared, sharedState } from './sharedHelpers.js';
 
 type Page = 'hosts' | 'agent' | 'memories';
@@ -51,10 +56,10 @@ function renderPage(page: Page): void {
 }
 
 /** Open a host's detail by clicking its row in the list. */
-function openRow(daemonId: string): void {
-  const row = screen.getByTestId(`host-${daemonId}`);
+function openRow(hostId: string): void {
+  const row = screen.getByTestId(`host-${hostId}`);
   const open = row.querySelector('button.set-row-open');
-  if (!open) throw new Error(`host-${daemonId} row has no open button`);
+  if (!open) throw new Error(`host-${hostId} row has no open button`);
   fireEvent.click(open);
 }
 
@@ -119,7 +124,7 @@ describe('Settings → Hosts', () => {
     usePresenceStore.setState({
       hosts: {
         'host-quiet': {
-          daemonId: 'host-quiet',
+          hostId: 'host-quiet',
           online: false,
           lastSeenAt: null,
           host: null,
@@ -128,7 +133,7 @@ describe('Settings → Hosts', () => {
           folders: null,
         },
       },
-      daemonOnline: false,
+      hostOnline: false,
     });
     renderPage('hosts');
     // Named by its id, never by a made-up label.
@@ -148,12 +153,20 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-a-update')).toBeNull();
   });
 
+  it('shows a neutral "Update pending" while the build for this machine is still being made', () => {
+    reportHost('host-a', { hostName: 'laptop', updatePending: true });
+    renderPage('hosts');
+    expect(screen.getByTestId('host-host-a-update-pending').textContent).toBe('Update pending');
+    expect(screen.queryByTestId('host-host-a-update')).toBeNull();
+    expect(errors()).toEqual([]);
+  });
+
   it('Update on a machine that has one sends host.update to it', () => {
     reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
     usePresenceStore.getState().setHostOnline('host-a', true);
     renderPage('hosts');
     fireEvent.click(screen.getByTestId('host-host-a-update'));
-    expect(send).toHaveBeenCalledWith({ type: 'host.update', daemonId: 'host-a' });
+    expect(send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a' });
   });
 
   it('Update on an OFFLINE machine is refused, naming it', () => {
@@ -202,7 +215,7 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-a-set-home')).toBeNull();
     openRow('host-b');
     fireEvent.click(screen.getByTestId('host-host-b-set-home'));
-    expect(send).toHaveBeenCalledWith({ type: 'host.set_home', daemonId: 'host-b' });
+    expect(send).toHaveBeenCalledWith({ type: 'host.set_home', hostId: 'host-b' });
   });
 
   it('opens on the home machine, and clicking another row switches the detail to it', () => {
@@ -281,7 +294,7 @@ describe('Settings → Hosts', () => {
   it('shows which settings version each host runs, and a refusal by name', () => {
     reportHost('host-a', { hostName: 'laptop' });
     usePresenceStore.getState().setHostOnline('host-a', true);
-    loadShared({ version: 5, hosts: [{ daemonId: 'host-a', appliedVersion: 5 }] });
+    loadShared({ version: 5, hosts: [{ hostId: 'host-a', appliedVersion: 5 }] });
     renderPage('hosts');
     expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent('Up to date');
     act(() => {
@@ -289,7 +302,7 @@ describe('Settings → Hosts', () => {
         version: 6,
         hosts: [
           {
-            daemonId: 'host-a',
+            hostId: 'host-a',
             appliedVersion: 5,
             error: 'provider keys: the shared settings have no Groq key',
           },
@@ -315,7 +328,17 @@ describe('Settings → Hosts', () => {
     fireEvent.click(screen.getByTestId('host-host-a-claude-drift-keep-os'));
     await waitFor(() => expect(adopt).toHaveBeenCalledWith('host-a', 'linux'));
     fireEvent.click(screen.getByTestId('host-host-a-claude-drift-discard'));
-    expect(send).toHaveBeenCalledWith({ type: 'host.claude_settings_discard', daemonId: 'host-a' });
+    expect(send).toHaveBeenCalledWith({ type: 'host.claude_settings_discard', hostId: 'host-a' });
+  });
+
+  it('shows a host on battery with its charge, and a plugged-in one as plugged in', () => {
+    reportHost('host-a', { hostName: 'laptop', power: { onBattery: true, percent: 12 } });
+    reportHost('host-b', { hostName: 'desk', power: { onBattery: false, percent: 80 } });
+    reportHost('host-c', { hostName: 'server' });
+    renderPage('hosts');
+    expect(screen.getByTestId('host-host-a-power')).toHaveTextContent('12% on battery');
+    expect(screen.getByTestId('host-host-b-power')).toHaveTextContent('80% plugged in');
+    expect(screen.queryByTestId('host-host-c-power')).toBeNull();
   });
 
   it('shows no drift for a machine whose settings.json is in step', () => {
@@ -362,7 +385,7 @@ describe('Settings → Hosts', () => {
     fireEvent.click(screen.getByTestId('host-host-a-component-kokoro-install'));
     expect(send).toHaveBeenCalledWith({
       type: 'host.component_install',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       componentId: 'kokoro',
     });
   });
@@ -378,7 +401,7 @@ describe('Settings → Hosts', () => {
     fireEvent.click(screen.getByTestId('host-host-a-component-kokoro-remove'));
     expect(send).toHaveBeenCalledWith({
       type: 'host.component_remove',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       componentId: 'kokoro',
     });
   });
@@ -407,7 +430,7 @@ describe('Settings → Hosts', () => {
     });
     expect(send).toHaveBeenCalledWith({
       type: 'host.settings',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       browserRouteThrough: 'host-b',
     });
 
@@ -437,7 +460,7 @@ describe('Settings → Hosts', () => {
     fireEvent.change(screen.getByTestId('host-host-a-route-through'), { target: { value: '' } });
     expect(send).toHaveBeenCalledWith({
       type: 'host.settings',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       browserRouteThrough: null,
     });
   });
@@ -450,11 +473,11 @@ describe('Settings → Hosts', () => {
   });
 
   it('Add a host opens the add-host panel, and Close closes it', async () => {
-    vi.spyOn(api, 'daemonManifest').mockResolvedValue({
+    vi.spyOn(api, 'hostManifest').mockResolvedValue({
       version: '1.2.3',
       artifacts: [{ target: 'darwin-arm64' }, { target: 'linux-x64' }],
     });
-    vi.spyOn(api, 'daemonInstallCommand').mockResolvedValue({
+    vi.spyOn(api, 'hostInstallCommand').mockResolvedValue({
       os: 'macos',
       version: '1.2.3',
       targets: ['darwin-arm64'],
@@ -492,13 +515,13 @@ describe('Settings → Hosts → rename', () => {
   it('commits on ↵ via host.rename, trimmed', () => {
     fireEvent.change(field(), { target: { value: '  desk  ' } });
     fireEvent.keyDown(field(), { key: 'Enter' });
-    expect(renames()).toEqual([{ type: 'host.rename', daemonId: 'host-a', hostName: 'desk' }]);
+    expect(renames()).toEqual([{ type: 'host.rename', hostId: 'host-a', hostName: 'desk' }]);
   });
 
   it('commits on blur via host.rename', () => {
     fireEvent.change(field(), { target: { value: 'desk' } });
     fireEvent.blur(field());
-    expect(renames()).toEqual([{ type: 'host.rename', daemonId: 'host-a', hostName: 'desk' }]);
+    expect(renames()).toEqual([{ type: 'host.rename', hostId: 'host-a', hostName: 'desk' }]);
   });
 
   it('refuses an empty name, saying so, rather than leaving a nameless machine', () => {
@@ -674,7 +697,7 @@ describe('Settings → Memories → Claude Code memory entries', () => {
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith({
         type: 'host.claude_memory_delete',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         project: 'portfolio',
         file: 'feedback_tests.md',
       }),
@@ -747,11 +770,12 @@ describe('chat header names its machine', () => {
           row={
             {
               chatId: '01TEST',
-              daemonId: 'host-b',
+              hostId: 'host-b',
               folder: '/work/proj',
               name: 'A chat',
               pinned: false,
               awaitingPermission: false,
+              todos: [],
             } as never
           }
         />
@@ -768,11 +792,12 @@ describe('chat header names its machine', () => {
           row={
             {
               chatId: '01TEST2',
-              daemonId: 'host-unknown',
+              hostId: 'host-unknown',
               folder: '/work/proj',
               name: 'A chat',
               pinned: false,
               awaitingPermission: false,
+              todos: [],
             } as never
           }
         />
@@ -786,16 +811,10 @@ describe('chat header names its machine', () => {
 // The new-chat screen must announce a machine that cannot run a turn, not let
 // someone discover it by opening the model picker. Everything on that screen
 // depends on it, so it is answered once and stated loudly.
-describe('a machine that is not signed in blocks the new-chat screen', () => {
+describe('no connected account blocks the new-chat screen', () => {
   it('states it and disables the folder and model pickers', async () => {
     reportHost('host-a', { hostName: 'laptop' });
-    usePresenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'host-a',
-      backendId: 'claude-code',
-      connected: false,
-      accountEmail: null,
-    });
+    setSharedAccounts({ claude: [{ connected: false }] });
     const { NewChatRoute } = await import('../routes/NewChatRoute.js');
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -806,8 +825,7 @@ describe('a machine that is not signed in blocks the new-chat screen', () => {
       </QueryClientProvider>,
     );
     const blocked = await screen.findByTestId('new-chat-blocked');
-    expect(blocked).toHaveTextContent('laptop');
-    expect(blocked).toHaveTextContent(/isn.t signed in/i);
+    expect(blocked).toHaveTextContent(/not signed in/i);
     expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
     expect(screen.getByTestId('new-chat-model')).toBeDisabled();
   });
@@ -815,14 +833,14 @@ describe('a machine that is not signed in blocks the new-chat screen', () => {
 
 describe('This Mac (spec/02 § Desktop app and the local host)', () => {
   function withBridge(
-    status: { installed: boolean; daemonId: string | null },
+    status: { installed: boolean; hostId: string | null },
     result = { ok: true, exitCode: 0, output: 'service started' },
   ) {
     const bridge = {
       status: vi.fn().mockResolvedValue(status),
       install: vi.fn().mockResolvedValue(result),
     };
-    (window as unknown as { patch?: unknown }).patch = { localDaemon: bridge };
+    (window as unknown as { patch?: unknown }).patch = { localHost: bridge };
     return bridge;
   }
   afterEach(() => {
@@ -836,14 +854,14 @@ describe('This Mac (spec/02 § Desktop app and the local host)', () => {
   });
 
   it('is absent once this Mac runs a host', async () => {
-    const bridge = withBridge({ installed: true, daemonId: 'mac' });
+    const bridge = withBridge({ installed: true, hostId: 'mac' });
     renderPage('hosts');
     await waitFor(() => expect(bridge.status).toHaveBeenCalled());
     expect(screen.queryByTestId('this-mac')).not.toBeInTheDocument();
   });
 
   it('installs with a freshly minted pairing code', async () => {
-    const bridge = withBridge({ installed: false, daemonId: null });
+    const bridge = withBridge({ installed: false, hostId: null });
     fetchRoutes['POST /api/auth/daemon/pair/start'] = () =>
       json(200, { nonce: 'fresh-code-0123456789', expiresAt: 1 });
     renderPage('hosts');
@@ -854,7 +872,7 @@ describe('This Mac (spec/02 § Desktop app and the local host)', () => {
 
   it("says why an install failed, in the installer's words", async () => {
     withBridge(
-      { installed: false, daemonId: null },
+      { installed: false, hostId: null },
       { ok: false, exitCode: 75, output: 'patch install: the pairing code could not be submitted' },
     );
     fetchRoutes['POST /api/auth/daemon/pair/start'] = () =>

@@ -23,7 +23,7 @@ import { NotificationRouter, type PushBackend } from '../src/notifications/route
 import { CallOrchestrator } from '../src/notifications/call-orchestrator.js';
 import { ReplyRouter } from '../src/notifications/reply-router.js';
 import { routeVoiceDeviceTranscript } from '../src/notifications/routes.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { build } from '../src/app.js';
 
 const silent = pino({ level: 'silent' });
@@ -1218,11 +1218,11 @@ describe('ReplyRouter — outbound assistant message routes back to source chann
 describe('Push register REST routes', () => {
   it('endpoints require auth (401 without bearer)', async () => {
     const { dir, registry } = makeRegistryDir();
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const app = await build({
       dataDir: dir,
       registry,
-      daemonLink: link,
+      hostLink: link,
       jobsWatch: false,
     });
     try {
@@ -1240,8 +1240,8 @@ describe('Push register REST routes', () => {
   it('401s when no account has been bootstrapped at all', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'patch-notif-server-'));
     const registry = Registry.load(dir); // no bootstrapAccount() call
-    const link = new InProcessDaemonLink();
-    const app = await build({ dataDir: dir, registry, daemonLink: link, jobsWatch: false });
+    const link = new InProcessHostLink();
+    const app = await build({ dataDir: dir, registry, hostLink: link, jobsWatch: false });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -1257,8 +1257,8 @@ describe('Push register REST routes', () => {
 
   it('401s when the bearer JWT fails verification (malformed/invalid, not just missing)', async () => {
     const { dir, registry } = makeRegistryDir();
-    const link = new InProcessDaemonLink();
-    const app = await build({ dataDir: dir, registry, daemonLink: link, jobsWatch: false });
+    const link = new InProcessHostLink();
+    const app = await build({ dataDir: dir, registry, hostLink: link, jobsWatch: false });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -1287,8 +1287,8 @@ describe('Push register REST routes', () => {
       surfaceKind: 'web',
       label: 'web',
     });
-    const link = new InProcessDaemonLink();
-    const app = await build({ dataDir: dir, registry, daemonLink: link, jobsWatch: false });
+    const link = new InProcessHostLink();
+    const app = await build({ dataDir: dir, registry, hostLink: link, jobsWatch: false });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -1311,11 +1311,11 @@ describe('Push register REST routes', () => {
       surfaceKind: 'web',
       label: 'web',
     });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const app = await build({
       dataDir: dir,
       registry,
-      daemonLink: link,
+      hostLink: link,
       jobsWatch: false,
       nowMs: () => 1_234_567,
     });
@@ -1344,8 +1344,8 @@ describe('Push register REST routes', () => {
       surfaceKind: 'web',
       label: 'web',
     });
-    const link = new InProcessDaemonLink();
-    const app = await build({ dataDir: dir, registry, daemonLink: link, jobsWatch: false });
+    const link = new InProcessHostLink();
+    const app = await build({ dataDir: dir, registry, hostLink: link, jobsWatch: false });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -1363,11 +1363,11 @@ describe('Push register REST routes', () => {
 
 describe('routeVoiceDeviceTranscript', () => {
   it('uses the injected idGenerator when provided', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     routeVoiceDeviceTranscript({
       deviceId: 'kitchen',
       transcript: 'lights off',
-      daemonLink: link,
+      hostLink: link,
       idGenerator: () => 'fixed-id',
     });
     expect(link.sent).toHaveLength(1);
@@ -1379,11 +1379,11 @@ describe('routeVoiceDeviceTranscript', () => {
   });
 
   it('falls back to Date.now() when no idGenerator is injected', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     routeVoiceDeviceTranscript({
       deviceId: 'kitchen',
       transcript: 'lights on',
-      daemonLink: link,
+      hostLink: link,
       // idGenerator intentionally omitted.
     });
     expect(link.sent).toHaveLength(1);

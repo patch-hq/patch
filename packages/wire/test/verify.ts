@@ -20,7 +20,7 @@ console.log('  enabled     :', job.enabled);
 console.log('  trigger     :', JSON.stringify(job.trigger));
 console.log('  filter      :', job.filter);
 console.log('  concurrency :', job.concurrency);
-console.log('  gate.daemon :', job.gate?.daemonId);
+console.log('  gate.daemon :', job.gate?.hostId);
 console.log('  gate.folder :', job.gate?.folder);
 console.log('  gate.lines  :', job.gate?.command.split('\n').length);
 console.log(

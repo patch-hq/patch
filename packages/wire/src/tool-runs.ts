@@ -28,3 +28,31 @@ export function isEditToolCall(tool: string, args: unknown): boolean {
     (typeof a['old_string'] === 'string' || typeof a['new_string'] === 'string')
   );
 }
+
+/** A run's AI label as a surface stores it (`chat.tool_run_summary`). */
+export interface ToolRunLabel {
+  callIds: string[];
+  summary: string | null;
+  error?: string;
+  live?: boolean;
+}
+
+/**
+ * The label that applies to the run a surface has drawn, or undefined. A
+ * closed label names exactly the run's calls. A LIVE narration was written
+ * while the run was still growing, so it names a leading part of it — still
+ * the best account of the run until the closed label replaces it. A run this
+ * surface cut differently (rule drift) gets no label for other calls.
+ */
+export function labelForRun(
+  label: ToolRunLabel | undefined,
+  callIds: ReadonlyArray<string | undefined>,
+): ToolRunLabel | undefined {
+  if (label === undefined) return undefined;
+  const same = (n: number) =>
+    label.callIds.length === n && label.callIds.every((id, i) => callIds[i] === id);
+  if (same(callIds.length)) return label;
+  if (label.live === true && label.callIds.length < callIds.length && same(label.callIds.length))
+    return label;
+  return undefined;
+}

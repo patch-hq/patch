@@ -16,7 +16,7 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { JobStore } from '../src/jobs/store.js';
@@ -25,7 +25,7 @@ import type { Job } from '../src/jobs/types.js';
 const silentLogger = pino({ level: 'silent' });
 
 const TRIGGER = { type: 'cron', expression: '* * * * *' } as const;
-const ACTION = { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' } as const;
 
 describe('one-off jobs', () => {
   let dir: string;
@@ -149,18 +149,18 @@ describe('one-off jobs', () => {
 
   describe('dispatcher expiry', () => {
     function setup(job: Job): {
-      link: InProcessDaemonLink;
+      link: InProcessHostLink;
       store: JobStore;
       disp: JobDispatcher;
       dispatchOnce: () => string;
     } {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       const store = makeStore();
       const logs = new JobLogs(dir);
       let n = 0;
       const disp = new JobDispatcher({
         dataDir: dir,
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         logs,
         jobs: store,
@@ -201,7 +201,7 @@ describe('one-off jobs', () => {
         const chatId = dispatchOnce();
         expect(store.get(jobId)?.expiredAt).toBeUndefined();
 
-        link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+        link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
 
         const after = store.get(jobId);
         expect(after?.enabled).toBe(false);
@@ -239,7 +239,7 @@ describe('one-off jobs', () => {
       try {
         const jobId = store.list()[0]!.id;
         const chatId = dispatchOnce();
-        link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+        link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
 
         const after = store.get(jobId);
         expect(after?.enabled).toBe(true);
@@ -260,13 +260,13 @@ describe('one-off jobs', () => {
         const chatB = dispatchOnce();
         expect(chatA).not.toBe(chatB);
 
-        link.emit({ type: 'chat.spawned', chatId: chatA, daemonId: 'd1', folder: '/work' });
+        link.emit({ type: 'chat.spawned', chatId: chatA, hostId: 'd1', folder: '/work' });
         const firstStamp = store.get(jobId)?.expiredAt;
         expect(firstStamp).toBe(now);
 
         // Time moves on; the second settle must not re-stamp.
         now += 60_000;
-        link.emit({ type: 'chat.spawned', chatId: chatB, daemonId: 'd1', folder: '/work' });
+        link.emit({ type: 'chat.spawned', chatId: chatB, hostId: 'd1', folder: '/work' });
 
         expect(store.get(jobId)?.expiredAt).toBe(firstStamp);
         expect(store.get(jobId)?.enabled).toBe(false);
@@ -283,8 +283,8 @@ describe('one-off jobs', () => {
         const jobId = store.list()[0]!.id;
         const chatA = dispatchOnce();
         const chatB = dispatchOnce();
-        link.emit({ type: 'chat.spawned', chatId: chatA, daemonId: 'd1', folder: '/work' });
-        link.emit({ type: 'chat.spawned', chatId: chatB, daemonId: 'd1', folder: '/work' });
+        link.emit({ type: 'chat.spawned', chatId: chatA, hostId: 'd1', folder: '/work' });
+        link.emit({ type: 'chat.spawned', chatId: chatB, hostId: 'd1', folder: '/work' });
 
         const runs = logs.readRuns(jobId);
         expect(runs).toHaveLength(2);
@@ -325,7 +325,7 @@ describe('one-off jobs', () => {
       const built = await buildAll({
         logger: false,
         registry,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
       });
       return { built, auth: { authorization: `Bearer ${jwt}` } };
     }

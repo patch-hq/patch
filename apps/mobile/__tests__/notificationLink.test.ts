@@ -168,6 +168,31 @@ describe('deepLinkMatchesText', () => {
     ).toBe(false);
   });
 
+  it('does NOT match a link word that only appears inside another word', () => {
+    // "pay" is inside "Display", "art" inside "start": neither names the link.
+    expect(
+      deepLinkMatchesText('https://evil.example/pay', { title: 'Display updated', body: '' }),
+    ).toBe(false);
+    expect(
+      deepLinkMatchesText('https://example.org/art', { title: 'Patch', body: 'Start the build' }),
+    ).toBe(false);
+  });
+
+  it('still matches the word with a plural or in other case and punctuation', () => {
+    expect(
+      deepLinkMatchesText('https://example.org/forecast', {
+        title: 'Patch',
+        body: 'FORECASTS: rain.',
+      }),
+    ).toBe(true);
+    expect(
+      deepLinkMatchesText('https://todoist.com/showTask?id=1', {
+        title: 'Patch',
+        body: 'Open the task',
+      }),
+    ).toBe(true);
+  });
+
   it('does NOT match a link with no identifying words', () => {
     expect(
       deepLinkMatchesText('https://192.168.0.1/1/2/3', { title: 'Patch', body: 'Anything at all' }),

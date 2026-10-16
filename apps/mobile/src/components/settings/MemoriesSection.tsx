@@ -62,7 +62,7 @@ function HostMemories({ host }: { host: HostPresence }): React.ReactElement {
   const router = useRouter();
   const [query, setQuery] = React.useState('');
   const [type, setType] = React.useState<MemoryTypeFilter>('all');
-  const daemonId = host.daemonId;
+  const hostId = host.hostId;
   // Whether Claude Code keeps memory is shared (spec/01 § Settings); the
   // entries live on each machine.
   const enabled = useSettingsStore((st) => st.data?.preferences.harnessMemoryEnabled);
@@ -71,7 +71,7 @@ function HostMemories({ host }: { host: HostPresence }): React.ReactElement {
 
   return (
     <>
-      <SettingsSection testID={`harness-memory-${daemonId}`}>
+      <SettingsSection testID={`harness-memory-${hostId}`}>
         {enabled === undefined ? (
           <NoticeRow text="Settings haven’t loaded yet" />
         ) : (
@@ -149,7 +149,7 @@ function HostMemories({ host }: { host: HostPresence }): React.ReactElement {
                       onPress={() =>
                         router.push({
                           pathname: '/settings/memory',
-                          params: { daemonId, project: m.project, file: m.file },
+                          params: { hostId, project: m.project, file: m.file },
                         })
                       }
                     />
@@ -171,22 +171,22 @@ function HostMemories({ host }: { host: HostPresence }): React.ReactElement {
  * fresh snapshot — or its refusal, shown here.
  */
 export function MemoryDetail({
-  daemonId,
+  hostId,
   project,
   file,
 }: {
-  daemonId: string;
+  hostId: string;
   project: string;
   file: string;
 }): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
-  const host = usePresenceStore((s) => s.hosts[daemonId] ?? null);
+  const host = usePresenceStore((s) => s.hosts[hostId] ?? null);
   const settings = host?.claudeSettings ?? null;
   const entry: ClaudeMemoryEntry | null =
     settings?.memories.find((m) => m.project === project && m.file === file) ?? null;
   const [draft, setDraft] = React.useState(entry?.body ?? '');
-  const name = host ? hostName(host) : daemonId;
+  const name = host ? hostName(host) : hostId;
   const { waiting, problem, start, clearProblem } = useSettledEdit<'save' | 'delete'>(
     settings,
     name,
@@ -209,8 +209,8 @@ export function MemoryDetail({
     clearProblem();
     if (
       sendToHost(
-        daemonId,
-        { type: 'host.claude_memory_set', daemonId, project, file, body: draft },
+        hostId,
+        { type: 'host.claude_memory_set', hostId, project, file, body: draft },
         'Save memory',
       )
     ) {
@@ -227,8 +227,8 @@ export function MemoryDetail({
           clearProblem();
           if (
             sendToHost(
-              daemonId,
-              { type: 'host.claude_memory_delete', daemonId, project, file },
+              hostId,
+              { type: 'host.claude_memory_delete', hostId, project, file },
               'Delete memory',
             )
           ) {

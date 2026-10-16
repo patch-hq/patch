@@ -28,7 +28,7 @@ export interface LocalServerOptions {
   /** Lets a phone reach this server (`ws(s)://` address of a relay). */
   relayUrl?: string;
   /** Host builds to serve from `downloads/`, for the host on this Mac to install from. */
-  daemonArtifacts?: string;
+  hostArtifacts?: string;
   /** The Node that runs it: in Electron, the app's own with `ELECTRON_RUN_AS_NODE`. */
   node: { execPath: string; env: Record<string, string> };
   startTimeoutMs?: number;
@@ -95,7 +95,7 @@ export async function startLocalServer(opts: LocalServerOptions): Promise<LocalS
   ).gitSha;
 
   for (const d of ['data', 'downloads', 'logs']) mkdirSync(join(opts.home, d), { recursive: true });
-  if (opts.daemonArtifacts) seed(opts.daemonArtifacts, join(opts.home, 'downloads'));
+  if (opts.hostArtifacts) seed(opts.hostArtifacts, join(opts.home, 'downloads'));
 
   const running = await healthz(origin);
   if (running !== null) {

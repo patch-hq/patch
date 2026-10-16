@@ -9,7 +9,7 @@ import type { ChatRow } from '../stores/types';
 /** One folder the picker can offer, on one host. */
 export interface FolderRecent {
   folder: string;
-  daemonId: string;
+  hostId: string;
   /** 0 for a registered root, which is offered but never "recently used". */
   lastUpdated: number;
 }
@@ -42,21 +42,21 @@ export function buildRecentFolders(
   hostFolders: Record<string, { roots: string[]; recent: string[] }>,
 ): FolderRecent[] {
   const byKey = new Map<string, FolderRecent>();
-  const add = (folder: string, daemonId: string, lastUpdated: number): void => {
-    if (!folder || !daemonId) return;
-    const key = `${daemonId}\u0000${folder}`;
+  const add = (folder: string, hostId: string, lastUpdated: number): void => {
+    if (!folder || !hostId) return;
+    const key = `${hostId}\u0000${folder}`;
     const existing = byKey.get(key);
     if (!existing || existing.lastUpdated < lastUpdated) {
-      byKey.set(key, { folder, daemonId, lastUpdated });
+      byKey.set(key, { folder, hostId, lastUpdated });
     }
   };
   for (const c of Object.values(chats)) {
     if (c.status === 'deleted' || c.jobId || !c.folder || isJunkFolder(c.folder)) continue;
-    add(c.folder, c.daemonId, c.lastUpdated);
+    add(c.folder, c.hostId, c.lastUpdated);
   }
-  for (const [daemonId, h] of Object.entries(hostFolders)) {
-    for (const f of h.recent) if (!isJunkFolder(f)) add(f, daemonId, 0);
-    for (const f of h.roots) add(f, daemonId, 0);
+  for (const [hostId, h] of Object.entries(hostFolders)) {
+    for (const f of h.recent) if (!isJunkFolder(f)) add(f, hostId, 0);
+    for (const f of h.roots) add(f, hostId, 0);
   }
   return [...byKey.values()].sort((a, b) => b.lastUpdated - a.lastUpdated);
 }
@@ -65,12 +65,12 @@ export function buildRecentFolders(
 export function filterRows(
   recents: readonly FolderRecent[],
   query: string,
-  daemonId: string | 'all',
+  hostId: string | 'all',
 ): FolderPickerRow[] {
   const q = query.trim().toLowerCase();
   const out: FolderPickerRow[] = [];
   for (const r of recents) {
-    if (daemonId !== 'all' && r.daemonId !== daemonId) continue;
+    if (hostId !== 'all' && r.hostId !== hostId) continue;
     const name = folderName(r.folder);
     const shortPath = shortHomePath(r.folder);
     if (q && !name.toLowerCase().includes(q) && !shortPath.toLowerCase().includes(q)) continue;

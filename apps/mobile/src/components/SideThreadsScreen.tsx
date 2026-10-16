@@ -27,6 +27,7 @@ import {
   stopBranch,
   sendBackToChat,
   openSideThreadDraft,
+  offQuoteLabel,
 } from '../lib/sideThreadActions';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { api } from '../api/rest';
@@ -242,7 +243,7 @@ function DraftPane({
         testID="side-threads-draft-quote"
         style={{ margin: space.md, color: colors.ink3, fontSize: textMin }}
       >
-        {`Off "${draft.quotedMessage.slice(0, 90)}"`}
+        {offQuoteLabel(draft.quotedMessage)}
       </Text>
       <View style={{ flex: 1 }} />
       <View
@@ -326,7 +327,7 @@ function ThreadPane({
     <View style={{ flex: 1 }} testID={`side-threads-pane-${branchId}`}>
       {quoted !== null ? (
         <Text style={{ margin: space.md, marginBottom: 0, color: colors.ink3, fontSize: textMin }}>
-          {`Off "${quoted.slice(0, 90)}"`}
+          {offQuoteLabel(quoted)}
         </Text>
       ) : null}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md }}>

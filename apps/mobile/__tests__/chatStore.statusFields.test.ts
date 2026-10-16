@@ -11,7 +11,7 @@ import type { ChatListRow } from '../src/stores/types';
 const base: ChatListRow = {
   chatId: 'c1',
   name: 'n',
-  daemonId: 'd1',
+  hostId: 'd1',
   folder: '~/f',
   activity: 'idle',
   permissionMode: 'default',

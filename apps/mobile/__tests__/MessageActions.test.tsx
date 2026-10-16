@@ -19,6 +19,7 @@ import {
   MessageActionsHost,
   MessageLongPress,
   __resetMessageActions,
+  copyMessageText,
   formatMessageTime,
   showMessageActions,
 } from '../src/components/MessageActions';
@@ -99,6 +100,32 @@ describe('MessageActionsHost', () => {
     expect(findAllHost(r.root, byTestId('message-copied-toast'))).toHaveLength(1);
     actSync(() => {
       vi.advanceTimersByTime(COPIED_TOAST_MS);
+    });
+    expect(findAllHost(r.root, byTestId('message-copied-toast'))).toHaveLength(0);
+  });
+
+  it("a second Copied restarts the toast's time instead of inheriting what the first had left", async () => {
+    vi.useFakeTimers();
+    const r = renderRN(<MessageActionsHost />);
+    actSync(() => showMessageActions('x'));
+    // The select view's Copy all, pressed twice: no reopening of the sheet between.
+    const copy = async (): Promise<void> => {
+      await actAsync(async () => {
+        await copyMessageText('x');
+      });
+    };
+    await copy();
+    actSync(() => {
+      vi.advanceTimersByTime(COPIED_TOAST_MS - 500);
+    });
+    await copy();
+    actSync(() => {
+      vi.advanceTimersByTime(COPIED_TOAST_MS - 500);
+    });
+    // 500ms short of the SECOND copy's full time: still showing.
+    expect(findAllHost(r.root, byTestId('message-copied-toast'))).toHaveLength(1);
+    actSync(() => {
+      vi.advanceTimersByTime(500);
     });
     expect(findAllHost(r.root, byTestId('message-copied-toast'))).toHaveLength(0);
   });
@@ -206,5 +233,55 @@ describe('MessageLongPress with sideThread (spec/15 § Side threads screen)', ()
     expect(routerMock.push).toHaveBeenCalledWith('/chats/c1/threads');
     // The sheet closes, same as every other action.
     expect(findAllHost(r.root, byTestId('message-actions-sheet'))).toHaveLength(0);
+  });
+});
+
+describe('MessageLongPress with retry', () => {
+  it('a row without retry has no Retry item', () => {
+    const r = renderRN(
+      <>
+        <MessageLongPress text="hello" testID="row">
+          <Text>hello</Text>
+        </MessageLongPress>
+        <MessageActionsHost />
+      </>,
+    );
+    actSync(() => findHost(r.root, byTestId('row')).props.onLongPress());
+    expect(findAllHost(r.root, byTestId('message-action-retry'))).toHaveLength(0);
+  });
+
+  it('tapping Retry runs it and closes the sheet', () => {
+    const retry = vi.fn();
+    const r = renderRN(
+      <>
+        <MessageLongPress text="hello" retry={retry} testID="row">
+          <Text>hello</Text>
+        </MessageLongPress>
+        <MessageActionsHost />
+      </>,
+    );
+    actSync(() => findHost(r.root, byTestId('row')).props.onLongPress());
+    actSync(() => findHost(r.root, byTestId('message-action-retry')).props.onPress());
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(findAllHost(r.root, byTestId('message-actions-sheet'))).toHaveLength(0);
+  });
+});
+
+describe('retryTurn', () => {
+  it('on an assistant reply re-sends the preceding user message; none to resend is an error', async () => {
+    const { useChatStore } = await import('../src/stores/chatStore');
+    const { retrySource } = await import('../src/lib/sendQueue');
+    useChatStore.setState({
+      timelines: {
+        c1: [
+          { seq: 1, kind: 'message', role: 'user', content: 'ask', at: 0 },
+          { seq: 2, kind: 'message', role: 'assistant', content: 'answer', at: 0 },
+        ] as never,
+        c2: [{ seq: 2, kind: 'message', role: 'assistant', content: 'answer', at: 0 }] as never,
+      },
+    });
+    expect(retrySource('c1', { role: 'assistant', seq: 2 })).toEqual({ content: 'ask', seq: 1 });
+    expect(retrySource('c1', { role: 'user', seq: 1 })).toEqual({ content: 'ask', seq: 1 });
+    expect(retrySource('c2', { role: 'assistant', seq: 2 })).toBeNull();
   });
 });

@@ -70,7 +70,7 @@ const baseJob: Job = {
   filter: null,
   action: {
     type: 'spawn',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/home/tom/p',
     prompt: 'summarize the day',
     skill: undefined,
@@ -95,10 +95,10 @@ beforeEach(() => {
   useFolderStore.getState()._reset();
   // Every folder list and every browse is scoped to ONE machine (spec/04
   // § Folders / § Browsing), so the roster carries the single registered host
-  // these screens address. Without it `defaultDaemonId` is null and the screen
+  // these screens address. Without it `defaultHostId` is null and the screen
   // correctly refuses to guess — which is a different test.
   usePresenceStore.setState({
-    hosts: { [HOST]: { daemonId: HOST, online: true, lastSeenAt: 1, host: null, accounts: {} } },
+    hosts: { [HOST]: { hostId: HOST, online: true, lastSeenAt: 1, host: null, accounts: {} } },
   });
 });
 
@@ -249,7 +249,7 @@ describe('JobEditor — folder-seed effect (new job)', () => {
   it('seeds spawnFolder to the first host folder once folderChoices loads', async () => {
     useFolderStore
       .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
+      .setHostFolders({ hostId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
     __setLocalSearchParams({});
     const r = renderRN(<JobEditor />);
     await flush();
@@ -259,7 +259,7 @@ describe('JobEditor — folder-seed effect (new job)', () => {
   it('does not overwrite an already-chosen folder when the folder list later changes', async () => {
     useFolderStore
       .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
+      .setHostFolders({ hostId: HOST, roots: ['/home/tom/a', '/home/tom/b'], recent: [] });
     __setLocalSearchParams({});
     const r = renderRN(<JobEditor />);
     await flush();
@@ -274,7 +274,7 @@ describe('JobEditor — folder-seed effect (new job)', () => {
     await actAsync(async () => {
       useFolderStore
         .getState()
-        .setHostFolders({ daemonId: HOST, roots: ['/home/tom/c'], recent: [] });
+        .setHostFolders({ hostId: HOST, roots: ['/home/tom/c'], recent: [] });
       await flush();
     });
     expect(pickerLabel(r, 'job-spawn-folder')).toBe(`b · ${HOST}`);
@@ -295,9 +295,7 @@ describe('JobEditor — folder-seed effect (new job)', () => {
 
 describe('JobEditor — skills-fetch effect', () => {
   it('fetches skills for the spawn folder and offers them in the Skill picker', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockResolvedValue({ skills: ['life-coach', 'plant'] });
     __setLocalSearchParams({});
     const r = renderRN(<JobEditor />);
@@ -317,9 +315,7 @@ describe('JobEditor — skills-fetch effect', () => {
   });
 
   it('r.skills undefined on a 200 response degrades to an empty list (?? [])', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockResolvedValue({} as { skills: string[] });
     __setLocalSearchParams({});
     const r = renderRN(<JobEditor />);
@@ -328,9 +324,7 @@ describe('JobEditor — skills-fetch effect', () => {
   });
 
   it('a failed skills fetch degrades to an empty list', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.skills).mockRejectedValue(new Error('boom'));
     __setLocalSearchParams({});
     const r = renderRN(<JobEditor />);
@@ -339,9 +333,7 @@ describe('JobEditor — skills-fetch effect', () => {
   });
 
   it('unmounting before skills() resolves skips the stale setAvailableSkills (no crash)', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const d = deferred<{ skills: string[] }>();
     vi.mocked(api.skills).mockReturnValue(d.promise);
     __setLocalSearchParams({});
@@ -369,9 +361,7 @@ describe('JobEditor — save', () => {
   });
 
   it('create mode: a valid form calls createJob and navigates back', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({ id: 'new-job' });
     __setLocalSearchParams({});
     const r = renderRN(<JobEditor />);
@@ -404,9 +394,7 @@ describe('JobEditor — save', () => {
   });
 
   it('shows "Saving…" and disables the button while the save is in flight', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const d = deferred<unknown>();
     vi.mocked(api.createJob).mockReturnValue(d.promise);
     __setLocalSearchParams({});
@@ -425,9 +413,7 @@ describe('JobEditor — save', () => {
   });
 
   it('a failed create shows "Create failed" with the error message and stays on the screen', async () => {
-    useFolderStore
-      .getState()
-      .setHostFolders({ daemonId: HOST, roots: ['/home/tom/a'], recent: [] });
+    useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockRejectedValue(new Error('server exploded'));
     __setLocalSearchParams({});
     const r = renderRN(<JobEditor />);

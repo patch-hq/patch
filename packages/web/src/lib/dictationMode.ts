@@ -1,0 +1,115 @@
+// Dictation mode (spec/07 § Dictation mode): the composer's mic left open.
+// The user keeps talking; each time they go quiet for a few seconds what they
+// said is transcribed and handed to `onText` (the composer sends it), then the
+// mic carries on listening for the next thing. It is not a call — no agent
+// speaks back — it is dictation that does not need a button press per message.
+//
+// One microphone capture for the whole session (`startRecording`), tapped via
+// its PCM feed and cut into utterances by the shared segmenter. Utterances are
+// transcribed strictly in order so two quick messages cannot arrive swapped.
+// Every failure goes to `onError`; nothing is swallowed.
+
+import {
+  createUtteranceSegmenter,
+  type UtteranceSegmenterOptions,
+} from '@patch/wire/utterance-segmenter';
+import { startRecording, type VoiceRecording } from './voiceRecorder.js';
+
+const SAMPLE_RATE = 16000;
+
+export interface DictationModeDeps {
+  recorderFactory?: () => Promise<VoiceRecording>;
+  transcribe: (clip: Blob) => Promise<{ transcript: string }>;
+  segmenter?: UtteranceSegmenterOptions;
+}
+
+export interface DictationModeCallbacks {
+  /** A finished utterance's text, non-empty and trimmed. */
+  onText(text: string): void;
+  /** Capture is running (true) / the user has gone quiet and a transcript is pending (busy). */
+  onBusy(pending: number): void;
+  onError(message: string): void;
+}
+
+export interface DictationMode {
+  /** Resolves once the microphone is open; rejects if it could not be. */
+  ready: Promise<void>;
+  /** Close the mic. Speech not yet cut into an utterance is dropped. */
+  stop(): void;
+}
+
+export function pcm16ToWavBlob(pcm: Int16Array, sampleRate = SAMPLE_RATE): Blob {
+  const dataSize = pcm.length * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const v = new DataView(buffer);
+  const ascii = (o: number, s: string): void => {
+    for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
+  };
+  ascii(0, 'RIFF');
+  v.setUint32(4, 36 + dataSize, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, sampleRate, true);
+  v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  ascii(36, 'data');
+  v.setUint32(40, dataSize, true);
+  new Int16Array(buffer, 44).set(pcm);
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+export function startDictationMode(
+  deps: DictationModeDeps,
+  cb: DictationModeCallbacks,
+): DictationMode {
+  const segmenter = createUtteranceSegmenter({ sampleRate: SAMPLE_RATE, ...deps.segmenter });
+  let stopped = false;
+  let rec: VoiceRecording | null = null;
+  let pending = 0;
+  let chain: Promise<void> = Promise.resolve();
+
+  function enqueue(pcm: Int16Array): void {
+    pending++;
+    cb.onBusy(pending);
+    chain = chain.then(async () => {
+      try {
+        const { transcript } = await deps.transcribe(pcm16ToWavBlob(pcm));
+        const text = transcript.trim();
+        if (!stopped && text) cb.onText(text);
+      } catch (e) {
+        if (!stopped) cb.onError(`voice transcription failed: ${(e as Error).message}`);
+      } finally {
+        pending--;
+        if (!stopped) cb.onBusy(pending);
+      }
+    });
+  }
+
+  const ready = (async (): Promise<void> => {
+    const r = await (deps.recorderFactory ?? startRecording)();
+    if (stopped) {
+      r.cancel();
+      return;
+    }
+    rec = r;
+    r.onPcm((pcm) => {
+      if (stopped) return;
+      const utterance = segmenter.push(pcm);
+      if (utterance) enqueue(utterance);
+    });
+  })();
+
+  return {
+    ready,
+    stop(): void {
+      if (stopped) return;
+      stopped = true;
+      rec?.cancel();
+      rec = null;
+    },
+  };
+}

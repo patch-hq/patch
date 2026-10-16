@@ -248,8 +248,8 @@ test.describe('sidebar', () => {
   test('an EXPANDED lifecycle section sits directly below the icon row, closer to it than the row is to the chat list', async ({
     page,
   }) => {
-    // The list belongs to the icon row that opened it: it must sit closer to
-    // that row than the row itself sits to the chat list above.
+    // The list belongs to the icon row that opened it: it must sit close under
+    // that row. The chat list above runs right to the divider (no gap).
     await page.route('**/api/chats?archived=include', (r) =>
       r.fulfill({
         status: 200,
@@ -290,8 +290,7 @@ test.describe('sidebar', () => {
     expect(iconsBox.y).toBeLessThan(secBox.y);
 
     const gapToOwnList = secBox.y - (iconsBox.y + iconsBox.height);
-    const gapAboveRow = iconsBox.y - (scBox.y + scBox.height);
-    expect(gapToOwnList).toBeLessThan(gapAboveRow);
+    expect(gapToOwnList).toBeLessThan(12);
   });
 
   test('+ New chat sits at the TOP of the sidebar, under the brand row and above everything else', async ({

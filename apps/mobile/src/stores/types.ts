@@ -5,9 +5,11 @@
 
 import type {
   ChatActivity,
+  ChatContextUsage,
   ChatStatus,
   PendingWake,
   PermissionMode,
+  SnoozeRecord,
   StatusKind,
   TodoItem,
 } from '@patch/wire';
@@ -21,7 +23,7 @@ export interface ChatRow {
    * filesystem its folder is on — needs it, and '' is the honest value for a
    * row the surface has not seen spawned yet.
    */
-  daemonId: string;
+  hostId: string;
   folder: string;
   activity: ChatActivity;
   /**
@@ -63,6 +65,10 @@ export interface ChatRow {
    * time shows the chat back in its folder on the first paint.
    */
   snoozedUntil: number | null;
+  /** What each snooze of the chat was and what happened in it (spec/04 § Snooze), oldest first. */
+  snoozeRecords?: SnoozeRecord[];
+  /** ms epoch the chat's current run began; absent or `null` when not running. */
+  runningSince?: number | null;
   /**
    * Running out of the active list (spec/04 § Hidden), mirrored from
    * `chat.state`. Orthogonal to `status`, like `snoozedUntil`: never read on
@@ -79,6 +85,13 @@ export interface ChatRow {
    * known to be nonzero, so a chat with nothing running never polls at all.
    */
   backgroundTasks: number | null;
+  /**
+   * How full the chat's context window is (spec/14 § Composer — context ring):
+   * the roster's value, then every `chat.state` that carries one. `null` is
+   * nothing measured (no Claude turn yet, or a Codex chat) — never zero, so no
+   * ring is drawn for it.
+   */
+  context: ChatContextUsage | null;
   /**
    * The model the chat's NEXT turn runs on (spec/04 § Model): the roster's
    * value, then `chat.spawned`, then every `chat.state` that carries one — the
@@ -153,6 +166,7 @@ export type ChatListRow = Omit<
   | 'snoozedUntil'
   | 'hidden'
   | 'backgroundTasks'
+  | 'context'
   | 'model'
   | 'jobId'
   | 'statusSummary'
@@ -167,6 +181,7 @@ export type ChatListRow = Omit<
   snoozedUntil?: number | null;
   hidden?: boolean;
   backgroundTasks?: number | null;
+  context?: ChatContextUsage | null;
   model?: string | null;
   jobId?: string | null;
   statusSummary?: string | null;
@@ -228,7 +243,12 @@ export type DisplayBadge =
  *  adapted to the fields this row carries — see spec/14-design-web.md §
  *  Status badges for the full rationale behind the ordering. */
 export function deriveBadge(row: ChatRow): DisplayBadge {
+  // A pending permission outlives the transient `awaiting-permission` flag, and a
+  // DECLARED question (`patch_ask_human`) is the same "blocked on the user" fact;
+  // a generated guess (`statusDeclared` falsy) is not.
+  if (row.pendingPermissions.length > 0) return 'permission';
   if (row.activity === 'awaiting-permission') return 'permission';
+  if (row.statusKind === 'question' && row.statusDeclared) return 'permission';
   if (row.activity === 'errored' || row.status === 'errored') return 'errored';
   if (row.activity === 'running') return 'working';
   if (row.lastUpdated > row.lastVisitedAt) return 'done';

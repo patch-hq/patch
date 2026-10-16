@@ -64,16 +64,24 @@ afterEach(() => {
 });
 
 function pressAlert(text: string): void {
-  __getLastAlert()!.buttons!.find((b) => b.text === text)!.onPress?.();
+  __getLastAlert()!
+    .buttons!.find((b) => b.text === text)!
+    .onPress?.();
 }
 
 describe('MCP page', () => {
   it('lists Patch, built in and always on, then the host’s servers in order', () => {
     const r = render(<McpPage />);
-    const rows = findAllHost(r.root, (i) => /^mcp-server-[^-]+(-[a-z]+)*$/.test(String(i.props.testID)))
+    const rows = findAllHost(r.root, (i) =>
+      /^mcp-server-[^-]+(-[a-z]+)*$/.test(String(i.props.testID)),
+    )
       .map((i) => String(i.props.testID))
       .filter((id) => !id.endsWith('-enabled'));
-    expect(rows).toEqual(['mcp-server-patch', 'mcp-server-playwright', 'mcp-server-chrome-devtools']);
+    expect(rows).toEqual([
+      'mcp-server-patch',
+      'mcp-server-playwright',
+      'mcp-server-chrome-devtools',
+    ]);
     const patch = findHost(r.root, byTestId('mcp-server-patch'));
     expect(textOf(patch)).toContain('Built in');
     expect(textOf(patch)).toContain('Always on');
@@ -93,7 +101,7 @@ describe('MCP page', () => {
     );
     expect(send).toHaveBeenCalledWith({
       type: 'host.settings',
-      daemonId: 'd1',
+      hostId: 'd1',
       harnessMcpServers: [playwright, { ...devtools, enabled: true }],
     });
   });
@@ -109,12 +117,12 @@ describe('MCP page', () => {
     findHost(r.root, byTestId('mcp-server-playwright')).props.onPress();
     expect(routerMock.push).toHaveBeenLastCalledWith({
       pathname: '/settings/mcp-server',
-      params: { daemonId: 'd1', name: 'playwright' },
+      params: { hostId: 'd1', name: 'playwright' },
     });
     findHost(r.root, byTestId('mcp-add')).props.onPress();
     expect(routerMock.push).toHaveBeenLastCalledWith({
       pathname: '/settings/mcp-server',
-      params: { daemonId: 'd1' },
+      params: { hostId: 'd1' },
     });
   });
 
@@ -137,7 +145,7 @@ describe('MCP page', () => {
 
 describe('MCP server editor', () => {
   it('opens an existing server as its name, command line and env lines', () => {
-    const r = render(<McpServerEditor daemonId="d1" name="chrome-devtools" />);
+    const r = render(<McpServerEditor hostId="d1" name="chrome-devtools" />);
     expect(findHost(r.root, byTestId('mcp-editor-name')).props.value).toBe('chrome-devtools');
     expect(findHost(r.root, byTestId('mcp-editor-command')).props.value).toBe(
       'npx chrome-devtools-mcp',
@@ -146,7 +154,7 @@ describe('MCP server editor', () => {
   });
 
   it('Save sends the whole list with this one replaced, then goes back', async () => {
-    const r = render(<McpServerEditor daemonId="d1" name="playwright" />);
+    const r = render(<McpServerEditor hostId="d1" name="playwright" />);
     await actAsync(() =>
       findHost(r.root, byTestId('mcp-editor-command')).props.onChangeText('npx @playwright/mcp'),
     );
@@ -154,17 +162,14 @@ describe('MCP server editor', () => {
     await actAsync(() => findHost(r.root, byTestId('mcp-editor-save')).props.onPress());
     expect(send).toHaveBeenCalledWith({
       type: 'host.settings',
-      daemonId: 'd1',
-      harnessMcpServers: [
-        { ...playwright, args: ['@playwright/mcp'], env: { X: '1' } },
-        devtools,
-      ],
+      hostId: 'd1',
+      harnessMcpServers: [{ ...playwright, args: ['@playwright/mcp'], env: { X: '1' } }, devtools],
     });
     expect(routerMock.back).toHaveBeenCalledTimes(1);
   });
 
   it('adds a new server at the end', async () => {
-    const r = render(<McpServerEditor daemonId="d1" name={null} />);
+    const r = render(<McpServerEditor hostId="d1" name={null} />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Add server');
     expect(queryHost(r.root, byTestId('mcp-editor-remove'))).toBeNull();
     await actAsync(() => findHost(r.root, byTestId('mcp-editor-name')).props.onChangeText('fs'));
@@ -180,7 +185,7 @@ describe('MCP server editor', () => {
   });
 
   it('an invalid server is refused in words and nothing is sent', async () => {
-    const r = render(<McpServerEditor daemonId="d1" name={null} />);
+    const r = render(<McpServerEditor hostId="d1" name={null} />);
     await actAsync(() =>
       findHost(r.root, byTestId('mcp-editor-name')).props.onChangeText('playwright'),
     );
@@ -202,7 +207,7 @@ describe('MCP server editor', () => {
 
   it('an offline host is refused up front, naming it, and the editor stays', async () => {
     usePresenceStore.getState().setHostOnline('d1', false);
-    const r = render(<McpServerEditor daemonId="d1" name="playwright" />);
+    const r = render(<McpServerEditor hostId="d1" name="playwright" />);
     await actAsync(() => findHost(r.root, byTestId('mcp-editor-save')).props.onPress());
     expect(send).not.toHaveBeenCalled();
     expect(__getLastAlert()?.title).toBe('MCP servers failed');
@@ -211,7 +216,7 @@ describe('MCP server editor', () => {
   });
 
   it('Remove asks first; confirming sends the list without it', async () => {
-    const r = render(<McpServerEditor daemonId="d1" name="playwright" />);
+    const r = render(<McpServerEditor hostId="d1" name="playwright" />);
     await actAsync(() => findHost(r.root, byTestId('mcp-editor-remove')).props.onPress());
     expect(__getLastAlert()?.title).toBe('Remove playwright?');
     pressAlert('Cancel');
@@ -220,31 +225,31 @@ describe('MCP server editor', () => {
     await actAsync(() => pressAlert('Remove'));
     expect(send).toHaveBeenCalledWith({
       type: 'host.settings',
-      daemonId: 'd1',
+      hostId: 'd1',
       harnessMcpServers: [devtools],
     });
     expect(routerMock.back).toHaveBeenCalledTimes(1);
   });
 
   it('Cancel goes back without sending', async () => {
-    const r = render(<McpServerEditor daemonId="d1" name="playwright" />);
+    const r = render(<McpServerEditor hostId="d1" name="playwright" />);
     await actAsync(() => findHost(r.root, byTestId('mcp-editor-cancel')).props.onPress());
     expect(routerMock.back).toHaveBeenCalledTimes(1);
     expect(send).not.toHaveBeenCalled();
   });
 
   it('says why it cannot edit: server gone, host predating the list, host unreported', () => {
-    let r = render(<McpServerEditor daemonId="d1" name="gone" />);
+    let r = render(<McpServerEditor hostId="d1" name="gone" />);
     expect(textOf(findHost(r.root, byTestId('mcp-editor-unavailable')))).toBe(
       'gone is no longer on laptop',
     );
     reportHost('d2', { hostName: 'mac' });
-    r = render(<McpServerEditor daemonId="d2" name={null} />);
+    r = render(<McpServerEditor hostId="d2" name={null} />);
     expect(textOf(findHost(r.root, byTestId('mcp-editor-unavailable')))).toBe(
       'Update mac to manage this',
     );
     usePresenceStore.getState().setHostOnline('d3', true);
-    r = render(<McpServerEditor daemonId="d3" name={null} />);
+    r = render(<McpServerEditor hostId="d3" name={null} />);
     expect(textOf(findHost(r.root, byTestId('mcp-editor-unavailable')))).toBe(
       'd3 hasn’t reported yet',
     );

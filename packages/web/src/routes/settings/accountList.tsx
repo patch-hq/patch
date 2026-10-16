@@ -10,10 +10,13 @@
 
 import type { JSX, ReactNode } from 'react';
 import { useRef, useState } from 'react';
-import { rateLimitWindowBlocks, type RateLimitWindow } from '@patch/wire';
+import { rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
 import {
   EXTRA_USAGE_OFF_TEXT,
+  EXTRA_USAGE_ORG_DISABLED_TEXT,
+  EXTRA_USAGE_URL,
   OVERAGE_DISABLED_REASON,
+  OVERAGE_ORG_DISABLED_REASON,
   formatReset,
   formatResetDetail,
   formatUntil,
@@ -231,6 +234,7 @@ const SCOPE_LABELS: Record<Scope, string> = {
  */
 function describeDisabledReason(reason: string): string {
   if (reason === OVERAGE_DISABLED_REASON) return EXTRA_USAGE_OFF_TEXT;
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return EXTRA_USAGE_ORG_DISABLED_TEXT;
   return reason;
 }
 
@@ -271,10 +275,10 @@ export function UsageBars({
       {(['session', 'week', 'overage'] as const).map((scope) => {
         const win = usage[scope];
         if (!win) return null;
-        const blocked = rateLimitWindowBlocks(scope, win);
-        const off = scope === 'overage' && win.status === 'rejected';
-        const warn = !blocked && !off && (win.utilization ?? 0) >= 0.8;
-        const cls = blocked ? ' blocked' : off ? ' off' : warn ? ' warn' : '';
+        const state = rateLimitWindowState(scope, win);
+        const blocked = state === 'blocked';
+        const off = state === 'off';
+        const cls = state === 'ok' ? '' : ` ${state}`;
         return (
           <div
             key={scope}
@@ -302,7 +306,23 @@ export function UsageBars({
       })}
       {reasons.length > 0 ? (
         <span className="set-sub set-bars-reason">
-          {[...new Set(reasons)].map(describeDisabledReason).join(' · ')}
+          {[...new Set(reasons)].map((reason, index) => (
+            <span key={reason}>
+              {index > 0 ? ' · ' : null}
+              {reason === OVERAGE_DISABLED_REASON ? (
+                <a
+                  href={EXTRA_USAGE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid="account-extra-usage-settings"
+                >
+                  {describeDisabledReason(reason)}
+                </a>
+              ) : (
+                describeDisabledReason(reason)
+              )}
+            </span>
+          ))}
         </span>
       ) : null}
     </div>

@@ -15,6 +15,15 @@ function row(chatId: string) {
   return r;
 }
 
+/**
+ * Whether `next` — this write's own optimistic value — is still what the store
+ * shows. If a later write has replaced it, that write owns the value now and a
+ * refusal of this older one must not put its `prev` back over it.
+ */
+function stillOurs<T>(current: T, next: T): boolean {
+  return current === next;
+}
+
 function fail(what: string, e: unknown): void {
   useUiStore.getState().pushError(`${what} failed: ${(e as Error).message}`);
 }
@@ -26,7 +35,8 @@ export async function writeGoal(chatId: string, next: string | null): Promise<vo
   try {
     await api.setGoal(chatId, next);
   } catch (e) {
-    useChatStore.getState().setGoal(chatId, prev);
+    if (stillOurs(useChatStore.getState().chats[chatId]?.goal, next))
+      useChatStore.getState().setGoal(chatId, prev);
     fail(next === null ? 'clearing goal' : 'updating goal', e);
   }
 }
@@ -38,7 +48,8 @@ export async function writeReminder(chatId: string, next: string | null): Promis
   try {
     await api.setReminder(chatId, next);
   } catch (e) {
-    useChatStore.getState().setReminder(chatId, prev);
+    if (stillOurs(useChatStore.getState().chats[chatId]?.reminder, next))
+      useChatStore.getState().setReminder(chatId, prev);
     fail(next === null ? 'clearing reminder' : 'updating reminder', e);
   }
 }
@@ -69,7 +80,8 @@ export async function writeTodos(chatId: string, next: TodoItem[]): Promise<void
   try {
     await api.setTodos(chatId, next);
   } catch (e) {
-    useChatStore.getState().setTodos(chatId, prev);
+    if (stillOurs(useChatStore.getState().chats[chatId]?.todos, next))
+      useChatStore.getState().setTodos(chatId, prev);
     fail('updating tasks', e);
   }
 }
@@ -81,7 +93,8 @@ export async function toggleDisabled(chatId: string): Promise<void> {
   try {
     await api.disableChat(chatId, next);
   } catch (e) {
-    useChatStore.getState().setDisabled(chatId, !next);
+    if (stillOurs(useChatStore.getState().chats[chatId]?.disabled, next))
+      useChatStore.getState().setDisabled(chatId, !next);
     fail(next ? 'disable' : 'enable', e);
   }
 }

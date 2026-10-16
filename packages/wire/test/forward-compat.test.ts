@@ -2,7 +2,7 @@
 //
 // spec/03-wire-protocol.md § Forward compatibility. The scenario these tests
 // pin is the one that bit on 2026-09-11: the host shipped new fields on
-// `chat.state` and `daemon.account`, and every surface that had not taken the
+// `chat.state` and `host.account`, and every surface that had not taken the
 // matching OTA — a phone that was off during the deploy, a desktop shell that
 // had not restarted — dropped the frames and showed a wall of error banners.
 // `chat.state` drives the sidebar and the chat view, so that is not degrading,
@@ -32,17 +32,17 @@ const CHAT_STATE: Extract<WireEvent, { type: 'chat.state' }> = {
   lastUpdated: 1700000000,
 };
 
-/** A `daemon.account` exactly as this build knows it. */
-const DAEMON_ACCOUNT: Extract<WireEvent, { type: 'daemon.account' }> = {
-  type: 'daemon.account',
-  daemonId: 'host-a',
+/** A `host.account` exactly as this build knows it. */
+const HOST_ACCOUNT: Extract<WireEvent, { type: 'host.account' }> = {
+  type: 'host.account',
+  hostId: 'host-a',
   backendId: 'claude-code',
   connected: true,
   accountEmail: 'tom@anthropic.com',
 };
 
 /** Frame text as a newer host would put it on the wire. */
-function fromNewerDaemon(base: object, extra: object): string {
+function fromNewerHost(base: object, extra: object): string {
   return JSON.stringify({ ...base, ...extra });
 }
 
@@ -52,7 +52,7 @@ beforeEach(() => {
 
 describe('a newer host adds a FIELD', () => {
   test('the surface still renders the frame it understands', () => {
-    const frame = fromNewerDaemon(CHAT_STATE, { limitResetsAt: 1789000000000 });
+    const frame = fromNewerHost(CHAT_STATE, { limitResetsAt: 1789000000000 });
 
     const result = decodeCompat(frame);
 
@@ -68,7 +68,7 @@ describe('a newer host adds a FIELD', () => {
     // `usage.session` is a `RateLimitWindow`, one of the nested schemas that
     // really is `.strict()` — a new key there used to take the whole frame down
     // exactly as a top-level one did.
-    const frame = fromNewerDaemon(DAEMON_ACCOUNT, {
+    const frame = fromNewerHost(HOST_ACCOUNT, {
       organizationTier: 'enterprise',
       usage: {
         session: { status: 'allowed', utilization: 0.4, burstCredits: 12 },
@@ -80,18 +80,18 @@ describe('a newer host adds a FIELD', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('unreachable');
     expect(result.event).toEqual({
-      ...DAEMON_ACCOUNT,
+      ...HOST_ACCOUNT,
       usage: { session: { status: 'allowed', utilization: 0.4 } },
     });
     expect(result.tolerated).toEqual([
-      'daemon.account.organizationTier',
-      'daemon.account.usage.session.burstCredits',
+      'host.account.organizationTier',
+      'host.account.usage.session.burstCredits',
     ]);
   });
 
   test('the tolerated field is counted, so diagnostics can name the drift', () => {
-    decodeCompat(fromNewerDaemon(CHAT_STATE, { limitResetsAt: 1 }));
-    decodeCompat(fromNewerDaemon(CHAT_STATE, { limitResetsAt: 2 }));
+    decodeCompat(fromNewerHost(CHAT_STATE, { limitResetsAt: 1 }));
+    decodeCompat(fromNewerHost(CHAT_STATE, { limitResetsAt: 2 }));
 
     expect(wireCompatStats().unknownFields).toEqual({ 'chat.state.limitResetsAt': 2 });
     expect(wireCompatStats().unknownTypes).toEqual({});
@@ -110,7 +110,7 @@ describe('a newer host adds an EVENT TYPE', () => {
   test('it is counted by type, which is what tells the user to update', () => {
     decodeCompat(JSON.stringify({ type: 'chat.vibes', chatId: 'c1' }));
     decodeCompat(JSON.stringify({ type: 'chat.vibes', chatId: 'c2' }));
-    decodeCompat(JSON.stringify({ type: 'host.telepathy', daemonId: 'host-a' }));
+    decodeCompat(JSON.stringify({ type: 'host.telepathy', hostId: 'host-a' }));
 
     expect(wireCompatStats().unknownTypes).toEqual({ 'chat.vibes': 2, 'host.telepathy': 1 });
   });
@@ -122,6 +122,20 @@ describe('a newer host adds an EVENT TYPE', () => {
     expect(keys).toHaveLength(1);
     expect((keys[0] as string).length).toBeLessThanOrEqual(65);
     expect(keys[0]).toMatch(/…$/);
+  });
+
+  test('a type named after an Object.prototype member is counted like any other', () => {
+    decodeCompat(JSON.stringify({ type: 'constructor' }));
+    decodeCompat(JSON.stringify({ type: 'toString' }));
+    decodeCompat(JSON.stringify({ type: '__proto__' }));
+    decodeCompat(JSON.stringify({ type: '__proto__' }));
+
+    const stats = wireCompatStats().unknownTypes;
+    expect(Object.entries(stats)).toEqual([
+      ['constructor', 1],
+      ['toString', 1],
+      ['__proto__', 2],
+    ]);
   });
 });
 
@@ -160,9 +174,7 @@ describe('forward compatibility is not a fallback', () => {
 
 describe('INGRESS is unchanged — the server still refuses what it does not know', () => {
   test('strict decode rejects the newer host’s extra field', () => {
-    expect(() => decode(fromNewerDaemon(CHAT_STATE, { limitResetsAt: 1 }))).toThrow(
-      WireDecodeError,
-    );
+    expect(() => decode(fromNewerHost(CHAT_STATE, { limitResetsAt: 1 }))).toThrow(WireDecodeError);
   });
 
   test('strict decode rejects the newer host’s unknown event type', () => {

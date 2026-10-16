@@ -39,11 +39,12 @@ import {
   Power,
   ArrowRightLeft,
   Eraser,
-  Target,
+  ListPlus,
 } from 'lucide-react';
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DeleteIcon } from './icons.js';
+import { JobMenuItem } from './JobBar.js';
 import { NavHistoryControls } from './NavHistoryControls.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { folderLabel } from '../lib/folderLabel.js';
@@ -53,11 +54,10 @@ import { SnoozeMenu } from './SnoozeMenu.js';
 import { MoveChatModal } from './MoveChatModal.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { shortcutTitle } from '../lib/shortcuts.js';
-import { formatElapsed, formatTokenCount } from './GoalBanner.js';
-import type { FinishedGoal } from '@patch/wire';
 import { failed } from '../lib/errorCopy.js';
 import { captureDocument } from '../lib/padCapture.js';
 import { openPadBesideChat } from '../lib/openPad.js';
+import { isPlainEnter } from '../lib/submitChord.js';
 
 // Manager / Speakers occupy fixed slots and cannot be pinned or
 // deleted; their crumb is suppressed (crumb == name would duplicate the word).
@@ -70,43 +70,6 @@ function specialThreadLabel(chatId: string): string | null {
 }
 
 const ICON = 18;
-
-/**
- * spec/04 § Goals — "A finished goal stays viewable from the chat header".
- * Shown once a goal resolves (met/impossible) or is cleared without a verdict
- * (in which case `lastGoal` still names whatever last ACTUALLY finished, per
- * `setGoal`'s own doc — a goal abandoned mid-run leaves no new entry here).
- * Replaced the moment a new goal starts (the bar above takes over instead).
- */
-function FinishedGoalIndicator({ lastGoal }: { lastGoal: FinishedGoal }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const label = lastGoal.outcome === 'met' ? 'Goal met' : 'Goal impossible';
-  return (
-    <span className="finished-goal" data-testid="finished-goal-indicator">
-      <button
-        type="button"
-        className="finished-goal-summary"
-        data-testid="finished-goal-summary"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Target size={12} aria-hidden />
-        {label}
-      </button>
-      {open ? (
-        <div className="finished-goal-detail" data-testid="finished-goal-detail">
-          <div>{lastGoal.condition}</div>
-          <div>
-            {formatElapsed(lastGoal.endedAt - lastGoal.startedAt)} · {lastGoal.turns} turn
-            {lastGoal.turns === 1 ? '' : 's'}
-            {lastGoal.tokens > 0 ? ` · ${formatTokenCount(lastGoal.tokens)} tokens` : ''}
-          </div>
-          <div>{lastGoal.reason}</div>
-        </div>
-      ) : null}
-    </span>
-  );
-}
 
 const NO_DELEGATES: Record<string, DelegateUpdateInfo> = {};
 
@@ -140,6 +103,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   const setName = useChatStore((s) => s.setName);
   const pushError = useUiStore((s) => s.pushError);
   const setToolsPanelChatId = useUiStore((s) => s.setToolsPanelChatId);
+  const setTaskAddChatId = useUiStore((s) => s.setTaskAddChatId);
   const navigate = useNavigate();
   const location = useLocation();
   // spec/14 § Side threads panel — "A Threads icon in the chat header opens
@@ -156,12 +120,12 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   // basename, then "New chat" — never the raw first message or ULID.
   const title = specialThreadLabel(row.chatId) ?? deriveChatTitle(row.name);
   // The machine this chat is pinned to, by its user-editable name. Falls back
-  // to the raw daemonId only while that machine has yet to report a name —
+  // to the raw hostId only while that machine has yet to report a name —
   // shown rather than hidden, because "which machine is this running on" has no
   // safe default answer. An optimistically-seeded row has neither yet
-  // (chatStore's `emptyRow` uses `daemonId: ''`), and there is nothing to draw.
-  const hostReport = usePresenceStore((s) => s.hosts[row.daemonId]?.host ?? null);
-  const hostLabel = (hostReport?.hostName ?? row.daemonId).trim();
+  // (chatStore's `emptyRow` uses `hostId: ''`), and there is nothing to draw.
+  const hostReport = usePresenceStore((s) => s.hosts[row.hostId]?.host ?? null);
+  const hostLabel = (hostReport?.hostName ?? row.hostId).trim();
   // spec/14 § Chat panel header — rename in place. `draft` non-null means the
   // title is currently a text field. It is seeded from the stored `row.name`,
   // NOT the displayed title: the derived folder label is a display fallback and
@@ -209,6 +173,13 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   }, [hamburgerOpen]);
 
   const archived = row.status === 'archived';
+  // With no task list there is no task bar; this is where one is started.
+  const canAddTasks = row.todos.length === 0;
+  function addTasks(): void {
+    setMenuOpen(false);
+    setHamburgerOpen(false);
+    setTaskAddChatId(row.chatId);
+  }
 
   function commitRename(): void {
     if (draft === null) return;
@@ -382,7 +353,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={commitRename}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitRename();
+                  if (isPlainEnter(e)) commitRename();
                   else if (e.key === 'Escape') setDraft(null);
                 }}
               />
@@ -412,9 +383,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
               </span>
             ) : null}
             <WorkersIndicator chatId={row.chatId} />
-            {row.goal === null && row.lastGoal !== null ? (
-              <FinishedGoalIndicator lastGoal={row.lastGoal} />
-            ) : null}
             {/* Open in new window sits beside the title (spec/14 § Chat panel
               header) — shown for every chat including special threads. */}
             <button
@@ -527,6 +495,18 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                     <Wrench size={14} aria-hidden />
                     Tools
                   </button>
+                  {canAddTasks ? (
+                    <button
+                      type="button"
+                      className="head-menu-item"
+                      data-testid="action-add-tasks"
+                      role="menuitem"
+                      onClick={addTasks}
+                    >
+                      <ListPlus size={14} aria-hidden />
+                      Add tasks
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="head-menu-item"
@@ -580,7 +560,11 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                       {/* Snooze (spec/04 § Snooze) — take the chat off the
                       active list until a chosen moment, then it comes back
                       on its own. */}
-                      <div className="head-menu-snooze" data-testid="menu-snooze-row">
+                      <div
+                        className="head-menu-snooze"
+                        data-testid="menu-snooze-row"
+                        onClick={() => setMenuOpen(false)}
+                      >
                         <SnoozeMenu row={row} iconSize={14} label="Snooze" />
                       </div>
                       {canHide ? (
@@ -667,6 +651,35 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 <button
                   type="button"
                   className="head-menu-item"
+                  data-testid="quicklink-files"
+                  role="menuitem"
+                  onClick={() => {
+                    setHamburgerOpen(false);
+                    useLayoutStore
+                      .getState()
+                      .toggleTab({ kind: 'page', page: 'files', chatId: row.chatId });
+                  }}
+                >
+                  Files
+                </button>
+                <button
+                  type="button"
+                  className="head-menu-item"
+                  data-testid="quicklink-terminal"
+                  role="menuitem"
+                  onClick={() => {
+                    setHamburgerOpen(false);
+                    useLayoutStore.getState().toggleTab({ kind: 'terminal', chatId: row.chatId });
+                  }}
+                >
+                  Terminal
+                </button>
+                {row.jobId ? (
+                  <JobMenuItem jobId={row.jobId} onDone={() => setHamburgerOpen(false)} />
+                ) : null}
+                <button
+                  type="button"
+                  className="head-menu-item"
                   data-testid="hamburger-tools"
                   role="menuitem"
                   onClick={() => {
@@ -677,6 +690,18 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                   <Wrench size={14} aria-hidden />
                   Tools
                 </button>
+                {canAddTasks ? (
+                  <button
+                    type="button"
+                    className="head-menu-item"
+                    data-testid="hamburger-add-tasks"
+                    role="menuitem"
+                    onClick={addTasks}
+                  >
+                    <ListPlus size={14} aria-hidden />
+                    Add tasks
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="head-menu-item"
@@ -708,7 +733,11 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                   </button>
                 ) : null}
                 {isSpecial ? null : (
-                  <div className="head-menu-snooze" data-testid="hamburger-snooze-row">
+                  <div
+                    className="head-menu-snooze"
+                    data-testid="hamburger-snooze-row"
+                    onClick={() => setHamburgerOpen(false)}
+                  >
                     <SnoozeMenu row={row} iconSize={14} label="Snooze" />
                   </div>
                 )}
@@ -812,31 +841,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
         </div>
         {moveOpen ? <MoveChatModal row={row} onClose={() => setMoveOpen(false)} /> : null}
       </header>
-      {/* Files and Terminal links on their own strip just under the header's
-        rule, so both are one click away without hunting for the Editor icon
-        or remembering ⌃`. */}
-      <nav className="chat-quicklinks" data-testid="chat-quicklinks">
-        <button
-          type="button"
-          className="chat-quicklink"
-          data-testid="quicklink-files"
-          onClick={() =>
-            useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId: row.chatId })
-          }
-        >
-          Files
-        </button>
-        <button
-          type="button"
-          className="chat-quicklink"
-          data-testid="quicklink-terminal"
-          onClick={() =>
-            useLayoutStore.getState().toggleTab({ kind: 'terminal', chatId: row.chatId })
-          }
-        >
-          Terminal
-        </button>
-      </nav>
     </>
   );
 }

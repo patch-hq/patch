@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import type { Job } from '../src/jobs/types.js';
@@ -26,7 +26,7 @@ function scriptJob(overrides: Partial<Job> = {}): Job {
     filter: null,
     action: {
       type: 'script',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
       command: 'scripts/tick.sh',
     },
@@ -54,11 +54,11 @@ describe('script action', () => {
   });
 
   it('fires as a job.exec_request carrying the command and the default timeout', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fire1',
     });
@@ -69,7 +69,7 @@ describe('script action', () => {
     if (sent && sent.event.type === 'job.exec_request') {
       expect(sent.event.command).toBe('scripts/tick.sh');
       expect(sent.event.folder).toBe('/work');
-      expect(sent.event.daemonId).toBe('d1');
+      expect(sent.event.hostId).toBe('d1');
       expect(sent.event.jobId).toBe(JOB_ID);
       expect(sent.event.timeoutMs).toBe(60_000);
     }
@@ -79,11 +79,11 @@ describe('script action', () => {
   });
 
   it('a result event settles the run with the exit code and output, and no chatId', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fire1',
     });
@@ -111,11 +111,11 @@ describe('script action', () => {
   });
 
   it('a failing command is a dispatch-error carrying stderr, not a silent ok', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fire1',
     });
@@ -144,11 +144,11 @@ describe('script action', () => {
   });
 
   it('frees its concurrency slot on the result, so the next tick is not blocked', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: (() => {
         let n = 0;
@@ -180,11 +180,11 @@ describe('script action', () => {
   // invisible from the job page. Printing the id is how the command says so.
   describe('the chat a gate announces on stdout', () => {
     function settle(stdout: string, ok = true): Record<string, unknown> {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => 'fire1',
       });

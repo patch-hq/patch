@@ -55,7 +55,7 @@ export function HostsPage(): JSX.Element {
   const rows = sortHosts(Object.values(hosts));
   // Selecting a host here is the same choice the per-host pages' switcher
   // makes, so opening Agent next shows the machine just looked at.
-  const { daemonId: selected, select } = useSettingsHost();
+  const { hostId: selected, select } = useSettingsHost();
   const [adding, setAdding] = useState(false);
   const host = selected === null ? null : (hosts[selected] ?? null);
 
@@ -83,10 +83,10 @@ export function HostsPage(): JSX.Element {
         ) : (
           rows.map((h) => (
             <HostListRow
-              key={h.daemonId}
+              key={h.hostId}
               host={h}
-              selected={h.daemonId === selected}
-              onSelect={() => select(h.daemonId)}
+              selected={h.hostId === selected}
+              onSelect={() => select(h.hostId)}
             />
           ))
         )}
@@ -95,9 +95,7 @@ export function HostsPage(): JSX.Element {
           report, so a host that reports — or is renamed from another surface —
           while open must re-seed it, rather than keep showing a stale name or
           an empty one to be refused on blur. */}
-      {host ? (
-        <HostDetail key={`${host.daemonId}:${host.host?.hostName ?? ''}`} host={host} />
-      ) : null}
+      {host ? <HostDetail key={`${host.hostId}:${host.host?.hostName ?? ''}`} host={host} /> : null}
     </SettingsPage>
   );
 }
@@ -116,31 +114,40 @@ function HostListRow({
   const { updating, apply: applyUpdate } = useHostUpdate(host);
   return (
     <Row
-      testid={`host-${host.daemonId}`}
+      testid={`host-${host.hostId}`}
       className={selected ? 'selected' : undefined}
       onClick={onSelect}
       title={
         <>
           <OnlineDot online={host.online} />{' '}
           {report ? (
-            <span data-testid={`host-${host.daemonId}-label`}>{report.hostName}</span>
+            <span data-testid={`host-${host.hostId}-label`}>{report.hostName}</span>
           ) : (
-            <span className="mono" data-testid={`host-${host.daemonId}-id`}>
-              {host.daemonId}
+            <span className="mono" data-testid={`host-${host.hostId}-id`}>
+              {host.hostId}
             </span>
           )}
           {report?.isHomeHost ? (
-            <span className="set-chip g" data-testid={`host-${host.daemonId}-home`}>
+            <span className="set-chip g" data-testid={`host-${host.hostId}-home`}>
               home
             </span>
           ) : null}
         </>
       }
       sub={
-        <span data-testid={`host-${host.daemonId}-status`}>
+        <span data-testid={`host-${host.hostId}-status`}>
           {report
             ? `${PLATFORM_LABEL[report.platform] ?? report.platform} · ${seen}`
             : 'awaiting first report'}
+          {report?.power ? (
+            <>
+              {' · '}
+              <span data-testid={`host-${host.hostId}-power`}>
+                {Math.round(report.power.percent)}%{' '}
+                {report.power.onBattery ? 'on battery' : 'plugged in'}
+              </span>
+            </>
+          ) : null}
         </span>
       }
     >
@@ -150,10 +157,12 @@ function HostListRow({
           className="set-btn"
           disabled={updating}
           onClick={applyUpdate}
-          data-testid={`host-${host.daemonId}-update`}
+          data-testid={`host-${host.hostId}-update`}
         >
           {updating ? 'Updating…' : 'Update'}
         </button>
+      ) : report?.updatePending ? (
+        <span data-testid={`host-${host.hostId}-update-pending`}>Update pending</span>
       ) : null}
       <span className="set-chev" aria-hidden="true">
         ›
@@ -178,7 +187,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       return;
     }
     if (next === report?.hostName) return;
-    sendToHost(host, { type: 'host.rename', daemonId: host.daemonId, hostName: next });
+    sendToHost(host, { type: 'host.rename', hostId: host.hostId, hostName: next });
   }
 
   /**
@@ -193,7 +202,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
     }
     if (backendId === 'codex') {
       // ChatGPT sign-in is an account flow; it lives with the accounts.
-      useUiStore.getState().setCodexSignInHost(host.daemonId);
+      useUiStore.getState().setCodexSignInHost(host.hostId);
       navigate('/settings/usage');
       return;
     }
@@ -211,7 +220,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
     await writeShared('sign in', () =>
       token
         ? api.addAccount('claude-code', { token })
-        : api.adoptAccount('claude-code', host.daemonId),
+        : api.adoptAccount('claude-code', host.hostId),
     );
   }
 
@@ -224,22 +233,22 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
     });
     if (!ok) return;
     try {
-      await api.removeHost(host.daemonId);
+      await api.removeHost(host.hostId);
       // The server also tells every surface (`host.removed`); dropping it here
       // too means this one does not wait on that frame to stop showing it.
-      usePresenceStore.getState().removeHost(host.daemonId);
+      usePresenceStore.getState().removeHost(host.hostId);
     } catch (e) {
       const unknown = e instanceof ApiError && e.status === 404;
       pushError(
         unknown
-          ? `remove failed: the server has no host ${host.daemonId}`
+          ? `remove failed: the server has no host ${host.hostId}`
           : `remove failed: ${(e as Error).message}`,
       );
     }
   }
 
   return (
-    <section className="set-group" data-testid={`host-detail-${host.daemonId}`}>
+    <section className="set-group" data-testid={`host-detail-${host.hostId}`}>
       <h2 className="set-label">{name}</h2>
       <div className="set-card">
         {report ? (
@@ -249,7 +258,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 type="text"
                 className="set-word"
                 aria-label="Machine name"
-                data-testid={`host-${host.daemonId}-name-input`}
+                data-testid={`host-${host.hostId}-name-input`}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={commitRename}
@@ -274,10 +283,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 <button
                   type="button"
                   className="set-btn"
-                  data-testid={`host-${host.daemonId}-set-home`}
-                  onClick={() =>
-                    sendToHost(host, { type: 'host.set_home', daemonId: host.daemonId })
-                  }
+                  data-testid={`host-${host.hostId}-set-home`}
+                  onClick={() => sendToHost(host, { type: 'host.set_home', hostId: host.hostId })}
                 >
                   Make home
                 </button>
@@ -287,11 +294,11 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               title="Host"
               sub={
                 <>
-                  <span data-testid={`host-${host.daemonId}-platform`}>
+                  <span data-testid={`host-${host.hostId}-platform`}>
                     {report.platform} {report.arch}
                   </span>
                   {' · '}
-                  <span data-testid={`host-${host.daemonId}-version`}>{report.daemonVersion}</span>
+                  <span data-testid={`host-${host.hostId}-version`}>{report.hostVersion}</span>
                 </>
               }
             />
@@ -300,7 +307,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               <Row
                 title="Permission mode"
                 sub={
-                  <span data-testid={`host-${host.daemonId}-permission-overrides`}>
+                  <span data-testid={`host-${host.hostId}-permission-overrides`}>
                     {report.permissionOverrides} chats on their own mode
                   </span>
                 }
@@ -308,16 +315,16 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
             ) : null}
           </>
         ) : (
-          <Note testid={`host-${host.daemonId}-unreported`}>{name} hasn’t reported yet</Note>
+          <Note testid={`host-${host.hostId}-unreported`}>{name} hasn’t reported yet</Note>
         )}
       </div>
 
       {report && report.backends.length > 0 ? (
-        <div className="set-card set-card-gap" data-testid={`host-${host.daemonId}-backends`}>
+        <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-backends`}>
           {report.backends.map((b) => (
             <Row
               key={b.id}
-              testid={`host-${host.daemonId}-backend-${b.id}`}
+              testid={`host-${host.hostId}-backend-${b.id}`}
               title={b.label}
               sub={[b.version, b.state, b.error].filter(Boolean).join(' · ')}
             >
@@ -330,7 +337,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 <button
                   type="button"
                   className="set-btn"
-                  data-testid={`host-${host.daemonId}-backend-${b.id}-connect`}
+                  data-testid={`host-${host.hostId}-backend-${b.id}-connect`}
                   onClick={() => void connectBackend(b.id, b.label)}
                 >
                   Sign in
@@ -344,11 +351,11 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       <ClaudeSettingsDrift host={host} />
 
       {report && report.components.length > 0 ? (
-        <div className="set-card set-card-gap" data-testid={`host-${host.daemonId}-components`}>
+        <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-components`}>
           {report.components.map((c) => (
             <Row
               key={c.id}
-              testid={`host-${host.daemonId}-component-${c.id}`}
+              testid={`host-${host.hostId}-component-${c.id}`}
               title={c.label}
               sub={[
                 c.state === 'downloading' && c.progress !== undefined
@@ -364,11 +371,11 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 <button
                   type="button"
                   className="set-btn"
-                  data-testid={`host-${host.daemonId}-component-${c.id}-install`}
+                  data-testid={`host-${host.hostId}-component-${c.id}-install`}
                   onClick={() =>
                     sendToHost(host, {
                       type: 'host.component_install',
-                      daemonId: host.daemonId,
+                      hostId: host.hostId,
                       componentId: c.id,
                     })
                   }
@@ -379,11 +386,11 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 <button
                   type="button"
                   className="set-btn ghost"
-                  data-testid={`host-${host.daemonId}-component-${c.id}-remove`}
+                  data-testid={`host-${host.hostId}-component-${c.id}-remove`}
                   onClick={() =>
                     sendToHost(host, {
                       type: 'host.component_remove',
-                      daemonId: host.daemonId,
+                      hostId: host.hostId,
                       componentId: c.id,
                     })
                   }
@@ -403,7 +410,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
           <button
             type="button"
             className="set-btn danger"
-            data-testid={`host-${host.daemonId}-remove`}
+            data-testid={`host-${host.hostId}-remove`}
             onClick={() => void removeHost()}
           >
             Remove
@@ -421,7 +428,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
 function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | null {
   const shared = usePreferencesStore((s) => s.shared);
   if (shared === null) return null;
-  const state = shared.hosts.find((h) => h.daemonId === host.daemonId);
+  const state = shared.hosts.find((h) => h.hostId === host.hostId);
   const text = state?.error
     ? `Could not apply: ${state.error}`
     : state?.appliedVersion === undefined
@@ -436,8 +443,8 @@ function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | nul
   return (
     <Row
       title="Settings"
-      testid={`host-${host.daemonId}-settings-version`}
-      sub={<span data-testid={`host-${host.daemonId}-settings-state`}>{text}</span>}
+      testid={`host-${host.hostId}-settings-version`}
+      sub={<span data-testid={`host-${host.hostId}-settings-state`}>{text}</span>}
     />
   );
 }
@@ -452,7 +459,7 @@ function ClaudeSettingsDrift({ host }: { host: HostPresence }): JSX.Element | nu
   if (drift === undefined) return null;
   const os =
     host.host?.platform === 'darwin' ? 'darwin' : host.host?.platform === 'linux' ? 'linux' : null;
-  const id = `host-${host.daemonId}-claude-drift`;
+  const id = `host-${host.hostId}-claude-drift`;
   return (
     <div className="set-card set-card-gap" data-testid={id}>
       <Row title="Claude Code settings.json changed on this machine" />
@@ -466,7 +473,7 @@ function ClaudeSettingsDrift({ host }: { host: HostPresence }): JSX.Element | nu
           data-testid={`${id}-keep-shared`}
           onClick={() =>
             void writeShared('keep settings.json', () =>
-              api.adoptClaudeSettings(host.daemonId, 'shared'),
+              api.adoptClaudeSettings(host.hostId, 'shared'),
             )
           }
         >
@@ -478,9 +485,7 @@ function ClaudeSettingsDrift({ host }: { host: HostPresence }): JSX.Element | nu
             className="set-btn"
             data-testid={`${id}-keep-os`}
             onClick={() =>
-              void writeShared('keep settings.json', () =>
-                api.adoptClaudeSettings(host.daemonId, os),
-              )
+              void writeShared('keep settings.json', () => api.adoptClaudeSettings(host.hostId, os))
             }
           >
             Keep for {os === 'darwin' ? 'macOS' : 'Linux'}
@@ -491,7 +496,7 @@ function ClaudeSettingsDrift({ host }: { host: HostPresence }): JSX.Element | nu
           className="set-btn ghost"
           data-testid={`${id}-discard`}
           onClick={() =>
-            sendToHost(host, { type: 'host.claude_settings_discard', daemonId: host.daemonId })
+            sendToHost(host, { type: 'host.claude_settings_discard', hostId: host.hostId })
           }
         >
           Discard
@@ -507,7 +512,7 @@ function ClaudeSettingsDrift({ host }: { host: HostPresence }): JSX.Element | nu
  * this one, and not one that has never reported (there is nothing to route
  * through yet). Picking one, or picking "None", writes straight through via
  * `host.settings`; the row never guesses, it shows whatever this host's next
- * `daemon.host` report says. While it is on, this host's browsing is "via
+ * `host.host` report says. While it is on, this host's browsing is "via
  * <that host>" everywhere that matters (the live view's later step reads the
  * same field) — stated here too, so it is never a surprise that pages are
  * loading from somewhere else.
@@ -517,24 +522,24 @@ function BrowserRouteThrough({ host }: { host: HostPresence }): JSX.Element {
   const report = host.host!;
   const current = report.browserRouteThrough ?? null;
   const otherHosts = sortHosts(Object.values(hosts)).filter(
-    (h) => h.daemonId !== host.daemonId && h.host !== null,
+    (h) => h.hostId !== host.hostId && h.host !== null,
   );
   const routingHost = current === null ? null : (hosts[current] ?? null);
   const routingHostName = current === null ? null : routingHost ? hostLabel(routingHost) : current;
 
   return (
-    <div className="set-card set-card-gap" data-testid={`host-${host.daemonId}-browser`}>
+    <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-browser`}>
       <Row
         title="Route through"
         sub={
           current !== null ? (
-            <span data-testid={`host-${host.daemonId}-routed-via`}>via {routingHostName}</span>
+            <span data-testid={`host-${host.hostId}-routed-via`}>via {routingHostName}</span>
           ) : undefined
         }
       >
         <select
           aria-label="Route through"
-          data-testid={`host-${host.daemonId}-route-through`}
+          data-testid={`host-${host.hostId}-route-through`}
           value={current ?? ''}
           onChange={(e) =>
             sendHostSettings(host, {
@@ -544,14 +549,14 @@ function BrowserRouteThrough({ host }: { host: HostPresence }): JSX.Element {
         >
           <option value="">None</option>
           {otherHosts.map((h) => (
-            <option key={h.daemonId} value={h.daemonId}>
+            <option key={h.hostId} value={h.hostId}>
               {hostLabel(h)}
             </option>
           ))}
         </select>
       </Row>
       {current !== null && routingHost && !routingHost.online ? (
-        <Note testid={`host-${host.daemonId}-route-through-offline`}>
+        <Note testid={`host-${host.hostId}-route-through-offline`}>
           {routingHostName} is offline — browsing on {hostLabel(host)} will fail until it
           reconnects. It never falls back to going direct.
         </Note>
@@ -567,10 +572,10 @@ function BrowserRouteThrough({ host }: { host: HostPresence }): JSX.Element {
  * Mac has no host; once it has one it is a row in the list like any other.
  */
 function ThisMac(): JSX.Element | null {
-  const bridge = getDesktopBridge()?.localDaemon;
+  const bridge = getDesktopBridge()?.localHost;
   const qc = useQueryClient();
   const status = useQuery({
-    queryKey: ['local-daemon-status'],
+    queryKey: ['local-host-status'],
     queryFn: () => (bridge as NonNullable<typeof bridge>).status(),
     enabled: bridge !== undefined,
   });
@@ -582,14 +587,14 @@ function ThisMac(): JSX.Element | null {
     setInstalling(true);
     setFailure(null);
     try {
-      const { nonce } = await api.daemonPairStart();
+      const { nonce } = await api.hostPairStart();
       const result = await (bridge as NonNullable<typeof bridge>).install(nonce);
       if (!result.ok) setFailure(result.output.trim() || `the installer exited ${result.exitCode}`);
     } catch (err) {
       setFailure(err instanceof Error ? err.message : String(err));
     } finally {
       setInstalling(false);
-      await qc.invalidateQueries({ queryKey: ['local-daemon-status'] });
+      await qc.invalidateQueries({ queryKey: ['local-host-status'] });
     }
   }
 
@@ -637,8 +642,8 @@ function AddHost({ onClose }: { onClose: () => void }): JSX.Element {
   // What is actually published. Offering an operating system with no build only
   // produces a refusal after the fact — the picker should not offer it at all.
   const manifest = useQuery({
-    queryKey: ['daemon-manifest'],
-    queryFn: () => api.daemonManifest(),
+    queryKey: ['host-manifest'],
+    queryFn: () => api.hostManifest(),
     retry: false,
   });
   // A manifest with no `artifacts` is a half-written or unreadable publish, not
@@ -651,7 +656,7 @@ function AddHost({ onClose }: { onClose: () => void }): JSX.Element {
 
   const install = useQuery({
     queryKey: ['daemon-install-command', chosen],
-    queryFn: () => api.daemonInstallCommand(chosen as 'macos' | 'linux'),
+    queryFn: () => api.hostInstallCommand(chosen as 'macos' | 'linux'),
     enabled: chosen !== null,
     retry: false,
   });
@@ -667,7 +672,7 @@ function AddHost({ onClose }: { onClose: () => void }): JSX.Element {
       {manifest.isPending ? <Note>…</Note> : null}
       {nothingPublished ? (
         <Note testid="add-host-error">
-          No daemon build has been published yet. Publish one with <code>pnpm build:daemon</code>.
+          No host build has been published yet. Publish one with <code>pnpm build:host</code>.
         </Note>
       ) : null}
       {!nothingPublished && options.length > 0 ? (

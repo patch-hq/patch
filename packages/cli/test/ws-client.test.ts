@@ -173,3 +173,34 @@ test('a post-connect socket drop does not crash; client reconnects', async () =>
     await h.close();
   }
 });
+
+test('a reconnect replays each tracked chat from the last seq seen, not from the start', async () => {
+  const h = await startServer();
+  const client = new PatchWsClient({
+    url: h.url,
+    bearer: null,
+    initialBackoffMs: 20,
+    maxBackoffMs: 40,
+  });
+  try {
+    client.trackChat('c1');
+    await client.connect();
+    await waitFor(() => h.received.some((e) => e.type === 'chat.replay'));
+    h.push({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'assistant',
+      content: 'hi',
+      seq: 7,
+    } as WireEvent);
+    // Let the client take the event in before the socket drops.
+    await new Promise((r) => setTimeout(r, 100));
+    h.dropClient();
+    await waitFor(() => h.received.filter((e) => e.type === 'chat.replay').length >= 2, 2000);
+    const replays = h.received.filter((e) => e.type === 'chat.replay');
+    assert.equal((replays[1] as { fromSeq: number }).fromSeq, 7);
+  } finally {
+    await client.close();
+    await h.close();
+  }
+});

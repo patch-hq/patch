@@ -32,10 +32,11 @@ import { __getLastAlert, __clearLastAlert } from './stubs/react-native';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 import { saveCredential, clearCredential, loadCredential } from '../src/lib/credential';
 import { getServerUrl } from '../src/config';
+import { seedSettings } from './testUtils/settingsFixtures';
 import { usePresenceStore } from '../src/stores/presenceStore';
 
 vi.mock('../src/api/rest', () => ({
-  api: { me: vi.fn(), revoke: vi.fn() },
+  api: { me: vi.fn(), revoke: vi.fn(), setPreferences: vi.fn() },
 }));
 
 const teardown = vi.fn();
@@ -84,6 +85,19 @@ describe('serverHost', () => {
 });
 
 describe('Settings — Account page', () => {
+  it('Sync position toggle writes the shared setting', async () => {
+    seedSettings();
+    vi.mocked(api.setPreferences).mockResolvedValue({ preferences: {} } as never);
+    const r = renderRN(<AccountPage />);
+    const toggle = findHost(r.root, byTestId('sync-position'));
+    expect(toggle.props.value).toBe(true);
+    await actAsync(async () => {
+      toggle.props.onValueChange(false);
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ syncPosition: false });
+  });
+
   it('is titled Account and composes the account group and This device', () => {
     const r = renderRN(<AccountPage />);
     expect(findHost(r.root, byTestId('settings-page-account'))).toBeTruthy();

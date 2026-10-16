@@ -8,6 +8,7 @@ import {
   loadLayout,
   type LeafPane,
   type SplitPane,
+  setTabDirty,
 } from '../stores/layoutStore.js';
 
 const store = (): ReturnType<typeof useLayoutStore.getState> => useLayoutStore.getState();
@@ -333,5 +334,27 @@ describe('layoutStore — closeMatching', () => {
     const root = store().root;
     expect(root.type).toBe('leaf');
     expect((root as LeafPane).tabs.map((t) => cid(t.descriptor))).toEqual(['c2']);
+  });
+});
+
+describe('layoutStore — unsaved edits (spec/14 § Opening things)', () => {
+  it('a plain open next to a tab with unsaved edits opens a new tab instead of replacing it', () => {
+    store().openTab({ kind: 'file', chatId: 'c1', path: '/a.ts' });
+    const fileTab = rootLeaf().tabs[0]!;
+    setTabDirty(fileTab.id, true);
+    store().openTab({ kind: 'chat', chatId: 'c2' });
+    const leaf = rootLeaf();
+    expect(leaf.tabs).toHaveLength(2);
+    expect(leaf.tabs[0]!.id).toBe(fileTab.id);
+    setTabDirty(fileTab.id, false);
+  });
+
+  it('once the edits are saved a plain open replaces the tab again', () => {
+    store().openTab({ kind: 'file', chatId: 'c1', path: '/a.ts' });
+    const fileTab = rootLeaf().tabs[0]!;
+    setTabDirty(fileTab.id, true);
+    setTabDirty(fileTab.id, false);
+    store().openTab({ kind: 'chat', chatId: 'c2' });
+    expect(rootLeaf().tabs).toHaveLength(1);
   });
 });

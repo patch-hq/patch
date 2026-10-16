@@ -11,6 +11,17 @@ export async function setStringAsync(text: string): Promise<boolean> {
   return true;
 }
 
+let _lastImage: string | null = null;
+
+export async function setImageAsync(base64: string): Promise<void> {
+  if (_fail) throw new Error('clipboard unavailable');
+  _lastImage = base64;
+}
+
+export function __lastCopiedImage(): string | null {
+  return _lastImage;
+}
+
 export function __lastCopied(): string | null {
   return _last;
 }
@@ -21,5 +32,6 @@ export function __setFail(v: boolean): void {
 
 export function __resetClipboard(): void {
   _last = null;
+  _lastImage = null;
   _fail = false;
 }

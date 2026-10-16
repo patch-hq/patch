@@ -29,10 +29,10 @@ const PatchBody = z
   .strict();
 const OrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).strict();
 const StrategyBody = z.object({ strategy: AccountStrategy }).strict();
-const AdoptBody = z.object({ daemonId: z.string().min(1) }).strict();
+const AdoptBody = z.object({ hostId: z.string().min(1) }).strict();
 const KeyBody = z.object({ value: z.string().min(1) }).strict();
 const ClaudeAdoptBody = z
-  .object({ daemonId: z.string().min(1), target: z.enum(['shared', 'darwin', 'linux']) })
+  .object({ hostId: z.string().min(1), target: z.enum(['shared', 'darwin', 'linux']) })
   .strict();
 
 export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoutesDeps): void {
@@ -166,7 +166,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     '/api/accounts/:backendId/adopt',
     handle(AdoptBody, async (req, body) => {
       const backend = backendOf(req);
-      await shared.adoptInto(body.daemonId, backend === 'codex' ? 'codex-login' : 'claude-login');
+      await shared.adoptInto(body.hostId, backend === 'codex' ? 'codex-login' : 'claude-login');
     }),
   );
 
@@ -195,14 +195,14 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
   app.post(
     '/api/providers/keys/:keyId/adopt',
     handle(AdoptBody, async (req, body) => {
-      await shared.adoptInto(body.daemonId, 'provider-key', keyOf(req));
+      await shared.adoptInto(body.hostId, 'provider-key', keyOf(req));
     }),
   );
 
   app.post(
     '/api/settings/claude/adopt',
     handle(ClaudeAdoptBody, async (_req, body) => {
-      await shared.adoptInto(body.daemonId, 'claude-settings', body.target);
+      await shared.adoptInto(body.hostId, 'claude-settings', body.target);
     }),
   );
 }

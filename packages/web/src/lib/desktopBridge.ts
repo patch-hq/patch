@@ -99,8 +99,8 @@ export interface PatchDesktopBridge {
    * host, and installing one with a freshly minted pairing code. Absent in a
    * browser and on shells that predate it.
    */
-  localDaemon?: {
-    status(): Promise<{ installed: boolean; daemonId: string | null }>;
+  localHost?: {
+    status(): Promise<{ installed: boolean; hostId: string | null }>;
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   };
   /** Run a check now and resolve with the resulting state. */
@@ -134,6 +134,16 @@ export interface PatchDesktopBridge {
    * away again, not just replace its page.
    */
   closePanel?(): void;
+  /**
+   * Tell the shell which chat this window has open (null = none). The shell
+   * publishes the chat in the front window to a local file for other tools
+   * (Foreman) — see `lib/frontChat.ts`.
+   */
+  reportOpenChat?(chat: {
+    chatId: string | null;
+    name: string | null;
+    folder: string | null;
+  }): void;
   /**
    * Width (px) the web panel currently occupies, pushed by main whenever it
    * opens, resizes or closes (0 = closed). The app insets itself by exactly
@@ -175,6 +185,8 @@ export interface DesktopUpdaterState {
   lastCheckedAt: string | null;
   lastResult: 'up-to-date' | 'update-available' | 'downloaded' | 'error' | null;
   lastError: string | null;
+  /** What lastError was about: a background check, or the user's Restart. */
+  lastErrorKind: 'check' | 'install' | null;
   availableVersion: string | null;
   downloaded: boolean;
   checking: boolean;

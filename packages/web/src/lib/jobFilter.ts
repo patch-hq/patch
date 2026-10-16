@@ -6,7 +6,7 @@
 // function, the way jobGroups.ts holds the grouping rule.
 
 export type JobStatusFilter = 'all' | 'enabled' | 'disabled';
-export type JobTriggerFilter = 'all' | 'cron' | 'recurrence' | 'webhook' | 'todoist';
+export type JobTriggerFilter = 'all' | 'cron' | 'recurrence' | 'follows' | 'webhook' | 'todoist';
 
 export interface JobFilter {
   status: JobStatusFilter;
@@ -25,6 +25,7 @@ export const JOB_TRIGGER_FILTERS: ReadonlyArray<{ value: JobTriggerFilter; label
   { value: 'all', label: 'Any trigger' },
   { value: 'cron', label: 'Cron' },
   { value: 'recurrence', label: 'Recurrence' },
+  { value: 'follows', label: 'Follows' },
   { value: 'webhook', label: 'Webhook' },
   { value: 'todoist', label: 'Todoist' },
 ];

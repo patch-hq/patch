@@ -22,7 +22,7 @@
 
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
-import { Ear, Mic, MicOff, MessageSquare, PhoneOff } from 'lucide-react';
+import { Ear, Mic, MicOff, MessageSquare, Phone, PhoneOff } from 'lucide-react';
 import type { AudioSessionMode } from '@patch/wire/audio';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -89,7 +89,11 @@ export function VoiceBar(): JSX.Element | null {
       role="status"
     >
       <span className="vb-mode" data-testid="voice-bar-head">
-        {call.mode === 'hands-free' ? <Ear size={14} aria-hidden /> : <Mic size={14} aria-hidden />}
+        {call.mode === 'hands-free' ? (
+          <Ear size={14} aria-hidden />
+        ) : (
+          <Phone size={14} aria-hidden />
+        )}
         {MODE_HEAD[call.mode]}
       </span>
       <span className="vb-chat" data-testid="voice-bar-chat">

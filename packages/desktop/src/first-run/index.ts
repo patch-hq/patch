@@ -27,7 +27,7 @@ export interface FirstRunEnv {
   /** What servers call this app in their device lists. */
   label: string;
   ui: SetupUi;
-  /** The shell's own host installer (`local-daemon.ts`). */
+  /** The shell's own host installer (`local-host.ts`). */
   installHost(
     origin: string,
     code: string,
@@ -74,7 +74,7 @@ export function launch(env: FirstRunEnv): Promise<Launch> {
             home: localHome(env.userData),
             port,
             relayUrl: env.relayUrl,
-            daemonArtifacts: join(env.resources, 'daemon'),
+            hostArtifacts: join(env.resources, 'host'),
             node: { execPath: env.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
           }),
         call: post,

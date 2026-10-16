@@ -363,6 +363,37 @@ describe('persistClaudeOAuth with a store credential', () => {
     });
   });
 
+  it('keeps the stored organizationId across a refresh', async () => {
+    const { persistClaudeOAuth } = await import('../src/index.js');
+    connectPatchStore(
+      { accessToken: 'old', refreshToken: 'r0', email: 'a@b.c', organizationId: 'org-1' },
+      opts(),
+    );
+    persistClaudeOAuth(
+      loadClaudeOAuth(opts()),
+      { accessToken: 'new', refreshToken: 'r1', expiresAt: 42 },
+      {},
+    );
+    const store = readPatchStore(opts());
+    expect(store?.accounts.find((a) => a.id === DEFAULT_ACCOUNT_ID)?.credential).toEqual({
+      accessToken: 'new',
+      refreshToken: 'r1',
+      expiresAt: 42,
+      email: 'a@b.c',
+      organizationId: 'org-1',
+    });
+  });
+
+  it('does not reconnect an account disconnected while its refresh was in flight', async () => {
+    const { persistClaudeOAuth } = await import('../src/index.js');
+    connectPatchStore({ accessToken: 'old', refreshToken: 'r0' }, opts());
+    const cred = loadClaudeOAuth(opts());
+    disconnectPatchStore(opts());
+    persistClaudeOAuth(cred, { accessToken: 'new', refreshToken: 'r1', expiresAt: 42 }, {});
+    const store = readPatchStore(opts());
+    expect(store?.accounts.find((a) => a.id === DEFAULT_ACCOUNT_ID)?.credential).toBeNull();
+  });
+
   it('writes back to the SPECIFIC account it resolved from, leaving other accounts untouched', async () => {
     const { persistClaudeOAuth } = await import('../src/index.js');
     connectPatchStore({ accessToken: 'first', refreshToken: 'r0' }, opts());

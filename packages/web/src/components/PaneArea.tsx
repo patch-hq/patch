@@ -424,7 +424,20 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
               reorderTab(pane.id, payload.tabId, from !== -1 && from < gap ? gap - 1 : gap);
             } else moveTab(payload.paneId, payload.tabId, pane.id, gap);
           }}
-          onDragEnd={() => setDragOverId(null)}
+          onDragEnd={(e) => {
+            setDragOverId(null);
+            // Released over nothing that accepts a tab, outside the window:
+            // the tab leaves for a window of its own (spec/14 § Panes and tabs).
+            const outside =
+              e.clientX < 0 ||
+              e.clientY < 0 ||
+              e.clientX > window.innerWidth ||
+              e.clientY > window.innerHeight;
+            if (e.dataTransfer.dropEffect === 'none' && outside) {
+              openTabInNewWindow(tab.descriptor);
+              closeTab(pane.id, tab.id);
+            }
+          }}
         />
       ))}
       {/* Trailing drop catch-all: dropping past the last tab appends there,
@@ -469,7 +482,7 @@ interface PaneTabProps {
   onDragOver: (e: ReactDragEvent<HTMLDivElement>) => void;
   onDragLeave: () => void;
   onDrop: (e: ReactDragEvent<HTMLDivElement>) => void;
-  onDragEnd: () => void;
+  onDragEnd: (e: ReactDragEvent<HTMLDivElement>) => void;
 }
 
 /** One tab. Subscribes to its own chat's row and the jobs cache so the title

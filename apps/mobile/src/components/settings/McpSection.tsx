@@ -7,7 +7,7 @@
 //
 // Every change sends the host's WHOLE list (`host.settings` harnessMcpServers),
 // validated with the wire's McpServerList first; nothing is patched locally —
-// the list settles on the host's fresh `daemon.host`.
+// the list settles on the host's fresh `host.host`.
 
 import React from 'react';
 import { Alert, Switch, View } from 'react-native';
@@ -44,7 +44,7 @@ export function McpPage(): React.ReactElement {
             testID="mcp-add"
             label="Add server"
             onPress={() =>
-              router.push({ pathname: '/settings/mcp-server', params: { daemonId: host.daemonId } })
+              router.push({ pathname: '/settings/mcp-server', params: { hostId: host.hostId } })
             }
           />
         ) : null
@@ -91,7 +91,7 @@ function ServerRow({
       onPress={() =>
         router.push({
           pathname: '/settings/mcp-server',
-          params: { daemonId: host.daemonId, name: server.name },
+          params: { hostId: host.hostId, name: server.name },
         })
       }
       right={
@@ -102,7 +102,7 @@ function ServerRow({
           disabled={!reachable}
           onValueChange={(enabled) =>
             void sendHostSettings(
-              host.daemonId,
+              host.hostId,
               {
                 harnessMcpServers: list.map((s) =>
                   s.name === server.name ? { ...s, enabled } : s,
@@ -125,14 +125,14 @@ function ServerRow({
  * is sent and returns; Remove asks first.
  */
 export function McpServerEditor({
-  daemonId,
+  hostId,
   name,
 }: {
-  daemonId: string;
+  hostId: string;
   name: string | null;
 }): React.ReactElement {
   const router = useRouter();
-  const host = usePresenceStore((s) => s.hosts[daemonId] ?? null);
+  const host = usePresenceStore((s) => s.hosts[hostId] ?? null);
   const list = host?.host?.harnessMcpServers;
   const existing = name === null ? null : (list?.find((s) => s.name === name) ?? null);
   const [draftName, setDraftName] = React.useState(existing?.name ?? '');
@@ -152,7 +152,7 @@ export function McpServerEditor({
               gap ??
               (list === undefined && host
                 ? updateToManageText(host)
-                : `${name ?? ''} is no longer on ${host ? hostName(host) : daemonId}`)
+                : `${name ?? ''} is no longer on ${host ? hostName(host) : hostId}`)
             }
           />
         </SettingsSection>
@@ -167,7 +167,7 @@ export function McpServerEditor({
       return;
     }
     setProblem(null);
-    if (sendHostSettings(daemonId, { harnessMcpServers: result.list }, 'MCP servers')) {
+    if (sendHostSettings(hostId, { harnessMcpServers: result.list }, 'MCP servers')) {
       router.back();
     }
   };
@@ -181,7 +181,7 @@ export function McpServerEditor({
         onPress: () => {
           if (
             sendHostSettings(
-              daemonId,
+              hostId,
               { harnessMcpServers: list.filter((s) => s.name !== name) },
               'MCP servers',
             )

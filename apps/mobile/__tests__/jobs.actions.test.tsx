@@ -219,7 +219,7 @@ describe('Jobs tab — last-fired, queued, chat link', () => {
     enabled: true,
     queued: 3,
     trigger: { type: 'cron', expression: '0 9 * * *' },
-    action: { type: 'continue', daemonId: 'd1', folder: '/p', skill: 'digest' },
+    action: { type: 'continue', hostId: 'd1', folder: '/p', skill: 'digest' },
   };
 
   it('shows "never" with no latestRun, and the queued count', async () => {
@@ -240,7 +240,7 @@ describe('Jobs tab — last-fired, queued, chat link', () => {
 
   it('a spawn job with no run yet has no chat link', async () => {
     vi.mocked(api.listJobs).mockResolvedValue({
-      jobs: [{ ...JOB, action: { type: 'spawn', daemonId: 'd1', folder: '/p', skill: 'digest' } }],
+      jobs: [{ ...JOB, action: { type: 'spawn', hostId: 'd1', folder: '/p', skill: 'digest' } }],
     });
     const r = renderRN(<Jobs />);
     await flush();
@@ -252,7 +252,7 @@ describe('Jobs tab — last-fired, queued, chat link', () => {
       jobs: [
         {
           ...JOB,
-          action: { type: 'spawn', daemonId: 'd1', folder: '/p', skill: 'digest' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/p', skill: 'digest' },
           latestRun: { ts: Date.now(), status: 'ok', chatId: 'chat-77' },
         },
       ],
@@ -362,7 +362,7 @@ describe('Jobs tab — search matches the action label too', () => {
     usePresenceStore.setState({
       hosts: {
         d1: {
-          daemonId: 'd1',
+          hostId: 'd1',
           online: true,
           lastSeenAt: 1,
           host: { hostName: 'Mac mini' },
@@ -377,7 +377,7 @@ describe('Jobs tab — search matches the action label too', () => {
           name: 'Weekly check-in',
           enabled: true,
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'spawn', daemonId: 'd1', folder: '/home/tom/p', skill: 'life-coach' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/home/tom/p', skill: 'life-coach' },
         },
       ],
     });

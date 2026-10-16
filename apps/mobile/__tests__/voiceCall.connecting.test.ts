@@ -58,8 +58,11 @@ import {
   CALL_CONNECT_TIMEOUT_MS,
   endVoiceCall,
   retryVoiceCall,
+  setCallMode,
+  setCallMuted,
   startVoiceCall,
 } from '../src/lib/voiceCall';
+import { onVoiceServiceAction, startVoiceAudioService } from '../src/lib/voiceAudioService';
 
 async function flush(n = 8): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
@@ -224,5 +227,105 @@ describe('address word', () => {
     prefs.addressWord = null;
     startVoiceCall('c1', 'hands-free');
     expect(useVoiceStore.getState().callAddressWord).toBeNull();
+  });
+});
+
+describe('a setup superseded while its audio service starts', () => {
+  it('lets go of the notification-button listener it had just taken', async () => {
+    const unsubscribe = vi.fn();
+    vi.mocked(onVoiceServiceAction).mockReturnValueOnce(unsubscribe);
+    let finishService!: () => void;
+    vi.mocked(startVoiceAudioService).mockImplementationOnce(
+      () =>
+        new Promise<void>((res) => {
+          finishService = res;
+        }),
+    );
+    startVoiceCall('c1');
+    await flush();
+    // The connect watchdog (or the user ending the call) ends this attempt
+    // while the foreground service is still coming up.
+    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    await flush();
+    finishService();
+    await flush(20);
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ending a call whose audio service will not stop', () => {
+  it('still ends it — the bar goes — and says what did not stop', async () => {
+    startVoiceCall('c1');
+    await flush();
+    FakeWebSocket.last().emitOpen();
+    await flush();
+    stopVoiceAudioServiceMock.mockRejectedValueOnce(new Error('service not running'));
+
+    await endVoiceCall();
+
+    expect(useVoiceStore.getState().activeSession).toBeNull();
+    expect(useUiStore.getState().errors.map((e) => e.message)).toContain(
+      'voice call: audio service did not stop: service not running',
+    );
+  });
+});
+
+describe('switching mode while the call is still connecting', () => {
+  it('opens the session in the mode now showing, and starts the audio service in it', async () => {
+    startVoiceCall('c1', 'call');
+    // The bar is up at once, so the user can flip to hands-free before the socket opens.
+    setCallMode('hands-free');
+    expect(useVoiceStore.getState().callMode).toBe('hands-free');
+    await flush();
+    FakeWebSocket.last().emitOpen();
+    await flush();
+
+    const start = JSON.parse(String(FakeWebSocket.last().sent[0])) as { mode: string };
+    expect(start.mode).toBe('hands-free');
+    expect(startVoiceAudioService).toHaveBeenCalledWith('c1', 'hands-free', expect.anything());
+  });
+});
+
+describe('a call that timed out while still minting its token', () => {
+  it('stays failed when the token finally arrives: no socket, no audio service, no mic', async () => {
+    const { api } = await import('../src/api/rest');
+    let resolveToken!: (v: Awaited<ReturnType<typeof api.voiceToken>>) => void;
+    vi.mocked(api.voiceToken).mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          resolveToken = res;
+        }),
+    );
+    startVoiceCall('c1');
+    await flush();
+    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    await flush();
+    expect(useVoiceStore.getState().callError).toMatch(/no answer from the host/);
+
+    resolveToken({ token: 'tok1', sessionId: 'sess-1', audioUrl: '/audio/sess-1', expiresAt: 0 });
+    await flush(20);
+
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(startVoiceAudioService).not.toHaveBeenCalled();
+    // Still failed, with its error showing for Retry.
+    expect(useVoiceStore.getState().callError).toMatch(/no answer from the host/);
+    expect(useVoiceStore.getState().activeSession).not.toBeNull();
+  });
+});
+
+describe('muting while the call is still connecting', () => {
+  it('stays muted once the session goes live, and the audio service is told so', async () => {
+    startVoiceCall('c1');
+    // The bar is up at once; the user mutes while the token mints and the mic warms.
+    setCallMuted(true);
+    expect(useVoiceStore.getState().callMuted).toBe(true);
+    await flush();
+    FakeWebSocket.last().emitOpen();
+    await flush();
+
+    expect(useVoiceStore.getState().activeSession?.sessionId).toBe('sess-1');
+    expect(useVoiceStore.getState().callMuted).toBe(true);
+    expect(startVoiceAudioService).toHaveBeenCalledWith('c1', expect.anything(), true);
   });
 });

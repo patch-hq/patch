@@ -4,9 +4,9 @@
 // @patch/server dev`), has it LISTEN on a real TCP port, and drives every
 // trigger type, the JSONata filter, both action types, all four action
 // combos, both log streams, CRUD over BOTH surfaces (REST + the MCP/UDS
-// rpc-bridge over the daemon-link), and offline buffering/flush.
+// rpc-bridge over the host-link), and offline buffering/flush.
 //
-// Dispatched actions are captured on the InProcessDaemonLink.sent array —
+// Dispatched actions are captured on the InProcessHostLink.sent array —
 // these are the EXACT wire frames the host receives over WS in production
 // (chat.spawn_request / chat.input). The cron path is fired via the real
 // CronScheduler.fireForTesting hook (deterministic; a 1-minute expr would
@@ -22,7 +22,7 @@ import { generateUserKeypair, mintSurfaceCredential, type UserKeypair } from '@p
 import type { WireEvent } from '@patch/wire';
 import { buildAll, type BuiltApp } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '../src/jobs/types.js';
 import { hostConfirms } from './host-answer.js';
 
@@ -38,7 +38,7 @@ function withDefaultAutonomyPrompt(body: string): string {
 interface Harness {
   base: string;
   jwt: string;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   dataDir: string;
   built: BuiltApp;
   close: () => Promise<void>;
@@ -59,8 +59,8 @@ async function startServer(
     label: 'cli-test',
     issuedAt: Date.now(),
   });
-  const daemonLink = new InProcessDaemonLink();
-  const built = await buildAll({ logger: false, registry, daemonLink, ...extra });
+  const hostLink = new InProcessHostLink();
+  const built = await buildAll({ logger: false, registry, hostLink, ...extra });
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
   const jwt = await mintSurfaceCredential({
@@ -73,7 +73,7 @@ async function startServer(
   return {
     base: `http://127.0.0.1:${addr.port}`,
     jwt,
-    daemonLink,
+    hostLink,
     dataDir: dir,
     built,
     close: async () => {
@@ -136,13 +136,13 @@ async function postWebhook(
 
 /** Seed the chat-registry with a chatId so message-action validation passes. */
 function seedChat(h: Harness, chatId: string): void {
-  h.daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/seed' } as WireEvent);
+  h.hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/seed' } as WireEvent);
 }
 
 /**
  * Drive the MCP/UDS path: emit a patch.jobs.request inbound (as the host's
  * RemoteJobsStore would over WS), then read the server's patch.jobs.response
- * back off daemonLink.sent (where InProcessDaemonLink.send records the frame
+ * back off hostLink.sent (where InProcessHostLink.send records the frame
  * the server pushed upstream — the same bytes the host would read over WS).
  */
 async function jobsRpc(
@@ -151,7 +151,7 @@ async function jobsRpc(
   payload: { jobId?: string; body?: unknown; limit?: number } = {},
 ): Promise<{ ok: boolean; result?: any; error?: any }> {
   const requestId = `rpc-${Math.random().toString(36).slice(2)}`;
-  h.daemonLink.emit({
+  h.hostLink.emit({
     type: 'patch.jobs.request',
     requestId,
     op,
@@ -159,8 +159,8 @@ async function jobsRpc(
     ...(payload.body !== undefined ? { body: payload.body } : {}),
     ...(payload.limit !== undefined ? { limit: payload.limit } : {}),
   } as WireEvent);
-  // The rpc-bridge replies synchronously via daemonLink.send.
-  const reply = h.daemonLink.sent.find(
+  // The rpc-bridge replies synchronously via hostLink.send.
+  const reply = h.hostLink.sent.find(
     (s) => s.event.type === 'patch.jobs.response' && (s.event as any).requestId === requestId,
   );
   if (!reply) throw new Error(`no patch.jobs.response for ${op} (${requestId})`);
@@ -195,7 +195,7 @@ describe('jobs E2E [running server]', () => {
       trigger: { type: 'cron', expression: '* * * * *' },
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'fired at {{payload.firedAt}}',
       },
@@ -206,11 +206,9 @@ describe('jobs E2E [running server]', () => {
     // Stored expression is the raw 5-field UTC expr (never coerced to a TZ).
     expect(created.json.trigger.expression).toBe('* * * * *');
 
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     await h.built.cronScheduler.fireForTesting(jobId);
-    const spawn = h.daemonLink.sent
-      .slice(before)
-      .find((s) => s.event.type === 'chat.spawn_request');
+    const spawn = h.hostLink.sent.slice(before).find((s) => s.event.type === 'chat.spawn_request');
     expect(spawn).toBeDefined();
     const ev = spawn!.event as any;
     expect(ev.folder).toBe('/work');
@@ -223,11 +221,11 @@ describe('jobs E2E [running server]', () => {
 
     // The run is written from the host's own answer (spec/08 step 6).
 
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
 
     const runs = readJsonl(join(dir, 'runs', `${jobId}.jsonl`));
     expect(runs.at(-1)).toMatchObject({ jobId, status: 'ok', trigger: 'cron' });
-    expect(runs.at(-1).action).toMatchObject({ type: 'spawn', daemonId: 'd1', folder: '/work' });
+    expect(runs.at(-1).action).toMatchObject({ type: 'spawn', hostId: 'd1', folder: '/work' });
   });
 
   // --- Permission mode (spec/08 § Action) -----------------------------------
@@ -240,7 +238,7 @@ describe('jobs E2E [running server]', () => {
       trigger: { type: 'cron', expression: '* * * * *' },
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'go',
         permissionMode: 'plan',
@@ -252,34 +250,30 @@ describe('jobs E2E [running server]', () => {
     const fetched = await api(h, 'GET', `/api/jobs/${jobId}`);
     expect(fetched.json.action.permissionMode).toBe('plan');
 
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     await h.built.cronScheduler.fireForTesting(jobId);
-    const spawn = h.daemonLink.sent
-      .slice(before)
-      .find((s) => s.event.type === 'chat.spawn_request');
+    const spawn = h.hostLink.sent.slice(before).find((s) => s.event.type === 'chat.spawn_request');
     expect(spawn).toBeDefined();
     expect((spawn!.event as any).permissionMode).toBe('plan');
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
   });
 
   it('permission mode: a job that stores none fires under auto, not the host default', async () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'plain-job',
       trigger: { type: 'cron', expression: '* * * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     expect(created.status).toBe(201);
     expect(created.json.action).not.toHaveProperty('permissionMode');
 
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     await h.built.cronScheduler.fireForTesting(created.json.id);
-    const spawn = h.daemonLink.sent
-      .slice(before)
-      .find((s) => s.event.type === 'chat.spawn_request');
+    const spawn = h.hostLink.sent.slice(before).find((s) => s.event.type === 'chat.spawn_request');
     // Sent explicitly. An ABSENT field would resolve through whatever default
     // that host carries, which is the thing a job must never do.
     expect((spawn!.event as any).permissionMode).toBe('auto');
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
   });
 
   it('permission mode: a mode outside the enum is refused at the API', async () => {
@@ -288,7 +282,7 @@ describe('jobs E2E [running server]', () => {
       trigger: { type: 'cron', expression: '* * * * *' },
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'go',
         permissionMode: 'dontAsk',
@@ -304,21 +298,21 @@ describe('jobs E2E [running server]', () => {
       trigger: { type: 'cron', expression: '* * * * *' },
       // `startHidden` so the chat really is hidden — this test is about a chat
       // being in Automations AND Hidden at once.
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go', startHidden: true },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go', startHidden: true },
     });
     expect(created.status).toBe(201);
     const jobId = created.json.id;
 
     // A chat the user started, untouched by any job — must NOT show up.
-    h.daemonLink.emit({
+    h.hostLink.emit({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'user-chat-1',
       folder: '/x',
     });
 
     await h.built.cronScheduler.fireForTesting(jobId);
-    const spawnReq = h.daemonLink.sent.find((s) => s.event.type === 'chat.spawn_request');
+    const spawnReq = h.hostLink.sent.find((s) => s.event.type === 'chat.spawn_request');
     expect(spawnReq).toBeDefined();
     const spawnedChatId = (spawnReq!.event as { chatId: string }).chatId;
 
@@ -326,7 +320,7 @@ describe('jobs E2E [running server]', () => {
     // confirms (spec/08 § Action: "Recorded now, not once the host
     // confirms") — so the row is already tagged the instant the mirror
     // creates it off the host's own `chat.spawned` answer.
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
 
     const automations = await api(h, 'GET', '/api/chats?automations=only');
     expect(automations.status).toBe(200);
@@ -338,7 +332,7 @@ describe('jobs E2E [running server]', () => {
 
     // The host reports the hidden state it actually applied via its next
     // chat.state (chat.spawned itself carries no status — spec/03 § Control).
-    h.daemonLink.emit({
+    h.hostLink.emit({
       type: 'chat.state',
       chatId: spawnedChatId,
       permissionMode: 'bypassPermissions',
@@ -383,17 +377,17 @@ describe('jobs E2E [running server]', () => {
       name: 'serialised',
       concurrency: 1,
       trigger: { type: 'cron', expression: '* * * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     expect(created.status).toBe(201);
     const jobId = created.json.id;
     expect(created.json.concurrency).toBe(1);
 
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     await h.built.cronScheduler.fireForTesting(jobId);
     await h.built.cronScheduler.fireForTesting(jobId);
     // Only the first fire reached the host; the second is behind the limit.
-    const spawns = h.daemonLink.sent
+    const spawns = h.hostLink.sent
       .slice(before)
       .filter((s) => s.event.type === 'chat.spawn_request');
     expect(spawns).toHaveLength(1);
@@ -419,7 +413,7 @@ describe('jobs E2E [running server]', () => {
       name: 'queued-by-mode',
       queueing: { mode: 'queue', concurrency: 1 },
       trigger: { type: 'cron', expression: '* * * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     expect(created.status).toBe(201);
     expect(created.json.queueing).toEqual({ mode: 'queue', concurrency: 1 });
@@ -448,14 +442,14 @@ describe('jobs E2E [running server]', () => {
       name: 'serialised-across-restart',
       concurrency: 1,
       trigger: { type: 'cron', expression: '* * * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     const jobId = created.json.id;
 
     await h.built.cronScheduler.fireForTesting(jobId);
     await h.built.cronScheduler.fireForTesting(jobId);
     const heldChat = (
-      h.daemonLink.sent.find((s) => s.event.type === 'chat.spawn_request')!.event as any
+      h.hostLink.sent.find((s) => s.event.type === 'chat.spawn_request')!.event as any
     ).chatId as string;
     expect((await api(h, 'GET', `/api/jobs/${jobId}`)).json).toMatchObject({
       inFlight: 1,
@@ -463,13 +457,13 @@ describe('jobs E2E [running server]', () => {
     });
 
     // The chat is genuinely working when the server goes down.
-    h.daemonLink.emit({
+    h.hostLink.emit({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: heldChat,
       folder: '/work',
     } as WireEvent);
-    h.daemonLink.emit({
+    h.hostLink.emit({
       type: 'chat.state',
       chatId: heldChat,
       activity: 'running',
@@ -485,24 +479,24 @@ describe('jobs E2E [running server]', () => {
       inFlight: 1,
       queued: 1,
     });
-    expect(h.daemonLink.sent.filter((s) => s.event.type === 'chat.spawn_request')).toHaveLength(0);
+    expect(h.hostLink.sent.filter((s) => s.event.type === 'chat.spawn_request')).toHaveLength(0);
 
     // The queue moves only when that chat actually finishes.
-    h.daemonLink.emit({
+    h.hostLink.emit({
       type: 'chat.state',
       chatId: heldChat,
       activity: 'running',
       lastUpdated: 2,
       permissionMode: 'bypassPermissions',
     } as WireEvent);
-    h.daemonLink.emit({
+    h.hostLink.emit({
       type: 'chat.state',
       chatId: heldChat,
       activity: 'idle',
       lastUpdated: 3,
       permissionMode: 'bypassPermissions',
     } as WireEvent);
-    expect(h.daemonLink.sent.filter((s) => s.event.type === 'chat.spawn_request')).toHaveLength(1);
+    expect(h.hostLink.sent.filter((s) => s.event.type === 'chat.spawn_request')).toHaveLength(1);
     expect((await api(h, 'GET', `/api/jobs/${jobId}`)).json).toMatchObject({
       inFlight: 1,
       queued: 0,
@@ -515,7 +509,7 @@ describe('jobs E2E [running server]', () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'hook',
       trigger: { type: 'webhook', scheme: 'hmac-sha256', secret },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'hit' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'hit' },
     });
     const jobId = created.json.id;
     const url = `/api/webhooks/${jobId}`;
@@ -527,11 +521,11 @@ describe('jobs E2E [running server]', () => {
 
     // Valid signature → 200 + dispatch. `X-Patch-Signature: hex(hmac_sha256(...))`.
     const sig = createHmac('sha256', secret).update(rawBody).digest('hex');
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     const ok = await postWebhook(h, url, rawBody, { 'x-patch-signature': sig });
     expect(ok.status).toBe(200);
     expect(ok.json.status).toBe('sent');
-    expect(h.daemonLink.sent.slice(before).some((s) => s.event.type === 'chat.spawn_request')).toBe(
+    expect(h.hostLink.sent.slice(before).some((s) => s.event.type === 'chat.spawn_request')).toBe(
       true,
     );
 
@@ -546,7 +540,7 @@ describe('jobs E2E [running server]', () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'gh',
       trigger: { type: 'webhook', scheme: 'github', secret },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'gh' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'gh' },
     });
     const jobId = created.json.id;
     const rawBody = JSON.stringify({ action: 'closed' });
@@ -563,7 +557,7 @@ describe('jobs E2E [running server]', () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'stripe',
       trigger: { type: 'webhook', scheme: 'stripe', secret },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'stripe' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'stripe' },
     });
     const jobId = created.json.id;
     const rawBody = JSON.stringify({ id: 'evt_1', type: 'payment_intent.succeeded' });
@@ -580,7 +574,7 @@ describe('jobs E2E [running server]', () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'none',
       trigger: { type: 'webhook', scheme: 'none' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'none' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'none' },
     });
     const jobId = created.json.id;
     const res = await postWebhook(h, `/api/webhooks/${jobId}`, JSON.stringify({ x: 1 }));
@@ -595,7 +589,7 @@ describe('jobs E2E [running server]', () => {
       name: 'filtered',
       trigger: { type: 'webhook', scheme: 'hmac-sha256', secret },
       filter: "payload.action = 'closed' and payload.merged = true",
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'merged' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'merged' },
     });
     const jobId = created.json.id;
     const url = `/api/webhooks/${jobId}`;
@@ -603,22 +597,22 @@ describe('jobs E2E [running server]', () => {
 
     // Matching → fires.
     const matchBody = JSON.stringify({ action: 'closed', merged: true });
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     const m = await postWebhook(h, url, matchBody, { 'x-patch-signature': sign(matchBody) });
     expect(m.json.status).toBe('sent');
-    expect(h.daemonLink.sent.length).toBe(before + 1);
+    expect(h.hostLink.sent.length).toBe(before + 1);
 
     // Non-matching → rejected, no dispatch.
     const noBody = JSON.stringify({ action: 'opened', merged: false });
-    const sentAtReject = h.daemonLink.sent.length;
+    const sentAtReject = h.hostLink.sent.length;
     const r = await postWebhook(h, url, noBody, { 'x-patch-signature': sign(noBody) });
     expect(r.status).toBe(200);
     expect(r.json.status).toBe('filter-rejected');
-    expect(h.daemonLink.sent.length).toBe(sentAtReject); // nothing dispatched
+    expect(h.hostLink.sent.length).toBe(sentAtReject); // nothing dispatched
 
     // The run is written from the host's own answer (spec/08 step 6).
 
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
 
     const runs = readJsonl(join(dir, 'runs', `${jobId}.jsonl`));
     expect(runs.some((x) => x.status === 'ok')).toBe(true);
@@ -633,16 +627,16 @@ describe('jobs E2E [running server]', () => {
       name: 'ferr',
       trigger: { type: 'webhook', scheme: 'none' },
       filter: '$nonexistentFn(payload)',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'x' },
     });
     const jobId = created.json.id;
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     const res = await postWebhook(h, `/api/webhooks/${jobId}`, JSON.stringify({ a: 1 }));
     expect(res.status).toBe(200);
     expect(res.json.status).toBe('filter-error');
-    expect(h.daemonLink.sent.length).toBe(before); // no dispatch
+    expect(h.hostLink.sent.length).toBe(before); // no dispatch
     // The run is written from the host's own answer (spec/08 step 6).
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
     const runs = readJsonl(join(dir, 'runs', `${jobId}.jsonl`));
     expect(runs.some((x) => x.status === 'filter-error')).toBe(true);
   });
@@ -660,13 +654,13 @@ describe('jobs E2E [running server]', () => {
       return c.json.id;
     };
     const fire = async (jobId: string, body: unknown): Promise<any> => {
-      const before = h.daemonLink.sent.length;
+      const before = h.hostLink.sent.length;
       await postWebhook(h, `/api/webhooks/${jobId}`, JSON.stringify(body));
-      return h.daemonLink.sent.slice(before).at(-1)!.event;
+      return h.hostLink.sent.slice(before).at(-1)!.event;
     };
 
     // spawn + skill → first turn is "/skill\n\n<json>"
-    const j1 = await mkHook({ type: 'spawn', daemonId: 'd1', folder: '/w', skill: 'bus-watch' });
+    const j1 = await mkHook({ type: 'spawn', hostId: 'd1', folder: '/w', skill: 'bus-watch' });
     const e1 = await fire(j1, { stop: 'X' });
     expect(e1.type).toBe('chat.spawn_request');
     const e1Prefix = `/bus-watch\n\n${DEFAULT_JOB_AUTONOMY_PROMPT}\n\n`;
@@ -680,7 +674,7 @@ describe('jobs E2E [running server]', () => {
     // spawn + prompt → mustache substitution
     const j2 = await mkHook({
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/w',
       prompt: 'Hi {{payload.who}}',
     });
@@ -712,7 +706,7 @@ describe('jobs E2E [running server]', () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'todo-hooklog',
       trigger: { type: 'todoist', clientSecret },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', skill: 'todoist-handler' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', skill: 'todoist-handler' },
     });
     const jobId = created.json.id;
     const url = `/api/webhooks/todoist/${jobId}`;
@@ -736,18 +730,18 @@ describe('jobs E2E [running server]', () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'logshape',
       trigger: { type: 'webhook', scheme: 'none' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'x' },
     });
     const jobId = created.json.id;
     await postWebhook(h, `/api/webhooks/${jobId}`, JSON.stringify({ a: 1 }));
     // The run is written from the host's own answer (spec/08 step 6).
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
     const runs = readJsonl(join(dir, 'runs', `${jobId}.jsonl`));
     const last = runs.at(-1);
     expect(last).toMatchObject({ jobId, status: 'ok', trigger: 'webhook' });
     expect(typeof last.ts).toBe('number');
     expect(typeof last.payloadDigest).toBe('string');
-    expect(last.action).toMatchObject({ type: 'spawn', daemonId: 'd1', folder: '/w' });
+    expect(last.action).toMatchObject({ type: 'spawn', hostId: 'd1', folder: '/w' });
 
     // And it's served by GET /api/jobs/:id/runs.
     const got = await api(h, 'GET', `/api/jobs/${jobId}/runs`);
@@ -762,7 +756,7 @@ describe('jobs E2E [running server]', () => {
       body: {
         name: 'rpc-made',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'hi' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'hi' },
       },
     });
     expect(created.ok).toBe(true);
@@ -802,7 +796,7 @@ describe('jobs E2E [running server]', () => {
     const badCron = await api(h, 'POST', '/api/jobs', {
       name: 'badcron',
       trigger: { type: 'cron', expression: 'not a cron' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'x' },
     });
     expect(badCron.status).toBe(400);
 
@@ -810,7 +804,7 @@ describe('jobs E2E [running server]', () => {
       name: 'badfilter',
       trigger: { type: 'webhook', scheme: 'none' },
       filter: 'payload.( unbalanced',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'x' },
     });
     expect(badFilter.status).toBe(400);
   });
@@ -820,12 +814,12 @@ describe('jobs E2E [running server]', () => {
     const created = await api(h, 'POST', '/api/jobs', {
       name: 'offline',
       trigger: { type: 'webhook', scheme: 'none' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/w', prompt: 'buffered' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/w', prompt: 'buffered' },
     });
     const jobId = created.json.id;
 
     // Host goes offline.
-    h.daemonLink.setStatus('offline');
+    h.hostLink.setStatus('offline');
     const res = await postWebhook(h, `/api/webhooks/${jobId}`, JSON.stringify({ a: 1 }));
     expect(res.status).toBe(200);
     expect(res.json.status).toBe('buffered');
@@ -838,7 +832,7 @@ describe('jobs E2E [running server]', () => {
     expect(pendingFiles.length).toBe(1);
     // Run logged as buffered.
     // The run is written from the host's own answer (spec/08 step 6).
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
     const runs = readJsonl(join(dir, 'runs', `${jobId}.jsonl`));
     expect(runs.at(-1).status).toBe('buffered');
 
@@ -846,11 +840,11 @@ describe('jobs E2E [running server]', () => {
     // The settings import a host gets on connect is not work.
     // Frames the server sends every host as it attaches are not job work.
     const work = () =>
-      h.daemonLink.sent.filter(
+      h.hostLink.sent.filter(
         (s) => !s.event.type.startsWith('settings.') && s.event.type !== 'server.queue_mode',
       );
     const before = work().length;
-    h.daemonLink.setStatus('online');
+    h.hostLink.setStatus('online');
     // flush is synchronous in JobDispatcher.onStatus handler.
     expect(work().length).toBe(before + 1);
     const flushed = work().at(-1)!.event as any;
@@ -874,7 +868,7 @@ describe('jobs E2E [running server]', () => {
       trigger: { type: 'cron', expression: '* * * * *' },
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/live',
         prompt: 'tick {{payload.firedAt}}',
       },
@@ -886,12 +880,12 @@ describe('jobs E2E [running server]', () => {
     // test hook) for this job.
     expect(h.built.cronScheduler.hasLiveTask(jobId)).toBe(true);
 
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     // Wait up to ~65s for the genuine wall-clock tick to dispatch a spawn.
     const deadline = Date.now() + 65_000;
     let spawn: { event: WireEvent } | undefined;
     while (Date.now() < deadline) {
-      spawn = h.daemonLink.sent.slice(before).find((s) => s.event.type === 'chat.spawn_request');
+      spawn = h.hostLink.sent.slice(before).find((s) => s.event.type === 'chat.spawn_request');
       if (spawn) break;
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -902,7 +896,7 @@ describe('jobs E2E [running server]', () => {
     expect(ev.prompt).toMatch(/tick \d{4}-\d{2}-\d{2}T/);
     expect(ev.hidden).toBe(false);
     // The run is written from the host's own answer (spec/08 step 6).
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
     const runs = readJsonl(join(dir, 'runs', `${jobId}.jsonl`));
     expect(runs.at(-1)).toMatchObject({ jobId, status: 'ok', trigger: 'cron' });
   }, 70_000);

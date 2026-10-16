@@ -194,21 +194,17 @@ export function UpdatesPage(): React.ReactElement {
           ) : null}
           {behindHosts.map((h) => (
             <Row
-              key={h.daemonId}
-              testID={`updates-host-${h.daemonId}`}
+              key={h.hostId}
+              testID={`updates-host-${h.hostId}`}
               title={`${hostName(h)} host`}
-              subtitle={h.host?.daemonVersion}
+              subtitle={h.host?.hostVersion}
               right={
                 <SettingsButton
-                  testID={`updates-host-${h.daemonId}-update`}
+                  testID={`updates-host-${h.hostId}-update`}
                   label="Update"
                   variant="quiet"
                   onPress={() =>
-                    void sendToHost(
-                      h.daemonId,
-                      { type: 'host.update', daemonId: h.daemonId },
-                      'Update',
-                    )
+                    void sendToHost(h.hostId, { type: 'host.update', hostId: h.hostId }, 'Update')
                   }
                 />
               }
@@ -271,8 +267,8 @@ function layerRows(report: VersionReport): Array<{ id: string; name: string; val
     ...(report.web ? [{ id: 'web', name: 'Web UI', value: stamp(report.web) }] : []),
     { id: 'server', name: 'Server', value: stamp(report.server) },
     ...report.hosts.map((h) => ({
-      id: `host-${h.daemonId}`,
-      name: `${h.hostName ?? h.daemonId} host`,
+      id: `host-${h.hostId}`,
+      name: `${h.hostName ?? h.hostId} host`,
       value: `${stamp(h)}${h.online ? '' : ' · offline'}`,
     })),
     ...(report.android

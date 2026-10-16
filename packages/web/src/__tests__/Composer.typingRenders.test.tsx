@@ -20,7 +20,7 @@ describe('Composer — typing renders', () => {
       <Profiler id="c" onRender={() => (commits += 1)}>
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           onSend={() => {}}
           onValueChange={(t) => useComposerDraftStore.getState().setDraft('c1', t)}
         />

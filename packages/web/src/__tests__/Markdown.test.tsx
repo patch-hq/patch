@@ -22,6 +22,27 @@ afterEach(() => {
 });
 
 describe('Markdown', () => {
+  it("does not leak react-markdown's `node` prop onto links or inline code", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <Markdown content={'[site](https://example.com) and `code`'} />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('a[href="https://example.com"]')?.hasAttribute('node')).toBe(
+      false,
+    );
+    expect(container.querySelector('.md-inline-code')?.hasAttribute('node')).toBe(false);
+  });
+
+  it('puts no `node` attribute on any element, tables included', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <Markdown content={'| a | b |\n|---|---|\n| 1 | 2 |\n\n> quote\n\n# h\n'} />
+      </MemoryRouter>,
+    );
+    expect([...container.querySelectorAll('[node]')].map((e) => e.tagName)).toEqual([]);
+  });
+
   it('renders bold, inline code and lists', () => {
     const { container } = render(
       <Markdown content={'Here is **bold** and `inline`:\n- one\n- two'} />,
@@ -400,12 +421,17 @@ describe('Markdown chat links', () => {
     expect(container.querySelector('a[data-chat-link]')).toBeNull();
   });
 
-  it('a plain click on a root-relative path (a file path) stays in the SPA instead of loading the page', () => {
-    const { container, getByTestId } = renderLinked('[s](/Users/tom/projects/x/SOURCES.md)');
-    const a = container.querySelector('a[data-chat-link]') as HTMLAnchorElement;
-    expect(a).not.toBeNull();
-    expect(fireEvent.click(a)).toBe(false);
-    expect(getByTestId('where').textContent).toBe('/Users/tom/projects/x/SOURCES.md');
+  it('renders a local file path as non-clickable text, not a link that 404s', () => {
+    const { container } = renderLinked('[s](/Users/tom/projects/x/SOURCES.md)');
+    expect(container.querySelector('a')).toBeNull();
+    const el = container.querySelector('[data-unlinked-path]');
+    expect(el?.textContent).toBe('s');
+    expect(el?.getAttribute('data-unlinked-path')).toBe('/Users/tom/projects/x/SOURCES.md');
+  });
+
+  it('still links other in-app routes', () => {
+    const { container } = renderLinked('[j](/jobs/abc)');
+    expect(container.querySelector('a[data-chat-link]')?.getAttribute('href')).toBe('/jobs/abc');
   });
 
   it('leaves protocol-relative and external links alone', () => {

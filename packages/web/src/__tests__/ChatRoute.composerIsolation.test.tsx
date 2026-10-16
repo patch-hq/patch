@@ -28,7 +28,7 @@ function seedChats(chatIds: string[]): void {
   useChatStore.getState().hydrate(
     chatIds.map((chatId) => ({
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'foo',

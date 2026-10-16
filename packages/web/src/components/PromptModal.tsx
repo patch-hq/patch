@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useUiStore } from '../stores/uiStore.js';
+import { ModalOverlay } from './ModalOverlay.js';
 
 export function PromptModal(): JSX.Element | null {
   const dialog = useUiStore((s) => s.promptDialog);
@@ -20,8 +21,9 @@ export function PromptModal(): JSX.Element | null {
   // first one's text.
   useEffect(() => {
     if (!dialog) return;
-    setValue('');
+    setValue(dialog.initialValue);
     inputRef.current?.focus();
+    inputRef.current?.select();
   }, [dialog?.id, dialog]);
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export function PromptModal(): JSX.Element | null {
   if (!dialog) return null;
 
   return (
-    <div className="modal-overlay" data-testid="prompt-modal-overlay">
+    <ModalOverlay testId="prompt-modal-overlay">
       <div
         className="modal-backdrop"
         data-testid="prompt-modal-backdrop"
@@ -88,6 +90,6 @@ export function PromptModal(): JSX.Element | null {
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

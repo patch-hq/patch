@@ -11,7 +11,7 @@
 // A key's VALUE never leaves a host except to another host over the same
 // authenticated link, never to a surface. A surface sends one in a single
 // write-only request (REST, stored on the server and sent to hosts in the settings snapshot),
-// and everything that comes back — a host's `daemon.host.providerKeys` report
+// and everything that comes back — a host's `host.host.providerKeys` report
 // and the request's response — carries only where each key comes from and its
 // last four characters.
 

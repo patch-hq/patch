@@ -182,7 +182,7 @@ test.describe('sidebar chat name width', () => {
               pinnedAt: null,
               snoozedUntil: null,
               lastUpdated: 400,
-              daemonId: 'd1',
+              hostId: 'd1',
               permissionMode: 'bypassPermissions',
               jobId: 'job_1',
             },

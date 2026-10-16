@@ -44,7 +44,7 @@ describe('host key', () => {
     const kp = generateUserKeypair(() => new Uint8Array(32).fill(9));
     const cred = await mintDaemonKey({
       userPrivateKey: kp.privateKey,
-      daemonId: 'd-1',
+      hostId: 'd-1',
       label: 'hetzner-1',
     });
     const claims = await verifyDaemonKey(cred, { userPublicKey: kp.publicKey });
@@ -59,7 +59,7 @@ describe('host key', () => {
     const b = generateUserKeypair(() => new Uint8Array(32).fill(11));
     const cred = await mintDaemonKey({
       userPrivateKey: a.privateKey,
-      daemonId: 'd-2',
+      hostId: 'd-2',
       label: 'box',
     });
     await expect(verifyDaemonKey(cred, { userPublicKey: b.publicKey })).rejects.toBeInstanceOf(
@@ -127,7 +127,7 @@ describe('host key', () => {
     const kp = generateUserKeypair(() => new Uint8Array(32).fill(19));
     const cred = await mintDaemonKey({
       userPrivateKey: kp.privateKey,
-      daemonId: 'd-realtime',
+      hostId: 'd-realtime',
       label: 'box',
     });
     const claims = await verifyDaemonKey(cred, { userPublicKey: kp.publicKey });
@@ -138,7 +138,7 @@ describe('host key', () => {
     const kp = generateUserKeypair(() => new Uint8Array(32).fill(29));
     const cred = await mintDaemonKey({
       userPrivateKey: kp.privateKey,
-      daemonId: 'd-clock',
+      hostId: 'd-clock',
       label: 'box',
       now: 1_000_000,
     });

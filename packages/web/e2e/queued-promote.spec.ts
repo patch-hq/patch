@@ -38,11 +38,13 @@ test.describe('queued message promote (↑)', () => {
   test('the queue numbers itself, and removing the head renumbers the rest', async ({ page }) => {
     await page.goto(QUEUED);
     const queued = page.locator('[data-queued="true"]');
-    await expect(queued.nth(0).getByTestId('queued-badge')).toHaveText('Queued');
-    await expect(queued.nth(1).getByTestId('queued-badge')).toHaveText('2nd in queue');
+    await expect(queued.nth(0).getByTestId('queued-badge')).toHaveText('Queued · next tool call');
+    await expect(queued.nth(1).getByTestId('queued-badge')).toHaveText(
+      '2nd in queue · next tool call',
+    );
     await expect(queued.nth(0).getByTestId('queued-badge')).toHaveAttribute(
       'title',
-      'Runs when the current turn finishes',
+      'Goes in when the agent finishes its current tool call',
     );
 
     await queued.nth(0).hover();
@@ -52,7 +54,7 @@ test.describe('queued message promote (↑)', () => {
     const after = page.locator('[data-queued="true"]');
     await expect(after).toHaveCount(1);
     await expect(after.nth(0)).toContainText('second queued turn');
-    await expect(after.nth(0).getByTestId('queued-badge')).toHaveText('Queued');
+    await expect(after.nth(0).getByTestId('queued-badge')).toHaveText('Queued · next tool call');
   });
 
   test('clicking ↑ never reorders the queued block — the turn queued above stays above', async ({

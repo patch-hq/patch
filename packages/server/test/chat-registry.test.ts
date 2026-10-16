@@ -32,7 +32,7 @@ describe('ChatRegistry phantom-row gating', () => {
     // Special threads are the sidebar's Channels surfaces — they must stay
     // visible even after auto-archiving, so the rows never go dead.
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'thread_speakers', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'thread_speakers', folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -57,7 +57,7 @@ describe('ChatRegistry phantom-row gating', () => {
     // fires or is cancelled), so `null` is meaningful — but an OMITTED field
     // (a back-compat payload) must not wipe a known wake.
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'wakey', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'wakey', folder: '/x' });
     expect(reg.get('wakey')?.pendingWake).toBeNull();
 
     reg.observe({
@@ -100,7 +100,7 @@ describe('ChatRegistry phantom-row gating', () => {
 
   it('chat.state after chat.spawned is registered', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'real', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'real', folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -116,7 +116,7 @@ describe('ChatRegistry phantom-row gating', () => {
 
   it('chat.error with folder_not_found removes the chatId', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'doomed', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'doomed', folder: '/x' });
     reg.observe({
       type: 'chat.error',
       chatId: 'doomed',
@@ -137,7 +137,7 @@ describe('ChatRegistry phantom-row gating', () => {
 
   it('chat.error with sdk_error keeps the row (chat exists but in errored state)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'live', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/x' });
     reg.observe({
       type: 'chat.error',
       chatId: 'live',
@@ -151,7 +151,7 @@ describe('ChatRegistry phantom-row gating', () => {
 describe('ChatRegistry pinnedAt-aware ordering', () => {
   it('pinned chats sort by pinnedAt desc (most-recent-pinned first)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'older-pin', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'older-pin', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -162,7 +162,7 @@ describe('ChatRegistry pinnedAt-aware ordering', () => {
       pinnedAt: 100,
       status: 'active',
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'newer-pin', folder: '/b' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'newer-pin', folder: '/b' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -177,11 +177,27 @@ describe('ChatRegistry pinnedAt-aware ordering', () => {
     expect(ordered).toEqual(['newer-pin', 'older-pin']);
   });
 
+  it('unpinning clears pinnedAt: an explicit null is not "unchanged"', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/a' });
+    const state = {
+      type: 'chat.state' as const,
+      permissionMode: 'bypassPermissions' as const,
+      chatId: 'c1',
+      activity: 'idle' as const,
+      lastUpdated: 1000,
+      status: 'active' as const,
+    };
+    reg.observe({ ...state, pinned: true, pinnedAt: 1000 });
+    reg.observe({ ...state, pinned: false, pinnedAt: null });
+    expect(reg.get('c1')).toMatchObject({ pinned: false, pinnedAt: null });
+  });
+
   it('non-pinned with newer activity sorts AFTER pinned chats', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     reg.observe({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'pinned-old-active',
       folder: '/a',
     });
@@ -195,7 +211,7 @@ describe('ChatRegistry pinnedAt-aware ordering', () => {
       pinnedAt: 50,
       status: 'active',
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'fresh-unpinned', folder: '/b' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'fresh-unpinned', folder: '/b' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -212,7 +228,7 @@ describe('ChatRegistry pinnedAt-aware ordering', () => {
 
 describe('ChatRegistry soft-delete (E5)', () => {
   function spawnActive(reg: ChatRegistry, chatId: string): void {
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -260,7 +276,7 @@ describe('ChatRegistry soft-delete (E5)', () => {
 
   it('reserved special threads never appear in the deleted-only view', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'thread_manager', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'thread_manager', folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -302,7 +318,7 @@ describe('ChatRegistry seed', () => {
 describe('ChatRegistry lastUserActivity mirroring (spec/14 § Sidebar ordering)', () => {
   it('mirrors lastUserActivity from chat.state', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -331,7 +347,7 @@ describe('ChatRegistry lastUserActivity mirroring (spec/14 § Sidebar ordering)'
 
   it('falls back to lastUpdated when a host predating the field omits it', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'old-daemon', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'old-daemon', folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -345,7 +361,7 @@ describe('ChatRegistry lastUserActivity mirroring (spec/14 § Sidebar ordering)'
 
   it('preserves the last known lastUserActivity across a chat.state that omits the field', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -380,7 +396,7 @@ describe('ChatRegistry chat.stopped handling', () => {
 
   it('chat.stopped for a spawned chat is a no-op (host follows with chat.state)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'live', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -398,7 +414,7 @@ describe('ChatRegistry chat.stopped handling', () => {
 describe('ChatRegistry inFlightChatIds', () => {
   it('returns only chats with activity running or awaiting-permission', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'idle-one', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'idle-one', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -407,7 +423,7 @@ describe('ChatRegistry inFlightChatIds', () => {
       lastUpdated: 1,
       status: 'active',
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'running-one', folder: '/b' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'running-one', folder: '/b' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -416,7 +432,7 @@ describe('ChatRegistry inFlightChatIds', () => {
       lastUpdated: 1,
       status: 'active',
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'awaiting-one', folder: '/c' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'awaiting-one', folder: '/c' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -437,7 +453,7 @@ describe('ChatRegistry markErrored', () => {
 
   it('resolves a known chat to errored and returns the chat.state event, including folder when present', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'live', folder: '/proj' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/proj' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -461,9 +477,29 @@ describe('ChatRegistry markErrored', () => {
     expect(reg.get('live')?.activity).toBe('errored');
   });
 
+  it("keeps the host-owned lastUpdated, so the host's next frame is not dropped as stale", () => {
+    // Clients discard a chat.state older than the row's lastUpdated. Stamping the
+    // server clock here put that ahead of every frame the host would send on
+    // recovery, so the errored triangle never cleared.
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/proj' });
+    reg.observe({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions',
+      chatId: 'live',
+      activity: 'running',
+      lastUpdated: 1_000,
+      status: 'active',
+      folder: '/proj',
+    });
+    const ev = reg.markErrored('live', { code: 'daemon_unavailable', message: 'lost' }, 9_999);
+    expect(ev?.lastUpdated).toBe(1_000);
+    expect(reg.get('live')?.lastUpdated).toBe(1_000);
+  });
+
   it('omits `folder` from the emitted event when the mirrored folder is empty', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'nofolder', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'nofolder', folder: '/x' });
     // A chat.state with an explicitly empty folder clears the mirrored value
     // (folder: event.folder ?? existing?.folder ?? '').
     reg.observe({
@@ -484,7 +520,7 @@ describe('ChatRegistry markErrored', () => {
 describe('ChatRegistry remove', () => {
   it('removes the chat and forgets the spawn marker (a later chat.state is ignored)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'goner', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'goner', folder: '/x' });
     expect(reg.get('goner')).toBeDefined();
     reg.remove('goner');
     expect(reg.get('goner')).toBeUndefined();
@@ -506,7 +542,7 @@ describe('ChatRegistry list() sort-comparator edge cases', () => {
     chatId: string,
     opts: { pinned: boolean; pinnedAt: number | null; lastUpdated: number },
   ): void {
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -579,7 +615,7 @@ describe('ChatRegistry list() filter options on ordinary (non-special) chats', (
     chatId: string,
     status: 'active' | 'archived' | 'errored',
   ): void {
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/x' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -619,7 +655,7 @@ describe('ChatRegistry list() filter options on ordinary (non-special) chats', (
 describe('ChatRegistry chat.state omitted fields fall back to the existing mirrored value', () => {
   it('folder/status/pinned are preserved when a later chat.state omits them', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/original' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/original' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -685,7 +721,7 @@ describe('ChatRegistry chat.state literal-default fallback (defensive against co
 describe('ChatRegistry chat.spawned is idempotent', () => {
   it('a second chat.spawned for an already-known chatId is a no-op', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -695,7 +731,7 @@ describe('ChatRegistry chat.spawned is idempotent', () => {
       status: 'active',
     });
     // Re-spawning must not reset the row back to its initial idle/zero state.
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/a' });
     const c = reg.get('c1');
     expect(c?.activity).toBe('running');
     expect(c?.lastUpdated).toBe(5);
@@ -716,13 +752,13 @@ describe('ChatRegistry job-chat links (Automations group)', () => {
       logger: silentLogger(),
       jobChatLinks: fakeLinks({ auto1: 'j_1' }),
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'auto1', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'auto1', folder: '/a' });
     expect(reg.get('auto1')?.jobId).toBe('j_1');
   });
 
   it('a chat with no link gets jobId: null', () => {
     const reg = new ChatRegistry({ logger: silentLogger(), jobChatLinks: fakeLinks({}) });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'plain', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'plain', folder: '/a' });
     expect(reg.get('plain')?.jobId).toBeNull();
   });
 
@@ -731,7 +767,7 @@ describe('ChatRegistry job-chat links (Automations group)', () => {
       logger: silentLogger(),
       jobChatLinks: fakeLinks({ auto1: 'j_1' }),
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'auto1', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'auto1', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -749,7 +785,7 @@ describe('ChatRegistry job-chat links (Automations group)', () => {
       logger: silentLogger(),
       jobChatLinks: fakeLinks({ a1: 'j_1', a2: 'j_2', a3: 'j_3' }),
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'a1', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'a1', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -759,7 +795,7 @@ describe('ChatRegistry job-chat links (Automations group)', () => {
       status: 'archived',
       folder: '/a',
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'a2', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'a2', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -769,7 +805,7 @@ describe('ChatRegistry job-chat links (Automations group)', () => {
       status: 'active',
       folder: '/a',
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'a3', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'a3', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -780,7 +816,7 @@ describe('ChatRegistry job-chat links (Automations group)', () => {
       folder: '/a',
     });
     // A regular (non-job) chat must never appear.
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'plain', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'plain', folder: '/a' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -799,7 +835,7 @@ describe('ChatRegistry job-chat links (Automations group)', () => {
       logger: silentLogger(),
       jobChatLinks: fakeLinks({ thread_speakers: 'j_1' }),
     });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'thread_speakers', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'thread_speakers', folder: '/x' });
     expect(reg.list({ automationsOnly: true }).some((c) => c.chatId === 'thread_speakers')).toBe(
       false,
     );
@@ -815,7 +851,7 @@ describe('ChatRegistry model (top bar)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     reg.observe({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '/a',
       model: 'claude-x',
@@ -825,7 +861,7 @@ describe('ChatRegistry model (top bar)', () => {
 
   it('chat.spawned with no model on the event gets model: null (old host / no catalogue)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/a' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/a' });
     expect(reg.get('c1')?.model).toBeNull();
   });
 
@@ -833,7 +869,7 @@ describe('ChatRegistry model (top bar)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     reg.observe({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '/a',
       model: 'claude-x',
@@ -857,7 +893,7 @@ describe('ChatRegistry model (top bar)', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     reg.observe({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '/a',
       model: 'claude-x',
@@ -883,7 +919,7 @@ describe('ChatRegistry model (top bar)', () => {
 // build took, since a state frame only arrives when something changes.
 describe('ChatRegistry background-task count', () => {
   function spawned(reg: ChatRegistry): void {
-    reg.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
   }
 
   it('starts UNKNOWN, which is not zero', () => {

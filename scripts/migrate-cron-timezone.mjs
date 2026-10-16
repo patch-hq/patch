@@ -38,6 +38,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { isMain } from './lib/is-main.mjs';
 
 /** The zone every cron job on this box was authored in. */
 export const DEFAULT_TIMEZONE = 'Europe/London';
@@ -184,7 +185,7 @@ function main(argv) {
   );
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     main(process.argv.slice(2));
   } catch (err) {

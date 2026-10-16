@@ -36,6 +36,9 @@ export function utf8Decode(bytes: Uint8Array): string {
       if (next === undefined || (next & 0xc0) !== 0x80) ok = false;
       else code = (code << 6) | (next & 0x3f);
     }
+    // Overlong forms, surrogates and anything past U+10FFFF are not UTF-8.
+    const min = extra === 1 ? 0x80 : extra === 2 ? 0x800 : extra === 3 ? 0x10000 : 0;
+    if (ok && (code < min || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff))) ok = false;
     if (!ok) {
       out += '�';
       i += 1;

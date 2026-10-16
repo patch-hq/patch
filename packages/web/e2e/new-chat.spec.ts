@@ -14,8 +14,8 @@ type W = {
 async function seedUsage(page: Page): Promise<void> {
   await page.evaluate(() => {
     (window as unknown as W).__presenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'd1',
+      type: 'host.account',
+      hostId: 'd1',
       backendId: 'claude-code',
       connected: true,
       accountEmail: 'dev@example.com',
@@ -257,10 +257,10 @@ test.describe('new chat header', () => {
     );
     expect(fills[1]).not.toBe(fills[0]);
 
-    // Clicking it again deselects — back to no project chosen.
+    // Clicking it again keeps it chosen.
     await second.click();
-    await expect(second).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.locator('.folder-pill-label')).toHaveText('Choose a folder…');
+    await expect(second).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.folder-pill-label')).toHaveText(label);
   });
 
   // Todoist: "on a new chat page arrow keys left and right should allow user

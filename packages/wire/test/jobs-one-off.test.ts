@@ -16,7 +16,7 @@ function refusedKeys(issues: ZodIssue[]): string[] {
   return issues.flatMap((i) => (i.code === 'unrecognized_keys' ? i.keys : []));
 }
 
-const ACTION = { type: 'spawn', daemonId: 'host-a', folder: '/tmp', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'host-a', folder: '/tmp', prompt: 'go' } as const;
 const TRIGGER = { type: 'cron', expression: '0 9 * * *' } as const;
 
 const STORED_JOB = {

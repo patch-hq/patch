@@ -20,12 +20,12 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 // A fake host transcriber: answers `patch.voice_note.transcribe_request` with
 // a canned transcript (or a typed error), recording the request so the test can
-// assert what the server sent. Mirrors packages/daemon handleVoiceNoteTranscribe.
-class FakeTranscribeDaemon extends InProcessDaemonLink {
+// assert what the server sent. Mirrors packages/host handleVoiceNoteTranscribe.
+class FakeTranscribeHost extends InProcessHostLink {
   lastRequest: Extract<WireEvent, { type: 'patch.voice_note.transcribe_request' }> | null = null;
   mode: 'ok' | 'unsupported' | 'failed' = 'ok';
   transcript = 'buy oat milk';
@@ -139,23 +139,23 @@ describe('POST /api/voice/note', () => {
       label: 'phone',
       issuedAt: 1,
     });
-    const daemonLink = new FakeTranscribeDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeTranscribeHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     // Seed a real chat so the existence check passes.
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-mobile-1',
       surfaceKind: 'mobile',
       label: 'phone',
     });
-    return { built, daemonLink, jwt, registry };
+    return { built, hostLink, jwt, registry };
   }
 
   const authed = (jwt: string) => ({ authorization: `Bearer ${jwt}` });
 
   it('transcribes the uploaded clip and injects a voice-app chat.input', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     const audio = Buffer.from('fake-m4a-bytes-', 'binary');
     try {
       const body = multipartBody({ chatId: 'c1', audio });
@@ -169,13 +169,13 @@ describe('POST /api/voice/note', () => {
       expect(res.json()).toEqual({ ok: true, transcript: 'buy oat milk', text: 'buy oat milk' });
 
       // The host received the exact clip + format.
-      expect(daemonLink.lastRequest).not.toBeNull();
-      expect(daemonLink.lastRequest?.format).toBe('m4a');
-      expect(daemonLink.lastRequest?.surfaceKind).toBe('mobile');
-      expect(Buffer.from(daemonLink.lastRequest!.audioBase64, 'base64').equals(audio)).toBe(true);
+      expect(hostLink.lastRequest).not.toBeNull();
+      expect(hostLink.lastRequest?.format).toBe('m4a');
+      expect(hostLink.lastRequest?.surfaceKind).toBe('mobile');
+      expect(Buffer.from(hostLink.lastRequest!.audioBase64, 'base64').equals(audio)).toBe(true);
 
       // The transcript was injected as a chat.input carrying the voice-app source.
-      const inputs = daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(inputs).toHaveLength(1);
       const ev = inputs[0]!.event as Extract<WireEvent, { type: 'chat.input' }>;
       expect(ev.chatId).toBe('c1');
@@ -195,7 +195,7 @@ describe('POST /api/voice/note', () => {
   // simply thrown away. It now leads the turn and the transcript follows it.
 
   it('puts the typed composer text AHEAD of the transcript in one turn', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const body = multipartBody({
         chatId: 'c1',
@@ -217,7 +217,7 @@ describe('POST /api/voice/note', () => {
       });
 
       // ONE turn, not two: the typed text is not injected separately.
-      const inputs = daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(inputs).toHaveLength(1);
       const ev = inputs[0]!.event as Extract<WireEvent, { type: 'chat.input' }>;
       expect(ev.message).toBe('remind me to buy oat milk');
@@ -230,7 +230,7 @@ describe('POST /api/voice/note', () => {
   it('joins with exactly one space however the typed text was left', async () => {
     // The composer keeps whatever whitespace the user typed; the join must not
     // turn a trailing space into a double space or a leading one into an indent.
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const body = multipartBody({ chatId: 'c1', audio: Buffer.from('x'), prefix: '  please   ' });
       const res = await built.app.inject({
@@ -241,7 +241,7 @@ describe('POST /api/voice/note', () => {
       });
       expect(res.statusCode).toBe(200);
       expect((res.json() as { text: string }).text).toBe('please buy oat milk');
-      const inputs = daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = hostLink.sent.filter((s) => s.event.type === 'chat.input');
       const ev = inputs[0]!.event as Extract<WireEvent, { type: 'chat.input' }>;
       expect(ev.message).toBe('please buy oat milk');
     } finally {
@@ -250,7 +250,7 @@ describe('POST /api/voice/note', () => {
   });
 
   it('an empty composer sends the transcript alone — no leading space', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const body = multipartBody({ chatId: 'c1', audio: Buffer.from('x'), prefix: '' });
       const res = await built.app.inject({
@@ -261,7 +261,7 @@ describe('POST /api/voice/note', () => {
       });
       expect(res.statusCode).toBe(200);
       expect((res.json() as { text: string }).text).toBe('buy oat milk');
-      const inputs = daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = hostLink.sent.filter((s) => s.event.type === 'chat.input');
       const ev = inputs[0]!.event as Extract<WireEvent, { type: 'chat.input' }>;
       expect(ev.message).toBe('buy oat milk');
     } finally {
@@ -272,8 +272,8 @@ describe('POST /api/voice/note', () => {
   it('keeps the typed text even when the clip transcribes to nothing', async () => {
     // Whisper hearing silence must not cost the user the words he had already
     // written — the whole point of carrying them. The turn is the typed text.
-    const { built, daemonLink, jwt } = await makeApp();
-    daemonLink.transcript = '   ';
+    const { built, hostLink, jwt } = await makeApp();
+    hostLink.transcript = '   ';
     try {
       const body = multipartBody({
         chatId: 'c1',
@@ -288,7 +288,7 @@ describe('POST /api/voice/note', () => {
       });
       expect(res.statusCode).toBe(200);
       expect((res.json() as { text: string }).text).toBe('book the dentist');
-      const inputs = daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const inputs = hostLink.sent.filter((s) => s.event.type === 'chat.input');
       const ev = inputs[0]!.event as Extract<WireEvent, { type: 'chat.input' }>;
       expect(ev.message).toBe('book the dentist');
     } finally {
@@ -297,7 +297,7 @@ describe('POST /api/voice/note', () => {
   });
 
   it('detects a .wav upload as the wav format', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const body = multipartBody({
         chatId: 'c1',
@@ -312,7 +312,7 @@ describe('POST /api/voice/note', () => {
         payload: body.payload,
       });
       expect(res.statusCode).toBe(200);
-      expect(daemonLink.lastRequest?.format).toBe('wav');
+      expect(hostLink.lastRequest?.format).toBe('wav');
     } finally {
       await built.app.close();
     }
@@ -367,8 +367,8 @@ describe('POST /api/voice/note', () => {
   });
 
   it('maps a host unsupported_format error to 400 and injects nothing', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
-    daemonLink.mode = 'unsupported';
+    const { built, hostLink, jwt } = await makeApp();
+    hostLink.mode = 'unsupported';
     try {
       const body = multipartBody({ chatId: 'c1', audio: Buffer.from('x') });
       const res = await built.app.inject({
@@ -379,15 +379,15 @@ describe('POST /api/voice/note', () => {
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: string }).error).toBe('unsupported_format');
-      expect(daemonLink.sent.some((s) => s.event.type === 'chat.input')).toBe(false);
+      expect(hostLink.sent.some((s) => s.event.type === 'chat.input')).toBe(false);
     } finally {
       await built.app.close();
     }
   });
 
   it('maps a host transcription failure to 502', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
-    daemonLink.mode = 'failed';
+    const { built, hostLink, jwt } = await makeApp();
+    hostLink.mode = 'failed';
     try {
       const body = multipartBody({ chatId: 'c1', audio: Buffer.from('x') });
       const res = await built.app.inject({
@@ -420,8 +420,8 @@ describe('POST /api/voice/note', () => {
 
   it('rejects when no account has been bootstrapped', async () => {
     const registry = Registry.load(dir); // no bootstrapAccount() call
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const body = multipartBody({ chatId: 'c1', audio: Buffer.from('x') });
       const res = await built.app.inject({
@@ -598,7 +598,7 @@ describe('POST /api/voice/note', () => {
   }, 15_000);
 
   it('detects wav from a wav mimetype even when the filename does not end in .wav', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const body = multipartBody({
         chatId: 'c1',
@@ -613,14 +613,14 @@ describe('POST /api/voice/note', () => {
         payload: body.payload,
       });
       expect(res.statusCode).toBe(200);
-      expect(daemonLink.lastRequest?.format).toBe('wav');
+      expect(hostLink.lastRequest?.format).toBe('wav');
     } finally {
       await built.app.close();
     }
   });
 
   it('returns 504 when the host never replies to the transcribe request', async () => {
-    // A plain InProcessDaemonLink (unlike FakeTranscribeDaemon) never
+    // A plain InProcessHostLink (unlike FakeTranscribeHost) never
     // replies to the transcribe request, so this waits out the real 30s
     // STORE_REQUEST_TIMEOUT_MS.
     const user = generateUserKeypair(() => new Uint8Array(32).fill(41));
@@ -632,9 +632,9 @@ describe('POST /api/voice/note', () => {
       label: 'phone',
       issuedAt: 1,
     });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-mobile-1',
@@ -657,7 +657,7 @@ describe('POST /api/voice/note', () => {
   }, 35_000);
 
   it('accepts an empty filename / absent content-type file part and still defaults to m4a', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const boundary = '----patchtestboundary-nofilename';
       const CRLF = '\r\n';
@@ -687,7 +687,7 @@ describe('POST /api/voice/note', () => {
         payload,
       });
       expect(res.statusCode).toBe(200);
-      expect(daemonLink.lastRequest?.format).toBe('m4a');
+      expect(hostLink.lastRequest?.format).toBe('m4a');
     } finally {
       await built.app.close();
     }
@@ -703,12 +703,12 @@ describe('POST /api/voice/note', () => {
       label: 'phone',
       issuedAt: 1,
     });
-    const daemonLink = new InProcessDaemonLink();
-    const origSend = daemonLink.send.bind(daemonLink);
-    daemonLink.send = (surfaceId, event) => {
+    const hostLink = new InProcessHostLink();
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId, event) => {
       origSend(surfaceId, event);
       if (event.type === 'patch.voice_note.transcribe_request') {
-        daemonLink.emit({
+        hostLink.emit({
           type: 'patch.voice_note.transcribe_response',
           requestId: event.requestId,
           ok: true,
@@ -718,8 +718,8 @@ describe('POST /api/voice/note', () => {
         });
       }
     };
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
+    const built = await buildAll({ logger: false, registry, hostLink });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-mobile-1',
@@ -744,9 +744,9 @@ describe('POST /api/voice/note', () => {
   });
 
   it('ignores a patch.voice_note.transcribe_response frame with an unmatched requestId', async () => {
-    const { built, daemonLink } = await makeApp();
+    const { built, hostLink } = await makeApp();
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'patch.voice_note.transcribe_response',
         requestId: 'no-such-request-id',
         ok: true,
@@ -760,7 +760,7 @@ describe('POST /api/voice/note', () => {
   });
 
   it('honours a surfaceKind form field (web) on the transcribe request AND the injected source', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const body = multipartBody({
         chatId: 'c1',
@@ -776,8 +776,8 @@ describe('POST /api/voice/note', () => {
         payload: body.payload,
       });
       expect(res.statusCode).toBe(200);
-      expect(daemonLink.lastRequest?.surfaceKind).toBe('web');
-      const ev = daemonLink.sent.find((s) => s.event.type === 'chat.input')!.event as Extract<
+      expect(hostLink.lastRequest?.surfaceKind).toBe('web');
+      const ev = hostLink.sent.find((s) => s.event.type === 'chat.input')!.event as Extract<
         WireEvent,
         { type: 'chat.input' }
       >;
@@ -788,7 +788,7 @@ describe('POST /api/voice/note', () => {
   });
 
   it('falls back to mobile for an unknown surfaceKind value', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
+    const { built, hostLink, jwt } = await makeApp();
     try {
       const body = multipartBody({
         chatId: 'c1',
@@ -802,7 +802,7 @@ describe('POST /api/voice/note', () => {
         payload: body.payload,
       });
       expect(res.statusCode).toBe(200);
-      expect(daemonLink.lastRequest?.surfaceKind).toBe('mobile');
+      expect(hostLink.lastRequest?.surfaceKind).toBe('mobile');
     } finally {
       await built.app.close();
     }
@@ -831,15 +831,15 @@ describe('POST /api/voice/transcribe', () => {
       label: 'web',
       issuedAt: 1,
     });
-    const daemonLink = new FakeTranscribeDaemon();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new FakeTranscribeHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-web-1',
       surfaceKind: 'web',
       label: 'web',
     });
-    return { built, daemonLink, jwt, registry };
+    return { built, hostLink, jwt, registry };
   }
   const authed = (jwt: string) => ({ authorization: `Bearer ${jwt}` });
 
@@ -863,8 +863,8 @@ describe('POST /api/voice/transcribe', () => {
   });
 
   it('transcribes a clip and returns the transcript WITHOUT injecting a chat.input', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
-    daemonLink.transcript = 'dictated words';
+    const { built, hostLink, jwt } = await makeApp();
+    hostLink.transcript = 'dictated words';
     try {
       const body = multipartBody({
         audio: Buffer.from('RIFFwav'),
@@ -880,10 +880,10 @@ describe('POST /api/voice/transcribe', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ ok: true, transcript: 'dictated words' });
-      expect(daemonLink.lastRequest?.surfaceKind).toBe('web');
-      expect(daemonLink.lastRequest?.format).toBe('wav');
+      expect(hostLink.lastRequest?.surfaceKind).toBe('web');
+      expect(hostLink.lastRequest?.format).toBe('wav');
       // Critically: NO chat.input is injected (the user hasn't sent anything yet).
-      expect(daemonLink.sent.some((s) => s.event.type === 'chat.input')).toBe(false);
+      expect(hostLink.sent.some((s) => s.event.type === 'chat.input')).toBe(false);
     } finally {
       await built.app.close();
     }
@@ -939,8 +939,8 @@ describe('POST /api/voice/transcribe', () => {
   });
 
   it('maps a host transcription failure to 502', async () => {
-    const { built, daemonLink, jwt } = await makeApp();
-    daemonLink.mode = 'failed';
+    const { built, hostLink, jwt } = await makeApp();
+    hostLink.mode = 'failed';
     try {
       const body = multipartBody({ audio: Buffer.from('x'), surfaceKind: 'web' });
       const res = await built.app.inject({

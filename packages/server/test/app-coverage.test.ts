@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { build, buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobStore } from '../src/jobs/store.js';
 import pino from 'pino';
 
@@ -60,7 +60,7 @@ describe('app.ts — logger option branches', () => {
 
   it('accepts logger: true (attaches pino redaction, boots fine)', async () => {
     const registry = Registry.load(dir);
-    const app = await build({ logger: true, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: true, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/healthz' });
       expect(res.statusCode).toBe(200);
@@ -74,7 +74,7 @@ describe('app.ts — logger option branches', () => {
     const app = await build({
       logger: { level: 'silent' },
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
     });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/healthz' });
@@ -87,9 +87,9 @@ describe('app.ts — logger option branches', () => {
 
 describe('app.ts — build() requires registry or dataDir', () => {
   it('throws when neither registry nor dataDir is provided', async () => {
-    await expect(
-      buildAll({ logger: false, daemonLink: new InProcessDaemonLink() }),
-    ).rejects.toThrow(/either registry or dataDir is required/);
+    await expect(buildAll({ logger: false, hostLink: new InProcessHostLink() })).rejects.toThrow(
+      /either registry or dataDir is required/,
+    );
   });
 });
 
@@ -104,7 +104,7 @@ describe('app.ts — unified error envelope (setErrorHandler safety net)', () =>
 
   async function buildWithTestRoutes(): Promise<Awaited<ReturnType<typeof build>>> {
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     // Synthetic throwing routes registered on the SAME already-built app
     // instance — this exercises app.ts's globally-registered setErrorHandler
     // (a genuine cross-cutting concern) without depending on any one
@@ -259,7 +259,7 @@ describe('app.ts — /api/daemon/:name (the host install + artifact channel)', (
       '#!/bin/sh\nSERVER_URL="${PATCH_SERVER_URL:-@@PATCH_SERVER_URL@@}"\n',
     );
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/daemon/install.sh' });
       expect(res.statusCode).toBe(200);
@@ -271,26 +271,70 @@ describe('app.ts — /api/daemon/:name (the host install + artifact channel)', (
     }
   });
 
-  it('serves the manifest and the per-platform artifacts', async () => {
-    writeFileSync(join(downloadsDir, 'daemon-latest.json'), '{"version":"0.1.1"}');
-    writeFileSync(join(downloadsDir, 'patch-daemon-0.1.1-linux-x64.tar.gz'), 'tarball');
-    writeFileSync(join(downloadsDir, 'patch-daemon-0.1.1-linux-x64.tar.gz.sig'), 'sig');
+  it('serves the same files under the /api/host/ names', async () => {
+    writeFileSync(join(downloadsDir, 'host-latest.json'), '{"version":"0.1.1"}');
+    writeFileSync(join(downloadsDir, 'patch-host-0.1.1-linux-x64.tar.gz'), 'tarball');
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
-      const manifest = await app.inject({ method: 'GET', url: '/api/daemon/daemon-latest.json' });
+      const manifest = await app.inject({ method: 'GET', url: '/api/host/host-latest.json' });
       expect(manifest.statusCode).toBe(200);
       expect(manifest.json()).toEqual({ version: '0.1.1' });
       const art = await app.inject({
         method: 'GET',
-        url: '/api/daemon/patch-daemon-0.1.1-linux-x64.tar.gz',
+        url: '/api/host/patch-host-0.1.1-linux-x64.tar.gz',
+      });
+      expect(art.statusCode).toBe(200);
+      expect(art.body).toBe('tarball');
+      const health = await app.inject({ method: 'GET', url: '/api/host/healthz' });
+      expect(health.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('still answers the legacy daemon artifact names with the host files', async () => {
+    writeFileSync(join(downloadsDir, 'host-latest.json'), '{"version":"0.1.1"}');
+    writeFileSync(join(downloadsDir, 'patch-host-0.1.1-linux-x64.tar.gz'), 'tarball');
+    const registry = Registry.load(dir);
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
+    try {
+      for (const prefix of ['/api/daemon', '/api/host']) {
+        const manifest = await app.inject({ method: 'GET', url: `${prefix}/daemon-latest.json` });
+        expect(manifest.statusCode).toBe(200);
+        expect(manifest.json()).toEqual({ version: '0.1.1' });
+        const art = await app.inject({
+          method: 'GET',
+          url: `${prefix}/patch-daemon-0.1.1-linux-x64.tar.gz`,
+        });
+        expect(art.statusCode).toBe(200);
+        expect(art.body).toBe('tarball');
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('serves the manifest and the per-platform artifacts', async () => {
+    writeFileSync(join(downloadsDir, 'host-latest.json'), '{"version":"0.1.1"}');
+    writeFileSync(join(downloadsDir, 'patch-host-0.1.1-linux-x64.tar.gz'), 'tarball');
+    writeFileSync(join(downloadsDir, 'patch-host-0.1.1-linux-x64.tar.gz.sig'), 'sig');
+    const registry = Registry.load(dir);
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
+    try {
+      const manifest = await app.inject({ method: 'GET', url: '/api/daemon/host-latest.json' });
+      expect(manifest.statusCode).toBe(200);
+      expect(manifest.json()).toEqual({ version: '0.1.1' });
+      const art = await app.inject({
+        method: 'GET',
+        url: '/api/daemon/patch-host-0.1.1-linux-x64.tar.gz',
       });
       expect(art.statusCode).toBe(200);
       expect(art.headers['content-type']).toBe('application/gzip');
       expect(art.body).toBe('tarball');
       const sig = await app.inject({
         method: 'GET',
-        url: '/api/daemon/patch-daemon-0.1.1-linux-x64.tar.gz.sig',
+        url: '/api/daemon/patch-host-0.1.1-linux-x64.tar.gz.sig',
       });
       expect(sig.statusCode).toBe(200);
       expect(sig.body).toBe('sig');
@@ -301,12 +345,12 @@ describe('app.ts — /api/daemon/:name (the host install + artifact channel)', (
 
   it('404s on anything outside the published shapes, and when nothing is published', async () => {
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const bad = await app.inject({ method: 'GET', url: '/api/daemon/registry.json' });
       expect(bad.statusCode).toBe(404);
       expect(bad.json()).toEqual({ error: 'not found' });
-      const missing = await app.inject({ method: 'GET', url: '/api/daemon/daemon-latest.json' });
+      const missing = await app.inject({ method: 'GET', url: '/api/daemon/host-latest.json' });
       expect(missing.statusCode).toBe(404);
       expect(missing.json().error).toMatch(/no such host artifact published/);
     } finally {
@@ -334,7 +378,7 @@ describe('app.ts — /api/download/:name (APK download)', () => {
 
   it('404s on a name that does not match the patch*.apk whitelist', async () => {
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       // A single path segment (no slashes, so it actually reaches the route
       // handler) that fails the `patch*.apk` regex — e.g. wrong extension.
@@ -351,7 +395,7 @@ describe('app.ts — /api/download/:name (APK download)', () => {
 
   it('404s when the whitelisted name has no published file', async () => {
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/download/patch.apk' });
       expect(res.statusCode).toBe(404);
@@ -364,7 +408,7 @@ describe('app.ts — /api/download/:name (APK download)', () => {
   it('200s + streams the APK with the right headers when published', async () => {
     writeFileSync(join(downloadsDir, 'patch-abc123.apk'), 'fake apk bytes');
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/download/patch-abc123.apk' });
       expect(res.statusCode).toBe(200);
@@ -378,7 +422,7 @@ describe('app.ts — /api/download/:name (APK download)', () => {
 
   it('404s (no APK published) for the sidecar when it is not present', async () => {
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/download/android-latest.json' });
       expect(res.statusCode).toBe(404);
@@ -397,7 +441,7 @@ describe('app.ts — /api/download/:name (APK download)', () => {
     };
     writeFileSync(join(downloadsDir, 'android-latest.json'), JSON.stringify(sidecar));
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/download/android-latest.json' });
       expect(res.statusCode).toBe(200);
@@ -421,7 +465,7 @@ describe('app.ts — /api/daemon/healthz auth edge cases', () => {
 
   it('401s when no account has been bootstrapped', async () => {
     const registry = Registry.load(dir); // no bootstrapAccount()
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -438,7 +482,7 @@ describe('app.ts — /api/daemon/healthz auth edge cases', () => {
     const registry = Registry.load(dir);
     const jwt = await authFor(registry);
     registry.revoke('srf-web-1');
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -454,7 +498,7 @@ describe('app.ts — /api/daemon/healthz auth edge cases', () => {
   it('401s for a garbage/invalid JWT (catch branch)', async () => {
     const registry = Registry.load(dir);
     await authFor(registry);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -486,7 +530,7 @@ describe('app.ts — jobsDataDir / jobsStore branches', () => {
     // which is captured separately at construction time).
     (registry as unknown as { dataDir: string }).dataDir = '';
     await expect(
-      buildAll({ logger: false, registry, daemonLink: new InProcessDaemonLink() }),
+      buildAll({ logger: false, registry, hostLink: new InProcessHostLink() }),
     ).rejects.toThrow(/dataDir required for jobs/);
   });
 
@@ -501,12 +545,12 @@ describe('app.ts — jobsDataDir / jobsStore branches', () => {
     injectedStore.create({
       name: 'preseeded',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsStore: injectedStore,
     });
     try {
@@ -549,7 +593,7 @@ describe('app.ts — PATCH_JOBS_DIAG gate + chatExists (ensure-action) coverage'
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       internalToken,
       jobsWatch: false,
     });
@@ -561,7 +605,7 @@ describe('app.ts — PATCH_JOBS_DIAG gate + chatExists (ensure-action) coverage'
         payload: {
           name: 'ensure-durable-chat',
           trigger: { type: 'cron', expression: '0 9 * * *' },
-          action: { type: 'continue', daemonId: 'd1', folder: '/persist', prompt: 'tick' },
+          action: { type: 'continue', hostId: 'd1', folder: '/persist', prompt: 'tick' },
         },
       });
       expect(create.statusCode).toBe(201);
@@ -589,7 +633,7 @@ describe('app.ts — PATCH_JOBS_DIAG gate + chatExists (ensure-action) coverage'
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       internalToken: 'diag-internal-token-0123456789ab',
       jobsWatch: false,
       pushBackend: { send: async () => ({ delivered: 0, failed: [], permanentlyRejected: [] }) },
@@ -630,7 +674,7 @@ describe('app.ts — Expo push real backend construction (no injected pushBacken
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
     });
     try {
@@ -654,14 +698,14 @@ describe('app.ts — patch.call host event whose startCall rejects', () => {
   it('logs a warning and does not crash the server when callOrchestrator.startCall rejects', async () => {
     const registry = Registry.load(dir);
     registry.bootstrapAccount();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink,
+      hostLink,
       jobsWatch: false,
       // A throwing idGenerator makes CallOrchestrator.startCall's synchronous
-      // id-allocation step throw, rejecting the promise app.ts's daemon-link
+      // id-allocation step throw, rejecting the promise app.ts's host-link
       // handler wraps in .catch(...) for the 'patch.call' branch.
       idGenerator: () => {
         throw new Error('id gen boom');
@@ -669,7 +713,7 @@ describe('app.ts — patch.call host event whose startCall rejects', () => {
     });
     try {
       expect(() => {
-        daemonLink.emit({ type: 'patch.call', chatId: 'thread_manager', message: 'ring ring' });
+        hostLink.emit({ type: 'patch.call', chatId: 'thread_manager', message: 'ring ring' });
       }).not.toThrow();
       await new Promise((r) => setTimeout(r, 30));
       // Server is still alive and responsive after the rejection.
@@ -699,7 +743,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {
@@ -718,7 +762,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {
@@ -738,7 +782,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {
@@ -759,7 +803,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
 
   it('GET / redirects (302) to /app/', async () => {
     const registry = Registry.load(dir);
-    const app = await build({ logger: false, registry, daemonLink: new InProcessDaemonLink() });
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
     try {
       const res = await app.inject({ method: 'GET', url: '/' });
       expect(res.statusCode).toBe(302);
@@ -794,7 +838,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
         build({
           logger: false,
           registry: Registry.load(dir),
-          daemonLink: new InProcessDaemonLink(),
+          hostLink: new InProcessHostLink(),
         }),
       ).rejects.toThrow(/refusing to start without the SPA/);
     } finally {
@@ -808,7 +852,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {
@@ -831,7 +875,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {
@@ -852,7 +896,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {
@@ -880,7 +924,7 @@ describe('app.ts — /app SPA mount: wildcard route + root redirect', () => {
     const app = await build({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       webDistDir: webDir,
     });
     try {
@@ -900,7 +944,7 @@ describe('app.ts — opts.dataDir path (Registry.load internally, no injected re
       const app = await build({
         logger: false,
         dataDir: dir,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
         internalToken: 'a'.repeat(20),
       });
       try {
@@ -930,7 +974,7 @@ describe('app.ts — opts.nowMs threaded through notification/call/voice-token/a
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
       internalToken: 'a'.repeat(20),
       nowMs: () => clock,
@@ -958,7 +1002,7 @@ describe('app.ts — presence sweep uses opts.nowMs when provided', () => {
       const built = await buildAll({
         logger: false,
         registry,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
         jobsWatch: false,
         nowMs: () => {
           calls += 1;
@@ -1003,7 +1047,7 @@ describe('app.ts — dev-diag mounted when speakersRecorder is enabled', () => {
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
       jobsWatch: false,
       internalToken: 'a'.repeat(20),
     });
@@ -1037,7 +1081,7 @@ describe('app.ts — attachmentsDir falls back to /tmp when registry.dataDir is 
         logger: false,
         registry,
         dataDir: dir,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
         jobsWatch: false,
       });
       try {
@@ -1061,7 +1105,7 @@ describe('app.ts — Telegram, Google OAuth and Calendar routes are gone', () =>
       const built = await buildAll({
         logger: false,
         registry,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
         jobsWatch: false,
       });
       try {

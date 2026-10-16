@@ -23,6 +23,7 @@ import {
   BOX_CAPS,
   boxBuildCommand,
   gradleArgs,
+  smokeBuildArgs,
   gradleEnv,
   parseArgs,
   signingFromCredentials,
@@ -273,4 +274,11 @@ test('the box build runs the same stamping as the Mac build', () => {
   assert.equal(env.JAVA_HOME, '/usr/lib/jvm/java-17-openjdk-amd64');
   assert.equal(env.EXPO_PUBLIC_PATCH_GIT_SHA, 'e6e6d0f2');
   assert.equal(env.GRADLE_OPTS, BOX_CAPS.gradleOpts);
+});
+
+test('the smoke builds its own APK with the stamps of the commit under test', () => {
+  const info = { version: '0.1.9', gitSha: '4753bb5c', builtAt: '2026-10-14T01:00:00Z' };
+  assert.deepEqual(smokeBuildArgs(info), [
+    '--version', '0.1.9', '--sha', '4753bb5c', '--built-at', '2026-10-14T01:00:00Z',
+  ]);
 });

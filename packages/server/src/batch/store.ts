@@ -11,7 +11,7 @@
 // NO FALLBACK: a corrupt file resets to "no batch running", a legitimate
 // first-run state, rather than a half-parsed record silently misbehaving.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { Logger } from 'pino';
@@ -106,7 +106,9 @@ export class BatchStore {
     if (!this.path) return;
     mkdirSync(dirname(this.path), { recursive: true });
     const snapshot: BatchSnapshot = { batch: this.batch, carryover: this.carryover };
-    writeFileSync(this.path, JSON.stringify(snapshot, null, 2), 'utf8');
+    const tmp = `${this.path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
+    renameSync(tmp, this.path);
   }
 
   current(): BatchRecord | null {

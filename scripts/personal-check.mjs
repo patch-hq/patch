@@ -24,6 +24,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './lib/is-main.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const BASELINE = join(ROOT, 'scripts', 'personal-check.baseline.json');
@@ -140,4 +141,4 @@ function main() {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) main();
+if (isMain(import.meta.url)) main();

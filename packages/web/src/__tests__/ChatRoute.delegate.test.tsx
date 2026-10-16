@@ -38,7 +38,7 @@ function seed(): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'parent chat',
       folder: 'foo',
@@ -86,6 +86,52 @@ function emitDelegateCall(tool: string, result: unknown): void {
     result,
   } as never);
 }
+
+describe('ChatRoute — agent return row', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+    usePresenceStore.getState().setConnection('connected');
+    usePresenceStore.getState().setHostOnline('d1', true);
+    setActiveWs(null);
+  });
+  afterEach(() => {
+    cleanup();
+    deliveryTracker.reset();
+  });
+
+  it('renders a delivered agent result as a muted system row, expandable, not a user bubble', () => {
+    seed();
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 5,
+      role: 'user',
+      content: '[from Folk history; agent sub-1] The full result',
+      origin: 'machine',
+    } as never);
+    renderChat();
+    const row = screen.getByTestId('agent-return');
+    expect(row.textContent).toContain('Agent returned: Folk history');
+    expect(screen.queryByText(/\[from /)).toBeNull();
+    fireEvent.click(row.querySelector('button')!);
+    expect(screen.getByText('The full result')).toBeDefined();
+  });
+
+  it('renders a QUEUED agent result the same way', () => {
+    seed();
+    useChatStore.getState().applyEvent({
+      type: 'chat.queued',
+      chatId: 'c1',
+      localId: 'q1',
+      message: '[from Folk history; agent sub-1] queued result',
+      queueSeq: 1,
+    } as never);
+    renderChat();
+    expect(screen.getByTestId('agent-return').textContent).toContain(
+      'Agent returned: Folk history',
+    );
+  });
+});
 
 describe('ChatRoute — patch_delegate tool row', () => {
   beforeEach(() => {

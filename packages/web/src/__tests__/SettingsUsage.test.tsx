@@ -253,7 +253,7 @@ describe('Settings → Usage → changing accounts', () => {
     );
     expect(sent).toContainEqual({
       type: 'host.backend_usage_refresh',
-      daemonId: 'd1',
+      hostId: 'd1',
       backendId: 'claude-code',
     });
   });
@@ -270,7 +270,7 @@ describe('Settings → Usage → ChatGPT sign-in', () => {
     expect(sent).toContainEqual(
       expect.objectContaining({
         type: 'host.backend_add_account',
-        daemonId: 'd1',
+        hostId: 'd1',
         backendId: 'codex',
         authMethod: 'device',
       }),
@@ -282,8 +282,8 @@ describe('Settings → Usage → ChatGPT sign-in', () => {
     reportHost('d1', { hostName: 'hetzner' });
     usePresenceStore.getState().setHostOnline('d1', true);
     usePresenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'd1',
+      type: 'host.account',
+      hostId: 'd1',
       backendId: 'codex',
       connected: false,
       accountEmail: null,
@@ -306,6 +306,21 @@ describe('Settings → Usage → ChatGPT sign-in', () => {
   });
 });
 
+describe('Settings → Usage → token-spending generation', () => {
+  it('title and status toggles read and write the shared settings', async () => {
+    const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    loadShared({ settings: { titleGenerationEnabled: true, statusGenerationEnabled: true } });
+    renderSettings('/settings/usage');
+    const title = screen.getByTestId('title-generation-toggle');
+    expect(title).toBeChecked();
+    fireEvent.click(title);
+    await waitFor(() => expect(server.writes).toContainEqual({ titleGenerationEnabled: false }));
+    fireEvent.click(screen.getByTestId('status-generation-toggle'));
+    await waitFor(() => expect(server.writes).toContainEqual({ statusGenerationEnabled: false }));
+  });
+});
+
 describe('Settings → Usage → auto-resume', () => {
   it('reads and writes the shared setting', async () => {
     const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
@@ -316,5 +331,18 @@ describe('Settings → Usage → auto-resume', () => {
     expect(toggle).toBeChecked();
     fireEvent.click(toggle);
     await waitFor(() => expect(server.writes).toContainEqual({ autoResumeRateLimit: false }));
+  });
+});
+
+describe('Settings → Account → sync position', () => {
+  it('reads and writes the shared setting', async () => {
+    const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    loadShared({ settings: { syncPosition: true } });
+    renderSettings('/settings/account');
+    const toggle = screen.getByTestId('sync-position-toggle');
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(server.writes).toContainEqual({ syncPosition: false }));
   });
 });

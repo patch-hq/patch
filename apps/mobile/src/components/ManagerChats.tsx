@@ -23,6 +23,7 @@ import { fonts, radii, space, textMin, typography, useTheme } from '../lib/theme
 import { EMPTY_STATES } from '../lib/emptyStates';
 import { StatusBadge } from './StatusBadge';
 import { EmptyState } from './EmptyState';
+import { SweepStatusLine } from './SweepStatusLine';
 
 export type ManagerTab = 'conversation' | 'chats';
 
@@ -163,6 +164,7 @@ export function ManagerChatsList(): React.ReactElement {
       data={rows}
       keyExtractor={(r) => r.chatId}
       renderItem={({ item }) => <ThreadRow row={item} />}
+      ListHeaderComponent={<SweepStatusLine />}
       ListEmptyComponent={
         <EmptyState
           icon={ListChecks}
@@ -177,7 +179,7 @@ export function ManagerChatsList(): React.ReactElement {
 function ThreadRow({ row }: { row: ChatRow }): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
-  const hostName = usePresenceStore((s) => s.hosts[row.daemonId]?.host?.hostName ?? row.daemonId);
+  const hostName = usePresenceStore((s) => s.hosts[row.hostId]?.host?.hostName ?? row.hostId);
   const state = threadRowState(row);
   const title = deriveChatTitle(row);
   const permission =

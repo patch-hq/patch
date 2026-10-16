@@ -67,10 +67,8 @@ describe('registerNotificationResponseListener', () => {
     };
   }): Promise<void> {
     Notifications.__emitNotificationResponse(response);
-    // handleResponse is async (fire-and-forget from the listener) — flush microtasks.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // handleResponse is async (fire-and-forget from the listener) — let it settle.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   it('Reply on a plain message sends a chat reply and marks the notification Sent', async () => {
@@ -112,6 +110,41 @@ describe('registerNotificationResponseListener', () => {
       chatId: 'c1',
       text: 'on my way',
     });
+  });
+
+  it('a send that throws (device not linked, socket refused) is a failed send with a retry, not a lost tap', async () => {
+    vi.mocked(delivery.sendBackgroundChatInput).mockRejectedValue(new Error('not linked'));
+    vi.mocked(delivery.sendBackgroundPermissionDecision).mockRejectedValue(new Error('refused'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    registerNotificationResponseListener();
+
+    await fireResponse({
+      actionIdentifier: 'reply',
+      userText: 'on my way',
+      notification: { request: { identifier: 'notif-t1', content: { data: { chatId: 'c1' } } } },
+    });
+    await fireResponse({
+      actionIdentifier: 'deny',
+      notification: {
+        request: {
+          identifier: 'notif-t2',
+          content: {
+            data: {
+              chatId: 'c1',
+              actions: JSON.stringify({ kind: 'permission', requestId: 'r1' }),
+            },
+          },
+        },
+      },
+    });
+
+    expect(Notifications.__getScheduledNotification('notif-t1')).toMatchObject({
+      content: { body: 'Not sent — tap to retry' },
+    });
+    expect(getPendingRetry('notif-t1')).toMatchObject({ retryAs: 'reply', text: 'on my way' });
+    expect(getPendingRetry('notif-t2')).toMatchObject({ retryAs: 'permission' });
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   it('tapping the body of a failed notification retries with the same text', async () => {

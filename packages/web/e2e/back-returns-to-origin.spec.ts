@@ -23,15 +23,15 @@ async function spendEveryAccount(page: Page): Promise<void> {
       };
     };
     w.__presenceStore.getState().setHostReport({
-      type: 'daemon.host',
-      daemonId: 'd1',
+      type: 'host.host',
+      hostId: 'd1',
       hostName: 'ubuntu-4gb-hel1-1',
       backends: [],
       components: [],
     });
     w.__presenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'd1',
+      type: 'host.account',
+      hostId: 'd1',
       backendId: 'claude-code',
       connected: true,
       accountEmail: null,

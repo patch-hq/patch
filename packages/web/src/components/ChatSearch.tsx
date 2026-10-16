@@ -106,9 +106,12 @@ function appendHits(prev: ChatSearchHit[], next: ChatSearchHit[]): ChatSearchHit
 export function ChatSearchResults({
   query,
   activeChatId,
+  section,
 }: {
   query: string;
   activeChatId: string | null;
+  /** Keep only hits living in this chat-list section (the Lifecycle pages). */
+  section?: ChatSearchHit['section'];
 }): JSX.Element {
   const fullText = useUiStore((s) => s.searchFullText);
   const setFullText = useUiStore((s) => s.setSearchFullText);
@@ -122,6 +125,9 @@ export function ChatSearchResults({
 
   useEffect(() => {
     const gen = ++genRef.current;
+    // A "More results" page still in flight belongs to the search this replaces;
+    // its answer will be discarded, so its busy state must not outlive it.
+    setMoreFor(null);
     const ctrl = new AbortController();
     const timer = setTimeout(() => {
       setFailure(null);
@@ -178,9 +184,18 @@ export function ChatSearchResults({
 
   const chats = useChatStore((s) => s.chats);
   const waiting = settled === null && failed === null;
+  const settledHits = useMemo(
+    () => (settled?.hits ?? []).filter((h) => section === undefined || h.section === section),
+    [settled, section],
+  );
   const local = useMemo(
-    () => (waiting ? localSearchHits(Object.values(chats), query, fullText) : []),
-    [waiting, chats, query, fullText],
+    () =>
+      waiting
+        ? localSearchHits(Object.values(chats), query, fullText).filter(
+            (h) => section === undefined || h.section === section,
+          )
+        : [],
+    [waiting, chats, query, fullText, section],
   );
 
   // A host is named by what the surface already calls it (its self-reported
@@ -189,11 +204,11 @@ export function ChatSearchResults({
   const presence = usePresenceStore((s) => s.hosts);
   const serverNames = useMemo(() => {
     const m = new Map<string, string | null>();
-    for (const h of settled?.hosts ?? []) m.set(h.daemonId, h.hostName);
+    for (const h of settled?.hosts ?? []) m.set(h.hostId, h.hostName);
     return m;
   }, [settled]);
-  const hostName = (daemonId: string): string =>
-    presence[daemonId]?.host?.hostName ?? serverNames.get(daemonId) ?? daemonId;
+  const hostName = (hostId: string): string =>
+    presence[hostId]?.host?.hostName ?? serverNames.get(hostId) ?? hostId;
 
   const errorRow =
     failed === null ? null : (
@@ -222,7 +237,7 @@ export function ChatSearchResults({
             <SearchHitRow
               key={hit.chatId}
               hit={hit}
-              hostName={hostName(hit.daemonId)}
+              hostName={hostName(hit.hostId)}
               active={activeChatId}
               testId="chat-search-local-hit"
             />
@@ -232,16 +247,16 @@ export function ChatSearchResults({
       {settled === null ? errorRow : null}
       {settled !== null ? (
         <>
-          {settled.hits.length === 0 ? (
+          {settledHits.length === 0 ? (
             <div className="empty-hint" data-testid="chat-search-empty">
               No chats match “{query}”.
             </div>
           ) : (
-            settled.hits.map((hit) => (
+            settledHits.map((hit) => (
               <SearchHitRow
                 key={hit.chatId}
                 hit={hit}
-                hostName={hostName(hit.daemonId)}
+                hostName={hostName(hit.hostId)}
                 active={activeChatId}
                 testId="chat-search-hit"
               />
@@ -260,12 +275,12 @@ export function ChatSearchResults({
           ) : null}
           {errorRow}
           {settled.hosts.map((h) => {
-            const text = hostMarkerText(h, hostName(h.daemonId));
+            const text = hostMarkerText(h, hostName(h.hostId));
             return text === null ? null : (
               <div
-                key={h.daemonId}
+                key={h.hostId}
                 className="empty-hint sb-search-host"
-                data-testid={`chat-search-host-${h.daemonId}`}
+                data-testid={`chat-search-host-${h.hostId}`}
                 data-state={h.state}
               >
                 {text}

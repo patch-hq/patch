@@ -3,7 +3,7 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderRN, findHost, byTestId, hasText, flush, actSync } from './testUtils/render';
-import HostFiles from '../app/hosts/[daemonId]/files';
+import HostFiles from '../app/hosts/[hostId]/files';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { useFolderStore } from '../src/stores/folderStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
@@ -16,12 +16,12 @@ vi.mock('../src/api/rest', async (orig) => ({
 
 function reportHost(): void {
   usePresenceStore.getState().setHostReport({
-    type: 'daemon.host',
-    daemonId: 'd1',
+    type: 'host.host',
+    hostId: 'd1',
     hostName: 'hetzner',
     platform: 'linux',
     arch: 'x64',
-    daemonVersion: '0.1.400',
+    hostVersion: '0.1.400',
     updateAvailable: false,
     permissionModeDefault: 'default',
     permissionOverrides: 0,
@@ -49,7 +49,7 @@ describe('Host Files screen', () => {
   });
 
   it('with no path lists the host`s home, names the host, and draws dirs before files', async () => {
-    __setLocalSearchParams({ daemonId: 'd1' });
+    __setLocalSearchParams({ hostId: 'd1' });
     listSpy.mockResolvedValue({
       path: '/home/tom',
       parent: '/home',
@@ -71,7 +71,7 @@ describe('Host Files screen', () => {
   });
 
   it('a folder pushes the next directory; a file opens the editor', async () => {
-    __setLocalSearchParams({ daemonId: 'd1', path: '/home/tom' });
+    __setLocalSearchParams({ hostId: 'd1', path: '/home/tom' });
     listSpy.mockResolvedValue({
       path: '/home/tom',
       parent: '/home',
@@ -85,28 +85,28 @@ describe('Host Files screen', () => {
     expect(listSpy).toHaveBeenCalledWith('d1', '/home/tom');
     press(r.root, 'files-entry-.claude');
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]/files',
-      params: { daemonId: 'd1', path: '/home/tom/.claude' },
+      pathname: '/hosts/[hostId]/files',
+      params: { hostId: 'd1', path: '/home/tom/.claude' },
     });
     press(r.root, 'files-entry-notes.md');
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]/edit',
-      params: { daemonId: 'd1', path: '/home/tom/notes.md' },
+      pathname: '/hosts/[hostId]/edit',
+      params: { hostId: 'd1', path: '/home/tom/notes.md' },
     });
     press(r.root, 'files-up');
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]/files',
-      params: { daemonId: 'd1', path: '/home' },
+      pathname: '/hosts/[hostId]/files',
+      params: { hostId: 'd1', path: '/home' },
     });
   });
 
   it('offers Home and the host`s project folders as places, marking the one on screen', async () => {
     useFolderStore.getState().setHostFolders({
-      daemonId: 'd1',
+      hostId: 'd1',
       roots: ['/home/tom/projects/patch'],
       recent: ['/home/tom/projects/garden'],
     });
-    __setLocalSearchParams({ daemonId: 'd1', path: '/home/tom/projects/patch' });
+    __setLocalSearchParams({ hostId: 'd1', path: '/home/tom/projects/patch' });
     listSpy.mockResolvedValue({
       path: '/home/tom/projects/patch',
       parent: '/home/tom/projects',
@@ -118,20 +118,20 @@ describe('Host Files screen', () => {
     expect(here.props.accessibilityState).toEqual({ selected: true });
     press(r.root, 'place-chip-/home/tom/projects/garden');
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]/files',
-      params: { daemonId: 'd1', path: '/home/tom/projects/garden' },
+      pathname: '/hosts/[hostId]/files',
+      params: { hostId: 'd1', path: '/home/tom/projects/garden' },
     });
     press(r.root, 'place-chip-home');
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]/files',
-      params: { daemonId: 'd1' },
+      pathname: '/hosts/[hostId]/files',
+      params: { hostId: 'd1' },
     });
     // An empty directory says so rather than drawing nothing.
     expect(hasText(r.root, 'Empty folder')).toBe(true);
   });
 
   it('marks Home once the host has said where it is', async () => {
-    __setLocalSearchParams({ daemonId: 'd1' });
+    __setLocalSearchParams({ hostId: 'd1' });
     listSpy.mockResolvedValue({ path: '/home/tom', parent: '/home', entries: [] });
     const r = renderRN(<HostFiles />);
     await flush();
@@ -141,19 +141,19 @@ describe('Host Files screen', () => {
   });
 
   it('opens a terminal in the directory on screen', async () => {
-    __setLocalSearchParams({ daemonId: 'd1', path: '/srv' });
+    __setLocalSearchParams({ hostId: 'd1', path: '/srv' });
     listSpy.mockResolvedValue({ path: '/srv', parent: '/', entries: [] });
     const r = renderRN(<HostFiles />);
     await flush();
     press(r.root, 'files-terminal-here');
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]/terminal',
-      params: { daemonId: 'd1', folder: '/srv' },
+      pathname: '/hosts/[hostId]/terminal',
+      params: { hostId: 'd1', folder: '/srv' },
     });
   });
 
   it('shows the root as `/` with no way further up', async () => {
-    __setLocalSearchParams({ daemonId: 'd1', path: '/' });
+    __setLocalSearchParams({ hostId: 'd1', path: '/' });
     listSpy.mockResolvedValue({ path: '/', parent: null, entries: [{ name: 'etc', type: 'dir' }] });
     const r = renderRN(<HostFiles />);
     await flush();
@@ -161,13 +161,13 @@ describe('Host Files screen', () => {
     expect(hasText(findHost(r.root, byTestId('files-dir-name')), '/')).toBe(true);
     press(r.root, 'files-entry-etc');
     expect(routerMock.push).toHaveBeenLastCalledWith({
-      pathname: '/hosts/[daemonId]/files',
-      params: { daemonId: 'd1', path: '/etc' },
+      pathname: '/hosts/[hostId]/files',
+      params: { hostId: 'd1', path: '/etc' },
     });
   });
 
   it('a failed listing says why in place of the list (NO FALLBACK)', async () => {
-    __setLocalSearchParams({ daemonId: 'd1', path: '/root' });
+    __setLocalSearchParams({ hostId: 'd1', path: '/root' });
     listSpy.mockRejectedValue(new Error('permission_denied: permission denied: /root'));
     const r = renderRN(<HostFiles />);
     await flush();
@@ -176,7 +176,7 @@ describe('Host Files screen', () => {
   });
 
   it('back leaves the screen', async () => {
-    __setLocalSearchParams({ daemonId: 'd1' });
+    __setLocalSearchParams({ hostId: 'd1' });
     listSpy.mockResolvedValue({ path: '/home/tom', parent: '/home', entries: [] });
     const r = renderRN(<HostFiles />);
     await flush();
@@ -186,7 +186,7 @@ describe('Host Files screen', () => {
 
   it('names a host that has never reported by its id rather than inventing a name', async () => {
     usePresenceStore.setState({ hosts: {} });
-    __setLocalSearchParams({ daemonId: 'd9' });
+    __setLocalSearchParams({ hostId: 'd9' });
     listSpy.mockResolvedValue({ path: '/home/x', parent: '/home', entries: [] });
     const r = renderRN(<HostFiles />);
     await flush();
@@ -194,7 +194,7 @@ describe('Host Files screen', () => {
   });
 
   it('drops the answer of a listing the user has already navigated away from', async () => {
-    __setLocalSearchParams({ daemonId: 'd1' });
+    __setLocalSearchParams({ hostId: 'd1' });
     let resolve!: (v: unknown) => void;
     listSpy.mockReturnValue(new Promise((r) => (resolve = r)));
     const r = renderRN(<HostFiles />);

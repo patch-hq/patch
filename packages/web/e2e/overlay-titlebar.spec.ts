@@ -262,6 +262,7 @@ test('a staged update banner clears the lights too, and its button still clicks'
           lastCheckedAt: '2026-09-07T11:55:00.000Z',
           lastResult: 'downloaded',
           lastError: null,
+          lastErrorKind: null,
           availableVersion: '0.1.900',
           downloaded: true,
           checking: false,
@@ -296,6 +297,44 @@ test('a staged update banner clears the lights too, and its button still clicks'
   expect(await region(banner)).toBe('drag');
   expect(await region(page.getByTestId('desktop-update-restart'))).toBe('no-drag');
   await page.getByTestId('desktop-update-restart').click();
+});
+
+test('with a banner above it the sidebar brand row drops the lights inset', async ({ page }) => {
+  // The banner already clears the lights, so the row below it sits clear of
+  // them by position. Keeping the 84px inset there too pushed the wordmark
+  // off to the right under an empty strip (Tom, App Updates: "when update
+  // banner, looks messy").
+  await page.addInitScript(() => {
+    (window as unknown as { patch: unknown }).patch = {
+      overlayTitleBar: true,
+      getUpdaterState: () =>
+        Promise.resolve({
+          currentVersion: '0.1.899',
+          gitSha: '9b8635f',
+          builtAt: '2026-09-07T09:00:00.000Z',
+          feedUrl: 'https://patch.tomchambers.me/api/desktop/',
+          disabledReason: null,
+          lastCheckedAt: '2026-09-07T11:55:00.000Z',
+          lastResult: 'downloaded',
+          lastError: null,
+          lastErrorKind: null,
+          availableVersion: '0.1.900',
+          downloaded: true,
+          checking: false,
+          staleSince: new Date().toISOString(),
+        }),
+      checkForUpdates: () => Promise.resolve(undefined),
+      onUpdaterState: () => () => {},
+      installUpdate: () => {},
+    };
+  });
+  await page.goto(HARNESS);
+  const banner = page.getByTestId('desktop-update-banner');
+  await expect(banner).toBeVisible();
+  await expect(page.locator('.sb-brand')).toHaveCSS('padding-left', '20px');
+  const bannerBox = (await banner.boundingBox())!;
+  const brand = (await page.locator('.sb-brand').boundingBox())!;
+  expect(brand.y).toBeGreaterThanOrEqual(bannerBox.y + bannerBox.height);
 });
 
 test('the signed-out desktop keeps a full-width drag strip and usable sign-in controls', async ({

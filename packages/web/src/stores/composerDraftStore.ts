@@ -312,22 +312,28 @@ export const useComposerDraftStore = create<ComposerDraftStore>((set, get) => ({
     // The server has since told us the authoritative state for this chat —
     // whether this is our own echo or someone else's newer write, we no
     // longer owe it our (possibly stale) local copy.
-    pendingOp.delete(chatId);
     if (get().focused[chatId]) {
+      // A keystroke made after this update was captured is still owed to the
+      // server: the update may be the echo of our own earlier send.
+      if (updatedAt >= (localEditAt.get(chatId) ?? 0)) pendingOp.delete(chatId);
       set({ pendingRemote: { ...get().pendingRemote, [chatId]: { text, updatedAt } } });
       return;
     }
+    pendingOp.delete(chatId);
     const drafts = { ...get().drafts, [chatId]: text };
     persistCache(drafts);
     set({ drafts });
   },
 
   applyDraftCleared(chatId, updatedAt) {
-    pendingOp.delete(chatId);
     if (get().focused[chatId]) {
+      // A keystroke made after this update was captured is still owed to the
+      // server: the update may be the echo of our own earlier send.
+      if (updatedAt >= (localEditAt.get(chatId) ?? 0)) pendingOp.delete(chatId);
       set({ pendingRemote: { ...get().pendingRemote, [chatId]: { text: null, updatedAt } } });
       return;
     }
+    pendingOp.delete(chatId);
     if (!(chatId in get().drafts)) return;
     const drafts = { ...get().drafts };
     delete drafts[chatId];

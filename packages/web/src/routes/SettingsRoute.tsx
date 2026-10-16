@@ -37,8 +37,10 @@ import { ManagerPage } from './settings/ManagerPage.js';
 import { GoalsPage } from './settings/GoalsPage.js';
 import { VoicePage } from './settings/VoicePage.js';
 import { HooksPage } from './settings/HooksPage.js';
+import { ComputerUsePage } from './settings/ComputerUsePage.js';
 import { HostsPage } from './settings/HostsPage.js';
-import { JobsPage } from './settings/JobsPage.js';
+import { AgentIdentityPage } from './settings/AgentIdentityPage.js';
+import { ActivityPage } from './settings/ActivityPage.js';
 import { KeysPage } from './settings/KeysPage.js';
 import { DevicesPage } from './settings/DevicesPage.js';
 import { UpdatesPage } from './settings/UpdatesPage.js';
@@ -53,8 +55,10 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   goals: GoalsPage,
   voice: VoicePage,
   hooks: HooksPage,
-  jobs: JobsPage,
+  computer: ComputerUsePage,
+  activity: ActivityPage,
   hosts: HostsPage,
+  identity: AgentIdentityPage,
   keys: KeysPage,
   devices: DevicesPage,
   updates: UpdatesPage,

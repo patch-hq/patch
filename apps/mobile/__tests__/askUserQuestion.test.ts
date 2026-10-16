@@ -120,6 +120,13 @@ describe('parseStoredAnswer', () => {
     });
   });
 
+  it('reads a single-select "Label, extra text" answer as the option plus its comment (as web)', () => {
+    expect(parseStoredAnswer('Luxon, but later', dateFnsOrLuxon, false)).toEqual({
+      picked: ['Luxon'],
+      other: 'but later',
+    });
+  });
+
   it('reads a bare single-select Other answer as Other with no comment', () => {
     expect(parseStoredAnswer('Other', dateFnsOrLuxon, false)).toEqual({ picked: [], other: '' });
   });
@@ -187,5 +194,46 @@ describe('isQuestionRowCoveredByCard', () => {
     };
     expect(isQuestionRowCoveredByCard(call, [denied, call, result])).toBe(true);
     expect(isQuestionRowCoveredByCard(result, [denied, call, result])).toBe(false);
+  });
+});
+
+describe('isQuestionRowCoveredByCard with several questions in one chat', () => {
+  it('judges a result by the card just before it, not the first card ever', () => {
+    const approved = {
+      kind: 'permission',
+      tool: 'AskUserQuestion',
+      seq: 5,
+      permissionResolved: 'approve',
+    };
+    const denied = {
+      kind: 'permission',
+      tool: 'AskUserQuestion',
+      seq: 10,
+      permissionResolved: 'deny',
+    };
+    const result = { kind: 'tool_result', tool: 'AskUserQuestion', seq: 12 };
+    // The second question was denied: its result row carries the reason and stays.
+    expect(isQuestionRowCoveredByCard(result, [approved, denied, result])).toBe(false);
+  });
+
+  it('one card covers one call and one result — a second run with no card of its own stays visible', () => {
+    // The second question never produced a permission request (an old host, a
+    // replay that lost it). The first card is the nearest one before it, but it
+    // has already accounted for its own call and result.
+    const card = {
+      kind: 'permission',
+      tool: 'AskUserQuestion',
+      seq: 5,
+      permissionResolved: 'approve',
+    };
+    const call1 = { kind: 'tool_call', tool: 'AskUserQuestion', seq: 6 };
+    const result1 = { kind: 'tool_result', tool: 'AskUserQuestion', seq: 7 };
+    const call2 = { kind: 'tool_call', tool: 'AskUserQuestion', seq: 20 };
+    const result2 = { kind: 'tool_result', tool: 'AskUserQuestion', seq: 21 };
+    const timeline = [card, call1, result1, call2, result2];
+    expect(isQuestionRowCoveredByCard(call1, timeline)).toBe(true);
+    expect(isQuestionRowCoveredByCard(result1, timeline)).toBe(true);
+    expect(isQuestionRowCoveredByCard(call2, timeline)).toBe(false);
+    expect(isQuestionRowCoveredByCard(result2, timeline)).toBe(false);
   });
 });

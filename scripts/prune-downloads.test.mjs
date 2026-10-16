@@ -26,7 +26,7 @@ function downloads(files) {
 }
 
 const apkManifest = (file) => JSON.stringify({ version: '0.1.3', gitSha: 'abc1234', file });
-const daemonManifest = (...files) =>
+const hostManifest = (...files) =>
   JSON.stringify({ version: '0.1.9', artifacts: files.map((file) => ({ file })) });
 
 test('keeps what android-latest.json names, and the APK published before it', () => {
@@ -55,22 +55,22 @@ test('the rollback is the newest superseded build, not the highest-sorting name'
 
 test('the host keeps a previous build per target, with its signature', () => {
   const dir = downloads({
-    'daemon-latest.json': daemonManifest(
-      'patch-daemon-0.1.9-linux-x64.tar.gz',
-      'patch-daemon-0.1.9-darwin-arm64.tar.gz',
+    'host-latest.json': hostManifest(
+      'patch-host-0.1.9-linux-x64.tar.gz',
+      'patch-host-0.1.9-darwin-arm64.tar.gz',
     ),
-    'patch-daemon-0.1.9-linux-x64.tar.gz': ['x', 1],
-    'patch-daemon-0.1.9-linux-x64.tar.gz.sig': ['x', 1],
-    'patch-daemon-0.1.9-darwin-arm64.tar.gz': ['x', 1],
-    'patch-daemon-0.1.8-linux-x64.tar.gz': ['x', 5],
-    'patch-daemon-0.1.8-linux-x64.tar.gz.sig': ['x', 5],
-    'patch-daemon-0.1.7-linux-x64.tar.gz': ['x', 9],
-    'patch-daemon-0.1.7-linux-x64.tar.gz.sig': ['x', 9],
-    'patch-daemon-0.1.7-darwin-arm64.tar.gz': ['x', 9],
+    'patch-host-0.1.9-linux-x64.tar.gz': ['x', 1],
+    'patch-host-0.1.9-linux-x64.tar.gz.sig': ['x', 1],
+    'patch-host-0.1.9-darwin-arm64.tar.gz': ['x', 1],
+    'patch-host-0.1.8-linux-x64.tar.gz': ['x', 5],
+    'patch-host-0.1.8-linux-x64.tar.gz.sig': ['x', 5],
+    'patch-host-0.1.7-linux-x64.tar.gz': ['x', 9],
+    'patch-host-0.1.7-linux-x64.tar.gz.sig': ['x', 9],
+    'patch-host-0.1.7-darwin-arm64.tar.gz': ['x', 9],
   });
   assert.deepEqual(planPrune(dir).remove.sort(), [
-    'patch-daemon-0.1.7-linux-x64.tar.gz',
-    'patch-daemon-0.1.7-linux-x64.tar.gz.sig',
+    'patch-host-0.1.7-linux-x64.tar.gz',
+    'patch-host-0.1.7-linux-x64.tar.gz.sig',
   ]);
 });
 
@@ -109,4 +109,28 @@ test('files it does not recognise are never touched', () => {
     'notes.txt': ['x', 900],
   });
   assert.deepEqual(planPrune(dir).remove, []);
+});
+
+test('prereleases share their arch’s rollback line instead of each keeping one', () => {
+  const dir = downloads({
+    'desktop-latest.json': JSON.stringify({ file: 'Patch-1.0.0-arm64-mac.zip' }),
+    'Patch-1.0.0-arm64-mac.zip': ['x', 1],
+    'Patch-1.0.0-rc.2-arm64-mac.zip': ['x', 5],
+    'Patch-1.0.0-rc.1-arm64-mac.zip': ['x', 9],
+    'Patch-0.9.0-arm64-mac.zip': ['x', 20],
+  });
+  assert.deepEqual(planPrune(dir).remove.sort(), [
+    'Patch-0.9.0-arm64-mac.zip',
+    'Patch-1.0.0-rc.1-arm64-mac.zip',
+  ]);
+});
+
+test('prerelease host builds share their target’s rollback line', () => {
+  const dir = downloads({
+    'host-latest.json': hostManifest('patch-host-1.0.0-linux-x64.tar.gz'),
+    'patch-host-1.0.0-linux-x64.tar.gz': ['x', 1],
+    'patch-host-1.0.0-rc.2-linux-x64.tar.gz': ['x', 5],
+    'patch-host-1.0.0-rc.1-linux-x64.tar.gz': ['x', 9],
+  });
+  assert.deepEqual(planPrune(dir).remove, ['patch-host-1.0.0-rc.1-linux-x64.tar.gz']);
 });

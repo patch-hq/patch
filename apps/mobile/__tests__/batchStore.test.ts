@@ -101,4 +101,29 @@ describe('batchStore', () => {
     useBatchStore.getState().setMode('batch');
     expect(useBatchStore.getState().mode).toBe('batch');
   });
+
+  it('a slow poll that started before a change does not overwrite the change when it lands', async () => {
+    const { useBatchStore } = await import('../src/stores/batchStore');
+    useBatchStore.getState()._reset();
+    let resolvePoll!: (r: BatchResponse) => void;
+    getBatch.mockReturnValueOnce(new Promise((res) => (resolvePoll = res)));
+    removeBatchMember.mockResolvedValueOnce(running({ members: [] }));
+
+    const poll = useBatchStore.getState().refresh();
+    await useBatchStore.getState().removeMember('c1');
+    expect(useBatchStore.getState().batch?.members).toEqual([]);
+
+    // The poll was answered from before the removal: it still lists c1.
+    resolvePoll(running({ members: [{ chatId: 'c1' } as never] }));
+    await poll;
+    expect(useBatchStore.getState().batch?.members).toEqual([]);
+  });
+
+  it('a poll that nothing overtook still lands', async () => {
+    const { useBatchStore } = await import('../src/stores/batchStore');
+    useBatchStore.getState()._reset();
+    getBatch.mockResolvedValueOnce(running({ checkedIn: true }));
+    await useBatchStore.getState().refresh();
+    expect(useBatchStore.getState().batch?.checkedIn).toBe(true);
+  });
 });

@@ -6,7 +6,7 @@ hub. Runs once on Hetzner; the only component that's internet-reachable.
 The server is a **dumb pipe + auth gate**: it authenticates surfaces, fans
 events between them and the host, and persists the singleton account +
 surface registry. SDK lifecycle, chat history, and chat_state live in
-`@patch/daemon`.
+`@patch/host`.
 
 ## Routes
 
@@ -29,7 +29,7 @@ surface registry. SDK lifecycle, chat history, and chat_state live in
 
 - `POST /api/chats` `{ folder, prompt?, name?, parentChatId?, localId? }`
   (authed) — server allocates a ULID `chatId`, forwards a synthetic
-  `chat.spawn_request` to the host over the daemon-link. The handler
+  `chat.spawn_request` to the host over the host-link. The handler
   then waits up to 5s for either:
   - a host `chat.error { chatId }` (returns
     `400 { error: <code>, message, chatId }` synchronously — common
@@ -107,10 +107,10 @@ NO FALLBACKS: missing required env in production crashes at boot.
 ## Host link convention (inbound)
 
 Per spec/10 the host authenticates INTO the server: it dials `/ws` and
-presents its EdDSA-JWT `daemonKey` in the `hello` frame (`clientType:'daemon'`),
+presents its EdDSA-JWT `daemonKey` in the `hello` frame (`clientType:'host'`),
 exactly like a surface. The server no longer dials out to the host. The
-`InboundDaemonLink` (`src/daemon-link.ts`) owns the single live host socket
-once the WS hello gate hands it over; it presents the same `DaemonLink`
+`InboundHostLink` (`src/host-link.ts`) owns the single live host socket
+once the WS hello gate hands it over; it presents the same `HostLink`
 interface (`send`/`onEvent`/`onStatus`/`status`/`close`) the rest of the server
 consumes, so surface fan-out is unchanged.
 
@@ -125,7 +125,7 @@ frames — same codec as the surface ↔ server link, no extra envelope. Server
 forwards surface events upstream; host emits chat events downstream which
 the server fans out by chat-interest.
 
-For tests, `InProcessDaemonLink` from `src/daemon-link.ts` is dropped in
+For tests, `InProcessHostLink` from `src/host-link.ts` is dropped in
 where the real link would go, so integration tests can drive both sides
 without a real host process.
 
@@ -142,7 +142,7 @@ The `Registry` class implements `RevocationStoreInterface` from
 
 pino structured JSON. Every chat-scoped log line includes `accountId`,
 `surfaceId`, and (where relevant) `chatId`. Components are tagged with
-`component=ws-hub`, `component=daemon-link`, `component=auth-routes`.
+`component=ws-hub`, `component=host-link`, `component=auth-routes`.
 
 ## Tests
 
@@ -243,7 +243,7 @@ spec/08).
 
 When the host is offline the action is buffered to
 `<dataDir>/pending/<jobId>-<fireId>.jsonl` and flushed in createdAt
-order on `daemon.online`. Cap: 100 per job; oldest dropped with WARN
+order on `host.online`. Cap: 100 per job; oldest dropped with WARN
 on overflow.
 
 ### REST CRUD
@@ -261,7 +261,7 @@ All authed (`Authorization: Bearer <surface-jwt>`), rate-limited at
 ### Cross-chat tool integration (task A)
 
 Job DATA lives on the server (persisted under `<dataDir>/jobs/`). The
-daemon's `patch_job_*` MCP tools forward over the existing daemon-link
+daemon's `patch_job_*` MCP tools forward over the existing host-link
 to this server's `JobsInterface` — there is no separate host-side
 copy. The interface contract is in `src/jobs/types.ts` and is the
 canonical export for both consumers.

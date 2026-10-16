@@ -98,7 +98,28 @@ describe('spec/14 § Legibility — minimum font size is enforced, not aspiratio
   const floorPx = readFloorPx();
 
   it('defines the floor as a token', () => {
-    expect(floorPx).toBe(13);
+    expect(floorPx).toBe(14);
+  });
+
+  it('the notify card message reads close to body text, not at the floor', () => {
+    const m = /\.tool-call-notify \{[^}]*font-size:\s*([0-9.]+)px/.exec(css);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(16);
+  });
+
+  it('pane tab titles read above the floor', () => {
+    const m = /\.pane-tab \{[^}]*font-size:\s*([0-9.]+)px/.exec(css);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(16);
+  });
+
+  it('the pad editor stylesheet (shown inside Patch) also clears the floor', () => {
+    const pads = readFileSync(
+      resolve(process.cwd(), '../server/src/pads/public/editor.css'),
+      'utf8',
+    );
+    const small = [...pads.matchAll(/font-size:\s*([0-9.]+)px/g)].filter(
+      (m) => Number(m[1]) < floorPx,
+    );
+    expect(small.map((m) => m[0])).toEqual([]);
   });
 
   it('no rule in index.css renders text below the floor', () => {

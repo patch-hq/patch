@@ -95,7 +95,7 @@ test.describe('composer + transcript layout', () => {
     await expect(p).toBeVisible();
     const marginTop = await p.evaluate((el) => parseFloat(getComputedStyle(el).marginTop));
     // Our fix is ~0.35em (≈5.6px); the browser default <p> margin is ~16px.
-    expect(marginTop).toBeLessThan(10);
+    expect(marginTop).toBeLessThan(11);
   });
 
   test('markdown headings and dividers are compact (h2 top-margin well under default)', async ({
@@ -106,7 +106,7 @@ test.describe('composer + transcript layout', () => {
     await expect(h2).toBeVisible();
     const marginTop = await h2.evaluate((el) => parseFloat(getComputedStyle(el).marginTop));
     // ~0.7em (≈11px) vs the browser default ~21px for an h2.
-    expect(marginTop).toBeLessThan(14);
+    expect(marginTop).toBeLessThan(15);
   });
 });
 

@@ -16,6 +16,7 @@ import {
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { saveCredential, clearCredential } from '../lib/credential.js';
@@ -69,7 +70,7 @@ beforeEach(() => {
   useChatStore.getState()._reset();
   usePresenceStore.setState({
     connection: 'offline',
-    daemonOnline: false,
+    hostOnline: false,
     wsUrl: null,
     everConnected: false,
     failedAttempts: 0,
@@ -231,6 +232,33 @@ describe('PatchWs connection lifecycle', () => {
     ws.close();
   });
 
+  it("reconnectNow() on an open socket does not also dial from the old socket's close", async () => {
+    vi.useFakeTimers();
+    const { ws } = await connectAndOpen();
+    const countBefore = FakeWS.instances.length;
+    ws.reconnectNow();
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWS.instances.length).toBe(countBefore + 1);
+    ws.close();
+  });
+
+  it('a late close from the replaced socket leaves the live one alone', async () => {
+    vi.useFakeTimers();
+    const { ws, fake } = await connectAndOpen();
+    fake.close = (): void => {
+      fake.readyState = 3; // the real event arrives later, after the redial
+    };
+    ws.reconnectNow();
+    const live = FakeWS.instances[FakeWS.instances.length - 1]!;
+    live.open();
+    const countBefore = FakeWS.instances.length;
+    fake.emit('close', {});
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWS.instances.length).toBe(countBefore);
+    expect(usePresenceStore.getState().connection).toBe('connected');
+    ws.close();
+  });
+
   it('reconnectNow() swallows a throwing close on an already-dead socket', async () => {
     const { ws, fake } = await connectAndOpen();
     fake.close = () => {
@@ -269,7 +297,7 @@ describe('PatchWs chat.replay cursor excludes non-durable entries', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c-mixed',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/x',
@@ -315,7 +343,7 @@ describe('PatchWs chat.replay cursor excludes non-durable entries', () => {
 describe('PatchWs requestReplay dedup guard vs. a deliberately cleared timeline', () => {
   const row = (chatId: string) => ({
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
@@ -387,7 +415,7 @@ describe('PatchWs requestReplay dedup guard vs. a deliberately cleared timeline'
 describe("PatchWs replay cursor vs. the hub dropping this surface's subscriptions", () => {
   const row = (chatId: string) => ({
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
@@ -445,7 +473,7 @@ describe("PatchWs replay cursor vs. the hub dropping this surface's subscription
 describe('PatchWs batched replay (spec/12 § Sequence-based replay)', () => {
   const row = (chatId: string) => ({
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
@@ -518,7 +546,7 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
   beforeEach(() => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/proj' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/proj' });
     useUiStore.setState({ pendingDiffByChat: {} });
   });
 
@@ -627,7 +655,7 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
 describe('PatchWs cold start loads metadata only (no per-chat transcript fan-in)', () => {
   const row = (chatId: string) => ({
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
@@ -688,9 +716,9 @@ describe('PatchWs replays held chats when a host comes back', () => {
   // sweep only runs on a fresh socket and ChatRoute only replays when the chat
   // or the link changes identity — so a chat sat holding whatever it had when
   // the host went down, silently missing every event since.
-  const row = (chatId: string, daemonId = 'd1') => ({
+  const row = (chatId: string, hostId = 'd1') => ({
     chatId,
-    daemonId,
+    hostId,
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
@@ -721,7 +749,7 @@ describe('PatchWs replays held chats when a host comes back', () => {
     } as never);
     const before = replaysSent(fake).length;
 
-    fake.receive({ type: 'daemon.online', daemonId: 'd1' });
+    fake.receive({ type: 'host.online', hostId: 'd1' });
 
     const after = replaysSent(fake).slice(before);
     expect(after.map((r) => r.chatId)).toEqual(['c-1']);
@@ -741,7 +769,7 @@ describe('PatchWs replays held chats when a host comes back', () => {
     const { ws, fake } = await connectAndOpen();
     expect(replaysSent(fake).length).toBe(1); // the connect-time sweep, fromSeq -1
 
-    fake.receive({ type: 'daemon.online', daemonId: 'd1' });
+    fake.receive({ type: 'host.online', hostId: 'd1' });
 
     const replays = replaysSent(fake);
     expect(replays.length).toBe(2);
@@ -768,7 +796,7 @@ describe('PatchWs replays held chats when a host comes back', () => {
     const { ws, fake } = await connectAndOpen();
     const before = replaysSent(fake).length;
 
-    fake.receive({ type: 'daemon.online', daemonId: 'd1' });
+    fake.receive({ type: 'host.online', hostId: 'd1' });
 
     expect(
       replaysSent(fake)
@@ -786,7 +814,7 @@ describe('PatchWs replays held chats when a host comes back', () => {
     const { ws, fake } = await connectAndOpen();
     const before = replaysSent(fake).length;
 
-    fake.receive({ type: 'daemon.online', daemonId: 'd1' });
+    fake.receive({ type: 'host.online', hostId: 'd1' });
 
     expect(
       replaysSent(fake)
@@ -929,7 +957,7 @@ describe('PatchWs message dispatch — malformed frames', () => {
       throw new Error('boom');
     });
     expect(() =>
-      fake.receive({ type: 'chat.spawned', chatId: 'c1', daemonId: 'd1', folder: '~/p' }),
+      fake.receive({ type: 'chat.spawned', chatId: 'c1', hostId: 'd1', folder: '~/p' }),
     ).not.toThrow();
     expect(() => vi.advanceTimersByTime(STORE_BATCH_MS)).not.toThrow();
     expect(reload).toHaveBeenCalledTimes(1);
@@ -1105,24 +1133,24 @@ describe('PatchWs dispatch — host refusals addressed to no chat (pending-spawn
 });
 
 describe('PatchWs dispatch — host presence', () => {
-  it('daemon.online sets daemonOnline true', async () => {
+  it('host.online sets hostOnline true', async () => {
     const { fake } = await connectAndOpen();
-    fake.receive({ type: 'daemon.online', daemonId: 'd1' });
-    expect(usePresenceStore.getState().daemonOnline).toBe(true);
+    fake.receive({ type: 'host.online', hostId: 'd1' });
+    expect(usePresenceStore.getState().hostOnline).toBe(true);
   });
 
-  it('daemon.offline sets daemonOnline false', async () => {
+  it('host.offline sets hostOnline false', async () => {
     const { fake } = await connectAndOpen();
     usePresenceStore.getState().setHostOnline('d1', true);
-    fake.receive({ type: 'daemon.offline', daemonId: 'd1' });
-    expect(usePresenceStore.getState().daemonOnline).toBe(false);
+    fake.receive({ type: 'host.offline', hostId: 'd1' });
+    expect(usePresenceStore.getState().hostOnline).toBe(false);
   });
 
-  it('daemon.account updates that host+backend, and the account summary', async () => {
+  it('host.account updates that host+backend, and the account summary', async () => {
     const { fake } = await connectAndOpen();
     fake.receive({
-      type: 'daemon.account',
-      daemonId: 'd1',
+      type: 'host.account',
+      hostId: 'd1',
       backendId: 'claude-code',
       connected: true,
       accountEmail: 'a@b.com',
@@ -1130,7 +1158,7 @@ describe('PatchWs dispatch — host presence', () => {
     // Recorded against the (host, backend) pair it names — another machine's
     // credential is untouched (spec/10 § Backend credentials).
     expect(usePresenceStore.getState().hosts['d1']?.accounts['claude-code']).toEqual({
-      daemonId: 'd1',
+      hostId: 'd1',
       backendId: 'claude-code',
       connected: true,
       accountEmail: 'a@b.com',
@@ -1139,8 +1167,8 @@ describe('PatchWs dispatch — host presence', () => {
     // There is NO account-wide copy of this: a second host reporting itself
     // logged out must leave d1's row exactly as it is.
     fake.receive({
-      type: 'daemon.account',
-      daemonId: 'd2',
+      type: 'host.account',
+      hostId: 'd2',
       backendId: 'claude-code',
       connected: false,
       accountEmail: null,
@@ -1153,18 +1181,18 @@ describe('PatchWs dispatch — host presence', () => {
     const { fake } = await connectAndOpen();
     fake.receive({
       type: 'folders.list',
-      daemonId: 'd1',
+      hostId: 'd1',
       roots: ['/srv/patch'],
       recent: ['/tmp/x'],
     });
-    fake.receive({ type: 'folders.list', daemonId: 'd2', roots: ['/home/tom/p'], recent: [] });
+    fake.receive({ type: 'folders.list', hostId: 'd2', roots: ['/home/tom/p'], recent: [] });
     expect(usePresenceStore.getState().hosts['d1']?.folders).toEqual({
       roots: ['/srv/patch'],
       recent: ['/tmp/x'],
     });
     // A push for one machine leaves every other machine's list exactly as it is
     // — the same path string on two hosts is two different directories.
-    fake.receive({ type: 'folders.updated', daemonId: 'd1', roots: [], recent: [] });
+    fake.receive({ type: 'folders.updated', hostId: 'd1', roots: [], recent: [] });
     expect(usePresenceStore.getState().hosts['d1']?.folders).toEqual({ roots: [], recent: [] });
     expect(usePresenceStore.getState().hosts['d2']?.folders).toEqual({
       roots: ['/home/tom/p'],
@@ -1323,7 +1351,7 @@ describe('PatchWs dispatch — permission_request diff routing (Group 19/20)', (
   beforeEach(() => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/proj' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/proj' });
   });
 
   it('an Edit permission request with file_path opens the diff rail from old_string/new_string', async () => {
@@ -1485,7 +1513,7 @@ describe('PatchWs dispatch — mid-voice permission banner + permission_response
   beforeEach(() => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/proj' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/proj' });
   });
 
   it('falls back to "Approve <tool>?" when the host omits a description', async () => {
@@ -1728,6 +1756,56 @@ describe('PatchWs dispatch — terminal frames (spec/14 § Terminal)', () => {
 });
 
 // spec/14 § File browser — live updates.
+describe('PatchWs dispatch — agent browser live view and hand-off', () => {
+  it('records frames and hand-off state in browserHandoffStore, never in chatStore', async () => {
+    useBrowserHandoffStore.getState().reset();
+    const before = useChatStore.getState().chats;
+    const { fake } = await connectAndOpen();
+
+    fake.receive({
+      type: 'patch.browser_view.frame',
+      chatId: 'c1',
+      tabId: 't1',
+      data: 'AAAA',
+      width: 100,
+      height: 50,
+      url: 'https://example.com/',
+      title: 'Example',
+    });
+    fake.receive({
+      type: 'patch.browser_handoff.state',
+      chatId: 'c1',
+      handoffId: 'h1',
+      tabId: 't1',
+      status: 'waiting',
+      reason: 'Sign in',
+      startedAt: 1,
+    });
+    expect(useBrowserHandoffStore.getState().frames['c1']).toMatchObject({
+      tabId: 't1',
+      width: 100,
+    });
+    expect(useBrowserHandoffStore.getState().handoffs['c1']).toMatchObject({
+      handoffId: 'h1',
+      reason: 'Sign in',
+    });
+    expect(useChatStore.getState().chats).toBe(before);
+
+    fake.receive({
+      type: 'patch.browser_handoff.state',
+      chatId: 'c1',
+      handoffId: 'h1',
+      tabId: 't1',
+      status: 'ended',
+      reason: 'Sign in',
+      startedAt: 1,
+      outcome: 'done',
+    });
+    expect(useBrowserHandoffStore.getState().handoffs['c1']).toBeUndefined();
+    expect(useUiStore.getState().errors).toHaveLength(0);
+  });
+});
+
 describe('PatchWs dispatch — patch.file_changed (spec/14 § File browser — live updates)', () => {
   it('records the push into uiStore, keyed by chatId, and never reaches chatStore', async () => {
     useUiStore.setState({ lastFileChanged: {} });

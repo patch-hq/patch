@@ -81,7 +81,7 @@ beforeEach(async () => {
   __resetFlatListCalls();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   const mod = await import('../app/chats/[chatId]');
   ChatDetailScreen = mod.default;
 });
@@ -92,9 +92,13 @@ afterEach(() => {
   });
 });
 
-/** Hydrate a fresh chat (with N messages) under a chatId unique to this call. */
+/**
+ * Add a fresh chat (with N messages) under a chatId unique to this call. Merged
+ * rather than hydrated: a hydrate replaces the roster, which would drop the
+ * chats an earlier call seeded.
+ */
 function seedChatWithMessages(chatId: string, count = 3): void {
-  useChatStore.getState().hydrate([
+  useChatStore.getState().mergeRows([
     {
       chatId,
       name: 'Chat',

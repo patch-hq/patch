@@ -14,7 +14,7 @@ import type { ChatRow } from '../stores/types';
 function row(over: Partial<ChatRow>): ChatRow {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     name: null,
     preview: null,
@@ -200,7 +200,7 @@ describe('sectionLabel / searchHitPath', () => {
 
 describe('hostMarkerText', () => {
   const host = (over: Partial<ChatSearchHostResult>): ChatSearchHostResult => ({
-    daemonId: 'd1',
+    hostId: 'd1',
     hostName: 'Mac',
     state: 'searched',
     ...over,
@@ -219,5 +219,11 @@ describe('hostMarkerText', () => {
       'Mac: disk full',
     );
     expect(hostMarkerText(host({ state: 'error' }), 'Mac')).toBe('Mac: search failed');
+  });
+});
+
+describe('findRanges and characters whose lower case is a different length', () => {
+  it('keeps ranges aligned with the original text', () => {
+    expect(findRanges('İstanbul i', 'i')).toEqual([[9, 10]]);
   });
 });

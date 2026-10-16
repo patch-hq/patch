@@ -48,6 +48,8 @@ export function __resetRouterMock(): void {
   routerMock.canGoBack.mockClear();
   routerMock.canGoBack.mockReturnValue(true);
   _rootNavReady = true;
+  _route = undefined;
+  _navListeners = new Map();
 }
 
 /**
@@ -70,6 +72,53 @@ export function __setLocalSearchParams(p: Record<string, string | undefined>): v
 }
 export function useLocalSearchParams<T = Record<string, string>>(): T {
   return _params as unknown as T;
+}
+
+let _pathname = '/';
+/** Test helper: set what usePathname() returns. */
+export function __setPathname(p: string): void {
+  _pathname = p;
+}
+export function usePathname(): string {
+  return _pathname;
+}
+export function useGlobalSearchParams<T = Record<string, string>>(): T {
+  return _params as unknown as T;
+}
+
+// useNavigationContainerRef: the container ref the app reads handover state
+// from. A test sets the focused route (`__setCurrentRoute`) and fires the
+// events a real container emits (`__emitNavigationEvent`).
+let _route: { name: string; params?: Record<string, unknown> } | undefined;
+let _navListeners = new Map<string, Set<() => void>>();
+/** Test helper: the focused route; undefined = no route yet. */
+export function __setCurrentRoute(name?: string, params?: Record<string, unknown>): void {
+  _route = name === undefined ? undefined : { name, ...(params ? { params } : {}) };
+}
+/** Test helper: fire a container event ('state' | 'ready') at its listeners. */
+export function __emitNavigationEvent(type: 'state' | 'ready'): void {
+  for (const cb of [...(_navListeners.get(type) ?? [])]) cb();
+}
+/** Test helper: how many listeners the container has right now. */
+export function __navigationListenerCount(): number {
+  let n = 0;
+  for (const set of _navListeners.values()) n += set.size;
+  return n;
+}
+const navigationContainerRef = {
+  isReady: (): boolean => _rootNavReady,
+  getCurrentRoute: () => _route,
+  addListener: (type: string, cb: () => void): (() => void) => {
+    const set = _navListeners.get(type) ?? new Set();
+    set.add(cb);
+    _navListeners.set(type, set);
+    return () => {
+      set.delete(cb);
+    };
+  },
+};
+export function useNavigationContainerRef(): typeof navigationContainerRef {
+  return navigationContainerRef;
 }
 
 export function useSegments(): string[] {

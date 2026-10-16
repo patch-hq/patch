@@ -27,7 +27,7 @@ import { PermissionMode } from '../src/events.js';
 const ContinueActionBeforeHidden = z
   .object({
     type: z.literal('continue'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     folder: z.string().min(1),
     prompt: z.string().optional(),
     skill: z.string().optional(),
@@ -39,15 +39,14 @@ const ContinueActionBeforeHidden = z
 describe('JobAction skill/prompt invariant (at least one)', () => {
   test('spawn with skill only → valid', () => {
     expect(
-      JobAction.safeParse({ type: 'spawn', daemonId: 'host-a', folder: '/tmp', skill: 'foo' })
+      JobAction.safeParse({ type: 'spawn', hostId: 'host-a', folder: '/tmp', skill: 'foo' })
         .success,
     ).toBe(true);
   });
 
   test('spawn with prompt only → valid', () => {
     expect(
-      JobAction.safeParse({ type: 'spawn', daemonId: 'host-a', folder: '/tmp', prompt: 'x' })
-        .success,
+      JobAction.safeParse({ type: 'spawn', hostId: 'host-a', folder: '/tmp', prompt: 'x' }).success,
     ).toBe(true);
   });
 
@@ -60,7 +59,7 @@ describe('JobAction skill/prompt invariant (at least one)', () => {
   });
 
   test('spawn with NEITHER skill nor prompt → rejected (no-op job)', () => {
-    const res = JobAction.safeParse({ type: 'spawn', daemonId: 'host-a', folder: '/tmp' });
+    const res = JobAction.safeParse({ type: 'spawn', hostId: 'host-a', folder: '/tmp' });
     expect(res.success).toBe(false);
     if (!res.success) {
       expect(res.error.issues.some((i) => /a skill, a prompt, or both/.test(i.message))).toBe(true);
@@ -78,7 +77,7 @@ describe('JobAction skill/prompt invariant (at least one)', () => {
   test('spawn with BOTH skill and prompt → valid (skill runs with the prompt)', () => {
     const res = JobAction.safeParse({
       type: 'spawn',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       folder: '/tmp',
       skill: 'foo',
       prompt: 'x',
@@ -94,7 +93,7 @@ describe('JobAction skill/prompt invariant (at least one)', () => {
   test('ensure with BOTH skill and prompt → valid', () => {
     const res = JobAction.safeParse({
       type: 'continue',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       folder: '/tmp',
       skill: 'foo',
       prompt: 'x',
@@ -105,7 +104,7 @@ describe('JobAction skill/prompt invariant (at least one)', () => {
   test('empty-string skill/prompt counts as absent → rejected', () => {
     const res = JobAction.safeParse({
       type: 'spawn',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       folder: '/tmp',
       skill: '',
       prompt: '',
@@ -117,14 +116,14 @@ describe('JobAction skill/prompt invariant (at least one)', () => {
     const neither = JobCreateBody.safeParse({
       name: 't',
       trigger: { type: 'cron', expression: '0 8 * * *' },
-      action: { type: 'spawn', daemonId: 'host-a', folder: '/tmp' },
+      action: { type: 'spawn', hostId: 'host-a', folder: '/tmp' },
     });
     expect(neither.success).toBe(false);
 
     const valid = JobCreateBody.safeParse({
       name: 't',
       trigger: { type: 'cron', expression: '0 8 * * *' },
-      action: { type: 'spawn', daemonId: 'host-a', folder: '/tmp', skill: 'foo' },
+      action: { type: 'spawn', hostId: 'host-a', folder: '/tmp', skill: 'foo' },
     });
     expect(valid.success).toBe(true);
   });
@@ -134,7 +133,7 @@ describe('JobAction skill/prompt invariant (at least one)', () => {
 // run that stops on a question is visible; `startHidden` is the per-job opt-in
 // that keeps the run out of the inbox, Hidden.
 describe('JobAction.startHidden', () => {
-  const base = { type: 'spawn', daemonId: 'host-a', folder: '/tmp', skill: 'foo' };
+  const base = { type: 'spawn', hostId: 'host-a', folder: '/tmp', skill: 'foo' };
 
   test('omitted → undefined, i.e. NOT started archived (the default is a visible chat)', () => {
     const res = JobAction.safeParse(base);
@@ -226,7 +225,7 @@ describe('JobAction.startHidden', () => {
   });
 
   test('an untouched ensure action still parses on a host that predates the field', () => {
-    const stored = { type: 'continue', daemonId: 'host-a', folder: '/tmp', skill: 'foo' };
+    const stored = { type: 'continue', hostId: 'host-a', folder: '/tmp', skill: 'foo' };
     const res = JobAction.safeParse(stored);
     expect(res.success).toBe(true);
     if (res.success) expect(ContinueActionBeforeHidden.safeParse(res.data).success).toBe(true);
@@ -240,7 +239,7 @@ describe('JobAction.startHidden', () => {
     expect(
       JobAction.safeParse({
         type: 'continue',
-        daemonId: 'h',
+        hostId: 'h',
         folder: '/t',
         skill: 'f',
         startHidden: false,
@@ -249,7 +248,7 @@ describe('JobAction.startHidden', () => {
     expect(
       ContinueActionBeforeHidden.safeParse({
         type: 'continue',
-        daemonId: 'h',
+        hostId: 'h',
         folder: '/t',
         skill: 'f',
         startHidden: false,
@@ -264,7 +263,7 @@ describe('JobAction.startHidden', () => {
 // inverts the encoding — ABSENT MEANS NOTIFY and only an explicit `false`
 // suppresses, so a job written before the field existed needs no migration.
 describe('JobAction.notifyOnComplete', () => {
-  const base = { type: 'spawn', daemonId: 'host-a', folder: '/tmp', skill: 'foo' };
+  const base = { type: 'spawn', hostId: 'host-a', folder: '/tmp', skill: 'foo' };
 
   test('omitted → undefined, which MEANS notify (the default is on)', () => {
     for (const type of ['spawn', 'continue'] as const) {
@@ -313,7 +312,7 @@ describe('JobAction.notifyOnComplete', () => {
     expect(
       JobAction.safeParse({
         type: 'script',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         folder: '/tmp',
         command: 'true',
         notifyOnComplete: false,
@@ -353,7 +352,7 @@ describe('JobAction.notifyOnComplete', () => {
     // writer complains — the damage lands on the not-yet-OTA'd host.
     const stated = {
       type: 'continue',
-      daemonId: 'h',
+      hostId: 'h',
       folder: '/t',
       skill: 'f',
       notifyOnComplete: true,
@@ -377,7 +376,7 @@ describe('JobAction.notifyOnComplete', () => {
 // is what supplies that floor, so the schema keeps the field genuinely optional
 // rather than defaulting it here.
 describe('SpawnAction.permissionMode (spec/08 § Action)', () => {
-  const base = { type: 'spawn', daemonId: 'host-a', folder: '/tmp', skill: 'foo' };
+  const base = { type: 'spawn', hostId: 'host-a', folder: '/tmp', skill: 'foo' };
 
   test('omitted → undefined (the fire runs under auto)', () => {
     const res = JobAction.safeParse(base);
@@ -428,7 +427,7 @@ describe('SpawnAction.permissionMode (spec/08 § Action)', () => {
 // comes from. A `message` action has no host of its own; it inherits host,
 // folder and model from the chat it delivers into.
 describe('action model (spec/08 § Action)', () => {
-  const base = { type: 'spawn' as const, daemonId: 'host-a', folder: '/tmp', skill: 'foo' };
+  const base = { type: 'spawn' as const, hostId: 'host-a', folder: '/tmp', skill: 'foo' };
 
   test('omitted → undefined, i.e. the host last-used model wins', () => {
     const res = JobAction.safeParse(base);
@@ -493,7 +492,7 @@ describe('ensureChatId', () => {
 });
 
 describe('ContinueAction.key', () => {
-  const ensure = { type: 'continue', daemonId: 'host-a', folder: '/tmp', skill: 'app-update' };
+  const ensure = { type: 'continue', hostId: 'host-a', folder: '/tmp', skill: 'app-update' };
 
   test('accepted as a mustache template', () => {
     const res = JobAction.safeParse({ ...ensure, key: '{{payload.event_data.id}}' });
@@ -512,7 +511,7 @@ describe('ContinueAction.key', () => {
     expect(
       JobAction.safeParse({
         type: 'spawn',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         folder: '/tmp',
         skill: 'x',
         key: 'k',
@@ -524,7 +523,7 @@ describe('ContinueAction.key', () => {
 describe('script action (spec/08 § Action — `script`)', () => {
   const base = {
     type: 'script' as const,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/home/tom/projects/portfolio',
     command: 'scripts/tick.sh',
   };
@@ -541,7 +540,7 @@ describe('script action (spec/08 § Action — `script`)', () => {
   test('requires the host, the folder and the command', () => {
     expect(JobAction.safeParse({ ...base, command: '' }).success).toBe(false);
     expect(JobAction.safeParse({ ...base, folder: '' }).success).toBe(false);
-    expect(JobAction.safeParse({ ...base, daemonId: '' }).success).toBe(false);
+    expect(JobAction.safeParse({ ...base, hostId: '' }).success).toBe(false);
   });
 
   test('bounds the timeout — a tick may not run for an hour', () => {
@@ -551,7 +550,7 @@ describe('script action (spec/08 § Action — `script`)', () => {
   });
 
   test('the other actions still require a first turn', () => {
-    expect(JobAction.safeParse({ type: 'spawn', daemonId: 'd1', folder: '/tmp' }).success).toBe(
+    expect(JobAction.safeParse({ type: 'spawn', hostId: 'd1', folder: '/tmp' }).success).toBe(
       false,
     );
   });
@@ -586,7 +585,7 @@ describe('ensureChatKeySlug', () => {
 // rename still carry it on disk, and a job that stops parsing is a job that
 // silently stops running.
 describe('the `ensure` → `continue` rename', () => {
-  const base = { daemonId: 'd1', folder: '/work', skill: 'app-update' };
+  const base = { hostId: 'd1', folder: '/work', skill: 'app-update' };
 
   test('a job stored as `ensure` still parses, and reads as `continue`', () => {
     const parsed = JobAction.parse({ type: 'ensure', ...base });
@@ -613,7 +612,7 @@ describe('the `ensure` → `continue` rename', () => {
   });
 
   test('the rename does not smuggle past the skill-or-prompt rule', () => {
-    expect(() => JobAction.parse({ type: 'ensure', daemonId: 'd1', folder: '/work' })).toThrow();
+    expect(() => JobAction.parse({ type: 'ensure', hostId: 'd1', folder: '/work' })).toThrow();
   });
 });
 
@@ -622,8 +621,8 @@ describe('the `ensure` → `continue` rename', () => {
 // opts out. Carried by every action that delivers a user turn, never `script`.
 describe('JobAction.includePayload', () => {
   const shapes = [
-    { type: 'spawn', daemonId: 'h', folder: '/t', prompt: 'go' },
-    { type: 'continue', daemonId: 'h', folder: '/t', prompt: 'go' },
+    { type: 'spawn', hostId: 'h', folder: '/t', prompt: 'go' },
+    { type: 'continue', hostId: 'h', folder: '/t', prompt: 'go' },
     { type: 'message', chatId: 'c1', prompt: 'go' },
   ];
 
@@ -645,7 +644,7 @@ describe('JobAction.includePayload', () => {
     expect(
       JobAction.safeParse({
         type: 'script',
-        daemonId: 'h',
+        hostId: 'h',
         folder: '/t',
         command: 'true',
         includePayload: false,

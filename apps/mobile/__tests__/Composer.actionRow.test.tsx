@@ -27,6 +27,7 @@ import {
   actSync,
   actAsync,
   flush,
+  flushMicrotasks,
 } from './testUtils/render';
 import type { DictationHandle, DictationOutcome } from '../src/lib/dictation';
 import * as dictationModule from '../src/lib/dictation';
@@ -39,6 +40,12 @@ import { compactModelLabel } from '../src/lib/modelLabel';
 import { lightColors } from '../src/lib/theme';
 
 const { modelsSpy } = vi.hoisted(() => ({ modelsSpy: vi.fn() }));
+// Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
+
 vi.mock('../src/api/rest', () => ({
   api: {
     skills: vi.fn().mockResolvedValue({ skills: [] }),
@@ -91,7 +98,7 @@ function seed(
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       name: 'Chat',
       folder: '/home/tom/work',
       activity: overrides.activity ?? 'idle',
@@ -112,6 +119,7 @@ function rowOrder(root: ReactTestInstance): string[] {
     'Take photo',
     'Attach photo or image',
     'Attach any file',
+    'Sketch',
     'Dictate into message',
     'composer-actions-spacer',
     'composer-model-pill',
@@ -153,10 +161,11 @@ describe('Composer action row — order', () => {
       .findAll((i) => typeof i.type === 'string' && i !== row)
       .map((i) => (i.props['accessibilityLabel'] as string) ?? (i.props['testID'] as string))
       .filter((x): x is string => x !== undefined);
-    expect(ordered.slice(0, 5)).toEqual([
+    expect(ordered.slice(0, 6)).toEqual([
       'Take photo',
       'Attach photo or image',
       'Attach any file',
+      'Sketch',
       'Dictate into message',
       'Clear dictation',
     ]);
@@ -181,6 +190,7 @@ describe('Composer action row — order', () => {
       'Take photo',
       'Attach photo or image',
       'Attach any file',
+      'Sketch',
       'Dictate into message',
       'composer-actions-spacer',
       'composer-model-pill',
@@ -401,7 +411,7 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
     expect(wsMock.send).toHaveBeenCalledWith({ type: 'chat.stop_request', chatId: 'c1' });
   });
 
-  it('typing while running brings Send back, and it queues the message', () => {
+  it('typing while running brings Send back, and it queues the message', async () => {
     seed({ activity: 'running' });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
@@ -409,6 +419,7 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
     expect(queryHost(r.root, byTestId('composer-stop'))).toBeNull();
     const send = findHost(r.root, byLabel('Send message (queued after the current turn)'));
     actSync(() => send.props['onPress']());
+    await flushMicrotasks();
     // The ordinary delivery path: the host queues a chat.input behind the
     // running turn, exactly as a web send mid-turn is queued.
     expect(submitSpy).toHaveBeenCalledWith(
@@ -418,6 +429,8 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
       undefined,
       expect.any(Function),
       expect.anything(),
+      // An ordinary send is not a retry, so it carries no retryOfSeq.
+      undefined,
     );
     expect(wsMock.send).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'chat.stop_request' }),
@@ -473,12 +486,13 @@ describe('Composer — Send stays active across the send→running gap', () => {
     );
   }
 
-  it('keeps the active colour and a spinner until the host confirms running, then Stop takes over', () => {
+  it('keeps the active colour and a spinner until the host confirms running, then Stop takes over', async () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
     actSync(() => input.props['onChangeText']('hello'));
     actSync(() => sendButton(r).props['onPress']());
+    await flushMicrotasks();
 
     // The draft is gone and the host has not said the turn is running yet —
     // Stop is already offered, so the send can be cancelled while it is in
@@ -493,12 +507,13 @@ describe('Composer — Send stays active across the send→running gap', () => {
     expect(sendButton(r).props['style'].backgroundColor).toBe(lightColors.divider);
   });
 
-  it('Stop takes over from the pending send once the host confirms running', () => {
+  it('Stop takes over from the pending send once the host confirms running', async () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
     actSync(() => input.props['onChangeText']('hello'));
     actSync(() => sendButton(r).props['onPress']());
+    await flushMicrotasks();
     expect(queryHost(r.root, byTestId('composer-stop'))).not.toBeNull();
 
     // The host's chat.state lands — Stop takes over, exactly as it does for
@@ -513,13 +528,14 @@ describe('Composer — Send stays active across the send→running gap', () => {
     expect(queryHost(r.root, byLabel('Send message'))).toBeNull();
   });
 
-  it('settles instead of spinning forever if running never comes back (e.g. queued offline)', () => {
+  it('settles instead of spinning forever if running never comes back (e.g. queued offline)', async () => {
     vi.useFakeTimers();
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
     actSync(() => input.props['onChangeText']('hello'));
     actSync(() => sendButton(r).props['onPress']());
+    await flushMicrotasks();
     expect(queryHost(r.root, byTestId('composer-stop'))).not.toBeNull();
 
     actSync(() => vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS + 1));
@@ -529,13 +545,14 @@ describe('Composer — Send stays active across the send→running gap', () => {
     expect(settled.props['style'].backgroundColor).toBe(lightColors.divider);
   });
 
-  it('a queued send mid-turn (already running) goes straight to Stop, no gap', () => {
+  it('a queued send mid-turn (already running) goes straight to Stop, no gap', async () => {
     seed({ activity: 'running' });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
     actSync(() => input.props['onChangeText']('and then this'));
     const send = findHost(r.root, byLabel('Send message (queued after the current turn)'));
     actSync(() => send.props['onPress']());
+    await flushMicrotasks();
     // Already running at send time, so no busy gap to bridge — Stop is back
     // immediately, not a lingering busy Send.
     expect(queryHost(r.root, byTestId('composer-stop'))).not.toBeNull();

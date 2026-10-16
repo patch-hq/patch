@@ -106,7 +106,7 @@ test.describe('Settings — Keys', () => {
     await expect
       .poll(() => server.writes)
       .toEqual([
-        { method: 'POST', path: '/api/providers/keys/groq/adopt', body: { daemonId: 'd1' } },
+        { method: 'POST', path: '/api/providers/keys/groq/adopt', body: { hostId: 'd1' } },
       ]);
   });
 

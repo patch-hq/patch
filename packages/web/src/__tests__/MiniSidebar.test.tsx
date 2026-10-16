@@ -15,7 +15,7 @@ function row(chatId: string, over: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId,
     name: `Chat ${chatId}`,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/home/x/proj',
     activity: 'idle',
     permissionMode: 'bypassPermissions',

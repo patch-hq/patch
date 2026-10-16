@@ -12,7 +12,7 @@ function row(overrides: Partial<ChatRow>): ChatRow {
   return {
     chatId: 'c1',
     name: 'One',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '~/x',
     activity: 'idle',
     permissionMode: 'auto',
@@ -108,5 +108,52 @@ describe('deriveBadge — errored', () => {
         }),
       ),
     ).toBe('errored');
+  });
+});
+
+describe('deriveBadge — parity with web for the permission signals', () => {
+  const perm = { requestId: 'r1', tool: 'Bash', description: undefined, args: {} };
+
+  it('a pending permission outlives activity going idle', () => {
+    expect(deriveBadge(row({ activity: 'idle', pendingPermissions: [perm] }))).toBe('permission');
+  });
+
+  it('a pending permission beats errored', () => {
+    expect(deriveBadge(row({ activity: 'errored', pendingPermissions: [perm] }))).toBe(
+      'permission',
+    );
+  });
+
+  it('a DECLARED question is permission, even over errored/running', () => {
+    const q = { statusKind: 'question', statusDeclared: true } as const;
+    expect(deriveBadge(row(q))).toBe('permission');
+    expect(deriveBadge(row({ ...q, activity: 'running' }))).toBe('permission');
+    expect(deriveBadge(row({ ...q, activity: 'errored' }))).toBe('permission');
+  });
+
+  it('a GENERATED question does not read as permission', () => {
+    expect(deriveBadge(row({ statusKind: 'question', statusDeclared: false }))).toBe('read');
+    expect(deriveBadge(row({ statusKind: 'question', statusDeclared: null }))).toBe('read');
+  });
+
+  it('a declared report is not permission', () => {
+    expect(deriveBadge(row({ statusKind: 'report', statusDeclared: true }))).toBe('read');
+  });
+});
+
+describe('deriveBadge — mobile read/unread and full precedence', () => {
+  it('visited at/after last update is read', () => {
+    expect(deriveBadge(row({ lastUpdated: 5, lastVisitedAt: 5 }))).toBe('read');
+    expect(deriveBadge(row({ lastUpdated: 5, lastVisitedAt: 9 }))).toBe('read');
+  });
+  it('working beats unread', () => {
+    expect(deriveBadge(row({ activity: 'running', lastUpdated: 5, lastVisitedAt: 0 }))).toBe(
+      'working',
+    );
+  });
+  it('background beats monitoring beats read', () => {
+    const wake = { message: 'm', fireAt: 1, notAfter: undefined };
+    expect(deriveBadge(row({ backgroundTasks: 1, pendingWake: wake }))).toBe('background');
+    expect(deriveBadge(row({ pendingWake: wake }))).toBe('monitoring');
   });
 });

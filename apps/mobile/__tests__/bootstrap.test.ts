@@ -15,6 +15,7 @@ const apiMocks = {
   me: vi.fn(),
   listChats: vi.fn(async () => ({ chats: [] })),
   folders: vi.fn(async () => ({ hosts: [] })),
+  settings: vi.fn(),
 };
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
@@ -120,7 +121,7 @@ describe('bootstrap()', () => {
     // `GET /api/folders` is grouped BY HOST (spec/04 § Folders) — a flat
     // union would make two machines' identical paths indistinguishable.
     apiMocks.folders.mockResolvedValue({
-      hosts: [{ daemonId: 'd1', roots: ['~/x'], recent: ['~/y'] }],
+      hosts: [{ hostId: 'd1', roots: ['~/x'], recent: ['~/y'] }],
     });
     const { bootstrap } = await import('../src/lib/bootstrap');
     const { useChatStore } = await import('../src/stores/chatStore');
@@ -161,6 +162,7 @@ describe('bootstrap()', () => {
     const { saveCredential } = await import('../src/lib/credential');
     saveCredential('a.b.c');
     vi.doMock('../src/lib/push', () => ({
+      resetPush: vi.fn(),
       initPush: vi.fn(async () => {
         throw new Error('push boom');
       }),
@@ -240,6 +242,28 @@ describe('bootstrap()', () => {
     expect(showIncomingCall).toHaveBeenCalledWith('call1', 'chat1', 'Manager');
   });
 
+  it('bootstrapping again after a teardown (re-pair) bridges an incoming call once, not twice', async () => {
+    const { saveCredential } = await import('../src/lib/credential');
+    saveCredential('a.b.c');
+    const showIncomingCall = vi.fn();
+    vi.doMock('../src/lib/callkeep', () => ({
+      initCallKeep: vi.fn(async () => undefined),
+      showIncomingCall,
+    }));
+    const { bootstrap, teardown } = await import('../src/lib/bootstrap');
+    const { useVoiceStore } = await import('../src/stores/voiceStore');
+    await bootstrap();
+    teardown();
+    await bootstrap();
+    useVoiceStore.getState().setIncoming({
+      callId: 'call1',
+      chatId: 'chat1',
+      message: undefined,
+      receivedAt: Date.now(),
+    });
+    expect(showIncomingCall).toHaveBeenCalledTimes(1);
+  });
+
   it('a showIncomingCall failure from the bridge is surfaced as a banner', async () => {
     const { saveCredential } = await import('../src/lib/credential');
     saveCredential('a.b.c');
@@ -295,6 +319,33 @@ describe('teardown()', () => {
     teardown();
     await bootstrap();
     expect(wsMock.connect).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('teardown() — the next account starts from nothing', () => {
+  it("forgets the previous account's cached address word and voice config", async () => {
+    apiMocks.settings.mockResolvedValue({
+      preferences: {
+        addressWord: 'jarvis',
+        voiceConfig: { call: 'engine-a' },
+        suppressProviderSwitchWarning: true,
+        providerContextVerbosity: 'full',
+      },
+    });
+    const prefs = await import('../src/lib/preferences');
+    const { useSettingsStore } = await import('../src/stores/settingsStore');
+    const { teardown } = await import('../src/lib/bootstrap');
+    await prefs.loadPreferences();
+    await useSettingsStore.getState().load();
+    expect(prefs.addressWordOrNull()).toBe('jarvis');
+    expect(useSettingsStore.getState().data).not.toBeNull();
+
+    teardown();
+
+    expect(useSettingsStore.getState().data).toBeNull();
+    expect(prefs.addressWordOrNull()).toBeNull();
+    expect(prefs.voiceConfigOrNull()).toBeNull();
+    expect(prefs.suppressProviderSwitchWarningOrFalse()).toBe(false);
   });
 });
 

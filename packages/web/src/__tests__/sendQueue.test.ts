@@ -143,3 +143,15 @@ describe('sendQueue', () => {
     });
   });
 });
+
+describe('sendMessage onDelivered', () => {
+  it('calls onDelivered with the localId once handed to delivery', async () => {
+    const { sendMessage } = await import('../lib/sendQueue.js');
+    const seen: string[] = [];
+    const localId = sendMessage('c-od', 'hi', [], {
+      send: () => {},
+      onDelivered: (id) => seen.push(id),
+    });
+    expect(seen).toEqual([localId]);
+  });
+});

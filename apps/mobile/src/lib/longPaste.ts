@@ -11,7 +11,9 @@ export function pastedTextName(text: string): string {
     .filter(Boolean)
     .slice(0, 6)
     .join(' ');
-  const head = words.length > 40 ? words.slice(0, 40).trimEnd() + '…' : words;
+  // Cut on code points: a code-unit slice can split an emoji's surrogate pair.
+  const chars = Array.from(words);
+  const head = chars.length > 40 ? chars.slice(0, 40).join('').trimEnd() + '…' : words;
   return head ? `Pasted – ${head}.md` : 'Pasted text.md';
 }
 
@@ -24,9 +26,16 @@ export function extractLongPaste(
   let start = 0;
   const max = Math.min(prev.length, next.length);
   while (start < max && prev[start] === next[start]) start++;
+  // The diff runs on UTF-16 code units, so two emoji sharing a surrogate can
+  // leave a boundary between the halves of one. Step each edge back out of it.
+  if (start > 0 && isHighSurrogate(next.charCodeAt(start - 1))) start--;
   let end = 0;
   while (end < prev.length - start && prev[prev.length - 1 - end] === next[next.length - 1 - end])
     end++;
+  if (end > 0 && isLowSurrogate(next.charCodeAt(next.length - end))) end--;
   const inserted = next.slice(start, next.length - end);
   return { inserted, remaining: next.slice(0, start) + next.slice(next.length - end) };
 }
+
+const isHighSurrogate = (c: number): boolean => c >= 0xd800 && c <= 0xdbff;
+const isLowSurrogate = (c: number): boolean => c >= 0xdc00 && c <= 0xdfff;

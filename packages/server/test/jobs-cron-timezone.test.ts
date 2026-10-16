@@ -22,7 +22,7 @@ import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { CronScheduler } from '../src/jobs/cron.js';
 import { assertValidJobBody, JobValidationError } from '../src/jobs/validate.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import type { JobCreateBody, JobPatchBody } from '../src/jobs/types.js';
 
 const silentLogger = pino({ level: 'silent' });
@@ -35,7 +35,7 @@ const WINTER = '2026-01-15T12:00:00Z'; // Europe/London = UTC+0
 // A spawn action names its host and carries exactly one first turn — a body
 // missing the prompt is refused for THAT reason, which would mask the
 // timezone assertions on the REST route.
-const ACTION = { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' } as const;
 
 /** Wire up the store/dispatcher/logs a CronScheduler needs. */
 function makeDeps(dir: string): { jobs: JobStore; dispatcher: JobDispatcher; logs: JobLogs } {
@@ -43,7 +43,7 @@ function makeDeps(dir: string): { jobs: JobStore; dispatcher: JobDispatcher; log
   const logs = new JobLogs(dir);
   const dispatcher = new JobDispatcher({
     dataDir: dir,
-    daemonLink: new InProcessDaemonLink(),
+    hostLink: new InProcessHostLink(),
     logger: silentLogger,
     logs: new JobLogs(dir),
   });
@@ -299,7 +299,7 @@ describe('POST/PATCH /api/jobs over the real HTTP route', () => {
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
     });
     return { built, auth: { authorization: `Bearer ${jwt}` } };
   }

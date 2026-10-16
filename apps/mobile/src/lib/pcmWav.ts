@@ -1,6 +1,6 @@
 // PCM16 → WAV encoding for the composer's live-dictation upload (spec/07 §
 // "Dictation into the composer"). Mirrors the host's own encoder
-// (`packages/daemon/src/audio/whisper.ts` `pcm16ToWav`) byte-for-byte — same
+// (`packages/host/src/audio/whisper.ts` `pcm16ToWav`) byte-for-byte — same
 // 44-byte canonical header, mono, little-endian — so the server's existing
 // `.wav` auto-detection (`packages/server/src/voice/note.ts`, extension/
 // mimetype sniff) accepts it with ZERO server changes.

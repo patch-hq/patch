@@ -17,6 +17,7 @@ import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
+import { useSelectionStore } from '../stores/selectionStore.js';
 import * as newWindow from '../lib/newWindow.js';
 import { api } from '../api/rest.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
@@ -28,7 +29,7 @@ function rowFixture(overrides: Partial<ChatRow> = {}): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'a chat',
     folder: '~/proj',
@@ -107,14 +108,30 @@ describe('sidebar row context menu', () => {
       'Open in new tab',
       'Open to the side',
       'Open in new window',
+      'Rename',
       'Pin',
       'Snooze',
+      'Hide',
       'Archive',
       'Delete',
     ]);
     // Anchored where the pointer was.
     expect(menu.style.left).toBe('120px');
     expect(menu.style.top).toBe('200px');
+  });
+
+  it('Rename prompts seeded with the stored name and renames optimistically', async () => {
+    useChatStore.getState().hydrate([rowFixture({ name: 'old name' })]);
+    const spy = vi.spyOn(api, 'renameChat').mockResolvedValue(undefined as never);
+    renderSidebar();
+    rightClick(screen.getByTestId('chat-row-c1'));
+    fireEvent.click(screen.getByText('Rename'));
+    const input = (await screen.findByTestId('prompt-input')) as HTMLInputElement;
+    expect(input.value).toBe('old name');
+    fireEvent.change(input, { target: { value: '  new name ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('c1', 'new name'));
+    expect(useChatStore.getState().chats['c1']?.name ?? null).toBe('new name');
   });
 
   it('archives through the SAME path as the hover tool, and closes', async () => {
@@ -165,6 +182,31 @@ describe('sidebar row context menu', () => {
 
     expect(useChatStore.getState().chats['c1']?.pinned).toBe(true);
     expect(pin).toHaveBeenCalledWith('c1', true);
+  });
+
+  it('Hide hides the chat through the row’s hide API, and reverts on failure', async () => {
+    useChatStore.getState().hydrate([rowFixture()]);
+    const hide = vi.spyOn(api, 'hideChat').mockResolvedValue(undefined as never);
+    renderSidebar();
+
+    rightClick(screen.getByTestId('chat-row-c1'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(`${MENU}-hide`));
+    });
+    expect(useChatStore.getState().chats['c1']?.hidden).toBe(true);
+    expect(hide).toHaveBeenCalledWith('c1', true);
+  });
+
+  it('Hide reverts when the request fails', async () => {
+    useChatStore.getState().hydrate([rowFixture()]);
+    vi.spyOn(api, 'hideChat').mockRejectedValue(new Error('boom'));
+    renderSidebar();
+
+    rightClick(screen.getByTestId('chat-row-c1'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(`${MENU}-hide`));
+    });
+    await waitFor(() => expect(useChatStore.getState().chats['c1']?.hidden).toBe(false));
   });
 
   it('"Open in new tab" opens the chat as a new tab in the active pane (spec/14 § Panes and tabs)', async () => {
@@ -264,6 +306,7 @@ describe('sidebar row context menu', () => {
     expect(
       [...screen.getByTestId(MENU).querySelectorAll('[role="menuitem"]')][0]?.textContent,
     ).toBe('Unsnooze');
+    expect(screen.getByTestId(MENU).textContent).not.toMatch(/^Snooze|\bSnooze(?!d)/);
   });
 
   it('a special thread has no menu, so the browser keeps its own', () => {
@@ -318,5 +361,87 @@ describe('sidebar row context menu', () => {
     // different chat holding the first one's actions.
     fireEvent.scroll(screen.getByTestId('chat-row-c1'));
     expect(screen.queryByTestId(MENU)).toBeNull();
+  });
+});
+
+describe('sidebar row context menu over a multi-selection', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+    useLayoutStore.getState()._reset();
+    usePresenceStore.getState().setConnection('connected');
+    useVoiceStore.setState({ activeDevices: {} });
+    useUiStore.getState().setArchivedOpen(false);
+    useUiStore.getState().setDeletedOpen(false);
+    useUiStore.getState().setAttentionOnly(false);
+    useUiStore.getState().setSearchQuery('');
+    useUiStore.setState({ errors: [], forgottenFolders: [], toolsPanelChatId: null });
+    useUiStore.getState().resolveConfirm(false);
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    useChatStore
+      .getState()
+      .hydrate([
+        rowFixture({ chatId: 'c1' }),
+        rowFixture({ chatId: 'c2' }),
+        rowFixture({ chatId: 'c3' }),
+      ]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useSelectionStore.getState().clear();
+    cleanup();
+  });
+
+  function selectTwo(): void {
+    renderSidebar();
+    fireEvent.click(screen.getByTestId('chat-row-c1'));
+    fireEvent.click(screen.getByTestId('chat-row-c2'), { shiftKey: true });
+    expect(useSelectionStore.getState().selected.length).toBe(2);
+  }
+
+  it('offers only the bulk actions when the clicked row is selected, and pins every selected chat', async () => {
+    selectTwo();
+    const [a, b] = useSelectionStore.getState().selected as [string, string];
+    const pin = vi.spyOn(api, 'pinChat').mockResolvedValue(undefined as never);
+    rightClick(screen.getByTestId(`chat-row-${a}`));
+    const menu = screen.getByTestId(`chat-context-menu-${a}`);
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map((n) => n.textContent)).toEqual([
+      'Pin',
+      'Snooze',
+      'Hide',
+      'Archive',
+      'Delete',
+    ]);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(`chat-context-menu-${a}-pin`));
+    });
+    expect(pin).toHaveBeenCalledTimes(2);
+    expect(pin).toHaveBeenCalledWith(a, true);
+    expect(pin).toHaveBeenCalledWith(b, true);
+    expect(useChatStore.getState().chats['c3']?.pinned).toBe(false);
+  });
+
+  it('archives every selected chat after one confirm', async () => {
+    selectTwo();
+    const archive = vi.spyOn(api, 'archiveChat').mockResolvedValue(undefined as never);
+    rightClick(screen.getByTestId('chat-row-c1'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-context-menu-c1-archive'));
+    });
+    await waitFor(() => expect(useUiStore.getState().confirmDialog).not.toBeNull());
+    await act(async () => {
+      useUiStore.getState().resolveConfirm(true);
+    });
+    await waitFor(() => expect(archive).toHaveBeenCalledTimes(2));
+    expect(useChatStore.getState().chats['c3']?.status).not.toBe('archived');
+  });
+
+  it('acts on just the clicked row when it is outside the selection', () => {
+    selectTwo();
+    rightClick(screen.getByTestId('chat-row-c3'));
+    const menu = screen.getByTestId('chat-context-menu-c3');
+    expect(menu.textContent).toContain('Rename');
+    expect(useSelectionStore.getState().selected).toEqual([]);
   });
 });

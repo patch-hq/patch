@@ -14,12 +14,12 @@ import {
   gateVerdict,
 } from '../src/jobs.js';
 
-const GATE = { daemonId: 'd1', folder: '/work', command: 'exit 1' };
+const GATE = { hostId: 'd1', folder: '/work', command: 'exit 1' };
 
 describe('JobGate', () => {
   test('needs a host, a folder and a command', () => {
     expect(JobGate.safeParse(GATE).success).toBe(true);
-    for (const missing of ['daemonId', 'folder', 'command'] as const) {
+    for (const missing of ['folder', 'hostId', 'command'] as const) {
       const partial: Record<string, unknown> = { ...GATE };
       delete partial[missing];
       expect(JobGate.safeParse(partial).success).toBe(false);
@@ -45,13 +45,13 @@ describe('gate on a job', () => {
     enabled: true,
     trigger: { type: 'cron' as const, expression: '*/5 * * * *' },
     filter: null,
-    action: { type: 'spawn' as const, daemonId: 'd1', folder: '/work', skill: 'foreman' },
+    action: { type: 'spawn' as const, hostId: 'd1', folder: '/work', skill: 'foreman' },
     createdAt: 1,
     updatedAt: 1,
   };
 
   // Every job written before gates existed has no `gate` key at all, and `Job`
-  // is strict and travels the daemon-link: absent has to stay legal forever.
+  // is strict and travels the host-link: absent has to stay legal forever.
   test('absent is legal — an ungated job is the normal job', () => {
     expect(Job.safeParse(base).success).toBe(true);
   });

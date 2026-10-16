@@ -96,13 +96,13 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
       .poll(() => server.writes.map((w) => w.path))
       .toContain('/api/settings/claude/adopt');
     expect(server.writes.find((w) => w.path === '/api/settings/claude/adopt')?.body).toEqual({
-      daemonId: 'd1',
+      hostId: 'd1',
       target: 'linux',
     });
     await page.getByTestId('host-d1-claude-drift-discard').click();
     await expect
       .poll(async () => await wsSent(page))
-      .toContainEqual({ type: 'host.claude_settings_discard', daemonId: 'd1' });
+      .toContainEqual({ type: 'host.claude_settings_discard', hostId: 'd1' });
   });
 
   test('removing a memory entry asks, then sends host.claude_memory_delete naming it', async ({
@@ -116,7 +116,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     await expect.poll(async () => (await wsSent(page)).length).toBeGreaterThan(0);
     expect(await wsSent(page)).toContainEqual({
       type: 'host.claude_memory_delete',
-      daemonId: 'd1',
+      hostId: 'd1',
       project: 'portfolio',
       file: 'feedback_tests.md',
     });

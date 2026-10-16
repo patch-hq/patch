@@ -6,7 +6,7 @@ import type { WireEvent } from '@patch/wire';
 import { COMMIT_ACK_DELAY_MS, CommitAcks } from '../src/commit-acks.js';
 
 describe('CommitAcks', () => {
-  let sent: Array<{ daemonId: string; surfaceId: string; event: WireEvent }>;
+  let sent: Array<{ hostId: string; surfaceId: string; event: WireEvent }>;
   let online: Set<string>;
 
   beforeEach(() => {
@@ -20,7 +20,7 @@ describe('CommitAcks', () => {
 
   const make = (delayMs?: number): CommitAcks =>
     new CommitAcks({
-      sendTo: (daemonId, surfaceId, event) => sent.push({ daemonId, surfaceId, event }),
+      sendTo: (hostId, surfaceId, event) => sent.push({ hostId, surfaceId, event }),
       isOnline: (id) => online.has(id),
       ...(delayMs !== undefined ? { delayMs } : {}),
     });
@@ -33,7 +33,7 @@ describe('CommitAcks', () => {
     acks.note('c2', 'd2', 2);
     expect(sent).toEqual([]);
     vi.advanceTimersByTime(COMMIT_ACK_DELAY_MS);
-    expect(sent.map((s) => [s.daemonId, s.event])).toEqual([
+    expect(sent.map((s) => [s.hostId, s.event])).toEqual([
       ['d1', { type: 'chat.committed', chatId: 'c1', through: 7 }],
       ['d2', { type: 'chat.committed', chatId: 'c2', through: 2 }],
     ]);
@@ -45,7 +45,7 @@ describe('CommitAcks', () => {
     acks.note('c1', 'd1', 1);
     acks.note('c1', 'd2', 2);
     vi.advanceTimersByTime(COMMIT_ACK_DELAY_MS);
-    expect(sent.map((s) => s.daemonId)).toEqual(['d2']);
+    expect(sent.map((s) => s.hostId)).toEqual(['d2']);
   });
 
   test('waits as long as it was told to', () => {

@@ -55,7 +55,7 @@ async function waitFor(
   throw new Error(`TIMEOUT: ${label}`);
 }
 
-async function waitForDaemonOnline(): Promise<void> {
+async function waitForHostOnline(): Promise<void> {
   // The real host container self-registers (POSTs register/start +
   // register/complete itself and long-polls register/await for its
   // server-minted daemonKey) once the account exists, then connects inbound to
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   if (typeof jwt !== 'string' || jwt.length === 0) {
     throw new Error(`account bootstrap returned no credential: ${acct.text}`);
   }
-  await waitForDaemonOnline();
+  await waitForHostOnline();
 
   // ---- CRON: every-minute job, confirm it fires + logs a run ----
   const cron = await req('POST', '/api/jobs', {
@@ -184,7 +184,7 @@ async function main(): Promise<void> {
   compose(['start', 'daemon']);
   // The restarted host re-registers itself (server mints a fresh daemonKey)
   // and reconnects inbound to /ws. Wait for the link to come back.
-  await waitForDaemonOnline();
+  await waitForHostOnline();
   let drained = false;
   await waitFor(
     'pending flushed on reconnect',

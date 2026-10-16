@@ -1,5 +1,5 @@
 // lib/pcmWav.ts — the composer live-dictation WAV encoder. This mirrors the
-// host's own `pcm16ToWav` (`packages/daemon/src/audio/whisper.ts`) byte-for-
+// host's own `pcm16ToWav` (`packages/host/src/audio/whisper.ts`) byte-for-
 // byte on purpose (see that file's header comment) so the server's existing
 // `.wav` extension/mimetype sniff (`packages/server/src/voice/note.ts`) accepts
 // the upload with zero server changes — these tests pin that contract

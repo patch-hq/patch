@@ -241,7 +241,7 @@ export function VoicePage(): React.ReactElement {
 function VoiceEngine(): React.ReactElement {
   const colors = useTheme();
   const [busy, setBusy] = React.useState(false);
-  // Per-host key status (`daemon.host.voiceKeys`): a hosted cell names each
+  // Per-host key status (`host.host.voiceKeys`): a hosted cell names each
   // host that cannot run it.
   const hosts = usePresenceStore((s) => s.hosts);
   const hostReports = Object.values(hosts).flatMap((h) =>

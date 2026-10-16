@@ -262,5 +262,5 @@ and aborts on the first failure; `ctest` reports one row per suite.
 - `spec/03-wire-protocol.md` — control frame conventions
 - `spec/12-error-and-offline.md` — reconnect/replay semantics
 - `packages/wire/src/audio.ts` — audio WSS frame schemas
-- `packages/daemon/src/audio/server.ts` — audio WSS server we connect to
+- `packages/host/src/audio/server.ts` — audio WSS server we connect to
 - `packages/server/src/voice/token.ts` — voice token mint endpoint

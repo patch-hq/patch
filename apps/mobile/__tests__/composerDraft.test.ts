@@ -102,6 +102,55 @@ describe('loading at module init', () => {
   });
 });
 
+describe('relaunching after the first launch', () => {
+  it('does not re-push a cached draft that the server no longer holds', async () => {
+    store().set('patch.composerDraftMigrated', '1');
+    store().set('patch.composerDraft:chat_a', 'sent from the computer since');
+    vi.resetModules();
+    const mod = await import('../src/lib/composerDraft');
+    const wsMod = await import('../src/api/ws');
+    const send = vi.fn();
+    vi.mocked(wsMod.getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
+    mod.useComposerDraftStore.getState().resendPendingOnReconnect();
+    expect(send).not.toHaveBeenCalled();
+    mod.useComposerDraftStore.getState().applyDraftList([]);
+    expect(mod.useComposerDraftStore.getState().drafts).toEqual({});
+  });
+
+  it('still pushes an edit the server never confirmed before the app was killed', async () => {
+    store().set('patch.composerDraftMigrated', '1');
+    store().set('patch.composerDraft:chat_a', 'typed offline');
+    store().set('patch.composerDraftPending', JSON.stringify(['chat_a']));
+    vi.resetModules();
+    const mod = await import('../src/lib/composerDraft');
+    const wsMod = await import('../src/api/ws');
+    const send = vi.fn();
+    vi.mocked(wsMod.getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
+    mod.useComposerDraftStore.getState().resendPendingOnReconnect();
+    expect(send).toHaveBeenCalledWith({
+      type: 'composer_draft.set',
+      chatId: 'chat_a',
+      text: 'typed offline',
+    });
+  });
+
+  it('migrates only once: a second launch right after the first pushes nothing', async () => {
+    store().set('patch.composerDraft:chat_a', 'legacy');
+    vi.resetModules();
+    const first = await import('../src/lib/composerDraft');
+    const wsMod = await import('../src/api/ws');
+    const send = vi.fn();
+    vi.mocked(wsMod.getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
+    first.useComposerDraftStore.getState().resendPendingOnReconnect();
+    expect(send).toHaveBeenCalledTimes(1);
+    vi.resetModules();
+    const second = await import('../src/lib/composerDraft');
+    send.mockClear();
+    second.useComposerDraftStore.getState().resendPendingOnReconnect();
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('sending to the server', () => {
   it('debounces: a burst of keystrokes sends once, after the pause', () => {
     const send = vi.fn();
@@ -346,5 +395,22 @@ describe('the new-chat placeholder key', () => {
     expect(send).not.toHaveBeenCalled();
     clearComposerDraft('new');
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('an echo of an earlier send', () => {
+  it('does not cancel a newer edit still owed to the server', () => {
+    const send = vi.fn();
+    vi.mocked(getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
+    const s = useComposerDraftStore.getState();
+    s.setFocused('c1', true);
+    setComposerDraft('c1', 'a');
+    vi.advanceTimersByTime(DRAFT_SEND_DEBOUNCE_MS); // 'a' goes out
+    const echoAt = Date.now();
+    vi.advanceTimersByTime(10);
+    setComposerDraft('c1', 'ab'); // typed before the echo of 'a' came back
+    s.applyDraftUpdated('c1', 'a', echoAt);
+    vi.advanceTimersByTime(5000);
+    expect(send).toHaveBeenLastCalledWith({ type: 'composer_draft.set', chatId: 'c1', text: 'ab' });
   });
 });

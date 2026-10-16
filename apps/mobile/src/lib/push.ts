@@ -13,6 +13,7 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { AppState } from 'react-native';
 import { api } from '../api/rest';
+import { useUiStore } from '../stores/uiStore';
 import { showIncomingCall } from './callkeep';
 import { parseActionsPayload } from './notificationActions';
 import {
@@ -22,6 +23,23 @@ import {
 } from './notificationResponses';
 
 let _registered = false;
+/** Every listener `initPush` added, so a retry or a re-pair can take them off again. */
+let _subs: { remove(): void }[] = [];
+
+function dropSubscriptions(): void {
+  for (const sub of _subs) sub.remove();
+  _subs = [];
+}
+
+/**
+ * Forget this device's registration (the app was re-paired to another account or
+ * server): the next `initPush` registers a token for the new credential, with one
+ * set of listeners.
+ */
+export function resetPush(): void {
+  dropSubscriptions();
+  _registered = false;
+}
 
 /** The EAS project id `eas init` writes to `app.config.ts`'s `extra.eas.projectId` — required to mint an Expo push token. */
 function easProjectId(): string {
@@ -34,6 +52,17 @@ function easProjectId(): string {
 
 export async function initPush(): Promise<void> {
   if (_registered) return;
+  // A failed attempt may have left listeners behind; start from none.
+  dropSubscriptions();
+  try {
+    await register();
+  } catch (e) {
+    dropSubscriptions();
+    throw e;
+  }
+}
+
+async function register(): Promise<void> {
   // Foreground policy: don't auto-show banners — we render the
   // chat detail / overlays ourselves. Banner only when backgrounded.
   Notifications.setNotificationHandler({
@@ -87,7 +116,7 @@ export async function initPush(): Promise<void> {
   // once here so they're ready even for a notification shown while this
   // app's JS has only just woken up to a backgrounded push.
   await initNotificationCategories();
-  registerNotificationResponseListener();
+  _subs.push(registerNotificationResponseListener());
 
   const perm = await Notifications.requestPermissionsAsync();
   if (!perm.granted) {
@@ -103,23 +132,25 @@ export async function initPush(): Promise<void> {
   }
   await api.pushRegister(tok.data);
 
-  Notifications.addNotificationReceivedListener((n) => {
-    const data = n.request.content.data ?? {};
-    // spec/09 § Notification actions — a question's own option text or
-    // patch_notify's quickReplies can't be pre-registered (the labels aren't
-    // known ahead of time), so rebuild the one dynamic category fresh,
-    // right as the push arrives. Best-effort: this is a no-op for the common
-    // Reply/Approve-Deny case, which the static categories above already
-    // cover regardless of timing.
-    void registerDynamicCategoryIfNeeded(parseActionsPayload(data['actions']));
-    if (data['kind'] === 'call') {
-      const callId = String(data['callId'] ?? '');
-      const chatId = String(data['chatId'] ?? '');
-      if (callId && chatId) {
-        showIncomingCall(callId, chatId, String(data['callerLabel'] ?? 'Manager'));
+  _subs.push(
+    Notifications.addNotificationReceivedListener((n) => {
+      const data = n.request.content.data ?? {};
+      // spec/09 § Notification actions — a question's own option text or
+      // patch_notify's quickReplies can't be pre-registered (the labels aren't
+      // known ahead of time), so rebuild the one dynamic category fresh,
+      // right as the push arrives. Best-effort: this is a no-op for the common
+      // Reply/Approve-Deny case, which the static categories above already
+      // cover regardless of timing.
+      void registerDynamicCategoryIfNeeded(parseActionsPayload(data['actions']));
+      if (data['kind'] === 'call') {
+        const callId = String(data['callId'] ?? '');
+        const chatId = String(data['chatId'] ?? '');
+        if (callId && chatId) {
+          showIncomingCall(callId, chatId, String(data['callerLabel'] ?? 'Manager'));
+        }
       }
-    }
-  });
+    }),
+  );
 
   // Re-register on token rotation (spec/11 item 11). `addPushTokenListener`
   // fires with the underlying NATIVE device token, not the Expo one — Expo
@@ -127,12 +158,20 @@ export async function initPush(): Promise<void> {
   // Expo token too and it must be re-minted, not forwarded as-is. NO
   // FALLBACK: if re-register throws, we surface it via the listener's caller
   // (handler is best-effort but errors are propagated for the next call).
-  Notifications.addPushTokenListener(() => {
-    void Notifications.getExpoPushTokenAsync({ projectId: easProjectId() }).then((t) => {
-      if (!t.data) return;
-      void api.pushRegister(t.data);
-    });
-  });
+  _subs.push(
+    Notifications.addPushTokenListener(() => {
+      // Runs from a native callback with nobody awaiting it: a failure has to be
+      // shown here or it is an unhandled rejection with the old token still registered.
+      void Notifications.getExpoPushTokenAsync({ projectId: easProjectId() })
+        .then(async (t) => {
+          if (!t.data) return;
+          await api.pushRegister(t.data);
+        })
+        .catch((e: Error) => {
+          useUiStore.getState().pushError(`push token refresh failed: ${e.message}`);
+        });
+    }),
+  );
 
   _registered = true;
 }

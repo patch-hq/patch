@@ -31,7 +31,7 @@ import {
   type WireEvent,
 } from '@patch/wire';
 import type { Registry } from './registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ChatMirror } from './chat-mirror.js';
 import { requireAuth } from './folder-routes.js';
@@ -39,7 +39,7 @@ import { requireAuth } from './folder-routes.js';
 export interface ChatSearchRoutesDeps {
   logger: Logger;
   registry: Registry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   chatRegistry: ChatRegistry;
   /** The server's copy of message text, used for chats whose host is offline. */
   mirror?: ChatMirror;
@@ -101,16 +101,16 @@ function sectionOf(
 export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchRoutesDeps): void {
   const pending = new Map<
     string,
-    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; daemonId: string }
+    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
   >();
-  deps.daemonLink.onEvent((event: WireEvent, from) => {
+  deps.hostLink.onEvent((event: WireEvent, from) => {
     if (event.type !== 'patch.chat_search.response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
     // Only the machine that was asked may answer for itself.
-    if (event.daemonId !== w.daemonId || (from !== null && from !== w.daemonId)) {
+    if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
-        { requestId: event.requestId, asked: w.daemonId, answered: event.daemonId, from },
+        { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
         'chat search: response from a machine that was not asked; ignoring',
       );
       return;
@@ -122,8 +122,8 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
 
   /** Every machine this account knows: registered ones, plus any attached link. */
   function hostIds(): string[] {
-    const ids = deps.registry.registeredDaemonIds();
-    for (const linked of deps.daemonLink.onlineDaemonIds()) {
+    const ids = deps.registry.registeredHostIds();
+    for (const linked of deps.hostLink.onlineHostIds()) {
       if (!ids.includes(linked)) ids.push(linked);
     }
     return ids;
@@ -134,9 +134,9 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
    * the chat registry's names and the mirrored message text. Hits are flagged
    * `mirrored` so a surface can say the host is not reachable right now.
    */
-  function searchMirror(daemonId: string, query: string, fullText: boolean): HostOutcome {
-    const hostName = deps.registry.hostName(daemonId) ?? null;
-    const offline = { daemonId, hostName, state: 'offline' as const };
+  function searchMirror(hostId: string, query: string, fullText: boolean): HostOutcome {
+    const hostName = deps.registry.hostName(hostId) ?? null;
+    const offline = { hostId, hostName, state: 'offline' as const };
     if (!deps.mirror) return { status: offline, hits: [], total: 0 };
     const terms = parseSearchQuery(query);
     const now = Date.now();
@@ -144,17 +144,19 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     let mirroredChats = 0;
     const mirrored = new Set(deps.mirror.chatIds());
     for (const chat of deps.chatRegistry.list({ includeArchived: true, includeSnoozed: true })) {
-      if (chat.daemonId !== daemonId || chat.status === 'deleted') continue;
+      if (chat.hostId !== hostId || chat.status === 'deleted') continue;
       if (!mirrored.has(chat.chatId) && chat.name === null) continue;
       mirroredChats++;
       const name = chat.name ?? '';
       const lowerName = name.toLowerCase();
       const nameMatch = terms.length > 0 && terms.every((t) => lowerName.includes(t));
       const found = fullText ? deps.mirror.search(query, chat.chatId) : null;
-      if (!nameMatch && !found) continue;
+      const idQuery = query.trim().toLowerCase();
+      const idMatch = /^[a-z0-9_-]+$/.test(idQuery) && chat.chatId.toLowerCase().includes(idQuery);
+      if (!nameMatch && !found && !idMatch) continue;
       hits.push({
         chatId: chat.chatId,
-        daemonId,
+        hostId,
         name: chat.name,
         preview: chat.preview,
         folder: chat.folder,
@@ -180,15 +182,15 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
   }
 
   async function askHost(
-    daemonId: string,
+    hostId: string,
     surfaceId: string,
     query: string,
     depth: number,
     fullText: boolean,
   ): Promise<HostOutcome> {
-    const hostName = deps.registry.hostName(daemonId) ?? null;
-    if (!deps.daemonLink.isOnline(daemonId)) {
-      return searchMirror(daemonId, query, fullText);
+    const hostName = deps.registry.hostName(hostId) ?? null;
+    if (!deps.hostLink.isOnline(hostId)) {
+      return searchMirror(hostId, query, fullText);
     }
     const requestId = deps.idGenerator();
     const result = await new Promise<Response | 'timeout'>((resolve) => {
@@ -196,28 +198,28 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
         pending.delete(requestId);
         resolve('timeout');
       }, CHAT_SEARCH_TIMEOUT_MS);
-      pending.set(requestId, { resolve, timeout, daemonId });
-      deps.daemonLink.sendTo(daemonId, surfaceId, {
+      pending.set(requestId, { resolve, timeout, hostId });
+      deps.hostLink.sendTo(hostId, surfaceId, {
         type: 'patch.chat_search.request',
         requestId,
-        daemonId,
+        hostId,
         query,
         limit: depth,
         fullText,
       });
     });
     if (result === 'timeout') {
-      deps.logger.warn({ daemonId }, 'chat search: host did not answer in time');
-      return { status: { daemonId, hostName, state: 'timeout' }, hits: [], total: 0 };
+      deps.logger.warn({ hostId }, 'chat search: host did not answer in time');
+      return { status: { hostId, hostName, state: 'timeout' }, hits: [], total: 0 };
     }
     if (!result.ok) {
       const message = result.error?.message ?? 'search failed';
-      deps.logger.warn({ daemonId, err: message }, 'chat search: host answered with a failure');
-      return { status: { daemonId, hostName, state: 'error', message }, hits: [], total: 0 };
+      deps.logger.warn({ hostId, err: message }, 'chat search: host answered with a failure');
+      return { status: { hostId, hostName, state: 'error', message }, hits: [], total: 0 };
     }
     return {
       status: {
-        daemonId,
+        hostId,
         hostName,
         state: 'searched',
         ...(result.searchedChats !== undefined ? { searchedChats: result.searchedChats } : {}),
@@ -276,7 +278,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
       // inside their union, so this page is exact.
       const depth = Math.min(offset + limit, CHAT_SEARCH_MAX_DEPTH);
       const outcomes = await Promise.all(
-        hostIds().map((daemonId) => askHost(daemonId, auth.surfaceId, query, depth, fullText)),
+        hostIds().map((hostId) => askHost(hostId, auth.surfaceId, query, depth, fullText)),
       );
       const merged = outcomes
         .flatMap((o) => o.hits)

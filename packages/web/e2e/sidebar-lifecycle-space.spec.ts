@@ -86,7 +86,7 @@ function chatFixture(chatId: string, status: string, extra: Record<string, unkno
     pinnedAt: null,
     snoozedUntil: null,
     lastUpdated: 100,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions',
     jobId: null,
     ...extra,

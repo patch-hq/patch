@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { ChatRegistry } from '../src/chat-registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import type { Job } from '../src/jobs/types.js';
@@ -25,7 +25,7 @@ const job: Job = {
   enabled: true,
   trigger: { type: 'todoist' },
   filter: null,
-  action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+  action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
   createdAt: 1,
   updatedAt: 1,
   concurrency: 1,
@@ -37,12 +37,12 @@ const seqIds = (): (() => string) => {
 };
 
 const spawned = (chatId: string): WireEvent =>
-  ({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' }) as WireEvent;
+  ({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' }) as WireEvent;
 const state = (chatId: string, activity: string, over: Record<string, unknown> = {}): WireEvent =>
   ({
     type: 'chat.state',
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     activity,
     permissionMode: 'bypassPermissions',
     lastUpdated: 1,
@@ -52,9 +52,9 @@ const state = (chatId: string, activity: string, over: Record<string, unknown> =
 const finishedReport = (chatId: string): WireEvent =>
   state(chatId, 'idle', { preview: 'go', lastUpdated: Date.now() + 60_000 });
 const foldersList = (): WireEvent =>
-  ({ type: 'folders.list', daemonId: 'd1', roots: [], recent: [] }) as WireEvent;
+  ({ type: 'folders.list', hostId: 'd1', roots: [], recent: [] }) as WireEvent;
 
-const spawnRequests = (link: InProcessDaemonLink): string[] =>
+const spawnRequests = (link: InProcessHostLink): string[] =>
   link.sent
     .filter((s) => s.event.type === 'chat.spawn_request')
     .map((s) => (s.event.type === 'chat.spawn_request' ? s.event.chatId : ''));
@@ -72,7 +72,7 @@ describe('a job slot across a server restart', () => {
 
   /** One server process: a registry, a dispatcher and the link between them, wired as app.ts does. */
   function boot() {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const registry = new ChatRegistry({
       logger,
       persistPath: registryPath,
@@ -82,7 +82,7 @@ describe('a job slot across a server restart', () => {
     const dispatcher = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger,
       idGenerator: seqIds(),
       chatActivity: (chatId) => registry.get(chatId)?.activity ?? null,

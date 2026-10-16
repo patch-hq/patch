@@ -76,6 +76,77 @@ test('a live chat’s header names the account its latest turn ran on', async ({
   await expect(page.getByTestId('chat-account')).toHaveText('personal');
 });
 
+test('a live chat with two accounts gets an account dropdown styled like the approval mode', async ({
+  page,
+}) => {
+  await stubSettingsApi(page, { secrets: TWO_ACCOUNTS });
+  await page.goto('/app/dev-harness.html?chat=chat_bus');
+  await page.evaluate(async () => {
+    const res = await fetch('/api/settings/shared');
+    const state = await res.json();
+    (
+      window as unknown as { __preferencesStore: { getState(): { apply(s: unknown): void } } }
+    ).__preferencesStore
+      .getState()
+      .apply(state);
+  });
+  await applyEvent(page, {
+    type: 'chat.state',
+    chatId: 'chat_bus',
+    activity: 'idle',
+    lastUpdated: Date.now(),
+    permissionMode: 'auto',
+    account: { id: 'a1', label: 'work' },
+    preferredAccountId: null,
+  });
+  const select = page.getByTestId('chat-account');
+  await expect(select).toHaveJSProperty('tagName', 'SELECT');
+  await expect(select.locator('option')).toHaveText(['Auto: work', 'work', 'personal']);
+  // The tooltip would sit over the open list, so it is off while focused.
+  await expect(select).toHaveAttribute('title', /work account/);
+  await select.focus();
+  await expect(select).not.toHaveAttribute('title', /.*/);
+  await select.blur();
+  // Drawn as the approval-mode select beside it, not as a bordered chip.
+  const mode = page.getByTestId('permission-mode');
+  for (const prop of ['appearance', 'font-size', 'border-top-width', 'height', 'color']) {
+    expect(await select.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)).toBe(
+      await mode.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop),
+    );
+  }
+
+  // Choosing sends the request, reads as pending, and settles on the host's answer.
+  await select.selectOption('a2');
+  const sent = await page.evaluate(
+    () => (window as unknown as { __wsSent: Record<string, unknown>[] }).__wsSent,
+  );
+  expect(sent.filter((e) => e['type'] === 'chat.account_request')).toEqual([
+    { type: 'chat.account_request', chatId: 'chat_bus', preferredAccountId: 'a2' },
+  ]);
+  await expect(select).toHaveClass(/is-pending/);
+  await applyEvent(page, {
+    type: 'chat.state',
+    chatId: 'chat_bus',
+    activity: 'idle',
+    lastUpdated: Date.now(),
+    permissionMode: 'auto',
+    preferredAccountId: 'a2',
+  });
+  await expect(select).not.toHaveClass(/is-pending/);
+  await expect(select).toHaveValue('a2');
+
+  // Back to the strategy.
+  await select.selectOption('');
+  const again = await page.evaluate(
+    () => (window as unknown as { __wsSent: Record<string, unknown>[] }).__wsSent,
+  );
+  expect(again.at(-1)).toEqual({
+    type: 'chat.account_request',
+    chatId: 'chat_bus',
+    preferredAccountId: null,
+  });
+});
+
 test('a turn that moved account because the last ran out says so, in local time', async ({
   page,
 }) => {

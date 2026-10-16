@@ -14,14 +14,14 @@ import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { registerCrossHostBridge } from '../src/cross-host.js';
-import type { DaemonLink } from '../src/daemon-link.js';
+import type { HostLink } from '../src/host-link.js';
 import type { ChatRegistry } from '../src/chat-registry.js';
 import type { Registry } from '../src/registry.js';
 
 const logger = pino({ level: 'silent' });
 
 interface Sent {
-  daemonId: string;
+  hostId: string;
   surfaceId: string;
   event: WireEvent;
 }
@@ -32,9 +32,9 @@ function harness(opts: { owners?: Record<string, string>; online?: string[] } = 
   const sent: Sent[] = [];
   let handler: ((e: WireEvent, from: string | null) => void) | undefined;
 
-  const daemonLink = {
-    sendTo: (daemonId: string, surfaceId: string, event: WireEvent) => {
-      sent.push({ daemonId, surfaceId, event });
+  const hostLink = {
+    sendTo: (hostId: string, surfaceId: string, event: WireEvent) => {
+      sent.push({ hostId, surfaceId, event });
     },
     isOnline: (id: string) => online.has(id),
     onEvent: (h: (e: WireEvent, from: string | null) => void) => {
@@ -43,18 +43,18 @@ function harness(opts: { owners?: Record<string, string>; online?: string[] } = 
         handler = undefined;
       };
     },
-  } as unknown as DaemonLink;
+  } as unknown as HostLink;
 
   const chatRegistry = {
     list: () => [],
     get: (chatId: string) => {
-      const daemonId = owners[chatId];
-      return daemonId ? { chatId, daemonId } : undefined;
+      const hostId = owners[chatId];
+      return hostId ? { chatId, hostId } : undefined;
     },
   } as unknown as ChatRegistry;
-  const registry = { isRegisteredDaemon: () => true } as unknown as Registry;
+  const registry = { isRegisteredHost: () => true } as unknown as Registry;
 
-  const dispose = registerCrossHostBridge({ logger, daemonLink, chatRegistry, registry });
+  const dispose = registerCrossHostBridge({ logger, hostLink, chatRegistry, registry });
   return {
     sent,
     dispose,
@@ -75,7 +75,7 @@ describe('cross-host patch.peek.request — relayed to the owning machine', () =
       'host-a',
     );
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-b');
+    expect(h.sent[0]!.hostId).toBe('host-b');
     expect(h.sent[0]!.event).toMatchObject({ type: 'patch.peek.request', requestId: 'req-1' });
     h.dispose();
   });
@@ -104,7 +104,7 @@ describe('cross-host patch.peek.request — relayed to the owning machine', () =
       'host-b',
     );
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     expect(h.sent[0]!.event).toMatchObject({ type: 'patch.peek.response', ok: true });
     h.dispose();
   });
@@ -121,7 +121,7 @@ describe('cross-host patch.peek.request — relayed to the owning machine', () =
       'host-a',
     );
     const resp = h.sent.find((s) => s.event.type === 'patch.peek.response');
-    expect(resp?.daemonId).toBe('host-a');
+    expect(resp?.hostId).toBe('host-a');
     expect(resp?.event).toMatchObject({
       ok: false,
       requestId: 'req-1',
@@ -225,7 +225,7 @@ describe('cross-host patch.history.request — relayed the same way', () => {
     );
     expect(h.sent).toEqual([
       {
-        daemonId: 'host-b',
+        hostId: 'host-b',
         surfaceId: 'cross-host-bridge',
         event: expect.objectContaining({ type: 'patch.history.request' }),
       },
@@ -243,7 +243,7 @@ describe('cross-host patch.history.request — relayed the same way', () => {
       'host-b',
     );
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     h.dispose();
   });
 
@@ -278,7 +278,7 @@ describe('cross-host patch.send_to — relayed and acknowledged', () => {
       'host-a',
     );
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-b');
+    expect(h.sent[0]!.hostId).toBe('host-b');
     expect(h.sent[0]!.event).toMatchObject({ type: 'patch.send_to', requestId: 'req-3' });
     h.dispose();
   });
@@ -308,7 +308,7 @@ describe('cross-host patch.send_to — relayed and acknowledged', () => {
     );
     expect(h.sent).toEqual([
       {
-        daemonId: 'host-a',
+        hostId: 'host-a',
         surfaceId: 'cross-host-bridge',
         event: {
           type: 'patch.send_to.response',

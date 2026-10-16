@@ -33,7 +33,7 @@
 
 import type { Logger } from 'pino';
 import { OUT_OF_BAND_SEQ, type ChatErrorCode, type WireEvent } from '@patch/wire';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { Registry } from './registry.js';
 import type { ActivityReader } from './activity.js';
@@ -43,7 +43,7 @@ const BRIDGE_SURFACE_ID = 'cross-host-bridge';
 
 export interface CrossHostBridgeDeps {
   logger: Logger;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   chatRegistry: ChatRegistry;
   registry: Registry;
   activity: ActivityReader;
@@ -57,14 +57,14 @@ export interface CrossHostBridgeDeps {
 const RELAY_ROUTE_TTL_MS = 60_000;
 
 export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
-  const { logger, daemonLink, chatRegistry, registry, activity } = deps;
+  const { logger, hostLink, chatRegistry, registry, activity } = deps;
 
   /**
    * requestId → the machine that raised a relayed `patch.spawn`, so its
    * answer goes back to the CALLER rather than being looked up from the chat
    * mirror (which can lag a freshly-spawned chat).
    */
-  const spawnRoutes = new Map<string, { fromDaemonId: string; timer: NodeJS.Timeout }>();
+  const spawnRoutes = new Map<string, { fromHostId: string; timer: NodeJS.Timeout }>();
 
   /**
    * requestId → the machine that raised a relayed `patch.peek.request` /
@@ -72,15 +72,15 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
    * requestIds come from independent generators on the host side, so
    * collision would need two coordinators to mint the same random string.
    */
-  const relayRoutes = new Map<string, { fromDaemonId: string; timer: NodeJS.Timeout }>();
+  const relayRoutes = new Map<string, { fromHostId: string; timer: NodeJS.Timeout }>();
 
-  const trackRelay = (requestId: string, fromDaemonId: string): void => {
+  const trackRelay = (requestId: string, fromHostId: string): void => {
     const timer = setTimeout(() => relayRoutes.delete(requestId), RELAY_ROUTE_TTL_MS);
     timer.unref();
-    relayRoutes.set(requestId, { fromDaemonId, timer });
+    relayRoutes.set(requestId, { fromHostId, timer });
   };
 
-  const takeRelay = (requestId: string): { fromDaemonId: string } | undefined => {
+  const takeRelay = (requestId: string): { fromHostId: string } | undefined => {
     const route = relayRoutes.get(requestId);
     if (!route) return undefined;
     clearTimeout(route.timer);
@@ -95,28 +95,28 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
    */
   const resolveTargetHost = (
     targetChatId: string,
-  ): { ok: true; daemonId: string } | { ok: false; code: ChatErrorCode; message: string } => {
+  ): { ok: true; hostId: string } | { ok: false; code: ChatErrorCode; message: string } => {
     const owner = chatRegistry.get(targetChatId);
     if (!owner) {
       return { ok: false, code: 'chat_not_found', message: `no such chat: ${targetChatId}` };
     }
-    if (!daemonLink.isOnline(owner.daemonId)) {
+    if (!hostLink.isOnline(owner.hostId)) {
       return {
         ok: false,
         code: 'host_not_registered',
-        message: `machine ${owner.daemonId}, which owns chat ${targetChatId}, is offline`,
+        message: `machine ${owner.hostId}, which owns chat ${targetChatId}, is offline`,
       };
     }
-    return { ok: true, daemonId: owner.daemonId };
+    return { ok: true, hostId: owner.hostId };
   };
 
   const refuse = (
-    fromDaemonId: string,
+    fromHostId: string,
     chatId: string,
     code: ChatErrorCode,
     message: string,
   ): void => {
-    daemonLink.sendTo(fromDaemonId, BRIDGE_SURFACE_ID, {
+    hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
       type: 'chat.error',
       chatId,
       error: { code, message },
@@ -130,57 +130,57 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
    * a `chat.error` alone would leave it waiting for the full timeout.
    */
   const refuseSpawn = (
-    fromDaemonId: string,
-    event: { requestId?: string; sourceChatId: string; daemonId: string; folder: string },
+    fromHostId: string,
+    event: { requestId?: string; sourceChatId: string; hostId: string; folder: string },
     code: 'host_not_registered',
     message: string,
   ): void => {
-    refuse(fromDaemonId, event.sourceChatId, code, message);
+    refuse(fromHostId, event.sourceChatId, code, message);
     if (event.requestId === undefined) return;
-    daemonLink.sendTo(fromDaemonId, BRIDGE_SURFACE_ID, {
+    hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
       type: 'patch.spawn.response',
       requestId: event.requestId,
       sourceChatId: event.sourceChatId,
-      daemonId: event.daemonId,
+      hostId: event.hostId,
       folder: event.folder,
       ok: false,
       error: { code, message },
     });
   };
 
-  const unsubscribe = daemonLink.onEvent((event: WireEvent, fromDaemonId: string | null) => {
+  const unsubscribe = hostLink.onEvent((event: WireEvent, fromHostId: string | null) => {
     if (event.type === 'patch.spawn') {
       // Its own host: the host already created the chat in-process and this
       // frame is the audit trail. Relaying it back would spawn a second chat.
-      if (fromDaemonId === null || event.daemonId === fromDaemonId) return;
-      if (!registry.isRegisteredDaemon(event.daemonId)) {
+      if (fromHostId === null || event.hostId === fromHostId) return;
+      if (!registry.isRegisteredHost(event.hostId)) {
         logger.warn(
-          { from: fromDaemonId, target: event.daemonId },
+          { from: fromHostId, target: event.hostId },
           'patch.spawn named an unregistered machine',
         );
         refuseSpawn(
-          fromDaemonId,
+          fromHostId,
           event,
           'host_not_registered',
-          `patch_spawn: no machine registered with daemonId: ${event.daemonId}`,
+          `patch_spawn: no machine registered with hostId: ${event.hostId}`,
         );
         return;
       }
-      if (!daemonLink.isOnline(event.daemonId)) {
+      if (!hostLink.isOnline(event.hostId)) {
         logger.warn(
-          { from: fromDaemonId, target: event.daemonId },
+          { from: fromHostId, target: event.hostId },
           'patch.spawn named an offline machine',
         );
         refuseSpawn(
-          fromDaemonId,
+          fromHostId,
           event,
           'host_not_registered',
-          `patch_spawn: machine ${event.daemonId} is offline`,
+          `patch_spawn: machine ${event.hostId} is offline`,
         );
         return;
       }
       logger.info(
-        { from: fromDaemonId, target: event.daemonId, folder: event.folder },
+        { from: fromHostId, target: event.hostId, folder: event.folder },
         'relaying patch.spawn to another machine',
       );
       if (event.requestId !== undefined) {
@@ -188,9 +188,9 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
         const requestId = event.requestId;
         const timer = setTimeout(() => spawnRoutes.delete(requestId), RELAY_ROUTE_TTL_MS);
         timer.unref();
-        spawnRoutes.set(requestId, { fromDaemonId, timer });
+        spawnRoutes.set(requestId, { fromHostId, timer });
       }
-      daemonLink.sendTo(event.daemonId, BRIDGE_SURFACE_ID, event);
+      hostLink.sendTo(event.hostId, BRIDGE_SURFACE_ID, event);
       return;
     }
 
@@ -202,7 +202,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       const route = spawnRoutes.get(event.requestId);
       if (!route) {
         logger.warn(
-          { requestId: event.requestId, from: fromDaemonId },
+          { requestId: event.requestId, from: fromHostId },
           'patch.spawn.response for a spawn this server did not relay; dropping',
         );
         return;
@@ -210,22 +210,22 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       clearTimeout(route.timer);
       spawnRoutes.delete(event.requestId);
       logger.info(
-        { to: route.fromDaemonId, target: event.daemonId, ok: event.ok },
+        { to: route.fromHostId, target: event.hostId, ok: event.ok },
         'relaying patch.spawn.response back to the calling machine',
       );
-      daemonLink.sendTo(route.fromDaemonId, BRIDGE_SURFACE_ID, event);
+      hostLink.sendTo(route.fromHostId, BRIDGE_SURFACE_ID, event);
       return;
     }
 
     if (event.type === 'patch.list_chats.request') {
-      if (fromDaemonId === null) return;
+      if (fromHostId === null) return;
       const chats = chatRegistry
         .list({
           ...(event.archived === 'only' ? { archivedOnly: true } : {}),
           ...(event.archived === 'include' ? { includeArchived: true } : {}),
         })
-        .map((c) => ({ chatId: c.chatId, daemonId: c.daemonId }));
-      daemonLink.sendTo(fromDaemonId, BRIDGE_SURFACE_ID, {
+        .map((c) => ({ chatId: c.chatId, hostId: c.hostId }));
+      hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
         type: 'patch.list_chats.response',
         sourceChatId: event.sourceChatId,
         chatCount: chats.length,
@@ -235,8 +235,8 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
     }
 
     if (event.type === 'patch.activity.request') {
-      if (fromDaemonId === null) return;
-      const caller = fromDaemonId;
+      if (fromHostId === null) return;
+      const caller = fromHostId;
       void activity
         .query({
           since: event.since,
@@ -245,7 +245,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
           ...(event.limit !== undefined ? { limit: event.limit } : {}),
         })
         .then((result) => {
-          daemonLink.sendTo(caller, BRIDGE_SURFACE_ID, {
+          hostLink.sendTo(caller, BRIDGE_SURFACE_ID, {
             type: 'patch.activity.response',
             sourceChatId: event.sourceChatId,
             ...result,
@@ -263,18 +263,18 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       // No requestId: a same-host call, already resolved in-process by the
       // calling host — this frame is only its audit record (see file header
       // § 3), and relaying it would perform the read a second time.
-      if (fromDaemonId === null || event.requestId === undefined) return;
+      if (fromHostId === null || event.requestId === undefined) return;
       const requestId = event.requestId;
       const responseType =
         event.type === 'patch.peek.request' ? 'patch.peek.response' : 'patch.history.response';
       const resolved = resolveTargetHost(event.targetChatId);
       if (!resolved.ok) {
         logger.warn(
-          { from: fromDaemonId, target: event.targetChatId, code: resolved.code },
+          { from: fromHostId, target: event.targetChatId, code: resolved.code },
           `${event.type} named a chat this server cannot reach`,
         );
-        refuse(fromDaemonId, event.sourceChatId, resolved.code, resolved.message);
-        daemonLink.sendTo(fromDaemonId, BRIDGE_SURFACE_ID, {
+        refuse(fromHostId, event.sourceChatId, resolved.code, resolved.message);
+        hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
           type: responseType,
           requestId,
           sourceChatId: event.sourceChatId,
@@ -285,11 +285,11 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
         return;
       }
       logger.info(
-        { from: fromDaemonId, target: resolved.daemonId, targetChatId: event.targetChatId },
+        { from: fromHostId, target: resolved.hostId, targetChatId: event.targetChatId },
         `relaying ${event.type} to the machine that owns the chat`,
       );
-      trackRelay(requestId, fromDaemonId);
-      daemonLink.sendTo(resolved.daemonId, BRIDGE_SURFACE_ID, event);
+      trackRelay(requestId, fromHostId);
+      hostLink.sendTo(resolved.hostId, BRIDGE_SURFACE_ID, event);
       return;
     }
 
@@ -298,12 +298,12 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       const route = takeRelay(event.requestId);
       if (!route) {
         logger.warn(
-          { requestId: event.requestId, from: fromDaemonId },
+          { requestId: event.requestId, from: fromHostId },
           `${event.type} for a request this server did not relay; dropping`,
         );
         return;
       }
-      daemonLink.sendTo(route.fromDaemonId, BRIDGE_SURFACE_ID, event);
+      hostLink.sendTo(route.fromHostId, BRIDGE_SURFACE_ID, event);
       return;
     }
 
@@ -311,16 +311,16 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       // No requestId: a same-host call (or a surface's own direct send),
       // already resolved — see file header § 3. Only a cross-host agent call
       // carries one, and that's the only case this server needs to act on.
-      if (fromDaemonId === null || event.requestId === undefined) return;
+      if (fromHostId === null || event.requestId === undefined) return;
       const requestId = event.requestId;
       const resolved = resolveTargetHost(event.targetChatId);
       if (!resolved.ok) {
         logger.warn(
-          { from: fromDaemonId, target: event.targetChatId, code: resolved.code },
+          { from: fromHostId, target: event.targetChatId, code: resolved.code },
           'patch.send_to named a chat this server cannot reach',
         );
-        refuse(fromDaemonId, event.sourceChatId, resolved.code, resolved.message);
-        daemonLink.sendTo(fromDaemonId, BRIDGE_SURFACE_ID, {
+        refuse(fromHostId, event.sourceChatId, resolved.code, resolved.message);
+        hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
           type: 'patch.send_to.response',
           requestId,
           sourceChatId: event.sourceChatId,
@@ -331,11 +331,11 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
         return;
       }
       logger.info(
-        { from: fromDaemonId, target: resolved.daemonId, targetChatId: event.targetChatId },
+        { from: fromHostId, target: resolved.hostId, targetChatId: event.targetChatId },
         'relaying patch.send_to to the machine that owns the chat',
       );
-      trackRelay(requestId, fromDaemonId);
-      daemonLink.sendTo(resolved.daemonId, BRIDGE_SURFACE_ID, event);
+      trackRelay(requestId, fromHostId);
+      hostLink.sendTo(resolved.hostId, BRIDGE_SURFACE_ID, event);
       return;
     }
 
@@ -343,12 +343,12 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       const route = takeRelay(event.requestId);
       if (!route) {
         logger.warn(
-          { requestId: event.requestId, from: fromDaemonId },
+          { requestId: event.requestId, from: fromHostId },
           'patch.send_to.response for a request this server did not relay; dropping',
         );
         return;
       }
-      daemonLink.sendTo(route.fromDaemonId, BRIDGE_SURFACE_ID, event);
+      hostLink.sendTo(route.fromHostId, BRIDGE_SURFACE_ID, event);
     }
   });
 

@@ -95,6 +95,7 @@ describe('filter options', () => {
       'all',
       'cron',
       'recurrence',
+      'follows',
       'webhook',
       'todoist',
     ]);

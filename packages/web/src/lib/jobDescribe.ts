@@ -80,6 +80,8 @@ export function describeTrigger(trigger: JobTrigger, viewerTimeZone?: string): s
     }
     case 'todoist':
       return trigger.filter ? `Todoist task ${trigger.filter}` : 'Todoist task tagged @claude';
+    case 'follows':
+      return trigger.on === 'any' ? 'After another job runs' : 'After another job succeeds';
     case 'recurrence': {
       const zone = cronZoneLabel(trigger.timezone, viewerTimeZone ?? runtimeTimeZone());
       const label = describeRecurrenceRule(trigger.rrule);
@@ -97,6 +99,12 @@ export function actionVerb(action: JobAction): string {
   return `${action.type} · ${what}`;
 }
 
+/** Cut to 48 on code points: a code-unit slice can split an emoji's surrogate pair. */
+function clip48(text: string): string {
+  const chars = Array.from(text);
+  return chars.length > 48 ? `${chars.slice(0, 47).join('')}…` : text;
+}
+
 /**
  * The action's target: skill name, quoted prompt, folder, or chat id.
  *
@@ -110,11 +118,11 @@ export function actionVerb(action: JobAction): string {
  * folder a skill runs in found nothing (`actionTarget`).
  *
  * `hostName` is the caller's job: this function only sees the action, not the
- * live host list, so the caller resolves `action.daemonId` against presence
+ * live host list, so the caller resolves `action.hostId` against presence
  * state (the `JobEditorRoute` `hostNames` pattern) and passes the label in.
  * Omitted, the target reads exactly as before — folder alone, no host — so a
  * caller with no host list yet degrades gracefully rather than showing a raw
- * daemonId.
+ * hostId.
  */
 export function actionTarget(action: JobAction, hostName?: string): string {
   if (action.type === 'script') {
@@ -130,7 +138,7 @@ export function actionTarget(action: JobAction, hostName?: string): string {
       return t.length > 0 && !t.startsWith('#');
     });
     const head = (first ?? lines[0] ?? '').trim();
-    const clipped = head.length > 48 ? `${head.slice(0, 47)}…` : head;
+    const clipped = clip48(head);
     // A one-liner needs no line count; it is already all of it on screen.
     return lines.length > 1 ? `"${clipped}" · ${lines.length} lines` : `"${clipped}"`;
   }
@@ -142,7 +150,7 @@ export function actionTarget(action: JobAction, hostName?: string): string {
   }
   if (action.prompt) {
     const p = action.prompt.trim();
-    const clipped = p.length > 48 ? `${p.slice(0, 47)}…` : p;
+    const clipped = clip48(p);
     const quoted = `"${clipped}"`;
     if (!folderAddressed) return quoted;
     const folder = hostName ? `${hostName} · ${action.folder}` : action.folder;

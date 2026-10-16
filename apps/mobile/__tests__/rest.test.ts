@@ -264,18 +264,18 @@ describe('api.* — every method call shape', () => {
     expect(url).toBe(`${SERVER_URL}/api/auth/pair/start`);
     expect(init.method).toBe('POST');
   });
-  it('daemonPairStart()', async () => {
-    await api.daemonPairStart();
+  it('hostPairStart()', async () => {
+    await api.hostPairStart();
     const [url, init] = lastCall();
     expect(url).toBe(`${SERVER_URL}/api/auth/daemon/pair/start`);
     expect(init.method).toBe('POST');
   });
-  it('daemonManifest()', async () => {
-    await api.daemonManifest();
-    expect(lastCall()[0]).toBe(`${SERVER_URL}/api/daemon/daemon-latest.json`);
+  it('hostManifest()', async () => {
+    await api.hostManifest();
+    expect(lastCall()[0]).toBe(`${SERVER_URL}/api/daemon/host-latest.json`);
   });
-  it('daemonInstallCommand()', async () => {
-    await api.daemonInstallCommand('linux');
+  it('hostInstallCommand()', async () => {
+    await api.hostInstallCommand('linux');
     expect(lastCall()[0]).toBe(`${SERVER_URL}/api/daemon/install-command?os=linux`);
   });
   it('listSecrets()', async () => {
@@ -331,23 +331,23 @@ describe('api.* — every method call shape', () => {
     await api.folders();
     expect(lastCall()[0]).toBe(`${SERVER_URL}/api/folders`);
   });
-  // Browsing is addressed to ONE machine (spec/04 § Browsing) — the daemonId is
+  // Browsing is addressed to ONE machine (spec/04 § Browsing) — the hostId is
   // required and always on the query, because it is never the phone's own
   // filesystem being listed.
   it('browseFolders() with no dir', async () => {
     await api.browseFolders('host-a');
-    expect(lastCall()[0]).toBe(`${SERVER_URL}/api/folders/browse?daemonId=host-a`);
+    expect(lastCall()[0]).toBe(`${SERVER_URL}/api/folders/browse?hostId=host-a`);
   });
   it('browseFolders() with a dir', async () => {
     await api.browseFolders('host-a', '~/a b');
     expect(lastCall()[0]).toBe(
-      `${SERVER_URL}/api/folders/browse?daemonId=host-a&dir=${encodeURIComponent('~/a b')}`,
+      `${SERVER_URL}/api/folders/browse?hostId=host-a&dir=${encodeURIComponent('~/a b')}`,
     );
   });
   it('skills()', async () => {
     await api.skills('~/x', 'd1');
     expect(lastCall()[0]).toBe(
-      `${SERVER_URL}/api/skills?folder=${encodeURIComponent('~/x')}&daemonId=d1`,
+      `${SERVER_URL}/api/skills?folder=${encodeURIComponent('~/x')}&hostId=d1`,
     );
   });
 });

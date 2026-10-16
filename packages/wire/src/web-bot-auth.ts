@@ -4,14 +4,15 @@
 // lets a site verify them. Node-only (node:crypto), so it is a subpath export
 // (`@patch/wire/web-bot-auth`), never part of the browser-safe index.
 //
-// One Ed25519 key. Its private half is a base64 PKCS#8 DER string held in the
-// 1Password Agents vault (env-patch / PATCH_WEB_BOT_AUTH_KEY); nothing here
-// reads or writes disk.
+// One Ed25519 key per Patch deployment. Its private half is a base64 PKCS#8 DER
+// string held in the server's encrypted shared-secret store; nothing here reads
+// or writes disk.
 
 import {
   createHash,
   createPrivateKey,
   createPublicKey,
+  generateKeyPairSync,
   randomBytes,
   sign as edSign,
   type KeyObject,
@@ -19,7 +20,6 @@ import {
 
 export const DIRECTORY_PATH = '/.well-known/http-message-signatures-directory';
 export const DIRECTORY_CONTENT_TYPE = 'application/http-message-signatures-directory+json';
-export const DEFAULT_DIRECTORY_URL = `https://patch.tomchambers.me${DIRECTORY_PATH}`;
 export const SIGNATURE_LABEL = 'sig1';
 /** How long a request signature stays valid. Short: it is minted per request. */
 export const REQUEST_SIGNATURE_TTL_S = 60;
@@ -32,6 +32,13 @@ export interface WebBotAuthKey {
   jwk: { kty: 'OKP'; crv: 'Ed25519'; x: string };
   /** RFC 7638 JWK thumbprint, base64url — the `keyid` on every signature. */
   keyId: string;
+}
+
+/** Make the deployment's own identity. The returned PKCS#8 value belongs in its encrypted store. */
+export function generateWebBotAuthKey(): string {
+  return generateKeyPairSync('ed25519')
+    .privateKey.export({ type: 'pkcs8', format: 'der' })
+    .toString('base64');
 }
 
 /** Parse the vault value (base64 PKCS#8 DER). Throws on anything else. */

@@ -54,6 +54,13 @@ export interface NavigationGuard {
   shouldBlock: () => boolean;
   /** Ask the user. Resolving `true` lets the navigation through unchanged. */
   confirm: () => Promise<boolean>;
+  /**
+   * Take the modal down. Called when the guarded route unmounts while a
+   * `confirm()` is still unanswered — the user has already left (a redirect, a
+   * delete, an unguarded navigation), so "Keep editing" would be offered on a
+   * page that has no form to keep editing.
+   */
+  dismiss: () => void;
 }
 
 /** Every mounted guard, so a reload the app starts itself can ask the same question. */
@@ -92,6 +99,17 @@ export function useNavigationGuard(guard: NavigationGuard): void {
   // the effect below must run once per navigator. A ref bridges the two.
   const guardRef = useRef(guard);
   guardRef.current = guard;
+  // Confirms asked and not yet answered, and whether the route is still here.
+  const pendingRef = useRef(0);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      if (pendingRef.current > 0) guardRef.current.dismiss();
+    };
+  }, []);
 
   useEffect(() => {
     mountedGuards.add(guardRef);
@@ -115,8 +133,11 @@ export function useNavigationGuard(guard: NavigationGuard): void {
           run(...args);
           return;
         }
+        pendingRef.current += 1;
         void guardRef.current.confirm().then((ok) => {
-          if (ok) run(...args);
+          pendingRef.current -= 1;
+          // Already gone from this route: the held navigation is stale.
+          if (ok && aliveRef.current) run(...args);
         });
       };
     }

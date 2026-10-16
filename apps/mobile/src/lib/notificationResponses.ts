@@ -132,7 +132,23 @@ export interface NotificationResponseLike {
   };
 }
 
-async function performSend(
+/**
+ * A send that THROWS (the device is not linked, the socket could not be opened)
+ * is a failed send, not a lost tap: it takes the same "Not sent — tap to retry"
+ * path as a send that timed out. Logged, so the cause is not swallowed.
+ */
+async function attempt(
+  send: () => Promise<NotificationDeliveryResult>,
+): Promise<NotificationDeliveryResult> {
+  try {
+    return await send();
+  } catch (e) {
+    console.error(`notification action not delivered: ${(e as Error).message}`);
+    return 'failed';
+  }
+}
+
+function performSend(
   retryAs: PendingRetry['retryAs'],
   chatId: string,
   text: string,
@@ -140,10 +156,10 @@ async function performSend(
   questionText: string | undefined,
   decision: 'approve' | 'deny' | undefined,
 ): Promise<NotificationDeliveryResult> {
-  if (retryAs === 'reply') return sendBackgroundChatInput(chatId, text);
+  if (retryAs === 'reply') return attempt(() => sendBackgroundChatInput(chatId, text));
   if (retryAs === 'permission')
-    return sendBackgroundPermissionDecision(chatId, requestId!, decision!);
-  return sendBackgroundQuestionAnswer(chatId, requestId!, questionText!, text);
+    return attempt(() => sendBackgroundPermissionDecision(chatId, requestId!, decision!));
+  return attempt(() => sendBackgroundQuestionAnswer(chatId, requestId!, questionText!, text));
 }
 
 async function settle(
@@ -210,7 +226,7 @@ async function handleResponse(response: NotificationResponseLike): Promise<void>
   }
 
   if (intent.kind === 'reply') {
-    const result = await sendBackgroundChatInput(intent.chatId, intent.text);
+    const result = await attempt(() => sendBackgroundChatInput(intent.chatId, intent.text));
     await settle(identifier, result, {
       retryAs: 'reply',
       chatId: intent.chatId,
@@ -221,10 +237,8 @@ async function handleResponse(response: NotificationResponseLike): Promise<void>
   }
 
   if (intent.kind === 'permission') {
-    const result = await sendBackgroundPermissionDecision(
-      intent.chatId,
-      intent.requestId,
-      intent.decision,
+    const result = await attempt(() =>
+      sendBackgroundPermissionDecision(intent.chatId, intent.requestId, intent.decision),
     );
     await settle(identifier, result, {
       retryAs: 'permission',
@@ -238,11 +252,13 @@ async function handleResponse(response: NotificationResponseLike): Promise<void>
   }
 
   // 'question_answer'
-  const result = await sendBackgroundQuestionAnswer(
-    intent.chatId,
-    intent.requestId,
-    intent.questionText,
-    intent.answer,
+  const result = await attempt(() =>
+    sendBackgroundQuestionAnswer(
+      intent.chatId,
+      intent.requestId,
+      intent.questionText,
+      intent.answer,
+    ),
   );
   await settle(identifier, result, {
     retryAs: 'question_answer',

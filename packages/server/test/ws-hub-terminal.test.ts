@@ -16,7 +16,7 @@ import { WsHub } from '../src/ws-hub.js';
 import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
 import { ChatRegistry } from '../src/chat-registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const silentLogger = pino({ level: 'silent' });
 
@@ -32,18 +32,18 @@ class FakeSocket extends EventEmitter {
   }
 }
 
-function makeHub(): { hub: WsHub; link: InProcessDaemonLink } {
+function makeHub(): { hub: WsHub; link: InProcessHostLink } {
   const registry = Registry.load(mkdtempSync(join(tmpdir(), 'patch-wshub-term-')));
   const account = registry.bootstrapAccount();
   // `patch.terminal.open` names a machine, and the hub refuses one that is not
   // registered (spec/03 § Host events) — so the fixture registers it.
-  registry.setDaemonKey({ daemonId: 'd1', publicKey: account.userPublicKey, issuedAt: 1 });
-  const link = new InProcessDaemonLink();
+  registry.setDaemonKey({ hostId: 'd1', publicKey: account.userPublicKey, issuedAt: 1 });
+  const link = new InProcessHostLink();
   const hub = new WsHub({
     logger: silentLogger,
     registry,
     presence: new PresenceTracker(),
-    daemonLink: link,
+    hostLink: link,
     chatRegistry: new ChatRegistry(),
     idGenerator: () => 'id-1',
     helloTimeoutMs: 60_000,
@@ -68,7 +68,7 @@ describe('WsHub — terminal frames', () => {
     const frames: WireEvent[] = [
       {
         type: 'patch.terminal.open',
-        daemonId: 'd1',
+        hostId: 'd1',
         sessionId: 't1',
         folder: '/home/tom/projects',
       },

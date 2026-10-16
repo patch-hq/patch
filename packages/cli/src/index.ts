@@ -167,7 +167,8 @@ registerManageCommands(program);
 // bareword against commander's own registry of registered command names +
 // aliases. NO FALLBACK: a command the CLI doesn't define is rejected, not
 // swallowed.
-const knownCommandNames = new Set<string>();
+// `help` is commander's own built-in, so it is not in `program.commands`.
+const knownCommandNames = new Set<string>(['help']);
 for (const cmd of program.commands) {
   knownCommandNames.add(cmd.name());
   for (const alias of cmd.aliases()) knownCommandNames.add(alias);
@@ -177,6 +178,11 @@ if (cmdName !== undefined && !cmdName.startsWith('-') && !knownCommandNames.has(
   process.stderr.write(`error: unknown command '${cmdName}'\n`);
   process.exit(1);
 }
+
+// `patch help [command…]` reads as `patch [command…] --help`. The program's default
+// (TUI) action would otherwise take `help` as an excess argument.
+if (cmdName === 'help')
+  process.argv.splice(2, process.argv.length, ...process.argv.slice(3), '--help');
 
 // Determine if we're in TUI mode (no subcommand, or `resume`/`attach`).
 // In those modes we keep the event loop alive for Ink. For everything else

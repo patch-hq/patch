@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { CLAUDE_BACKEND_ID, type ChatContextUsage } from '@patch/wire';
 import { usePresenceStore, type HostAccount } from '../stores/presenceStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { UsageBars } from '../routes/settings/accountList.js';
 import { formatReadAt, summariseContext } from '../lib/usage.js';
 
@@ -31,29 +32,36 @@ interface Row {
   usage: HostAccount['usage'];
 }
 
-/** Every connected subscription account on every host — API keys have no limits to draw. */
-function accountRows(hosts: ReturnType<typeof usePresenceStore.getState>['hosts']): Row[] {
-  const list = Object.values(hosts).filter((h) => Object.keys(h.accounts).length > 0);
-  const many = list.length > 1;
+/** Each shared subscription account once; hosts only supply its usage readings. */
+function accountRows(
+  hosts: ReturnType<typeof usePresenceStore.getState>['hosts'],
+  shared: ReturnType<typeof usePreferencesStore.getState>['shared'],
+): Row[] {
+  if (shared === null) return [];
   const rows: Row[] = [];
-  for (const h of list) {
-    const hostName = h.host?.hostName ?? h.daemonId;
-    for (const acct of Object.values(h.accounts)) {
-      const backend = BACKEND_LABEL[acct.backendId] ?? acct.backendId;
-      const entries =
-        acct.accounts ??
-        (acct.connected
-          ? [{ id: acct.backendId, label: backend, connected: true, usage: acct.usage }]
-          : []);
-      for (const a of entries) {
-        if (!a.connected || ('kind' in a && a.kind === 'apiKey')) continue;
-        const name = acct.accounts ? `${backend} · ${a.label}` : backend;
-        rows.push({
-          key: `${h.daemonId}:${acct.backendId}:${a.id}`,
-          title: many ? `${hostName} · ${name}` : name,
-          usage: a.usage,
-        });
+  const backends = [
+    { id: CLAUDE_BACKEND_ID, accounts: shared.secrets.claude },
+    { id: 'codex', accounts: shared.secrets.codex },
+  ] as const;
+  for (const { id: backendId, accounts } of backends) {
+    const backend = BACKEND_LABEL[backendId] ?? backendId;
+    for (const account of accounts) {
+      if (!account.connected || ('kind' in account && account.kind === 'apiKey')) continue;
+      let usage: HostAccount['usage'];
+      let readAt = -1;
+      for (const host of Object.values(hosts)) {
+        const summary = host.accounts[backendId]?.accounts?.find((a) => a.id === account.id);
+        const at = summary?.usage?.at ?? 0;
+        if (summary?.usage && at > readAt) {
+          usage = summary.usage;
+          readAt = at;
+        }
       }
+      rows.push({
+        key: `${backendId}:${account.id}`,
+        title: `${backend} · ${account.label}`,
+        usage,
+      });
     }
   }
   return rows;
@@ -74,7 +82,8 @@ export function UsagePopover({
   onClose: () => void;
 }): JSX.Element | null {
   const hosts = usePresenceStore((s) => s.hosts);
-  const rows = accountRows(hosts);
+  const shared = usePreferencesStore((s) => s.shared);
+  const rows = accountRows(hosts, shared);
   const ctx = summariseContext(context);
   const popRef = useRef<HTMLDivElement>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);

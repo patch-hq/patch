@@ -41,6 +41,11 @@
       "types": "./dist/web-bot-auth.d.ts",
       "import": "./dist/web-bot-auth.js",
       "default": "./dist/web-bot-auth.js"
+    },
+    "./utterance-segmenter": {
+      "types": "./dist/utterance-segmenter.d.ts",
+      "import": "./dist/utterance-segmenter.js",
+      "default": "./dist/utterance-segmenter.js"
     }
   },
   "scripts": {

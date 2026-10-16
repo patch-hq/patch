@@ -13,7 +13,7 @@ const RUNNING = {
   queued: 2,
   trigger: { type: 'cron', expression: '57 8 * * 1-5' },
   filter: null,
-  action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/nearest-bus', skill: 'bus-watch' },
+  action: { type: 'spawn', hostId: 'd1', folder: '~/projects/nearest-bus', skill: 'bus-watch' },
   latestRun: { ts: Date.now() - 60_000, status: 'ok', chatId: 'chat-1' },
   createdAt: 1,
   updatedAt: 1,

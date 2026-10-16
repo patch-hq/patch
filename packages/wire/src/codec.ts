@@ -35,6 +35,52 @@
 import { z } from 'zod';
 import { WireEvent, type WireEvent as WireEventT } from './events.js';
 import { WireDecodeError } from './errors.js';
+import { headCodePoints } from './codepoints.js';
+
+/**
+ * Host rename, accept-both: the canonical names are `hostId` / `host.*`. A peer
+ * that predates the rename still sends `daemonId` / `daemon.*` (and
+ * `clientType: 'host'`), so inbound frames are rewritten to the canonical
+ * names before validation. Phase 3b deletes this.
+ */
+const LEGACY_TYPES = new Set([
+  'daemon.online',
+  'daemon.offline',
+  'daemon.unauthenticated',
+  'daemon.host',
+  'daemon.account',
+]);
+
+export function canonicalizeHostNames(value: unknown): unknown {
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk);
+    if (v === null || typeof v !== 'object') return v;
+    const out: Record<string, unknown> = {};
+    for (const [k, child] of Object.entries(v as Record<string, unknown>)) {
+      if (k === 'daemonId' && !('hostId' in (v as object))) out.hostId = walk(child);
+      else if (k === 'daemonVersion' && !('hostVersion' in (v as object)))
+        out.hostVersion = walk(child);
+      // The account's home machine. Easy to miss because it is the one legacy
+      // name that is not a bare `daemonId`, and missing it took production
+      // down: `parsePersisted` left `homeDaemonId` in registry.json, the
+      // `.strict()` RegistryFile rejected it AND found no `homeHostId`, and
+      // the server crash-looped on boot.
+      else if (k === 'homeDaemonId' && !('homeHostId' in (v as object)))
+        out.homeHostId = walk(child);
+      else out[k] = walk(child);
+    }
+    return out;
+  };
+  const walked = walk(value);
+  if (walked !== null && typeof walked === 'object' && !Array.isArray(walked)) {
+    const o = walked as Record<string, unknown>;
+    if (typeof o.type === 'string' && LEGACY_TYPES.has(o.type)) {
+      o.type = `host.${o.type.slice('daemon.'.length)}`;
+    }
+    if (o.clientType === 'daemon') o.clientType = 'host';
+  }
+  return walked;
+}
 
 /** Encode a typed event to a WebSocket text-frame string. */
 export function encode(event: WireEventT): string {
@@ -50,7 +96,7 @@ export function decode(raw: string | Buffer | ArrayBuffer | Uint8Array): WireEve
   } catch (e) {
     throw new WireDecodeError('invalid JSON', preview(text), e as SyntaxError);
   }
-  const result = WireEvent.safeParse(parsed);
+  const result = WireEvent.safeParse((parsed = canonicalizeHostNames(parsed)));
   if (!result.success) {
     throw new WireDecodeError(
       'schema validation failed',
@@ -89,18 +135,18 @@ function receivedAt(parsed: unknown, path: readonly (string | number)[]): string
     return undefined;
   }
   const max = 80;
-  return rendered.length <= max ? rendered : `${rendered.slice(0, max)}…`;
+  return rendered.length <= max ? rendered : `${headCodePoints(rendered, max)}…`;
 }
 
 function preview(text: string): string {
   const max = 200;
   if (text.length <= max) return text;
-  return `${text.slice(0, max)}…(+${text.length - max} chars)`;
+  return `${headCodePoints(text, max)}…(+${text.length - max} chars)`;
 }
 
 /** Type guard — narrows an unknown to a `WireEvent` without throwing. */
 export function isWireEvent(value: unknown): value is WireEventT {
-  return WireEvent.safeParse(value).success;
+  return WireEvent.safeParse(canonicalizeHostNames(value)).success;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +189,12 @@ export interface WireCompatStats {
   unknownFields: Record<string, number>;
 }
 
-const compatStats: WireCompatStats = { unknownTypes: {}, unknownFields: {} };
+// Prototype-less, so a sender's `type` of 'constructor' or '__proto__' is just
+// another key rather than a read of (or write to) Object.prototype.
+const compatStats: WireCompatStats = {
+  unknownTypes: Object.create(null) as Record<string, number>,
+  unknownFields: Object.create(null) as Record<string, number>,
+};
 
 /** Snapshot of the running totals — a copy, so callers cannot mutate the source. */
 export function wireCompatStats(): WireCompatStats {
@@ -174,7 +225,7 @@ export function decodeCompat(raw: string | Buffer | ArrayBuffer | Uint8Array): C
   } catch (e) {
     throw new WireDecodeError('invalid JSON', preview(text), e as SyntaxError);
   }
-  const result = WireEvent.safeParse(parsed);
+  const result = WireEvent.safeParse((parsed = canonicalizeHostNames(parsed)));
   if (result.success) return { ok: true, event: result.data, tolerated: [] };
 
   // An unknown discriminator is zod's way of saying no member of the union has

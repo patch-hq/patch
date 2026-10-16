@@ -7,8 +7,8 @@
 //      iframe that cannot attach a bearer header, so the URL carries an HMAC
 //      over the Pad id (server secret). The editor's own API (changes, send)
 //      lives under the same prefix.
-//   3. A daemon-link bridge for `patch.pad.request` — the agent's
-//      `patch_pad_*` tools (create / update / reply / list).
+//   3. A host-link bridge for `patch.pad.request` — the agent's
+//      `patch_pad_*` tools (create / update / reply / list / collect).
 //
 // Send draws a picture of every change, then delivers the batch into the
 // owning chat as a user turn over the daemon link. NO FALLBACK: a picture that
@@ -35,7 +35,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { PatchPadRequestEvent, type WireEvent } from '@patch/wire';
-import type { DaemonLink } from '../daemon-link.js';
+import type { HostLink } from '../host-link.js';
 import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
 import { loadLinkSecret } from '../artifacts.js';
@@ -43,7 +43,15 @@ import { requireAuth } from '../folder-routes.js';
 import { batchMessage, type PicturePlan } from './format.js';
 import { renderChangePictures, renderThumbnails } from './pictures.js';
 import { ScreensError, screensFor, type Screen } from './screens.js';
-import { PadError, PadStore, slugify, validId, type Device, type PadRecord } from './store.js';
+import {
+  PadError,
+  PadStore,
+  slugify,
+  validId,
+  type Batch,
+  type Device,
+  type PadRecord,
+} from './store.js';
 
 const BRIDGE_SURFACE_ID = 'pads-bridge';
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -73,7 +81,7 @@ const TYPES: Record<string, string> = {
 
 export interface PadRoutesDeps {
   logger: Logger;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   registry: Registry;
   chatRegistry: ChatRegistry;
   /** `<dataDir>/pads` — one folder per Pad. */
@@ -81,6 +89,12 @@ export interface PadRoutesDeps {
   /** Where the link-signing secret lives (shared with artifacts). */
   secretDir: string;
   idGenerator: () => string;
+  /**
+   * The server's public address, read when an agent collects a Pad: the
+   * pictures in the [Pad] message need an absolute URL, and an agent's call
+   * has no browser request to take one from. Empty when none is configured.
+   */
+  publicUrl: () => string;
 }
 
 export interface PadView {
@@ -141,7 +155,11 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
     createHmac('sha256', secret).update(`pad|${id}`).digest('hex');
   const sigOk = (id: string, sig: string): boolean => {
     const want = sign(id);
-    return sig.length === want.length && timingSafeEqual(Buffer.from(sig), Buffer.from(want));
+    // Lengths in BYTES: `timingSafeEqual` throws on unequal buffers, and 64
+    // multi-byte characters are 64 long but not 64 bytes.
+    const got = Buffer.from(sig);
+    const expected = Buffer.from(want);
+    return got.length === expected.length && timingSafeEqual(got, expected);
   };
   const base = (id: string): string => `/api/padx/${id}/${sign(id)}`;
   const sending = new Set<string>();
@@ -203,6 +221,14 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
     if (total > MAX_PAD_BYTES)
       throw new PadError(413, `pad files are ${total} bytes; the limit is ${MAX_PAD_BYTES}`);
     const root = store.filesDir(id);
+    // Resolve every destination BEFORE touching the disk: a bad path halfway
+    // through must not leave the Pad with its old files gone or half replaced.
+    const dests = files.map((f) => {
+      const dest = resolve(root, safeRel(f.path));
+      if (!dest.startsWith(resolve(root) + sep))
+        throw new PadError(400, `bad file path "${f.path}"`);
+      return dest;
+    });
     if (replace) {
       // Library copies and the screens a chat added by capture live beside the
       // agent's files: a replace by the agent must not take them away.
@@ -211,14 +237,11 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
         rmSync(join(root, entry), { recursive: true, force: true });
       }
     }
-    for (const f of files) {
-      const rel = safeRel(f.path);
-      const dest = resolve(root, rel);
-      if (!dest.startsWith(resolve(root) + sep))
-        throw new PadError(400, `bad file path "${f.path}"`);
+    files.forEach((f, i) => {
+      const dest = dests[i]!;
       mkdirSync(dirname(dest), { recursive: true });
       writeFileSync(dest, f.data);
-    }
+    });
   }
 
   /**
@@ -260,18 +283,28 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
   }
 
   /** Write captured single-file screens, listing them in pad.json after what is there. */
-  function addCaptured(
-    id: string,
-    screens: { name: string; html: string; width?: number }[],
-  ): void {
+  function addCaptured(id: string, input: unknown): void {
+    // The body is unchecked JSON: check every screen before writing any, so a
+    // bad one is a 400 and leaves no half-added capture on disk.
+    const ok = (s: unknown): s is { name: string; html: string; width?: unknown } => {
+      const v = s as { name?: unknown; html?: unknown } | null;
+      return (
+        typeof v === 'object' &&
+        v !== null &&
+        typeof v.name === 'string' &&
+        v.name.trim() !== '' &&
+        typeof v.html === 'string' &&
+        v.html.trim() !== ''
+      );
+    };
+    if (!Array.isArray(input) || !input.every(ok)) {
+      throw new PadError(400, 'each screen needs a name and html');
+    }
     const root = store.filesDir(id);
     mkdirSync(root, { recursive: true });
     const manifestPath = join(root, 'pad.json');
     const entries = existingScreens(root, manifestPath);
-    for (const s of screens) {
-      if (!s.name?.trim() || typeof s.html !== 'string' || !s.html.trim()) {
-        throw new PadError(400, 'each screen needs a name and html');
-      }
+    for (const s of input) {
       let n = slugify(s.name);
       let file = `cap-${n}.html`;
       for (let i = 2; existsSync(join(root, file)); i++) file = `cap-${n}-${i}.html`;
@@ -308,7 +341,12 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
         copyTree(store.filesDir(pick.padId), join(root, prefix));
         copied.add(prefix);
       }
+      // Two library screens called "Chat" are two screens: the id tells them apart.
+      const used = new Set(entries.map((e) => e.id ?? slugify(e.name)));
+      let sid = slugify(screen.name);
+      for (let i = 2; used.has(sid); i++) sid = `${slugify(screen.name)}-${i}`;
       entries.push({
+        id: sid,
         name: screen.name,
         path: `${prefix}/${screen.path}`,
         ...(screen.width ? { width: screen.width } : {}),
@@ -325,15 +363,16 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
     if (!deps.chatRegistry.get(pad.chatId)) {
       throw new PadError(502, `the chat this Pad belongs to (${pad.chatId}) no longer exists`);
     }
-    deps.daemonLink.send(BRIDGE_SURFACE_ID, {
+    deps.hostLink.send(BRIDGE_SURFACE_ID, {
       type: 'chat.input',
       chatId: pad.chatId,
       message,
       localId: deps.idGenerator(),
+      source: { kind: 'pad', padId: pad.id },
     });
   }
 
-  async function sendBatch(id: string, origin: string): Promise<unknown> {
+  async function sendBatch(id: string, origin: string): Promise<Batch> {
     if (sending.has(id)) throw new PadError(409, 'a send for this pad is already in progress');
     sending.add(id);
     try {
@@ -569,7 +608,9 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
   app.get(
     `${PFX}/f/*`,
     withPad((req, reply, pad) =>
-      sendFile(reply, store.filesDir(pad.id), decodeURIComponent(req.params['*'])),
+      // Fastify has already percent-decoded the wildcard: decoding again turns
+      // a real `%` in a file name into a 500.
+      sendFile(reply, store.filesDir(pad.id), req.params['*']),
     ),
   );
   app.get(
@@ -647,7 +688,7 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
 
   // ------------------------------------------------ 3. agent tools (link) --
 
-  const unsub = deps.daemonLink.onEvent((event: WireEvent, fromDaemonId: string | null) => {
+  const unsub = deps.hostLink.onEvent((event: WireEvent, fromHostId: string | null) => {
     if (event.type !== 'patch.pad.request') return;
     const reply = (
       ok: boolean,
@@ -662,34 +703,35 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
             ok: false,
             error: error ?? { code: 'internal', message: 'unknown' },
           };
-      if (fromDaemonId === null) {
+      if (fromHostId === null) {
         log.error(
           { requestId: event.requestId },
           'pads bridge: request with no originating machine; cannot reply',
         );
         return;
       }
-      deps.daemonLink.sendTo(fromDaemonId, BRIDGE_SURFACE_ID, out);
+      deps.hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, out);
     };
     const parsed = PatchPadRequestEvent.safeParse(event);
     if (!parsed.success)
       return reply(false, undefined, { code: 'invalid_input', message: parsed.error.message });
-    try {
-      reply(true, handleAgentOp(parsed.data));
-    } catch (err) {
-      if (err instanceof PadError) {
-        reply(false, undefined, {
-          code: err.status === 404 ? 'not_found' : 'invalid_input',
-          message: err.message,
-        });
-      } else {
-        log.error(
-          { err: (err as Error).message, stack: (err as Error).stack },
-          'pads bridge: failed',
-        );
-        reply(false, undefined, { code: 'internal', message: (err as Error).message });
-      }
-    }
+    handleAgentOp(parsed.data).then(
+      (result) => reply(true, result),
+      (err: unknown) => {
+        if (err instanceof PadError) {
+          reply(false, undefined, {
+            code: err.status === 404 ? 'not_found' : 'invalid_input',
+            message: err.message,
+          });
+        } else {
+          log.error(
+            { err: (err as Error).message, stack: (err as Error).stack },
+            'pads bridge: failed',
+          );
+          reply(false, undefined, { code: 'internal', message: (err as Error).message });
+        }
+      },
+    );
   });
 
   function owned(padId: string | undefined, chatId: string): PadRecord {
@@ -710,7 +752,7 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
     return pad;
   }
 
-  function handleAgentOp(req: PatchPadRequestEvent): unknown {
+  async function handleAgentOp(req: PatchPadRequestEvent): Promise<unknown> {
     switch (req.op) {
       case 'create': {
         if (!req.name) throw new PadError(400, 'name is required');
@@ -757,7 +799,50 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
             .filter((p) => p.chatId === req.chatId)
             .map(view),
         };
+      case 'collect':
+        return collect(owned(req.padId, req.chatId));
     }
+  }
+
+  /**
+   * The agent's Send: the same batch the editor's Send button makes, delivered
+   * into the owning chat as the same [Pad] message. Nothing pending sends
+   * nothing and says so. A batch already waiting on a reply is left as it is;
+   * the new one queues behind it, as a second Send from the editor would.
+   */
+  async function collect(pad: PadRecord): Promise<unknown> {
+    const pending = pad.changes.filter((c) => c.status === 'pending').length;
+    if (pending === 0) {
+      return {
+        ...view(pad),
+        collected: 0,
+        message: `no pending changes on "${pad.name}" — nothing was sent`,
+      };
+    }
+    const origin = deps.publicUrl().replace(/\/+$/, '');
+    if (!origin) {
+      throw new PadError(
+        409,
+        'this server has no public URL configured (PATCH_PUBLIC_URL), so the pictures in the [Pad] message would have no address — set it, or have the user press Send in the Pad',
+      );
+    }
+    const unanswered = pad.batches.filter((b) => b.status === 'sent').length;
+    const batch = await sendBatch(pad.id, origin);
+    const n = batch.changeIds.length;
+    const lines = [
+      `sent ${n} change${n === 1 ? '' : 's'} on "${pad.name}" to this chat as a [Pad] message with a picture of each; it arrives as your next message. Act on it, then patch_pad_update and patch_pad_reply.`,
+    ];
+    if (unanswered > 0) {
+      lines.push(
+        `${unanswered} earlier batch${unanswered === 1 ? ' was' : 'es were'} already waiting on a reply; patch_pad_reply answers the oldest first, so reply once per batch.`,
+      );
+    }
+    return {
+      ...view(store.mustGet(pad.id)),
+      collected: n,
+      batchId: batch.id,
+      message: lines.join(' '),
+    };
   }
 
   return unsub;

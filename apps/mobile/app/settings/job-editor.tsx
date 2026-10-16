@@ -1,4 +1,4 @@
-import { defaultDaemonId, usePresenceStore } from '../../src/stores/presenceStore';
+import { defaultHostId, usePresenceStore } from '../../src/stores/presenceStore';
 // Full mobile job editor (spec/15 § Job editor). Parity with the
 // web editor (packages/web/src/routes/JobEditorRoute.tsx): name + enable,
 // trigger type + natural-language cron config, JSONata filter for payload
@@ -211,7 +211,7 @@ export default function JobEditor(): React.ReactElement {
   const chatList = React.useMemo(() => Object.values(chats), [chats]);
   // The host the job's chat runs on, and whose folder registry the picker
   // shows (spec/08 § Action — the action is dispatched to the host it names).
-  const jobDaemonId = usePresenceStore((s) => defaultDaemonId(s.hosts));
+  const jobHostId = usePresenceStore((s) => defaultHostId(s.hosts));
   // Every folder the picker sheet offers, across hosts (spec/15 § Folder
   // picker sheet). The selector returns the stored map (stable); the list is
   // derived — building it inside the selector would loop.
@@ -222,8 +222,8 @@ export default function JobEditor(): React.ReactElement {
     () =>
       Object.values(hosts)
         .map((h) => ({
-          daemonId: h.daemonId,
-          name: h.host?.hostName ?? h.daemonId,
+          hostId: h.hostId,
+          name: h.host?.hostName ?? h.hostId,
           online: h.online,
         }))
         .sort((x, y) => x.name.localeCompare(y.name)),
@@ -241,8 +241,8 @@ export default function JobEditor(): React.ReactElement {
   const messageChat = chatList.find((c) => c.chatId === form.messageChatId);
   const messageChatFolder = messageChat?.folder ?? '';
   const skillFolder = form.actionType === 'message' ? messageChatFolder : form.spawnFolder;
-  const skillDaemonId =
-    form.actionType === 'message' ? (messageChat?.daemonId ?? '') : form.spawnDaemonId;
+  const skillHostId =
+    form.actionType === 'message' ? (messageChat?.hostId ?? '') : form.spawnHostId;
 
   // Load the jobs list for the Group picker's options.
   React.useEffect(() => {
@@ -298,7 +298,7 @@ export default function JobEditor(): React.ReactElement {
   // host-owned list arrives via the WS (`folders.list` / `folders.updated`)
   // and the cold-start fetch in bootstrap — no per-screen fetch needed.
   React.useEffect(() => {
-    const first = recents.find((r) => r.daemonId === jobDaemonId)?.folder;
+    const first = recents.find((r) => r.hostId === jobHostId)?.folder;
     if (isNew && form.spawnFolder === '' && first) {
       // Belt-and-braces re-check inside the functional updater against a
       // stale closure: this component is single-threaded, synchronous
@@ -309,7 +309,7 @@ export default function JobEditor(): React.ReactElement {
       /* v8 ignore next */
       setForm((f) => (f.spawnFolder === '' ? { ...f, spawnFolder: first } : f));
     }
-  }, [isNew, recents, jobDaemonId, form.spawnFolder]);
+  }, [isNew, recents, jobHostId, form.spawnFolder]);
 
   // Seed the host the same way the web editor does: the account's default host
   // (its home host, or the only one) when there is an unambiguous answer. With
@@ -317,22 +317,22 @@ export default function JobEditor(): React.ReactElement {
   // save refuses — better than silently scheduling work onto the wrong machine
   // (spec/08 § Action).
   React.useEffect(() => {
-    if (!isNew || form.spawnDaemonId !== '' || jobDaemonId === null) return;
-    setForm((f) => (f.spawnDaemonId === '' ? { ...f, spawnDaemonId: jobDaemonId } : f));
-  }, [isNew, jobDaemonId, form.spawnDaemonId]);
+    if (!isNew || form.spawnHostId !== '' || jobHostId === null) return;
+    setForm((f) => (f.spawnHostId === '' ? { ...f, spawnHostId: jobHostId } : f));
+  }, [isNew, jobHostId, form.spawnHostId]);
 
   // Fetch the target folder's skills for the Skill picker.
   React.useEffect(() => {
     const folder = skillFolder.trim();
-    const daemonId = skillDaemonId.trim();
-    if (folder === '' || daemonId === '') {
+    const hostId = skillHostId.trim();
+    if (folder === '' || hostId === '') {
       setAvailableSkills([]);
       setSkillPaths(undefined);
       return;
     }
     let live = true;
     void api
-      .skills(folder, daemonId)
+      .skills(folder, hostId)
       .then((r) => {
         if (!live) return;
         setAvailableSkills(r.skills ?? []);
@@ -346,7 +346,7 @@ export default function JobEditor(): React.ReactElement {
     return () => {
       live = false;
     };
-  }, [skillFolder, skillDaemonId]);
+  }, [skillFolder, skillHostId]);
 
   // Fetch the chosen host's models for the Model picker. NO FALLBACK: a failed
   // load leaves the list empty rather than showing a plausible hard-coded set
@@ -355,14 +355,14 @@ export default function JobEditor(): React.ReactElement {
     // Inlined rather than using `usesSpawnFields` below: that is declared later
     // in the component body, so reading it here would hit its TDZ on render.
     const spawns = form.actionType === 'spawn' || form.actionType === 'continue';
-    const daemonId = form.spawnDaemonId.trim();
-    if (daemonId === '' || !spawns) {
+    const hostId = form.spawnHostId.trim();
+    if (hostId === '' || !spawns) {
       setAvailableModels([]);
       return;
     }
     let live = true;
     void api
-      .models(daemonId)
+      .models(hostId)
       .then((r) => {
         if (live) setAvailableModels(r.models ?? []);
       })
@@ -372,7 +372,7 @@ export default function JobEditor(): React.ReactElement {
     return () => {
       live = false;
     };
-  }, [form.spawnDaemonId, form.actionType]);
+  }, [form.spawnHostId, form.actionType]);
 
   const scheduleUnparsed =
     form.scheduleText.trim() !== '' && parseNaturalSchedule(form.scheduleText) === null;
@@ -482,7 +482,7 @@ export default function JobEditor(): React.ReactElement {
     const target = resolveSkillEditTarget({
       skill: skillValue,
       paths: skillPaths,
-      daemonId: skillDaemonId,
+      hostId: skillHostId,
     });
     if (target === null) return null;
     if ('reason' in target) {
@@ -498,7 +498,7 @@ export default function JobEditor(): React.ReactElement {
     const to = target;
     return (
       <Pressable
-        onPress={() => router.push(editRoute(to.daemonId, to.path))}
+        onPress={() => router.push(editRoute(to.hostId, to.path))}
         style={{ marginTop: space.xs }}
       >
         <Text
@@ -647,6 +647,7 @@ export default function JobEditor(): React.ReactElement {
                 { value: 'cron', label: 'cron' },
                 { value: 'recurrence', label: 'recurrence' },
                 { value: 'webhook', label: 'webhook' },
+                { value: 'follows', label: 'follows' },
                 { value: 'todoist', label: 'todoist' },
               ]}
             />
@@ -837,6 +838,36 @@ export default function JobEditor(): React.ReactElement {
             </>
           ) : null}
 
+          {form.triggerType === 'follows' ? (
+            <>
+              <Field label="Follows job id">
+                <Input
+                  value={form.followsJobId}
+                  onChangeText={(v) => setForm({ ...form, followsJobId: v })}
+                  autoCapitalize="none"
+                  testID="job-follows-id"
+                />
+              </Field>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: space.lg,
+                }}
+              >
+                <Text style={{ color: colors.ink2, fontFamily: fonts.bodyBold }}>
+                  Also after failures
+                </Text>
+                <Switch
+                  value={form.followsAny}
+                  onValueChange={(v) => setForm({ ...form, followsAny: v })}
+                  testID="job-follows-any"
+                />
+              </View>
+            </>
+          ) : null}
+
           {form.triggerType === 'webhook' ? (
             <>
               <Field label="Scheme">
@@ -898,7 +929,7 @@ export default function JobEditor(): React.ReactElement {
                 gateOn: !f.gateOn,
                 // Seed from the action: the work's host and folder is almost
                 // always where the question belongs too.
-                ...(!f.gateOn && f.gateDaemonId === '' ? { gateDaemonId: f.spawnDaemonId } : {}),
+                ...(!f.gateOn && f.gateHostId === '' ? { gateHostId: f.spawnHostId } : {}),
                 ...(!f.gateOn && f.gateFolder === '' ? { gateFolder: f.spawnFolder } : {}),
               }))
             }
@@ -920,8 +951,8 @@ export default function JobEditor(): React.ReactElement {
             <>
               <Field label="Gate host">
                 <Input
-                  value={form.gateDaemonId}
-                  onChangeText={(v) => setForm({ ...form, gateDaemonId: v })}
+                  value={form.gateHostId}
+                  onChangeText={(v) => setForm({ ...form, gateHostId: v })}
                   autoCapitalize="none"
                   testID="job-gate-daemon"
                 />
@@ -1020,7 +1051,7 @@ export default function JobEditor(): React.ReactElement {
                     {form.spawnFolder === ''
                       ? 'Choose a folder…'
                       : `${folderName(form.spawnFolder)}${
-                          form.spawnDaemonId ? ` · ${hostName(form.spawnDaemonId)}` : ''
+                          form.spawnHostId ? ` · ${hostName(form.spawnHostId)}` : ''
                         }`}
                   </Text>
                   <ChevronDown size={14} color={colors.ink3} />
@@ -1029,18 +1060,18 @@ export default function JobEditor(): React.ReactElement {
                   visible={folderSheetOpen}
                   recents={recents}
                   hosts={pickerHosts}
-                  currentDaemonId={form.spawnDaemonId || null}
-                  onPick={(daemonId, folder) => {
-                    const h = hosts[daemonId];
+                  currentHostId={form.spawnHostId || null}
+                  onPick={(hostId, folder) => {
+                    const h = hosts[hostId];
                     if (h && !h.online) {
                       useUiStore
                         .getState()
                         .pushError(
-                          `${hostName(daemonId)} is offline — pick a folder on another host`,
+                          `${hostName(hostId)} is offline — pick a folder on another host`,
                         );
                       return;
                     }
-                    setForm({ ...form, spawnDaemonId: daemonId, spawnFolder: folder });
+                    setForm({ ...form, spawnHostId: hostId, spawnFolder: folder });
                     setFolderSheetOpen(false);
                   }}
                   onDismiss={() => setFolderSheetOpen(false)}
@@ -1057,7 +1088,7 @@ export default function JobEditor(): React.ReactElement {
                 A saved model is always kept as a chip even when the catalogue
                 is empty, so editing another field can't silently unpin it. */}
                   <Field label="Model">
-                    {form.spawnDaemonId.trim() === '' ? (
+                    {form.spawnHostId.trim() === '' ? (
                       <Text style={{ color: colors.ink3, fontSize: textMin }}>
                         Pick a folder first — models are per host.
                       </Text>
@@ -1213,6 +1244,24 @@ export default function JobEditor(): React.ReactElement {
                 {skillFolder.trim() !== '' && skillOptions.length > 0 ? skillEditLink() : null}
               </Field>
 
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: space.sm,
+                }}
+              >
+                <Text style={{ color: colors.ink2, fontFamily: fonts.body }}>
+                  Send agent trigger payload
+                </Text>
+                <Switch
+                  value={form.includePayload}
+                  onValueChange={(v) => setForm({ ...form, includePayload: v })}
+                  testID="job-include-payload"
+                />
+              </View>
+
               <Field label="Prompt">
                 <Input
                   value={usesSpawnFields ? form.spawnPrompt : form.messagePrompt}
@@ -1227,24 +1276,6 @@ export default function JobEditor(): React.ReactElement {
                   style={{ minHeight: 88, textAlignVertical: 'top' }}
                 />
               </Field>
-
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: space.sm,
-                }}
-              >
-                <Text style={{ color: colors.ink2, fontFamily: fonts.body }}>
-                  Include trigger event
-                </Text>
-                <Switch
-                  value={form.includePayload}
-                  onValueChange={(v) => setForm({ ...form, includePayload: v })}
-                  testID="job-include-payload"
-                />
-              </View>
 
               {form.actionType === 'continue' ? (
                 <Field label="Deduplication key · optional">

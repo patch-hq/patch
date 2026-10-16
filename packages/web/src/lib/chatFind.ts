@@ -13,18 +13,20 @@ export const FIND_CURRENT = 'chat-find-current';
  *  A match never spans two text nodes: markdown splits text at inline marks,
  *  and a phrase broken by one is rare enough not to be worth stitching. */
 export function findRanges(root: HTMLElement, query: string): Range[] {
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   if (q === '') return [];
+  // Matched against the original text: lower-casing can change a string's length
+  // ('İ' becomes two code units), which would shift every DOM offset after it.
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
   const out: Range[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
     const parent = n.parentElement;
     if (parent !== null && parent.closest('script,style,[data-find-skip]') !== null) continue;
-    const text = (n.textContent ?? '').toLowerCase();
-    for (let at = text.indexOf(q); at !== -1; at = text.indexOf(q, at + q.length)) {
+    for (const m of (n.textContent ?? '').matchAll(re)) {
       const r = document.createRange();
-      r.setStart(n, at);
-      r.setEnd(n, at + q.length);
+      r.setStart(n, m.index);
+      r.setEnd(n, m.index + m[0].length);
       out.push(r);
     }
   }

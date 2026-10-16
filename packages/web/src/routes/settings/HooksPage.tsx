@@ -12,7 +12,7 @@ import { api, ApiError } from '../../api/rest.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { Toggle } from '../../components/Toggle.js';
 import { useChatStore } from '../../stores/chatStore.js';
-import { defaultDaemonId, usePresenceStore } from '../../stores/presenceStore.js';
+import { defaultHostId, usePresenceStore } from '../../stores/presenceStore.js';
 import { loadModels, useModelCatalog } from '../../lib/models.js';
 import { Group, Note, Row, SettingsPage } from './ui.js';
 
@@ -246,15 +246,15 @@ function HookEditor({
   const modelCatalog = useModelCatalog();
   // The model catalogue is per machine: ask the first host the hook is gated
   // to, else the home host. No host to ask means no list — said, not guessed.
-  const modelDaemonId = draft.hosts[0] ?? defaultDaemonId(hosts);
+  const modelHostId = draft.hosts[0] ?? defaultHostId(hosts);
   useEffect(() => {
-    if (draft.kind !== 'prompt' || modelDaemonId === null) return;
-    void loadModels(modelDaemonId);
-  }, [draft.kind, modelDaemonId]);
+    if (draft.kind !== 'prompt' || modelHostId === null) return;
+    void loadModels(modelHostId);
+  }, [draft.kind, modelHostId]);
 
   const hostOptions = Object.values(hosts).map((h) => ({
-    value: h.daemonId,
-    label: h.host?.hostName ?? h.daemonId,
+    value: h.hostId,
+    label: h.host?.hostName ?? h.hostId,
   }));
   const folderOptions = [
     ...new Set([
@@ -347,7 +347,7 @@ function HookEditor({
                 </option>
               ))}
             </select>
-            {modelDaemonId === null ? (
+            {modelHostId === null ? (
               <Note testid="hook-editor-model-error">
                 No host to read models from — gate the hook to a host first.
               </Note>

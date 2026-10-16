@@ -1,9 +1,9 @@
 // Shared fixtures for the Settings section tests: a full `/api/settings`
 // response, and helpers that put hosts into the presence store exactly as the
-// wire does (`daemon.host`, `daemon.account`).
+// wire does (`host.host`, `host.account`).
 
 import { act, type ReactTestInstance } from 'react-test-renderer';
-import type { DaemonAccountSummary, DaemonHostEvent } from '@patch/wire';
+import type { HostAccountSummary, HostInfoEvent } from '@patch/wire';
 import { CLAUDE_BACKEND_ID, DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import type { SettingsResponse } from '../../src/api/rest';
 import { usePresenceStore } from '../../src/stores/presenceStore';
@@ -43,29 +43,29 @@ export function seedSettings(patch: Partial<SettingsResponse> = {}): SettingsRes
 /** An empty roster with a live link, and no host picked in the Settings switcher. */
 export function resetHosts(connection: 'connected' | 'offline' = 'connected'): void {
   usePresenceStore.setState({ hosts: {}, connection, daemon: 'unknown' });
-  useSettingsHostChoice.setState({ daemonId: null });
+  useSettingsHostChoice.setState({ hostId: null });
 }
 
 /** Pick the host the per-host Settings pages show (the switcher's tap). */
-export function pickHost(daemonId: string | null): void {
-  useSettingsHostChoice.setState({ daemonId });
+export function pickHost(hostId: string | null): void {
+  useSettingsHostChoice.setState({ hostId });
 }
 
-/** One host, online, having reported itself (`daemon.host`). */
+/** One host, online, having reported itself (`host.host`). */
 export function reportHost(
-  daemonId: string,
-  patch: Partial<Omit<DaemonHostEvent, 'type' | 'daemonId'>> = {},
+  hostId: string,
+  patch: Partial<Omit<HostInfoEvent, 'type' | 'hostId'>> = {},
   online = true,
 ): void {
   const s = usePresenceStore.getState();
-  s.setHostOnline(daemonId, online);
+  s.setHostOnline(hostId, online);
   s.setHostReport({
-    type: 'daemon.host',
-    daemonId,
-    hostName: daemonId,
+    type: 'host.host',
+    hostId,
+    hostName: hostId,
     platform: 'darwin',
     arch: 'arm64',
-    daemonVersion: '0.1.375',
+    hostVersion: '0.1.375',
     updateAvailable: false,
     permissionModeDefault: 'default',
     permissionOverrides: 0,
@@ -77,20 +77,20 @@ export function reportHost(
   });
 }
 
-/** One host's Claude credential report (`daemon.account`). */
+/** One host's Claude credential report (`host.account`). */
 export function reportClaude(
-  daemonId: string,
+  hostId: string,
   patch: {
     connected?: boolean;
     accountEmail?: string | null;
-    accounts?: DaemonAccountSummary[];
-    usage?: DaemonAccountSummary['usage'];
+    accounts?: HostAccountSummary[];
+    usage?: HostAccountSummary['usage'];
     credentialError?: { message: string; accountId?: string };
   } = {},
 ): void {
   usePresenceStore.getState().setHostAccount({
-    type: 'daemon.account',
-    daemonId,
+    type: 'host.account',
+    hostId,
     backendId: CLAUDE_BACKEND_ID,
     connected: patch.connected ?? false,
     accountEmail: patch.accountEmail ?? null,

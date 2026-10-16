@@ -4,7 +4,7 @@
 // Hosts — Add a host (the server's install command and a single-use pairing
 // code), then one row per machine: a presence dot, its name, platform and when
 // it was last seen, Update when it is behind. Tapping a row opens that host
-// (app/hosts/[daemonId]/index.tsx → HostDetail): its name, Make home, the
+// (app/hosts/[hostId]/index.tsx → HostDetail): its name, Make home, the
 // state of its agent backends with Sign in, its optional components, its Files
 // and Terminal, and Remove this host.
 //
@@ -55,7 +55,10 @@ export function hostSubtitle(h: HostPresence, now: number = Date.now()): string 
   if (!h.host) return 'awaiting first report';
   const where = platformLabel(h.host.platform);
   const home = h.host.isHomeHost ? 'home · ' : '';
-  return `${home}${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}`;
+  const power = h.host.power
+    ? ` · ${Math.round(h.host.power.percent)}% ${h.host.power.onBattery ? 'on battery' : 'plugged in'}`
+    : '';
+  return `${home}${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}${power}`;
 }
 
 // ── Hosts ────────────────────────────────────────────────────────────────────
@@ -90,30 +93,26 @@ export function HostsSection(): React.ReactElement {
       ) : (
         rows.map((h) => (
           <Row
-            key={h.daemonId}
-            testID={`host-${h.daemonId}`}
+            key={h.hostId}
+            testID={`host-${h.hostId}`}
             accessibilityLabel={hostName(h)}
             onPress={() =>
-              router.push({ pathname: '/hosts/[daemonId]', params: { daemonId: h.daemonId } })
+              router.push({ pathname: '/hosts/[hostId]', params: { hostId: h.hostId } })
             }
             leading={<Dot on={h.online} />}
             title={hostName(h)}
-            titleTestID={`host-${h.daemonId}-name`}
+            titleTestID={`host-${h.hostId}-name`}
             subtitle={hostSubtitle(h)}
-            subtitleTestID={`host-${h.daemonId}-status`}
+            subtitleTestID={`host-${h.hostId}-status`}
             right={
               <>
                 {h.host?.updateAvailable ? (
                   <SettingsButton
-                    testID={`host-${h.daemonId}-update`}
+                    testID={`host-${h.hostId}-update`}
                     label="Update"
                     variant="quiet"
                     onPress={() =>
-                      void sendToHost(
-                        h.daemonId,
-                        { type: 'host.update', daemonId: h.daemonId },
-                        'Update',
-                      )
+                      void sendToHost(h.hostId, { type: 'host.update', hostId: h.hostId }, 'Update')
                     }
                   />
                 ) : null}
@@ -132,9 +131,9 @@ export function HostsSection(): React.ReactElement {
  * its agent backends with Sign in on any that needs one, its optional
  * components, Files and Terminal, and Remove this host.
  */
-export function HostDetail({ daemonId }: { daemonId: string }): React.ReactElement {
+export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
   const router = useRouter();
-  const host = usePresenceStore((s) => s.hosts[daemonId] ?? null);
+  const host = usePresenceStore((s) => s.hosts[hostId] ?? null);
   const seen = React.useRef(false);
   if (host !== null) seen.current = true;
 
@@ -146,7 +145,7 @@ export function HostDetail({ daemonId }: { daemonId: string }): React.ReactEleme
 
   if (host === null) {
     return (
-      <SettingsPage title={daemonId} testID="settings-host-detail">
+      <SettingsPage title={hostId} testID="settings-host-detail">
         <SettingsSection>
           <NoticeRow testID="host-detail-gone" text="This host is no longer on the account" />
         </SettingsSection>
@@ -159,9 +158,9 @@ export function HostDetail({ daemonId }: { daemonId: string }): React.ReactEleme
       {host.host === null ? (
         <SettingsSection>
           <Row
-            title={daemonId}
+            title={hostId}
             subtitle="awaiting first report"
-            subtitleTestID={`host-${daemonId}-status`}
+            subtitleTestID={`host-${hostId}-status`}
           />
         </SettingsSection>
       ) : (
@@ -186,7 +185,7 @@ export function HostDetail({ daemonId }: { daemonId: string }): React.ReactEleme
 function HostSettingsState({ host }: { host: HostPresence }): React.ReactElement | null {
   const shared = useSettingsStore((s) => s.data?.shared ?? null);
   if (shared === null) return null;
-  const state = shared.hosts.find((h) => h.daemonId === host.daemonId);
+  const state = shared.hosts.find((h) => h.hostId === host.hostId);
   const text = state?.error
     ? `Could not apply: ${state.error}`
     : state?.appliedVersion === undefined
@@ -199,12 +198,8 @@ function HostSettingsState({ host }: { host: HostPresence }): React.ReactElement
           ? 'Updating'
           : 'Gets the latest when it reconnects';
   return (
-    <SettingsSection testID={`host-${host.daemonId}-settings-version`}>
-      <Row
-        title="Settings"
-        subtitle={text}
-        subtitleTestID={`host-${host.daemonId}-settings-state`}
-      />
+    <SettingsSection testID={`host-${host.hostId}-settings-version`}>
+      <Row title="Settings" subtitle={text} subtitleTestID={`host-${host.hostId}-settings-state`} />
     </SettingsSection>
   );
 }
@@ -217,41 +212,39 @@ function HostSettingsState({ host }: { host: HostPresence }): React.ReactElement
 function ClaudeSettingsDrift({ host }: { host: HostPresence }): React.ReactElement | null {
   const drift = host.claudeSettings?.drift;
   if (drift === undefined) return null;
-  const daemonId = host.daemonId;
+  const hostId = host.hostId;
   const platform = host.host?.platform;
   const os = platform === 'darwin' || platform === 'linux' ? platform : null;
   return (
     <SettingsSection
       title="settings.json changed on this machine"
-      testID={`host-${daemonId}-claude-drift`}
+      testID={`host-${hostId}-claude-drift`}
     >
-      <Muted testID={`host-${daemonId}-claude-drift-text`}>{drift}</Muted>
+      <Muted testID={`host-${hostId}-claude-drift-text`}>{drift}</Muted>
       <ButtonRow>
         <SettingsButton
-          testID={`host-${daemonId}-claude-drift-keep-shared`}
+          testID={`host-${hostId}-claude-drift-keep-shared`}
           label="Keep for every host"
           onPress={() =>
-            void writeShared('Keep settings.json', () =>
-              api.adoptClaudeSettings(daemonId, 'shared'),
-            )
+            void writeShared('Keep settings.json', () => api.adoptClaudeSettings(hostId, 'shared'))
           }
         />
         {os ? (
           <SettingsButton
-            testID={`host-${daemonId}-claude-drift-keep-os`}
+            testID={`host-${hostId}-claude-drift-keep-os`}
             label={`Keep for ${os === 'darwin' ? 'macOS' : 'Linux'}`}
             variant="quiet"
             onPress={() =>
-              void writeShared('Keep settings.json', () => api.adoptClaudeSettings(daemonId, os))
+              void writeShared('Keep settings.json', () => api.adoptClaudeSettings(hostId, os))
             }
           />
         ) : null}
         <SettingsButton
-          testID={`host-${daemonId}-claude-drift-discard`}
+          testID={`host-${hostId}-claude-drift-discard`}
           label="Discard"
           variant="quiet"
           onPress={() =>
-            void sendToHost(daemonId, { type: 'host.claude_settings_discard', daemonId }, 'Discard')
+            void sendToHost(hostId, { type: 'host.claude_settings_discard', hostId }, 'Discard')
           }
         />
       </ButtonRow>
@@ -262,7 +255,7 @@ function ClaudeSettingsDrift({ host }: { host: HostPresence }): React.ReactEleme
 /** Name (renamable), presence, platform and version with Update, and home. */
 function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | null {
   const report = host.host;
-  const daemonId = host.daemonId;
+  const hostId = host.hostId;
   const [draft, setDraft] = React.useState(report?.hostName ?? '');
   React.useEffect(() => setDraft(report?.hostName ?? ''), [report?.hostName]);
   if (!report) return null;
@@ -276,19 +269,19 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
       return;
     }
     if (next === report.hostName) return;
-    if (!sendToHost(daemonId, { type: 'host.rename', daemonId, hostName: next }, 'Rename')) {
+    if (!sendToHost(hostId, { type: 'host.rename', hostId, hostName: next }, 'Rename')) {
       setDraft(report.hostName);
     }
   };
 
   return (
-    <SettingsSection testID={`host-${daemonId}`}>
+    <SettingsSection testID={`host-${hostId}`}>
       <Row
         title="Name"
         right={
           <>
             <Field
-              testID={`host-${daemonId}-name-input`}
+              testID={`host-${hostId}-name-input`}
               accessibilityLabel="Machine name"
               value={draft}
               onChangeText={setDraft}
@@ -297,7 +290,7 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
             />
             {draft.trim() !== report.hostName ? (
               <SettingsButton
-                testID={`host-${daemonId}-rename-save`}
+                testID={`host-${hostId}-rename-save`}
                 label="Save"
                 disabled={draft.trim() === ''}
                 onPress={commitRename}
@@ -310,19 +303,19 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
         leading={<Dot on={host.online} />}
         title={host.online ? 'Online' : 'Offline'}
         subtitle={host.online ? undefined : `seen ${agoLabel(host.lastSeenAt)}`}
-        titleTestID={`host-${daemonId}-status`}
+        titleTestID={`host-${hostId}-status`}
       />
       <Row
         title={`${platformLabel(report.platform)} ${report.arch}`}
-        titleTestID={`host-${daemonId}-platform`}
-        subtitle={`Host ${report.daemonVersion}`}
+        titleTestID={`host-${hostId}-platform`}
+        subtitle={`Host ${report.hostVersion}`}
         right={
           report.updateAvailable ? (
             <SettingsButton
-              testID={`host-${daemonId}-update`}
+              testID={`host-${hostId}-update`}
               label="Update"
               variant="quiet"
-              onPress={() => void sendToHost(daemonId, { type: 'host.update', daemonId }, 'Update')}
+              onPress={() => void sendToHost(hostId, { type: 'host.update', hostId }, 'Update')}
             />
           ) : null
         }
@@ -331,14 +324,14 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
         title="Home"
         right={
           report.isHomeHost ? (
-            <RowValue testID={`host-${daemonId}-home`}>This is home</RowValue>
+            <RowValue testID={`host-${hostId}-home`}>This is home</RowValue>
           ) : (
             <SettingsButton
-              testID={`host-${daemonId}-set-home`}
+              testID={`host-${hostId}-set-home`}
               label="Make home"
               variant="quiet"
               onPress={() =>
-                void sendToHost(daemonId, { type: 'host.set_home', daemonId }, 'Make home')
+                void sendToHost(hostId, { type: 'host.set_home', hostId }, 'Make home')
               }
             />
           )
@@ -352,23 +345,23 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
 function HostBackends({ host }: { host: HostPresence }): React.ReactElement | null {
   const router = useRouter();
   const report = host.host;
-  const daemonId = host.daemonId;
+  const hostId = host.hostId;
   const [signingIn, setSigningIn] = React.useState<string | null>(null);
   const [token, setToken] = React.useState('');
   if (!report || report.backends.length === 0) return null;
   return (
-    <SettingsSection title="Agents" testID={`host-${daemonId}-backends`}>
+    <SettingsSection title="Agents" testID={`host-${hostId}-backends`}>
       {report.backends.map((b) => (
         <Row
           key={b.id}
           title={b.label}
           subtitle={`${b.version ? `${b.version} · ` : ''}${b.state}${b.error ? ` — ${b.error}` : ''}`}
-          subtitleTestID={`host-${daemonId}-backend-${b.id}`}
+          subtitleTestID={`host-${hostId}-backend-${b.id}`}
           right={
             // A backend that is logged out or absent is the one state to act on.
             b.state !== 'present' ? (
               <SettingsButton
-                testID={`host-${daemonId}-backend-${b.id}-connect`}
+                testID={`host-${hostId}-backend-${b.id}-connect`}
                 label="Sign in"
                 variant="quiet"
                 accessibilityLabel={`Sign in to ${b.label}`}
@@ -382,7 +375,7 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
                   }
                   if (b.id === 'codex') {
                     // OpenAI sign-in lives on Usage → ChatGPT, where its form is.
-                    useUiStore.getState().setCodexSignInHost(daemonId);
+                    useUiStore.getState().setCodexSignInHost(hostId);
                     router.push({ pathname: '/settings/[page]', params: { page: 'usage' } });
                     return;
                   }
@@ -396,7 +389,7 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
           {signingIn === b.id ? (
             <View style={{ marginTop: space.sm, gap: space.sm }}>
               <Field
-                testID={`host-${daemonId}-signin-token`}
+                testID={`host-${hostId}-signin-token`}
                 accessibilityLabel="Token"
                 value={token}
                 onChangeText={setToken}
@@ -404,7 +397,7 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
                 secureTextEntry
               />
               <SettingsButton
-                testID={`host-${daemonId}-signin-submit`}
+                testID={`host-${hostId}-signin-submit`}
                 label="Sign in"
                 onPress={() => {
                   // A Claude account is shared by every host (spec/01 § Settings):
@@ -414,7 +407,7 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
                   void writeShared('Sign in', () =>
                     t
                       ? api.addAccount('claude-code', { token: t })
-                      : api.adoptAccount('claude-code', daemonId),
+                      : api.adoptAccount('claude-code', hostId),
                   ).then((ok) => {
                     if (ok) {
                       setSigningIn(null);
@@ -434,10 +427,10 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
 /** The host's optional components (spec/02 § Optional components). */
 function HostComponents({ host }: { host: HostPresence }): React.ReactElement | null {
   const report = host.host;
-  const daemonId = host.daemonId;
+  const hostId = host.hostId;
   if (!report || report.components.length === 0) return null;
   return (
-    <SettingsSection title="Components" testID={`host-${daemonId}-components`}>
+    <SettingsSection title="Components" testID={`host-${hostId}-components`}>
       {report.components.map((c) => {
         const state =
           c.state === 'downloading'
@@ -450,13 +443,13 @@ function HostComponents({ host }: { host: HostPresence }): React.ReactElement | 
         return (
           <Row
             key={c.id}
-            testID={`host-${daemonId}-component-${c.id}`}
+            testID={`host-${hostId}-component-${c.id}`}
             title={c.label}
             subtitle={state}
             right={
               c.state === 'installed' ? (
                 <SettingsButton
-                  testID={`host-${daemonId}-component-${c.id}-remove`}
+                  testID={`host-${hostId}-component-${c.id}-remove`}
                   label="Remove"
                   variant="danger"
                   onPress={() =>
@@ -467,8 +460,8 @@ function HostComponents({ host }: { host: HostPresence }): React.ReactElement | 
                         style: 'destructive',
                         onPress: () =>
                           void sendToHost(
-                            daemonId,
-                            { type: 'host.component_remove', daemonId, componentId: c.id },
+                            hostId,
+                            { type: 'host.component_remove', hostId, componentId: c.id },
                             'Remove',
                           ),
                       },
@@ -477,13 +470,13 @@ function HostComponents({ host }: { host: HostPresence }): React.ReactElement | 
                 />
               ) : c.state === 'downloading' ? null : (
                 <SettingsButton
-                  testID={`host-${daemonId}-component-${c.id}-install`}
+                  testID={`host-${hostId}-component-${c.id}-install`}
                   label={c.state === 'failed' ? 'Retry' : 'Install'}
                   variant="quiet"
                   onPress={() =>
                     void sendToHost(
-                      daemonId,
-                      { type: 'host.component_install', daemonId, componentId: c.id },
+                      hostId,
+                      { type: 'host.component_install', hostId, componentId: c.id },
                       'Install',
                     )
                   }
@@ -509,7 +502,7 @@ function HostTools({ host }: { host: HostPresence }): React.ReactElement {
   const reachable = conn === 'connected' && host.online;
   const tool = (key: 'files' | 'terminal', label: string, go: () => void): React.ReactElement => (
     <Row
-      testID={`host-${host.daemonId}-${key}`}
+      testID={`host-${host.hostId}-${key}`}
       accessibilityLabel={label}
       title={label}
       titleColor={reachable ? colors.ink : colors.inkFaint}
@@ -518,15 +511,15 @@ function HostTools({ host }: { host: HostPresence }): React.ReactElement {
     />
   );
   return (
-    <SettingsSection title="Tools" testID={`host-${host.daemonId}-tools`}>
-      {tool('files', 'Files', () => router.push(filesRoute(host.daemonId)))}
-      {tool('terminal', 'Terminal', () => router.push(terminalRoute(host.daemonId)))}
+    <SettingsSection title="Tools" testID={`host-${host.hostId}-tools`}>
+      {tool('files', 'Files', () => router.push(filesRoute(host.hostId)))}
+      {tool('terminal', 'Terminal', () => router.push(terminalRoute(host.hostId)))}
     </SettingsSection>
   );
 }
 
 /**
- * Remove this host from the account (`DELETE /api/hosts/:daemonId`). Its
+ * Remove this host from the account (`DELETE /api/hosts/:hostId`). Its
  * credential is revoked, so it cannot reconnect without being paired again —
  * asked first. The host is dropped here as soon as the server says so (every
  * surface is also sent `host.removed`).
@@ -537,8 +530,8 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
   const remove = async (): Promise<void> => {
     setBusy(true);
     try {
-      await api.removeHost(host.daemonId);
-      usePresenceStore.getState().removeHost(host.daemonId);
+      await api.removeHost(host.hostId);
+      usePresenceStore.getState().removeHost(host.hostId);
     } catch (e) {
       const message =
         e instanceof ApiError && e.status === 404
@@ -554,7 +547,7 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
         title="Remove this host"
         right={
           <SettingsButton
-            testID={`host-${host.daemonId}-remove`}
+            testID={`host-${host.hostId}-remove`}
             label={busy ? 'Removing…' : 'Remove'}
             variant="danger"
             disabled={busy}
@@ -621,7 +614,7 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
   const mintCode = React.useCallback(() => {
     setCode({ state: 'loading' });
     void api
-      .daemonPairStart()
+      .hostPairStart()
       .then((r) => setCode({ state: 'ok', value: r.nonce }))
       .catch((e: Error) => setCode({ state: 'error', error: e.message }));
   }, []);
@@ -629,7 +622,7 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
   React.useEffect(() => {
     let live = true;
     void api
-      .daemonManifest()
+      .hostManifest()
       .then((m) => {
         if (!live) return;
         const published = Array.isArray(m.artifacts) ? m.artifacts : [];
@@ -639,7 +632,7 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
         if (!chosen) return;
         mintCode();
         void api
-          .daemonInstallCommand(chosen.value)
+          .hostInstallCommand(chosen.value)
           .then((r) => live && setCommand({ state: 'ok', value: r.command }))
           .catch((e: Error) => live && setCommand({ state: 'error', error: e.message }));
       })
@@ -811,7 +804,7 @@ export function ProviderKeys(): React.ReactElement {
                       variant="quiet"
                       disabled={!reachable || busy}
                       onPress={() =>
-                        void run(`${label} key`, () => api.adoptProviderKey(k.id, env[0]!.daemonId))
+                        void run(`${label} key`, () => api.adoptProviderKey(k.id, env[0]!.hostId))
                       }
                     />
                   ) : null}

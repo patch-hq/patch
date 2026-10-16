@@ -18,6 +18,7 @@
 // a spawn-time code (`folder_not_found`) tears the row down — the spawn
 // failed, the row should not exist.
 
+import { parsePersisted } from './persisted-json.js';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { Logger } from 'pino';
 import type {
@@ -31,8 +32,9 @@ import type {
   ChatContextUsage,
   GoalProgress,
   FinishedGoal,
+  ChatBranch,
 } from '@patch/wire';
-import { isReservedSpecialThread } from '@patch/wire';
+import { isReservedSpecialThread, type SnoozeRecord } from '@patch/wire';
 
 export interface ChatSummary {
   chatId: string;
@@ -91,7 +93,7 @@ export interface ChatSummary {
    * host needs to know which one owns it, and REST callers list chats
    * grouped by host.
    */
-  daemonId: string;
+  hostId: string;
   /**
    * The EFFECTIVE permission mode the chat's next turn will use, as the host
    * resolved it. Mirrored, never re-derived: the server does not know the
@@ -119,6 +121,10 @@ export interface ChatSummary {
    * event to bring the chat back into the active list.
    */
   snoozedUntil: number | null;
+  /** What each snooze was and what happened in it (spec/04 § Snooze), oldest first. */
+  snoozeRecords: SnoozeRecord[];
+  /** ms epoch the current run began, or `null` when not running. */
+  runningSince: number | null;
   /**
    * Running out of the active list (spec/04 § Hidden), mirrored from the
    * host's `chat.state`. Drawn only in the sidebar's Hidden section.
@@ -169,6 +175,9 @@ export interface ChatSummary {
    * cold-start reason as `backgroundTasks`. `null` means nothing measured.
    */
   context: ChatContextUsage | null;
+  /** Latest host-reported branch graph, retained for server-copy takeover. */
+  branches: ChatBranch[];
+  activeBranchId: string | null;
 }
 
 export interface ChatRegistryOptions {
@@ -202,7 +211,7 @@ const SPAWN_TIME_ERROR_CODES = new Set<ChatErrorCode>(['folder_not_found']);
  * the chat back to `idle`/`errored`. If the host↔server link drops while a
  * chat is in one of these states, the turn-completion event will never arrive,
  * so the server must resolve the chat to `errored` itself (see
- * `WsHub.resolveInFlightChatsOnDaemonOffline`). spec/04 ## Activity + spec/12.
+ * `WsHub.resolveInFlightChatsOnHostOffline`). spec/04 ## Activity + spec/12.
  */
 const IN_FLIGHT_ACTIVITIES = new Set<ChatSummary['activity']>(['running', 'awaiting-permission']);
 
@@ -267,7 +276,7 @@ export class ChatRegistry {
   private restore(): void {
     if (this.persistPath === null || !existsSync(this.persistPath)) return;
     try {
-      const parsed = JSON.parse(readFileSync(this.persistPath, 'utf8')) as {
+      const parsed = parsePersisted(readFileSync(this.persistPath, 'utf8')) as {
         chats?: ChatSummary[];
         worked?: Record<string, number>;
       };
@@ -298,12 +307,12 @@ export class ChatRegistry {
       return;
     }
     if (event.type === 'folders.list') {
-      this.syncedHosts.add(event.daemonId);
+      this.syncedHosts.add(event.hostId);
       // The host has finished telling us what it has: a restored chat of this
       // host that it did not mention is not on it any more.
       let pruned = false;
       for (const chatId of [...this.unconfirmed]) {
-        if (this.chats.get(chatId)?.daemonId !== event.daemonId) continue;
+        if (this.chats.get(chatId)?.hostId !== event.hostId) continue;
         this.unconfirmed.delete(chatId);
         this.chats.delete(chatId);
         this.spawnedSet.delete(chatId);
@@ -330,7 +339,7 @@ export class ChatRegistry {
         statusDeclared: null,
         pendingWake: null,
         todos: [],
-        daemonId: event.daemonId,
+        hostId: event.hostId,
         permissionMode: 'auto',
         folder: event.folder,
         activity: 'idle',
@@ -339,6 +348,8 @@ export class ChatRegistry {
         pinnedAt: null,
         disabled: false,
         snoozedUntil: null,
+        snoozeRecords: [],
+        runningSince: null,
         hidden: false,
         lastUpdated: 0,
         lastUserActivity: 0,
@@ -348,7 +359,17 @@ export class ChatRegistry {
         // which is not the same as none.
         backgroundTasks: null,
         context: null,
+        branches: [],
+        activeBranchId: null,
       });
+      return;
+    }
+    if (event.type === 'chat.branches') {
+      const chat = this.chats.get(event.chatId);
+      if (!chat) return;
+      chat.branches = event.branches;
+      chat.activeBranchId = event.activeBranchId;
+      this.markDirty();
       return;
     }
     if (event.type === 'chat.state') {
@@ -398,18 +419,23 @@ export class ChatRegistry {
         // every item), so `[]` is meaningful — only keep the existing list when
         // the field is absent (undefined).
         todos: event.todos !== undefined ? event.todos : (existing?.todos ?? []),
-        daemonId: existing?.daemonId ?? event.daemonId ?? '',
+        hostId: existing?.hostId ?? event.hostId ?? '',
         permissionMode: event.permissionMode,
         folder: event.folder ?? existing?.folder ?? '',
         activity: event.activity,
         status: event.status ?? existing?.status ?? 'active',
         pinned: event.pinned ?? existing?.pinned ?? false,
-        pinnedAt: event.pinnedAt ?? existing?.pinnedAt ?? null,
+        // Unpinning sends `null`, which is meaningful — only keep the existing
+        // value when the field is absent (undefined).
+        pinnedAt: event.pinnedAt !== undefined ? event.pinnedAt : (existing?.pinnedAt ?? null),
         disabled: event.disabled ?? existing?.disabled ?? false,
         // A snooze CAN clear (unsnoozed / woken), so `null` is meaningful — only
         // keep the existing value when the field is absent (undefined).
         snoozedUntil:
           event.snoozedUntil !== undefined ? event.snoozedUntil : (existing?.snoozedUntil ?? null),
+        snoozeRecords: event.snoozeRecords ?? existing?.snoozeRecords ?? [],
+        runningSince:
+          event.runningSince !== undefined ? event.runningSince : (existing?.runningSince ?? null),
         hidden: event.hidden ?? existing?.hidden ?? false,
         lastUpdated: event.lastUpdated,
         // Back-compat: an older host never sends the field, so fall back to
@@ -440,6 +466,8 @@ export class ChatRegistry {
             ? event.backgroundTasks
             : (existing?.backgroundTasks ?? null),
         context: event.context !== undefined ? event.context : (existing?.context ?? null),
+        branches: existing?.branches ?? [],
+        activeBranchId: existing?.activeBranchId ?? null,
       };
       this.chats.set(event.chatId, next);
       this.unconfirmed.delete(event.chatId);
@@ -509,13 +537,13 @@ export class ChatRegistry {
   }
 
   /** Whether this host has re-announced its chats since the server started. */
-  hasSynced(daemonId: string): boolean {
-    return this.syncedHosts.has(daemonId);
+  hasSynced(hostId: string): boolean {
+    return this.syncedHosts.has(hostId);
   }
 
   /**
    * chatIds currently mid-turn (activity `running` or `awaiting-permission`).
-   * Used on daemon-link loss to find the chats whose turn-completion event will
+   * Used on host-link loss to find the chats whose turn-completion event will
    * never arrive, so they can be resolved to `errored` rather than left
    * spinning forever (spec/12 — NO FALLBACK / fail loud).
    */
@@ -542,17 +570,20 @@ export class ChatRegistry {
   ): ChatStateEvent | null {
     const existing = this.chats.get(chatId);
     if (!existing) return null;
-    const next: ChatSummary = { ...existing, activity: 'errored', lastUpdated: at };
+    // `lastUpdated` is host-owned and clients drop any chat.state older than the
+    // one they hold. Stamping the server clock here would outrank every frame
+    // the host sends once it recovers, leaving the errored badge stuck for good.
+    const next: ChatSummary = { ...existing, activity: 'errored' };
     this.chats.set(chatId, next);
     this.markDirty();
     return {
       type: 'chat.state',
       chatId,
-      daemonId: next.daemonId,
+      hostId: next.hostId,
       activity: 'errored',
       permissionMode: next.permissionMode,
       status: next.status,
-      lastUpdated: at,
+      lastUpdated: next.lastUpdated,
       name: next.name,
       preview: next.preview,
       // `folder` on the wire is min(1); a spawned chat always has one, but guard
@@ -561,6 +592,8 @@ export class ChatRegistry {
       pinned: next.pinned,
       pinnedAt: next.pinnedAt,
       snoozedUntil: next.snoozedUntil,
+      snoozeRecords: next.snoozeRecords,
+      runningSince: next.runningSince,
       hidden: next.hidden,
       lastError: { code: error.code, message: error.message, at },
     };
@@ -568,14 +601,14 @@ export class ChatRegistry {
 
   /**
    * The chat has moved to another host (spec/04 § Moving a chat to another
-   * host). `daemonId` is otherwise fixed at `chat.spawned` for the chat's life,
+   * host). `hostId` is otherwise fixed at `chat.spawned` for the chat's life,
    * and it is what routes every later frame for the chat, so a move is the one
    * thing that changes it. No-op if unknown.
    */
-  rehome(chatId: string, daemonId: string, folder: string): void {
+  rehome(chatId: string, hostId: string, folder: string): void {
     const existing = this.chats.get(chatId);
     if (!existing) return;
-    this.chats.set(chatId, { ...existing, daemonId, folder });
+    this.chats.set(chatId, { ...existing, hostId, folder });
     this.unconfirmed.delete(chatId);
     this.markDirty();
   }
@@ -707,8 +740,8 @@ export class ChatRegistry {
    * surfaces, not projects you would start a chat in (spec/06, and matching
    * `chatGroups.ts`'s own exclusion on the web side).
    */
-  folders(): Array<{ folder: string; daemonId: string; lastUpdated: number }> {
-    const byFolder = new Map<string, { folder: string; daemonId: string; lastUpdated: number }>();
+  folders(): Array<{ folder: string; hostId: string; lastUpdated: number }> {
+    const byFolder = new Map<string, { folder: string; hostId: string; lastUpdated: number }>();
     for (const c of this.chats.values()) {
       if (isReservedSpecialThread(c.chatId)) continue;
       // A soft-deleted chat stops contributing, exactly as on the web side —
@@ -720,7 +753,7 @@ export class ChatRegistry {
       if (existing && existing.lastUpdated >= c.lastUpdated) continue;
       byFolder.set(c.folder, {
         folder: c.folder,
-        daemonId: c.daemonId,
+        hostId: c.hostId,
         lastUpdated: c.lastUpdated,
       });
     }

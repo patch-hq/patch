@@ -316,7 +316,34 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookIngress
       // addressed host is down, else `ok` / `dispatch-error` when that host
       // answers (spec/08 ## Execution model step 6). Accepting an inbound is
       // NOT the same as the fire landing, and the run log must not say it is.
-      const result = deps.dispatcher.dispatch(job, payload, 'webhook');
+      let result: ReturnType<typeof deps.dispatcher.dispatch>;
+      try {
+        result = deps.dispatcher.dispatch(job, payload, 'webhook');
+      } catch (err) {
+        // A job that cannot be dispatched at all (e.g. a broken prompt
+        // template) is an operator problem, like a filter error: record it
+        // and answer 200 so the source does not retry forever.
+        const message = (err as Error).message;
+        deps.logger.error({ jobId, err: message }, 'webhook: dispatch threw');
+        deps.logs.appendWebhook({
+          ts: nowMs(),
+          jobId,
+          signature: job.trigger.scheme === 'none' ? 'none' : 'ok',
+          scheme: job.trigger.scheme,
+          filter: 'pass',
+          status: 200,
+          error: message,
+        });
+        deps.logs.appendRun({
+          ts: nowMs(),
+          jobId,
+          status: 'dispatch-error',
+          trigger: 'webhook',
+          payloadDigest: digestPayload(payload),
+          error: message,
+        });
+        return reply.code(200).send({ status: 'dispatch-error' });
+      }
       deps.logs.appendWebhook({
         ts: nowMs(),
         jobId,

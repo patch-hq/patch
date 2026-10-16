@@ -1,15 +1,16 @@
 // Mirrors packages/web/src/__tests__/tools.test.tsx's completeness gate (same
 // duplication convention as toolsCatalog.ts itself — mobile depends on
 // @patch/wire, not @patch/web). Every tool `buildPatchToolsServer`
-// (packages/daemon/src/mcp.ts) registers must have a catalog entry here too,
+// (packages/host/src/mcp.ts) registers must have a catalog entry here too,
 // or the mobile Tools sheet leaves it invisible and un-toggleable.
 
 import { describe, it, expect } from 'vitest';
 import { TOOL_CATALOG, patchToolId, PATCH_MCP_PREFIX, describeTool } from '../src/lib/toolsCatalog';
 
-// Pinned against packages/daemon/test/mcp-tools.test.ts's own
+// Pinned against packages/host/test/mcp-tools.test.ts's own
 // "listTools returns the full tool catalogue" gate — update both together.
 const EXPECTED_PATCH_TOOLS = [
+  'patch_agent',
   'patch_peek',
   'patch_send_to',
   'patch_send_back',
@@ -20,10 +21,6 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_watch_list',
   'patch_watch_output',
   'patch_watch_stop',
-  'patch_delegate',
-  'patch_delegate_list',
-  'patch_delegate_send',
-  'patch_delegate_stop',
   'patch_history',
   'patch_list_chats',
   'patch_list_devices',
@@ -53,6 +50,20 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_browser_screenshot',
   'patch_browser_tabs',
   'patch_browser_close',
+  'patch_browser_mouse',
+  'patch_browser_key',
+  'patch_browser_handoff',
+  'patch_browser_navigate',
+  'patch_browser_switch_tab',
+  'patch_browser_wait',
+  'patch_browser_interact',
+  'patch_browser_dialog',
+  'patch_browser_downloads',
+  'patch_browser_state',
+  'patch_browser_eval',
+  'patch_browser_console',
+  'patch_browser_network',
+  'patch_browser_viewport',
 ];
 
 describe('toolsCatalog', () => {

@@ -30,6 +30,8 @@ interface ComposerAttachmentState {
   byKey: Record<string, PendingAttachment[]>;
   add(key: string, items: PendingAttachment[]): void;
   remove(key: string, attachmentKey: string): void;
+  /** Swap one attachment for another in place (an annotated copy of an image). */
+  replace(key: string, attachmentKey: string, next: PendingAttachment): void;
   clear(key: string): void;
   _reset(): void;
 }
@@ -48,6 +50,18 @@ export const useComposerAttachmentStore = create<ComposerAttachmentState>((set) 
       byKey: {
         ...s.byKey,
         [key]: (s.byKey[key] ?? []).filter((a) => a.key !== attachmentKey),
+      },
+    }));
+  },
+  replace(key, attachmentKey, next) {
+    const list = useComposerAttachmentStore.getState().byKey[key] ?? [];
+    if (!list.some((a) => a.key === attachmentKey)) {
+      throw new Error(`composerAttachmentStore: no attachment ${attachmentKey} to replace`);
+    }
+    set((s) => ({
+      byKey: {
+        ...s.byKey,
+        [key]: (s.byKey[key] ?? []).map((a) => (a.key === attachmentKey ? next : a)),
       },
     }));
   },

@@ -158,6 +158,35 @@ describe('Registry', () => {
     expect(() => Registry.load(dir)).toThrow();
   });
 
+  // The host rename renamed two persisted keys. `RegistryFile` is `.strict()`,
+  // so a file written before it is rejected twice over — the stale key is
+  // unrecognised AND the canonical one is missing — and the server crash-loops
+  // on boot with no route serving. That is what happened in production on
+  // 2026-10-14: `parsePersisted` canonicalised `daemonId` but not
+  // `homeDaemonId`. Load a genuinely pre-rename file, whole.
+  it('loads a registry.json written before the host rename', () => {
+    writeFileSync(
+      join(dir, 'registry.json'),
+      JSON.stringify({
+        version: 1,
+        account: {
+          accountId: KP_A.publicKey,
+          userPublicKey: KP_A.publicKey,
+          userPrivateKey: KP_A.privateKey,
+          createdAt: 1,
+        },
+        surfaces: [],
+        daemonKeys: [{ daemonId: 'd1', publicKey: 'pk', issuedAt: 2, hostName: 'Hetzner' }],
+        homeDaemonId: null,
+        pushTokens: [],
+      }),
+      'utf8',
+    );
+    const r = Registry.load(dir);
+    expect(r.listDaemonKeys().map((k) => k.hostId)).toEqual(['d1']);
+    expect(r.homeHostId()).toBe('d1');
+  });
+
   it('rejects a legacy account (public key only, no private key) with a migration instruction', () => {
     const path = join(dir, 'registry.json');
     writeFileSync(
@@ -194,10 +223,33 @@ describe('Registry', () => {
     expect(() => r.revoke(undefined as unknown as string)).toThrowError(/id required/);
   });
 
+  it('a host key minted before the machine was registered again is superseded, so an old key does not come back to life', () => {
+    const r = Registry.load(dir);
+    r.bootstrapAccount({ keypair: KP_A });
+    r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1000 });
+    expect(r.isDaemonKeySuperseded('daemon-1', 1000)).toBe(false);
+    r.removeHost('daemon-1');
+    r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 2000 });
+    // Registered again: the key from the first registration (iat 1000) must not work.
+    expect(r.isRevoked('daemon-1')).toBe(false);
+    expect(r.isDaemonKeySuperseded('daemon-1', 1000)).toBe(true);
+    expect(r.isDaemonKeySuperseded('daemon-1', 2000)).toBe(false);
+    // A record written in milliseconds (mint-daemon-key) is read as seconds.
+    r.setDaemonKey({
+      hostId: 'daemon-ms',
+      publicKey: KP_A.publicKey,
+      issuedAt: 1_700_000_000_500,
+    });
+    expect(r.isDaemonKeySuperseded('daemon-ms', 1_700_000_000)).toBe(false);
+    expect(r.isDaemonKeySuperseded('daemon-ms', 1_600_000_000)).toBe(true);
+    // An id the registry has never seen supersedes nothing (the caller refuses it as unknown).
+    expect(r.isDaemonKeySuperseded('nobody', 1)).toBe(false);
+  });
+
   it('revoke + isRevoked round-trip for a host key', () => {
     const r = Registry.load(dir);
     r.bootstrapAccount({ keypair: KP_A });
-    r.setDaemonKey({ daemonId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
+    r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
     expect(r.isRevoked('daemon-1')).toBe(false);
     r.revoke('daemon-1');
     expect(r.isRevoked('daemon-1')).toBe(true);
@@ -205,26 +257,26 @@ describe('Registry', () => {
     expect(r.getDaemonKey('daemon-1')?.revoked).toBe(true);
   });
 
-  it('removeDaemon tombstones the machine (revoked), drops it from the roster, and clears it as home', () => {
+  it('removeHost tombstones the machine (revoked), drops it from the roster, and clears it as home', () => {
     const r = Registry.load(dir);
     r.bootstrapAccount({ keypair: KP_A });
-    r.setDaemonKey({ daemonId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
-    r.setDaemonKey({ daemonId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 1 });
-    r.setHomeDaemonId('daemon-2');
-    r.removeDaemon('daemon-2');
+    r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
+    r.setDaemonKey({ hostId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 1 });
+    r.setHomeHostId('daemon-2');
+    r.removeHost('daemon-2');
     expect(r.isRevoked('daemon-2')).toBe(true);
-    expect(r.registeredDaemonIds()).toEqual(['daemon-1']);
-    expect(r.homeDaemonId()).toBe('daemon-1');
+    expect(r.registeredHostIds()).toEqual(['daemon-1']);
+    expect(r.homeHostId()).toBe('daemon-1');
     // Durable: a reload agrees.
     const reloaded = Registry.load(dir);
-    expect(reloaded.registeredDaemonIds()).toEqual(['daemon-1']);
-    expect(reloaded.snapshot().homeDaemonId).toBeNull();
+    expect(reloaded.registeredHostIds()).toEqual(['daemon-1']);
+    expect(reloaded.snapshot().homeHostId).toBeNull();
     // Removing it again, or a machine never registered, is refused naming it.
-    expect(() => r.removeDaemon('daemon-2')).toThrow(/daemon-2/);
-    expect(() => r.removeDaemon('nope')).toThrow(/nope/);
+    expect(() => r.removeHost('daemon-2')).toThrow(/daemon-2/);
+    expect(() => r.removeHost('nope')).toThrow(/nope/);
     // Pairing the machine again brings it back.
-    r.setDaemonKey({ daemonId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 2 });
-    expect(r.registeredDaemonIds()).toEqual(['daemon-1', 'daemon-2']);
+    r.setDaemonKey({ hostId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 2 });
+    expect(r.registeredHostIds()).toEqual(['daemon-1', 'daemon-2']);
   });
 
   it('isRevoked returns false for a totally unknown id (not authoritative)', () => {
@@ -249,6 +301,28 @@ describe('Registry', () => {
       registeredAt: 2,
     });
     expect(r.listPushTokens(account.accountId)).toEqual(['tok-new']);
+  });
+
+  it('lists a push token once even when two surfaces registered it', () => {
+    const r = Registry.load(dir);
+    const account = r.bootstrapAccount({ keypair: KP_A });
+    for (const surfaceId of ['old-install', 're-paired']) {
+      r.registerPushToken({
+        surfaceId,
+        accountId: account.accountId,
+        token: 'ExponentPushToken[same-phone]',
+        registeredAt: 1,
+      });
+    }
+    expect(r.listPushTokens(account.accountId)).toEqual(['ExponentPushToken[same-phone]']);
+  });
+
+  it('setHostName stores the trimmed name', () => {
+    const r = Registry.load(dir);
+    r.bootstrapAccount({ keypair: KP_A });
+    r.setDaemonKey({ hostId: 'd1', publicKey: KP_A.publicKey, issuedAt: 1 });
+    r.setHostName('d1', '  box  ');
+    expect(r.hostName('d1')).toBe('box');
   });
 
   describe('removePushTokens', () => {

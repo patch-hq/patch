@@ -149,6 +149,14 @@ Response is the per-job outcome list: `{ "results": [ { "jobId": "j_...", "statu
 
 The original form, kept working. It verifies against the job's **own** `trigger.clientSecret` rather than the server env, and fires only that job. Use it when a job needs to be driven by a _different_ Todoist app (its own client secret), or for a subscription already wired to a per-job URL. New Todoist jobs should use the shared endpoint and carry no `clientSecret`.
 
+### Follows
+
+A `follows` trigger — `{ type: 'follows', jobId, on? }` — fires the job when another job's run settles. `on: 'success'` (the default, absent) fires only after a run that settled `ok`; `on: 'any'` also fires after `dispatch-error`. "Settles" is the moment the followed job's run entry is written, so for a `script` action it is when the command finishes and for `spawn`/`message` it is when the host confirms the chat.
+
+- The followed job must exist at write time, and a job may not follow itself directly or through a chain; both are refused with a validation error on `trigger.jobId`.
+- A disabled or archived follower does not fire. The follower's own filter, gate, window and concurrency apply as for any trigger; the filter payload is `{ followedJobId, status, chatId? }`.
+- Its run entries carry `trigger: 'follows'`.
+
 ## Filter
 
 Optional JSONata expression applied to the trigger payload. Returns truthy → action fires. Returns falsy → action skipped (logged as `filter rejected`, not a run).
@@ -172,7 +180,7 @@ A payload-bearing filter only makes sense for payload-bearing triggers (webhook 
 Optional shell command that decides whether a fire proceeds at all.
 
 ```json
-"gate": { "daemonId": "d_abc", "folder": "/path", "command": "…", "timeoutMs": 30000 }
+"gate": { "hostId": "d_abc", "folder": "/path", "command": "…", "timeoutMs": 30000 }
 ```
 
 `filter` asks a question of the trigger's **payload**; a gate asks one of the **world** — is there a new photo, is the watcher due, is the desktop even awake, has the queue got anything in it. Both sit in the same place in the pipeline and do the same job: turn a fire away before it costs an agent turn. So a gate is a sibling of `filter`, not part of the action, and it composes with all four action types: a gated `spawn`, `message`, `continue` or `script` is the ordinary one with a precondition in front of it. Null/absent → every fire that passed the filter runs its action.
@@ -244,15 +252,15 @@ Because a gate is a top-level field it is version-sensitive on the **write** pat
 Each job has one action; pick `spawn`, `message`, `continue`, or `script`. These are scheduler verbs that fire when the trigger matches — and when the job has a `gate`, when the gate has let the fire through (§ Gate).
 
 ```json
-{ "type": "spawn",   "daemonId": "d_abc", "folder": "/path", "skill": "bus-watch" }
-{ "type": "spawn",   "daemonId": "d_abc", "folder": "/path", "prompt": "..." }
+{ "type": "spawn",   "hostId": "d_abc", "folder": "/path", "skill": "bus-watch" }
+{ "type": "spawn",   "hostId": "d_abc", "folder": "/path", "prompt": "..." }
 { "type": "message", "chatId": "c_abc",                      "skill": "bus-watch" }
 { "type": "message", "chatId": "c_abc",                      "prompt": "..." }
-{ "type": "continue", "daemonId": "d_abc", "folder": "/path", "skill": "bus-watch" }
-{ "type": "continue", "daemonId": "d_abc", "folder": "/path", "prompt": "..." }
+{ "type": "continue", "hostId": "d_abc", "folder": "/path", "skill": "bus-watch" }
+{ "type": "continue", "hostId": "d_abc", "folder": "/path", "prompt": "..." }
 ```
 
-A folder-addressed action carries both `daemonId` and `folder`, stored with the
+A folder-addressed action carries both `hostId` and `folder`, stored with the
 job, so a job fires on the host it was written for at the path it was written for.
 Both are required: a folder path means nothing without the machine it is on, and
 there is no host-wide directory a job could fall back to. An action saved without
@@ -263,9 +271,10 @@ message saying so (`14-design-web.md` § Jobs view, `15-design-mobile.md`
 An action may also store a `model`, named from the catalogue of the host the action
 runs on; without one the spawned chat takes that host's last-used model. A `message`
 action takes host, folder and model from the chat it delivers into. On a `continue`
-action the model applies to the fire that creates the durable chat — a chat's model
-is fixed for its life (`04-chats-and-folders.md` § Spawn), so changing a stored model
-afterwards reaches the next chat the job creates, not the one it already owns.
+action the model applies to the fire that creates the durable chat, and a later fire
+into a chat running on a different model first switches it (`04-chats-and-folders.md`
+§ Model) so its turn runs on the job's stored model: editing the model reaches the
+chats the job already owns, not only the next one it creates.
 
 A `spawn` action may also store a `permissionMode`, one of the modes in
 `02-daemon.md` § Permission mode, stamped onto the chat it spawns. Without one the
@@ -283,7 +292,7 @@ Two axes: where (`spawn` a new chat, `message` an existing one, or `continue` a 
 ### `script` — a fire with no chat
 
 ```json
-{ "type": "script", "daemonId": "d_abc", "folder": "/path", "command": "scripts/tick.sh" }
+{ "type": "script", "hostId": "d_abc", "folder": "/path", "command": "scripts/tick.sh" }
 ```
 
 The three actions above all cost an agent turn. A job that mostly finds nothing to do
@@ -319,18 +328,18 @@ that this is the opposite of a **gate**'s reading of the same code, where `1` is
 ordinary "no" (§ Gate): an action is doing the work and a non-zero exit means the work
 failed, where a gate is answering a question and "no" is half the answers it has.
 
-`spawn` creates a fresh blank chat in `folder` on `daemonId`, so each fire is independent. Spawned chats open in the active inbox like any other chat; the action's optional `startHidden` flag spawns them into Hidden instead (`04-chats-and-folders.md` § Hidden). It was `hidden` until 2026-09-11 and `startArchived` until 2026-09-28, when archived came to mean stopped and a background run needed a state of its own; jobs stored under either old name are translated on read and never written back out.
+`spawn` creates a fresh blank chat in `folder` on `hostId`, so each fire is independent. Spawned chats open in the active inbox like any other chat; the action's optional `startHidden` flag spawns them into Hidden instead (`04-chats-and-folders.md` § Hidden). It was `hidden` until 2026-09-11 and `startArchived` until 2026-09-28, when archived came to mean stopped and a background run needed a state of its own; jobs stored under either old name are translated on read and never written back out.
 
 `message` delivers into an existing chat — a long-running chat that maintains context, a specialised handler chat that's accumulated knowledge, or a special thread (Manager, Speakers). The `chatId` must already exist.
 
-`continue` is the middle ground (named `ensure` until 2026-09-11 — an infra-as-code word for the mechanism rather than for what the fire does; jobs stored under the old name are translated on read and never written back out): the job owns one durable chat, created on the first fire and reused on every fire after, so context accumulates across runs — without the user pre-creating a chat or knowing its id. The chat id is derived deterministically from the job id (`jobchat-<jobId>`); the server keys on it to decide spawn-vs-message (the chat registry mirror plus an in-process guard cover the window before the first `chat.spawned` round-trips, and the ordered daemon-link makes a spawn-then-input pair land in order). The mirror is in memory and empty after a server restart until each host re-announces its chats, so a chat the mirror lacks on a host that has not reported yet is unknown, not missing: the fire is held in that host's buffer and decided, spawn or message, only once the host has reported. Deciding early would spawn a chat the host already has, which it refuses, and the fire would be lost. A `continue` chat opens in the active inbox — it's something the user wants to find and follow — unless the action sets `startHidden` (below). Use it for "a single running digest/log chat this weekly job keeps appending to."
+`continue` is the middle ground (named `ensure` until 2026-09-11 — an infra-as-code word for the mechanism rather than for what the fire does; jobs stored under the old name are translated on read and never written back out): the job owns one durable chat, created on the first fire and reused on every fire after, so context accumulates across runs — without the user pre-creating a chat or knowing its id. The chat id is derived deterministically from the job id (`jobchat-<jobId>`); the server keys on it to decide spawn-vs-message (the chat registry mirror plus an in-process guard cover the window before the first `chat.spawned` round-trips, and the ordered host-link makes a spawn-then-input pair land in order). The mirror is in memory and empty after a server restart until each host re-announces its chats, so a chat the mirror lacks on a host that has not reported yet is unknown, not missing: the fire is held in that host's buffer and decided, spawn or message, only once the host has reported. Deciding early would spawn a chat the host already has, which it refuses, and the fire would be lost. A `continue` chat opens in the active inbox — it's something the user wants to find and follow — unless the action sets `startHidden` (below). Use it for "a single running digest/log chat this weekly job keeps appending to."
 
 `continue` may also carry a `key` — a mustache template naming the SUBJECT of the fire, giving the job one durable chat _per subject_ rather than one overall (`jobchat-<jobId>-<key>`):
 
 ```json
 {
   "type": "continue",
-  "daemonId": "d_abc",
+  "hostId": "d_abc",
   "folder": "/path",
   "skill": "app-update",
   "key": "{{payload.event_data.id}}"
@@ -368,7 +377,7 @@ The action's `includePayload: false` opts a job out (on `spawn`, `continue` and 
 An action may carry both a `skill` and a `prompt` (it must carry at least one). When both are present the first user-turn is the skill invocation with the rendered prompt as its body — `/<skill-name>\n\n<rendered-prompt>` — so a job can run a skill and hand it custom, mustache-templated instructions instead of the raw JSON payload:
 
 ```
-{ "type": "spawn", "daemonId": "d_abc", "folder": "/path", "skill": "forage-podcast", "prompt": "Focus on autumn mushrooms near {{home}}." }
+{ "type": "spawn", "hostId": "d_abc", "folder": "/path", "skill": "forage-podcast", "prompt": "Focus on autumn mushrooms near {{home}}." }
 ```
 
 Alerts come from the chat, not the job. If a job needs to alert the user, the spawned/messaged chat calls `patch_notify` (see `09-notifications.md`). Every fire runs a chat, so every fire is auditable as a real conversation.
@@ -393,7 +402,7 @@ Suppression follows the chat, not the turn: a turn the user types into a suppres
 
 ## Autonomy prompt
 
-Every fire is unattended — there is nobody at the keyboard to answer a question a chat stops to ask — so every fire carries an autonomy prompt, text prepended to the fire's first user-turn. There is no way to turn it off. It is set ONCE for all jobs, as the account setting `jobAutonomyPrompt` (Settings → Jobs, `14-design-web.md`), whose default is:
+Every fire is unattended — there is nobody at the keyboard to answer a question a chat stops to ask — so every fire carries an autonomy prompt, text prepended to the fire's first user-turn. There is no way to turn it off. It is set ONCE for all jobs, as the account setting `jobAutonomyPrompt` (the Jobs page's defaults area, `14-design-web.md` § Jobs view), whose default is:
 
 > You are running autonomously, don't stop to ask the user questions
 
@@ -427,7 +436,7 @@ This matters for the high-volume triggers. A Todoist project that gets thirty ta
 
 The limit counts CHATS a job has working, not messages it has sent. A fire that delivers into a chat this job already has in flight — a keyed `continue` whose subject is already being worked on — therefore skips the gate and takes no second slot: it opens no new chat, it appends to one already counted. Queueing it would be actively wrong, since the update would then wait for the very run it is meant to correct to finish first.
 
-A fire is in flight from the moment it is sent to its host until the chat it landed in goes idle. The server already mirrors chat activity, so this needs nothing from the job itself. Because a chat is reported idle before its first turn begins, a slot is only released once that chat has been seen working and then stops. A chat that dies without ever reporting itself idle releases its slot after a bounded wait, recorded as `slot-timeout` on the job's runs, so a lost chat delays the queue rather than wedging it forever.
+A fire is in flight from the moment it is sent to its host until the chat it landed in genuinely finishes. The server already mirrors chat activity, so this needs nothing from the job itself. Because a chat is reported idle before its first turn begins, a slot is only released once that chat has been seen working and then stops. An idle or errored chat with `rateLimitResumingAt` set is paused, not finished: its automatic retry remains the same fire and keeps the slot, so a later timed fire cannot start beside it. A terminal error with no retry armed releases the slot. A chat that dies without ever reporting itself idle releases its slot after a bounded wait, recorded as `slot-timeout` on the job's runs, so a lost chat delays the queue rather than wedging it forever.
 
 The queue is FIFO and per job. When an in-flight fire finishes, the oldest queued fire dispatches. It is server-owned state under `/data`, so it survives a server restart: fires queued before a restart still run after it, and slots held by chats still working are re-checked against the chat mirror on reconnect rather than assumed free.
 
@@ -458,6 +467,10 @@ A fire that settles `dispatch-error` does not expire the job. It never did its t
 Enabling an expired job re-arms it — any write that sets `enabled: true` clears `expiredAt`, and the job then fires and expires once more. That keeps the invariant intact: an enabled job is never expired, so a job cannot sit in the list marked retired while still firing.
 
 Expired jobs are kept, not deleted. Their run log and the chats their fire produced stay reachable (§ Logs); the web list simply folds them away (`14-design-web.md` § Jobs view).
+
+## Wake host
+
+A cron job may set `wakeHost`. While its host is awake the server asks it (`host.wake_request`) to be awake a minute before the job's next fire; it re-asks only when that time changes or the host reconnects. The host schedules the wake with `sudo -n pmset schedule wake`, and only on macOS on AC power. Whether it worked comes back as `host.wake_result`; a failure (not macOS, on battery, no passwordless sudo for `pmset`) raises a notification naming the job, the host and the reason. Nothing is assumed scheduled.
 
 ## Archived jobs
 
@@ -497,7 +510,7 @@ A job that names a `skill` in a `spawn` action delivers `/<skill>\n<payload>` as
   },
   "action": {
     "type": "spawn",
-    "daemonId": "d_abc",
+    "hostId": "d_abc",
     "folder": "/home/tom/projects/claude-tasks",
     "skill": "todoist-handler"
   }
@@ -522,7 +535,7 @@ Simultaneous edits: last-write-wins. The user is the only writer, just from diff
 5. If filter and gate passed: server resolves templates. If the job is at its concurrency limit the fire is queued here and steps 6-8 wait for a slot (§ Concurrency); otherwise it dispatches the action to the host it names.
 6. That host executes (spawns chat or messages an existing one).
 7. The server writes the run to `runs.jsonl` (success or failure), filling the chatId and the outcome from the events that host emits back through it — `chat.spawned` for a fire that landed, the host's own error (`folder_not_found` and the like) for one that did not. A gated fire's row also carries what its gate said, so the fire stays one row. No host writes to the server's logs; a host reports and the server records.
-8. If the action's host is offline, the server buffers the action in `/data/pending/<daemonId>/` and flushes when that host reconnects (see `12-error-and-offline.md`).
+8. If the action's host is offline, the server buffers the action in `/data/pending/<hostId>/` and flushes when that host reconnects (see `12-error-and-offline.md`).
 
 Webhook triggers support a defined set of HMAC signature schemes; other vendors are reached via skills layered over a generic webhook trigger. Cross-job orchestration is done by a chat calling `patch_spawn` itself.
 

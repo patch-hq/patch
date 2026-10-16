@@ -58,7 +58,7 @@ describe('LifecycleRoute', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'a1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions',
         name: 'an archived chat',
         folder: '~/proj',
@@ -95,7 +95,7 @@ describe('LifecycleRoute', () => {
             snoozedUntil: null,
             hidden: true,
             lastUpdated: 1,
-            daemonId: 'd1',
+            hostId: 'd1',
             permissionMode: 'auto',
             jobId: 'j1',
             statusSummary: null,
@@ -118,7 +118,7 @@ describe('LifecycleRoute', () => {
             snoozedUntil: null,
             hidden: true,
             lastUpdated: 2,
-            daemonId: 'd1',
+            hostId: 'd1',
             permissionMode: 'auto',
             jobId: 'j1',
             statusSummary: null,
@@ -140,5 +140,65 @@ describe('LifecycleRoute', () => {
     await waitFor(() => expect(listChatsHidden).toHaveBeenCalledTimes(2));
     expect(listChatsHidden).toHaveBeenLastCalledWith({ limit: 30, offset: 1 });
     await screen.findByTestId('chat-row-h2');
+  });
+  describe('search', () => {
+    const hit = (chatId: string, section: 'archived' | 'hidden', name: string) => ({
+      chatId,
+      hostId: 'd1',
+      name,
+      preview: null,
+      folder: '/x',
+      status: 'active' as const,
+      section,
+      pinned: false,
+      snoozedUntil: null,
+      lastUpdated: 1,
+      jobId: null,
+      nameMatch: true,
+      nameHighlights: [],
+      messageMatches: 0,
+      snippet: null,
+    });
+
+    it('searches full text, scoped to the section being viewed', async () => {
+      const search = vi.spyOn(api, 'searchChats').mockResolvedValue({
+        query: 'bus',
+        hits: [hit('a1', 'archived', 'bus archived'), hit('h1', 'hidden', 'bus hidden')],
+        total: 2,
+        nextOffset: null,
+        hosts: [],
+      });
+      renderAt('archived');
+      fireEvent.change(screen.getByTestId('lifecycle-search'), { target: { value: 'bus' } });
+      await screen.findByTestId('chat-search-hit');
+      expect(screen.getAllByTestId('chat-search-hit')).toHaveLength(1);
+      expect(screen.getByText(/bus archived/)).toBeInTheDocument();
+      expect(screen.queryByText(/bus hidden/)).toBeNull();
+
+      fireEvent.click(screen.getByTestId('chat-search-fulltext'));
+      await waitFor(() =>
+        expect(search).toHaveBeenLastCalledWith('bus', expect.objectContaining({ fullText: true })),
+      );
+    });
+
+    it('returns to the section list when the query is cleared', async () => {
+      vi.spyOn(api, 'searchChats').mockResolvedValue({
+        query: 'bus',
+        hits: [],
+        total: 0,
+        nextOffset: null,
+        hosts: [],
+      });
+      renderAt('hidden');
+      fireEvent.change(screen.getByTestId('lifecycle-search'), { target: { value: 'bus' } });
+      await screen.findByTestId('chat-search-empty');
+      fireEvent.change(screen.getByTestId('lifecycle-search'), { target: { value: '' } });
+      expect(screen.getByTestId('lifecycle-route-hidden')).toBeInTheDocument();
+    });
+
+    it('has no search on Deleted, which chat search cannot reach', () => {
+      renderAt('deleted');
+      expect(screen.queryByTestId('lifecycle-search')).toBeNull();
+    });
   });
 });

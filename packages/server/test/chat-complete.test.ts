@@ -16,7 +16,7 @@ function spawned(chatId: string): WireEvent {
   return {
     type: 'chat.spawned',
     chatId,
-    daemonId: 'hetzner',
+    hostId: 'hetzner',
     folder: '/home/tom/projects/bed-planner',
     seq: 1,
     ts: 0,
@@ -27,7 +27,7 @@ function state(chatId: string, over: Partial<Record<string, unknown>> = {}): Wir
   return {
     type: 'chat.state',
     chatId,
-    daemonId: 'hetzner',
+    hostId: 'hetzner',
     activity: 'idle',
     permissionMode: 'auto',
     folder: '/home/tom/projects/bed-planner',
@@ -433,7 +433,7 @@ describe('ChatCompletionNotifier', () => {
         name: 'five-minute tick',
         enabled: true,
         trigger: { type: 'cron', expression: '*/5 * * * *' },
-        action: { type: 'spawn', daemonId: 'hetzner', folder: '/work', prompt: 'go', ...over },
+        action: { type: 'spawn', hostId: 'hetzner', folder: '/work', prompt: 'go', ...over },
       } as Job;
     }
 
@@ -468,7 +468,7 @@ describe('ChatCompletionNotifier', () => {
         ...job(),
         action: {
           type: 'continue',
-          daemonId: 'hetzner',
+          hostId: 'hetzner',
           folder: '/work',
           prompt: 'go',
           notifyOnComplete: false,
@@ -677,6 +677,18 @@ describe('ChatCompletionNotifier', () => {
       expect(reason.length).toBe(200);
       expect(reason.endsWith('…')).toBe(true);
     });
+
+    test('a long error is cut between characters, never through an emoji', () => {
+      seedRunning('c1');
+      feed(
+        state('c1', {
+          activity: 'errored',
+          lastError: err(`${'x'.repeat(198)}😀${'y'.repeat(50)}`),
+        }),
+      );
+      const reason = messages()[0]!.split(' failed: ')[1]!;
+      expect(reason).toBe(`${'x'.repeat(198)}😀…`);
+    });
   });
 
   // spec/09 § Chat completion — a running batch's member is skipped for both
@@ -710,6 +722,63 @@ describe('ChatCompletionNotifier', () => {
       batchMembers.delete('c1');
       feed(state('c1', { activity: 'idle' }));
       expect(channels()).toEqual(['desktop', 'push']);
+    });
+  });
+
+  // Tom: "patch notifications are firing early before a chat has finished". A
+  // turn can settle idle while the chat still owes work — a backgrounded task
+  // or sub-agent in flight, or an unmet goal. The follow-up turns are machine
+  // turns, so the ring is deferred to the real finish rather than dropped.
+  describe('a chat that settles with work still owed', () => {
+    test('rings once the background tasks are done, on the machine turn that reports them', () => {
+      seedRunning('c1');
+      feed(state('c1', { activity: 'idle', turnOrigin: 'user', backgroundTasks: 2 }));
+      expect(routed).toEqual([]);
+
+      feed(state('c1', { activity: 'running', turnOrigin: 'machine', backgroundTasks: 1 }));
+      feed(state('c1', { activity: 'idle', turnOrigin: 'machine', backgroundTasks: 1 }));
+      expect(routed).toEqual([]);
+
+      feed(state('c1', { activity: 'running', turnOrigin: 'machine', backgroundTasks: 0 }));
+      feed(state('c1', { activity: 'idle', turnOrigin: 'machine', backgroundTasks: 0 }));
+      expect(channels()).toEqual(['desktop', 'push']);
+    });
+
+    test('rings when the goal is met, though no further turn runs', () => {
+      seedRunning('c1');
+      feed(state('c1', { activity: 'idle', turnOrigin: 'user', goal: 'ship it' }));
+      expect(routed).toEqual([]);
+
+      feed(state('c1', { activity: 'running', turnOrigin: 'machine', goal: 'ship it' }));
+      feed(state('c1', { activity: 'idle', turnOrigin: 'machine', goal: 'ship it' }));
+      expect(routed).toEqual([]);
+
+      feed(state('c1', { activity: 'idle', turnOrigin: 'machine', goal: null }));
+      expect(channels()).toEqual(['desktop', 'push']);
+    });
+
+    test('rings only once', () => {
+      seedRunning('c1');
+      feed(state('c1', { activity: 'idle', turnOrigin: 'user', backgroundTasks: 1 }));
+      feed(state('c1', { activity: 'idle', turnOrigin: 'user', backgroundTasks: 0 }));
+      feed(state('c1', { activity: 'idle', turnOrigin: 'user', backgroundTasks: 0 }));
+      expect(channels()).toEqual(['desktop', 'push']);
+    });
+
+    test('a stop clears what was owed', () => {
+      seedRunning('c1');
+      feed(state('c1', { activity: 'idle', turnOrigin: 'user', backgroundTasks: 1 }));
+      feed(state('c1', { activity: 'running', turnOrigin: 'user', backgroundTasks: 1 }));
+      feed(state('c1', { activity: 'idle', turnStopped: true, backgroundTasks: 1 }));
+      feed(state('c1', { activity: 'idle', turnStopped: true, backgroundTasks: 0 }));
+      expect(routed).toEqual([]);
+    });
+
+    test('a machine-only chat never starts owing', () => {
+      seedRunning('c1');
+      feed(state('c1', { activity: 'idle', turnOrigin: 'machine', backgroundTasks: 0 }));
+      feed(state('c1', { activity: 'idle', turnOrigin: 'machine', backgroundTasks: 0 }));
+      expect(routed).toEqual([]);
     });
   });
 });

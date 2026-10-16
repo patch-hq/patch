@@ -16,7 +16,7 @@ import pino from 'pino';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { CronScheduler } from '../src/jobs/cron.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
@@ -26,7 +26,7 @@ import type { Job } from '../src/jobs/types.js';
 const silentLogger = pino({ level: 'silent' });
 
 const TRIGGER = { type: 'cron', expression: '0 7 * * *' } as const;
-const ACTION = { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' } as const;
 
 describe('archived jobs', () => {
   let dir: string;
@@ -121,14 +121,14 @@ describe('archived jobs', () => {
       jobs: JobStore;
       scheduler: CronScheduler;
       dispatcher: JobDispatcher;
-      link: InProcessDaemonLink;
+      link: InProcessHostLink;
       tasks: Map<string, () => Promise<void>>;
     } {
       const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       const dispatcher = new JobDispatcher({
         dataDir: dir,
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         logs: new JobLogs(dir),
       });
@@ -206,11 +206,11 @@ describe('archived jobs', () => {
   describe('ingress', () => {
     async function setup(): Promise<{
       built: Awaited<ReturnType<typeof buildAll>>;
-      link: InProcessDaemonLink;
+      link: InProcessHostLink;
     }> {
       const registry = Registry.load(dir);
-      const link = new InProcessDaemonLink();
-      const built = await buildAll({ logger: false, registry, daemonLink: link });
+      const link = new InProcessHostLink();
+      const built = await buildAll({ logger: false, registry, hostLink: link });
       return { built, link };
     }
 
@@ -342,7 +342,7 @@ describe('archived jobs', () => {
       const built = await buildAll({
         logger: false,
         registry,
-        daemonLink: new InProcessDaemonLink(),
+        hostLink: new InProcessHostLink(),
       });
       return { built, auth: { authorization: `Bearer ${jwt}` } };
     }

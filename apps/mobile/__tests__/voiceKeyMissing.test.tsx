@@ -1,6 +1,6 @@
 // A voice surface configured onto a hosted backend whose key the chat's host
 // does not hold (spec/07 § Voice — a config matrix). The host refuses such a
-// session itself; the phone, which already knows from `daemon.host.voiceKeys`,
+// session itself; the phone, which already knows from `host.host.voiceKeys`,
 // refuses a voice note or a dictation at the PRESS — before the user has said
 // anything — with the host's exact sentence. Nothing records, nothing
 // uploads, and nothing quietly runs on local instead.
@@ -51,9 +51,9 @@ function seedConfig(voiceConfig: VoiceConfig): void {
   });
 }
 
-function pinChat(chatId: string, daemonId: string): void {
+function pinChat(chatId: string, hostId: string): void {
   useChatStore.setState((s) => ({
-    chats: { ...s.chats, [chatId]: { ...(s.chats[chatId] ?? {}), daemonId } as never },
+    chats: { ...s.chats, [chatId]: { ...(s.chats[chatId] ?? {}), hostId } as never },
   }));
 }
 

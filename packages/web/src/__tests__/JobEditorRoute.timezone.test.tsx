@@ -17,7 +17,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 
 const FOLDERS_BODY = {
-  hosts: [{ daemonId: 'd1', roots: ['/Users/tom/projects/portfolio'], recent: [] }],
+  hosts: [{ hostId: 'd1', roots: ['/Users/tom/projects/portfolio'], recent: [] }],
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -32,8 +32,8 @@ function defaultRoute(url: string): Response {
   return jsonResponse({});
 }
 
-function pick(daemonId: string, folder: string): string {
-  return JSON.stringify([daemonId, folder]);
+function pick(hostId: string, folder: string): string {
+  return JSON.stringify([hostId, folder]);
 }
 
 function renderNew(): void {
@@ -71,7 +71,7 @@ function storedJob(trigger: Record<string, unknown>): Record<string, unknown> {
     enabled: true,
     trigger,
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '/tmp', prompt: 'hi' },
+    action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
     createdAt: 1,
     updatedAt: 1,
   };
@@ -100,7 +100,7 @@ function makeChatRow(chatId: string, folder: string) {
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder,
@@ -134,7 +134,7 @@ describe('cron timezone in the job editor', () => {
   beforeEach(() => {
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
     useUiStore.getState().clearToasts();
     useUiStore.getState().resolveConfirm(false);
     useChatStore.setState({

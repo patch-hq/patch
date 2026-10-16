@@ -5,12 +5,7 @@
 // The server can be reachable while the host is down.
 
 import { create } from 'zustand';
-import type {
-  AuthOkHost,
-  ClaudeMemoryEntry,
-  DaemonAccountEvent,
-  DaemonHostEvent,
-} from '@patch/wire';
+import type { AuthOkHost, ClaudeMemoryEntry, HostAccountEvent, HostInfoEvent } from '@patch/wire';
 
 // WS link states. On first launch we are `connecting` — a neutral, quiet
 // state that must NEVER render an offline/reconnecting treatment before a
@@ -33,18 +28,17 @@ export type ConnectionState =
 // greeting arrives on connect — distinct from a known `offline`.
 export type DaemonPresence = 'unknown' | 'online' | 'offline';
 
-// One backend's credential state on ONE host (`daemon.account`, spec/10 §
-// Surface in Settings). Credentials are per host per backend — they live on the
-// machine that runs the turns — so there is deliberately no account-wide copy of
-// this anywhere in the store. Absent (no entry) means that host has not reported
-// yet: Settings shows a checking state, NEVER a guessed "not connected".
+// One host's report about the shared accounts for a backend (`host.account`,
+// spec/10 § Surface in Settings). The accounts are server-owned and available
+// to every host; this stores only that host's latest validation and usage
+// readings. Absent (no entry) means that host has not reported yet.
 //
 // `seq` counts the reports seen for this (host, backend) pair. Settings'
 // connect/disconnect resolve on a FRESH report, and a report can legitimately
 // repeat the value it just had (a disconnect the host failed to apply reports
 // `connected: true` again), so the value alone cannot distinguish "answered"
 // from "never answered".
-export type HostAccount = Omit<DaemonAccountEvent, 'type'> & { seq: number };
+export type HostAccount = Omit<HostAccountEvent, 'type'> & { seq: number };
 
 /** Why the last WebSocket closed — a diagnostics input (spec/12 § Connection diagnostics screen). */
 export interface WsCloseInfo {
@@ -55,10 +49,10 @@ export interface WsCloseInfo {
 
 /** What the surface knows about one registered host (spec/03 § `auth.ok`). */
 export interface HostPresence {
-  daemonId: string;
+  hostId: string;
   online: boolean;
   lastSeenAt: number | null;
-  host: Omit<DaemonHostEvent, 'type'> | null;
+  host: Omit<HostInfoEvent, 'type'> | null;
   accounts: Record<string, HostAccount>;
   /**
    * That host's Claude Code settings.json + memory entries
@@ -76,25 +70,25 @@ export interface HostPresence {
  */
 export function hostAccount(
   hosts: Record<string, HostPresence>,
-  daemonId: string | null,
+  hostId: string | null,
   backendId: string,
 ): HostAccount | null {
-  if (daemonId === null || daemonId === '') return null;
-  return hosts[daemonId]?.accounts[backendId] ?? null;
+  if (hostId === null || hostId === '') return null;
+  return hosts[hostId]?.accounts[backendId] ?? null;
 }
 
 /**
- * The model a spawn on `daemonId` that names none will run on — that host's
+ * The model a spawn on `hostId` that names none will run on — that host's
  * last-used model (spec/04 § Spawn), as it reports it. `null` until the host
  * has reported one, in which case the surface has nothing to preselect and a
  * model-less spawn there is an error the host raises, never a guess made here.
  */
 export function hostDefaultModel(
   hosts: Record<string, HostPresence>,
-  daemonId: string | null,
+  hostId: string | null,
 ): string | null {
-  if (daemonId === null || daemonId === '') return null;
-  return hosts[daemonId]?.host?.defaultModel ?? null;
+  if (hostId === null || hostId === '') return null;
+  return hosts[hostId]?.host?.defaultModel ?? null;
 }
 
 interface PresenceState {
@@ -111,13 +105,13 @@ interface PresenceState {
   outageVisible: boolean;
   setOutageVisible(v: boolean): void;
   /**
-   * Every registered host, keyed by daemonId, seeded from the `auth.ok`
+   * Every registered host, keyed by hostId, seeded from the `auth.ok`
    * greeting so the list is complete even for machines that are asleep.
    */
   hosts: Record<string, HostPresence>;
   /**
    * Aggregate over `hosts`: `online` while ANY host is up, matching
-   * `/api/daemon/healthz` without a daemonId (spec/01 § Endpoints). `unknown`
+   * `/api/daemon/healthz` without a hostId (spec/01 § Endpoints). `unknown`
    * until the greeting lands, so the first paint is neutral rather than a
    * false "offline" flash.
    */
@@ -143,27 +137,23 @@ interface PresenceState {
    */
   authRejected: string | null;
   setAuthRejected(reason: string | null): void;
-  setDaemon(p: DaemonPresence): void;
+  setHost(p: DaemonPresence): void;
   /** Seed the whole roster from the `auth.ok` greeting. */
   setHosts(hosts: AuthOkHost[]): void;
-  /** One host's presence changed (`daemon.online` / `daemon.offline`). */
-  setHostOnline(daemonId: string, online: boolean): void;
-  /** One host's self-description (`daemon.host`). */
-  setHostReport(report: DaemonHostEvent): void;
-  /** One backend's credential state on one host (`daemon.account`). */
-  setHostAccount(report: DaemonAccountEvent): void;
+  /** One host's presence changed (`host.online` / `host.offline`). */
+  setHostOnline(hostId: string, online: boolean): void;
+  /** One host's self-description (`host.host`). */
+  setHostReport(report: HostInfoEvent): void;
+  /** One backend's credential state on one host (`host.account`). */
+  setHostAccount(report: HostAccountEvent): void;
   /**
    * A host was removed from the account (`host.removed`, or the answer to this
-   * surface's own `DELETE /api/hosts/:daemonId`): drop it and every report
+   * surface's own `DELETE /api/hosts/:hostId`): drop it and every report
    * cached for it. It cannot reconnect without being paired again.
    */
-  removeHost(daemonId: string): void;
+  removeHost(hostId: string): void;
   /** One host's Claude Code settings + memory snapshot (`claude_settings.*`). */
-  setClaudeSettings(
-    daemonId: string,
-    drift: string | undefined,
-    memories: ClaudeMemoryEntry[],
-  ): void;
+  setClaudeSettings(hostId: string, drift: string | undefined, memories: ClaudeMemoryEntry[]): void;
   /** A socket reached OPEN: clears the failure counters. */
   noteWsOpen(url: string): void;
   /** A socket closed (or a connect attempt failed): records why, counts it. */
@@ -171,9 +161,9 @@ interface PresenceState {
   setIdentity(accountId: string | null, surfaceId: string | null): void;
 }
 
-/** A host row for a daemonId the store has not seen described yet. */
-function blankHost(daemonId: string): HostPresence {
-  return { daemonId, online: false, lastSeenAt: null, host: null, accounts: {} };
+/** A host row for a hostId the store has not seen described yet. */
+function blankHost(hostId: string): HostPresence {
+  return { hostId, online: false, lastSeenAt: null, host: null, accounts: {} };
 }
 
 const anyOnline = (hosts: Record<string, HostPresence>): boolean =>
@@ -184,13 +174,13 @@ const anyOnline = (hosts: Record<string, HostPresence>): boolean =>
  * account's HOME host, else the only registered one. With several and no home
  * marked there is no right answer, so this returns null and the caller refuses
  * — sending a host-scoped edit to a guessed machine is precisely what
- * `daemonId` exists to prevent.
+ * `hostId` exists to prevent.
  */
-export function defaultDaemonId(hosts: Record<string, HostPresence>): string | null {
+export function defaultHostId(hosts: Record<string, HostPresence>): string | null {
   const all = Object.values(hosts);
   const home = all.find((h) => h.host?.isHomeHost === true);
-  if (home) return home.daemonId;
-  return all.length === 1 ? (all[0] as HostPresence).daemonId : null;
+  if (home) return home.hostId;
+  return all.length === 1 ? (all[0] as HostPresence).hostId : null;
 }
 
 export const usePresenceStore = create<PresenceState>((set, get) => ({
@@ -217,7 +207,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   setOutageVisible(v) {
     set({ outageVisible: v });
   },
-  setDaemon(p) {
+  setHost(p) {
     set({ daemon: p });
   },
   setHosts(list) {
@@ -225,25 +215,25 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
     for (const h of list) {
       const accounts: Record<string, HostAccount> = {};
       for (const a of h.accounts) accounts[a.backendId] = { ...a, seq: 1 };
-      hosts[h.daemonId] = {
-        daemonId: h.daemonId,
+      hosts[h.hostId] = {
+        hostId: h.hostId,
         online: h.online,
         lastSeenAt: h.lastSeenAt,
         host: h.host,
         accounts,
         // The greeting carries no settings snapshot; the server replays it as
         // a separate frame right after. Keep one already received.
-        claudeSettings: get().hosts[h.daemonId]?.claudeSettings ?? null,
+        claudeSettings: get().hosts[h.hostId]?.claudeSettings ?? null,
       };
     }
     set({ hosts, daemon: anyOnline(hosts) ? 'online' : 'offline' });
   },
-  setHostOnline(daemonId, online) {
+  setHostOnline(hostId, online) {
     set((s) => {
-      const prev = s.hosts[daemonId] ?? blankHost(daemonId);
+      const prev = s.hosts[hostId] ?? blankHost(hostId);
       const hosts = {
         ...s.hosts,
-        [daemonId]: { ...prev, online, ...(online ? { lastSeenAt: Date.now() } : {}) },
+        [hostId]: { ...prev, online, ...(online ? { lastSeenAt: Date.now() } : {}) },
       };
       return { hosts, daemon: anyOnline(hosts) ? 'online' : 'offline' };
     });
@@ -253,20 +243,20 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
       // Strip the wire envelope; the store holds the payload.
       const { type: _envelope, ...host } = report;
       void _envelope;
-      const prev = s.hosts[report.daemonId] ?? blankHost(report.daemonId);
-      return { hosts: { ...s.hosts, [report.daemonId]: { ...prev, host } } };
+      const prev = s.hosts[report.hostId] ?? blankHost(report.hostId);
+      return { hosts: { ...s.hosts, [report.hostId]: { ...prev, host } } };
     });
   },
   setHostAccount(report) {
     set((s) => {
       const { type: _envelope, ...account } = report;
       void _envelope;
-      const prev = s.hosts[report.daemonId] ?? blankHost(report.daemonId);
+      const prev = s.hosts[report.hostId] ?? blankHost(report.hostId);
       const seq = (prev.accounts[report.backendId]?.seq ?? 0) + 1;
       return {
         hosts: {
           ...s.hosts,
-          [report.daemonId]: {
+          [report.hostId]: {
             ...prev,
             accounts: { ...prev.accounts, [report.backendId]: { ...account, seq } },
           },
@@ -274,21 +264,21 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
       };
     });
   },
-  removeHost(daemonId) {
+  removeHost(hostId) {
     set((s) => {
-      if (!s.hosts[daemonId]) return {};
+      if (!s.hosts[hostId]) return {};
       const hosts = { ...s.hosts };
-      delete hosts[daemonId];
+      delete hosts[hostId];
       return { hosts, daemon: anyOnline(hosts) ? 'online' : 'offline' };
     });
   },
-  setClaudeSettings(daemonId, drift, memories) {
+  setClaudeSettings(hostId, drift, memories) {
     set((s) => {
-      const prev = s.hosts[daemonId] ?? blankHost(daemonId);
+      const prev = s.hosts[hostId] ?? blankHost(hostId);
       return {
         hosts: {
           ...s.hosts,
-          [daemonId]: {
+          [hostId]: {
             ...prev,
             claudeSettings: { ...(drift !== undefined ? { drift } : {}), memories },
           },

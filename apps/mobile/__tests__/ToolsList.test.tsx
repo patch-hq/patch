@@ -48,7 +48,7 @@ describe('ToolsList', () => {
     // 39 to 42 adding patch_delegate/patch_delegate_list/patch_delegate_stop)
     // — assert the exact count is stable rather than "some", so a catalog
     // edit that quietly drops a tool from the sheet is caught here.
-    expect(switches.length).toBe(54);
+    expect(switches.length).toBe(64);
   });
 });
 

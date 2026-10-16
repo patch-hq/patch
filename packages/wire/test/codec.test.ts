@@ -22,7 +22,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'chat.spawned': {
     type: 'chat.spawned',
     chatId: 'c1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     folder: '/work/proj',
     parentChatId: 'cParent',
     jobId: 'j_00000000000000000000000012',
@@ -187,21 +187,21 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     error: { code: 'sdk_error', message: 'boom' },
     seq: 4,
   },
-  'daemon.online': { type: 'daemon.online', daemonId: 'host-a' },
-  'daemon.offline': { type: 'daemon.offline', daemonId: 'host-a', reason: 'heartbeat-timeout' },
-  'daemon.unauthenticated': {
-    type: 'daemon.unauthenticated',
-    daemonId: 'host-a',
+  'host.online': { type: 'host.online', hostId: 'host-a' },
+  'host.offline': { type: 'host.offline', hostId: 'host-a', reason: 'heartbeat-timeout' },
+  'host.unauthenticated': {
+    type: 'host.unauthenticated',
+    hostId: 'host-a',
     backendId: 'claude-code',
     reason: 'oauth-expired',
   },
-  'daemon.host': {
-    type: 'daemon.host',
-    daemonId: 'host-a',
+  'host.host': {
+    type: 'host.host',
+    hostId: 'host-a',
     hostName: "Tom's MacBook",
     platform: 'darwin',
     arch: 'arm64',
-    daemonVersion: '0.1.0',
+    hostVersion: '0.1.0',
     updateAvailable: false,
     permissionModeDefault: 'bypassPermissions',
     permissionOverrides: 1,
@@ -212,58 +212,58 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     components: [{ id: 'kokoro', label: 'Kokoro TTS', bytes: 340_000_000, state: 'not-installed' }],
     voiceKeys: { gemini: false, openai: true },
   },
-  'daemon.account': {
-    type: 'daemon.account',
-    daemonId: 'host-a',
+  'host.account': {
+    type: 'host.account',
+    hostId: 'host-a',
     backendId: 'claude-code',
     connected: true,
     accountEmail: 'tom@anthropic.com',
   },
-  'host.rename': { type: 'host.rename', daemonId: 'host-a', hostName: 'hetzner' },
-  'host.set_home': { type: 'host.set_home', daemonId: 'host-a' },
-  'host.removed': { type: 'host.removed', daemonId: 'host-a' },
+  'host.rename': { type: 'host.rename', hostId: 'host-a', hostName: 'hetzner' },
+  'host.set_home': { type: 'host.set_home', hostId: 'host-a' },
+  'host.removed': { type: 'host.removed', hostId: 'host-a' },
   'host.settings': {
     type: 'host.settings',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     harnessMcpServers: [],
   },
   'host.component_install': {
     type: 'host.component_install',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     componentId: 'kokoro',
   },
   'host.component_remove': {
     type: 'host.component_remove',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     componentId: 'kokoro',
   },
   'host.component_progress': {
     type: 'host.component_progress',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     componentId: 'kokoro',
     state: 'downloading',
     receivedBytes: 1024,
     totalBytes: 340_000_000,
   },
-  'host.update': { type: 'host.update', daemonId: 'host-a' },
-  'host.folder_add': { type: 'host.folder_add', daemonId: 'host-a', path: '/work/new' },
-  'host.folder_remove': { type: 'host.folder_remove', daemonId: 'host-a', path: '/work/old' },
+  'host.update': { type: 'host.update', hostId: 'host-a' },
+  'host.folder_add': { type: 'host.folder_add', hostId: 'host-a', path: '/work/new' },
+  'host.folder_remove': { type: 'host.folder_remove', hostId: 'host-a', path: '/work/old' },
   'host.claude_memory_delete': {
     type: 'host.claude_memory_delete',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     project: '/work/proj',
     file: 'notes.md',
   },
   'host.claude_memory_set': {
     type: 'host.claude_memory_set',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     project: '-work-proj',
     file: 'notes.md',
     body: 'Remember this.\n',
   },
   'host.backend_add_account': {
     type: 'host.backend_add_account',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     backendId: 'codex',
     authMethod: 'device',
     requestId: 'signin-1',
@@ -272,13 +272,13 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   // spec/10 § Usage — read every account's limits from Anthropic now.
   'host.backend_usage_refresh': {
     type: 'host.backend_usage_refresh',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     backendId: 'claude-code',
   },
   // spec/03 § Settings
   'settings.snapshot': {
     type: 'settings.snapshot',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     version: 3,
     settings: DEFAULT_SHARED_SETTINGS,
     secrets: {
@@ -293,7 +293,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       providerKeys: { groq: 'gsk_example_not_real_000' },
     },
   },
-  'settings.applied': { type: 'settings.applied', daemonId: 'host-a', version: 3 },
+  'settings.applied': { type: 'settings.applied', hostId: 'host-a', version: 3 },
   'settings.changed': {
     type: 'settings.changed',
     version: 3,
@@ -303,57 +303,57 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       codex: [],
       providerKeys: [{ id: 'groq', set: true, last4: '0000' }],
     },
-    hosts: [{ daemonId: 'host-a', appliedVersion: 3 }],
+    hosts: [{ hostId: 'host-a', appliedVersion: 3 }],
   },
   'notifications.changed': { type: 'notifications.changed', unread: 2 },
   'settings.secret_update': {
     type: 'settings.secret_update',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     update: { backendId: 'codex', accountId: 'c1', authJson: '{"tokens":{}}' },
   },
   'settings.adopt.request': {
     type: 'settings.adopt.request',
     requestId: 'ad1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     kind: 'provider-key',
     id: 'groq',
   },
   'settings.adopt.response': {
     type: 'settings.adopt.response',
     requestId: 'ad1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     ok: true,
     result: { kind: 'provider-key', id: 'groq', value: 'gsk_example_not_real_000' },
   },
   'settings.account_signed_in': {
     type: 'settings.account_signed_in',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     requestId: 'signin-1',
     account: { id: 'c2', label: 'me@example.com', kind: 'chatgpt', authJson: '{"tokens":{}}' },
   },
-  'host.claude_settings_discard': { type: 'host.claude_settings_discard', daemonId: 'host-a' },
+  'host.claude_settings_discard': { type: 'host.claude_settings_discard', hostId: 'host-a' },
   'device.session': { type: 'device.session', deviceId: 'dev-1', name: 'kitchen', active: true },
   'folders.list': {
     type: 'folders.list',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     roots: ['/work/proj'],
     recent: ['/home/tom/notes'],
   },
   'folders.updated': {
     type: 'folders.updated',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     roots: ['/work/proj'],
     recent: [],
   },
   'claude_settings.list': {
     type: 'claude_settings.list',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     drift: '{"model":"opus"}',
     memories: [],
   },
   'claude_settings.updated': {
     type: 'claude_settings.updated',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     memories: [],
   },
   'new_chat_draft.set': {
@@ -373,6 +373,15 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'composer_draft.set': { type: 'composer_draft.set', chatId: 'c1', text: 'not sent yet' },
   'composer_draft.clear': { type: 'composer_draft.clear', chatId: 'c1' },
+  'view_position.set': { type: 'view_position.set', page: 'chat', id: 'c1', seq: 12 },
+  'view_position.updated': {
+    type: 'view_position.updated',
+    page: 'chat',
+    id: 'c1',
+    seq: 12,
+    surfaceId: 'srf-a',
+    updatedAt: 1_700_000_000_000,
+  },
   'composer_draft.updated': {
     type: 'composer_draft.updated',
     chatId: 'c1',
@@ -397,7 +406,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'chat.spawn_request': {
     type: 'chat.spawn_request',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     folder: '/work/x',
     prompt: 'go',
   },
@@ -415,6 +424,51 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     decision: 'do',
   },
   'meeting.state': { type: 'meeting.state', chatId: 'c1', meeting: null },
+  'patch.browser_view.frame': {
+    type: 'patch.browser_view.frame',
+    chatId: 'c1',
+    tabId: 't1',
+    data: 'AA==',
+    width: 1280,
+    height: 720,
+    url: 'https://example.com/login',
+    title: 'Sign in',
+  },
+  'patch.browser_view.watch': {
+    type: 'patch.browser_view.watch',
+    chatId: 'c1',
+    tabId: 't1',
+    watch: true,
+  },
+  'patch.browser_view.status': {
+    type: 'patch.browser_view.status',
+    chatId: 'c1',
+    active: true,
+    action: 'Clicking',
+    tabs: [{ tabId: 't1', url: 'https://example.com/login', handedOff: false }],
+  },
+  'patch.browser_view.stop': { type: 'patch.browser_view.stop', chatId: 'c1' },
+  'patch.browser_handoff.state': {
+    type: 'patch.browser_handoff.state',
+    chatId: 'c1',
+    handoffId: 'h1',
+    tabId: 't1',
+    status: 'waiting',
+    reason: 'Sign in',
+    startedAt: 1,
+  },
+  'patch.browser_handoff.input': {
+    type: 'patch.browser_handoff.input',
+    chatId: 'c1',
+    handoffId: 'h1',
+    input: { kind: 'text', text: 'hunter2' },
+  },
+  'patch.browser_handoff.control': {
+    type: 'patch.browser_handoff.control',
+    chatId: 'c1',
+    handoffId: 'h1',
+    action: 'done',
+  },
   'chat.archive_request': { type: 'chat.archive_request', chatId: 'c1', archived: true },
   'chat.hide_request': { type: 'chat.hide_request', chatId: 'c1', hidden: true },
   'chat.disable_request': { type: 'chat.disable_request', chatId: 'c1', disabled: true },
@@ -425,7 +479,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     candidates: [
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/home/tom/project',
         edge: 'stalled',
         idleMinutes: 120,
@@ -445,7 +499,9 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     type: 'chat.snooze_request',
     chatId: 'c1',
     snoozedUntil: 1_700_000_060_000,
+    setId: 'set-1',
   },
+  'chat.snooze_back_clear_request': { type: 'chat.snooze_back_clear_request', chatId: 'c1' },
   'chat.delete_request': { type: 'chat.delete_request', chatId: 'c1', deleted: true },
   'chat.goal_request': { type: 'chat.goal_request', chatId: 'c1', goal: 'Ship it' },
   'chat.todos_request': {
@@ -471,6 +527,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     type: 'chat.model_request',
     chatId: 'c1',
     model: 'claude-opus-4-1',
+  },
+  'chat.account_request': {
+    type: 'chat.account_request',
+    chatId: 'c1',
+    preferredAccountId: 'account-1',
   },
   'file.write': { type: 'file.write', chatId: 'c1', path: 'foo.txt', content: 'x' },
   'patch.file_changed': { type: 'patch.file_changed', chatId: 'c1', path: 'foo.txt' },
@@ -500,6 +561,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     targetChatId: 'c2',
     message: 'do thing',
     requestId: 'req-1',
+    revealTarget: true,
   },
   'patch.send_to.response': {
     type: 'patch.send_to.response',
@@ -510,7 +572,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'patch.spawn': {
     type: 'patch.spawn',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     sourceChatId: 'c1',
     folder: '/work/x',
     prompt: 'go',
@@ -519,7 +581,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     type: 'patch.spawn.response',
     requestId: 'req-1',
     sourceChatId: 'c1',
-    daemonId: 'host-b',
+    hostId: 'host-b',
     folder: '/work/x',
     ok: true,
     chatId: 'c2',
@@ -547,7 +609,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'patch.list_chats.response': {
     type: 'patch.list_chats.response',
-    chats: [{ chatId: 'c1', daemonId: 'host-a' }],
+    chats: [{ chatId: 'c1', hostId: 'host-a' }],
     sourceChatId: 'c1',
     chatCount: 3,
   },
@@ -564,7 +626,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       {
         chatId: 'c2',
         chatName: 'bus watch',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         folder: '/home/tom/bus',
         text: 'is it late',
         ts: 2_000,
@@ -583,6 +645,54 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     type: 'patch.activity.read.response',
     requestId: 'r1',
     messages: [{ chatId: 'c2', text: 'is it late', ts: 2_000 }],
+  },
+  'patch.browser_use.request': {
+    type: 'patch.browser_use.request',
+    requestId: 'r1',
+    action: 'stop',
+  },
+  'patch.browser_use.response': {
+    type: 'patch.browser_use.response',
+    requestId: 'r1',
+    active: true,
+    actionLabel: 'Clicking',
+    since: 1_000,
+    tabs: 1,
+  },
+  'patch.usage.read.request': {
+    type: 'patch.usage.read.request',
+    requestId: 'r1',
+    since: 1_000,
+    until: 5_000,
+  },
+  'patch.usage.read.response': {
+    type: 'patch.usage.read.response',
+    requestId: 'r1',
+    hostId: 'host-a',
+    samples: [{ ts: 2_000, accountId: 'a1', label: 'Work', week: 0.4, weekResetsAt: 9_000 }],
+    chats: [{ chatId: 'c1', name: 'A chat', tokens: 1200, costUsd: 0.5, turns: 3 }],
+  },
+  'patch.tool_log.read.request': {
+    type: 'patch.tool_log.read.request',
+    requestId: 'r1',
+    since: 1_000,
+    until: 5_000,
+    limit: 200,
+  },
+  'patch.tool_log.read.response': {
+    type: 'patch.tool_log.read.response',
+    requestId: 'r1',
+    hostId: 'host-a',
+    entries: [
+      {
+        ts: 2_000,
+        tool: 'patch_send_to',
+        callerChatId: 'c1',
+        targetChatId: 'c2',
+        durationMs: 5,
+        ok: true,
+      },
+    ],
   },
   'patch.stop': { type: 'patch.stop', sourceChatId: 'c1', targetChatId: 'c2' },
   'patch.job_create': {
@@ -775,14 +885,15 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     done: false,
   },
   'chat.committed': { type: 'chat.committed', chatId: 'c1', through: 41 },
+  'host.reconciled': { type: 'host.reconciled', hostId: 'd1' },
   'host.manager_adopt': {
     type: 'host.manager_adopt',
-    daemonId: 'd1',
+    hostId: 'd1',
     epoch: 2,
     handoff: 'user: hello',
     nextSeq: 7,
   },
-  'host.manager_release': { type: 'host.manager_release', daemonId: 'd1', epoch: 3 },
+  'host.manager_release': { type: 'host.manager_release', hostId: 'd1', epoch: 3 },
   'patch.chat_history.request': {
     type: 'patch.chat_history.request',
     requestId: 'ch1',
@@ -799,7 +910,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     type: 'patch.skills.request',
     requestId: 'sk1',
     folder: '/Users/tom/projects/portfolio',
-    daemonId: 'd1',
+    hostId: 'd1',
   },
   'patch.skills.response': {
     type: 'patch.skills.response',
@@ -820,12 +931,12 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.models.request': {
     type: 'patch.models.request',
     requestId: 'md1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
   },
   'patch.models.response': {
     type: 'patch.models.response',
     requestId: 'md1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     models: [{ id: 'claude-opus-5', label: 'Claude Opus 5', backend: 'claude-code' }],
     errors: [],
     fetchedAt: '2026-08-03T09:00:00.000Z',
@@ -833,26 +944,26 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.recurrence.translate.request': {
     type: 'patch.recurrence.translate.request',
     requestId: 'rt1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     phrase: 'every 3rd Sunday between May and August',
   },
   'patch.recurrence.translate.response': {
     type: 'patch.recurrence.translate.response',
     requestId: 'rt1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     ok: true,
     rrule: 'FREQ=MONTHLY;BYDAY=SU;BYSETPOS=3;BYMONTH=5,6,7,8;BYHOUR=9;BYMINUTE=0',
   },
   'patch.folders.browse.request': {
     type: 'patch.folders.browse.request',
     requestId: 'fb1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     dir: '/Users/tom/projects',
   },
   'patch.folders.browse.response': {
     type: 'patch.folders.browse.response',
     requestId: 'fb1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     ok: true,
     dir: '/Users/tom/projects',
     parent: null,
@@ -860,7 +971,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'patch.terminal.open': {
     type: 'patch.terminal.open',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     sessionId: 'term-1',
     folder: '/Users/tom/projects',
   },
@@ -884,7 +995,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.host_files.request': {
     type: 'patch.host_files.request',
     requestId: 'hf1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     op: 'write',
     path: '/Users/tom/.claude/skills/plant/SKILL.md',
     content: '# plant\n',
@@ -893,7 +1004,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.host_files.response': {
     type: 'patch.host_files.response',
     requestId: 'hf1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     ok: true,
     path: '/Users/tom/.claude/skills',
     parent: '/Users/tom/.claude',
@@ -902,14 +1013,14 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.blob.request': {
     type: 'patch.blob.request',
     requestId: 'b1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     chatId: 'c1',
     sha: 'a'.repeat(64),
   },
   'patch.blob.response': {
     type: 'patch.blob.response',
     requestId: 'b1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     ok: true,
     mime: 'image/png',
     data: 'iVBORw0KGgo=',
@@ -926,7 +1037,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.chat_move.request': {
     type: 'patch.chat_move.request',
     requestId: 'cm1',
-    daemonId: 'host-b',
+    hostId: 'host-b',
     chatId: 'c1',
     op: 'import',
     folder: '/home/tom/Unite',
@@ -940,7 +1051,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.chat_move.response': {
     type: 'patch.chat_move.response',
     requestId: 'cm1',
-    daemonId: 'host-b',
+    hostId: 'host-b',
     chatId: 'c1',
     op: 'import',
     ok: false,
@@ -949,19 +1060,19 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.chat_search.request': {
     type: 'patch.chat_search.request',
     requestId: 'cs1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     query: 'boiler',
     limit: 20,
   },
   'patch.chat_search.response': {
     type: 'patch.chat_search.response',
     requestId: 'cs1',
-    daemonId: 'host-a',
+    hostId: 'host-a',
     ok: true,
     hits: [
       {
         chatId: 'c1',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         name: 'Boiler',
         preview: null,
         folder: '/Users/tom',
@@ -1012,7 +1123,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.browser_tunnel.open': {
     type: 'patch.browser_tunnel.open',
     streamId: 'stream-1',
-    daemonId: 'd1',
+    hostId: 'd1',
     host: 'example.com',
     port: 443,
   },
@@ -1034,6 +1145,26 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     streamId: 'stream-1',
     code: 'host_offline',
     message: 'routing host d2 is offline',
+  },
+  'web_bot_auth.sign_request': {
+    type: 'web_bot_auth.sign_request',
+    hostId: 'd1',
+    requestId: 'wba-1',
+    authority: 'shop.example',
+    directoryUrl: 'https://patch.example/.well-known/http-message-signatures-directory',
+  },
+  'web_bot_auth.sign_response': {
+    type: 'web_bot_auth.sign_response',
+    hostId: 'd1',
+    requestId: 'wba-1',
+    ok: true,
+    result: {
+      headers: {
+        'Signature-Agent': '"https://patch.example/.well-known/http-message-signatures-directory"',
+        'Signature-Input': 'sig1=("@authority" "signature-agent")',
+        Signature: 'sig1=:YWJjZA==:',
+      },
+    },
   },
   'patch.audio_relay.open': {
     type: 'patch.audio_relay.open',
@@ -1061,7 +1192,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'job.exec_request': {
     type: 'job.exec_request',
-    daemonId: 'd1',
+    hostId: 'd1',
     jobId: 'j_1',
     fireId: 'f_1',
     folder: '/home/tom/projects/portfolio',
@@ -1078,9 +1209,22 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     stdout: '2 new photos\n',
     stderr: '',
   },
+  'host.wake_request': {
+    type: 'host.wake_request',
+    hostId: 'd1',
+    jobId: 'j_1',
+    at: 1_792_116_000_000,
+  },
+  'host.wake_result': {
+    type: 'host.wake_result',
+    jobId: 'j_1',
+    at: 1_792_116_000_000,
+    ok: false,
+    error: 'the host is not on AC power',
+  },
   'hook.check_request': {
     type: 'hook.check_request',
-    daemonId: 'd1',
+    hostId: 'd1',
     requestId: 'req_1',
     hookId: 'hook_1',
     kind: 'script',
@@ -1090,7 +1234,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       message: 'hello',
       chatId: 'c1',
       folder: '/home/tom/projects/portfolio',
-      daemonId: 'd1',
+      hostId: 'd1',
       specialThread: false,
     },
   },
@@ -1104,7 +1248,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'hook.agent_response_check_request': {
     type: 'hook.agent_response_check_request',
-    daemonId: 'd1',
+    hostId: 'd1',
     chatId: 'c1',
     checkId: 'arc_1',
     folder: '/home/tom/projects/portfolio',
@@ -1114,7 +1258,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'hook.agent_response_outcome': {
     type: 'hook.agent_response_outcome',
-    daemonId: 'd1',
+    hostId: 'd1',
     chatId: 'c1',
     checkId: 'arc_1',
     results: [
@@ -1301,7 +1445,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     surfaceId: 'srf-1',
     hosts: [
       {
-        daemonId: 'host-a',
+        hostId: 'host-a',
         online: true,
         lastSeenAt: 1_700_000_000_000,
         host: null,
@@ -1593,7 +1737,7 @@ describe('codec', () => {
     // must say WHICH field held WHAT, or it is indistinguishable from an edit
     // that silently did not save.
     try {
-      decode(JSON.stringify({ type: 'host.rename', daemonId: 'host-a', hostName: '' }));
+      decode(JSON.stringify({ type: 'host.rename', hostId: 'host-a', hostName: '' }));
       expect.fail('expected throw');
     } catch (err) {
       const e = err as WireDecodeError;
@@ -1602,7 +1746,7 @@ describe('codec', () => {
     }
     // And a long value is truncated rather than pasted whole onto `.message`.
     try {
-      decode(JSON.stringify({ type: 'host.rename', daemonId: 'host-a', hostName: 42 }));
+      decode(JSON.stringify({ type: 'host.rename', hostId: 'host-a', hostName: 42 }));
       expect.fail('expected throw');
     } catch (err) {
       const e = err as WireDecodeError;
@@ -1610,7 +1754,7 @@ describe('codec', () => {
     }
     try {
       decode(
-        JSON.stringify({ type: 'host.folder_add', daemonId: 'host-a', path: ['x'.repeat(200)] }),
+        JSON.stringify({ type: 'host.folder_add', hostId: 'host-a', path: ['x'.repeat(200)] }),
       );
       expect.fail('expected throw');
     } catch (err) {
@@ -1805,7 +1949,7 @@ describe('codec', () => {
 
   // Spec constraint: daemon.unauthenticated requires reason
   test('decode throws on daemon.unauthenticated missing reason', () => {
-    const bad = { type: 'daemon.unauthenticated' };
+    const bad = { type: 'host.unauthenticated' };
     expect(() => decode(JSON.stringify(bad))).toThrow(WireDecodeError);
   });
 
@@ -1932,7 +2076,7 @@ describe('codec', () => {
   // an old host that has never heard of it must still decode fine, so it's
   // optional and its absence must not throw.
   test('decode accepts chat.spawned with no jobId (old-daemon back-compat)', () => {
-    const legacy = { type: 'chat.spawned', chatId: 'c1', daemonId: 'd1', folder: '/x' };
+    const legacy = { type: 'chat.spawned', chatId: 'c1', hostId: 'd1', folder: '/x' };
     const decoded = decode(JSON.stringify(legacy));
     expect(decoded).toEqual(legacy);
   });
@@ -1953,6 +2097,52 @@ describe('codec', () => {
       // No cause is passed for this failure mode, so formatMessage falls back
       // to the bare reason (no zod issue, no SyntaxError to report).
       expect((err as WireDecodeError).message).toBe('unsupported frame type');
+    }
+  });
+
+  test('WireDecodeError preview and received value never end in half an emoji', () => {
+    const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    // Sweep the padding so one case puts the emoji's halves either side of each limit.
+    for (let pad = 0; pad < 4; pad++) {
+      const rawLimit = JSON.stringify({
+        type: 'chat.message',
+        chatId: 'c1',
+        role: 'user',
+        content: '',
+        seq: -1,
+      });
+      const head = 'a'.repeat(200 - rawLimit.length + 1 + pad);
+      try {
+        decode(
+          JSON.stringify({
+            type: 'chat.message',
+            chatId: 'c1',
+            role: 'user',
+            content: `${head}😀😀`,
+            seq: -1,
+          }),
+        );
+        expect.fail('expected throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(WireDecodeError);
+        expect(lone.test((err as WireDecodeError).preview)).toBe(false);
+      }
+      try {
+        decode(
+          JSON.stringify({
+            type: 'chat.message',
+            chatId: 'c1',
+            role: 'user',
+            content: 'x',
+            seq: `${'a'.repeat(77 + pad)}😀😀`,
+          }),
+        );
+        expect.fail('expected throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(WireDecodeError);
+        const received = (err as WireDecodeError).received ?? '';
+        expect(lone.test(received)).toBe(false);
+      }
     }
   });
 

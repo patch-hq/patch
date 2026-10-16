@@ -14,7 +14,7 @@ const JOBS = [
     enabled: true,
     trigger: { type: 'cron', expression: '0 9 * * *' },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/alpha', skill: 'alpha' },
+    action: { type: 'spawn', hostId: 'd1', folder: '~/projects/alpha', skill: 'alpha' },
     createdAt: 100,
     updatedAt: 100,
     latestRun: { ts: 1_700_000_001_000, status: 'ok' },
@@ -25,7 +25,7 @@ const JOBS = [
     enabled: false,
     trigger: { type: 'webhook', scheme: 'github' },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/zulu', skill: 'zulu' },
+    action: { type: 'spawn', hostId: 'd1', folder: '~/projects/zulu', skill: 'zulu' },
     createdAt: 300,
     updatedAt: 300,
     latestRun: { ts: 1_700_000_003_000, status: 'ok' },
@@ -36,7 +36,7 @@ const JOBS = [
     enabled: true,
     trigger: { type: 'todoist', filter: null },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/mike', skill: 'mike' },
+    action: { type: 'spawn', hostId: 'd1', folder: '~/projects/mike', skill: 'mike' },
     createdAt: 200,
     updatedAt: 200,
     // Never fired.
@@ -187,13 +187,13 @@ test.describe('jobs sort and filter', () => {
     );
     await page.getByTestId('jobs-sort').selectOption('name');
     await page.getByTestId('jobs-filter-status').selectOption('enabled');
-    // Into the editor for a job, then back out of it by its own back control.
+    // Into the editor for a job, then back out of it by the nav history control.
     await page.getByTestId('job-alpha').locator('a.job-link').click();
     await expect(page.getByTestId('jobs-route')).toHaveCount(0);
     // Wait for the editor to finish loading the job before leaving it: it
-    // re-renders as the fetch lands, detaching the back button mid-click.
+    // re-renders as the fetch lands, detaching the control mid-click.
     await expect(page.getByTestId('job-name')).toHaveValue('alpha watcher');
-    await page.getByTestId('job-editor-back').click();
+    await page.getByTestId('nav-back').click();
     await expect(page.getByTestId('jobs-sort')).toHaveValue('name');
     await expect(page.getByTestId('jobs-filter-status')).toHaveValue('enabled');
     expect(await rowOrder(page)).toEqual(['alpha', 'mike']);

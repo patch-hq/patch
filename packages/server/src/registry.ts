@@ -7,6 +7,7 @@
 // Implements `RevocationStoreInterface` from @patch/auth so the server's
 // auth gate can plug straight in.
 
+import { parsePersisted } from './persisted-json.js';
 import {
   existsSync,
   readFileSync,
@@ -32,9 +33,12 @@ const SurfaceRecord = z
   .strict();
 export type SurfaceRecord = z.infer<typeof SurfaceRecord>;
 
+/** How much earlier than a registration a key may be and still count as that registration's own. */
+const SUPERSEDE_SLACK_SECONDS = 60;
+
 const DaemonKeyRecord = z
   .object({
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     publicKey: z.string().min(1),
     issuedAt: z.number().int(),
     revoked: z.boolean().optional(),
@@ -119,7 +123,7 @@ const RegistryFile = z
      * `null` until one is chosen, in which case the first registered machine is
      * the home machine so exactly one always holds it.
      */
-    homeDaemonId: z.string().min(1).nullable(),
+    homeHostId: z.string().min(1).nullable(),
     /** Group 11: Expo push tokens per surface. */
     pushTokens: z.array(PushTokenRecord).optional(),
     /** Configurable project-launch folders per account (Settings → Project folders). */
@@ -140,7 +144,7 @@ const EMPTY: RegistryFile = {
   account: null,
   surfaces: [],
   daemonKeys: [],
-  homeDaemonId: null,
+  homeHostId: null,
 };
 
 export class Registry implements RevocationStoreInterface {
@@ -164,7 +168,7 @@ export class Registry implements RevocationStoreInterface {
       return r;
     }
     const raw = readFileSync(path, 'utf8');
-    const rawObj: unknown = JSON.parse(raw);
+    const rawObj: unknown = parsePersisted(raw);
     // Back-compat guard: accounts bootstrapped before the server became the
     // credential authority (spec/10-auth) persisted only the account PUBLIC
     // key. The current schema requires `userPrivateKey`, which the server
@@ -298,8 +302,25 @@ export class Registry implements RevocationStoreInterface {
   // --- host keys (one record per registered machine) ---
 
   /** The record for one machine, or null if that machine is not registered. */
-  getDaemonKey(daemonId: string): DaemonKeyRecord | null {
-    return this.state.daemonKeys.find((d) => d.daemonId === daemonId) ?? null;
+  getDaemonKey(hostId: string): DaemonKeyRecord | null {
+    return this.state.daemonKeys.find((d) => d.hostId === hostId) ?? null;
+  }
+
+  /**
+   * Was a host key minted (`iat`, unix seconds) before this machine's current
+   * registration? Pairing a machine again replaces its record but a daemonKey
+   * carries only the machine's id and never expires, so without this an old key
+   * — one that was revoked, or stolen — would work again the moment the machine
+   * re-registered under the same id.
+   */
+  isDaemonKeySuperseded(hostId: string, iat: number): boolean {
+    const rec = this.getDaemonKey(hostId);
+    if (rec === null) return false;
+    // `issuedAt` is unix seconds, but records written by `mint-daemon-key` hold
+    // milliseconds; nothing in seconds reaches 1e11 for thousands of years.
+    const registeredAt = rec.issuedAt > 1e11 ? Math.floor(rec.issuedAt / 1000) : rec.issuedAt;
+    // A minute of slack: a key minted and recorded together can straddle a second.
+    return iat + SUPERSEDE_SLACK_SECONDS < registeredAt;
   }
 
   /** Every machine's record, in registration order (revoked ones included). */
@@ -308,12 +329,12 @@ export class Registry implements RevocationStoreInterface {
   }
 
   /**
-   * Register a machine, or replace its record on re-pair. Keyed by `daemonId`,
+   * Register a machine, or replace its record on re-pair. Keyed by `hostId`,
    * so a second machine ADDS a record rather than overwriting the first — the
    * account is a relay for any number of machines (spec/01).
    */
   setDaemonKey(record: DaemonKeyRecord): void {
-    const idx = this.state.daemonKeys.findIndex((d) => d.daemonId === record.daemonId);
+    const idx = this.state.daemonKeys.findIndex((d) => d.hostId === record.hostId);
     // A re-pair must not silently discard the machine's user-editable name.
     const keptName = idx >= 0 ? this.state.daemonKeys[idx]?.hostName : undefined;
     const merged: DaemonKeyRecord = {
@@ -330,38 +351,38 @@ export class Registry implements RevocationStoreInterface {
    * the machine is not registered or the name is empty — the offending value is
    * named rather than silently defaulted.
    */
-  setHostName(daemonId: string, hostName: string): void {
+  setHostName(hostId: string, hostName: string): void {
     if (hostName.trim().length === 0) {
-      throw new Error(`Registry.setHostName: empty hostName for daemonId ${daemonId}`);
+      throw new Error(`Registry.setHostName: empty hostName for hostId ${hostId}`);
     }
-    const idx = this.state.daemonKeys.findIndex((d) => d.daemonId === daemonId);
-    if (idx < 0) throw new Error(`Registry.setHostName: no machine registered as ${daemonId}`);
+    const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
+    if (idx < 0) throw new Error(`Registry.setHostName: no machine registered as ${hostId}`);
     const rec = this.state.daemonKeys[idx] as DaemonKeyRecord;
-    this.state.daemonKeys[idx] = { ...rec, hostName };
+    this.state.daemonKeys[idx] = { ...rec, hostName: hostName.trim() };
     this.flush();
   }
 
   /** The machine's user-editable label, or undefined when never renamed. */
-  hostName(daemonId: string): string | undefined {
-    return this.getDaemonKey(daemonId)?.hostName;
+  hostName(hostId: string): string | undefined {
+    return this.getDaemonKey(hostId)?.hostName;
   }
 
   /**
    * The account's home machine (spec/06). Defaults to the first registered
    * machine so exactly one machine holds the flag as soon as one exists.
    */
-  homeDaemonId(): string | null {
-    const explicit = this.state.homeDaemonId;
-    if (explicit !== null && this.isRegisteredDaemon(explicit)) return explicit;
-    return this.registeredDaemonIds()[0] ?? null;
+  homeHostId(): string | null {
+    const explicit = this.state.homeHostId;
+    if (explicit !== null && this.isRegisteredHost(explicit)) return explicit;
+    return this.registeredHostIds()[0] ?? null;
   }
 
   /** Make one machine the account's home machine. Throws if unregistered. */
-  setHomeDaemonId(daemonId: string): void {
-    if (!this.isRegisteredDaemon(daemonId)) {
-      throw new Error(`Registry.setHomeDaemonId: no machine registered as ${daemonId}`);
+  setHomeHostId(hostId: string): void {
+    if (!this.isRegisteredHost(hostId)) {
+      throw new Error(`Registry.setHomeHostId: no machine registered as ${hostId}`);
     }
-    this.state.homeDaemonId = daemonId;
+    this.state.homeHostId = hostId;
     this.flush();
   }
 
@@ -369,12 +390,12 @@ export class Registry implements RevocationStoreInterface {
    * Every machine registered against this account, in registration order
    * (spec/03 § Host events — a host-addressed frame names one of these).
    */
-  registeredDaemonIds(): string[] {
-    return this.state.daemonKeys.filter((d) => d.revoked !== true).map((d) => d.daemonId);
+  registeredHostIds(): string[] {
+    return this.state.daemonKeys.filter((d) => d.revoked !== true).map((d) => d.hostId);
   }
 
   /**
-   * Is `daemonId` a machine this account has registered?
+   * Is `hostId` a machine this account has registered?
    *
    * The gate for every host-addressed ingress. A frame naming an unregistered
    * machine is REFUSED naming the offending id — never relayed to whichever
@@ -383,31 +404,31 @@ export class Registry implements RevocationStoreInterface {
    * the wrong filesystem, which is why the check lives at the ingress rather
    * than at the routing layer.
    */
-  isRegisteredDaemon(daemonId: string): boolean {
-    return this.registeredDaemonIds().includes(daemonId);
+  isRegisteredHost(hostId: string): boolean {
+    return this.registeredHostIds().includes(hostId);
   }
 
   /**
    * Take a machine off the account (Settings → Hosts → "Remove this host").
    *
    * The record is kept as a REVOKED tombstone rather than deleted: an unknown
-   * daemonId's hello is merely refused, whereas a revoked one is told
+   * hostId's hello is merely refused, whereas a revoked one is told
    * `auth.revoked` and wipes its key — so the machine learns it was removed
-   * instead of retrying forever. It drops out of `registeredDaemonIds()` (and
+   * instead of retrying forever. It drops out of `registeredHostIds()` (and
    * so out of every roster and the host-addressing gate) at once. Pairing the
    * machine again replaces the tombstone (`setDaemonKey`). An explicit home
-   * choice naming it is cleared, so `homeDaemonId()` falls to the next machine.
+   * choice naming it is cleared, so `homeHostId()` falls to the next machine.
    *
    * Throws naming the id when it is not a registered machine.
    */
-  removeDaemon(daemonId: string): void {
-    if (!this.isRegisteredDaemon(daemonId)) {
-      throw new Error(`Registry.removeDaemon: no machine registered as ${daemonId}`);
+  removeHost(hostId: string): void {
+    if (!this.isRegisteredHost(hostId)) {
+      throw new Error(`Registry.removeHost: no machine registered as ${hostId}`);
     }
-    const idx = this.state.daemonKeys.findIndex((d) => d.daemonId === daemonId);
+    const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
     const rec = this.state.daemonKeys[idx] as DaemonKeyRecord;
     this.state.daemonKeys[idx] = { ...rec, revoked: true };
-    if (this.state.homeDaemonId === daemonId) this.state.homeDaemonId = null;
+    if (this.state.homeHostId === hostId) this.state.homeHostId = null;
     this.flush();
   }
 
@@ -430,7 +451,7 @@ export class Registry implements RevocationStoreInterface {
       this.flush();
       return;
     }
-    const dIdx = this.state.daemonKeys.findIndex((d) => d.daemonId === id);
+    const dIdx = this.state.daemonKeys.findIndex((d) => d.hostId === id);
     if (dIdx >= 0) {
       const rec = this.state.daemonKeys[dIdx] as DaemonKeyRecord;
       this.state.daemonKeys[dIdx] = { ...rec, revoked: true };
@@ -443,7 +464,7 @@ export class Registry implements RevocationStoreInterface {
   isRevoked(id: string): boolean {
     const surface = this.state.surfaces.find((s) => s.surfaceId === id);
     if (surface) return surface.revoked === true;
-    const daemon = this.state.daemonKeys.find((d) => d.daemonId === id);
+    const daemon = this.state.daemonKeys.find((d) => d.hostId === id);
     if (daemon) return daemon.revoked === true;
     // Unknown id: not revoked, but also not authoritative — caller should
     // pair this with a "do we know this id at all?" check via getSurface.
@@ -509,7 +530,7 @@ export class Registry implements RevocationStoreInterface {
     const tokens = this.state.pushTokens ?? [];
     const revoked = new Set(this.state.surfaces.filter((s) => s.revoked).map((s) => s.surfaceId));
     const singletonAccountId = this.state.account?.accountId;
-    return tokens
+    const live = tokens
       .filter((t) => !revoked.has(t.surfaceId))
       .filter((t) => {
         if (t.accountId) return t.accountId === accountId;
@@ -517,6 +538,9 @@ export class Registry implements RevocationStoreInterface {
         return singletonAccountId === accountId;
       })
       .map((t) => t.token);
+    // A phone re-paired as a new surface holds the same token under two ids; it
+    // must be pushed once, not twice.
+    return [...new Set(live)];
   }
 
   // --- Project-launch folders (Settings → Project folders) ---

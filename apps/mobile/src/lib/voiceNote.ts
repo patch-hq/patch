@@ -42,6 +42,10 @@ let _prepare: Promise<void> | null = null;
 // arrives before prepare finished) checks it and bails without clobbering a
 // newer note.
 let _noteGen = 0;
+/** An `endVoiceNote` is waiting to take the recording (see there). */
+let _taking = false;
+/** A Cancel arrived while a send was still waiting for the recording. */
+let _cancelWhileTaking = false;
 
 export function startVoiceNote(chatId: string, mode: VoiceNoteMode = 'tap'): void {
   // 0) A note on a dictation backend this chat's host has no key for would be
@@ -124,15 +128,33 @@ export function releaseVoiceNoteIfHeld(chatId: string): void {
  * gesture was released faster than the mic could spin up), the user is told.
  */
 export async function endVoiceNote(send: boolean): Promise<void> {
+  // A release and the overlay's Send can both land before the mic is ready.
+  // Only the first may take the recording; the second would find it gone and
+  // toast "nothing recorded" over an upload that is in flight.
+  // But a Cancel among them wins: nobody meant that note to go.
+  if (_taking) {
+    if (!send) _cancelWhileTaking = true;
+    return;
+  }
   const chatId = useVoiceStore.getState().voiceNoteChatId;
   // Wait for a still-in-flight prepare so a quick tap/hold-release still has a
   // recording to send (the fix for the vanished-note race). A failed prepare
   // already toasted + cleared the overlay in startVoiceNote.
   const prep = _prepare;
-  if (prep) await prep.catch(() => undefined);
-  const rec = _recording;
-  _recording = null;
-  _prepare = null;
+  _taking = true;
+  let rec: Audio.Recording | null;
+  try {
+    if (prep) await prep.catch(() => undefined);
+    rec = _recording;
+    _recording = null;
+    _prepare = null;
+  } finally {
+    _taking = false;
+  }
+  if (_cancelWhileTaking) {
+    _cancelWhileTaking = false;
+    send = false;
+  }
 
   if (!rec) {
     // Prepare failed (already surfaced) or the gesture was released before the

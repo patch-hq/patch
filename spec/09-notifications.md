@@ -8,9 +8,9 @@ A notification is a doorbell first: it exists in the moment, on whichever surfac
 
 - **What is logged:** every agent-sent notification (`patch_notify` at any importance, and `patch_ask_human`'s push). Not logged: a `patch_call` ring, and the notifications the server raises itself (turn finished, permission waiting, batch check-in) — those have their own place in the sidebar (`04-chats-and-folders.md` § Current status).
 - **Entry:** id, source chat, message (as the agent wrote it), importance, `deepLink` if any, time sent, and read state. Logged whether or not the channel was suppressed — the log is "what the agent said", not "what reached me".
-- **Read state is account-wide and server-held**, so reading on the web clears the badge everywhere. An entry is unread until the user opens it from the bell (which also opens its source chat), presses "Mark all read", or looks at its source chat: while a chat is open in a web pane or tab, every unread entry for it — already there or arriving live — is marked read. A push being tapped does not mark one read, since the log is a separate surface from the OS tray.
+- **Read state is account-wide and server-held**, so reading on the web clears the unread state everywhere. An entry is unread until the user opens it from the bell (which also opens its source chat), presses "Mark all read", or looks at its source chat: while a chat is open in a web pane or tab, every unread entry for it — already there or arriving live — is marked read. A push being tapped does not mark one read, since the log is a separate surface from the OS tray.
 - **Bell on the chat row:** a chat with at least one unread entry shows a small bell beside its title in the web sidebar, and loses it when the entry is read.
-- **The bell** sits in the web header. It carries a count of unread entries (none shown at zero). Opening it lists entries newest first, unread ones visibly distinct from read ones. Clicking an entry marks it read and opens its source chat.
+- **The bell** sits in the web header. It shows no count; the unread total is only in its accessible label. Opening it lists entries newest first, unread ones visibly distinct from read ones. Clicking an entry marks it read and opens its source chat.
 - **Retention:** the newest 200 entries. Older ones are dropped; read ones are never dropped before unread ones within the cap.
 - **Live:** a change to the log is broadcast to every surface as `notifications.changed` (`03-wire-protocol.md`), and surfaces refetch.
 - The source chat stays the canonical record: every `patch_notify` call is also a tool-call entry in the source chat's history. There is still no cross-channel timeline of OS-level toasts — the bell shows what agents sent, not how it was delivered.
@@ -274,7 +274,7 @@ When a chat's turn settles — its activity goes from running to idle — the se
 
 - Desktop fires on every desktop surface except one that already has this exact chat open — it is already in front of the user, so the toast would only repeat what the screen already shows. If Patch is open on the computer at all the toast appears there; if it isn't, the notification is simply not delivered anywhere.
 - Push fires only when no computer surface is active — the user is somewhere other than the machine Patch is on. A live phone surface does not suppress it, since being on the phone is exactly when the push is the point.
-- Archived, deleted and snoozed chats are skipped, as are the special threads — Manager and Speakers each already reach the user through their own channel, and a Manager sweep ending is caused by other chats finishing rather than being news of its own.
+- Archived and deleted chats are skipped, snoozed ones are silent (§ Snoozed chats), as are the special threads — Manager and Speakers each already reach the user through their own channel, and a Manager sweep ending is caused by other chats finishing rather than being news of its own.
 - A chat a job created is skipped when that job's action sets `notifyOnComplete: false` (`08-triggers-and-jobs.md` § Action). Absent — the default — the job's chats notify like any other.
 - A chat that is a member of the currently-running batch (`14-design-web.md` § Batch mode) is skipped, and so is § A turn that failed below for the same chat — that is the suppression the feature is for. It applies for as long as the batch is running, check-in included: the one check-in notification already said what there was to say, and a member finishing afterwards must not go back to pinging one at a time. § Waiting on you is unaffected — a permission ask is not a finish, and stays live.
 
@@ -332,6 +332,12 @@ The fact rides on `chat.state` as `turnStopped` (`03-wire-protocol.md`), stamped
 
 Only the stopped turn is silenced. A chat that is stopped and then given a fresh turn notifies when that turn settles, as does the promoted turn a stop exists to start.
 
+### A chat that is not done yet
+
+A turn settling is not always the chat finishing. The chat can settle `idle` while a backgrounded command or sub-agent is still running (`backgroundTasks` on `chat.state`, `02-daemon.md` § Background task completions), or while its goal is not yet met (`04-chats-and-folders.md` § Goals). Ringing then says "finished" for a chat that is still working.
+
+So when a `user` turn settles and either holds, the notification is owed rather than sent. It goes out on the next idle frame at which neither holds — whether that frame ends a machine turn (the one that reports a background completion, or a goal continuation) or is the goal being met with no turn at all. A machine turn on its own still never starts a debt, a stop clears one, and a failure clears one. Absent `backgroundTasks` counts as none: it is not a measurement, so it holds nothing back.
+
 ## A turn that failed
 
 A turn that errors out is the same news as one that finishes — the thing the user was waiting on is not coming — so it rings the same doorbell. It fires on the edge into `errored` (from `running`, or from `idle` for a pre-flight failure such as a missing folder), reads `<name> failed: <error>`, and is delivered exactly as § Chat completion is, to the same audience: a `user` turn, not stopped, on a chat that is not archived, deleted, snoozed, hidden, a special thread, or a job's with `notifyOnComplete: false`. The error is the chat's `lastError` message, flattened to one line and cut to 200 characters.
@@ -356,6 +362,10 @@ It fires on the transition into `awaiting-permission`, so a re-sent state frame 
 Origin is deliberately not consulted here. A machine turn is silent when it finishes because nobody was waiting on it; a machine turn that stops to ask is the opposite — it is the run nobody is watching, and it stays stopped until a human answers. This is the same judgement that unarchives such a chat.
 
 The message names the chat and what is being asked: the question text itself for `AskUserQuestion`, otherwise the tool being requested and the description carried with it.
+
+## Snoozed chats
+
+While a chat is snoozed (`snoozedUntil > now`, `04-chats-and-folders.md` § Snooze) it produces no notification of any kind on any channel: push/FCM, desktop, the in-app toast and the bell. That covers chat completion, waiting on a permission or `AskUserQuestion`, `patch_ask_human`, `patch_report`, `patch_notify` at every importance, `patch_call` and errors. The rule is applied once, where every notification is routed (the server's notification router, the bell's log and the call orchestrator), by looking the chat up at the moment the notification would be sent; a notification that is dropped is not queued and is not replayed when the snooze ends. What the user sees instead is the Back state (`04-chats-and-folders.md` § Snooze → Back). A permission prompt or question raised while snoozed waits, and does not end the snooze. Not changed: an agent's `patch_send_to` into a snoozed chat ends the snooze, a permission prompt that expires still expires, and `manager-sweep` skips snoozed chats.
 
 ## Batch check-in
 

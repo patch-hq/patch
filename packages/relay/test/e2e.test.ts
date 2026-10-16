@@ -81,7 +81,11 @@ beforeEach(async () => {
     sock.send(`welcome ${req.headers['sec-websocket-protocol'] ?? ''}`.trim());
     sock.on('message', (data, isBinary) =>
       sock.send(
-        isBinary ? Buffer.concat([Buffer.from('bin:'), data as Buffer]) : `echo:${data.toString()}`,
+        isBinary
+          ? Buffer.concat([Buffer.from('bin:'), data as Buffer])
+          : data.toString() === 'send-huge-text'
+            ? 'x'.repeat(100_000)
+            : `echo:${data.toString()}`,
       ),
     );
   });
@@ -259,6 +263,46 @@ describe('WebSockets through the tunnel', () => {
     client.close();
   });
 
+  it('fails the one socket, not the host, when the server sends text bigger than a frame', async () => {
+    const client = await connect();
+    const s = client.openSocket('/ws');
+    const errors: string[] = [];
+    s.onerror = (e) => errors.push(e.message);
+    await until(() => s.readyState === 1);
+    s.send('send-huge-text');
+    await until(() => s.readyState === 3);
+    expect(errors[0]).toMatch(/too large/);
+    expect(host.status().connected).toBe(true);
+    client.close();
+  });
+
+  it('refuses a path that would move the socket off the server (userinfo trick), never connecting elsewhere', async () => {
+    let connections = 0;
+    const elsewhere = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    elsewhere.on('connection', () => (connections += 1));
+    await new Promise<void>((r) => elsewhere.on('listening', () => r()));
+    const port = (elsewhere.address() as AddressInfo).port;
+    const client = await connect();
+    try {
+      const s = client.openSocket(`@127.0.0.1:${port}/ws`);
+      const errors: string[] = [];
+      s.onerror = (e) => errors.push(e.message);
+      await until(() => s.readyState === 3);
+      expect(connections).toBe(0);
+      expect(errors[0]).toMatch(/path/);
+    } finally {
+      client.close();
+      await new Promise<void>((r) => elsewhere.close(() => r()));
+    }
+  });
+
+  it('refuses an HTTP path that does not start with a slash', async () => {
+    const client = await connect();
+    await expect(client.fetch('.example.test/x')).rejects.toBeInstanceOf(RelayError);
+    await expect(client.fetch('@example.test/x')).rejects.toBeInstanceOf(RelayError);
+    client.close();
+  });
+
   it('errors when the path has no socket behind it', async () => {
     const client = await connect();
     const s = client.openSocket('/not-a-socket');
@@ -408,6 +452,20 @@ describe('a route that outlives any one session', () => {
     first.close();
     expect((await conn.fetch('/missing')).status).toBe(404);
     expect(await conn.session()).not.toBe(first);
+    conn.close();
+  });
+
+  it('shares one new session between callers that find the old one ended together', async () => {
+    let dials = 0;
+    const conn = new RelayConnection(() => {
+      dials += 1;
+      return connect();
+    });
+    const first = await conn.session();
+    first.close();
+    const [a, b] = await Promise.all([conn.session(), conn.session()]);
+    expect(a).toBe(b);
+    expect(dials).toBe(2);
     conn.close();
   });
 

@@ -31,11 +31,15 @@ export interface ChatMenuState {
   hidden: boolean;
   /** A special thread turned off (spec/06 § Disabled). */
   disabled: boolean;
+  /** The chat has no task list, so there is no task bar and "Add tasks" starts one. */
+  noTasks?: boolean;
 }
 
 export function chatKebabItems(chatId: string, state: ChatMenuState): string[] {
   const items = ['New chat'];
-  if (!isReadOnlyMirrorThread(chatId)) items.push('Call', 'Tools');
+  if (!isReadOnlyMirrorThread(chatId)) items.push('Call', 'Tools', 'Documents');
+  if (state.noTasks) items.push('Add tasks');
+  items.push('Design a change to Chat');
   if (isReservedSpecialThread(chatId)) {
     items.push(state.disabled ? 'Enable' : 'Disable', 'Clear context');
     return items;

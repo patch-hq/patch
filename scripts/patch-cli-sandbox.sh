@@ -28,7 +28,7 @@ DAEMON_AUDIO_PORT=3113
 INTERNAL_TOKEN="dev-internal-token-sandbox-0123456789"
 PID_FILE="$DATA_DIR/.pids"
 SERVER_LOG="/tmp/patch-cli-sandbox-server.log"
-DAEMON_LOG="/tmp/patch-cli-sandbox-daemon.log"
+HOST_LOG="/tmp/patch-cli-sandbox-daemon.log"
 
 print_env() {
   echo "export PATCH_HOME='$CLI_HOME'"
@@ -95,7 +95,7 @@ up() {
     PATCH_DAEMON_AUDIO_PORT="$DAEMON_AUDIO_PORT" \
     PATCH_MOCK_TURN_DELAY_MS=1500 \
     SDK_BACKEND=mock WHISPER_BACKEND=mock KOKORO_BACKEND=mock \
-    nohup pnpm --filter @patch/daemon dev > "$DAEMON_LOG" 2>&1 &
+    nohup pnpm --filter @patch/host dev > "$HOST_LOG" 2>&1 &
   echo "$!" >> "$PID_FILE"
   wait_for "http://127.0.0.1:$DAEMON_HEALTHZ_PORT/healthz" "daemon"
   wait_for "http://127.0.0.1:$SERVER_PORT/api/daemon/healthz" "daemon-server-link"

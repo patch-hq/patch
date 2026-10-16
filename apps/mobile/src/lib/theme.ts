@@ -157,7 +157,7 @@ export const space = {
  * counterpart to `space`/`radii`: a scale value, never a one-off literal.
  * Anything below it goes through here so the floor is raised in one place.
  */
-export const textMin = 13;
+export const textMin = 14;
 
 export const fonts = {
   // Italic Fraunces is the wordmark only — it is the logo, as on desktop.

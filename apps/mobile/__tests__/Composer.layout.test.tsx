@@ -149,6 +149,14 @@ describe('Composer — two-row layout', () => {
     expect(contains(actionsRow, send)).toBe(true);
   });
 
+  // Tom, 9 Oct 2026 (Todoist 6hj4XqwVpJGJWHH6): the row read as crowded — the
+  // model pill and the account label touched. Same controls, more air.
+  it('spaces the actions row so the controls do not touch', () => {
+    const r = renderRN(<Composer chatId="c1" folder="work" />);
+    const actionsRow = findHost(r.root, byTestId('composer-actions-row'));
+    expect(actionsRow.props['style'].gap).toBeGreaterThanOrEqual(4);
+  });
+
   // The Android nav bar rule (never hide it; pad past the bottom inset exactly
   // ONCE): the chat-detail screen's window is not edge-to-edge, so nothing in
   // this app draws under the system bar and the composer must NOT add a bottom

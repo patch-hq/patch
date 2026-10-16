@@ -227,10 +227,10 @@ export class PermissionDeliveryTracker {
   private onTimeout(entry: PendingResponse): void {
     if (!this.pending.has(entry.requestId)) return;
     this.maybeWarn(entry);
-    const { connection, daemonOnline } = usePresenceStore.getState();
+    const { connection, hostOnline } = usePresenceStore.getState();
     // Our own link is down, or the host is knowingly offline: wait rather
     // than burn a redelivery into a socket we already know is no good.
-    if (connection !== 'connected' || !daemonOnline) {
+    if (connection !== 'connected' || !hostOnline) {
       this.arm(entry);
       return;
     }

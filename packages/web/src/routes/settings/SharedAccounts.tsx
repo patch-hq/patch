@@ -4,12 +4,12 @@
 // backend, held on the server and sent to every host. Every change here is a
 // server write and settles on its answer. What a host does add is its own view
 // of each account — whether its check passed and how much is used — which
-// arrives on that host's `daemon.account` report; the freshest reading any
+// arrives on that host's `host.account` report; the freshest reading any
 // host has taken is the one shown.
 
 import type { JSX, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import type { AccountStrategy, DaemonAccountSummary } from '@patch/wire';
+import type { AccountStrategy, HostAccountSummary } from '@patch/wire';
 import { api, type SharedBackendId } from '../../api/rest.js';
 import { getActiveWs } from '../../api/ws.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
@@ -50,9 +50,9 @@ interface SharedRow {
 function useReading(
   backendId: SharedBackendId,
   accountId: string,
-): { summary: DaemonAccountSummary; host: HostPresence } | null {
+): { summary: HostAccountSummary; host: HostPresence } | null {
   const hosts = usePresenceStore((s) => s.hosts);
-  let best: { summary: DaemonAccountSummary; host: HostPresence } | null = null;
+  let best: { summary: HostAccountSummary; host: HostPresence } | null = null;
   for (const host of Object.values(hosts)) {
     const summary = host.accounts[backendId]?.accounts?.find((a) => a.id === accountId);
     if (!summary) continue;
@@ -149,7 +149,7 @@ function AccountEntry({
       pushError('refresh usage: no host is online to read it');
       return;
     }
-    sendToHost(host, { type: 'host.backend_usage_refresh', daemonId: host.daemonId, backendId });
+    sendToHost(host, { type: 'host.backend_usage_refresh', hostId: host.hostId, backendId });
   };
 
   const menu = [
@@ -289,13 +289,13 @@ export function AddClaudeAccount(): JSX.Element {
       </button>
       {online.map((h) => (
         <button
-          key={h.daemonId}
+          key={h.hostId}
           type="button"
           className="set-btn ghost"
-          data-testid={`adopt-claude-${h.daemonId}`}
+          data-testid={`adopt-claude-${h.hostId}`}
           onClick={() =>
             void writeShared(`use the login on ${hostLabel(h)}`, () =>
-              api.adoptAccount('claude-code', h.daemonId),
+              api.adoptAccount('claude-code', h.hostId),
             )
           }
         >
@@ -319,13 +319,13 @@ export function AddChatGPTAccount(): JSX.Element {
   useEffect(() => {
     if (requested !== null) setHostId(requested);
   }, [requested]);
-  const host = online.find((h) => h.daemonId === hostId) ?? online[0] ?? null;
+  const host = online.find((h) => h.hostId === hostId) ?? online[0] ?? null;
   const login = host?.accounts['codex']?.login;
   const pending = login?.status === 'pending';
 
   const send = (authMethod: 'device' | 'browser' | 'cancel', requestId?: string): void => {
     if (!host) return;
-    setHostId(host.daemonId);
+    setHostId(host.hostId);
     const ws = getActiveWs();
     if (!ws) {
       useUiStore.getState().pushError('sign in: this surface has no link to the server');
@@ -333,7 +333,7 @@ export function AddChatGPTAccount(): JSX.Element {
     }
     sendToHost(host, {
       type: 'host.backend_add_account',
-      daemonId: host.daemonId,
+      hostId: host.hostId,
       backendId: 'codex',
       authMethod,
       requestId: requestId ?? `signin-${Date.now()}`,

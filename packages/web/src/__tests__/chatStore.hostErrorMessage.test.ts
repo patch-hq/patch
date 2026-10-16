@@ -6,7 +6,7 @@ import { useChatStore } from '../stores/chatStore.js';
 describe('chat.message with error: true', () => {
   it('becomes one error entry, once, however often it is replayed', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'ce', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'ce', folder: '~/p' });
     const ev = {
       type: 'chat.message' as const,
       chatId: 'ce',
@@ -26,7 +26,7 @@ describe('chat.message with error: true', () => {
 
   it('leaves an ordinary system message alone', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'cf', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'cf', folder: '~/p' });
     s.applyEvent({ type: 'chat.message', chatId: 'cf', role: 'system', content: 'note', seq: 3 });
     expect(useChatStore.getState().timelines['cf']?.[0]?.kind).toBe('message');
   });

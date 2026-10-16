@@ -10,6 +10,7 @@
 // corrupt file is logged loudly and the store starts empty. `dataDir` is
 // optional (a bare-registry test): in memory only then.
 
+import { parsePersisted } from './persisted-json.js';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
@@ -40,7 +41,7 @@ export class NewChatDraftStore {
     if (!this.path || !existsSync(this.path)) return {};
     let raw: unknown;
     try {
-      raw = JSON.parse(readFileSync(this.path, 'utf8'));
+      raw = parsePersisted(readFileSync(this.path, 'utf8'));
     } catch (err) {
       this.logger?.warn(
         { path: this.path, err: (err as Error).message },
@@ -67,7 +68,7 @@ export class NewChatDraftStore {
           id,
           folder: d.folder,
           text: d.text,
-          ...(typeof d.daemonId === 'string' && d.daemonId ? { daemonId: d.daemonId } : {}),
+          ...(typeof d.hostId === 'string' && d.hostId ? { hostId: d.hostId } : {}),
           ...(typeof d.model === 'string' && d.model ? { model: d.model } : {}),
           updatedAt: d.updatedAt,
         };

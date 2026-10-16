@@ -9,7 +9,7 @@ import type { ChatRow } from '../src/stores/types';
 function row(overrides: Partial<ChatRow> & { chatId: string }): ChatRow {
   return {
     name: null,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '~/proj',
     activity: 'idle',
     permissionMode: 'bypassPermissions',

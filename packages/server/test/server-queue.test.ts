@@ -22,14 +22,14 @@ const input = (localId: string, over: Partial<ChatInputEvent> = {}): ChatInputEv
     ...over,
   }) as ChatInputEvent;
 
-const spawned = (chatId = 'c1', daemonId = 'd1'): WireEvent =>
-  ({ type: 'chat.spawned', chatId, daemonId, folder: '/w', seq: 1, ts: 0 }) as WireEvent;
+const spawned = (chatId = 'c1', hostId = 'd1'): WireEvent =>
+  ({ type: 'chat.spawned', chatId, hostId, folder: '/w', seq: 1, ts: 0 }) as WireEvent;
 
 const state = (activity: string, over: Record<string, unknown> = {}): WireEvent =>
   ({
     type: 'chat.state',
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     activity,
     permissionMode: 'auto',
     folder: '/w',
@@ -43,7 +43,7 @@ describe('ServerQueue', () => {
   let dir: string;
   let chats: ChatRegistry;
   let injected: WireEvent[];
-  let sent: Array<{ daemonId: string; surfaceId: string; event: WireEvent }>;
+  let sent: Array<{ hostId: string; surfaceId: string; event: WireEvent }>;
   let online: boolean;
   let supports: boolean;
   let nowMs: number;
@@ -51,7 +51,7 @@ describe('ServerQueue', () => {
   const make = (): ServerQueue =>
     new ServerQueue({
       chats,
-      sendTo: (daemonId, surfaceId, event) => sent.push({ daemonId, surfaceId, event }),
+      sendTo: (hostId, surfaceId, event) => sent.push({ hostId, surfaceId, event }),
       isOnline: () => online,
       hostSupports: () => supports,
       inject: (e) => injected.push(e),
@@ -81,6 +81,17 @@ describe('ServerQueue', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test('an idle report from a chat the server wrongly thought was running (a stop on an idle host) releases what is waiting', async () => {
+    const q = make();
+    hostFrame(q, state('running'));
+    expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(true);
+    // The host was in fact idle already, so its stop reports idle with no running
+    // turn behind it. That report alone must release the waiting message.
+    hostFrame(q, state('idle'));
+    await Promise.resolve();
+    expect(sent.map((s) => (s.event as ChatInputEvent).localId)).toEqual(['L1']);
+  });
+
   test('holds a message that arrives behind a running turn, and acknowledges it', () => {
     const q = make();
     hostFrame(q, state('running'));
@@ -101,11 +112,37 @@ describe('ServerQueue', () => {
   test('a message sent right behind one just handed to an idle host queues behind it', () => {
     const q = make();
     hostFrame(q, state('idle'));
-    q.noteForwarded('c1');
+    q.noteForwarded(input('F1'));
     expect(q.enqueueIfBusy('srf-1', input('L2'))).toBe(true);
     nowMs += RELEASE_GUARD_MS + 1; // the host never started: not waited on for ever
     expect(make().enqueueIfBusy('srf-1', input('L3'))).toBe(true); // the queue still holds L2
   });
+
+  test.each([
+    [
+      'it is for a side branch',
+      input('F1', { branchId: 'b1' } as Partial<ChatInputEvent>),
+      () => undefined,
+    ],
+    [
+      'it came from a voice device',
+      input('F1', { source: { kind: 'voice' } } as unknown as Partial<ChatInputEvent>),
+      () => undefined,
+    ],
+    ['the host is offline', input('F1'), () => (online = false)],
+    ['the host does not take queued messages', input('F1'), () => (supports = false)],
+  ])(
+    'a message the queue would not hold does not make the next one wait when %s',
+    (_n, forwarded, change) => {
+      const q = make();
+      hostFrame(q, state('idle'));
+      change();
+      q.noteForwarded(forwarded);
+      online = true;
+      supports = true;
+      expect(q.enqueueIfBusy('srf-1', input('L2'))).toBe(false);
+    },
+  );
 
   test.each([
     ['the host is offline', () => (online = false)],
@@ -150,7 +187,7 @@ describe('ServerQueue', () => {
     await Promise.resolve();
 
     expect(sent.map((s) => (s.event as { localId: string }).localId)).toEqual(['L1']);
-    expect(sent[0]).toMatchObject({ daemonId: 'd1', surfaceId: 'srf-1' });
+    expect(sent[0]).toMatchObject({ hostId: 'd1', surfaceId: 'srf-1' });
     expect(injected).toEqual([
       { type: 'chat.dequeued', chatId: 'c1', localId: 'L1', reason: 'running' },
     ]);
@@ -217,7 +254,7 @@ describe('ServerQueue', () => {
     q.enqueueIfBusy('srf-1', input('L2'));
     expect(q.promote('c1', 'L2', 'srf-9')).toBe(true);
     expect(sent).toEqual([
-      { daemonId: 'd1', surfaceId: 'srf-9', event: { type: 'chat.stop_request', chatId: 'c1' } },
+      { hostId: 'd1', surfaceId: 'srf-9', event: { type: 'chat.stop_request', chatId: 'c1' } },
     ]);
     expect(q.pull('c1').map((e) => e.localId)).toEqual(['L1', 'L2']);
   });
@@ -283,19 +320,19 @@ describe('ServerQueue', () => {
       chats.observe({
         type: 'chat.spawned',
         chatId: 'c2',
-        daemonId: 'd2',
+        hostId: 'd2',
         folder: '/w',
         seq: 1,
         ts: 0,
       } as WireEvent);
       const q = make();
       hostFrame(q, state('idle'));
-      q.noteForwarded('c1');
-      q.noteForwarded('c2');
+      q.noteForwarded(input('F1'));
+      q.noteForwarded(input('F2', { chatId: 'c2' }));
       expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(true); // c1 is being started
       expect(q.enqueueIfBusy('srf-1', input('L2', { chatId: 'c2' }))).toBe(true);
 
-      q.gate({ type: 'daemon.offline', daemonId: 'd1' } as WireEvent, 'd1');
+      q.gate({ type: 'host.offline', hostId: 'd1' } as WireEvent, 'd1');
       // c1's release guard is gone; c2's is not. Nothing waits on c1 any more but L1.
       q.pull('c1');
       expect(q.enqueueIfBusy('srf-1', input('L3'))).toBe(false);
@@ -304,7 +341,7 @@ describe('ServerQueue', () => {
 
     test('passes any frame that is not about a chat through untouched', () => {
       const q = make();
-      const other = { type: 'folders.list', daemonId: 'd1', roots: [], recent: [] } as WireEvent;
+      const other = { type: 'folders.list', hostId: 'd1', roots: [], recent: [] } as WireEvent;
       expect(q.gate(other, 'd1')).toBe(other);
       const noActivity = { ...state('idle'), activity: undefined } as WireEvent;
       expect(q.gate(noActivity, 'd1')).toBe(noActivity);
@@ -313,7 +350,7 @@ describe('ServerQueue', () => {
     test('lets an idle chat go to the host after the release guard runs out', () => {
       const q = make();
       hostFrame(q, state('idle'));
-      q.noteForwarded('c1');
+      q.noteForwarded(input('F1'));
       expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(true);
       q.pull('c1');
       nowMs += RELEASE_GUARD_MS + 1;
@@ -327,7 +364,7 @@ describe('ServerQueue', () => {
       const passed = q.gate(state('idle'), null);
       expect((passed as { activity: string }).activity).toBe('running');
       await Promise.resolve();
-      expect(sent.map((s) => s.daemonId)).toEqual(['d1']);
+      expect(sent.map((s) => s.hostId)).toEqual(['d1']);
     });
 
     test('sends nothing when what it meant to release was taken or cancelled in the meantime', async () => {
@@ -344,7 +381,7 @@ describe('ServerQueue', () => {
       const gone = new Map<string, boolean>();
       const q = new ServerQueue({
         chats: { get: (id) => (gone.get(id) ? undefined : chats.get(id)) },
-        sendTo: (daemonId, surfaceId, event) => sent.push({ daemonId, surfaceId, event }),
+        sendTo: (hostId, surfaceId, event) => sent.push({ hostId, surfaceId, event }),
         isOnline: () => online,
         hostSupports: () => supports,
         inject: (e) => injected.push(e),

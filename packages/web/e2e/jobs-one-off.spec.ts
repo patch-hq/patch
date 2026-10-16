@@ -12,7 +12,7 @@ const RECURRING = {
   enabled: true,
   trigger: { type: 'cron', expression: '57 8 * * 1-5' },
   filter: null,
-  action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/nearest-bus', skill: 'bus-watch' },
+  action: { type: 'spawn', hostId: 'd1', folder: '~/projects/nearest-bus', skill: 'bus-watch' },
   createdAt: 1,
   updatedAt: 1,
 };
@@ -24,7 +24,7 @@ const PENDING_ONE_OFF = {
   oneOff: true,
   trigger: { type: 'webhook', scheme: 'none' },
   filter: null,
-  action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/portfolio', prompt: 'track it' },
+  action: { type: 'spawn', hostId: 'd1', folder: '~/projects/portfolio', prompt: 'track it' },
   createdAt: 2,
   updatedAt: 2,
 };
@@ -37,7 +37,7 @@ const EXPIRED_A = {
   expiredAt: 1_700_000_000_000,
   trigger: { type: 'cron', expression: '0 9 * * *' },
   filter: null,
-  action: { type: 'spawn', daemonId: 'd1', folder: '~/projects/portfolio', prompt: 'ring them' },
+  action: { type: 'spawn', hostId: 'd1', folder: '~/projects/portfolio', prompt: 'ring them' },
   createdAt: 3,
   updatedAt: 3,
 };

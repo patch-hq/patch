@@ -51,6 +51,8 @@ export interface CallOrchestratorDeps {
    * `notify`, which is the default and what every existing test expects.
    */
   reach?: () => 'notify' | 'auto-notify';
+  /** A snoozed chat never rings or speaks (spec/09 § Snoozed chats): its call resolves as unanswered. */
+  isChatSnoozed?: (chatId: string) => boolean;
 }
 
 export class CallOrchestrator {
@@ -85,6 +87,15 @@ export class CallOrchestrator {
       ...(event.message !== undefined ? { message: event.message } : {}),
     };
     this.calls.set(callId, state);
+
+    if (this.deps.isChatSnoozed?.(event.chatId)) {
+      state.status = 'timeout';
+      const ev: ChatCallTimeoutEvent = { type: 'chat.call_timeout', callId };
+      this.deps.wsHub.sendToAll(ev);
+      this.scheduleGc(callId);
+      this.deps.logger.info({ callId, chatId: event.chatId }, 'call: not placed, chat is snoozed');
+      return callId;
+    }
 
     // spec/09 § Reaching the user — under `auto-notify` a call does not ring.
     // The message is spoken aloud on the surface the user is at, in a short

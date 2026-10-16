@@ -221,4 +221,30 @@ describe('TooltipHost — detached trigger', () => {
     });
     expect(screen.queryByTestId('app-tooltip')).toBeNull();
   });
+
+  it('does not cut copy on a control that opts out with data-tooltip-full', () => {
+    const long = 'Claude Code returned an error result: You have hit your limit for this account';
+    render(
+      <>
+        <button data-testid="full" title={long} data-tooltip-full="">
+          x
+        </button>
+        <button data-testid="cut" title={long}>
+          x
+        </button>
+        <TooltipHost />
+      </>,
+    );
+    fireEvent.mouseOver(screen.getByTestId('full'));
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(screen.getByTestId('app-tooltip').textContent).toBe(long);
+    fireEvent.mouseOut(screen.getByTestId('full'));
+    fireEvent.mouseOver(screen.getByTestId('cut'));
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(screen.getByTestId('app-tooltip').textContent?.endsWith('…')).toBe(true);
+  });
 });

@@ -149,7 +149,7 @@ export function registerHookRoutes(app: FastifyInstance, deps: HookRoutesDeps): 
       ...(images !== undefined ? { images } : {}),
       chatId,
       folder: chat.folder,
-      daemonId: chat.daemonId,
+      hostId: chat.hostId,
       specialThread: SPECIAL_THREAD_ID_SET.has(chatId),
     });
     return reply.code(200).send(result);

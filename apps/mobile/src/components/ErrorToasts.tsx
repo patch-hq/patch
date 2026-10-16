@@ -10,6 +10,7 @@
 
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { AlarmClock } from 'lucide-react-native';
 import { useUiStore } from '../stores/uiStore';
 import { fonts, radii, space, useTheme } from '../lib/theme';
 
@@ -21,15 +22,36 @@ export function ErrorToasts(): React.ReactElement | null {
   const errors = useUiStore((s) => s.errors);
   const dismiss = useUiStore((s) => s.dismissError);
 
-  // Auto-dismiss each toast TTL_MS after it was pushed. The store only hands
-  // back a new `errors` array when the queue actually changes, so the timers
-  // are rescheduled on a push/dismiss and never on an unrelated re-render.
+  // Auto-dismiss each toast TTL_MS after it was pushed (or last repeated: the
+  // store stamps a fresh `at` on a repeat). One timer per toast, keyed by id and
+  // stamp, so a later push never extends an older toast's life.
+  const timers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
   React.useEffect(() => {
-    const timers = errors.map((e) => setTimeout(() => dismiss(e.id), TOAST_TTL_MS));
-    return () => {
-      for (const t of timers) clearTimeout(t);
-    };
+    const live = new Set<string>();
+    for (const e of errors) {
+      const key = `${e.id}:${e.at}`;
+      live.add(key);
+      if (!timers.current.has(key)) {
+        timers.current.set(
+          key,
+          setTimeout(() => dismiss(e.id), TOAST_TTL_MS),
+        );
+      }
+    }
+    for (const [key, t] of timers.current) {
+      if (!live.has(key)) {
+        clearTimeout(t);
+        timers.current.delete(key);
+      }
+    }
   }, [errors, dismiss]);
+  React.useEffect(() => {
+    const held = timers.current;
+    return () => {
+      for (const t of held.values()) clearTimeout(t);
+      held.clear();
+    };
+  }, []);
 
   if (errors.length === 0) return null;
   return (
@@ -45,23 +67,73 @@ export function ErrorToasts(): React.ReactElement | null {
         gap: space.xs,
       }}
     >
-      {errors.map((e) => (
-        <Pressable
-          key={e.id}
-          testID={`error-toast-${e.id}`}
-          accessibilityRole="button"
-          accessibilityLabel={`${e.message}. Tap to dismiss.`}
-          onPress={() => dismiss(e.id)}
-          style={{
-            backgroundColor: colors.red,
-            borderRadius: radii.sm,
-            paddingHorizontal: space.md,
-            paddingVertical: space.sm,
-          }}
-        >
-          <Text style={{ color: colors.onAccent, fontFamily: fonts.bodyMedium }}>{e.message}</Text>
-        </Pressable>
-      ))}
+      {errors.map((e) =>
+        e.snooze ? (
+          <View
+            key={e.id}
+            testID={`snooze-toast-${e.id}`}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.md,
+              backgroundColor: colors.ink,
+              borderRadius: radii.md,
+              paddingHorizontal: space.md,
+              paddingVertical: space.md,
+            }}
+          >
+            <AlarmClock size={16} color={colors.paperRaised} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.paperRaised, fontFamily: fonts.bodyMedium }}>
+                {e.message}
+              </Text>
+              {e.snooze.subline === null ? null : (
+                <Text style={{ color: colors.paperRaised, opacity: 0.75, fontFamily: fonts.body }}>
+                  {e.snooze.subline}
+                </Text>
+              )}
+            </View>
+            <Pressable
+              testID="snooze-toast-undo"
+              accessibilityRole="button"
+              accessibilityLabel="Undo snooze"
+              hitSlop={10}
+              onPress={() => {
+                e.snooze?.undo();
+                dismiss(e.id);
+              }}
+            >
+              <Text
+                style={{
+                  color: colors.paperRaised,
+                  fontFamily: fonts.bodyMedium,
+                  textDecorationLine: 'underline',
+                }}
+              >
+                Undo
+              </Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            key={e.id}
+            testID={`error-toast-${e.id}`}
+            accessibilityRole="button"
+            accessibilityLabel={`${e.message}. Tap to dismiss.`}
+            onPress={() => dismiss(e.id)}
+            style={{
+              backgroundColor: colors.red,
+              borderRadius: radii.sm,
+              paddingHorizontal: space.md,
+              paddingVertical: space.sm,
+            }}
+          >
+            <Text style={{ color: colors.onAccent, fontFamily: fonts.bodyMedium }}>
+              {e.message}
+            </Text>
+          </Pressable>
+        ),
+      )}
     </View>
   );
 }

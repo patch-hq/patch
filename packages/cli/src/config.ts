@@ -17,7 +17,7 @@ export interface PatchConfig {
 
 export interface ResolvedConfig {
   serverUrl: string;
-  daemonSocket: string | null;
+  hostSocket: string | null;
   daemonLocalKey: string | null;
   defaultFlags: string[];
   defaultFolder: string | null;
@@ -34,7 +34,7 @@ export function configHomeDir(): string {
       'set only one of PATCH_HOME / PATCH_CONFIG_DIR (they are aliases; got different values)',
     );
   }
-  const override = home ?? cfg;
+  const override = home || cfg;
   if (override && override.length > 0) return override;
   return join(homedir(), '.patch');
 }
@@ -51,7 +51,12 @@ export function credentialFilePath(): string {
   return join(configHomeDir(), 'credential.jwt');
 }
 
-export function defaultDaemonSocketPath(): string {
+export function defaultHostSocketPath(): string {
+  return join(configHomeDir(), 'host.sock');
+}
+
+/** The socket a host built before the rename listens on. */
+export function legacyHostSocketPath(): string {
   return join(configHomeDir(), 'daemon.sock');
 }
 
@@ -76,19 +81,42 @@ export function loadConfig(): ResolvedConfig {
     }
   }
 
-  const serverUrl = process.env.PATCH_SERVER_URL ?? fileConfig.serverUrl ?? DEFAULT_SERVER;
+  // Empty env counts as unset, like every other override here. A value that
+  // is present but empty/invalid in the file, or invalid in the env, throws.
+  const envServer = process.env.PATCH_SERVER_URL;
+  let serverUrl: string;
+  let serverUrlSource: string;
+  if (envServer !== undefined && envServer.length > 0) {
+    serverUrl = envServer;
+    serverUrlSource = 'PATCH_SERVER_URL';
+  } else if (fileConfig.serverUrl !== undefined) {
+    serverUrl = fileConfig.serverUrl;
+    serverUrlSource = `serverUrl in ${path}`;
+  } else {
+    serverUrl = DEFAULT_SERVER;
+    serverUrlSource = 'the default';
+  }
+  try {
+    new URL(serverUrl);
+  } catch {
+    throw new Error(
+      `config: invalid server URL ${JSON.stringify(serverUrl)} from ${serverUrlSource}`,
+    );
+  }
 
   // Host socket auto-detection: env override > default path if it exists
   // and is reachable as a socket.
-  const envSocket = process.env.PATCH_DAEMON_SOCKET;
-  let daemonSocket: string | null = null;
+  const envSocket = process.env.PATCH_HOST_SOCKET ?? process.env.PATCH_DAEMON_SOCKET;
+  let hostSocket: string | null = null;
   if (envSocket && envSocket.length > 0) {
-    daemonSocket = envSocket;
+    hostSocket = envSocket;
   } else {
-    const defaultPath = defaultDaemonSocketPath();
-    if (existsSync(defaultPath)) {
-      const st = statSync(defaultPath);
-      if (st.isSocket()) daemonSocket = defaultPath;
+    // A host older than the rename still listens on daemon.sock.
+    for (const defaultPath of [defaultHostSocketPath(), legacyHostSocketPath()]) {
+      if (existsSync(defaultPath) && statSync(defaultPath).isSocket()) {
+        hostSocket = defaultPath;
+        break;
+      }
     }
   }
 
@@ -113,7 +141,7 @@ export function loadConfig(): ResolvedConfig {
 
   return {
     serverUrl,
-    daemonSocket,
+    hostSocket,
     daemonLocalKey,
     defaultFlags: fileConfig.defaultFlags ?? [],
     defaultFolder: fileConfig.defaultFolder ?? null,

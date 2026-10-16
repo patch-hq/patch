@@ -23,7 +23,7 @@ import type { ChatRow } from '../stores/types.js';
 function rowFixture(overrides: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'a chat',
     folder: '~/proj',
@@ -42,7 +42,7 @@ function seedFour(): void {
   useChatStore.getState().hydrate([
     rowFixture({
       chatId: 'r1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'one',
       folder: '~/proj',
@@ -50,7 +50,7 @@ function seedFour(): void {
     }),
     rowFixture({
       chatId: 'r2',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'two',
       folder: '~/proj',
@@ -58,7 +58,7 @@ function seedFour(): void {
     }),
     rowFixture({
       chatId: 'r3',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'three',
       folder: '~/proj',
@@ -66,7 +66,7 @@ function seedFour(): void {
     }),
     rowFixture({
       chatId: 'r4',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'four',
       folder: '~/proj',
@@ -261,7 +261,7 @@ describe('Sidebar — shift-click multi-select', () => {
       // The Manager special thread lives in its own top slot, not the list.
       rowFixture({
         chatId: SPECIAL_THREAD_IDS.manager,
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '~/manager',
@@ -273,5 +273,22 @@ describe('Sidebar — shift-click multi-select', () => {
     const manager = screen.queryByTestId(`chat-row-${SPECIAL_THREAD_IDS.manager}`);
     if (manager) fireEvent.click(manager, { shiftKey: true, button: 0 });
     expect(useSelectionStore.getState().selected).toEqual([]);
+  });
+  it('pinned rows take part: shift-click ranges across the pinned section', () => {
+    useChatStore
+      .getState()
+      .hydrate([
+        rowFixture({ chatId: 'p1', name: 'pin one', pinned: true, pinnedAt: 300 }),
+        rowFixture({ chatId: 'p2', name: 'pin two', pinned: true, pinnedAt: 200 }),
+        rowFixture({ chatId: 'p3', name: 'pin three', pinned: true, pinnedAt: 100 }),
+        rowFixture({ chatId: 'r1', name: 'one', lastUpdated: 50 }),
+      ]);
+    renderInRouter();
+    fireEvent.click(screen.getByTestId('chat-row-p1'), { button: 0 });
+    expect(shiftClick('chat-row-p3')).toBe(false);
+    expect(useSelectionStore.getState().selected).toEqual(['p1', 'p2', 'p3']);
+    expect(screen.getByTestId('chat-row-p2')).toHaveAttribute('aria-selected', 'true');
+    shiftClick('chat-row-r1');
+    expect(useSelectionStore.getState().selected).toEqual(['p1', 'p2', 'p3', 'r1']);
   });
 });

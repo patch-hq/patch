@@ -16,7 +16,7 @@ function searchBody(query: string): unknown {
     hits: [
       {
         chatId: 'chat_scroll',
-        daemonId: 'd1',
+        hostId: 'd1',
         name: 'scroll-fixture',
         preview: null,
         folder: '/home/tom/projects/bus',
@@ -39,7 +39,7 @@ function searchBody(query: string): unknown {
       },
       {
         chatId: 'chat_md',
-        daemonId: 'd1',
+        hostId: 'd1',
         name: 'lorem notes',
         preview: null,
         folder: '/home/tom/projects/portfolio',
@@ -58,8 +58,8 @@ function searchBody(query: string): unknown {
     total: 2,
     nextOffset: null,
     hosts: [
-      { daemonId: 'd1', hostName: 'hetzner', state: 'searched', searchedChats: 12 },
-      { daemonId: 'mac1', hostName: 'Mac', state: 'offline' },
+      { hostId: 'd1', hostName: 'hetzner', state: 'searched', searchedChats: 12 },
+      { hostId: 'mac1', hostName: 'Mac', state: 'offline' },
     ],
   };
 }

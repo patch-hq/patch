@@ -14,7 +14,7 @@
 import React from 'react';
 import { Pressable, View } from 'react-native';
 import { Redirect, Tabs, useRouter } from 'expo-router';
-import { Clock, MessageCircle, Mic, Plus, Settings as SettingsIcon } from 'lucide-react-native';
+import { Clock, MessageCircle, Phone, Plus, Settings as SettingsIcon } from 'lucide-react-native';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../../src/lib/theme';
 import { startVoiceNote, releaseVoiceNoteIfHeld } from '../../src/lib/voiceNote';
 import { CallPill } from '../../src/components/CallPill';
@@ -150,7 +150,7 @@ export default function TabLayout(): React.ReactElement {
           options={{
             title: 'Voice',
             tabBarIcon: ({ color, size }: { color: string; size: number }) => (
-              <Mic size={size} color={color} />
+              <Phone size={size} color={color} />
             ),
             // The tab-bar prop type is from @react-navigation; it accepts any
             // component but its signature is wider than ours — cast through

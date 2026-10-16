@@ -17,20 +17,14 @@ const MAX_DESCRIPTION = 60;
 const MAX_COMMAND = 40;
 
 function clip(text: string, max: number): string {
-  const line = text.split('\n')[0]?.trim() ?? '';
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-}
-
-/** The run's status line: the agent's own sentence just before it ("Researching how to set up shaver…"). */
-const MAX_NARRATION = 80;
-
-export function runNarration(
-  prev: { kind: string; role?: string | undefined; content?: string | undefined } | undefined,
-): string | null {
-  if (!prev || prev.kind !== 'message' || prev.role !== 'assistant') return null;
-  const line = (prev.content ?? '').split('\n').find((l) => l.trim() !== '') ?? '';
-  const text = clip(line.replace(/^[-*#>\s]+/, '').replace(/\*\*/g, ''), MAX_NARRATION);
-  return text === '' ? null : text;
+  const line =
+    text
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l !== '') ?? '';
+  // Cut on code points: a code-unit slice can split an emoji's surrogate pair.
+  const chars = Array.from(line);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : line;
 }
 
 function str(args: Record<string, unknown>, key: string): string | undefined {

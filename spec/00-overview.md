@@ -57,7 +57,7 @@ exists to avoid.
 
 | Term       | Meaning                                                                                                      |
 | ---------- | ------------------------------------------------------------------------------------------------------------ |
-| Host       | A machine running a host. Identified by `daemonId`, labelled by a user-editable host name.                   |
+| Host       | A machine running a host. Identified by `hostId`, labelled by a user-editable host name.                     |
 | Chat       | One agent session, pinned to a host and a folder on it. Lives forever.                                       |
 | Project    | Emergent. Any folder with ≥1 chat. No registration step. Scoped to its host.                                 |
 | Surface    | A client UI (CLI, web, phone, desktop).                                                                      |

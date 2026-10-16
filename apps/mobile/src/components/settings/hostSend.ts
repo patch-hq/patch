@@ -19,17 +19,17 @@ import { agoLabel } from '../../lib/agoLabel';
 export { agoLabel };
 
 /** The name a host goes by on screen: its reported name, else its id. */
-export function hostLabel(daemonId: string): string {
-  return usePresenceStore.getState().hosts[daemonId]?.host?.hostName ?? daemonId;
+export function hostLabel(hostId: string): string {
+  return usePresenceStore.getState().hosts[hostId]?.host?.hostName ?? hostId;
 }
 
 /**
- * Send `event` to `daemonId`, or say why not. `what` names the action in the
+ * Send `event` to `hostId`, or say why not. `what` names the action in the
  * failure ("Rename failed"). Returns whether the frame went out.
  */
-export function sendToHost(daemonId: string, event: WireEvent, what: string): boolean {
+export function sendToHost(hostId: string, event: WireEvent, what: string): boolean {
   const { connection, hosts } = usePresenceStore.getState();
-  const label = hostLabel(daemonId);
+  const label = hostLabel(hostId);
   if (connection !== 'connected') {
     Alert.alert(
       `${what} failed`,
@@ -37,7 +37,7 @@ export function sendToHost(daemonId: string, event: WireEvent, what: string): bo
     );
     return false;
   }
-  const host = hosts[daemonId];
+  const host = hosts[hostId];
   if (!host?.online) {
     Alert.alert(
       `${what} failed`,
@@ -55,13 +55,13 @@ export function sendToHost(daemonId: string, event: WireEvent, what: string): bo
 }
 
 /** The body of a `host.settings` frame, minus its envelope. */
-export type HostSettingsPatch = Omit<HostSettingsEvent, 'type' | 'daemonId'>;
+export type HostSettingsPatch = Omit<HostSettingsEvent, 'type' | 'hostId'>;
 
 /** Write one or more per-host settings (`host.settings`), as web does. */
 export function sendHostSettings(
-  daemonId: string,
+  hostId: string,
   patch: HostSettingsPatch,
   what = 'Setting',
 ): boolean {
-  return sendToHost(daemonId, { type: 'host.settings', daemonId, ...patch }, what);
+  return sendToHost(hostId, { type: 'host.settings', hostId, ...patch }, what);
 }

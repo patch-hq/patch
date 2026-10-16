@@ -3,7 +3,7 @@
 // backends).
 //
 // Every case here is one the host or a surface would otherwise have to guess
-// at. The whole reason `daemonId` is on the wire is that guessing runs a chat
+// at. The whole reason `hostId` is on the wire is that guessing runs a chat
 // on the wrong filesystem, or applies a machine setting to the wrong machine —
 // failures that look like nothing happened. So the protocol rejects them with
 // the offending value named, and never silently defaults, drops, or routes to
@@ -23,9 +23,9 @@ import {
   ChatSettingsEvent,
   ChatStateEvent,
   ClaudeMemoryEntry,
-  DaemonAccountEvent,
-  DaemonHostEvent,
-  DaemonUnauthenticatedEvent,
+  HostAccountEvent,
+  HostInfoEvent,
+  HostUnauthenticatedEvent,
   EVENT_SCHEMAS,
   FoldersListEvent,
   HOST_ADDRESSED_SURFACE_EVENTS,
@@ -59,7 +59,7 @@ function issuePaths(res: {
 }
 
 describe('a frame that names no machine is rejected, not defaulted', () => {
-  it('rejects a spawn request with no daemonId', () => {
+  it('rejects a spawn request with no hostId', () => {
     // spec/04 § Spawn: "the host to run on. Required." The same folder string
     // on two hosts is two different directories, so a spawn without a host has
     // nowhere correct to go.
@@ -69,10 +69,10 @@ describe('a frame that names no machine is rejected, not defaulted', () => {
       prompt: 'go',
     });
     expect(res.success).toBe(false);
-    expect(issuePaths(res)).toContain('daemonId');
+    expect(issuePaths(res)).toContain('hostId');
   });
 
-  it('rejects a cross-chat spawn with no daemonId', () => {
+  it('rejects a cross-chat spawn with no hostId', () => {
     // An agent spawning a chat is choosing a machine whether it realises it or
     // not. The contract makes it say which.
     const res = PatchSpawnEvent.safeParse({
@@ -82,17 +82,17 @@ describe('a frame that names no machine is rejected, not defaulted', () => {
       prompt: 'go',
     });
     expect(res.success).toBe(false);
-    expect(issuePaths(res)).toContain('daemonId');
+    expect(issuePaths(res)).toContain('hostId');
   });
 
-  it('rejects a terminal-open with no daemonId', () => {
+  it('rejects a terminal-open with no hostId', () => {
     const res = PatchTerminalOpenEvent.safeParse({
       type: 'patch.terminal.open',
       sessionId: 's1',
       folder: '/work/proj',
     });
     expect(res.success).toBe(false);
-    expect(issuePaths(res)).toContain('daemonId');
+    expect(issuePaths(res)).toContain('hostId');
   });
 
   it('rejects every host control that names no machine', () => {
@@ -117,7 +117,7 @@ describe('a frame that names no machine is rejected, not defaulted', () => {
       ],
     ];
     for (const [name, schema, payload] of cases) {
-      expect(schema.safeParse(payload).success, `${name} must require daemonId`).toBe(false);
+      expect(schema.safeParse(payload).success, `${name} must require hostId`).toBe(false);
     }
   });
 });
@@ -126,7 +126,7 @@ describe('empty and out-of-set values are named, not coerced', () => {
   it('rejects an empty host name rather than falling back to the hostname', () => {
     // A host that silently renames itself back is indistinguishable from an
     // edit that did not save.
-    const res = HostRenameEvent.safeParse({ type: 'host.rename', daemonId: 'd1', hostName: '' });
+    const res = HostRenameEvent.safeParse({ type: 'host.rename', hostId: 'd1', hostName: '' });
     expect(res.success).toBe(false);
     expect(issuePaths(res)).toContain('hostName');
   });
@@ -134,7 +134,7 @@ describe('empty and out-of-set values are named, not coerced', () => {
   it('rejects a folder-registry edit carrying an empty path', () => {
     const res = HostFolderAddEvent.safeParse({
       type: 'host.folder_add',
-      daemonId: 'd1',
+      hostId: 'd1',
       path: '',
     });
     expect(res.success).toBe(false);
@@ -160,7 +160,7 @@ describe('empty and out-of-set values are named, not coerced', () => {
     expect(
       HostBackendUsageRefreshEvent.safeParse({
         type: 'host.backend_usage_refresh',
-        daemonId: 'd1',
+        hostId: 'd1',
         backendId: '',
       }).success,
     ).toBe(false);
@@ -171,7 +171,7 @@ describe('empty and out-of-set values are named, not coerced', () => {
     expect(
       HostSettingsEvent.safeParse({
         type: 'host.settings',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionModeDefault: 'plan',
       }).success,
     ).toBe(false);
@@ -181,7 +181,7 @@ describe('empty and out-of-set values are named, not coerced', () => {
     expect(
       HostComponentInstallEvent.safeParse({
         type: 'host.component_install',
-        daemonId: 'd1',
+        hostId: 'd1',
         componentId: '',
       }).success,
     ).toBe(false);
@@ -196,7 +196,7 @@ describe('model is optional at every spawn site', () => {
   it('accepts a surface spawn request with no model', () => {
     const res = ChatSpawnRequestEvent.safeParse({
       type: 'chat.spawn_request',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work/proj',
     });
     expect(res.success).toBe(true);
@@ -205,7 +205,7 @@ describe('model is optional at every spawn site', () => {
   it('accepts a cross-chat spawn with no model', () => {
     const res = PatchSpawnEvent.safeParse({
       type: 'patch.spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       sourceChatId: 'c1',
       folder: '/work/proj',
       prompt: 'go',
@@ -219,7 +219,7 @@ describe('the catalogue reports per-backend outcomes, not one host-wide verdict'
     const ev = PatchModelsResponseEvent.parse({
       type: 'patch.models.response',
       requestId: 'm1',
-      daemonId: 'd1',
+      hostId: 'd1',
       models: [{ id: 'claude-opus-5', label: 'Claude Opus 5', backend: 'claude-code' }],
       errors: [{ backend: 'other', code: 'upstream', message: 'provider returned 503' }],
     });
@@ -233,7 +233,7 @@ describe('the catalogue reports per-backend outcomes, not one host-wide verdict'
     const res = PatchModelsResponseEvent.safeParse({
       type: 'patch.models.response',
       requestId: 'm1',
-      daemonId: 'd1',
+      hostId: 'd1',
       models: [{ id: 'claude-opus-5', label: 'Claude Opus 5' }],
       errors: [],
     });
@@ -243,12 +243,12 @@ describe('the catalogue reports per-backend outcomes, not one host-wide verdict'
 
 describe("a host's self-description", () => {
   const base = {
-    type: 'daemon.host' as const,
-    daemonId: 'd1',
+    type: 'host.host' as const,
+    hostId: 'd1',
     hostName: 'hetzner',
     platform: 'linux',
     arch: 'x64',
-    daemonVersion: '0.1.0',
+    hostVersion: '0.1.0',
     updateAvailable: false,
     permissionModeDefault: 'bypassPermissions' as const,
     permissionOverrides: 0,
@@ -262,15 +262,15 @@ describe("a host's self-description", () => {
     // Absent is MEANINGFUL: a spawn naming no model on a host with none is an
     // error saying so (spec/02 § Agent backends), so this must not be filled
     // in with a plausible-looking default.
-    const ev = DaemonHostEvent.parse(base);
+    const ev = HostInfoEvent.parse(base);
     expect('defaultModel' in ev).toBe(false);
-    expect(DaemonHostEvent.parse({ ...base, defaultModel: 'claude-opus-5' }).defaultModel).toBe(
+    expect(HostInfoEvent.parse({ ...base, defaultModel: 'claude-opus-5' }).defaultModel).toBe(
       'claude-opus-5',
     );
   });
 
   it('rejects a component whose state is not one of the four', () => {
-    const res = DaemonHostEvent.safeParse({
+    const res = HostInfoEvent.safeParse({
       ...base,
       components: [{ id: 'kokoro', label: 'Kokoro', bytes: 1, state: 'maybe' }],
     });
@@ -305,14 +305,14 @@ describe('chat.settings: omitting the field CLEARS the override', () => {
 
 describe('the greeting carries every registered machine', () => {
   // spec/03 § Control — `auth.ok` is `{surfaceId, hosts[], webBundleHash}`:
-  // per-host presence plus the server's cached `daemon.host` / `daemon.account`
+  // per-host presence plus the server's cached `host.host` / `host.account`
   // reports, ALONGSIDE the web-bundle hash the frame already carried.
   const host = {
-    daemonId: 'host-a',
+    hostId: 'host-a',
     hostName: 'studio',
     platform: 'darwin',
     arch: 'arm64',
-    daemonVersion: '0.1.0',
+    hostVersion: '0.1.0',
     updateAvailable: false,
     permissionModeDefault: 'bypassPermissions' as const,
     permissionOverrides: 2,
@@ -331,20 +331,20 @@ describe('the greeting carries every registered machine', () => {
       surfaceId: 'srf-1',
       hosts: [
         {
-          daemonId: 'host-a',
+          hostId: 'host-a',
           online: true,
           lastSeenAt: 1_700_000_000_000,
           host,
-          accounts: [{ daemonId: 'host-a', backendId: 'claude-code', connected: true }],
+          accounts: [{ hostId: 'host-a', backendId: 'claude-code', connected: true }],
         },
         // A machine that has never spoken since the server started is still
         // named — a surface renders it offline-and-unknown rather than
-        // omitting it and waiting for a `daemon.online` that may never come.
-        { daemonId: 'host-b', online: false, lastSeenAt: null, host: null, accounts: [] },
+        // omitting it and waiting for a `host.online` that may never come.
+        { hostId: 'host-b', online: false, lastSeenAt: null, host: null, accounts: [] },
       ],
       webBundleHash: 'assets/index-DEADBEEF.js',
     });
-    expect(ev.hosts.map((h) => h.daemonId)).toEqual(['host-a', 'host-b']);
+    expect(ev.hosts.map((h) => h.hostId)).toEqual(['host-a', 'host-b']);
     expect(ev.hosts[0]?.host?.backends[0]?.id).toBe('claude-code');
     expect(ev.hosts[0]?.accounts[0]?.backendId).toBe('claude-code');
     expect(ev.webBundleHash).toBe('assets/index-DEADBEEF.js');
@@ -358,7 +358,7 @@ describe('the greeting carries every registered machine', () => {
       hosts: [{ online: true, lastSeenAt: null, host: null, accounts: [] }],
     });
     expect(res.success).toBe(false);
-    expect(issuePaths(res)).toContain('hosts.0.daemonId');
+    expect(issuePaths(res)).toContain('hosts.0.hostId');
   });
 });
 
@@ -366,9 +366,9 @@ describe('the unauthenticated report names the machine AND the backend', () => {
   it('rejects a report that names only the machine', () => {
     // A host with two backends can be authenticated on one and not the other;
     // "this machine is logged out" cannot say which credential to fix.
-    const res = DaemonUnauthenticatedEvent.safeParse({
-      type: 'daemon.unauthenticated',
-      daemonId: 'host-a',
+    const res = HostUnauthenticatedEvent.safeParse({
+      type: 'host.unauthenticated',
+      hostId: 'host-a',
       reason: 'token expired',
     });
     expect(res.success).toBe(false);
@@ -376,9 +376,9 @@ describe('the unauthenticated report names the machine AND the backend', () => {
   });
 
   it('accepts the per-backend form', () => {
-    const ev = DaemonUnauthenticatedEvent.parse({
-      type: 'daemon.unauthenticated',
-      daemonId: 'host-a',
+    const ev = HostUnauthenticatedEvent.parse({
+      type: 'host.unauthenticated',
+      hostId: 'host-a',
       backendId: 'claude-code',
       reason: 'token expired',
     });
@@ -386,22 +386,22 @@ describe('the unauthenticated report names the machine AND the backend', () => {
   });
 
   it('replaces the account-wide report with a per-machine, per-backend one', () => {
-    const ev = DaemonAccountEvent.parse({
-      type: 'daemon.account',
-      daemonId: 'host-a',
+    const ev = HostAccountEvent.parse({
+      type: 'host.account',
+      hostId: 'host-a',
       backendId: 'claude-code',
       connected: true,
       accountEmail: 'tom@example.com',
     });
-    expect(ev.daemonId).toBe('host-a');
+    expect(ev.hostId).toBe('host-a');
     // Neither half may be dropped.
     expect(
-      DaemonAccountEvent.safeParse({ type: 'daemon.account', daemonId: 'host-a', connected: true })
+      HostAccountEvent.safeParse({ type: 'host.account', hostId: 'host-a', connected: true })
         .success,
     ).toBe(false);
     expect(
-      DaemonAccountEvent.safeParse({
-        type: 'daemon.account',
+      HostAccountEvent.safeParse({
+        type: 'host.account',
         backendId: 'claude-code',
         connected: true,
       }).success,
@@ -409,17 +409,17 @@ describe('the unauthenticated report names the machine AND the backend', () => {
   });
 
   it('carries optional session/week usage windows, absent by default', () => {
-    const withoutUsage = DaemonAccountEvent.parse({
-      type: 'daemon.account',
-      daemonId: 'host-a',
+    const withoutUsage = HostAccountEvent.parse({
+      type: 'host.account',
+      hostId: 'host-a',
       backendId: 'claude-code',
       connected: true,
     });
     expect(withoutUsage.usage).toBeUndefined();
 
-    const withUsage = DaemonAccountEvent.parse({
-      type: 'daemon.account',
-      daemonId: 'host-a',
+    const withUsage = HostAccountEvent.parse({
+      type: 'host.account',
+      hostId: 'host-a',
       backendId: 'claude-code',
       connected: true,
       usage: {
@@ -435,9 +435,9 @@ describe('the unauthenticated report names the machine AND the backend', () => {
 
     // A window's utilization is a fraction, not a raw score — out of range is rejected.
     expect(
-      DaemonAccountEvent.safeParse({
-        type: 'daemon.account',
-        daemonId: 'host-a',
+      HostAccountEvent.safeParse({
+        type: 'host.account',
+        hostId: 'host-a',
         backendId: 'claude-code',
         connected: true,
         usage: { session: { status: 'allowed', utilization: 1.5 } },
@@ -447,12 +447,12 @@ describe('the unauthenticated report names the machine AND the backend', () => {
 });
 
 describe('the cross-chat listing names each chat’s machine', () => {
-  it('rejects a listed chat with no daemonId', () => {
+  it('rejects a listed chat with no hostId', () => {
     const ok = PatchListChatsResponseEvent.safeParse({
       type: 'patch.list_chats.response',
       sourceChatId: 'c0',
       chatCount: 1,
-      chats: [{ chatId: 'c1', daemonId: 'host-a' }],
+      chats: [{ chatId: 'c1', hostId: 'host-a' }],
     });
     expect(ok.success, JSON.stringify(ok.success ? {} : ok.error?.issues)).toBe(true);
     const res = PatchListChatsResponseEvent.safeParse({
@@ -462,12 +462,12 @@ describe('the cross-chat listing names each chat’s machine', () => {
       chats: [{ chatId: 'c1' }],
     });
     expect(res.success).toBe(false);
-    expect(issuePaths(res)).toContain('chats.0.daemonId');
+    expect(issuePaths(res)).toContain('chats.0.hostId');
   });
 });
 
 describe('directory browse is addressed to one machine at a time', () => {
-  it('requires a daemonId on both the request and the response', () => {
+  it('requires a hostId on both the request and the response', () => {
     expect(
       PatchFoldersBrowseRequestEvent.safeParse({
         type: 'patch.folders.browse.request',
@@ -483,7 +483,7 @@ describe('directory browse is addressed to one machine at a time', () => {
       entries: [],
     });
     expect(res.success).toBe(false);
-    expect(issuePaths(res)).toContain('daemonId');
+    expect(issuePaths(res)).toContain('hostId');
   });
 });
 
@@ -492,7 +492,7 @@ describe('regression guards — what host addressing must NOT have changed', () 
     // Streamed text chunks, the queue/dequeue notices, the input ack and the
     // new component-progress frame are transient: no own `seq`, never
     // persisted, never replayed. `host.component_progress` joins that set, and
-    // its SETTLED result lands on `daemon.host` instead.
+    // its SETTLED result lands on `host.host` instead.
     const liveOnly = [
       'chat.message_delta',
       'chat.queued',
@@ -548,6 +548,13 @@ describe('regression guards — what host addressing must NOT have changed', () 
     ).toBe(false);
   });
 
+  it('accepts retryOfSeq on a chat.input and rejects a non-integer one', () => {
+    const base = { type: 'chat.input', chatId: 'c', message: 'hi', localId: 'L' };
+    expect(ChatInputEvent.safeParse({ ...base, retryOfSeq: 3 }).success).toBe(true);
+    expect(ChatInputEvent.safeParse(base).success).toBe(true);
+    expect(ChatInputEvent.safeParse({ ...base, retryOfSeq: 1.5 }).success).toBe(false);
+  });
+
   it('keeps idempotency on the (chatId, localId) pair', () => {
     // A retry is deduped by the pair, so both halves are mandatory on the
     // input frame and neither may be inferred.
@@ -595,7 +602,7 @@ describe('regression guards — what host addressing must NOT have changed', () 
   it('round-trips a host-addressed frame through the codec unchanged', () => {
     const ev: WireEvent = {
       type: 'folders.list',
-      daemonId: 'd1',
+      hostId: 'd1',
       roots: ['/work/proj'],
       recent: ['/home/tom/notes'],
     };
@@ -605,7 +612,7 @@ describe('regression guards — what host addressing must NOT have changed', () 
   it('still rejects an unknown key on a host-addressed frame (strict)', () => {
     const res = FoldersListEvent.safeParse({
       type: 'folders.list',
-      daemonId: 'd1',
+      hostId: 'd1',
       roots: [],
       recent: [],
       folders: ['/legacy'],
@@ -615,9 +622,9 @@ describe('regression guards — what host addressing must NOT have changed', () 
 });
 
 describe('the host-addressed surface set is enumerable, so the gate can be complete', () => {
-  it('lists exactly the surface frames that carry a daemonId', () => {
+  it('lists exactly the surface frames that carry a hostId', () => {
     // spec/03 § Host events: "Every host-scoped control a surface changes has a
-    // surface-originated frame here carrying `daemonId` — no exceptions." The
+    // surface-originated frame here carrying `hostId` — no exceptions." The
     // server gates the whole set at one ingress, so the set has to BE the whole
     // set: a frame added to the protocol but not to this list is ungated.
     expect([...HOST_ADDRESSED_SURFACE_EVENTS].sort()).toEqual(
@@ -646,27 +653,27 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
     );
   });
 
-  it('every listed type really does require a daemonId in its schema', () => {
+  it('every listed type really does require a hostId in its schema', () => {
     for (const type of HOST_ADDRESSED_SURFACE_EVENTS) {
       const schema = EVENT_SCHEMAS[type];
-      // Parsing the type alone must fail ON daemonId — proof the entry is not
+      // Parsing the type alone must fail ON hostId — proof the entry is not
       // just a string in a list but a frame the contract actually addresses.
       const res = schema.safeParse({ type });
       expect(res.success, `${type} parsed with no fields`).toBe(false);
-      expect(issuePaths(res as never), type).toContain('daemonId');
+      expect(issuePaths(res as never), type).toContain('hostId');
       expect(isHostAddressedSurfaceEvent(type)).toBe(true);
     }
   });
 
   it('does not claim daemon-originated or chat-scoped frames', () => {
-    // `daemon.online` carries a daemonId but is server→surface: gating it as a
+    // `host.online` carries a hostId but is server→surface: gating it as a
     // surface frame would answer a disallowed-type frame with a host error
     // instead of closing the socket.
-    expect(isHostAddressedSurfaceEvent('daemon.online')).toBe(false);
+    expect(isHostAddressedSurfaceEvent('host.online')).toBe(false);
     // `host.removed` is server→surface only: a surface cannot remove a host by
-    // sending it (that is `DELETE /api/hosts/:daemonId`).
+    // sending it (that is `DELETE /api/hosts/:hostId`).
     expect(isHostAddressedSurfaceEvent('host.removed')).toBe(false);
-    expect(isHostAddressedSurfaceEvent('daemon.host')).toBe(false);
+    expect(isHostAddressedSurfaceEvent('host.host')).toBe(false);
     expect(isHostAddressedSurfaceEvent('folders.list')).toBe(false);
     expect(isHostAddressedSurfaceEvent('chat.input')).toBe(false);
   });
@@ -707,47 +714,47 @@ describe("a host's Claude Code settings + memory (spec/02 § Claude Code setting
     expect(res.success).toBe(true);
   });
 
-  it('claude_settings.list / .updated carry the full memory list and any drift, daemonId required', () => {
+  it('claude_settings.list / .updated carry the full memory list and any drift, hostId required', () => {
     for (const type of ['claude_settings.list', 'claude_settings.updated'] as const) {
       const schema = EVENT_SCHEMAS[type];
       const ok = schema.safeParse({
         type,
-        daemonId: 'd1',
+        hostId: 'd1',
         drift: '{"model":"opus"}',
         memories: [memory],
       });
       expect(ok.success, JSON.stringify(ok.success ? {} : ok.error?.issues)).toBe(true);
-      expect(schema.safeParse({ type, daemonId: 'd1', memories: [] }).success).toBe(true);
+      expect(schema.safeParse({ type, hostId: 'd1', memories: [] }).success).toBe(true);
       expect(schema.safeParse({ type, memories: [] }).success).toBe(false);
     }
   });
 
   it('round-trips claude_settings.updated through the codec unchanged', () => {
-    const ev: WireEvent = { type: 'claude_settings.updated', daemonId: 'd1', memories: [memory] };
+    const ev: WireEvent = { type: 'claude_settings.updated', hostId: 'd1', memories: [memory] };
     expect(decode(encode(ev))).toEqual(ev);
   });
 
-  it('host.claude_settings_discard requires daemonId', () => {
+  it('host.claude_settings_discard requires hostId', () => {
     expect(
       HostClaudeSettingsDiscardEvent.safeParse({ type: 'host.claude_settings_discard' }).success,
     ).toBe(false);
     expect(
       HostClaudeSettingsDiscardEvent.safeParse({
         type: 'host.claude_settings_discard',
-        daemonId: 'd1',
+        hostId: 'd1',
       }).success,
     ).toBe(true);
   });
 
-  it('host.claude_memory_delete requires daemonId, project and file — none may be empty', () => {
+  it('host.claude_memory_delete requires hostId, project and file — none may be empty', () => {
     const base = {
       type: 'host.claude_memory_delete' as const,
-      daemonId: 'd1',
+      hostId: 'd1',
       project: 'p',
       file: 'f.md',
     };
     expect(HostClaudeMemoryDeleteEvent.safeParse(base).success).toBe(true);
-    expect(HostClaudeMemoryDeleteEvent.safeParse({ ...base, daemonId: undefined }).success).toBe(
+    expect(HostClaudeMemoryDeleteEvent.safeParse({ ...base, hostId: undefined }).success).toBe(
       false,
     );
     expect(HostClaudeMemoryDeleteEvent.safeParse({ ...base, project: '' }).success).toBe(false);

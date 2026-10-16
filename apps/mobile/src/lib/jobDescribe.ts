@@ -77,6 +77,12 @@ export function actionVerb(action: DescribableAction): string {
   return `${action.type ?? 'action'} · ${what}`;
 }
 
+/** Cut to 48 on code points: a code-unit slice can split an emoji's surrogate pair. */
+function clip48(text: string): string {
+  const chars = Array.from(text);
+  return chars.length > 48 ? `${chars.slice(0, 47).join('')}…` : text;
+}
+
 /**
  * The action's target: skill name, quoted prompt, folder, or chat id.
  * `hostName` is resolved by the caller against live presence state (the
@@ -90,7 +96,7 @@ export function actionTarget(action: DescribableAction, hostName?: string): stri
       return t.length > 0 && !t.startsWith('#');
     });
     const head = (first ?? lines[0] ?? '').trim();
-    const clipped = head.length > 48 ? `${head.slice(0, 47)}…` : head;
+    const clipped = clip48(head);
     return lines.length > 1 ? `"${clipped}" · ${lines.length} lines` : `"${clipped}"`;
   }
   const folderAddressed = action.type === 'spawn' || action.type === 'continue';
@@ -101,7 +107,7 @@ export function actionTarget(action: DescribableAction, hostName?: string): stri
   }
   if (action.prompt) {
     const p = action.prompt.trim();
-    const clipped = p.length > 48 ? `${p.slice(0, 47)}…` : p;
+    const clipped = clip48(p);
     const quoted = `"${clipped}"`;
     if (!folderAddressed) return quoted;
     const folder = hostName ? `${hostName} · ${action.folder ?? ''}` : (action.folder ?? '');

@@ -34,6 +34,7 @@ const apiMocks = {
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
 const { ChatBars } = await import('../src/components/ChatBars');
+const { useSettingsStore } = await import('../src/stores/settingsStore');
 
 function Harness(): React.ReactElement {
   const row = useChatStore((s) => s.chats['c1']);
@@ -45,7 +46,7 @@ function seed(extra: Record<string, unknown> = {}): void {
     {
       chatId: 'c1',
       name: 'Chat',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/p',
       activity: 'idle',
       permissionMode: 'auto',
@@ -75,7 +76,7 @@ beforeEach(() => {
   useUiStore.setState({ errors: [] });
   usePresenceStore.setState({ hosts: {} });
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
 });
 
 describe('ChatBars — an ordinary chat', () => {
@@ -84,7 +85,6 @@ describe('ChatBars — an ordinary chat', () => {
     const r = renderRN(<Harness />);
     for (const id of [
       'goal-bar',
-      'task-bar',
       'reminder-bar',
       'background-task-bar',
       'artifact-bar',
@@ -144,6 +144,45 @@ describe('Goal bar', () => {
 });
 
 describe('Task bar', () => {
+  it('with no list yet: no bar until the menu summons it, then "Add tasks" and no count', () => {
+    seed();
+    useUiStore.getState().setTaskAddChatId(null);
+    const r = renderRN(<Harness />);
+    expect(queryHost(r.root, byTestId('task-bar'))).toBeNull();
+    actSync(() => useUiStore.getState().setTaskAddChatId('c1'));
+    expect(hasText(findHost(r.root, byTestId('task-bar-head')), 'Add tasks')).toBe(true);
+    expect(queryHost(r.root, byTestId('task-add-input'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('task-bar-count'))).toBeNull();
+    actSync(() => findHost(r.root, byTestId('task-bar-summary')).props.onPress());
+    expect(queryHost(r.root, byTestId('task-bar'))).toBeNull();
+    expect(useUiStore.getState().taskAddChatId).toBeNull();
+  });
+
+  it('queues tasks as a draft and only writes the list on Done', async () => {
+    seed({ todos: TODOS });
+    const r = renderRN(<Harness />);
+    actSync(() => findHost(r.root, byTestId('task-bar-summary')).props.onPress());
+    for (const t of ['x', 'y', 'z']) {
+      actSync(() => findHost(r.root, byTestId('task-add-input')).props.onChangeText(t));
+      actSync(() => findHost(r.root, byTestId('task-add-input')).props.onSubmitEditing());
+    }
+    await flush();
+    expect(apiMocks.setTodos).not.toHaveBeenCalled();
+    expect(findAllHost(r.root, byTestId('task-draft-row'))).toHaveLength(3);
+    expect(hasText(findHost(r.root, byTestId('task-bar-queued')), '3 queued')).toBe(true);
+
+    actSync(() => findAllHost(r.root, byTestId('task-draft-delete-btn'))[1]!.props.onPress());
+    actSync(() => findHost(r.root, byTestId('task-draft-done')).props.onPress());
+    await flush();
+    expect(apiMocks.setTodos).toHaveBeenCalledTimes(1);
+    expect(apiMocks.setTodos).toHaveBeenCalledWith('c1', [
+      ...TODOS,
+      { text: 'x', status: 'pending' },
+      { text: 'z', status: 'pending' },
+    ]);
+    expect(queryHost(r.root, byTestId('task-draft-row'))).toBeNull();
+  });
+
   it('collapsed: the item in progress and done/total', () => {
     seed({ todos: TODOS });
     const r = renderRN(<Harness />);
@@ -192,6 +231,7 @@ describe('Task bar', () => {
 
     actSync(() => findHost(r.root, byTestId('task-add-input')).props.onChangeText('  Tell Tom '));
     actSync(() => findHost(r.root, byTestId('task-add-input')).props.onSubmitEditing());
+    actSync(() => findHost(r.root, byTestId('task-draft-done')).props.onPress());
     await flush();
     expect(apiMocks.setTodos).toHaveBeenLastCalledWith('c1', [
       { text: 'Rebuild it', status: 'in_progress' },
@@ -272,36 +312,55 @@ describe('Hidden bar', () => {
 });
 
 describe('Claude disconnected bar', () => {
-  function account(connected: boolean): void {
-    usePresenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'd1',
-      backendId: 'claude-code',
-      connected,
+  function accounts(
+    claude: boolean[],
+    codex: { connected: boolean; kind: 'chatgpt' | 'apiKey' }[] = [],
+  ): void {
+    useSettingsStore.setState({
+      data: {
+        preferences: {},
+        shared: {
+          version: 1,
+          secrets: {
+            claude: claude.map((connected, i) => ({ id: `c${i}`, label: `c${i}`, connected })),
+            codex: codex.map((a, i) => ({ id: `o${i}`, label: `o${i}`, ...a })),
+            providerKeys: [],
+          },
+          hosts: [],
+        },
+      } as never,
     });
   }
 
-  it('shows only on a definite connected:false from THIS chat’s host, and links to Settings', () => {
+  it('shows when no shared account is connected, and links to Settings', () => {
     seed();
     const r = renderRN(<Harness />);
     expect(queryHost(r.root, byTestId('claude-disconnected-bar'))).toBeNull();
-    actSync(() => account(false));
+    actSync(() => accounts([false]));
     const bar = findHost(r.root, byTestId('claude-disconnected-bar'));
-    expect(hasText(bar, 'isn’t signed in to Claude')).toBe(true);
+    expect(hasText(bar, 'Not signed in to Claude')).toBe(true);
     findHost(r.root, byTestId('claude-disconnected-signin')).props.onPress();
     expect(routerMock.push).toHaveBeenCalledWith('/(tabs)/settings');
-    actSync(() => account(true));
+    actSync(() => accounts([false, true]));
     expect(queryHost(r.root, byTestId('claude-disconnected-bar'))).toBeNull();
   });
 
-  it('a different host being signed out says nothing about this chat', () => {
+  it('what a host reports does not matter: accounts are not tied to a host', () => {
     seed();
+    actSync(() => accounts([true]));
     usePresenceStore.getState().setHostAccount({
-      type: 'daemon.account',
-      daemonId: 'other',
+      type: 'host.account',
+      hostId: 'd1',
       backendId: 'claude-code',
       connected: false,
     });
+    const r = renderRN(<Harness />);
+    expect(queryHost(r.root, byTestId('claude-disconnected-bar'))).toBeNull();
+  });
+
+  it('says nothing before the settings have loaded', () => {
+    seed();
+    useSettingsStore.setState({ data: null });
     const r = renderRN(<Harness />);
     expect(queryHost(r.root, byTestId('claude-disconnected-bar'))).toBeNull();
   });

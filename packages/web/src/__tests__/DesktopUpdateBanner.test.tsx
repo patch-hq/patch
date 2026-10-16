@@ -26,6 +26,7 @@ function state(over: Partial<DesktopUpdaterState> = {}): DesktopUpdaterState {
     lastCheckedAt: '2026-09-17T09:00:00Z',
     lastResult: 'downloaded',
     lastError: null,
+    lastErrorKind: null,
     availableVersion: '0.1.971',
     downloaded: true,
     checking: false,
@@ -165,5 +166,102 @@ describe('DesktopUpdateBanner', () => {
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(1);
     expect(buttons[0]).toHaveAttribute('data-testid', 'desktop-update-restart');
+  });
+
+  it('does not stay on "Updating…" forever when the shell never answers the press', async () => {
+    vi.useFakeTimers();
+    const install = vi.fn();
+    installBridge(state(), install);
+    render(<DesktopUpdateBanner />);
+    await act(async () => {});
+    fireEvent.click(screen.getByTestId('desktop-update-restart'));
+    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Updating');
+    await act(async () => {
+      vi.advanceTimersByTime(90_000);
+    });
+    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Update Patch');
+    expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
+    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(/did not restart/i);
+  });
+
+  it('acknowledges the press and surfaces an install failure on the banner itself', async () => {
+    const calls: Array<(s: DesktopUpdaterState) => void> = [];
+    const install = vi.fn();
+    (window as unknown as { patch?: unknown }).patch = {
+      getUpdaterState: () => Promise.resolve(state()),
+      onUpdaterState: (cb: (s: DesktopUpdaterState) => void) => {
+        calls.push(cb);
+        return () => {};
+      },
+      installUpdate: install,
+    };
+    render(<DesktopUpdateBanner />);
+    await act(async () => {});
+    fireEvent.click(screen.getByTestId('desktop-update-restart'));
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Updating');
+    await act(async () => {
+      calls.forEach((cb) =>
+        cb(state({ lastResult: 'error', lastErrorKind: 'install', lastError: 'refused: adhoc' })),
+      );
+    });
+    expect(screen.getByTestId('desktop-update-error')).toHaveTextContent('refused: adhoc');
+    expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
+  });
+  it('un-sticks the button when the same install failure comes back on a second press', async () => {
+    const calls: Array<(s: DesktopUpdaterState) => void> = [];
+    (window as unknown as { patch?: unknown }).patch = {
+      getUpdaterState: () => Promise.resolve(state()),
+      onUpdaterState: (cb: (s: DesktopUpdaterState) => void) => {
+        calls.push(cb);
+        return () => {};
+      },
+      installUpdate: vi.fn(),
+    };
+    render(<DesktopUpdateBanner />);
+    await act(async () => {});
+    for (const at of ['2026-10-11T10:00:00Z', '2026-10-11T10:01:00Z']) {
+      fireEvent.click(screen.getByTestId('desktop-update-restart'));
+      await act(async () => {
+        calls.forEach((cb) =>
+          cb(
+            state({
+              lastResult: 'error',
+              lastErrorKind: 'install',
+              lastError: 'refused: adhoc',
+              lastCheckedAt: at,
+            }),
+          ),
+        );
+      });
+      expect(screen.getByTestId('desktop-update-error')).toHaveTextContent('refused: adhoc');
+      expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
+    }
+  });
+
+  it('does not paint a failed background check next to a perfectly installable update', async () => {
+    installBridge(
+      state({
+        lastResult: 'error',
+        lastErrorKind: 'check',
+        lastError: 'net::ERR_INTERNET_DISCONNECTED',
+      }),
+    );
+    render(<DesktopUpdateBanner />);
+    await act(async () => {});
+    expect(screen.getByTestId('desktop-update-restart')).toBeInTheDocument();
+    expect(screen.queryByTestId('desktop-update-error')).toBeNull();
+  });
+
+  it('says so when the shell has no install bridge, rather than pretending to update', async () => {
+    (window as unknown as { patch?: unknown }).patch = {
+      getUpdaterState: () => Promise.resolve(state()),
+      onUpdaterState: () => () => {},
+    };
+    render(<DesktopUpdateBanner />);
+    await act(async () => {});
+    fireEvent.click(screen.getByTestId('desktop-update-restart'));
+    expect(screen.getByTestId('desktop-update-error')).toBeInTheDocument();
+    expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
   });
 });

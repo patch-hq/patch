@@ -58,5 +58,5 @@ test('clicking a queued message edits it in place, keeping its place in the queu
   }, localId);
   await expect(queued.nth(0)).toContainText('first queued turn, reworded');
   await expect(queued.nth(1)).toContainText('second queued turn');
-  await expect(queued.nth(0).getByTestId('queued-badge')).toHaveText('Queued');
+  await expect(queued.nth(0).getByTestId('queued-badge')).toHaveText('Queued · next tool call');
 });

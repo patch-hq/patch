@@ -5,7 +5,7 @@
 // ordering — most recently active first — page the result, and name every host
 // it could not search. The
 // host half is tested against real transcripts in
-// packages/daemon/test/chat-search.test.ts.
+// packages/host/test/chat-search.test.ts.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -15,40 +15,40 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { ChatSearchResponse, type ChatSearchHit, type WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { CHAT_SEARCH_TIMEOUT_MS } from '../src/chat-search-routes.js';
 
 type Req = Extract<WireEvent, { type: 'patch.chat_search.request' }>;
 type Res = Extract<WireEvent, { type: 'patch.chat_search.response' }>;
-type Answer = Omit<Res, 'type' | 'requestId' | 'daemonId'> | null;
+type Answer = Omit<Res, 'type' | 'requestId' | 'hostId'> | null;
 
 /** A host link whose machines answer search requests with `respond`. */
-class FakeSearchHosts extends InProcessDaemonLink {
-  readonly asked: Array<{ daemonId: string; event: Req }> = [];
+class FakeSearchHosts extends InProcessHostLink {
+  readonly asked: Array<{ hostId: string; event: Req }> = [];
   constructor(
-    private readonly respond: (daemonId: string, event: Req) => Answer,
+    private readonly respond: (hostId: string, event: Req) => Answer,
     private readonly answerAs?: string,
   ) {
     super();
   }
-  override sendTo(daemonId: string, surfaceId: string, event: WireEvent): void {
-    super.sendTo(daemonId, surfaceId, event);
+  override sendTo(hostId: string, surfaceId: string, event: WireEvent): void {
+    super.sendTo(hostId, surfaceId, event);
     if (event.type !== 'patch.chat_search.request') return;
-    this.asked.push({ daemonId, event });
-    const r = this.respond(daemonId, event);
+    this.asked.push({ hostId, event });
+    const r = this.respond(hostId, event);
     if (r === null) return; // never answers
-    const from = this.answerAs ?? daemonId;
+    const from = this.answerAs ?? hostId;
     this.emit(
-      { type: 'patch.chat_search.response', requestId: event.requestId, daemonId: from, ...r },
+      { type: 'patch.chat_search.response', requestId: event.requestId, hostId: from, ...r },
       from,
     );
   }
 }
 
-function hit(chatId: string, daemonId: string, over: Partial<ChatSearchHit> = {}): ChatSearchHit {
+function hit(chatId: string, hostId: string, over: Partial<ChatSearchHit> = {}): ChatSearchHit {
   return {
     chatId,
-    daemonId,
+    hostId,
     name: `chat ${chatId}`,
     preview: null,
     folder: '/home/tom',
@@ -77,13 +77,13 @@ describe('chat search route', () => {
   });
 
   /** Three registered machines: d1 (home) and mac online, pi offline. */
-  async function boot(link: InProcessDaemonLink) {
+  async function boot(link: InProcessHostLink) {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(44));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     registry.upsertSurface({ surfaceId: 'srf-web', surfaceKind: 'web', label: 'web', issuedAt: 1 });
     for (const id of ['d1', 'mac', 'pi']) {
-      registry.setDaemonKey({ daemonId: id, publicKey: user.publicKey, issuedAt: 1 });
+      registry.setDaemonKey({ hostId: id, publicKey: user.publicKey, issuedAt: 1 });
     }
     registry.setHostName('mac', 'MacBook');
     link.addOnlineHost('mac');
@@ -93,7 +93,7 @@ describe('chat search route', () => {
       surfaceKind: 'web',
       label: 'web',
     });
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     return { built, auth: { authorization: `Bearer ${jwt}` }, registry };
   }
 
@@ -171,8 +171,8 @@ describe('chat search route', () => {
   });
 
   it('asks every online host, merges by recency, and names the offline one', async () => {
-    const link = new FakeSearchHosts((daemonId) =>
-      daemonId === 'd1'
+    const link = new FakeSearchHosts((hostId) =>
+      hostId === 'd1'
         ? {
             ok: true,
             hits: [hit('a', 'd1', { lastUpdated: 50 }), hit('b', 'd1', { lastUpdated: 10 })],
@@ -208,25 +208,25 @@ describe('chat search route', () => {
       expect(body.nextOffset).toBeNull();
       expect(body.hosts).toEqual([
         {
-          daemonId: 'd1',
+          hostId: 'd1',
           hostName: null,
           state: 'searched',
           searchedChats: 30,
           transcriptsMissing: 4,
         },
         {
-          daemonId: 'mac',
+          hostId: 'mac',
           hostName: 'MacBook',
           state: 'searched',
           searchedChats: 12,
           transcriptsMissing: 0,
         },
-        { daemonId: 'pi', hostName: null, state: 'offline' },
+        { hostId: 'pi', hostName: null, state: 'offline' },
       ]);
       // Each online host was asked once, for the trimmed query and its top page.
-      expect(link.asked.map((a) => a.daemonId).sort()).toEqual(['d1', 'mac']);
+      expect(link.asked.map((a) => a.hostId).sort()).toEqual(['d1', 'mac']);
       for (const a of link.asked) {
-        expect(a.event).toMatchObject({ query: 'boiler', limit: 20, daemonId: a.daemonId });
+        expect(a.event).toMatchObject({ query: 'boiler', limit: 20, hostId: a.hostId });
       }
     } finally {
       await built.app.close();
@@ -240,9 +240,9 @@ describe('chat search route', () => {
     const mac = Array.from({ length: 5 }, (_, i) =>
       hit(`m${i}`, 'mac', { lastUpdated: 99 - 2 * i }),
     );
-    const link = new FakeSearchHosts((daemonId, e) => ({
+    const link = new FakeSearchHosts((hostId, e) => ({
       ok: true,
-      hits: (daemonId === 'd1' ? d1 : mac).slice(0, e.limit),
+      hits: (hostId === 'd1' ? d1 : mac).slice(0, e.limit),
       total: 5,
     }));
     const { built, auth } = await boot(link);
@@ -282,15 +282,15 @@ describe('chat search route', () => {
   });
 
   it("tags a job-spawned chat with its job from the server's registry", async () => {
-    const link = new FakeSearchHosts((daemonId) =>
-      daemonId === 'd1'
+    const link = new FakeSearchHosts((hostId) =>
+      hostId === 'd1'
         ? { ok: true, hits: [hit('job-chat', 'd1')], total: 1 }
         : { ok: true, hits: [], total: 0 },
     );
     const { built, auth } = await boot(link);
     try {
       link.emit(
-        { type: 'chat.spawned', chatId: 'job-chat', daemonId: 'd1', folder: '/home/tom' },
+        { type: 'chat.spawned', chatId: 'job-chat', hostId: 'd1', folder: '/home/tom' },
         'd1',
       );
       built.chatRegistry.get('job-chat')!.jobId = 'j_nightly';
@@ -305,10 +305,8 @@ describe('chat search route', () => {
 
   it('a host that fails or never answers is named, and the rest still come back', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const link = new FakeSearchHosts((daemonId) =>
-      daemonId === 'd1'
-        ? null
-        : { ok: false, error: { code: 'internal', message: 'disk on fire' } },
+    const link = new FakeSearchHosts((hostId) =>
+      hostId === 'd1' ? null : { ok: false, error: { code: 'internal', message: 'disk on fire' } },
     );
     const { built, auth } = await boot(link);
     try {
@@ -318,9 +316,9 @@ describe('chat search route', () => {
       const res = await pending;
       expect(res.statusCode).toBe(200);
       expect(res.json().hosts).toEqual([
-        { daemonId: 'd1', hostName: null, state: 'timeout' },
-        { daemonId: 'mac', hostName: 'MacBook', state: 'error', message: 'disk on fire' },
-        { daemonId: 'pi', hostName: null, state: 'offline' },
+        { hostId: 'd1', hostName: null, state: 'timeout' },
+        { hostId: 'mac', hostName: 'MacBook', state: 'error', message: 'disk on fire' },
+        { hostId: 'pi', hostName: null, state: 'offline' },
       ]);
     } finally {
       vi.useRealTimers();
@@ -371,7 +369,7 @@ describe('chat search route', () => {
     try {
       // 'pi' is offline; its chat's messages passed through the server earlier.
       link.emit(
-        { type: 'chat.spawned', chatId: 'pi-chat', daemonId: 'pi', folder: '/srv' } as WireEvent,
+        { type: 'chat.spawned', chatId: 'pi-chat', hostId: 'pi', folder: '/srv' } as WireEvent,
         'pi',
       );
       link.emit(
@@ -386,7 +384,7 @@ describe('chat search route', () => {
       );
       // A chat on an ONLINE host is never answered from the mirror (the host is authoritative).
       link.emit(
-        { type: 'chat.spawned', chatId: 'mac-chat', daemonId: 'mac', folder: '/m' } as WireEvent,
+        { type: 'chat.spawned', chatId: 'mac-chat', hostId: 'mac', folder: '/m' } as WireEvent,
         'mac',
       );
       link.emit(
@@ -405,11 +403,11 @@ describe('chat search route', () => {
       expect(body.hits.map((h) => [h.chatId, h.mirrored])).toEqual([['pi-chat', true]]);
       expect(body.hits[0]!.snippet).toMatchObject({ role: 'user', seq: 0 });
       expect(body.total).toBe(1);
-      expect(body.hosts.find((h) => h.daemonId === 'pi')).toMatchObject({
+      expect(body.hosts.find((h) => h.hostId === 'pi')).toMatchObject({
         state: 'offline',
         mirroredChats: 1,
       });
-      expect(body.hosts.find((h) => h.daemonId === 'd1')!.mirroredChats).toBeUndefined();
+      expect(body.hosts.find((h) => h.hostId === 'd1')!.mirroredChats).toBeUndefined();
       // fullText=false skips message text, so the mirror finds nothing by body.
       const names = ChatSearchResponse.parse(
         (
@@ -421,13 +419,20 @@ describe('chat search route', () => {
         ).json(),
       );
       expect(names.hits).toEqual([]);
+      // A pasted chat id finds the offline host's chat, with or without full text.
+      for (const q of ['q=pi-chat', 'q=PI-CHAT&fullText=false']) {
+        const byId = ChatSearchResponse.parse(
+          (await built.app.inject({ method: 'GET', url: search(q), headers: auth })).json(),
+        );
+        expect(byId.hits.map((h) => h.chatId)).toEqual(['pi-chat']);
+      }
     } finally {
       await built.app.close();
     }
   });
 
   it('never relays a search response (it carries message text) to connected surfaces', async () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const { built } = await boot(link);
     try {
       const sent: string[] = [];
@@ -446,7 +451,7 @@ describe('chat search route', () => {
       link.emit({
         type: 'patch.chat_search.response',
         requestId: 'orphan',
-        daemonId: 'd1',
+        hostId: 'd1',
         ok: true,
         hits: [hit('a', 'd1')],
         total: 1,

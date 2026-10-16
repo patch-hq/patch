@@ -7,6 +7,8 @@
 //   patch://voice-note?chat=<id>   → open the global voice-note overlay
 //   patch://new-chat               → navigate to the new-chat sheet
 //   patch://chats/<id>             → navigate to a chat detail
+//   patch://home                   → the tab navigator's root (Chats tab), where the tab bar is painted
+//   patch://settings/<page>        → navigate to a settings page (the emulator smoke reads the running version from updates)
 //
 // A `?credential=` link is handled separately (bootstrap.maybeAcceptDevCredential)
 // and resolves to null here.
@@ -44,6 +46,14 @@ export function resolveDeepLink(url: string | null | undefined): DeepLinkAction 
     /* v8 ignore next */
     const chatId = rest.split('/')[0] ?? '';
     if (chatId.length > 0) return { kind: 'navigate', route: `/chats/${chatId}` };
+  }
+  if (head === 'home') {
+    return { kind: 'navigate', route: '/(tabs)/chats' };
+  }
+  if (head === 'settings') {
+    const rest = host === 'settings' ? path : path.split('/').slice(1).join('/');
+    const page = rest.split('/')[0] ?? '';
+    if (page.length > 0) return { kind: 'navigate', route: `/settings/${page}` };
   }
   return null;
 }

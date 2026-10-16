@@ -6,7 +6,7 @@ import { Stack, useRootNavigationState, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
-import { Text, useColorScheme } from 'react-native';
+import { Text, View, useColorScheme } from 'react-native';
 import {
   useFonts as useFraunces,
   Fraunces_400Regular_Italic,
@@ -27,8 +27,14 @@ import { useBatchWatcher } from '../src/lib/batchNotifier';
 import { VoiceNoteOverlay } from '../src/components/VoiceNoteOverlay';
 import { IncomingCallSheet } from '../src/components/IncomingCallSheet';
 import { ChatLongPressSheet } from '../src/components/ChatLongPressSheet';
+import { SnoozeSheet } from '../src/components/SnoozeSheet';
 import { ConnectionDiagnosticsGate } from '../src/components/ConnectionDiagnostics';
 import { SignedOutRedirect } from '../src/components/SignedOutRedirect';
+import {
+  ViewPositionSync,
+  noteExplicitNavigation,
+  noteUserInput,
+} from '../src/components/ViewPositionSync';
 import { ErrorToasts } from '../src/components/ErrorToasts';
 import { fonts, useTheme } from '../src/lib/theme';
 import { useUiStore } from '../src/stores/uiStore';
@@ -122,6 +128,8 @@ export default function RootLayout(): React.ReactElement | null {
 
   const navigateWhenReady = React.useCallback(
     (route: NavTarget): void => {
+      // The user asked for this screen; handover must not replace it.
+      noteExplicitNavigation();
       if (navReadyRef.current) {
         // `navigate`, not `push`: tapping a notification for the chat already
         // on screen must land on it, not stack a second copy to back out of.
@@ -276,41 +284,52 @@ export default function RootLayout(): React.ReactElement | null {
 
   return (
     <SafeAreaProvider>
-      {/* Top-edge safe-area inset applied ONCE, app-wide (spec/15 § Safe area):
+      {/* Any touch marks the surface in use (spec/05 § Handover). */}
+      <View
+        style={{ flex: 1 }}
+        onStartShouldSetResponderCapture={() => {
+          noteUserInput();
+          return false;
+        }}
+      >
+        {/* Top-edge safe-area inset applied ONCE, app-wide (spec/15 § Safe area):
           the app draws its own header with headerShown off, so without this the
           wordmark/title/back-bar collide with the status bar on every screen.
           Screens keep their normal space.* gap on top of this inset. The bottom
           tab bar handles its own bottom inset, so only 'top' is claimed here. */}
-      <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paper }}>
-        {/* System bars adapt to the scheme: light glyphs on the dark paper,
+        <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paper }}>
+          {/* System bars adapt to the scheme: light glyphs on the dark paper,
             dark glyphs on the light paper (spec/15 § Dark mode). */}
-        {/* Background matches the theme dynamically (spec/15 § Dark mode —
+          {/* Background matches the theme dynamically (spec/15 § Dark mode —
             "status bar adapts with the scheme"). app.config.ts's
             `androidStatusBar` only covers the native splash window before
             this component mounts; without this prop that native color (a
             fixed light-mode value) would stay wrong for the rest of a
             dark-mode session instead of just the first frame. */}
-        <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} backgroundColor={colors.paper} />
-        <Stack screenOptions={{ headerShown: false }}>
-          {/* New-chat is an INLINE flow — no slide-up-from-the-bottom animation
+          <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} backgroundColor={colors.paper} />
+          <Stack screenOptions={{ headerShown: false }}>
+            {/* New-chat is an INLINE flow — no slide-up-from-the-bottom animation
               and no dimmed/black overlay. It appears instantly, matching the
               web new-chat's "rendered immediately, no flash" feel (spec/15
               ## New chat flow). */}
-          <Stack.Screen name="new-chat" options={{ animation: 'none' }} />
-        </Stack>
-        <IncomingCallSheet />
-        <VoiceNoteOverlay />
-        <ChatLongPressSheet />
-        <ConnectionDiagnosticsGate />
-        {/* A credential the server REFUSED is terminal, not a link that might
+            <Stack.Screen name="new-chat" options={{ animation: 'none' }} />
+          </Stack>
+          <ViewPositionSync />
+          <IncomingCallSheet />
+          <VoiceNoteOverlay />
+          <ChatLongPressSheet />
+          <SnoozeSheet />
+          <ConnectionDiagnosticsGate />
+          {/* A credential the server REFUSED is terminal, not a link that might
             come back — leave for pairing rather than sit in a shell that can
             never load anything (spec/10 § Surface). */}
-        <SignedOutRedirect />
-        {/* Queued errors from every failing path (uploads, REST, WS). Without
+          <SignedOutRedirect />
+          {/* Queued errors from every failing path (uploads, REST, WS). Without
             this the app pushes errors nowhere and a failure reads as a dead
             control (NO SILENT FAILURE). Mounted last so it draws on top. */}
-        <ErrorToasts />
-      </SafeAreaView>
+          <ErrorToasts />
+        </SafeAreaView>
+      </View>
     </SafeAreaProvider>
   );
 }

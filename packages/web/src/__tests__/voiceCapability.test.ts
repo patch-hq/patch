@@ -9,15 +9,15 @@ import type { HostPresence } from '../stores/presenceStore.js';
 
 function host(components: unknown[], hostName = 'laptop'): HostPresence {
   return {
-    daemonId: 'host-a',
+    hostId: 'host-a',
     online: true,
     lastSeenAt: 1,
     host: {
-      daemonId: 'host-a',
+      hostId: 'host-a',
       hostName,
       platform: 'darwin',
       arch: 'arm64',
-      daemonVersion: '0.1.375',
+      hostVersion: '0.1.375',
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
@@ -54,7 +54,7 @@ describe('voiceCapability', () => {
 
   it('a machine that has not reported is NOT assumed capable', () => {
     const cap = voiceCapability({
-      daemonId: 'quiet',
+      hostId: 'quiet',
       online: false,
       lastSeenAt: null,
       host: null,

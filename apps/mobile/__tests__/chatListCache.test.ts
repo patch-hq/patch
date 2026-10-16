@@ -17,7 +17,7 @@ function row(chatId: string, over: Partial<ChatListRow> = {}): ChatListRow {
   return {
     chatId,
     name: chatId.toUpperCase(),
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/w',
     activity: 'idle',
     permissionMode: 'auto',

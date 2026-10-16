@@ -238,6 +238,15 @@ describe('describeCron — shapes it refuses to phrase', () => {
     expect(describeCron('0 9-17/0 * * *')).toBe('');
     expect(describeCron('0 9-24 * * *')).toBe('');
   });
+  test('a step that does not divide its field evenly', () => {
+    // `*/45` fires at :00 and :45, then :00 again — gaps of 45 and 15 minutes,
+    // so "every 45 minutes" would misreport when it fires. Same for hours.
+    expect(describeCron('*/45 * * * *')).toBe('');
+    expect(describeCron('*/7 * * * *')).toBe('');
+    expect(describeCron('0 */5 * * *')).toBe('');
+    expect(describeCron('0 */16 * * *')).toBe('');
+    expect(describeCron('*/45 9-17 * * *')).toBe('');
+  });
   test('a field count other than 5', () => {
     expect(describeCron('* * * *')).toBe('');
     expect(describeCron('* * *')).toBe('');

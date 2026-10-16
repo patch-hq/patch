@@ -60,9 +60,9 @@ const OUTCOME = String.raw`.+`;
 // The description is matched greedily so a description containing its own
 // quotes still resolves — it runs to the LAST `" ` in the sentence, and what
 // follows is the outcome.
-const COMMAND = new RegExp(String.raw`^Background command "(.+)" (${OUTCOME})$`);
+const COMMAND = new RegExp(String.raw`^Background command "([\s\S]+)" (${OUTCOME})$`);
 // Both spellings the agent layer uses for a sub-agent.
-const AGENT = new RegExp(String.raw`^(?:Background a|A)gent "(.+)" (${OUTCOME})$`);
+const AGENT = new RegExp(String.raw`^(?:Background a|A)gent "([\s\S]+)" (${OUTCOME})$`);
 
 const FAILED_WITH_EXIT = /^failed with exit code (-?\d+)$/;
 const WAS_STOPPED = /^was stopped(?: by Claude)?$/;

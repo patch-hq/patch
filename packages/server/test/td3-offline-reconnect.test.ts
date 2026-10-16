@@ -2,10 +2,10 @@
 // stack (group D3 self-cert + the encoded TD3 e2e tests, D3-1 … D3-8).
 //
 // This is NOT a set of isolated unit tests. It stands up the real server
-// (`buildAll`, listening on a real port, real `InboundDaemonLink` accepting a
+// (`buildAll`, listening on a real port, real `InboundHostLink` accepting a
 // real host socket via the WS hello gate) and a real `Daemon` whose real
 // `createServerLink` DIALS INTO that server over a real WebSocket — exactly the
-// production topology from packages/daemon/src/index.ts — driven by
+// production topology from packages/host/src/index.ts — driven by
 // `WireTestClient` surfaces. SDK_BACKEND is mock so no Claude install / OAuth
 // is needed.
 //
@@ -30,13 +30,13 @@ import { WireTestClient } from '@patch/wire/test-client';
 import type { WireEvent } from '@patch/wire';
 import { buildAll, type BuiltApp } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { Daemon } from '../../daemon/src/chatRunner.js';
-import { createMetaStore } from '../../daemon/src/meta.js';
-import { createMockSdkBackend, type MockSdkBackend } from '../../daemon/src/sdkBackend.js';
-import { createServerLink, type ServerLink } from '../../daemon/src/serverLink.js';
+import { Daemon } from '../../host/src/chatRunner.js';
+import { createMetaStore } from '../../host/src/meta.js';
+import { createMockSdkBackend, type MockSdkBackend } from '../../host/src/sdkBackend.js';
+import { createServerLink, type ServerLink } from '../../host/src/serverLink.js';
 
 const silent = pino({ level: 'silent' });
-const DAEMON_ID = 'td3-daemon';
+const HOST_ID = 'td3-daemon';
 
 async function waitFor(pred: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -57,7 +57,7 @@ interface Stack {
   sdk: MockSdkBackend;
   daemon: Daemon;
   link: ServerLink;
-  newDaemon: () => { daemon: Daemon; sdk: MockSdkBackend };
+  newHost: () => { daemon: Daemon; sdk: MockSdkBackend };
   stop: () => Promise<void>;
 }
 
@@ -75,7 +75,7 @@ async function startStack(): Promise<Stack> {
   const kp = generateUserKeypair();
   const registry = Registry.load(dataDir);
   registry.bootstrapAccount({ keypair: kp });
-  registry.setDaemonKey({ daemonId: DAEMON_ID, publicKey: kp.publicKey, issuedAt: Date.now() });
+  registry.setDaemonKey({ hostId: HOST_ID, publicKey: kp.publicKey, issuedAt: Date.now() });
 
   const mintSurface = (surfaceId: string): Promise<string> =>
     mintSurfaceCredential({
@@ -86,13 +86,14 @@ async function startStack(): Promise<Stack> {
     });
   const daemonKey = await mintDaemonKey({
     userPrivateKey: kp.privateKey,
-    daemonId: DAEMON_ID,
+    hostId: HOST_ID,
     label: 'td3',
   });
 
   const built = await buildAll({
     registry,
     logger: false,
+    hostOfflineGraceMs: 0,
     // Injected mock notify backend so credential validation passes without env.
     pushBackend: { send: async () => ({ ok: true as const }) } as never,
   });
@@ -104,9 +105,9 @@ async function startStack(): Promise<Stack> {
 
   // Factory: a Host instance wired to a fresh ServerLink that dials the live
   // server. Returns the live-link `emit` and the host. The first invocation
-  // is the "running" host; `newDaemon()` rebuilds from the SAME metaStore
+  // is the "running" host; `newHost()` rebuilds from the SAME metaStore
   // dir to simulate a process restart.
-  function buildDaemonInstance(): {
+  function buildHostInstance(): {
     daemon: Daemon;
     sdk: MockSdkBackend;
     link: ServerLink;
@@ -117,7 +118,7 @@ async function startStack(): Promise<Stack> {
       link.send(event);
     };
     const daemon = new Daemon({
-      daemonId: DAEMON_ID,
+      hostId: HOST_ID,
       metaStore,
       sdkBackend: sdk,
       oauthAccessToken: 'mock-token',
@@ -138,7 +139,7 @@ async function startStack(): Promise<Stack> {
         for (const state of daemon.list()) {
           sender({
             type: 'chat.spawned',
-            daemonId: DAEMON_ID,
+            hostId: HOST_ID,
             chatId: state.chatId,
             folder: state.folder,
           });
@@ -161,10 +162,10 @@ async function startStack(): Promise<Stack> {
     return { daemon, sdk, link };
   }
 
-  let current = buildDaemonInstance();
+  let current = buildHostInstance();
   current.link.start();
   await waitFor(() => current.link.isOnline());
-  await waitFor(() => built.daemonLink.status() === 'online');
+  await waitFor(() => built.hostLink.status() === 'online');
 
   return {
     built,
@@ -176,9 +177,9 @@ async function startStack(): Promise<Stack> {
     sdk: current.sdk,
     daemon: current.daemon,
     link: current.link,
-    newDaemon() {
+    newHost() {
       current.daemon.shutdown();
-      const next = buildDaemonInstance();
+      const next = buildHostInstance();
       current = next;
       next.link.start();
       // expose new handles
@@ -235,7 +236,7 @@ async function handleServerEvent(
 /** Spawn a chat folder + chat via a surface, return the allocated chatId. */
 async function spawnChat(surface: WireTestClient, folder: string): Promise<string> {
   const spawned = surface.waitFor('chat.spawned');
-  surface.send({ type: 'chat.spawn_request', daemonId: DAEMON_ID, folder });
+  surface.send({ type: 'chat.spawn_request', hostId: HOST_ID, folder });
   const ev = await spawned;
   return ev.chatId;
 }
@@ -442,8 +443,8 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     const chatId = await spawnChat(surface, folder);
     surface.send({ type: 'chat.focus_change', chatId });
 
-    const offline = surface.waitFor('daemon.offline');
-    const online = surface.waitFor('daemon.online');
+    const offline = surface.waitFor('host.offline');
+    const online = surface.waitFor('host.online');
 
     // Sever the host→server link (host stays alive).
     expect(stack.link.severForTest()).toBe(true);
@@ -486,7 +487,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     // warn-capturing logger so we can assert the drop log fires. The 10k value
     // is the production default (DEFAULT_BUFFER_PER_CHAT); here we prove the
     // bounding+drop behaviour with a low cap. (The 10k default is exercised by
-    // packages/server/test/daemon-link.test.ts and eventBuffer.test.ts.)
+    // packages/server/test/host-link.test.ts and eventBuffer.test.ts.)
     const warnings: unknown[] = [];
     const capturing = pino(
       { level: 'warn' },
@@ -545,12 +546,12 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     });
 
     // Kill the host (close its link + shutdown) and observe daemon.offline.
-    const offline = surface.waitFor('daemon.offline');
-    const online = surface.waitFor('daemon.online');
+    const offline = surface.waitFor('host.offline');
+    const online = surface.waitFor('host.online');
     stack.link.severForTest();
     // Actually tear the old instance fully down and start a NEW host process
     // re-hydrating from the same metaStore — the real restart.
-    const restarted = stack.newDaemon();
+    const restarted = stack.newHost();
     await offline.catch(() => undefined);
     await waitFor(() => restarted.daemon.list().some((c) => c.chatId === chatId));
     await online;
@@ -590,7 +591,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
   // provider switch does, rather than handing the model a contextless session
   // that can only see this one prompt. So the resume argument is a new id
   // carrying a reseed — never the id that went missing. The host's own twin
-  // asserts the same pair (packages/daemon/test/restart-resume.test.ts).
+  // asserts the same pair (packages/host/test/restart-resume.test.ts).
   it('D3-7: a chat whose claudeSessionId has gone starts a fresh session and runs the turn', async () => {
     const surface = await connectSurface();
     const chatId = await spawnChat(surface, folder);
@@ -617,8 +618,8 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as Record<string, unknown>;
     delete meta['claudeSessionId']; // missing session id
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-    const online = surface.waitFor('daemon.online');
-    const restarted = stack.newDaemon();
+    const online = surface.waitFor('host.online');
+    const restarted = stack.newHost();
     await online;
     await waitFor(() => restarted.daemon.list().some((c) => c.chatId === chatId));
 
@@ -658,15 +659,15 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
   // ── D3-8 ──────────────────────────────────────────────────────────────────
   it('D3-8: daemon.offline/online lifecycle events reach connected surfaces', async () => {
     const surface = await connectSurface();
-    const offline = surface.waitFor('daemon.offline');
-    const online = surface.waitFor('daemon.online');
+    const offline = surface.waitFor('host.offline');
+    const online = surface.waitFor('host.online');
 
     expect(stack.link.severForTest()).toBe(true);
     const off = await offline;
-    expect(off.type).toBe('daemon.offline');
+    expect(off.type).toBe('host.offline');
 
     const on = await online;
-    expect(on.type).toBe('daemon.online');
-    await waitFor(() => stack.built.daemonLink.status() === 'online');
+    expect(on.type).toBe('host.online');
+    await waitFor(() => stack.built.hostLink.status() === 'online');
   });
 });

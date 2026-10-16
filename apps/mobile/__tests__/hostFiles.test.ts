@@ -34,6 +34,11 @@ describe('formatSize', () => {
     expect(formatSize(4300)).toBe('4.2 KB');
     expect(formatSize(1.3 * 1024 * 1024)).toBe('1.3 MB');
   });
+
+  it('rolls a size that rounds to 1024.0 KB over into MB', () => {
+    expect(formatSize(1024 * 1024 - 1)).toBe('1.0 MB');
+    expect(formatSize(5 * 1024 * 1024)).toBe('5.0 MB');
+  });
 });
 
 describe('childPath', () => {
@@ -46,24 +51,24 @@ describe('childPath', () => {
 describe('routes', () => {
   it('address the host screens with typed params, leaving out what was not given', () => {
     expect(filesRoute('d1')).toEqual({
-      pathname: '/hosts/[daemonId]/files',
-      params: { daemonId: 'd1' },
+      pathname: '/hosts/[hostId]/files',
+      params: { hostId: 'd1' },
     });
     expect(filesRoute('d1', '/x')).toEqual({
-      pathname: '/hosts/[daemonId]/files',
-      params: { daemonId: 'd1', path: '/x' },
+      pathname: '/hosts/[hostId]/files',
+      params: { hostId: 'd1', path: '/x' },
     });
     expect(editRoute('d1', '/x/a.md')).toEqual({
-      pathname: '/hosts/[daemonId]/edit',
-      params: { daemonId: 'd1', path: '/x/a.md' },
+      pathname: '/hosts/[hostId]/edit',
+      params: { hostId: 'd1', path: '/x/a.md' },
     });
     expect(terminalRoute('d1')).toEqual({
-      pathname: '/hosts/[daemonId]/terminal',
-      params: { daemonId: 'd1' },
+      pathname: '/hosts/[hostId]/terminal',
+      params: { hostId: 'd1' },
     });
     expect(terminalRoute('d1', '/x')).toEqual({
-      pathname: '/hosts/[daemonId]/terminal',
-      params: { daemonId: 'd1', folder: '/x' },
+      pathname: '/hosts/[hostId]/terminal',
+      params: { hostId: 'd1', folder: '/x' },
     });
   });
 });

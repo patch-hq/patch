@@ -64,7 +64,7 @@ function HostMemories({ host }: { host: HostPresence }): JSX.Element {
       </Group>
       {cs === null ? (
         <Group>
-          <Note testid={`host-${host.daemonId}-memory-unreported`}>
+          <Note testid={`host-${host.hostId}-memory-unreported`}>
             {hostLabel(host)} hasn’t sent its memories yet
           </Note>
         </Group>
@@ -137,12 +137,10 @@ function MemoryBrowser({
       </div>
       {memories.length === 0 ? (
         <Group>
-          <Note testid={`host-${host.daemonId}-memory-empty`}>
-            No memories on {hostLabel(host)}
-          </Note>
+          <Note testid={`host-${host.hostId}-memory-empty`}>No memories on {hostLabel(host)}</Note>
         </Group>
       ) : (
-        <div className="set-mem" data-testid={`host-${host.daemonId}-memory-list`}>
+        <div className="set-mem" data-testid={`host-${host.hostId}-memory-list`}>
           <div className="set-mem-list">
             {groups.length === 0 ? <Note testid="memory-no-match">No matches</Note> : null}
             {groups.map(([label, ms]) => (
@@ -156,7 +154,7 @@ function MemoryBrowser({
                     type="button"
                     key={key(m)}
                     className={`set-mem-item${current && key(current) === key(m) ? ' on' : ''}`}
-                    data-testid={`host-${host.daemonId}-memory-${m.project}-${m.file}`}
+                    data-testid={`host-${host.hostId}-memory-${m.project}-${m.file}`}
                     onClick={() => setSelected(key(m))}
                   >
                     <b>{m.name || m.file}</b>
@@ -188,7 +186,7 @@ function MemoryDetail({
 }): JSX.Element {
   const [draft, setDraft] = useState(memory.body ?? '');
   const [editing, setEditing] = useState(false);
-  const id = `host-${host.daemonId}-memory-${memory.project}-${memory.file}`;
+  const id = `host-${host.hostId}-memory-${memory.project}-${memory.file}`;
   const meta = [
     memory.memoryType || 'unknown',
     projectLabel(memory),
@@ -202,7 +200,7 @@ function MemoryDetail({
     if (memory.body === undefined || draft === memory.body) return;
     sendToHost(host, {
       type: 'host.claude_memory_set',
-      daemonId: host.daemonId,
+      hostId: host.hostId,
       project: memory.project,
       file: memory.file,
       body: draft,
@@ -219,7 +217,7 @@ function MemoryDetail({
     if (!ok) return;
     sendToHost(host, {
       type: 'host.claude_memory_delete',
-      daemonId: host.daemonId,
+      hostId: host.hostId,
       project: memory.project,
       file: memory.file,
     });

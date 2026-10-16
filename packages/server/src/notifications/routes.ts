@@ -8,12 +8,12 @@ import { z } from 'zod';
 import { verifySurfaceCredential } from '@patch/auth';
 import type { ChatInputEvent } from '@patch/wire';
 import type { Registry } from '../registry.js';
-import type { DaemonLink } from '../daemon-link.js';
+import type { HostLink } from '../host-link.js';
 
 export interface NotificationRoutesDeps {
   logger: Logger;
   registry: Registry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   nowMs?: () => number;
   idGenerator?: () => string;
 }
@@ -109,7 +109,7 @@ export function registerNotificationRoutes(
 export function routeVoiceDeviceTranscript(opts: {
   deviceId: string;
   transcript: string;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   idGenerator?: () => string;
 }): void {
   const localId = `vd-${opts.deviceId}-${opts.idGenerator ? opts.idGenerator() : Date.now()}`;
@@ -120,5 +120,5 @@ export function routeVoiceDeviceTranscript(opts: {
     localId,
     source: { kind: 'voice-device', deviceId: opts.deviceId },
   };
-  opts.daemonLink.send(`voice-device:${opts.deviceId}`, event);
+  opts.hostLink.send(`voice-device:${opts.deviceId}`, event);
 }

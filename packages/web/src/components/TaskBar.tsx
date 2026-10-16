@@ -5,11 +5,24 @@
 // it is one line (current item + progress); expanded, every item's status,
 // text and existence is the user's to change.
 //
+// Queueing: the add row writes into a local DRAFT, not the list. The agent is
+// only told about (and the host only fires from) the list, so the user can type
+// "x", "y", "z" and the agent looks once, when they press Done.
+//
 // Every edit sends the WHOLE list and is optimistic, reverting + surfacing a
 // toast on failure (NO FALLBACK), matching the goal bar's pattern.
 
-import { useState, type JSX, type KeyboardEvent } from 'react';
-import { ChevronDown, ChevronRight, Circle, CircleCheck, CircleDot, Plus, X } from 'lucide-react';
+import { useEffect, useState, type JSX, type KeyboardEvent } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  CircleDot,
+  Paperclip,
+  Plus,
+  X,
+} from 'lucide-react';
 import type { TodoItem } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -42,9 +55,16 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
   const pushError = useUiStore((s) => s.pushError);
   const [expanded, setExpanded] = useState(false);
   const [newTask, setNewTask] = useState('');
+  const [draft, setDraft] = useState<string[]>([]);
+  // A chat with no list shows no bar at all (spec/14): "Add tasks" lives in the
+  // header's ⋯ menu, which summons the bar here with its add row open.
+  const summoned = useUiStore((s) => s.taskAddChatId === row.chatId);
+  const setTaskAddChatId = useUiStore((s) => s.setTaskAddChatId);
+  useEffect(() => {
+    if (summoned) setExpanded(true);
+  }, [summoned]);
 
   const todos = row.todos;
-  if (todos.length === 0) return null;
 
   const done = todos.filter((t) => t.status === 'completed').length;
   // What the chat is on right now: the in-progress item, else the next pending
@@ -85,7 +105,24 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
     const text = newTask.trim();
     if (text === '') return;
     setNewTask('');
-    void commit([...todos, { text, status: 'pending' }]);
+    setDraft([...draft, text]);
+  }
+
+  /** Hand the queued tasks to the agent: append them to the list in one write. */
+  function release(): void {
+    const typed = newTask.trim();
+    const queued = typed === '' ? draft : [...draft, typed];
+    if (queued.length === 0) return;
+    setNewTask('');
+    setDraft([]);
+    void commit([...todos, ...queued.map((text) => ({ text, status: 'pending' as const }))]);
+  }
+
+  if (todos.length === 0 && !summoned && draft.length === 0) return null;
+
+  function toggle(): void {
+    if (expanded && todos.length === 0 && draft.length === 0) setTaskAddChatId(null);
+    setExpanded(!expanded);
   }
 
   return (
@@ -96,15 +133,22 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
         data-testid="task-bar-summary"
         aria-expanded={expanded}
         aria-label={expanded ? 'Collapse task list' : 'Expand task list'}
-        onClick={() => setExpanded(!expanded)}
+        onClick={toggle}
       >
         {expanded ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
         <span className="task-bar-head" data-testid="task-bar-head">
-          {head ? head.text : 'All tasks done'}
+          {todos.length === 0 ? 'Add tasks' : head ? head.text : 'All tasks done'}
         </span>
-        <span className="task-bar-count" data-testid="task-bar-count">
-          {done}/{todos.length}
-        </span>
+        {draft.length > 0 ? (
+          <span className="task-bar-count" data-testid="task-bar-queued">
+            {draft.length} queued
+          </span>
+        ) : null}
+        {todos.length > 0 ? (
+          <span className="task-bar-count" data-testid="task-bar-count">
+            {done}/{todos.length}
+          </span>
+        ) : null}
       </button>
       {expanded ? (
         <ul className="task-bar-list" data-testid="task-bar-list">
@@ -131,6 +175,23 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
                 value={t.text}
                 onCommit={(text) => rename(i, text)}
               />
+              {t.attachments && t.attachments.length > 0 ? (
+                <span className="task-attachments" data-testid="task-attachments">
+                  {t.attachments.map((a) => (
+                    <a
+                      key={a.id}
+                      className="task-attachment"
+                      data-testid="task-attachment"
+                      href={`/api/chats/${encodeURIComponent(row.chatId)}/attachment/${encodeURIComponent(a.id)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Paperclip size={12} aria-hidden />
+                      {a.name}
+                    </a>
+                  ))}
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="task-delete-btn"
@@ -138,6 +199,28 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
                 aria-label="Delete task"
                 title="Delete task"
                 onClick={() => remove(i)}
+              >
+                <X size={14} aria-hidden />
+              </button>
+            </li>
+          ))}
+          {draft.map((text, i) => (
+            <li
+              className="task-row task-row-draft"
+              data-testid="task-draft-row"
+              key={`draft-${i}-${text}`}
+            >
+              <span className="task-status-btn task-add-icon" aria-hidden>
+                <Circle size={14} />
+              </span>
+              <span className="task-text">{text}</span>
+              <button
+                type="button"
+                className="task-delete-btn"
+                data-testid="task-draft-delete-btn"
+                aria-label="Remove queued task"
+                title="Remove queued task"
+                onClick={() => setDraft(draft.filter((_, j) => j !== i))}
               >
                 <X size={14} aria-hidden />
               </button>
@@ -156,6 +239,16 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
               onChange={(e) => setNewTask(e.target.value)}
               onKeyDown={onNewTaskKeyDown}
             />
+            {draft.length > 0 || newTask.trim() !== '' ? (
+              <button
+                type="button"
+                className="task-done-btn"
+                data-testid="task-draft-done"
+                onClick={release}
+              >
+                Done
+              </button>
+            ) : null}
           </li>
         </ul>
       ) : null}

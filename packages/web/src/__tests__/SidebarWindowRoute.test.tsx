@@ -61,7 +61,7 @@ describe('SidebarWindowRoute', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'sw1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'a chat',
         folder: '~/proj',

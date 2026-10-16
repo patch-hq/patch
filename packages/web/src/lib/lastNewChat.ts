@@ -4,10 +4,12 @@
 // by continuing an existing chat, and read once on open, never live, so
 // nothing that changes while the screen is showing can move its options.
 
+import { canonicalizeHostNames } from '@patch/wire';
+
 const KEY = 'patch.newChat.last.v1';
 
 export interface LastNewChat {
-  daemonId: string;
+  hostId: string;
   folder: string;
   model: string | null;
 }
@@ -17,15 +19,15 @@ export function loadLastNewChat(): LastNewChat | null {
   if (raw === null) return null;
   let parsed: Partial<LastNewChat>;
   try {
-    parsed = JSON.parse(raw) as Partial<LastNewChat>;
+    parsed = canonicalizeHostNames(JSON.parse(raw)) as Partial<LastNewChat>;
   } catch (e) {
     throw new Error(`lastNewChat: stored value is not JSON (${(e as Error).message})`);
   }
-  if (typeof parsed.daemonId !== 'string' || typeof parsed.folder !== 'string') {
-    throw new Error('lastNewChat: stored value has no daemonId/folder');
+  if (typeof parsed.hostId !== 'string' || typeof parsed.folder !== 'string') {
+    throw new Error('lastNewChat: stored value has no hostId/folder');
   }
   return {
-    daemonId: parsed.daemonId,
+    hostId: parsed.hostId,
     folder: parsed.folder,
     model: typeof parsed.model === 'string' ? parsed.model : null,
   };

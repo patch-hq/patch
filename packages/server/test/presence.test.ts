@@ -19,6 +19,22 @@ describe('PresenceTracker', () => {
     expect(p.get('acc', 'srf-1')?.status).toBe('stale');
   });
 
+  it('a second hello from an already-online surface keeps its input and focus; after going offline it starts fresh', () => {
+    const p = new PresenceTracker();
+    p.online('acc', 'desk', 'desktop', 1000);
+    p.input('acc', 'desk', 0, 1000);
+    p.setFocus('acc', 'desk', 'chatX');
+    // A second window (or a reconnect that overlaps the first socket) says hello.
+    p.online('acc', 'desk', 'desktop', 2000);
+    expect(p.isComputerActive('acc', 2000)).toBe(true);
+    expect(p.get('acc', 'desk')?.lastFocusedChatId).toBe('chatX');
+    // Once every socket is gone the old input is no evidence about the new session.
+    p.offline('acc', 'desk');
+    p.online('acc', 'desk', 'desktop', 3000);
+    expect(p.get('acc', 'desk')?.lastFocusedChatId).toBeUndefined();
+    expect(p.isComputerActive('acc', 3000)).toBe(false);
+  });
+
   it('heartbeat resets stale to online', () => {
     const p = new PresenceTracker();
     p.online('acc', 'srf-1', 'web', 1000);

@@ -20,7 +20,7 @@ function seed(snoozedUntil: number | null): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'a chat',
       folder: '~/proj',
@@ -34,7 +34,7 @@ function seed(snoozedUntil: number | null): void {
     },
     {
       chatId: 'c2',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'another chat',
       folder: '~/proj',
@@ -132,7 +132,7 @@ describe('chatStore — snoozedUntil', () => {
     store.hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',

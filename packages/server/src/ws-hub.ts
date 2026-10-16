@@ -23,17 +23,18 @@ import {
   SPECIAL_THREAD_IDS,
   type AuthOkHost,
   type ClaudeSettingsListEvent,
-  type DaemonAccountEvent,
-  type DaemonHostEvent,
+  type HostAccountEvent,
+  type HostInfoEvent,
   type FoldersListEvent,
   type WireEvent,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey, CredentialExpiredError } from '@patch/auth';
 import type { Registry } from './registry.js';
 import type { PresenceTracker, ClientBuildInfo } from './presence.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
+import type { ViewPositionStore } from './view-position.js';
 import type { ChatLogStore } from './chat-log-store.js';
 import type { CommitAcks } from './commit-acks.js';
 import type { ManagerFailover } from './manager-failover.js';
@@ -41,7 +42,7 @@ import type { QueueTracker } from './queue-tracker.js';
 import type { ServerQueue } from './server-queue.js';
 import type { NewChatDraftStore } from './new-chat-drafts.js';
 import { InputDedupe } from './dedupe.js';
-import { daemonLockstep } from './daemon-lockstep.js';
+import { hostLockstep } from './host-lockstep.js';
 
 /**
  * Message shown to the user when an in-flight chat is force-resolved to
@@ -52,7 +53,7 @@ import { daemonLockstep } from './daemon-lockstep.js';
  * reports its own completion when the link is back. Do not reword this into an
  * instruction to resend — that describes behaviour the system does not have.
  */
-const DAEMON_LINK_LOST_MESSAGE = 'Connection to the host was lost. Message will resend.';
+const HOST_LINK_LOST_MESSAGE = 'Connection to the host was lost. Message will resend.';
 
 const HELLO_TIMEOUT_MS = 5_000;
 const AUTH_BUFFER_LIMIT = 50;
@@ -67,7 +68,7 @@ export const CLOSE_BUFFER_OVERFLOW = 4413;
 type ConnState = 'awaiting-hello' | 'authenticating' | 'authed' | 'daemon' | 'closed';
 
 /** Sentinel returned by handleHello when the authenticated client is the host. */
-const DAEMON_CONN = Symbol('daemon-connection');
+const HOST_CONN = Symbol('daemon-connection');
 
 export type SurfaceKind = 'terminal' | 'web' | 'desktop' | 'mobile' | 'voice-device';
 
@@ -122,6 +123,12 @@ const DETAIL_LEVEL_EVENT_TYPES = new Set<WireEvent['type']>([
   // path just went stale. Every other watching-nothing surface has nothing
   // to invalidate.
   'patch.file_changed',
+  // Agent browser live view and hand-off (spec/02 § Browser — Hand-off): a
+  // picture of the tab and the hand-off prompt belong to the chat's detail
+  // stream — only a surface focused on the chat draws them.
+  'patch.browser_view.frame',
+  'patch.browser_view.status',
+  'patch.browser_handoff.state',
   // Meeting mode: the whole panel (transcript included) re-sent on every clip.
   // Only a surface watching the chat draws it.
   'meeting.state',
@@ -133,13 +140,20 @@ export interface WsHubDeps {
   sharedSettings?: () => WireEvent;
   registry: Registry;
   presence: PresenceTracker;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   /**
-   * Server-side mirror of chat activity. On daemon-link loss the hub queries it
+   * Server-side mirror of chat activity. On host-link loss the hub queries it
    * for chats that were mid-turn so it can resolve them to `errored` (their
    * turn-completion event will never arrive from the now-gone host).
    */
   chatRegistry: ChatRegistry;
+  /**
+   * How long a host must stay offline before its in-flight chats are forced to
+   * `errored`. A link that drops and returns inside this window (a network
+   * blip, a host re-attaching) never marks them, so chat rows do not flip
+   * running → errored → running, and the host is not announced offline. Default 5000.
+   */
+  hostOfflineGraceMs?: number;
   /**
    * Server-owned composer drafts (spec/14 § Composer, spec/15 § Composer).
    * Account-wide, not per-machine — set/clear frames from a surface write
@@ -149,6 +163,7 @@ export interface WsHubDeps {
    * (`app.ts`) always supplies a real store.
    */
   composerDrafts?: ComposerDraftStore;
+  viewPosition?: ViewPositionStore;
   /**
    * What each chat is holding behind a running turn. A surface that asks for a
    * chat's replay is told the waiting messages too, since the host announces
@@ -174,10 +189,10 @@ export interface WsHubDeps {
   /**
    * Bind the host's authenticated WS socket to the host link. Called by
    * the hello gate when a host presents a valid daemonKey. Production wires
-   * `InboundDaemonLink.attach`; tests inject a spy. Absent → host hellos are
+   * `InboundHostLink.attach`; tests inject a spy. Absent → host hellos are
    * rejected (the in-process test link can't accept a real socket).
    */
-  attachDaemon?: (socket: WebSocket, daemonId: string) => void;
+  attachHost?: (socket: WebSocket, hostId: string) => void;
   /** Override clock for tests (returns unix seconds). */
   nowSec?: () => number;
   /** Hello-frame timeout (override for tests). */
@@ -195,13 +210,13 @@ export interface WsHubDeps {
   getAppVersion?: () => string | undefined;
   /**
    * This server's own version and the host build the update channel
-   * currently publishes (`daemon-latest.json`: its version and the os/arch
+   * currently publishes (`host-latest.json`: its version and the os/arch
    * targets it has artifacts for), so a host that connects on an older build
-   * can be told to update (daemon-lockstep.ts). Absent in tests that do not
+   * can be told to update (host-lockstep.ts). Absent in tests that do not
    * exercise it.
    */
   serverVersion?: string;
-  publishedDaemon?: () => { version: string; targets: string[] } | null;
+  publishedHost?: () => { version: string; targets: string[] } | null;
 }
 
 export class WsHub {
@@ -224,25 +239,26 @@ export class WsHub {
    */
   private readonly surfaces = new Map<string, Set<ConnectedSurface>>();
   private readonly dedupe = new InputDedupe();
-  private daemonStatusUnsub: (() => void) | null = null;
-  private daemonEventUnsub: (() => void) | null = null;
+  private hostStatusUnsub: (() => void) | null = null;
+  private hostEventUnsub: (() => void) | null = null;
   private composerDraftsUnsub: (() => void) | null = null;
+  private viewPositionUnsub: (() => void) | null = null;
   private newChatDraftsUnsub: (() => void) | null = null;
   /**
-   * The last `daemon.host` self-description each host reported, keyed by
-   * daemonId. A host emits it on link auth, so a surface that connects LATER
+   * The last `host.host` self-description each host reported, keyed by
+   * hostId. A host emits it on link auth, so a surface that connects LATER
    * never sees it live — the server caches it and replays it inside the
    * `auth.ok` greeting so the Hosts list renders from the greeting alone
    * (spec/03 § Control → `auth.ok`).
    */
-  private readonly lastHostReport = new Map<string, DaemonHostEvent>();
+  private readonly lastHostReport = new Map<string, HostInfoEvent>();
   /**
-   * The last `daemon.account` per (daemonId, backendId). Keyed per BACKEND, not
+   * The last `host.account` per (hostId, backendId). Keyed per BACKEND, not
    * per host: a machine can be connected on one backend and logged out on
    * another, and collapsing them would lose exactly the distinction Settings
    * has to show (spec/10 § Backend credentials).
    */
-  private readonly lastAccountReport = new Map<string, Map<string, DaemonAccountEvent>>();
+  private readonly lastAccountReport = new Map<string, Map<string, HostAccountEvent>>();
   /** ms-epoch each host's link was last seen; survives the link dropping. */
   private readonly hostLastSeenAt = new Map<string, number>();
   /**
@@ -260,8 +276,8 @@ export class WsHub {
   private readonly lastClaudeSettings = new Map<string, ClaudeSettingsListEvent>();
   /**
    * Which machine each live terminal session's shell is running on —
-   * `sessionId → daemonId`, stamped from `patch.terminal.open` (the only
-   * terminal frame that carries a `daemonId`; spec/03 § Terminal sessions).
+   * `sessionId → hostId`, stamped from `patch.terminal.open` (the only
+   * terminal frame that carries a `hostId`; spec/03 § Terminal sessions).
    *
    * Every later frame for that session (`input`, `signal`, `close`) names only
    * the `sessionId`, so without this table the host link falls through to the
@@ -277,34 +293,34 @@ export class WsHub {
    * after the link drops so the update panel can still name the build that went
    * offline instead of showing a blank.
    */
-  private daemonBuild: ClientBuildInfo | null = null;
-  /** Every host that has said hello, with the version it stated (daemon-lockstep.ts). */
-  private readonly connectedDaemons = new Map<
+  private hostBuild: ClientBuildInfo | null = null;
+  /** Every host that has said hello, with the version it stated (host-lockstep.ts). */
+  private readonly connectedHosts = new Map<
     string,
     { socket: WebSocket; version: string; log: Logger }
   >();
   /** The published host build the last recheck saw; undefined before the first. */
-  private lastPublishedDaemon: string | null | undefined = undefined;
+  private lastPublishedHost: string | null | undefined = undefined;
 
   /** The host's last-reported build, or null if it has never linked. */
-  getDaemonBuild(): ClientBuildInfo | null {
-    return this.daemonBuild;
+  getHostBuild(): ClientBuildInfo | null {
+    return this.hostBuild;
   }
 
   /**
    * Every host id in the registry — ANY number of machines (spec/01 § "a relay
    * for any number of machines"). Callers must already handle N.
    */
-  private registeredDaemonIds(): string[] {
+  private registeredHostIds(): string[] {
     // Single source of truth with the host-addressing gate: a revoked machine
     // is not registered, so it must not appear in the roster either — otherwise
     // a surface renders a machine whose every frame is refused.
-    const ids = this.deps.registry.registeredDaemonIds();
+    const ids = this.deps.registry.registeredHostIds();
     // A link can be attached before (or without) a registry record in dev and
     // test bring-ups. It is still a real host with a real id, and a surface
     // must see it in the roster — otherwise the machine it is talking to is
     // absent from its own Hosts list.
-    for (const linked of this.deps.daemonLink.onlineDaemonIds()) {
+    for (const linked of this.deps.hostLink.onlineHostIds()) {
       if (!ids.includes(linked)) ids.push(linked);
     }
     return ids;
@@ -314,8 +330,8 @@ export class WsHub {
    * The account's HOME machine (spec/06). Exactly one machine holds it: the
    * registry's explicit choice, else the first registered machine.
    */
-  private homeDaemonId(): string | null {
-    return this.deps.registry.homeDaemonId() ?? this.registeredDaemonIds()[0] ?? null;
+  private homeHostId(): string | null {
+    return this.deps.registry.homeHostId() ?? this.registeredHostIds()[0] ?? null;
   }
 
   /**
@@ -325,12 +341,12 @@ export class WsHub {
    * for both, so exactly one machine can claim home and a rename survives the
    * machine restarting.
    */
-  private withServerOwnedHostFields(event: DaemonHostEvent): DaemonHostEvent {
-    const name = this.deps.registry.hostName(event.daemonId);
+  private withServerOwnedHostFields(event: HostInfoEvent): HostInfoEvent {
+    const name = this.deps.registry.hostName(event.hostId);
     return {
       ...event,
       ...(name !== undefined ? { hostName: name } : {}),
-      isHomeHost: this.homeDaemonId() === event.daemonId,
+      isHomeHost: this.homeHostId() === event.hostId,
     };
   }
 
@@ -350,74 +366,122 @@ export class WsHub {
   }
 
   /**
-   * Where the server can reach `daemonId`'s own audio WSS to relay a voice
+   * Where the server can reach `hostId`'s own audio WSS to relay a voice
    * session for a chat that lives there (`audio-relay.ts`). `undefined` when
    * this host has never reported in — there is nothing to relay to yet.
    */
-  audioRelayHost(daemonId: string): string | undefined {
-    return this.lastHostReport.get(daemonId)?.audioRelayHost;
+  audioRelayHost(hostId: string): string | undefined {
+    return this.lastHostReport.get(hostId)?.audioRelayHost;
   }
 
   private hostRoster(): AuthOkHost[] {
-    return this.registeredDaemonIds().map((daemonId) => {
-      const cachedRaw = this.lastHostReport.get(daemonId);
+    return this.registeredHostIds().map((hostId) => {
+      const cachedRaw = this.lastHostReport.get(hostId);
       const cached = cachedRaw ? this.withServerOwnedHostFields(cachedRaw) : undefined;
       // Strip the wire envelope; the greeting carries the payload.
-      const { type: _envelope, ...host } = cached ?? { type: 'daemon.host' as const };
+      const { type: _envelope, ...host } = cached ?? { type: 'host.host' as const };
       void _envelope;
-      const accounts = [...(this.lastAccountReport.get(daemonId)?.values() ?? [])].map((a) => {
+      const accounts = [...(this.lastAccountReport.get(hostId)?.values() ?? [])].map((a) => {
         const { type: _accountEnvelope, ...rest } = a;
         void _accountEnvelope;
         return rest;
       });
       return {
-        daemonId,
-        online: this.deps.daemonLink.isOnline(daemonId),
-        lastSeenAt: this.hostLastSeenAt.get(daemonId) ?? null,
-        host: cached ? (host as Omit<DaemonHostEvent, 'type'>) : null,
-        accounts: accounts as Omit<DaemonAccountEvent, 'type'>[],
+        hostId,
+        online: this.deps.hostLink.isOnline(hostId),
+        lastSeenAt: this.hostLastSeenAt.get(hostId) ?? null,
+        host: cached ? (host as Omit<HostInfoEvent, 'type'>) : null,
+        registeredName: this.deps.registry.hostName(hostId) ?? null,
+        accounts: accounts as Omit<HostAccountEvent, 'type'>[],
       };
     });
   }
 
+  /** Pending grace timers, per host, before its in-flight chats are errored. */
+  private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** Hosts whose socket is being replaced by a new one right now (see the offline handler). */
+  private readonly replacingHosts = new Set<string>();
+
+  /**
+   * Run a deliberate disconnect (revoke, remove) so the host's offline is
+   * announced at once: unlike a network blip, it is not coming straight back.
+   */
+  disconnectHostNow<T>(hostId: string, fn: () => T): T {
+    this.replacingHosts.add(hostId);
+    try {
+      return fn();
+    } finally {
+      this.replacingHosts.delete(hostId);
+    }
+  }
+
+  /** Tell every surface and machine a host's status changed; on offline, resolve what died with it. */
+  private announceHostStatus(hostId: string, status: 'online' | 'offline'): void {
+    const ev: WireEvent =
+      status === 'online' ? { type: 'host.online', hostId } : { type: 'host.offline', hostId };
+    for (const conn of this.allConns()) {
+      conn.socket.send(encode(ev));
+    }
+    // Machines need the roster too: an agent's cross-chat call naming another
+    // machine has to fail INSIDE the turn when that machine is down (spec/03
+    // § Cross-chat tools), which means the calling machine must know it is
+    // down without asking.
+    for (const otherId of this.deps.hostLink.onlineHostIds()) {
+      if (otherId === hostId) continue;
+      this.deps.hostLink.sendTo(otherId, 'presence', ev);
+    }
+    if (status !== 'offline') return;
+    // The host owns every in-flight turn. When the link drops, the
+    // turn-completion / activity event will never arrive, so a chat left in
+    // `running` / `awaiting-permission` would spin forever — a SILENT failure
+    // (the reported bug). Resolve those chats to `errored` LOUDLY so the UI
+    // unsticks and the user can retry. Only chats on the machine that went
+    // away: another machine's turns are unaffected. NO FALLBACK. spec/12 +
+    // spec/04.
+    this.resolveInFlightChatsOnHostOffline(hostId);
+    // Every shell on that machine died with it. Drop the routes so a
+    // surface still holding those ids is told `unknown_session` instead of
+    // having its keystrokes buffered for a shell that no longer exists.
+    for (const [sessionId, host] of this.terminalSessionHost.entries()) {
+      if (host === hostId) this.terminalSessionHost.delete(sessionId);
+    }
+  }
+
   constructor(private readonly deps: WsHubDeps) {
     // Pipe host → surfaces.
-    this.daemonEventUnsub = deps.daemonLink.onEvent((event) => this.onDaemonEvent(event));
+    this.hostEventUnsub = deps.hostLink.onEvent((event) => this.onHostEvent(event));
     // Presence names the machine it describes: the link tells us WHICH machine
     // changed, so a surface can never mistake one machine going offline for
     // another's. NO unaddressed presence frame is ever sent.
-    this.daemonStatusUnsub = deps.daemonLink.onHostStatus((daemonId, status) => {
-      if (status === 'online') this.hostLastSeenAt.set(daemonId, Date.now());
-      const ev: WireEvent =
-        status === 'online'
-          ? { type: 'daemon.online', daemonId }
-          : { type: 'daemon.offline', daemonId };
-      for (const conn of this.allConns()) {
-        conn.socket.send(encode(ev));
+    this.hostStatusUnsub = deps.hostLink.onHostStatus((hostId, status) => {
+      if (status === 'online') this.hostLastSeenAt.set(hostId, Date.now());
+      // A link that drops and returns inside the grace window is a network
+      // blip, not an outage: nobody is told it went offline, so surfaces do
+      // not flash "offline" for the second or two the host takes to redial.
+      const pending = this.offlineTimers.get(hostId);
+      if (pending) {
+        clearTimeout(pending);
+        this.offlineTimers.delete(hostId);
       }
-      // Machines need the roster too: an agent's cross-chat call naming another
-      // machine has to fail INSIDE the turn when that machine is down (spec/03
-      // § Cross-chat tools), which means the calling machine must know it is
-      // down without asking.
-      for (const otherId of this.deps.daemonLink.onlineDaemonIds()) {
-        if (otherId === daemonId) continue;
-        this.deps.daemonLink.sendTo(otherId, 'presence', ev);
+      if (status === 'online') {
+        if (pending) return; // the drop was never announced
+        this.announceHostStatus(hostId, status);
+        return;
       }
-      // The host owns every in-flight turn. When the link drops, the
-      // turn-completion / activity event will never arrive, so a chat left in
-      // `running` / `awaiting-permission` would spin forever — a SILENT failure
-      // (the reported bug). Resolve those chats to `errored` LOUDLY so the UI
-      // unsticks and the user can retry. Only chats on the machine that went
-      // away: another machine's turns are unaffected. NO FALLBACK. spec/12 +
-      // spec/04.
-      if (status === 'offline') {
-        this.resolveInFlightChatsOnDaemonOffline(daemonId);
-        // Every shell on that machine died with it. Drop the routes so a
-        // surface still holding those ids is told `unknown_session` instead of
-        // having its keystrokes buffered for a shell that no longer exists.
-        for (const [sessionId, host] of this.terminalSessionHost.entries()) {
-          if (host === daemonId) this.terminalSessionHost.delete(sessionId);
-        }
+      // A NEW process taking over the same hostId (its predecessor's socket
+      // never closed) is a restart: the old process's turns died with it, so
+      // they resolve now. Only a plain link drop might come straight back.
+      const graceMs = this.deps.hostOfflineGraceMs ?? 5000;
+      if (graceMs <= 0 || this.replacingHosts.has(hostId)) {
+        this.announceHostStatus(hostId, status);
+      } else {
+        const timer = setTimeout(() => {
+          this.offlineTimers.delete(hostId);
+          this.announceHostStatus(hostId, status);
+        }, graceMs);
+        timer.unref?.();
+        this.offlineTimers.set(hostId, timer);
       }
     });
     // Composer drafts are account-wide, not per-machine (spec/14 § Composer):
@@ -442,6 +506,11 @@ export class WsHub {
               };
         this.sendToAll(event);
       }) ?? null;
+    // View position (spec/05 § Handover): account-wide, fanned out to everyone.
+    this.viewPositionUnsub =
+      deps.viewPosition?.onChange((p) => {
+        this.sendToAll({ type: 'view_position.updated', ...p });
+      }) ?? null;
     // New-chat drafts: same account-wide fan-out.
     this.newChatDraftsUnsub =
       deps.newChatDrafts?.onChange((change) => {
@@ -457,7 +526,7 @@ export class WsHub {
   }
 
   /**
-   * On daemon-link loss, force every chat that was mid-turn into a visible
+   * On host-link loss, force every chat that was mid-turn into a visible
    * `errored` state for all connected surfaces. Emits the same pair the host
    * itself emits when a turn errors (chatRunner): a `chat.error` (toast) plus a
    * `chat.state` with `activity: 'errored'` + `lastError` (what flips the
@@ -465,14 +534,14 @@ export class WsHub {
    * pull-to-refresh) agree with the live stream. On reconnect the host
    * remains source of truth: a retried turn drives the chat back to `running`.
    */
-  private resolveInFlightChatsOnDaemonOffline(daemonId: string): void {
+  private resolveInFlightChatsOnHostOffline(hostId: string): void {
     const inFlight = this.deps.chatRegistry
       .inFlightChatIds()
-      .filter((chatId) => this.deps.chatRegistry.get(chatId)?.daemonId === daemonId);
+      .filter((chatId) => this.deps.chatRegistry.get(chatId)?.hostId === hostId);
     if (inFlight.length === 0) return;
     const at = Date.now();
     for (const chatId of inFlight) {
-      const error = { code: 'daemon_unavailable' as const, message: DAEMON_LINK_LOST_MESSAGE };
+      const error = { code: 'daemon_unavailable' as const, message: HOST_LINK_LOST_MESSAGE };
       const errorEvent: WireEvent = {
         type: 'chat.error',
         chatId,
@@ -504,9 +573,12 @@ export class WsHub {
 
   /** Drop all upstream subscriptions (test cleanup). */
   shutdown(): void {
-    this.daemonEventUnsub?.();
-    this.daemonStatusUnsub?.();
+    for (const t of this.offlineTimers.values()) clearTimeout(t);
+    this.offlineTimers.clear();
+    this.hostEventUnsub?.();
+    this.hostStatusUnsub?.();
     this.composerDraftsUnsub?.();
+    this.viewPositionUnsub?.();
     this.newChatDraftsUnsub?.();
     for (const conn of this.allConns()) {
       try {
@@ -619,7 +691,7 @@ export class WsHub {
 
     socket.on('message', (raw: WebSocket.RawData) => {
       if (state === 'closed') return;
-      // Host socket: the InboundDaemonLink owns inbound frames (it attached
+      // Host socket: the InboundHostLink owns inbound frames (it attached
       // its own `message` listener). The hub stays out of the way — including
       // skipping decode, since the link decodes for itself.
       if (state === 'daemon') return;
@@ -657,7 +729,13 @@ export class WsHub {
         void this.handleHello(socket, event, log)
           .then((conn) => {
             if (state !== 'authenticating') {
-              // socket already closed (e.g. timeout, error) — drop result
+              // socket already closed (e.g. timeout, error) — drop result. If
+              // the hello had gone on to register a surface, the close handler
+              // missed it (it ran first): undo that here, or the surface reads
+              // as online for ever.
+              if (conn && conn !== HOST_CONN && this.removeConn(conn)) {
+                this.deps.presence.offline(conn.accountId, conn.surfaceId);
+              }
               return;
             }
             if (!conn) {
@@ -666,8 +744,8 @@ export class WsHub {
               pending.length = 0;
               return;
             }
-            if (conn === DAEMON_CONN) {
-              // Host authenticated. The InboundDaemonLink now owns this
+            if (conn === HOST_CONN) {
+              // Host authenticated. The InboundHostLink now owns this
               // socket (message/close/error). The hub must not interpret
               // frames as surface events — drop anything buffered pre-auth.
               state = 'daemon';
@@ -751,7 +829,7 @@ export class WsHub {
     socket: WebSocket,
     hello: Extract<WireEvent, { type: 'hello' }>,
     log: Logger,
-  ): Promise<ConnectedSurface | typeof DAEMON_CONN | null> {
+  ): Promise<ConnectedSurface | typeof HOST_CONN | null> {
     const account = this.deps.registry.getAccount();
     if (!account) {
       log.warn({}, 'hello rejected: no account bootstrapped');
@@ -768,8 +846,8 @@ export class WsHub {
 
     const nowSec = this.deps.nowSec ? this.deps.nowSec() : Math.floor(Date.now() / 1000);
 
-    if (hello.clientType === 'daemon') {
-      return this.handleDaemonHello(socket, hello, account, nowSec, log);
+    if (hello.clientType === 'host') {
+      return this.handleHostHello(socket, hello, account, nowSec, log);
     }
 
     let claims;
@@ -875,6 +953,9 @@ export class WsHub {
       socket.send(encode({ type: 'composer_draft.list', drafts }));
     }
 
+    const viewPosition = this.deps.viewPosition?.get();
+    if (viewPosition) socket.send(encode({ type: 'view_position.updated', ...viewPosition }));
+
     // New-chat drafts: always sent (even empty) so a surface drops any draft
     // that was deleted elsewhere while it was away.
     if (this.deps.newChatDrafts) {
@@ -883,14 +964,14 @@ export class WsHub {
 
     // Greet with each registered host's presence. Every registered host is
     // named — including ones that have never connected — so a surface can
-    // render the whole Hosts list without waiting for a `daemon.online` that
+    // render the whole Hosts list without waiting for a `host.online` that
     // an asleep machine will never send.
-    for (const daemonId of this.registeredDaemonIds()) {
+    for (const hostId of this.registeredHostIds()) {
       socket.send(
         encode(
-          this.deps.daemonLink.isOnline(daemonId)
-            ? { type: 'daemon.online', daemonId }
-            : { type: 'daemon.offline', daemonId },
+          this.deps.hostLink.isOnline(hostId)
+            ? { type: 'host.online', hostId }
+            : { type: 'host.offline', hostId },
         ),
       );
       // Each machine's folder registry, from the greeting alone (spec/03 §
@@ -898,11 +979,11 @@ export class WsHub {
       // it when its own link authenticates, so a surface that connects later
       // would otherwise have an empty picker until something changed on that
       // machine. The server replays its cached snapshot per machine.
-      const folders = this.lastFolderList.get(daemonId);
+      const folders = this.lastFolderList.get(hostId);
       if (folders) socket.send(encode(folders));
       // Each machine's Claude Code settings + memory entries, same reasoning
       // (spec/03 § Host events — `claude_settings.list` is "sent on connect").
-      const claudeSettings = this.lastClaudeSettings.get(daemonId);
+      const claudeSettings = this.lastClaudeSettings.get(hostId);
       if (claudeSettings) socket.send(encode(claudeSettings));
     }
     // The shared settings, from the greeting alone (spec/03 § Settings).
@@ -916,22 +997,22 @@ export class WsHub {
    * Host hello gate (spec/10 ## Host registration). The host presents an
    * EdDSA-JWT daemonKey; we verify it against the account user key, confirm the
    * presented daemon_id matches the one registered in the registry, and check
-   * revocation. On success the socket is handed to the InboundDaemonLink via
-   * `attachDaemon`, and `daemon.online` fans out to surfaces.
+   * revocation. On success the socket is handed to the InboundHostLink via
+   * `attachHost`, and `host.online` fans out to surfaces.
    *
    * Close-code discipline mirrors the surface gate: only a *genuine* revocation
    * emits `auth.revoked` (a destructive signal that tells a client to wipe its
    * credential + re-pair). A bad/unknown/foreign daemonKey just closes 4401.
    */
-  private async handleDaemonHello(
+  private async handleHostHello(
     socket: WebSocket,
     hello: Extract<WireEvent, { type: 'hello' }>,
     account: NonNullable<ReturnType<Registry['getAccount']>>,
     nowSec: number,
     log: Logger,
-  ): Promise<typeof DAEMON_CONN | null> {
-    if (!this.deps.attachDaemon) {
-      log.error({}, 'host hello rejected: no attachDaemon wired');
+  ): Promise<typeof HOST_CONN | null> {
+    if (!this.deps.attachHost) {
+      log.error({}, 'host hello rejected: no attachHost wired');
       socket.close(CLOSE_AUTH_FAILED, 'host link unavailable');
       return null;
     }
@@ -954,26 +1035,33 @@ export class WsHub {
     // A host must be registered, and the presented daemon_id must match.
     const registered = this.deps.registry.getDaemonKey(claims.daemon_id);
     if (!registered) {
-      log.warn({ daemonId: claims.daemon_id }, 'host hello rejected: unknown host');
+      log.warn({ hostId: claims.daemon_id }, 'host hello rejected: unknown host');
       socket.close(CLOSE_AUTH_FAILED, 'unknown host');
+      return null;
+    }
+
+    if (this.deps.registry.isDaemonKeySuperseded(claims.daemon_id, claims.iat)) {
+      log.warn({ hostId: claims.daemon_id }, 'host hello rejected: key from an earlier pairing');
+      socket.send(encode({ type: 'auth.revoked', reason: 'host key superseded' }));
+      socket.close(CLOSE_AUTH_FAILED, 'host key superseded');
       return null;
     }
 
     if (this.deps.registry.isRevoked(claims.daemon_id)) {
       // Genuine revocation — emit auth.revoked so the host wipes its key.
-      log.warn({ daemonId: claims.daemon_id }, 'host hello rejected: revoked');
+      log.warn({ hostId: claims.daemon_id }, 'host hello rejected: revoked');
       socket.send(encode({ type: 'auth.revoked', reason: 'host revoked' }));
       socket.close(CLOSE_AUTH_FAILED, 'host revoked');
       return null;
     }
 
-    log.info({ daemonId: claims.daemon_id, label: claims.label }, 'host authed');
+    log.info({ hostId: claims.daemon_id, label: claims.label }, 'host authed');
 
     // The host isn't a surface, so it has no presence record — stash its
     // self-reported build here for `GET /api/version` (spec/11 § Version
     // reporting). Survives the link dropping, so the panel can still say WHICH
     // host build went offline.
-    this.daemonBuild = {
+    this.hostBuild = {
       version: hello.clientVersion,
       ...(hello.clientGitSha ? { gitSha: hello.clientGitSha } : {}),
       ...(hello.clientBuiltAt ? { builtAt: hello.clientBuiltAt } : {}),
@@ -992,11 +1080,19 @@ export class WsHub {
     // Hand the live socket to the link. This flips status → online and fans
     // out daemon.online to surfaces (via the link's onStatus subscription set
     // up in the constructor). attach() also closes any prior host socket.
-    this.deps.attachDaemon(socket, claims.daemon_id);
-    this.connectedDaemons.set(claims.daemon_id, { socket, version: hello.clientVersion, log });
-    this.bringDaemonInStep(socket, claims.daemon_id, hello.clientVersion, log);
+    const replaced = this.connectedHosts.get(claims.daemon_id)?.socket;
+    if (replaced && replaced !== socket && replaced.readyState === replaced.OPEN) {
+      this.replacingHosts.add(claims.daemon_id);
+    }
+    try {
+      this.deps.attachHost(socket, claims.daemon_id);
+    } finally {
+      this.replacingHosts.delete(claims.daemon_id);
+    }
+    this.connectedHosts.set(claims.daemon_id, { socket, version: hello.clientVersion, log });
+    this.bringHostInStep(socket, claims.daemon_id, hello.clientVersion, log);
 
-    return DAEMON_CONN;
+    return HOST_CONN;
   }
 
   /**
@@ -1013,47 +1109,47 @@ export class WsHub {
    * that minute refuses (no darwin artifact yet) — so the Mac build landing
    * has to count as a change, or the Mac is never told again.
    */
-  recheckDaemonVersions(): void {
-    const published = this.deps.publishedDaemon?.() ?? null;
+  recheckHostVersions(): void {
+    const published = this.deps.publishedHost?.() ?? null;
     const key = published
       ? `${published.version} ${[...published.targets].sort().join(',')}`
       : null;
-    if (key === this.lastPublishedDaemon) return;
-    this.lastPublishedDaemon = key;
-    for (const [daemonId, d] of this.connectedDaemons) {
+    if (key === this.lastPublishedHost) return;
+    this.lastPublishedHost = key;
+    for (const [hostId, d] of this.connectedHosts) {
       if (d.socket.readyState !== d.socket.OPEN) {
-        this.connectedDaemons.delete(daemonId);
+        this.connectedHosts.delete(hostId);
         continue;
       }
-      this.bringDaemonInStep(d.socket, daemonId, d.version, d.log);
+      this.bringHostInStep(d.socket, hostId, d.version, d.log);
     }
   }
 
   /**
    * A host on a different version from this server is a fault, not a state
-   * (daemon-lockstep.ts). Behind with the matching build published: tell it to
+   * (host-lockstep.ts). Behind with the matching build published: tell it to
    * update — its own gate holds the restart until its running turns finish.
    * Anything else it cannot fix is logged as an error naming which side is
    * stale, never left to surface later as a chat that cannot be reached.
    */
-  private bringDaemonInStep(
+  private bringHostInStep(
     socket: WebSocket,
-    daemonId: string,
-    daemonVersion: string,
+    hostId: string,
+    hostVersion: string,
     log: Logger,
   ): void {
     const serverVersion = this.deps.serverVersion;
-    if (!serverVersion || !this.deps.publishedDaemon) return;
-    const publishedVersion = this.deps.publishedDaemon()?.version ?? null;
-    const step = daemonLockstep({ serverVersion, daemonVersion, publishedVersion });
-    const ctx = { daemonId, daemonVersion, serverVersion, publishedVersion };
+    if (!serverVersion || !this.deps.publishedHost) return;
+    const publishedVersion = this.deps.publishedHost()?.version ?? null;
+    const step = hostLockstep({ serverVersion, hostVersion, publishedVersion });
+    const ctx = { hostId, hostVersion, serverVersion, publishedVersion };
     switch (step.kind) {
       case 'in-step':
       case 'incomparable':
         return;
       case 'update':
         log.warn(ctx, 'host is behind the server; telling it to update');
-        socket.send(encode({ type: 'host.update', daemonId }));
+        socket.send(encode({ type: 'host.update', hostId }));
         return;
       case 'unpublished':
         log.error(
@@ -1092,11 +1188,11 @@ export class WsHub {
    * changed something it owns (its name, the home flag). Without this the
    * change would only appear the next time the machine happened to speak.
    */
-  private republishHost(daemonId: string): void {
-    const cached = this.lastHostReport.get(daemonId);
+  private republishHost(hostId: string): void {
+    const cached = this.lastHostReport.get(hostId);
     if (!cached) return;
     const updated = this.withServerOwnedHostFields(cached);
-    this.lastHostReport.set(daemonId, cached);
+    this.lastHostReport.set(hostId, cached);
     const wire = encode(updated);
     for (const conn of this.allConns()) conn.socket.send(wire);
   }
@@ -1111,24 +1207,24 @@ export class WsHub {
     });
 
     // ---- host addressing gate (spec/03 § Host events, spec/04 § Spawn) ----
-    // Every surface→server frame that carries a `daemonId` names ONE machine.
+    // Every surface→server frame that carries a `hostId` names ONE machine.
     // If that machine is not registered against this account the frame is
     // refused HERE, before any id is allocated or anything is relayed, and the
     // surface is told which value was wrong. Relaying it would hand the work to
     // whichever host happens to be attached — indistinguishable from correct
     // routing while one machine is online, and the wrong filesystem the moment
     // there are two. NO FALLBACK.
-    // Gated by TYPE, not merely by "has a daemonId": a frame of a type that is
+    // Gated by TYPE, not merely by "has a hostId": a frame of a type that is
     // not valid surface→server at all must still be rejected as a bad type
     // (4400) rather than answered with a host error, so the two checks must not
     // compete for the same frame.
     const addressed = isHostAddressedSurfaceEvent(event.type)
-      ? (event as { daemonId?: unknown }).daemonId
+      ? (event as { hostId?: unknown }).hostId
       : undefined;
-    if (typeof addressed === 'string' && !this.deps.registry.isRegisteredDaemon(addressed)) {
+    if (typeof addressed === 'string' && !this.deps.registry.isRegisteredHost(addressed)) {
       slog.warn(
-        { type: event.type, daemonId: addressed, known: this.deps.registry.registeredDaemonIds() },
-        'host-addressed frame rejected: unregistered daemonId',
+        { type: event.type, hostId: addressed, known: this.deps.registry.registeredHostIds() },
+        'host-addressed frame rejected: unregistered hostId',
       );
       const chatId =
         'chatId' in event && typeof event.chatId === 'string' ? event.chatId : 'pending-spawn';
@@ -1138,7 +1234,7 @@ export class WsHub {
           chatId,
           error: {
             code: 'host_not_registered',
-            message: `no machine registered with daemonId: ${addressed}`,
+            message: `no machine registered with hostId: ${addressed}`,
           },
           // Control error with no chat behind it — never a replayable stream event.
           seq: OUT_OF_BAND_SEQ,
@@ -1207,7 +1303,7 @@ export class WsHub {
         // event has no surfaceId and the host link drops the routing arg.
         // spec/07 ## Focus-follow.
         const taggedFocus: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
-        this.deps.daemonLink.send(conn.surfaceId, taggedFocus);
+        this.deps.hostLink.send(conn.surfaceId, taggedFocus);
         return;
       }
       case 'chat.input': {
@@ -1252,8 +1348,8 @@ export class WsHub {
         void _spoofGuard;
         const sanitizedEvent = sanitized as typeof event;
         if (this.deps.serverQueue?.enqueueIfBusy(conn.surfaceId, sanitizedEvent)) return;
-        this.deps.serverQueue?.noteForwarded(sanitizedEvent.chatId);
-        this.deps.daemonLink.send(conn.surfaceId, sanitizedEvent);
+        this.deps.serverQueue?.noteForwarded(sanitizedEvent);
+        this.deps.hostLink.send(conn.surfaceId, sanitizedEvent);
         return;
       }
       case 'chat.spawn_request': {
@@ -1262,7 +1358,7 @@ export class WsHub {
         const chatId = event.chatId ?? this.deps.idGenerator();
         const tagged: WireEvent = { ...event, chatId };
         conn.watchedChats.add(chatId);
-        this.deps.daemonLink.send(conn.surfaceId, tagged);
+        this.deps.hostLink.send(conn.surfaceId, tagged);
         return;
       }
       case 'chat.call_response': {
@@ -1287,6 +1383,11 @@ export class WsHub {
         this.deps.composerDrafts?.clear(event.chatId);
         return;
       }
+      case 'view_position.set': {
+        const { type: _t, ...pos } = event;
+        this.deps.viewPosition?.set(conn.surfaceId, pos);
+        return;
+      }
       case 'new_chat_draft.set': {
         this.deps.newChatDrafts?.set(event.draft);
         return;
@@ -1302,35 +1403,35 @@ export class WsHub {
       // and self-description agree with the registry.
       case 'host.rename': {
         try {
-          this.deps.registry.setHostName(event.daemonId, event.hostName);
+          this.deps.registry.setHostName(event.hostId, event.hostName);
         } catch (err) {
           this.sendControlError(conn, 'invalid_frame', (err as Error).message);
           return;
         }
         slog.info(
-          { daemonId: event.daemonId, hostName: event.hostName },
+          { hostId: event.hostId, hostName: event.hostName },
           'host renamed (server registry)',
         );
-        this.deps.daemonLink.sendTo(event.daemonId, conn.surfaceId, event);
-        this.republishHost(event.daemonId);
+        this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, event);
+        this.republishHost(event.hostId);
         return;
       }
       case 'host.set_home': {
         try {
-          this.deps.registry.setHomeDaemonId(event.daemonId);
+          this.deps.registry.setHomeHostId(event.hostId);
         } catch (err) {
           this.sendControlError(conn, 'invalid_frame', (err as Error).message);
           return;
         }
-        slog.info({ daemonId: event.daemonId }, 'home machine changed');
+        slog.info({ hostId: event.hostId }, 'home machine changed');
         // EVERY machine's flag moves: the new home gains it and the previous
         // one loses it, so exactly one machine reports it.
-        for (const daemonId of this.registeredDaemonIds()) {
-          this.deps.daemonLink.sendTo(daemonId, conn.surfaceId, {
+        for (const hostId of this.registeredHostIds()) {
+          this.deps.hostLink.sendTo(hostId, conn.surfaceId, {
             type: 'host.set_home',
-            daemonId: event.daemonId,
+            hostId: event.hostId,
           });
-          this.republishHost(daemonId);
+          this.republishHost(hostId);
         }
         return;
       }
@@ -1359,7 +1460,7 @@ export class WsHub {
       case 'host.claude_settings_discard':
       case 'host.claude_memory_delete':
       case 'host.claude_memory_set': {
-        this.deps.daemonLink.sendTo(event.daemonId, conn.surfaceId, event);
+        this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, event);
         return;
       }
       case 'chat.permission_response':
@@ -1378,9 +1479,14 @@ export class WsHub {
       case 'meeting.control_request':
       case 'meeting.get_request':
       case 'meeting.audio':
+      case 'patch.browser_view.watch':
+      case 'patch.browser_view.stop':
+      case 'patch.browser_handoff.input':
+      case 'patch.browser_handoff.control':
       case 'meeting.action_request':
       case 'chat.archive_request':
       case 'chat.snooze_request':
+      case 'chat.snooze_back_clear_request':
       case 'chat.hide_request':
       case 'file.write':
       case 'chat.settings':
@@ -1388,6 +1494,7 @@ export class WsHub {
       // switch is relayed untouched and answered by the `chat.state` that host
       // emits. The server holds no model of its own to keep in step.
       case 'chat.model_request':
+      case 'chat.account_request':
       case 'patch.peek.request':
       case 'patch.send_to':
       case 'patch.spawn':
@@ -1395,20 +1502,20 @@ export class WsHub {
         if ('chatId' in event && typeof event.chatId === 'string') {
           conn.watchedChats.add(event.chatId);
         }
-        this.deps.daemonLink.send(conn.surfaceId, event);
+        this.deps.hostLink.send(conn.surfaceId, event);
         return;
       }
       case 'patch.terminal.open': {
         // spec/03 § Terminal sessions. A terminal is per-SURFACE, not per-chat:
         // stamp the originating surfaceId so the host streams stdout/stderr
-        // back to this surface alone (onDaemonEvent's forSurfaceId path) rather
+        // back to this surface alone (onHostEvent's forSurfaceId path) rather
         // than fanning a shell's output out to every connected client.
         //
         // `open` is the ONLY terminal frame that names a machine, so it is also
         // where this session's host is recorded for every later frame.
-        this.terminalSessionHost.set(event.sessionId, event.daemonId);
+        this.terminalSessionHost.set(event.sessionId, event.hostId);
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
-        this.deps.daemonLink.sendTo(event.daemonId, conn.surfaceId, tagged);
+        this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, tagged);
         return;
       }
       case 'patch.terminal.input':
@@ -1416,12 +1523,12 @@ export class WsHub {
       case 'patch.terminal.resize':
       case 'patch.terminal.close': {
         // Route by SESSION: the shell lives on exactly one machine and these
-        // frames carry no daemonId of their own. Falling through to the link's
+        // frames carry no hostId of their own. Falling through to the link's
         // account-default machine would deliver a host-A session's keystrokes
         // to host B. NO FALLBACK — an unknown session is refused to the surface
         // that sent it.
-        const daemonId = this.terminalSessionHost.get(event.sessionId);
-        if (daemonId === undefined) {
+        const hostId = this.terminalSessionHost.get(event.sessionId);
+        if (hostId === undefined) {
           slog.warn(
             { type: event.type, sessionId: event.sessionId },
             'terminal frame for a session this server never opened; refusing',
@@ -1438,7 +1545,7 @@ export class WsHub {
         }
         if (event.type === 'patch.terminal.close') this.terminalSessionHost.delete(event.sessionId);
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
-        this.deps.daemonLink.sendTo(daemonId, conn.surfaceId, tagged);
+        this.deps.hostLink.sendTo(hostId, conn.surfaceId, tagged);
         return;
       }
       case 'chat.replay': {
@@ -1446,7 +1553,7 @@ export class WsHub {
         // direct the stream back to this surface only.
         conn.watchedChats.add(event.chatId);
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
-        this.deps.daemonLink.send(conn.surfaceId, tagged);
+        this.deps.hostLink.send(conn.surfaceId, tagged);
         this.replayHeldTranscript(conn, event);
         for (const queued of this.deps.queueTracker?.snapshot(event.chatId) ?? []) {
           conn.socket.send(encode(queued));
@@ -1479,8 +1586,8 @@ export class WsHub {
   ): void {
     const store = this.deps.chatLogStore;
     if (!store) return;
-    const hostId = this.deps.chatRegistry.get(request.chatId)?.daemonId;
-    const hostOffline = hostId !== undefined && !this.deps.daemonLink.isOnline(hostId);
+    const hostId = this.deps.chatRegistry.get(request.chatId)?.hostId;
+    const hostOffline = hostId !== undefined && !this.deps.hostLink.isOnline(hostId);
     // The home host's own log does not hold what the Manager said while another
     // host stood in for it, so that stretch is added from the server's copy.
     const events = hostOffline
@@ -1506,13 +1613,13 @@ export class WsHub {
   }
 
   /** Does this host say it takes queued messages from the server? */
-  hostServerQueue(daemonId: string): boolean {
-    return this.lastHostReport.get(daemonId)?.serverQueue === true;
+  hostServerQueue(hostId: string): boolean {
+    return this.lastHostReport.get(hostId)?.serverQueue === true;
   }
 
   // ---- host → surfaces ----
 
-  private onDaemonEvent(event: WireEvent): void {
+  private onHostEvent(event: WireEvent): void {
     // The server is the log of record (spec/01 § Message log): a finished event
     // is written before anything is broadcast, so what a surface sees live is
     // already on the server's disk. A resend of one it holds is not broadcast
@@ -1536,7 +1643,7 @@ export class WsHub {
         }
         if (outcome === 'new' || outcome === 'updated') {
           const { chatId, seq } = event as { chatId: string; seq: number };
-          const host = this.deps.chatRegistry.get(chatId)?.daemonId;
+          const host = this.deps.chatRegistry.get(chatId)?.hostId;
           if (host !== undefined) this.deps.commitAcks?.note(chatId, host, seq);
         }
       }
@@ -1551,7 +1658,7 @@ export class WsHub {
     // same: answered over REST, and it carries message text. So is
     // `patch.chat_move.response`, which can carry a whole chat.
     // `patch.host_keys.response` carries no key value, but it is one caller's
-    // answer (spec/02 § Provider keys); everyone else learns from `daemon.host`.
+    // answer (spec/02 § Provider keys); everyone else learns from `host.host`.
     if (
       event.type === 'patch.artifact.publish_request' ||
       event.type === 'patch.artifact.publish_response' ||
@@ -1572,7 +1679,9 @@ export class WsHub {
       event.type === 'settings.applied' ||
       event.type === 'settings.secret_update' ||
       event.type === 'settings.adopt.response' ||
-      event.type === 'settings.account_signed_in'
+      event.type === 'settings.account_signed_in' ||
+      event.type === 'web_bot_auth.sign_request' ||
+      event.type === 'web_bot_auth.sign_response'
     ) {
       return;
     }
@@ -1584,9 +1693,9 @@ export class WsHub {
     // Cache each host's self-description and per-backend credential state so a
     // late-joining surface gets them inside its auth.ok greeting (a host only
     // emits them on link auth and on change).
-    if (event.type === 'daemon.host') {
-      this.lastHostReport.set(event.daemonId, event);
-      this.hostLastSeenAt.set(event.daemonId, Date.now());
+    if (event.type === 'host.host') {
+      this.lastHostReport.set(event.hostId, event);
+      this.hostLastSeenAt.set(event.hostId, Date.now());
       // The name and the home flag are SERVER-owned (spec/03: `host.rename` and
       // `host.set_home` are surface → server). Overwrite what the machine
       // reported before any surface sees it, so a rename is not undone by the
@@ -1598,9 +1707,9 @@ export class WsHub {
       // Cache per machine so a late-joining surface gets the snapshot in its
       // greeting (see handleHello). `folders.updated` supersedes it: both carry
       // the COMPLETE list for that machine.
-      this.lastFolderList.set(event.daemonId, {
+      this.lastFolderList.set(event.hostId, {
         type: 'folders.list',
-        daemonId: event.daemonId,
+        hostId: event.hostId,
         roots: event.roots,
         recent: event.recent,
       });
@@ -1609,9 +1718,9 @@ export class WsHub {
       // Cache per machine so a late-joining surface gets the snapshot in its
       // greeting (see handleHello). `claude_settings.updated` supersedes it:
       // both carry the COMPLETE state for that machine.
-      this.lastClaudeSettings.set(event.daemonId, {
+      this.lastClaudeSettings.set(event.hostId, {
         type: 'claude_settings.list',
-        daemonId: event.daemonId,
+        hostId: event.hostId,
         ...(event.drift !== undefined ? { drift: event.drift } : {}),
         memories: event.memories,
       });
@@ -1629,11 +1738,11 @@ export class WsHub {
         event = { ...event, jobId };
       }
     }
-    if (event.type === 'daemon.account') {
-      let perBackend = this.lastAccountReport.get(event.daemonId);
+    if (event.type === 'host.account') {
+      let perBackend = this.lastAccountReport.get(event.hostId);
       if (!perBackend) {
         perBackend = new Map();
-        this.lastAccountReport.set(event.daemonId, perBackend);
+        this.lastAccountReport.set(event.hostId, perBackend);
       }
       perBackend.set(event.backendId, event);
     }
@@ -1800,23 +1909,23 @@ export class WsHub {
   }
 
   /**
-   * A machine was removed from the account (`DELETE /api/hosts/:daemonId`):
+   * A machine was removed from the account (`DELETE /api/hosts/:hostId`):
    * forget everything cached about it — its self-description, account and
    * folder/settings reports, last-seen time and terminal routes — so no later
    * greeting replays it, and tell every connected surface `host.removed` so
    * its host list drops it now. A surface that was not connected learns it
    * from its next `auth.ok`, whose roster no longer names the machine.
    */
-  removeHost(daemonId: string): number {
-    this.lastHostReport.delete(daemonId);
-    this.lastAccountReport.delete(daemonId);
-    this.hostLastSeenAt.delete(daemonId);
-    this.lastFolderList.delete(daemonId);
-    this.lastClaudeSettings.delete(daemonId);
+  removeHost(hostId: string): number {
+    this.lastHostReport.delete(hostId);
+    this.lastAccountReport.delete(hostId);
+    this.hostLastSeenAt.delete(hostId);
+    this.lastFolderList.delete(hostId);
+    this.lastClaudeSettings.delete(hostId);
     for (const [sessionId, host] of this.terminalSessionHost.entries()) {
-      if (host === daemonId) this.terminalSessionHost.delete(sessionId);
+      if (host === hostId) this.terminalSessionHost.delete(sessionId);
     }
-    return this.sendToAll({ type: 'host.removed', daemonId });
+    return this.sendToAll({ type: 'host.removed', hostId });
   }
 
   /**
@@ -1825,7 +1934,7 @@ export class WsHub {
    * machine reads as home on every surface.
    */
   republishAllHosts(): void {
-    for (const daemonId of this.registeredDaemonIds()) this.republishHost(daemonId);
+    for (const hostId of this.registeredHostIds()) this.republishHost(hostId);
   }
 
   /** Send to all connected surfaces. Returns count delivered. */

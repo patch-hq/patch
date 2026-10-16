@@ -12,7 +12,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { setActiveWs } from '../api/ws.js';
-import { reportAccount } from './presenceHelpers.js';
+import { clearSharedAccounts, reportAccount, setSharedAccounts } from './presenceHelpers.js';
 
 vi.mock('../api/rest.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/rest.js')>();
@@ -33,7 +33,7 @@ function seedChat(chatId: string): void {
   useChatStore.getState().hydrate([
     {
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'foo',
@@ -59,6 +59,7 @@ function renderChat(chatId: string) {
 
 describe('ChatRoute — whole-chat drop zone', () => {
   beforeEach(() => {
+    clearSharedAccounts();
     useChatStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
     usePresenceStore.getState().setHostOnline('d1', true);
@@ -108,7 +109,7 @@ describe('ChatRoute — whole-chat drop zone', () => {
 
   it('dropping while Claude is disconnected shows the blocked hint and does not attach', async () => {
     seedChat('c1');
-    reportAccount('d1', false);
+    setSharedAccounts({ claude: [{ connected: false }] });
     renderChat('c1');
     const stream = screen.getByTestId('chat-stream');
     fireEvent.dragEnter(stream, { dataTransfer: { types: ['Files'] } });

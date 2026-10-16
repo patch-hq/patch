@@ -26,16 +26,28 @@ export const SPEAK_TIMEOUT_MS = 60_000;
 
 let _ws: WebSocket | null = null;
 let _timer: ReturnType<typeof setTimeout> | null = null;
+/** Which interrupt owns the audio. A replaced one's late events must not end its successor. */
+let _gen = 0;
 
 async function teardown(): Promise<void> {
   if (_timer) clearTimeout(_timer);
   _timer = null;
-  try {
-    _ws?.close();
-  } catch {
-    // Already closed; closing is the source of truth either way.
-  }
+  const ws = _ws;
   _ws = null;
+  if (ws) {
+    // We are the one closing it: its own close/message events are not news.
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    try {
+      ws.close();
+    } catch {
+      // Already closed; closing is the source of truth either way.
+    }
+  }
+  // A call that has come up since owns the sink and the audio mode now; handing
+  // them back here would cut the agent off mid-sentence.
+  if (useVoiceStore.getState().activeSession) return;
   await stopTtsPlayback().catch(() => undefined);
   // Hand the audio back — this is what lets the paused podcast resume.
   await Audio.setAudioModeAsync({
@@ -54,13 +66,22 @@ async function teardown(): Promise<void> {
  */
 export function speakInterrupt(chatId: string, message: string): void {
   if (useVoiceStore.getState().activeSession) return;
+  const gen = ++_gen;
+  /** Replaced by a newer interrupt, or a call has come up and owns the audio. */
+  const stale = (): boolean => gen !== _gen || useVoiceStore.getState().activeSession !== null;
+  /** End THIS interrupt — a no-op once another has replaced it. */
+  const finish = (): void => {
+    if (gen === _gen) void teardown();
+  };
   void (async () => {
     // A second interrupt while the first is still speaking replaces it rather
     // than talking over it.
     await teardown();
     try {
+      if (stale()) return;
       const me = await api.me();
       const tok = await api.voiceToken(chatId, 'voice-call');
+      if (stale()) return;
       if (!tok.audioUrl) throw new Error('server returned empty audioUrl');
       // Take the audio for the length of the message only. No recording flag:
       // this session holds no microphone, which is the whole point.
@@ -71,7 +92,11 @@ export function speakInterrupt(chatId: string, message: string): void {
         shouldDuckAndroid: false,
         playThroughEarpieceAndroid: false,
       });
+      if (stale()) return;
       await startTtsPlayback();
+      // No stop here: the sink is shared, and whoever replaced this interrupt
+      // (another interrupt, or a call) now owns it.
+      if (stale()) return;
       const ws = new WebSocket(audioWsUrl(tok.audioUrl));
       _ws = ws;
       ws.binaryType = 'arraybuffer';
@@ -91,10 +116,10 @@ export function speakInterrupt(chatId: string, message: string): void {
           return;
         }
         if (frame.type === 'audio.tts_end') {
-          void teardown();
+          finish();
         } else if (frame.type === 'audio.error') {
           useUiStore.getState().pushError(`spoken alert: ${frame.code}: ${frame.message}`);
-          void teardown();
+          finish();
         }
       };
       ws.onopen = (): void => {
@@ -113,12 +138,10 @@ export function speakInterrupt(chatId: string, message: string): void {
         );
         ws.send(JSON.stringify({ type: 'audio.speak', sessionId: tok.sessionId, text: message }));
       };
-      ws.onclose = (): void => {
-        void teardown();
-      };
-      _timer = setTimeout(() => void teardown(), SPEAK_TIMEOUT_MS);
+      ws.onclose = finish;
+      _timer = setTimeout(finish, SPEAK_TIMEOUT_MS);
     } catch (e) {
-      await teardown();
+      if (gen === _gen) await teardown();
       useUiStore.getState().pushError(`spoken alert failed: ${(e as Error).message}`);
     }
   })();

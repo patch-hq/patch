@@ -9,6 +9,7 @@
 // not transactional state. The job DEFINITION (which is transactional) is
 // fsync'd in store.ts.
 
+import { parsePersisted } from '../persisted-json.js';
 import {
   appendFileSync,
   closeSync,
@@ -90,19 +91,19 @@ export interface RunLogEntry {
    * the gate's reason as that row's output, so one fire stays one row.
    */
   status: JobRunStatus;
-  trigger: 'cron' | 'webhook' | 'todoist' | 'recurrence' | 'manual';
+  trigger: 'cron' | 'webhook' | 'todoist' | 'recurrence' | 'follows' | 'manual';
   payloadDigest?: string;
   error?: string;
   /**
    * Where the fire went. `chatId` is present only once the host has confirmed
    * a chat (spec/08 ## Execution model step 6) — a fire that never landed must
-   * not carry one. `daemonId` names the host on every folder-addressed fire,
+   * not carry one. `hostId` names the host on every folder-addressed fire,
    * so `dispatch-error` / `buffered` say WHICH machine (spec/08 ## Logs).
    */
   action?: {
     type: 'spawn' | 'message' | 'continue' | 'script';
     chatId?: string;
-    daemonId?: string;
+    hostId?: string;
     folder?: string;
     /**
      * A command's exit code and output tail, from the two places a job runs one:
@@ -224,7 +225,7 @@ function readJsonlTail<T>(path: string, limit: number): T[] {
     /* v8 ignore next */
     if (line === undefined) continue;
     try {
-      out.push(JSON.parse(line) as T);
+      out.push(parsePersisted(line) as T);
     } catch {
       // Skip malformed lines — observability log, not transactional state.
     }
@@ -257,7 +258,7 @@ function readJsonlLastEntry<T>(path: string): T | null {
     // The trailing newline every append writes leaves a final empty element.
     if (line.length === 0) continue;
     try {
-      return JSON.parse(line) as T;
+      return parsePersisted(line) as T;
     } catch {
       // Not an entry. Keep walking back, same as readJsonlTail.
     }

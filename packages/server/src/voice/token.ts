@@ -161,7 +161,7 @@ export interface VoiceTokenRouteOpts {
    * which a surface reaching only the server otherwise has no way to name
    * (spec/07 § Voice is a per-host capability).
    */
-  recordSessionHost: (sessionId: string, daemonId: string) => void;
+  recordSessionHost: (sessionId: string, hostId: string) => void;
   /** Test hook: deterministic clock. */
   nowMs?: () => number;
   /** Test hook: deterministic sessionId factory (group 14, DX m2). */
@@ -251,13 +251,13 @@ export function registerVoiceTokenRoute(app: FastifyInstance, opts: VoiceTokenRo
     // The chat's own host, so `/audio/:sessionId` (audio-relay.ts) knows where
     // to send this session — a surface reaching only the server has no other
     // way to name it (spec/07 § Voice is a per-host capability).
-    opts.recordSessionHost(sessionId, chat.daemonId);
+    opts.recordSessionHost(sessionId, chat.hostId);
     opts.logger.info(
       {
         accountId: identity.accountId,
         surfaceId: identity.surfaceId,
         sessionId,
-        daemonId: chat.daemonId,
+        hostId: chat.hostId,
       },
       'voice-token minted',
     );

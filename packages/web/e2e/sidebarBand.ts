@@ -11,7 +11,7 @@ export const HARNESS = '/app/dev-harness.html?chat=chat_bus';
 export const SHORT_ROSTER = [
   {
     chatId: 'thread_manager',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     name: 'manager',
     folder: '/home/tom/.patch/threads/manager',
@@ -23,7 +23,7 @@ export const SHORT_ROSTER = [
   },
   {
     chatId: 'thread_speakers',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     name: 'speakers',
     folder: '/home/tom/.patch/threads/speakers',
@@ -35,7 +35,7 @@ export const SHORT_ROSTER = [
   },
   {
     chatId: 'chat_bus',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto',
     name: 'bus-watch',
     folder: '/home/tom/projects/bus',

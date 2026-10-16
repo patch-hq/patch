@@ -33,7 +33,7 @@ import type { AddressInfo } from 'node:net';
 import { generateUserKeypair, mintSurfaceCredential, type UserKeypair } from '@patch/auth';
 import { buildAll, type BuiltApp } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { hostConfirms } from './host-answer.js';
 
 const ACCOUNT_KP: UserKeypair = generateUserKeypair();
@@ -41,7 +41,7 @@ const ACCOUNT_KP: UserKeypair = generateUserKeypair();
 interface Harness {
   base: string;
   jwt: string;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   dataDir: string;
   built: BuiltApp;
   close: () => Promise<void>;
@@ -56,8 +56,8 @@ async function startServer(dir: string): Promise<Harness> {
     label: 'cli-test',
     issuedAt: Date.now(),
   });
-  const daemonLink = new InProcessDaemonLink();
-  const built = await buildAll({ logger: false, registry, daemonLink });
+  const hostLink = new InProcessHostLink();
+  const built = await buildAll({ logger: false, registry, hostLink });
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
   const jwt = await mintSurfaceCredential({
@@ -70,7 +70,7 @@ async function startServer(dir: string): Promise<Harness> {
   return {
     base: `http://127.0.0.1:${addr.port}`,
     jwt,
-    daemonLink,
+    hostLink,
     dataDir: dir,
     built,
     close: async () => {
@@ -194,7 +194,7 @@ describe('D2-int-2 — real Todoist HMAC secret [running server]', () => {
       filter: "'claude' in payload.event_data.labels",
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/home/tom/projects/claude-tasks',
         skill: 'todoist-handler',
       },
@@ -228,13 +228,13 @@ describe('D2-int-2 — real Todoist HMAC secret [running server]', () => {
     expect(bad.status).toBe(401);
 
     // 2) CORRECT signature (real secret) → passes verification, fires, dispatches.
-    const before = h.daemonLink.sent.length;
+    const before = h.hostLink.sent.length;
     const ok = await postWebhook(url, rawBody, { 'x-todoist-hmac-sha256': goodSig });
     expect(ok.status).toBe(200);
     expect(ok.json.status).toBe('sent');
 
     // The dispatched action carries the task as its first turn.
-    const ev = h.daemonLink.sent.slice(before).find((s) => s.event.type === 'chat.spawn_request')!
+    const ev = h.hostLink.sent.slice(before).find((s) => s.event.type === 'chat.spawn_request')!
       .event as any;
     expect(ev.type).toBe('chat.spawn_request');
     expect(ev.hidden).toBe(false);
@@ -250,7 +250,7 @@ describe('D2-int-2 — real Todoist HMAC secret [running server]', () => {
 
     // 4) runs.jsonl recorded the successful fire with the todoist trigger.
     // The run is written from the host's own answer (spec/08 step 6).
-    hostConfirms(h.daemonLink);
+    hostConfirms(h.hostLink);
     const runs = readJsonl(join(dir, 'runs', `${jobId}.jsonl`));
     expect(runs.at(-1)).toMatchObject({ jobId, status: 'ok', trigger: 'todoist' });
 
@@ -260,12 +260,12 @@ describe('D2-int-2 — real Todoist HMAC secret [running server]', () => {
       event_data: { id: '111', content: 'nope', labels: ['other'] },
     });
     const nonMatchSig = createHmac('sha256', realSecret).update(nonMatchBody).digest('base64');
-    const beforeNm = h.daemonLink.sent.length;
+    const beforeNm = h.hostLink.sent.length;
     const nm = await postWebhook(url, nonMatchBody, { 'x-todoist-hmac-sha256': nonMatchSig });
     expect(nm.status).toBe(200);
     expect(nm.json.status).toBe('filter-rejected');
     expect(
-      h.daemonLink.sent.slice(beforeNm).filter((s) => s.event.type === 'chat.spawn_request').length,
+      h.hostLink.sent.slice(beforeNm).filter((s) => s.event.type === 'chat.spawn_request').length,
     ).toBe(0);
   });
 });

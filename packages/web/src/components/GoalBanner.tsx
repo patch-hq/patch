@@ -12,11 +12,12 @@
 // pattern.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Target, X } from 'lucide-react';
+import { Pause, Target, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import type { ChatRow } from '../stores/types.js';
+import { ModalOverlay } from './ModalOverlay.js';
 
 /**
  * Humanise time elapsed since a goal started: `9m`, `1h 4m`, `3h`. Coarsest
@@ -36,7 +37,8 @@ export function formatElapsed(ms: number): string {
 /** Humanise a token count: `842`, `8.2k`, `1.4M`. */
 export function formatTokenCount(n: number): string {
   if (n < 1000) return `${n}`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  // 999_999 rounds to "1000.0" at one decimal: that is a million, not "1000k".
+  if (Number((n / 1000).toFixed(1)) < 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
 }
 
@@ -61,7 +63,7 @@ function GoalEditModal({
     onClose();
   }
   return (
-    <div className="modal-overlay" data-testid="goal-edit-overlay">
+    <ModalOverlay testId="goal-edit-overlay">
       <div className="modal-backdrop" onClick={onClose} />
       <div
         className="modal-card goal-edit-modal"
@@ -107,7 +109,7 @@ function GoalEditModal({
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -144,31 +146,44 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
     }
   }
 
-  const metrics: string[] = [];
+  const paused = progress?.pausedByStop === true;
+  const metrics: { key: string; label: string }[] = [];
   if (progress) {
-    metrics.push(formatElapsed(now - progress.startedAt));
-    metrics.push(`${progress.turnsEvaluated} turn${progress.turnsEvaluated === 1 ? '' : 's'}`);
-    if (progress.tokensSpent > 0) metrics.push(`${formatTokenCount(progress.tokensSpent)} tokens`);
+    metrics.push({ key: 'time', label: formatElapsed(now - progress.startedAt) });
+    metrics.push({
+      key: 'turns',
+      label: `${progress.turnsEvaluated} turn${progress.turnsEvaluated === 1 ? '' : 's'}`,
+    });
+    if (progress.tokensSpent > 0)
+      metrics.push({ key: 'tokens', label: `${formatTokenCount(progress.tokensSpent)} tokens` });
   }
-  const reason =
-    progress?.lastVerdict === 'not_met' && progress.lastReason !== null
+  const reason = paused
+    ? 'Paused: you stopped the chat. Send a message to resume.'
+    : progress?.lastVerdict === 'not_met' && progress.lastReason !== null
       ? `Not met: ${progress.lastReason}`
       : null;
 
+  const cells = reason !== null ? [...metrics, { key: 'reason', label: reason }] : metrics;
+
   return (
-    <div className="goal-banner" data-testid="goal-banner" role="status">
-      <div className="goal-banner-meta" data-testid="goal-banner-meta">
-        <Target size={16} aria-hidden />
-        {metrics.length > 0 && (
-          <span className="goal-banner-metrics" data-testid="goal-banner-metrics">
-            {metrics.join(' · ')}
-          </span>
-        )}
-        {reason !== null && (
-          <span className="goal-banner-reason" data-testid="goal-banner-reason" title={reason}>
-            {reason}
-          </span>
-        )}
+    <div
+      className={`goal-banner${paused ? ' goal-banner-paused' : ''}`}
+      data-testid="goal-banner"
+      data-paused={paused ? 'true' : 'false'}
+      role="status"
+    >
+      <div className="goal-banner-main">
+        {paused ? <Pause size={16} aria-hidden /> : <Target size={16} aria-hidden />}
+        <button
+          type="button"
+          className="goal-banner-text"
+          data-testid="goal-banner-text"
+          aria-label="Edit goal"
+          title={goal}
+          onClick={() => setEditing(true)}
+        >
+          {goal}
+        </button>
         <button
           type="button"
           className="goal-clear-btn"
@@ -180,15 +195,23 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
           <X size={16} aria-hidden />
         </button>
       </div>
-      <button
-        type="button"
-        className="goal-banner-text"
-        data-testid="goal-banner-text"
-        aria-label="Edit goal"
-        onClick={() => setEditing(true)}
-      >
-        {goal}
-      </button>
+      {cells.length > 0 && (
+        <div
+          className="goal-banner-meta"
+          data-testid="goal-banner-meta"
+          title={cells.map((c) => c.label).join(' · ')}
+        >
+          {cells.map((c) => (
+            <span
+              key={c.key}
+              className="goal-banner-cell"
+              data-testid={c.key === 'reason' ? 'goal-banner-reason' : `goal-banner-cell-${c.key}`}
+            >
+              {c.label}
+            </span>
+          ))}
+        </div>
+      )}
       {editing && (
         <GoalEditModal
           value={goal}
@@ -196,6 +219,62 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
           onClose={() => setEditing(false)}
         />
       )}
+    </div>
+  );
+}
+
+const DISMISSED_KEY = 'patch.finishedGoalDismissed';
+
+function readDismissed(): Record<string, number> {
+  const raw = localStorage.getItem(DISMISSED_KEY);
+  return raw === null ? {} : (JSON.parse(raw) as Record<string, number>);
+}
+
+/**
+ * spec/04 § Goals — a finished goal stays viewable, in the top bar with the
+ * active goal's bar (not a popover over the transcript). Full text, wrapped;
+ * dismissible per finished goal (remembered by its end time, so the next goal
+ * to finish shows again).
+ */
+export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
+  const last = row.lastGoal;
+  const [dismissed, setDismissed] = useState<Record<string, number>>(readDismissed);
+  if (row.goal !== null || last === null || dismissed[row.chatId] === last.endedAt) return null;
+  const label = last.outcome === 'met' ? 'Goal met' : 'Goal impossible';
+  function dismiss(): void {
+    const next = { ...dismissed, [row.chatId]: last!.endedAt };
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+    setDismissed(next);
+  }
+  return (
+    <div
+      className="goal-banner finished-goal-banner"
+      data-testid="finished-goal-banner"
+      role="status"
+    >
+      <div className="goal-banner-main">
+        <Target size={16} aria-hidden />
+        <span className="finished-goal-title" data-testid="finished-goal-summary">
+          {label}: {last.condition}
+        </span>
+        <button
+          type="button"
+          className="goal-clear-btn"
+          data-testid="finished-goal-dismiss"
+          aria-label="Dismiss"
+          title="Dismiss"
+          onClick={dismiss}
+        >
+          <X size={16} aria-hidden />
+        </button>
+      </div>
+      <div className="finished-goal-meta" data-testid="finished-goal-detail">
+        {formatElapsed(last.endedAt - last.startedAt)} · {last.turns} turn
+        {last.turns === 1 ? '' : 's'}
+        {last.tokens > 0 ? ` · ${formatTokenCount(last.tokens)} tokens` : ''}
+        {' · '}
+        {last.reason}
+      </div>
     </div>
   );
 }

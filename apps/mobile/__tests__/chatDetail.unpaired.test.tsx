@@ -29,22 +29,20 @@ let ChatDetailScreen: React.ComponentType;
 beforeEach(async () => {
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   ChatDetailScreen = (await import('../app/chats/[chatId]')).default;
-  useChatStore
-    .getState()
-    .hydrate([
-      {
-        chatId: 'c1',
-        name: 'My Chat',
-        folder: '~/p',
-        activity: 'idle',
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        lastUpdated: 1,
-      },
-    ]);
+  useChatStore.getState().hydrate([
+    {
+      chatId: 'c1',
+      name: 'My Chat',
+      folder: '~/p',
+      activity: 'idle',
+      status: 'active',
+      pinned: false,
+      pinnedAt: null,
+      lastUpdated: 1,
+    },
+  ]);
   useChatStore.getState().applyEvent({
     type: 'chat.tool_call',
     chatId: 'c1',

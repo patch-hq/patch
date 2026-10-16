@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatActivity, WireEvent } from '@patch/wire';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobStore } from '../src/jobs/store.js';
@@ -23,7 +23,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     enabled: true,
     trigger: { type: 'todoist' },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+    action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -32,7 +32,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
 
 const continueAction = {
   type: 'continue' as const,
-  daemonId: 'd1',
+  hostId: 'd1',
   folder: '/work',
   prompt: 'go',
 };
@@ -50,17 +50,17 @@ function stateEvent(chatId: string, activity: ChatActivity): WireEvent {
 describe('job queueing modes', () => {
   let dir: string;
   let now: number;
-  let link: InProcessDaemonLink;
+  let link: InProcessHostLink;
   let disp: JobDispatcher;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-queueing-'));
     now = 1_000_000;
-    link = new InProcessDaemonLink();
+    link = new InProcessHostLink();
     let n = 0;
     disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => `id${++n}`,
       nowMs: () => now,
@@ -187,11 +187,11 @@ describe('job queueing modes', () => {
       disp.dispatch(job, {}, 'todoist');
       disp.dispatch(job, {}, 'todoist'); // g1
       disp.close();
-      const link2 = new InProcessDaemonLink();
+      const link2 = new InProcessHostLink();
       const disp2 = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link2,
+        hostLink: link2,
         logger: silentLogger,
         idGenerator: () => 'x',
         nowMs: () => now,
@@ -219,7 +219,7 @@ describe('queueing validation in the store', () => {
   const body = {
     name: 'x',
     trigger: { type: 'webhook' as const, scheme: 'none' as const },
-    action: { type: 'spawn' as const, daemonId: 'd1', folder: '/w', prompt: 'p' },
+    action: { type: 'spawn' as const, hostId: 'd1', folder: '/w', prompt: 'p' },
   };
   const open = (): JobStore => new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
 
@@ -244,7 +244,7 @@ describe('queueing validation in the store', () => {
     expect(() => store.create({ ...body, queueing: { mode: 'append' } })).toThrow(/continue/);
     const job = store.create({
       ...body,
-      action: { type: 'continue', daemonId: 'd1', folder: '/w', prompt: 'p' },
+      action: { type: 'continue', hostId: 'd1', folder: '/w', prompt: 'p' },
       queueing: { mode: 'append' },
     });
     expect(() => store.patch(job.id, { action: body.action })).toThrow(/continue/);

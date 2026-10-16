@@ -32,7 +32,7 @@ export interface SkillPreviewPanelProps {
   frontmatter: Record<string, Record<string, string>> | undefined;
   /** The composer's own host + folder — same containment rule as the Jobs
    *  view's Skill field (`resolveSkillLink`). */
-  daemonId: string;
+  hostId: string;
   folder: string;
 }
 
@@ -44,7 +44,7 @@ export function SkillPreviewPanel({
   item,
   paths,
   frontmatter,
-  daemonId,
+  hostId,
   folder,
 }: SkillPreviewPanelProps): JSX.Element | null {
   const chats = useChatStore((s) => s.chats);
@@ -69,12 +69,12 @@ export function SkillPreviewPanel({
     : resolveSkillLink({
         skill: item.name,
         paths,
-        daemonId,
+        hostId,
         folder,
         chats: Object.values(chats).map((c) => ({
           chatId: c.chatId,
           folder: c.folder,
-          daemonId: c.daemonId,
+          hostId: c.hostId,
         })),
       });
 

@@ -11,7 +11,7 @@ describe('sendToNewChat', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'a chat',
         folder: '/home/me/proj',
@@ -36,7 +36,7 @@ describe('sendToNewChat', () => {
     const d = useDraftStore.getState().drafts[id]!;
     expect(path.startsWith('/chats/new?draft=')).toBe(true);
     expect(d.folder).toBe('/home/me/proj');
-    expect(d.daemonId).toBe('d1');
+    expect(d.hostId).toBe('d1');
     expect(d.text).toBe('> line one\n> line two\n\n');
   });
 

@@ -25,7 +25,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.js
 COPY packages/wire/package.json packages/wire/
 COPY packages/auth/package.json packages/auth/
 COPY packages/server/package.json packages/server/
-COPY packages/daemon/package.json packages/daemon/
+COPY packages/host/package.json packages/host/
 COPY packages/cli/package.json packages/cli/
 COPY packages/web/package.json packages/web/
 COPY packages/desktop/package.json packages/desktop/

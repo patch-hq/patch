@@ -40,8 +40,10 @@ const PAGE_TESTID: Record<string, string> = {
   goals: 'settings-goals-page',
   voice: 'settings-voice',
   hooks: 'settings-hooks-page',
-  jobs: 'settings-jobs-page',
+  computer: 'settings-computer-use',
+  activity: 'settings-activity',
   hosts: 'settings-hosts',
+  identity: 'settings-identity',
   keys: 'settings-keys',
   devices: 'settings-devices',
   updates: 'settings-version',
@@ -81,8 +83,10 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Goals',
       'Voice',
       'Hooks',
-      'Jobs',
+      'Computer use',
+      'Activity',
       'Hosts',
+      'Agent identity',
       'Keys',
       'Devices',
       'Updates',
@@ -670,7 +674,7 @@ describe('Settings → Voice', () => {
   });
 
   // spec/07 § Voice — a config matrix: a hosted cell whose key a host lacks is
-  // shown as not configured on that host, from `daemon.host.voiceKeys`.
+  // shown as not configured on that host, from `host.host.voiceKeys`.
   describe('a backend with no key on a host', () => {
     it('names the missing key per host on each hosted cell, and nothing on a local one', async () => {
       usePreferencesStore.setState({
@@ -859,7 +863,8 @@ describe('Settings → Voice', () => {
       /Not implemented yet for this surface/,
     );
     expect(voiceCellStatus('call', 'local', 'light')).toMatch(/no front model built for local/);
-    expect(voiceCellStatus('handsFree', 'gemini', 'light')).toMatch(/address word is not enforced/);
+    // Gemini hands-free enforces the address word on the host, so there is nothing to warn about.
+    expect(voiceCellStatus('handsFree', 'gemini', 'light')).toBeNull();
     expect(voiceCellStatus('call', 'local', 'direct')).toBeNull();
     expect(voiceCellStatus('dictation', 'openai')).toBeNull();
   });
@@ -1402,25 +1407,6 @@ describe('Settings → Manager (account-wide)', () => {
     fireEvent.click(screen.getByTestId('sweep-prompt-reset'));
     await waitFor(() => expect(server.writes[1]).toEqual({ sweepPrompt: DEFAULT_SWEEP_PROMPT }));
     expect(screen.queryByTestId('sweep-prompt')).toBeNull(); // editor closes on a successful reset
-  });
-
-  it('jobs: the account autonomy prompt is edited once here, and Reset restores the built-in default', async () => {
-    const DEFAULT = "You are running autonomously, don't stop to ask the user questions";
-    const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-    vi.stubGlobal('fetch', makeFetch({}, server.handler));
-    renderSettings('/settings/jobs');
-    fireEvent.click(await screen.findByTestId('job-autonomy-prompt-default-edit'));
-    const box = screen.getByTestId('job-autonomy-prompt-default') as HTMLTextAreaElement;
-    expect(box.value).toBe(DEFAULT);
-    fireEvent.change(box, { target: { value: 'House rule.' } });
-    fireEvent.click(screen.getByTestId('job-autonomy-prompt-default-save'));
-    await waitFor(() => expect(server.writes).toEqual([{ jobAutonomyPrompt: 'House rule.' }]));
-    fireEvent.click(screen.getByTestId('job-autonomy-prompt-default-edit'));
-    expect((screen.getByTestId('job-autonomy-prompt-default') as HTMLTextAreaElement).value).toBe(
-      'House rule.',
-    );
-    fireEvent.click(screen.getByTestId('job-autonomy-prompt-default-reset'));
-    await waitFor(() => expect(server.writes[1]).toEqual({ jobAutonomyPrompt: DEFAULT }));
   });
 
   it('keeps the saved special-thread model as an option and writes a new pick', async () => {

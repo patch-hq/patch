@@ -16,6 +16,7 @@
 
 import React from 'react';
 import { Pressable as RNPressable } from 'react-native';
+import type { ReactTestInstance } from 'react-test-renderer';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   findHost,
@@ -39,6 +40,12 @@ import type { DictationHandle, DictationOutcome } from '../src/lib/dictation';
 import * as dictationModule from '../src/lib/dictation';
 import * as sendQueue from '../src/lib/sendQueue';
 
+// Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
+
 vi.mock('../src/api/rest', () => ({
   api: {
     skills: vi.fn().mockResolvedValue({ skills: [] }),
@@ -57,6 +64,7 @@ let submitSpy: ReturnType<typeof vi.spyOn>;
 interface FakeSession {
   onPartial: (text: string) => void;
   onError: (message: string) => void;
+  onPreviewError: (message: string) => void;
   finish: ReturnType<typeof vi.fn>;
 }
 
@@ -70,9 +78,10 @@ function makeDictationFactory(): {
       _chatId: string,
       onPartial: (t: string) => void,
       onError: (m: string) => void,
+      onPreviewError: (m: string) => void,
     ): DictationHandle => {
       const finish = vi.fn(async (_send: boolean) => ({ kind: 'no-audio' }) as DictationOutcome);
-      sessions.push({ onPartial, onError, finish });
+      sessions.push({ onPartial, onError, onPreviewError, finish });
       return { finish };
     },
   ) as unknown as typeof dictationModule.startDictation;
@@ -119,7 +128,12 @@ describe('Composer — dictation mic (tap-toggle)', () => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
     expect(factory).toHaveBeenCalledTimes(1);
-    expect(factory).toHaveBeenCalledWith('c1', expect.any(Function), expect.any(Function));
+    expect(factory).toHaveBeenCalledWith(
+      'c1',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+    );
     update(r, <Composer chatId="c1" folder="work" dictationFactory={factory} />);
     // Still recording — chatId untouched in voiceStore and nothing sent yet.
     expect(useVoiceStore.getState().voiceNoteChatId).toBeNull();
@@ -182,9 +196,50 @@ describe('Composer — dictation mic (tap-toggle)', () => {
   });
 });
 
-describe('Composer — send while dictating', () => {
-  const sent = (): string => JSON.stringify(submitSpy.mock.calls);
+describe('Composer — a dead live preview is surfaced, not swallowed', () => {
+  it('shows an error, and the recording carries on', async () => {
+    const { factory, sessions } = makeDictationFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
+    await actAsync(() => {
+      findHost(r.root, byLabel('Dictate into message')).props['onPress']();
+    });
+    await actAsync(() => {
+      sessions[0]!.onPreviewError('the audio connection failed');
+    });
+    expect(
+      useUiStore
+        .getState()
+        .errors.map((e) => e.message)
+        .join(' '),
+    ).toContain('live preview unavailable — the audio connection failed');
+    // Still recording: the clear control is still there and the session was not finished.
+    expect(sessions[0]!.finish).not.toHaveBeenCalled();
+    expect(findHost(r.root, byLabel('Clear dictation'))).toBeTruthy();
+  });
+});
 
+describe('Composer — dictation preview is drawn above the input', () => {
+  it('mounts the preview after the opaque TextInput so it is not painted over, and inside its border', async () => {
+    const { factory, sessions } = makeDictationFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
+    await actAsync(() => {
+      findHost(r.root, byLabel('Dictate into message')).props['onPress']();
+    });
+    await actAsync(() => {
+      sessions[0]!.onPartial('buy oat');
+    });
+    const row = findHost(r.root, (i) => i.props['testID'] === 'composer-input-row');
+    const kids = row.children.filter((c): c is ReactTestInstance => typeof c !== 'string');
+    const inputIdx = kids.findIndex((k) => k.findAll((n) => n.type === 'TextInput').length > 0);
+    const previewIdx = kids.findIndex(
+      (k) => k.findAll((n) => n.props['testID'] === 'dictation-preview').length > 0,
+    );
+    expect(inputIdx).toBeGreaterThanOrEqual(0);
+    expect(previewIdx).toBeGreaterThan(inputIdx);
+  });
+});
+
+describe('Composer — send while dictating', () => {
   it('Send is live mid-dictation, ends it, and sends typed text plus transcript', async () => {
     const { factory, sessions } = makeDictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
@@ -196,8 +251,9 @@ describe('Composer — send while dictating', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
     });
+    await flush();
     expect(sessions[0]!.finish).toHaveBeenCalledWith(true);
-    expect(sent()).toContain('buy oat milk and some bread');
+    expect(JSON.stringify(submitSpy.mock.calls)).toContain('buy oat milk and some bread');
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
     expect(r.root.findAllByProps({ accessibilityLabel: 'Clear dictation' })).toHaveLength(0);
   });
@@ -214,7 +270,8 @@ describe('Composer — send while dictating', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
     });
-    expect(sent()).toContain('hello');
+    await flush();
+    expect(JSON.stringify(submitSpy.mock.calls)).toContain('hello');
   });
 
   it('nothing heard and nothing typed: nothing is sent, and the reason is shown', async () => {
@@ -227,6 +284,7 @@ describe('Composer — send while dictating', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
     });
+    await flush();
     expect(submitSpy).not.toHaveBeenCalled();
     expect(useUiStore.getState().errors.at(-1)?.message).toBe('voice: no speech recognised');
   });
@@ -242,6 +300,7 @@ describe('Composer — send while dictating', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
     });
+    await flush();
     expect(submitSpy).not.toHaveBeenCalled();
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('typed first');
     expect(useUiStore.getState().errors.at(-1)?.message).toBe(
@@ -250,92 +309,14 @@ describe('Composer — send while dictating', () => {
   });
 });
 
-// A hold session must end on a genuine finger LIFT, never on React Native's
-// `onPressOut` — Pressability fires that on LEAVE_PRESS_RECT as well as on
-// release, so a few px of drift on a phone-sized button (or the composer
-// growing under the finger as the dictation preview appears) used to commit
-// mid-sentence with no feedback at all. The commit therefore hangs off the
-// raw View touch events, which Pressability does not claim.
-describe('Composer — dictation mic (press-and-hold)', () => {
+// Long-press on the mic is DICTATION MODE (spec/07 § Dictation mode): the mic stays
+// open and each quiet-gap utterance is sent as its own message.
+describe('Composer — dictation mode (long-press the mic)', () => {
   const mic = (r: ReturnType<typeof renderRN>): Record<string, (e?: unknown) => void> =>
     findHost(r.root, byLabel('Dictate into message')).props as Record<
       string,
       (e?: unknown) => void
     >;
-
-  it('press-and-hold then a real lift commits (release-transcribes)', async () => {
-    const { factory, sessions } = makeDictationFactory();
-    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onPressIn']!();
-    });
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
-    sessions[0]!.finish.mockResolvedValueOnce({ kind: 'text', text: 'held dictation' });
-    await actAsync(() => {
-      mic(r)['onTouchEnd']!();
-    });
-    expect(sessions[0]!.finish).toHaveBeenCalledWith(true);
-    expect(findHost(r.root, byType('TextInput')).props['value']).toBe('held dictation');
-  });
-
-  it('a drift-out onPressOut mid-hold does NOT commit — the session survives and only the lift ends it', async () => {
-    const { factory, sessions } = makeDictationFactory();
-    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onPressIn']!();
-    });
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
-    // The finger slides off the button and back on again while still down:
-    // RN reports that as onPressOut / onPressIn, NOT as a release.
-    await actAsync(() => {
-      mic(r)['onPressOut']!();
-    });
-    expect(sessions[0]!.finish).not.toHaveBeenCalled();
-    // Still recording — the Clear control is still offered.
-    expect(findHost(r.root, byLabel('Clear dictation'))).toBeTruthy();
-    await actAsync(() => {
-      mic(r)['onPressIn']!();
-    });
-    await actAsync(() => {
-      mic(r)['onPressOut']!();
-    });
-    expect(sessions[0]!.finish).not.toHaveBeenCalled();
-
-    // Only the genuine lift commits, and it commits the WHOLE utterance.
-    sessions[0]!.finish.mockResolvedValueOnce({
-      kind: 'text',
-      text: 'the whole sentence, not half of it',
-    });
-    await actAsync(() => {
-      mic(r)['onTouchEnd']!();
-    });
-    expect(sessions[0]!.finish).toHaveBeenCalledTimes(1);
-    expect(sessions[0]!.finish).toHaveBeenCalledWith(true);
-    expect(findHost(r.root, byType('TextInput')).props['value']).toBe(
-      'the whole sentence, not half of it',
-    );
-  });
-
-  it('a system touch cancel (the responder is taken away) ends the hold and keeps what was said', async () => {
-    const { factory, sessions } = makeDictationFactory();
-    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onPressIn']!();
-    });
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
-    sessions[0]!.finish.mockResolvedValueOnce({ kind: 'text', text: 'cancelled mid-hold' });
-    await actAsync(() => {
-      mic(r)['onTouchCancel']!();
-    });
-    expect(sessions[0]!.finish).toHaveBeenCalledWith(true);
-    expect(findHost(r.root, byType('TextInput')).props['value']).toBe('cancelled mid-hold');
-  });
 
   it('the mic keeps a generous hit slop and press-retention offset so a drift-out is unlikely in the first place', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
@@ -346,64 +327,114 @@ describe('Composer — dictation mic (press-and-hold)', () => {
     expect(props['pressRetentionOffset']).toBeGreaterThanOrEqual(60);
   });
 
-  it('releasing a TAP session does not commit (only a second tap / hold-lift does)', async () => {
-    const { factory, sessions } = makeDictationFactory();
-    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
+  function makeModeFactory() {
+    const calls: Array<{
+      onText: (t: string) => void;
+      onBusy: (n: number) => void;
+      onError: (m: string) => void;
+      stop: ReturnType<typeof vi.fn>;
+    }> = [];
+    const factory = vi.fn(
+      (cb: {
+        onText: (t: string) => void;
+        onBusy: (n: number) => void;
+        onError: (m: string) => void;
+      }) => {
+        const stop = vi.fn(async () => undefined);
+        calls.push({ ...cb, stop });
+        return { stop };
+      },
+    );
+    return {
+      factory: factory as unknown as typeof import('../src/lib/dictationMode').startDictationMode,
+      calls,
+    };
+  }
+
+  it('long-press opens dictation mode, and each utterance is sent as its own message', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
     await actAsync(() => {
-      mic(r)['onPressIn']!();
+      mic(r)['onLongPress']!();
+    });
+    expect(calls).toHaveLength(1);
+    expect(r.root.findAllByProps({ testID: 'dictation-mode-status' }).length).toBeGreaterThan(0);
+    await actAsync(() => {
+      calls[0]!.onText('first thing');
+    });
+    await flush();
+    expect(JSON.stringify(submitSpy.mock.calls)).toContain('first thing');
+    await actAsync(() => {
+      calls[0]!.onText('second thing');
+    });
+    await flush();
+    expect(submitSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(submitSpy.mock.calls)).toContain('second thing');
+    expect(calls[0]!.stop).not.toHaveBeenCalled();
+    expect(r.root.findAllByProps({ testID: 'dictation-mode-status' }).length).toBeGreaterThan(0);
+  });
+
+  it('shows Sending… while a transcript is pending', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
+    });
+    await actAsync(() => {
+      calls[0]!.onBusy(1);
+    });
+    expect(JSON.stringify(r.toJSON())).toContain('Sending…');
+  });
+
+  it('a tap on the mic ends dictation mode', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
     });
     await actAsync(() => {
       mic(r)['onPress']!();
     });
-    await actAsync(() => {
-      mic(r)['onPressOut']!();
-    });
-    await actAsync(() => {
-      mic(r)['onTouchEnd']!();
-    });
-    expect(sessions[0]!.finish).not.toHaveBeenCalled();
-    expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
+    expect(calls[0]!.stop).toHaveBeenCalledOnce();
+    expect(r.root.findAllByProps({ testID: 'dictation-mode-status' })).toHaveLength(0);
   });
 
-  it('a hold whose session already died (setup error) is not committed again on the lift', async () => {
-    const factory = vi.fn(
-      (
-        _chatId: string,
-        _onPartial: (t: string) => void,
-        onError: (m: string) => void,
-      ): DictationHandle => {
-        queueMicrotask(() => onError('mic permission denied'));
-        return { finish: vi.fn(async () => ({ kind: 'no-audio' }) as DictationOutcome) };
-      },
-    ) as unknown as typeof dictationModule.startDictation;
-    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onPressIn']!();
-    });
+  it('the stop control ends dictation mode', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
     await actAsync(() => {
       mic(r)['onLongPress']!();
     });
-    await flush();
-    expect(useUiStore.getState().errors).toHaveLength(1);
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      findHost(r.root, byLabel('Stop dictation mode')).props['onPress']();
     });
-    // The error already reset the mic to idle; the lift must not report a
-    // second failure on top of it.
-    expect(useUiStore.getState().errors).toHaveLength(1);
-    expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
+    expect(calls[0]!.stop).toHaveBeenCalledOnce();
   });
 
-  it('a lift with no hold session in flight is a no-op (a bare tap-and-lift on an idle mic)', async () => {
-    const { factory, sessions } = makeDictationFactory();
-    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
+  it('surfaces a dictation-mode error', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
     await actAsync(() => {
-      mic(r)['onPressIn']!();
+      mic(r)['onLongPress']!();
     });
     await actAsync(() => {
-      mic(r)['onTouchEnd']!();
+      calls[0]!.onError('dictation setup failed: denied');
     });
-    expect(sessions).toHaveLength(0);
+    expect(useUiStore.getState().errors.at(-1)?.message).toBe(
+      'voice: dictation setup failed: denied',
+    );
+  });
+
+  it('unmounting releases the mic', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
+    });
+    await actAsync(() => {
+      r.unmount();
+    });
+    expect(calls[0]!.stop).toHaveBeenCalledOnce();
   });
 });
 
@@ -482,12 +513,12 @@ describe('Composer — dictation clear/discard button', () => {
     const { factory, sessions } = makeDictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
     await actAsync(() => {
-      findHost(r.root, byLabel('Dictate into message')).props['onLongPress']();
+      findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
     let resolveFinish!: (v: DictationOutcome) => void;
     sessions[0]!.finish.mockImplementationOnce(() => new Promise((res) => (resolveFinish = res)));
-    // Release commits (starts the upload)...
-    findHost(r.root, byLabel('Dictate into message')).props['onPressOut']();
+    // A second tap commits (starts the upload)...
+    findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     await flush();
     // ...then Clear is pressed before the upload resolves.
     await actAsync(() => {
@@ -497,6 +528,63 @@ describe('Composer — dictation clear/discard button', () => {
       resolveFinish({ kind: 'text', text: 'too late' });
     });
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
+  });
+
+  it('a discarded upload that resolves AFTER a new dictation began neither lands its text nor ends the new session', async () => {
+    const { factory, sessions } = makeDictationFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
+    const mic = (): Record<string, () => void> =>
+      findHost(r.root, byLabel('Dictate into message')).props as Record<string, () => void>;
+    await actAsync(() => mic()['onPress']!());
+    let resolveFinish!: (v: DictationOutcome) => void;
+    sessions[0]!.finish.mockImplementationOnce(() => new Promise((res) => (resolveFinish = res)));
+    // Tap again: stop and upload.
+    await actAsync(() => mic()['onPress']!());
+    await flush();
+    expect(findHost(r.root, byLabel('Transcribing…'))).toBeTruthy();
+    // Clear while it uploads, then a second dictation starts.
+    await actAsync(() => {
+      findHost(r.root, byLabel('Clear dictation')).props['onPress']();
+    });
+    await actAsync(() => mic()['onPress']!());
+    expect(sessions).toHaveLength(2);
+    await actAsync(() => {
+      resolveFinish({ kind: 'text', text: 'too late' });
+    });
+    expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
+    // The new session is still recording: its Clear control is still offered.
+    expect(findHost(r.root, byLabel('Clear dictation'))).toBeTruthy();
+  });
+});
+
+describe('Composer — a cleared dictation that fails late', () => {
+  it('is dropped silently: no toast, and the next dictation is left alone', async () => {
+    const { factory, sessions } = makeDictationFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
+    const mic = (): Record<string, () => void> =>
+      findHost(r.root, byLabel('Dictate into message')).props as Record<string, () => void>;
+    await actAsync(() => mic()['onPress']!());
+    let rejectFinish!: (e: Error) => void;
+    sessions[0]!.finish.mockImplementationOnce(
+      () =>
+        new Promise((_res, rej) => {
+          rejectFinish = rej;
+        }),
+    );
+    await actAsync(() => mic()['onPress']!());
+    await flush();
+    await actAsync(async () => {
+      findHost(r.root, byLabel('Clear dictation')).props['onPress']();
+    });
+    await actAsync(() => mic()['onPress']!());
+    expect(sessions).toHaveLength(2);
+
+    await actAsync(async () => {
+      rejectFinish(new Error('upload died'));
+    });
+
+    expect(useUiStore.getState().errors).toEqual([]);
+    expect(findHost(r.root, byLabel('Clear dictation'))).toBeTruthy();
   });
 });
 
@@ -627,7 +715,12 @@ describe('Composer — dictation uses the default lib/dictation.startDictation w
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
-    expect(startSpy).toHaveBeenCalledWith('c1', expect.any(Function), expect.any(Function));
+    expect(startSpy).toHaveBeenCalledWith(
+      'c1',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+    );
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
@@ -751,24 +844,6 @@ describe('Composer — dictation never disturbs a pending attachment', () => {
     expect(useComposerAttachmentStore.getState().byKey['c1']).toHaveLength(1);
   });
 
-  it('a HOLD dictation (long-press + release) leaves the attachment in place', async () => {
-    seedOneAttachment('c1');
-    const { factory } = makeDictationFactory();
-    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
-
-    await actAsync(() => {
-      findHost(r.root, byLabel('Dictate into message')).props['onLongPress']();
-    });
-    update(r, <Composer chatId="c1" folder="work" dictationFactory={factory} />);
-    expect(useComposerAttachmentStore.getState().byKey['c1']).toHaveLength(1);
-
-    await actAsync(() => {
-      findHost(r.root, byLabel('Dictate into message')).props['onTouchEnd']();
-    });
-    update(r, <Composer chatId="c1" folder="work" dictationFactory={factory} />);
-    expect(useComposerAttachmentStore.getState().byKey['c1']).toHaveLength(1);
-  });
-
   it('Send tapped mid-dictation still carries the attachment to sendMessage, then clears it', async () => {
     seedOneAttachment('c1');
     const sendMessageSpy = vi.spyOn(sendQueue, 'sendMessage').mockImplementation(() => {});
@@ -783,6 +858,7 @@ describe('Composer — dictation never disturbs a pending attachment', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
     });
+    await flush();
     update(r, <Composer chatId="c1" folder="work" dictationFactory={factory} />);
 
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);

@@ -21,7 +21,7 @@ import { verifySurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { SecretsRegistry } from './secrets-registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 
 const SECRETS_REQUEST_TIMEOUT_MS = 5_000;
 
@@ -53,7 +53,7 @@ export interface SecretsRoutesDeps {
   logger: Logger;
   registry: Registry;
   secretsRegistry: SecretsRegistry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   idGenerator: () => string;
 }
 
@@ -66,7 +66,7 @@ export function registerSecretsRoutes(app: FastifyInstance, deps: SecretsRoutesD
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.secrets.response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
@@ -75,7 +75,7 @@ export function registerSecretsRoutes(app: FastifyInstance, deps: SecretsRoutesD
     w.resolve(event);
   });
 
-  function awaitDaemon(
+  function awaitHost(
     surfaceId: string,
     build: (requestId: string) => WireEvent,
   ): Promise<Extract<WireEvent, { type: 'patch.secrets.response' }> | 'timeout'> {
@@ -86,7 +86,7 @@ export function registerSecretsRoutes(app: FastifyInstance, deps: SecretsRoutesD
         resolveP('timeout');
       }, SECRETS_REQUEST_TIMEOUT_MS);
       pending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(surfaceId, build(requestId));
+      deps.hostLink.send(surfaceId, build(requestId));
     });
   }
 
@@ -134,7 +134,7 @@ export function registerSecretsRoutes(app: FastifyInstance, deps: SecretsRoutesD
       if (typeof value !== 'string') {
         return reply.code(400).send({ error: 'value_required', message: 'value must be a string' });
       }
-      const result = await awaitDaemon(auth.surfaceId, (requestId) => ({
+      const result = await awaitHost(auth.surfaceId, (requestId) => ({
         type: 'patch.secrets.set_request',
         requestId,
         key,
@@ -165,7 +165,7 @@ export function registerSecretsRoutes(app: FastifyInstance, deps: SecretsRoutesD
     if (!key) {
       return reply.code(400).send({ error: 'key_required', message: 'key is required' });
     }
-    const result = await awaitDaemon(auth.surfaceId, (requestId) => ({
+    const result = await awaitHost(auth.surfaceId, (requestId) => ({
       type: 'patch.secrets.delete_request',
       requestId,
       key,

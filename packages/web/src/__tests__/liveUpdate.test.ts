@@ -103,7 +103,7 @@ describe('reloadNow', () => {
     let answer = false;
     const confirm = vi.fn(() => Promise.resolve(answer));
     function Editor(): null {
-      useNavigationGuard({ shouldBlock: () => true, confirm });
+      useNavigationGuard({ shouldBlock: () => true, confirm, dismiss: () => {} });
       return null;
     }
     render(React.createElement(MemoryRouter, null, React.createElement(Editor)));

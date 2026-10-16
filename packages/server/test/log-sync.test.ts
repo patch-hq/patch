@@ -12,12 +12,12 @@ const say = (seq: number, role: 'user' | 'assistant' = 'assistant', chatId = 'c1
   ({ type: 'chat.message', chatId, role, content: `m${seq}`, seq }) as WireEvent;
 
 const reported = (lastSeq: number, chatId = 'c1'): WireEvent =>
-  ({ type: 'chat.state', chatId, daemonId: 'd1', activity: 'idle', lastSeq }) as WireEvent;
+  ({ type: 'chat.state', chatId, hostId: 'd1', activity: 'idle', lastSeq }) as WireEvent;
 
 describe('LogSync', () => {
   let store: ChatLogStore;
   let online: boolean;
-  let sent: Array<{ daemonId: string; event: WireEvent }>;
+  let sent: Array<{ hostId: string; event: WireEvent }>;
   let injected: WireEvent[];
   let sync: LogSync;
   let nowMs: number;
@@ -32,9 +32,9 @@ describe('LogSync', () => {
     sync = new LogSync({
       store,
       chats: {
-        get: (id: string) => (id.startsWith('c') ? ({ daemonId: 'd1' } as never) : undefined),
+        get: (id: string) => (id.startsWith('c') ? ({ hostId: 'd1' } as never) : undefined),
       },
-      sendTo: (daemonId, _s, event) => sent.push({ daemonId, event }),
+      sendTo: (hostId, _s, event) => sent.push({ hostId, event }),
       isOnline: () => online,
       inject: (e) => injected.push(e),
       logger,
@@ -61,7 +61,7 @@ describe('LogSync', () => {
     sync.observe(reported(7));
     settle();
     expect(sent).toEqual([
-      { daemonId: 'd1', event: { type: 'patch.log_sync.request', chatId: 'c1', afterSeq: 3 } },
+      { hostId: 'd1', event: { type: 'patch.log_sync.request', chatId: 'c1', afterSeq: 3 } },
     ]);
 
     sent.length = 0;
@@ -143,7 +143,7 @@ describe('LogSync', () => {
     sync.observe({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       activity: 'idle',
     } as WireEvent);
     settle();
@@ -166,16 +166,30 @@ describe('LogSync', () => {
 
   test('a host going offline cancels what was waiting', () => {
     sync.observe(reported(9));
-    sync.observe({ type: 'daemon.offline', daemonId: 'd1' } as WireEvent);
+    sync.observe({ type: 'host.offline', hostId: 'd1' } as WireEvent);
     settle();
     expect(sent).toEqual([]);
+  });
+
+  test('asks a host again for the same reach once it has been offline: the first request may have been lost with the link', () => {
+    sync.observe(reported(7));
+    settle();
+    expect(sent).toHaveLength(1);
+
+    sent.length = 0;
+    sync.observe({ type: 'host.offline', hostId: 'd1' } as WireEvent);
+    sync.observe(reported(7));
+    settle();
+    expect(sent).toEqual([
+      { hostId: 'd1', event: { type: 'patch.log_sync.request', chatId: 'c1', afterSeq: 3 } },
+    ]);
   });
 
   test('works on the real clock when it is not given one', () => {
     const real = new LogSync({
       store,
-      chats: { get: () => ({ daemonId: 'd1' }) as never },
-      sendTo: (daemonId, _s, event) => sent.push({ daemonId, event }),
+      chats: { get: () => ({ hostId: 'd1' }) as never },
+      sendTo: (hostId, _s, event) => sent.push({ hostId, event }),
       isOnline: () => true,
       inject: () => undefined,
       logger,
@@ -188,14 +202,14 @@ describe('LogSync', () => {
 
   test("another host going offline leaves a wait for this host's chat alone, and so does a chat nobody knows", () => {
     sync.observe(reported(9));
-    sync.observe({ type: 'daemon.offline', daemonId: 'someone-else' } as WireEvent);
+    sync.observe({ type: 'host.offline', hostId: 'someone-else' } as WireEvent);
     sync.observe(reported(9, 'x-unknown'));
-    sync.observe({ type: 'daemon.offline', daemonId: 'd1' } as WireEvent);
+    sync.observe({ type: 'host.offline', hostId: 'd1' } as WireEvent);
     settle();
     expect(sent).toEqual([]);
 
     sync.observe(reported(9));
-    sync.observe({ type: 'daemon.offline', daemonId: 'someone-else' } as WireEvent);
+    sync.observe({ type: 'host.offline', hostId: 'someone-else' } as WireEvent);
     settle();
     expect(sent).toHaveLength(1);
   });

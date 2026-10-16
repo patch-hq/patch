@@ -70,9 +70,9 @@ exported as both the value `WireEvent` (zod schema) and the type `WireEvent`.
 | `chat.state`              | `events.ts` | `chatId, activity, lastUpdated`                           |
 | `chat.stopped`            | `events.ts` | `chatId, reason`                                          |
 | `chat.error`              | `events.ts` | `chatId, error, seq`                                      |
-| `daemon.online`           | `events.ts` | —                                                         |
-| `daemon.offline`          | `events.ts` | `reason?`                                                 |
-| `daemon.unauthenticated`  | `events.ts` | `reason`                                                  |
+| `host.online`             | `events.ts` | —                                                         |
+| `host.offline`            | `events.ts` | `reason?`                                                 |
+| `host.unauthenticated`    | `events.ts` | `reason`                                                  |
 
 ### Surface events (surface → server → host)
 

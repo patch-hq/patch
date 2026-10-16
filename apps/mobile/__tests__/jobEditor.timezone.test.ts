@@ -24,7 +24,7 @@ function form(overrides: Partial<FormState>): FormState {
   return {
     ...DEFAULT_FORM,
     name: 'daily email update',
-    spawnDaemonId: HOST,
+    spawnHostId: HOST,
     spawnFolder: '/work',
     spawnPrompt: 'go',
     ...overrides,
@@ -38,7 +38,7 @@ function storedJob(trigger: Job['trigger']): Job {
     enabled: true,
     trigger,
     filter: null,
-    action: { type: 'spawn', daemonId: HOST, folder: '/work', prompt: 'go' },
+    action: { type: 'spawn', hostId: HOST, folder: '/work', prompt: 'go' },
     createdAt: 1,
     updatedAt: 1,
   };
@@ -134,5 +134,45 @@ describe('validateForm', () => {
         form({ triggerType: 'webhook', webhookScheme: 'none', cronTimezone: 'not a zone' }),
       ),
     ).toBeNull();
+  });
+});
+
+describe('formToBody — a timeout left blank', () => {
+  it('a stray space in the script timeout means the default, not 0ms', () => {
+    const body = formToBody(
+      form({
+        actionType: 'script',
+        scriptCommand: 'make',
+        scriptTimeoutMs: ' ',
+        cronExpression: '0 9 * * *',
+      }),
+    );
+    expect(body.action).not.toHaveProperty('timeoutMs');
+  });
+
+  it('a stray space in the gate timeout means the default, not 0ms', () => {
+    const body = formToBody(
+      form({
+        gateOn: true,
+        gateCommand: 'test -f ok',
+        gateHostId: HOST,
+        gateFolder: '/work',
+        gateTimeoutMs: '  ',
+        cronExpression: '0 9 * * *',
+      }),
+    );
+    expect(body.gate).not.toHaveProperty('timeoutMs');
+  });
+
+  it('a timeout typed with padding is sent as the number', () => {
+    const body = formToBody(
+      form({
+        actionType: 'script',
+        scriptCommand: 'make',
+        scriptTimeoutMs: ' 5000 ',
+        cronExpression: '0 9 * * *',
+      }),
+    );
+    expect(body.action).toMatchObject({ timeoutMs: 5000 });
   });
 });

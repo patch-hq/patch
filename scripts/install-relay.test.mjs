@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { relayUnit } from './install-relay.mjs';
+import { relayUnit, releasePath, staleReleases } from './install-relay.mjs';
 
 test('the relay unit binds loopback on 8787 and restarts on failure', () => {
   const u = relayUnit({ home: '/h/.patch-relay', node: '/usr/bin/node' });
@@ -19,4 +19,15 @@ test('the installer defaults to the latest release the project publishes on GitH
     sh,
     /DEFAULT_RELEASE_URL="https:\/\/github\.com\/tomchambers2\/patch\/releases\/latest\/download\/patch-server\.tar\.gz"/,
   );
+});
+
+test('each install builds into a release directory of its own, never over the one running', () => {
+  assert.equal(releasePath('/h/.patch-relay', 1700), '/h/.patch-relay/releases/1700');
+  assert.notEqual(releasePath('/h/.patch-relay', 1700), releasePath('/h/.patch-relay', 1701));
+});
+
+test('pruning keeps the live release and the newest few, and nothing else', () => {
+  const names = ['100', '300', '200', '400', '50'];
+  assert.deepEqual(staleReleases(names, '50', 2).sort(), ['100', '200']);
+  assert.deepEqual(staleReleases(names, '400', 2).sort(), ['100', '50']);
 });

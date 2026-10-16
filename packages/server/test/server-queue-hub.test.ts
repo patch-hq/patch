@@ -10,7 +10,7 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const wait = (ms = 50): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -27,11 +27,11 @@ describe('server-run queue through the hub', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(31));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink,
+      hostLink,
     });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const url = `ws://127.0.0.1:${(built.app.server.address() as AddressInfo).port}/ws`;
@@ -44,16 +44,16 @@ describe('server-run queue through the hub', () => {
     });
     const client = new WireTestClient({ url, auth: jwt });
     await client.connect();
-    await client.waitFor('daemon.online');
+    await client.waitFor('host.online');
 
     // The host: announces itself as able to take queued messages, and a chat.
-    daemonLink.emit({
-      type: 'daemon.host',
-      daemonId: 'd1',
+    hostLink.emit({
+      type: 'host.host',
+      hostId: 'd1',
       hostName: 'host',
       platform: 'linux',
       arch: 'x64',
-      daemonVersion: '1.0.0',
+      hostVersion: '1.0.0',
       updateAvailable: false,
       permissionModeDefault: 'auto',
       permissionOverrides: 0,
@@ -62,18 +62,18 @@ describe('server-run queue through the hub', () => {
       backends: [],
       components: [],
     } as never);
-    daemonLink.emit({ type: 'chat.spawned', chatId: 'c1', daemonId: 'd1', folder: '/w' });
+    hostLink.emit({ type: 'chat.spawned', chatId: 'c1', hostId: 'd1', folder: '/w' });
     const state = (activity: string) =>
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         activity,
         permissionMode: 'auto',
         folder: '/w',
         lastUpdated: 1,
       } as never);
-    return { built, daemonLink, client, state };
+    return { built, hostLink, client, state };
   }
 
   it('holds a message sent behind a running turn and releases it when the chat idles', async () => {
@@ -90,12 +90,12 @@ describe('server-run queue through the hub', () => {
       t.client.sendInput({ chatId: 'c1', message: 'while you work', localId: 'L1' });
       await wait();
       expect(got).toEqual(['ack:L1', 'queued:L1']);
-      expect(t.daemonLink.sent.filter((s) => s.event.type === 'chat.input')).toEqual([]);
+      expect(t.hostLink.sent.filter((s) => s.event.type === 'chat.input')).toEqual([]);
 
       t.state('idle'); // the turn ends
       await wait();
       expect(got).toEqual(['ack:L1', 'queued:L1', 'dequeued:L1:running']);
-      expect(t.daemonLink.sent.filter((s) => s.event.type === 'chat.input')).toHaveLength(1);
+      expect(t.hostLink.sent.filter((s) => s.event.type === 'chat.input')).toHaveLength(1);
       // The chat never looked finished to the surface while it still had a message to run.
       expect(activities).not.toContain('idle');
     } finally {
@@ -112,10 +112,10 @@ describe('server-run queue through the hub', () => {
       t.client.sendInput({ chatId: 'c1', message: 'two', localId: 'L2' });
       await wait();
 
-      t.daemonLink.emit({ type: 'patch.queue_pull.request', requestId: 'r1', chatId: 'c1' });
+      t.hostLink.emit({ type: 'patch.queue_pull.request', requestId: 'r1', chatId: 'c1' });
       await wait();
-      const reply = t.daemonLink.sent.find((s) => s.event.type === 'patch.queue_pull.response')!;
-      expect(reply.daemonId).toBe('d1');
+      const reply = t.hostLink.sent.find((s) => s.event.type === 'patch.queue_pull.response')!;
+      expect(reply.hostId).toBe('d1');
       expect(
         (reply.event as { items: Array<{ localId: string }>; requestId: string }).items.map(
           (i) => i.localId,
@@ -125,7 +125,7 @@ describe('server-run queue through the hub', () => {
       // Taken once: the chat idling afterwards has nothing left to release.
       t.state('idle');
       await wait();
-      expect(t.daemonLink.sent.filter((s) => s.event.type === 'chat.input')).toEqual([]);
+      expect(t.hostLink.sent.filter((s) => s.event.type === 'chat.input')).toEqual([]);
     } finally {
       await t.client.close();
       await t.built.app.close();
@@ -143,7 +143,7 @@ describe('server-run queue through the hub', () => {
       t.client.send({ type: 'chat.unqueue_request', chatId: 'c1', localId: 'L1' });
       await wait();
       expect(dequeued).toEqual(['L1:cancelled']);
-      expect(t.daemonLink.sent.filter((s) => s.event.type === 'chat.unqueue_request')).toEqual([]);
+      expect(t.hostLink.sent.filter((s) => s.event.type === 'chat.unqueue_request')).toEqual([]);
     } finally {
       await t.client.close();
       await t.built.app.close();
@@ -153,10 +153,10 @@ describe('server-run queue through the hub', () => {
   it('tells a host, as it attaches, that the server is running its queue', async () => {
     const t = await start();
     try {
-      t.daemonLink.addOnlineHost('d2');
+      t.hostLink.addOnlineHost('d2');
       await wait();
-      const modes = t.daemonLink.sent.filter((s) => s.event.type === 'server.queue_mode');
-      expect(modes.map((m) => m.daemonId)).toContain('d2');
+      const modes = t.hostLink.sent.filter((s) => s.event.type === 'server.queue_mode');
+      expect(modes.map((m) => m.hostId)).toContain('d2');
       expect((modes[0]!.event as { enabled: boolean }).enabled).toBe(true);
     } finally {
       await t.client.close();
@@ -170,7 +170,7 @@ describe('server-run queue through the hub', () => {
       t.state('running');
       t.client.sendInput({ chatId: 'c1', message: 'one', localId: 'L1' });
       await wait();
-      expect(t.daemonLink.sent.filter((s) => s.event.type === 'chat.input')).toHaveLength(1);
+      expect(t.hostLink.sent.filter((s) => s.event.type === 'chat.input')).toHaveLength(1);
     } finally {
       await t.client.close();
       await t.built.app.close();
@@ -193,7 +193,7 @@ describe('server-run queue through the hub', () => {
       });
       await wait();
       expect(queued).toEqual(['L1:one, changed:1']);
-      expect(t.daemonLink.sent.filter((s) => s.event.type === 'chat.edit_queued_request')).toEqual(
+      expect(t.hostLink.sent.filter((s) => s.event.type === 'chat.edit_queued_request')).toEqual(
         [],
       );
     } finally {
@@ -211,14 +211,14 @@ describe('server-run queue through the hub', () => {
       await wait();
       t.client.send({ type: 'chat.promote_request', chatId: 'c1', localId: 'L2' });
       await wait();
-      const stops = t.daemonLink.sent.filter((s) => s.event.type === 'chat.stop_request');
+      const stops = t.hostLink.sent.filter((s) => s.event.type === 'chat.stop_request');
       expect(stops).toHaveLength(1);
-      expect(t.daemonLink.sent.filter((s) => s.event.type === 'chat.promote_request')).toEqual([]);
+      expect(t.hostLink.sent.filter((s) => s.event.type === 'chat.promote_request')).toEqual([]);
 
       // The turn ends; the queue drains in order, so L1 still goes first.
       t.state('idle');
       await wait();
-      const released = t.daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const released = t.hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(released.map((s) => (s.event as { localId: string }).localId)).toEqual(['L1']);
     } finally {
       await t.client.close();
@@ -239,7 +239,7 @@ describe('server-run queue through the hub', () => {
       });
       t.client.send({ type: 'chat.promote_request', chatId: 'c1', localId: 'host-held' });
       await wait();
-      const types = t.daemonLink.sent.map((s) => s.event.type);
+      const types = t.hostLink.sent.map((s) => s.event.type);
       expect(types).toContain('chat.unqueue_request');
       expect(types).toContain('chat.edit_queued_request');
       expect(types).toContain('chat.promote_request');

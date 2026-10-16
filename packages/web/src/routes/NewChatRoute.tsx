@@ -1,4 +1,3 @@
-import { accountConnectedForModel } from '@patch/wire';
 // NewChatRoute — `/chats/new`. Per spec/14 ## Sidebar §8 (`+ New chat`):
 // "Opens a fresh chat directly in the main panel. No modal, no wizard. Folder
 // defaults to the most-recently-used. Composer auto-focused."
@@ -12,7 +11,7 @@ import { accountConnectedForModel } from '@patch/wire';
 // up" into the live chat's header crumb and the model is fixed.
 
 import type { JSX, KeyboardEvent } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -31,12 +30,16 @@ import { useDraftStore } from '../stores/draftStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { markUnsentNewChat } from '../lib/unsentNewChat.js';
 import {
-  defaultDaemonId,
+  defaultHostId,
   hostAccount,
   hostDefaultModel,
   usePresenceStore,
 } from '../stores/presenceStore.js';
-import { usePreferencesStore } from '../stores/preferencesStore.js';
+import {
+  anyProviderConnected,
+  providerConnectedForModel,
+  usePreferencesStore,
+} from '../stores/preferencesStore.js';
 import { startVoiceCall, startVoiceNote } from '../lib/voiceController.js';
 import { sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
@@ -55,6 +58,7 @@ import { ModelPicker } from '../components/ModelPicker.js';
 import type { PatchWs } from '../api/ws.js';
 import { TerminalPanel } from '../components/TerminalPanel.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
+import { isPlainEnter } from '../lib/submitChord.js';
 
 const HEAD_ICON = 18;
 // How many projects the setup row offers as one-click toggles (spec/14 §8).
@@ -99,7 +103,7 @@ function findSpawnRejection(chatId: string): SpawnRejection | null {
  * shown the chat (optimistic message + navigation), because the host took
  * longer than the server's synchronous-error window to refuse it. Waits up to
  * `timeoutMs` for either a spawn-rejection chat.error or confirmation
- * (chat.spawned sets daemonId); resolves null once the spawn is confirmed or
+ * (chat.spawned sets hostId); resolves null once the spawn is confirmed or
  * the window expires with no error, in which case there is nothing to unwind.
  *
  * The code and the message are kept APART rather than collapsed into one
@@ -132,8 +136,8 @@ function waitForSpawnRejection(chatId: string, timeoutMs = 800): Promise<SpawnRe
           return true;
         }
       }
-      // chat.spawned sets daemonId from '' to a real value.
-      if (chats[chatId]?.daemonId) {
+      // chat.spawned sets hostId from '' to a real value.
+      if (chats[chatId]?.hostId) {
         resolve(null);
         return true;
       }
@@ -222,7 +226,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // this whole route per key press (typing went slow). The composer owns the
   // text; it is seeded once per draft below.
   const draftFolder = useDraftStore((s) => s.drafts[draftId]?.folder) ?? '';
-  const draftDaemonId = useDraftStore((s) => s.drafts[draftId]?.daemonId);
+  const draftHostId = useDraftStore((s) => s.drafts[draftId]?.hostId);
   const draftModel = useDraftStore((s) => s.drafts[draftId]?.model);
   const seedRef = useRef<{ id: string; text: string } | null>(null);
   if (seedRef.current?.id !== draftId) {
@@ -258,24 +262,24 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     () =>
       Object.values(chats).filter(
         (c) =>
-          c.folder && c.daemonId && !isReservedSpecialThread(c.chatId) && !isJunkFolder(c.folder),
+          c.folder && c.hostId && !isReservedSpecialThread(c.chatId) && !isJunkFolder(c.folder),
       ),
     [chats],
   );
 
   // Folder defaults to the most-recently-used (host, folder) PAIR (spec/14 §8).
   // Paths are scoped to their host (spec/04 § Spawn: "the same string on two
-  // hosts means two different directories"), so the folder and the daemonId
+  // hosts means two different directories"), so the folder and the hostId
   // must move together — pairing one host's path with another host's id is how
   // a spawn ends up running somewhere the user never chose.
   // The last NEW chat's pair wins outright and never moves. Only before any
   // new chat has been made from this browser (nothing recorded yet) does the
   // newest project chat seed it.
   const newestProjectPair = useMemo(() => {
-    let best: { folder: string; daemonId: string; at: number } | null = null;
+    let best: { folder: string; hostId: string; at: number } | null = null;
     for (const c of projectChats) {
       if (!best || c.lastUpdated > best.at)
-        best = { folder: c.folder, daemonId: c.daemonId, at: c.lastUpdated };
+        best = { folder: c.folder, hostId: c.hostId, at: c.lastUpdated };
     }
     return best;
   }, [projectChats]);
@@ -296,14 +300,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     for (const entry of folderRoster) {
       if (
         entry.folder &&
-        entry.daemonId &&
+        entry.hostId &&
         !isJunkFolder(entry.folder) &&
         !byFolder.has(entry.folder)
       )
-        byFolder.set(entry.folder, entry.daemonId);
+        byFolder.set(entry.folder, entry.hostId);
     }
     for (const c of projectChats) {
-      byFolder.set(c.folder, c.daemonId);
+      byFolder.set(c.folder, c.hostId);
     }
     return byFolder;
   }, [projectChats, folderRoster]);
@@ -311,30 +315,30 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // the picker only ever offers the chosen machine's own folders.
   const recentFoldersByHost = useMemo(() => {
     const byHost = new Map<string, Set<string>>();
-    const add = (daemonId: string, f: string): void => {
-      const set = byHost.get(daemonId) ?? new Set<string>();
+    const add = (hostId: string, f: string): void => {
+      const set = byHost.get(hostId) ?? new Set<string>();
       set.add(f);
-      byHost.set(daemonId, set);
+      byHost.set(hostId, set);
     };
     for (const entry of folderRoster) {
-      if (entry.folder && entry.daemonId && !isJunkFolder(entry.folder))
-        add(entry.daemonId, entry.folder);
+      if (entry.folder && entry.hostId && !isJunkFolder(entry.folder))
+        add(entry.hostId, entry.folder);
     }
-    for (const c of projectChats) add(c.daemonId, c.folder);
+    for (const c of projectChats) add(c.hostId, c.folder);
     return byHost;
   }, [projectChats, folderRoster]);
 
   // The machines a chat can start on, the default one first (spec/14 §8).
   const presenceHosts = usePresenceStore((s) => s.hosts);
-  const accountDefaultDaemonId = defaultDaemonId(presenceHosts);
+  const accountDefaultHostId = defaultHostId(presenceHosts);
   const machines = useMemo(
     () =>
       Object.values(presenceHosts).sort((a, b) => {
-        if (a.daemonId === accountDefaultDaemonId) return -1;
-        if (b.daemonId === accountDefaultDaemonId) return 1;
-        return (a.host?.hostName ?? a.daemonId).localeCompare(b.host?.hostName ?? b.daemonId);
+        if (a.hostId === accountDefaultHostId) return -1;
+        if (b.hostId === accountDefaultHostId) return 1;
+        return (a.host?.hostName ?? a.hostId).localeCompare(b.host?.hostName ?? b.hostId);
       }),
-    [presenceHosts, accountDefaultDaemonId],
+    [presenceHosts, accountDefaultHostId],
   );
 
   // The host whose filesystem the picker browses and whose folder the chat is
@@ -342,47 +346,45 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   //
   // Choosing a machine is its own decision, taken before the folder: a folder
   // picked afterwards is one of THAT machine's, and the pair is what the spawn
-  // sends as `daemonId` + `folder` (spec/14 §8). A restored draft comes back on
+  // sends as `hostId` + `folder` (spec/14 §8). A restored draft comes back on
   // the machine it was typed against; otherwise the most recent chat's machine.
-  const [chosenDaemonId, setChosenDaemonId] = useState<string | null>(
-    draftDaemonId ??
+  const [chosenHostId, setChosenHostId] = useState<string | null>(
+    draftHostId ??
       (folderParam ? recentFolderHosts.get(folderParam) : undefined) ??
-      mruPair?.daemonId ??
+      mruPair?.hostId ??
       null,
   );
-  const pickerDaemonId = chosenDaemonId ?? accountDefaultDaemonId;
+  const pickerHostId = chosenHostId ?? accountDefaultHostId;
   useEffect(() => {
-    updateDraft(draftId, { daemonId: pickerDaemonId ?? undefined });
-  }, [pickerDaemonId, draftId, updateDraft]);
+    updateDraft(draftId, { hostId: pickerHostId ?? undefined });
+  }, [pickerHostId, draftId, updateDraft]);
 
   // Configured project folders (Settings → Project folders) — offered first in
   // the picker (spec/04 § Folders). Cached with the same settings query key.
   // They predate per-machine folders and name the default machine's paths.
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.settings() });
   const configuredFolders = settings?.projectFolders ?? [];
-  const pickerHostFolders = pickerDaemonId ? presenceHosts[pickerDaemonId]?.folders : null;
-
   // Picker option list for the chosen machine: configured first, then that
   // machine's own registered roots, then its recents (de-duped).
-  const folderOptions = useMemo(() => {
-    if (pickerDaemonId === null) return [];
-    const recent = Array.from(recentFoldersByHost.get(pickerDaemonId) ?? []).sort();
-    const out: string[] = [];
-    for (const f of [
-      ...(pickerDaemonId === accountDefaultDaemonId ? configuredFolders : []),
-      ...(pickerHostFolders?.roots ?? []),
-      ...recent,
-    ]) {
-      if (f && !out.includes(f)) out.push(f);
-    }
-    return out;
-  }, [
-    configuredFolders,
-    recentFoldersByHost,
-    pickerDaemonId,
-    accountDefaultDaemonId,
-    pickerHostFolders,
-  ]);
+  const optionsForHost = useCallback(
+    (hostId: string): string[] => {
+      const recent = Array.from(recentFoldersByHost.get(hostId) ?? []).sort();
+      const out: string[] = [];
+      for (const f of [
+        ...(hostId === accountDefaultHostId ? configuredFolders : []),
+        ...(presenceHosts[hostId]?.folders?.roots ?? []),
+        ...recent,
+      ]) {
+        if (f && !out.includes(f)) out.push(f);
+      }
+      return out;
+    },
+    [configuredFolders, recentFoldersByHost, accountDefaultHostId, presenceHosts],
+  );
+  const folderOptions = useMemo(
+    () => (pickerHostId === null ? [] : optionsForHost(pickerHostId)),
+    [pickerHostId, optionsForHost],
+  );
 
   // Disambiguating labels for the option rows: just the folder NAME, growing a
   // parent segment ONLY when two options share a basename (todo "recent should
@@ -401,14 +403,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   const foldersByRecency = useMemo(() => {
     const newest = new Map<string, number>();
     for (const c of projectChats) {
-      if (c.daemonId !== pickerDaemonId) continue;
+      if (c.hostId !== pickerHostId) continue;
       const at = newest.get(c.folder);
       if (at === undefined || c.lastUpdated > at) newest.set(c.folder, c.lastUpdated);
     }
     return Array.from(newest.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([f]) => f);
-  }, [projectChats, pickerDaemonId]);
+  }, [projectChats, pickerHostId]);
   const quickFoldersLive = useMemo(() => {
     const out: string[] = [];
     for (const f of [...foldersByRecency, ...folderOptions]) {
@@ -452,10 +454,9 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   }, [model, draftId, updateDraft]);
   // The two setup-row pop-ups (folder + model) are mutually exclusive — one
   // open list at a time (spec/14 § Model selector), so they never overlap.
-  const [openPicker, setOpenPicker] = useState<'folder' | 'model' | 'host' | null>(null);
+  const [openPicker, setOpenPicker] = useState<'folder' | 'model' | null>(null);
   const pickerOpen = openPicker === 'folder';
   const modelOpen = openPicker === 'model';
-  const hostOpen = openPicker === 'host';
   function setPickerOpen(next: boolean | ((v: boolean) => boolean)): void {
     const value = typeof next === 'function' ? next(pickerOpen) : next;
     setOpenPicker(value ? 'folder' : null);
@@ -467,16 +468,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // the composer.
   const folderAnchorRef = useRef<HTMLDivElement | null>(null);
   const modelAnchorRef = useRef<HTMLDivElement | null>(null);
-  const hostAnchorRef = useRef<HTMLDivElement | null>(null);
   const folderPlacement = usePopupPlacement(folderAnchorRef, pickerOpen);
   const modelPlacement = usePopupPlacement(modelAnchorRef, modelOpen);
-  const hostPlacement = usePopupPlacement(hostAnchorRef, hostOpen);
   // spec/14 § Dismissing pop-ups (click-off): a press anywhere outside the open
   // picker closes it and selects nothing. All anchors wrap their pill AND
   // their pop-up, so a press on either is "inside" — the pill keeps its own
   // toggle, and interacting with the pop-up (browse tree, path field) never
   // closes it.
-  useDismissOnClickOff(openPicker !== null, [folderAnchorRef, modelAnchorRef, hostAnchorRef], () =>
+  useDismissOnClickOff(openPicker !== null, [folderAnchorRef, modelAnchorRef], () =>
     setOpenPicker(null),
   );
   // Folder BROWSER (spec/04 § Browsing, spec/14/15 § folder picker): the user
@@ -489,38 +488,34 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // it, so it is answered ONCE here rather than discovered control by control.
   // `null` = not reported yet; only a definite `connected: false` blocks, so a
   // slow first report does not flash a wall of red on every load.
-  const hostHasCreditSource = usePresenceStore((s) =>
-    pickerDaemonId
-      ? Object.values(s.hosts[pickerDaemonId]?.accounts ?? {}).some((account) => account.connected)
-      : false,
-  );
+  const hostHasCreditSource = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
+  const signedOut =
+    usePreferencesStore((s) =>
+      providerConnectedForModel(
+        s.shared,
+        model ?? hostDefaultModel(usePresenceStore.getState().hosts, pickerHostId),
+      ),
+    ) === false;
   const chosenAccount = usePresenceStore((s) =>
     hostAccount(
       s.hosts,
-      pickerDaemonId,
-      (model ?? hostDefaultModel(s.hosts, pickerDaemonId))?.startsWith('openai/')
+      pickerHostId,
+      (model ?? hostDefaultModel(s.hosts, pickerHostId))?.startsWith('openai/')
         ? 'codex'
         : CLAUDE_BACKEND_ID,
     ),
-  );
-  const signedOut = !accountConnectedForModel(
-    chosenAccount,
-    model ?? hostDefaultModel(usePresenceStore.getState().hosts, pickerDaemonId),
-  );
-  const chosenMachine = usePresenceStore((s) =>
-    pickerDaemonId ? (s.hosts[pickerDaemonId]?.host?.hostName ?? pickerDaemonId) : null,
   );
   // The catalogue is per MACHINE, so it loads once the machine is known and
   // RELOADS when it changes — showing one machine's models while a chat is
   // about to be pinned to another is how the wrong model gets sent.
   useEffect(() => {
-    void loadModels(pickerDaemonId);
-  }, [pickerDaemonId]);
+    void loadModels(pickerHostId);
+  }, [pickerHostId]);
   // What an omitted `model` resolves to on that host — the ACCOUNT's default
-  // model, which the host reports as `daemon.host.defaultModel` and the server
+  // model, which the host reports as `host.host.defaultModel` and the server
   // mirrors down. `null` until it has reached that host, in which case a spawn
   // there naming no model is an error the host raises.
-  const hostModel = usePresenceStore((s) => hostDefaultModel(s.hosts, pickerDaemonId));
+  const hostModel = usePresenceStore((s) => hostDefaultModel(s.hosts, pickerHostId));
   // The model this chat will actually run on: the explicit choice if there is
   // one, else the account default (which is what omitting `model` selects).
   const effectiveModel = model ?? hostModel;
@@ -627,11 +622,11 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     isLoading: browseLoading,
     error: browseErr,
   } = useQuery({
-    queryKey: ['folders-browse', pickerDaemonId, browseDir],
-    queryFn: () => api.browseFolders(pickerDaemonId as string, browseDir ?? undefined),
+    queryKey: ['folders-browse', pickerHostId, browseDir],
+    queryFn: () => api.browseFolders(pickerHostId as string, browseDir ?? undefined),
     // Browsing is addressed to ONE host; with none resolved there is nothing to
     // ask, so the query stays idle rather than browsing a guessed machine.
-    enabled: pickerOpen && pickerDaemonId !== null,
+    enabled: pickerOpen && pickerHostId !== null,
   });
   // A failed chat creation is reported by `pushError` alone — one surface per
   // failure (spec/12 § Principles). It used to ALSO render the identical text
@@ -645,7 +640,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // A SECOND `?folder=` navigation on this same mount (the sidebar's Recent
   // folders rows `navigate()` to `/chats/new?folder=<path>` with no `?draft=`,
   // so clicking a different row re-renders this screen rather than remounting
-  // it — the `folder`/`chosenDaemonId` state above is seeded from the param
+  // it — the `folder`/`chosenHostId` state above is seeded from the param
   // only once, at mount, via `useState`'s initializer). Without this, the
   // picker keeps showing the FIRST click's folder (and its host) after the
   // user has pointed it at a different one — stale, and on another host
@@ -660,8 +655,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     if (!folderParam) return;
     userEditedFolder.current = true;
     setFolder(folderParam);
-    const daemonId = recentFolderHosts.get(folderParam);
-    if (daemonId) setChosenDaemonId(daemonId);
+    const hostId = recentFolderHosts.get(folderParam);
+    if (hostId) setChosenHostId(hostId);
   }, [folderParam, recentFolderHosts]);
   // The chatId once the chat has been created for THIS new-chat session. Caches
   // so a retry (e.g. after an attachment upload failed) reuses the same chat
@@ -673,7 +668,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   useEffect(() => {
     if (!userEditedFolder.current && !folder && mruPair) {
       setFolder(mruPair.folder);
-      setChosenDaemonId(mruPair.daemonId);
+      setChosenHostId(mruPair.hostId);
     }
   }, [mruPair, folder]);
 
@@ -695,7 +690,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     if (submitting) return null;
     setSubmitting(true);
     try {
-      if (pickerDaemonId === null) {
+      if (pickerHostId === null) {
         pushError('Choose which host to start the chat on.');
         setSubmitting(false);
         return null;
@@ -705,7 +700,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       // new one (spec/04 § Spawn). Sending the surface's idea of a default
       // instead is what overwrote a machine's last-used model on every spawn.
       const res = (await api.createChat({
-        daemonId: pickerDaemonId,
+        hostId: pickerHostId,
         folder: trimmed,
         ...(model === null ? {} : { model }),
         ...(preferredAccountId !== null ? { preferredAccountId } : {}),
@@ -713,7 +708,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       // Created before anything is sent into it: if the user leaves it
       // empty, it goes (spec/14 § New chat drafts).
       markUnsentNewChat(res.chatId);
-      saveLastNewChat({ daemonId: pickerDaemonId, folder: trimmed, model });
+      saveLastNewChat({ hostId: pickerHostId, folder: trimmed, model });
       return res.chatId;
     } catch (err) {
       let code: string;
@@ -913,33 +908,27 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   }
 
   // Choosing a project, shared by the pop-up's recents rows and the setup row's
-  // quick toggles so the two cannot drift apart. It is a TOGGLE (spec/14 §8):
-  // choosing the one already chosen DESELECTS it — the only way to clear the
-  // most-recently-used default. Selecting also picks the project's HOST, and
-  // that pair is what the spawn sends. A deselect leaves the pop-up open
-  // (nothing was picked, so there is nothing to close on); a pick closes it.
+  // quick buttons so the two cannot drift apart. Re-choosing the one already
+  // chosen keeps it (spec/14 §8): the preselected most-recently-used project
+  // must be confirmable in one click. Selecting also picks the project's HOST,
+  // and that pair is what the spawn sends.
   function chooseFolder(f: string): void {
     userEditedFolder.current = true;
-    if (f === folder) {
-      setFolder('');
-      return;
-    }
     setFolder(f);
-    setChosenDaemonId(pickerDaemonId);
+    setChosenHostId(pickerHostId);
     setPickerOpen(false);
   }
 
-  // Choosing the machine. Its folders are not the last machine's, so a folder
-  // chosen there is kept only if this machine has one at the same path, and the
-  // browser goes back to this machine's roots.
-  function chooseMachine(daemonId: string): void {
-    if (daemonId === pickerDaemonId) return;
+  // Choosing the machine. Its folders are not the last machine's, so the folder
+  // becomes the first one in this machine's list, and the browser goes back to
+  // this machine's roots.
+  function chooseMachine(hostId: string): void {
+    if (hostId === pickerHostId) return;
     userEditedFolder.current = true;
-    setChosenDaemonId(daemonId);
+    setChosenHostId(hostId);
     setBrowseDir(null);
-    const theirs = recentFoldersByHost.get(daemonId);
-    const roots = presenceHosts[daemonId]?.folders?.roots ?? [];
-    if (folder && !theirs?.has(folder) && !roots.includes(folder)) setFolder('');
+    // Land on the first folder in this machine's list, never on an empty pick.
+    setFolder(optionsForHost(hostId)[0] ?? '');
   }
 
   // Quick-folder toggle row: Left/Right cycle the row like a segmented
@@ -967,7 +956,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     if (next === undefined) return;
     userEditedFolder.current = true;
     setFolder(next);
-    setChosenDaemonId(pickerDaemonId);
+    setChosenHostId(pickerHostId);
     quickFolderRefs.current.get(next)?.focus();
   }
 
@@ -1016,22 +1005,15 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           An offline machine is listed so its absence is visible, and cannot be
           chosen. */}
       {machines.length > 1 ? (
-        <div className="new-chat-quick new-chat-machines" data-testid="new-chat-machines">
+        <div className="new-chat-machines" data-testid="new-chat-machines">
           <HostPicker
             hosts={machines.map((m) => ({
-              daemonId: m.daemonId,
-              label: m.host?.hostName ?? m.daemonId,
+              hostId: m.hostId,
+              label: m.host?.hostName ?? m.hostId,
               online: m.online,
             }))}
-            selected={pickerDaemonId}
-            onSelect={(id) => {
-              chooseMachine(id);
-              setOpenPicker(null);
-            }}
-            open={hostOpen}
-            onToggle={() => setOpenPicker((v) => (v === 'host' ? null : 'host'))}
-            anchorRef={hostAnchorRef}
-            placement={hostPlacement}
+            selected={pickerHostId}
+            onSelect={chooseMachine}
             testId="new-chat-host"
           />
         </div>
@@ -1109,7 +1091,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 setFolder(e.target.value);
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+                if (isPlainEnter(e)) {
                   e.preventDefault();
                   setPickerOpen(false);
                 }
@@ -1262,9 +1244,9 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                   onClick={() => {
                     userEditedFolder.current = true;
                     setFolder(browse.dir as string);
-                    // The tree just browsed belongs to `pickerDaemonId`; keep
+                    // The tree just browsed belongs to `pickerHostId`; keep
                     // the chosen path bound to the host it came from.
-                    setChosenDaemonId(pickerDaemonId);
+                    setChosenHostId(pickerHostId);
                     setPickerOpen(false);
                   }}
                 >
@@ -1427,13 +1409,9 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             {signedOut ? (
               <div className="new-chat-blocked" data-testid="new-chat-blocked" role="alert">
                 <p className="new-chat-blocked-title">
-                  {chosenMachine ?? 'This machine'} isn’t signed in to{' '}
-                  {effectiveModel?.startsWith('openai/') ? 'OpenAI' : 'Claude'}
+                  Not signed in to {effectiveModel?.startsWith('openai/') ? 'OpenAI' : 'Claude'}
                 </p>
-                <p className="muted">Chats can’t run until it is.</p>
-                <Link className="ctrl" to="/settings/usage">
-                  Sign in
-                </Link>
+                <Link to="/settings/usage">Sign in</Link>
               </div>
             ) : null}
             {setupRow}
@@ -1442,7 +1420,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       )}
       {/* A new chat cannot run without a credential, so say so here too — this is
           the screen where someone would otherwise type into a dead composer. */}
-      <ClaudeDisconnectedBanner daemonId={pickerDaemonId} />
+      <ClaudeDisconnectedBanner model={effectiveModel ?? undefined} />
       {/* spec/14 § Terminal — available HERE above all: you are on this screen
           because the folder you want does not exist on the host yet, and a
           shell is how you clone it there. Rooted by the daemon (no folder
@@ -1455,7 +1433,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           key={draftId}
           chatId="new"
           selectedModel={effectiveModel ?? undefined}
-          daemonId={pickerDaemonId}
+          hostId={pickerHostId}
           folder={folder.trim()}
           resolveChatId={resolveNewChatId}
           onStartCall={() => void handleStartCall()}

@@ -63,7 +63,7 @@ beforeEach(() => {
   useComposerDraftStore.getState()._reset();
   usePresenceStore.setState({
     connection: 'offline',
-    daemonOnline: false,
+    hostOnline: false,
     wsUrl: null,
     everConnected: false,
     failedAttempts: 0,

@@ -21,7 +21,7 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const WEB = process.env['PATCH_WEB_DIST'] ?? join(__dirname, '..', '..', 'web', 'dist');
 const WEB_SRC = join(__dirname, '..', '..', 'web', 'src');
@@ -49,7 +49,7 @@ describe.skipIf(!BROWSER_LAYER)('pads in the app', () => {
   let dir: string;
   let browser: Browser;
   let built: Awaited<ReturnType<typeof buildAll>>;
-  let link: InProcessDaemonLink;
+  let link: InProcessHostLink;
   let base: string;
   let bearer: string;
 
@@ -73,9 +73,9 @@ describe.skipIf(!BROWSER_LAYER)('pads in the app', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(7));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    link = new InProcessDaemonLink();
-    built = await buildAll({ logger: false, registry, daemonLink: link, webDistDir: WEB });
-    link.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+    link = new InProcessHostLink();
+    built = await buildAll({ logger: false, registry, hostLink: link, webDistDir: WEB });
+    link.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     base = `http://127.0.0.1:${(built.app.server.address() as AddressInfo).port}`;
     bearer = await mintSurfaceCredential({

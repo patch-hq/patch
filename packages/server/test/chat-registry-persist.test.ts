@@ -12,14 +12,14 @@ import { ChatRegistry } from '../src/chat-registry.js';
 
 const logger = pino({ level: 'silent' });
 
-const spawned = (chatId: string, daemonId = 'd1'): WireEvent =>
-  ({ type: 'chat.spawned', chatId, daemonId, folder: `/w/${chatId}` }) as WireEvent;
+const spawned = (chatId: string, hostId = 'd1'): WireEvent =>
+  ({ type: 'chat.spawned', chatId, hostId, folder: `/w/${chatId}` }) as WireEvent;
 
 const state = (chatId: string, activity: string, over: Record<string, unknown> = {}): WireEvent =>
   ({
     type: 'chat.state',
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     activity,
     permissionMode: 'auto',
     folder: `/w/${chatId}`,
@@ -27,8 +27,8 @@ const state = (chatId: string, activity: string, over: Record<string, unknown> =
     ...over,
   }) as WireEvent;
 
-const foldersList = (daemonId: string): WireEvent =>
-  ({ type: 'folders.list', daemonId, roots: [], recent: [] }) as WireEvent;
+const foldersList = (hostId: string): WireEvent =>
+  ({ type: 'folders.list', hostId, roots: [], recent: [] }) as WireEvent;
 
 describe('ChatRegistry persistence', () => {
   let dir: string;
@@ -55,7 +55,7 @@ describe('ChatRegistry persistence', () => {
       chatId: 'c1',
       activity: 'idle',
       status: 'active',
-      daemonId: 'd1',
+      hostId: 'd1',
       jobId: 'j_1',
       lastUpdated: 777,
     });
@@ -101,7 +101,7 @@ describe('ChatRegistry persistence', () => {
     expect(second.get('c1')?.activity).toBe('errored');
     expect(second.get('c2')).toBeUndefined();
     expect(second.get('c3')?.status).toBe('deleted');
-    expect(second.get('c4')).toMatchObject({ daemonId: 'd2', folder: '/elsewhere' });
+    expect(second.get('c4')).toMatchObject({ hostId: 'd2', folder: '/elsewhere' });
   });
 
   test('a restored chat its host does not report again is dropped when the host closes its list', () => {
@@ -214,7 +214,7 @@ describe('ChatRegistry persistence', () => {
     });
 
     test('skips an entry with no chat id, an empty one, or that is not an object', () => {
-      const good = { chatId: 'c1', daemonId: 'd1', activity: 'idle', status: 'active' };
+      const good = { chatId: 'c1', hostId: 'd1', activity: 'idle', status: 'active' };
       const r = read({ version: 1, chats: [null, {}, { chatId: '' }, { chatId: 7 }, good] });
       expect(r.size()).toBe(1);
       expect(r.get('c1')).toBeDefined();

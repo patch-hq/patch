@@ -38,6 +38,12 @@ export class PatchWsClient {
   private readonly forwardedTypes = new Set<WireEventType>();
   private readonly stateListeners = new Set<(s: ConnectionState) => void>();
   private readonly seenChatIds = new Set<string>();
+  /**
+   * Highest seq seen per chat across every socket so far. Each `WireTestClient`
+   * only knows what ITS socket delivered, so a reconnect would otherwise ask for
+   * the whole history again.
+   */
+  private readonly lastSeqByChat = new Map<string, number>();
   private backoffMs: number;
   private readonly maxBackoffMs: number;
   private timer: NodeJS.Timeout | null = null;
@@ -111,7 +117,7 @@ export class PatchWsClient {
   attachChat(chatId: string): void {
     this.seenChatIds.add(chatId);
     if (this.client && this.state === 'connected') {
-      this.client.replayFromLastSeen(chatId);
+      this.replayChat(this.client, chatId);
     }
   }
 
@@ -142,6 +148,7 @@ export class PatchWsClient {
     }
     if (this.client) {
       const c = this.client;
+      this.rememberSeqs(c);
       this.client = null;
       await c.close();
     }
@@ -174,6 +181,7 @@ export class PatchWsClient {
     // re-wires forwarders and re-replays every seen chat so the stream resumes.
     const onDisconnect = (): void => {
       if (this.client !== client) return; // already replaced/closed
+      this.rememberSeqs(client);
       this.client = null;
       this.forwardedTypes.clear();
       if (!this.opts.noAutoReconnect && !this.closed) this.scheduleReconnect();
@@ -194,13 +202,31 @@ export class PatchWsClient {
     // chat.error if the chat doesn't exist, which is fine). Runs AFTER
     // forwarders are wired so replayed events actually dispatch to listeners.
     for (const chatId of this.seenChatIds) {
-      client.replayFromLastSeen(chatId);
+      this.replayChat(client, chatId);
     }
 
     // Auto-reconnect on close.
     // The WireTestClient internally holds the ws; we tap close via timer.
     // Since WireTestClient doesn't expose close events, we poll here only on
     // explicit failures via `send` / `connect`. For TUI use this is enough.
+  }
+
+  /** Carry what a socket saw into the next one. */
+  private rememberSeqs(client: WireTestClient): void {
+    for (const chatId of this.seenChatIds) {
+      const seq = client.lastSeq(chatId);
+      const prior = this.lastSeqByChat.get(chatId);
+      if (seq !== undefined && (prior === undefined || seq > prior)) {
+        this.lastSeqByChat.set(chatId, seq);
+      }
+    }
+  }
+
+  /** Ask for a chat's events after the last seq seen on any socket, or all of them. */
+  private replayChat(client: WireTestClient, chatId: string): void {
+    const seq = client.lastSeq(chatId);
+    const prior = this.lastSeqByChat.get(chatId);
+    client.replay(chatId, Math.max(seq ?? -1, prior ?? -1));
   }
 
   private scheduleReconnect(): void {

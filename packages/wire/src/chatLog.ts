@@ -17,6 +17,7 @@ import {
   ChatToolCallEvent,
   ChatToolResultEvent,
   HarnessId,
+  PermissionDecision,
   PermissionMode,
   TurnOrigin,
 } from './events.js';
@@ -145,7 +146,7 @@ export const LogRecordBody = z.discriminatedUnion('k', [
     .object({
       k: z.literal('permission.decision'),
       requestId: z.string().min(1),
-      decision: z.enum(['approve', 'deny', 'approve_with_edits']),
+      decision: PermissionDecision,
       by: PermissionDecisionBy,
       editedInput: z.record(z.unknown()).optional(),
     })

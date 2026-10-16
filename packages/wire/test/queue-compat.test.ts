@@ -39,7 +39,7 @@ describe('what a newer server adds to frames an older host or surface reads', ()
     const base = {
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       activity: 'idle',
       permissionMode: 'auto',
       folder: '/w',

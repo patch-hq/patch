@@ -4,16 +4,20 @@
 // exclusion/ordering rule is unit-tested without rendering anything, same
 // convention as chatFilter.ts.
 
+import { isReadOnlyMirrorThread } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import type { SharedPayload } from './shareIntent';
 import { getComposerDraft, hasDraftText, setComposerDraft } from './composerDraft';
 import { newAttachmentKey, useComposerAttachmentStore } from '../stores/composerAttachmentStore';
 
-/** Archived/deleted chats aren't valid share destinations; the rest, most
+/** Archived/deleted chats and read-only mirror threads (no composer, the host
+ *  refuses input to them) aren't valid share destinations; the rest, most
  *  recently updated first — matching the Chats tab's own recency order. */
 export function shareableChats(chats: Record<string, ChatRow>): ChatRow[] {
   return Object.values(chats)
-    .filter((c) => c.status !== 'archived' && c.status !== 'deleted')
+    .filter(
+      (c) => c.status !== 'archived' && c.status !== 'deleted' && !isReadOnlyMirrorThread(c.chatId),
+    )
     .sort((a, b) => b.lastUpdated - a.lastUpdated);
 }
 

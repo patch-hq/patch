@@ -24,6 +24,7 @@ function Guarded(): React.JSX.Element {
       confirmCalls += 1;
       return Promise.resolve(answer);
     },
+    dismiss: () => {},
   });
   return (
     <div>
@@ -143,5 +144,54 @@ describe('the guard is removed with the component', () => {
     fireEvent.click(screen.getByText('back button'));
     expect(await screen.findByText('jobs list')).toBeTruthy();
     vi.restoreAllMocks();
+  });
+});
+
+describe('a confirm still open when the route goes away', () => {
+  // Todoist 6hjv43XR267HFww6: "keep editing" modal fired after already having
+  // navigated away. Something else (a redirect, a delete) moved the router while
+  // the modal was up; the modal then sat on the NEXT page offering to keep
+  // editing a form that no longer exists.
+  it('dismisses the modal and drops the held navigation when the guarded route unmounts', async () => {
+    shouldBlock = true;
+    let dismissed = 0;
+    let resolveConfirm: (v: boolean) => void = () => {};
+    let navigateElsewhere: () => void = () => {};
+
+    function Mover(): React.JSX.Element {
+      const navigate = useNavigate();
+      const { pathname } = useLocation();
+      const guard = pathname === '/jobs/j1';
+      navigateElsewhere = () => navigate('/other');
+      return guard ? <Held /> : <p>other page</p>;
+    }
+    function Held(): React.JSX.Element {
+      const navigate = useNavigate();
+      useNavigationGuard({
+        shouldBlock: () => shouldBlock,
+        confirm: () => new Promise<boolean>((r) => (resolveConfirm = r)),
+        dismiss: () => {
+          dismissed += 1;
+        },
+      });
+      return <button onClick={() => navigate('/jobs')}>leave</button>;
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/jobs/j1']}>
+        <Where />
+        <Mover />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('leave'));
+    // Modal is now pending. Route changes by another path (unguarded: shouldBlock off).
+    shouldBlock = false;
+    navigateElsewhere();
+    expect(await screen.findByText('other page')).toBeTruthy();
+    expect(dismissed).toBe(1);
+    // Even if the modal's answer arrives late, it must not move the router.
+    resolveConfirm(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(screen.getByText('at /other')).toBeTruthy();
   });
 });

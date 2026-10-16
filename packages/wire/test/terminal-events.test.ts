@@ -14,11 +14,11 @@ describe('terminal wire frames', () => {
       {
         type: 'patch.terminal.open',
         sessionId: 's1',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         folder: '/home/tom/projects',
       },
       // No folder — "a shell anywhere I can work" (the new-chat case).
-      { type: 'patch.terminal.open', sessionId: 's1', daemonId: 'host-a' },
+      { type: 'patch.terminal.open', sessionId: 's1', hostId: 'host-a' },
       { type: 'patch.terminal.input', sessionId: 's1', data: 'git clone git@x:y.git\n' },
       { type: 'patch.terminal.signal', sessionId: 's1', signal: 'SIGINT' },
       { type: 'patch.terminal.close', sessionId: 's1' },
@@ -58,13 +58,13 @@ describe('terminal wire frames', () => {
 
   it('rejects malformed frames (no silent coercion)', () => {
     const bad = [
-      { type: 'patch.terminal.open', sessionId: 's1', daemonId: 'host-a', folder: '' }, // named-but-empty
-      { type: 'patch.terminal.open', sessionId: '', daemonId: 'host-a', folder: '/x' },
+      { type: 'patch.terminal.open', sessionId: 's1', hostId: 'host-a', folder: '' }, // named-but-empty
+      { type: 'patch.terminal.open', sessionId: '', hostId: 'host-a', folder: '/x' },
       { type: 'patch.terminal.signal', sessionId: 's1', signal: 'SIGKILL' },
       { type: 'patch.terminal.output', sessionId: 's1', stream: 'other', data: 'x' },
       { type: 'patch.terminal.exit', sessionId: 's1', code: 0, reason: 'whatever' },
       { type: 'patch.terminal.error', sessionId: 's1', code: 'nope', message: 'm' },
-      { type: 'patch.terminal.open', sessionId: 's1', daemonId: 'host-a', folder: '/x', extra: 1 }, // strict
+      { type: 'patch.terminal.open', sessionId: 's1', hostId: 'host-a', folder: '/x', extra: 1 }, // strict
     ];
     for (const ev of bad) expect(WireEvent.safeParse(ev).success).toBe(false);
   });
@@ -91,7 +91,7 @@ describe('terminal wire frames', () => {
       {
         type: 'patch.terminal.open',
         sessionId: 's1',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         pty: { cols: 80, rows: 24 },
       },
       { type: 'patch.terminal.resize', sessionId: 's1', cols: 40, rows: 18 },
@@ -104,8 +104,8 @@ describe('terminal wire frames', () => {
 
   it('rejects a nonsense PTY window size', () => {
     const bad = [
-      { type: 'patch.terminal.open', sessionId: 's1', daemonId: 'h', pty: { cols: 0, rows: 24 } },
-      { type: 'patch.terminal.open', sessionId: 's1', daemonId: 'h', pty: { cols: 80 } },
+      { type: 'patch.terminal.open', sessionId: 's1', hostId: 'h', pty: { cols: 0, rows: 24 } },
+      { type: 'patch.terminal.open', sessionId: 's1', hostId: 'h', pty: { cols: 80 } },
       { type: 'patch.terminal.resize', sessionId: 's1', cols: 80, rows: 1.5 },
       { type: 'patch.terminal.resize', sessionId: 's1', cols: 5000, rows: 24 },
     ];
@@ -115,18 +115,18 @@ describe('terminal wire frames', () => {
   it('host files RPC: accepts list / read / write requests and their answers', () => {
     // spec/03 § Host files.
     const good = [
-      { type: 'patch.host_files.request', requestId: 'r', daemonId: 'h', op: 'list' },
+      { type: 'patch.host_files.request', requestId: 'r', hostId: 'h', op: 'list' },
       {
         type: 'patch.host_files.request',
         requestId: 'r',
-        daemonId: 'h',
+        hostId: 'h',
         op: 'read',
         path: '/etc/hosts',
       },
       {
         type: 'patch.host_files.response',
         requestId: 'r',
-        daemonId: 'h',
+        hostId: 'h',
         ok: true,
         path: '/etc/hosts',
         content: 'x',
@@ -136,7 +136,7 @@ describe('terminal wire frames', () => {
       {
         type: 'patch.host_files.response',
         requestId: 'r',
-        daemonId: 'h',
+        hostId: 'h',
         ok: false,
         error: { code: 'conflict', message: 'changed on disk' },
       },
@@ -147,11 +147,11 @@ describe('terminal wire frames', () => {
   it('host files RPC: a request must name its host, and the op set is closed', () => {
     const bad = [
       { type: 'patch.host_files.request', requestId: 'r', op: 'list' },
-      { type: 'patch.host_files.request', requestId: 'r', daemonId: 'h', op: 'delete', path: '/x' },
+      { type: 'patch.host_files.request', requestId: 'r', hostId: 'h', op: 'delete', path: '/x' },
       {
         type: 'patch.host_files.response',
         requestId: 'r',
-        daemonId: 'h',
+        hostId: 'h',
         ok: false,
         error: { code: 'nope', message: 'm' },
       },

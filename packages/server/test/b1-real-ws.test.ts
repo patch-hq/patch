@@ -124,7 +124,7 @@ describe('B1 real WS: host + surface auth, presence, healthz', () => {
     // Register the real host identity (Ed25519 key) in registry.json — the
     // server gates the host hello on this stored public key.
     registry.setDaemonKey({
-      daemonId: 'daemon-real-1',
+      hostId: 'daemon-real-1',
       publicKey: user.publicKey,
       issuedAt: Math.floor(Date.now() / 1000),
     });
@@ -138,7 +138,7 @@ describe('B1 real WS: host + surface auth, presence, healthz', () => {
 
     presence = new PresenceTracker();
 
-    const { app } = await buildAll({ registry, presence, logger: false });
+    const { app } = await buildAll({ registry, presence, logger: false, hostOfflineGraceMs: 0 });
     await app.listen({ port: 0, host: '127.0.0.1' });
     const addr = app.server.address() as AddressInfo;
     const port = addr.port;
@@ -179,45 +179,41 @@ describe('B1 real WS: host + surface auth, presence, healthz', () => {
     );
     await surfaceLog.waitForCount('auth.ok', 1);
     // Greeting: host currently offline.
-    await surfaceLog.waitForCount('daemon.offline', 1);
+    await surfaceLog.waitForCount('host.offline', 1);
 
     // 2. Real host connects with a genuine EdDSA-JWT daemonKey signed by the
     //    user's private key and verified against the stored public key (jose).
     const daemonKey = await mintDaemonKey({
       userPrivateKey: user.privateKey,
-      daemonId: 'daemon-real-1',
+      hostId: 'daemon-real-1',
       label: 'hetzner',
     });
     const daemon = connect(harness.url);
     await waitOpen(daemon);
-    daemon.send(
-      encode({ type: 'hello', clientType: 'daemon', clientVersion: '1', auth: daemonKey }),
-    );
+    daemon.send(encode({ type: 'hello', clientType: 'host', clientVersion: '1', auth: daemonKey }));
     // daemon.online fans out to the connected surface — proves the real
     // daemonKey was accepted by jose verification against the registered key.
-    await surfaceLog.waitForCount('daemon.online', 1);
+    await surfaceLog.waitForCount('host.online', 1);
 
     // 3. Drop the host socket → a second daemon.offline fans out.
     daemon.close();
-    await surfaceLog.waitForCount('daemon.offline', 2);
+    await surfaceLog.waitForCount('host.offline', 2);
 
     surface.close();
   });
 
   it('forged-key host JWT is rejected immediately after hello (close 4401)', async () => {
-    // A second, UNKNOWN keypair signs a daemonKey for the real daemonId.
+    // A second, UNKNOWN keypair signs a daemonKey for the real hostId.
     const forger = generateUserKeypair();
     const forgedKey = await mintDaemonKey({
       userPrivateKey: forger.privateKey,
-      daemonId: 'daemon-real-1',
+      hostId: 'daemon-real-1',
       label: 'hetzner',
     });
     const daemon = connect(harness.url);
     await waitOpen(daemon);
     const closePromise = waitClose(daemon);
-    daemon.send(
-      encode({ type: 'hello', clientType: 'daemon', clientVersion: '1', auth: forgedKey }),
-    );
+    daemon.send(encode({ type: 'hello', clientType: 'host', clientVersion: '1', auth: forgedKey }));
     const code = await closePromise;
     expect(code).toBe(4401);
   });

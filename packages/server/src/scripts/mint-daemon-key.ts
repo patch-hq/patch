@@ -9,7 +9,7 @@
 //   2) bootstrap the singleton account in <dataDir>/registry.json if absent
 //   3) mint a long-lived daemon-key EdDSA-JWT (signed by the user private key)
 //   4) record it in the registry via setDaemonKey — REQUIRED: the server's WS
-//      hello gate rejects a host whose daemonId has no DaemonKeyRecord
+//      hello gate rejects a host whose hostId has no DaemonKeyRecord
 //   5) write the daemonKey to <patchHome>/daemon.key so the host picks it up
 //      on boot instead of falling into the QR registration flow
 //
@@ -46,7 +46,7 @@ function fail(msg: string): never {
 function parseArgs(argv: string[]): {
   dataDir: string;
   patchHome: string | null;
-  daemonId: string;
+  hostId: string;
   label: string;
 } {
   const args = new Map<string, string>();
@@ -66,7 +66,7 @@ function parseArgs(argv: string[]): {
   return {
     dataDir: dataDir!,
     patchHome: args.get('patch-home') ?? null,
-    daemonId: args.get('daemon-id') ?? 'dev-daemon-1',
+    hostId: args.get('daemon-id') ?? 'dev-daemon-1',
     label: args.get('label') ?? 'local-dev',
   };
 }
@@ -108,13 +108,13 @@ async function main(): Promise<void> {
 
   const daemonKey = await mintDaemonKey({
     userPrivateKey: keypair.privateKey,
-    daemonId: args.daemonId,
+    hostId: args.hostId,
     label: args.label,
   });
 
   // REQUIRED so the server's WS hello gate accepts this host.
   registry.setDaemonKey({
-    daemonId: args.daemonId,
+    hostId: args.hostId,
     publicKey: keypair.publicKey,
     issuedAt: Date.now(),
   });
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     JSON.stringify(
       {
-        daemonId: args.daemonId,
+        hostId: args.hostId,
         label: args.label,
         accountPublicKey: keypair.publicKey,
         daemonKeyPath,

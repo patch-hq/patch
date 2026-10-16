@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('POST /api/jobs/recurrence/translate', () => {
   let dir: string;
@@ -41,33 +41,33 @@ describe('POST /api/jobs/recurrence/translate', () => {
     });
     // `d1` must be a REGISTERED machine — every host-addressed route refuses
     // an id that is not (spec/04 § Spawn).
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     return { registry, jwt };
   }
 
-  /** Wire `daemonLink.send` to answer every translate request with `rrule` (or `error` if given). */
-  function stubDaemonAnswer(
-    daemonLink: InProcessDaemonLink,
+  /** Wire `hostLink.send` to answer every translate request with `rrule` (or `error` if given). */
+  function stubHostAnswer(
+    hostLink: InProcessHostLink,
     answer: { rrule: string } | { error: string },
   ): void {
-    const origSend = daemonLink.send.bind(daemonLink);
-    daemonLink.send = (surfaceId, event) => {
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId, event) => {
       origSend(surfaceId, event);
       if (event.type !== 'patch.recurrence.translate.request') return;
       setImmediate(() => {
-        daemonLink.emit(
+        hostLink.emit(
           'rrule' in answer
             ? {
                 type: 'patch.recurrence.translate.response',
                 requestId: event.requestId,
-                daemonId: 'd1',
+                hostId: 'd1',
                 ok: true,
                 rrule: answer.rrule,
               }
             : {
                 type: 'patch.recurrence.translate.response',
                 requestId: event.requestId,
-                daemonId: 'd1',
+                hostId: 'd1',
                 ok: false,
                 error: answer.error,
               },
@@ -78,17 +78,17 @@ describe('POST /api/jobs/recurrence/translate', () => {
 
   it('translates a phrase into an rrule + English description on success', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    stubDaemonAnswer(daemonLink, {
+    const hostLink = new InProcessHostLink();
+    stubHostAnswer(hostLink, {
       rrule: 'FREQ=MONTHLY;BYDAY=SU;BYSETPOS=3;BYMONTH=5,6,7,8;BYHOUR=9;BYMINUTE=0',
     });
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', phrase: 'every 3rd Sunday between May and August' },
+        payload: { hostId: 'd1', phrase: 'every 3rd Sunday between May and August' },
       });
       expect(res.statusCode).toBe(200);
       const body = res.json() as { rrule: string; description: string };
@@ -103,15 +103,15 @@ describe('POST /api/jobs/recurrence/translate', () => {
 
   it("maps the host's own ok:false (e.g. model said UNSURE) to 422", async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    stubDaemonAnswer(daemonLink, { error: 'could not confidently translate that phrase' });
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    stubHostAnswer(hostLink, { error: 'could not confidently translate that phrase' });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', phrase: 'sometime, whenever, you know' },
+        payload: { hostId: 'd1', phrase: 'sometime, whenever, you know' },
       });
       expect(res.statusCode).toBe(422);
       const body = res.json() as { error: string; message: string };
@@ -124,15 +124,15 @@ describe('POST /api/jobs/recurrence/translate', () => {
 
   it('rejects a syntactically invalid rrule from the host rather than saving it (422)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    stubDaemonAnswer(daemonLink, { rrule: 'FREQ=BOGUS' });
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    stubHostAnswer(hostLink, { rrule: 'FREQ=BOGUS' });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', phrase: 'whenever' },
+        payload: { hostId: 'd1', phrase: 'whenever' },
       });
       expect(res.statusCode).toBe(422);
       const body = res.json() as { error: string; message: string };
@@ -145,18 +145,18 @@ describe('POST /api/jobs/recurrence/translate', () => {
 
   it('rejects a syntactically valid rrule the describer cannot confirm (422, not a silent save)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     // Valid RRULE (BYMONTHDAY is real RFC 5545), but outside the narrow shape
     // describeRecurrence confidently phrases — exactly the case that must
     // fail loudly rather than confirm a rule Tom never actually saw in English.
-    stubDaemonAnswer(daemonLink, { rrule: 'FREQ=MONTHLY;BYMONTHDAY=15;BYHOUR=9;BYMINUTE=0' });
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    stubHostAnswer(hostLink, { rrule: 'FREQ=MONTHLY;BYMONTHDAY=15;BYHOUR=9;BYMINUTE=0' });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', phrase: 'the 15th of every month' },
+        payload: { hostId: 'd1', phrase: 'the 15th of every month' },
       });
       expect(res.statusCode).toBe(422);
       const body = res.json() as { error: string; message: string };
@@ -167,16 +167,16 @@ describe('POST /api/jobs/recurrence/translate', () => {
     }
   });
 
-  it('rejects an unregistered daemonId (404), not a guess about which host', async () => {
+  it('rejects an unregistered hostId (404), not a guess about which host', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'no-such-host', phrase: 'every Sunday at 9am' },
+        payload: { hostId: 'no-such-host', phrase: 'every Sunday at 9am' },
       });
       expect(res.statusCode).toBe(404);
       expect((res.json() as { error: string }).error).toBe('unknown_host');
@@ -187,14 +187,14 @@ describe('POST /api/jobs/recurrence/translate', () => {
 
   it('rejects a request with no phrase (400)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1' },
+        payload: { hostId: 'd1' },
       });
       expect(res.statusCode).toBe(400);
     } finally {
@@ -204,13 +204,13 @@ describe('POST /api/jobs/recurrence/translate', () => {
 
   it('rejects an unauthenticated request (401)', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
-        payload: { daemonId: 'd1', phrase: 'every Sunday at 9am' },
+        payload: { hostId: 'd1', phrase: 'every Sunday at 9am' },
       });
       expect(res.statusCode).toBe(401);
     } finally {
@@ -220,14 +220,14 @@ describe('POST /api/jobs/recurrence/translate', () => {
 
   it('times out as 504 when the host never answers', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    // No stub — daemonLink.send is a no-op reply-wise, so the request hangs
+    const hostLink = new InProcessHostLink();
+    // No stub — hostLink.send is a no-op reply-wise, so the request hangs
     // until the route's own timeout fires. Shortened via the test-only
     // override so this doesn't cost the suite the real 25s production window.
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink,
+      hostLink,
       recurrenceTranslateTimeoutMs: 100,
     });
     try {
@@ -235,7 +235,7 @@ describe('POST /api/jobs/recurrence/translate', () => {
         method: 'POST',
         url: '/api/jobs/recurrence/translate',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', phrase: 'every Sunday at 9am' },
+        payload: { hostId: 'd1', phrase: 'every Sunday at 9am' },
       });
       expect(res.statusCode).toBe(504);
     } finally {

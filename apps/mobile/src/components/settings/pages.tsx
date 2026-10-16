@@ -1,5 +1,5 @@
 // The Settings pages, their groups and their order (design/settings-redesign):
-// Agents — Usage, Agent, MCP, Memories, Manager, Goals, Voice; Setup — Hosts, Keys,
+// Agents — Usage, Agent, MCP, Memories, Manager, Goals, Voice, Hooks, Computer use; Setup — Hosts, Keys,
 // Devices; System — Updates, Account. The Settings tab lists them; each opens
 // as its own screen at /settings/<id> (app/settings/[page].tsx).
 
@@ -12,8 +12,11 @@ import { HostsPage, KeysPage } from './HostsSection';
 import { McpPage } from './McpSection';
 import { MemoriesPage } from './MemoriesSection';
 import { GoalsPage } from './GoalsSection';
+import { ComputerUsePage } from './ComputerUseSection';
+import { HooksPage } from './HooksSection';
 import { ManagerPage, VoicePage } from './PreferenceSections';
 import { UpdatesPage } from './VersionSection';
+import { AgentIdentityPage } from './AgentIdentitySection';
 
 export type SettingsGroup = 'Agents' | 'Setup' | 'System';
 
@@ -32,7 +35,10 @@ export const SETTINGS_PAGES: readonly SettingsPageEntry[] = [
   { id: 'manager', title: 'Manager', group: 'Agents', Page: ManagerPage },
   { id: 'goals', title: 'Goals', group: 'Agents', Page: GoalsPage },
   { id: 'voice', title: 'Voice', group: 'Agents', Page: VoicePage },
+  { id: 'hooks', title: 'Hooks', group: 'Agents', Page: HooksPage },
+  { id: 'computer', title: 'Computer use', group: 'Agents', Page: ComputerUsePage },
   { id: 'hosts', title: 'Hosts', group: 'Setup', Page: HostsPage },
+  { id: 'identity', title: 'Agent identity', group: 'Setup', Page: AgentIdentityPage },
   { id: 'keys', title: 'Keys', group: 'Setup', Page: KeysPage },
   { id: 'devices', title: 'Devices', group: 'Setup', Page: DevicesPage },
   { id: 'updates', title: 'Updates', group: 'System', Page: UpdatesPage },

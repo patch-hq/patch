@@ -3,7 +3,7 @@
 // from it, and a fork point offers a track switcher.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
@@ -25,7 +25,7 @@ function seedChat(chatId: string, timeline: ChatEventEntry[]): void {
   useChatStore.getState().hydrate([
     {
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'foo',
@@ -367,5 +367,104 @@ describe('switching between tracks at a fork point', () => {
     });
     renderChat('c-fork');
     expect(screen.queryByTestId('track-switcher')).toBeNull();
+  });
+});
+
+describe('Retry on the message hover button and context menu', () => {
+  const wsWith = (send: ReturnType<typeof vi.fn>) =>
+    ({ send, requestReplay() {} }) as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+
+  it('hover button on a settled user turn resends its text as a new turn', () => {
+    const send = vi.fn();
+    seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
+    renderChat('c-fork', wsWith(send));
+    fireEvent.click(screen.getByTestId('msg-retry-trigger'));
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'chat.input', chatId: 'c-fork', message: 'ask one' }),
+    );
+  });
+
+  it('right-click menu offers Retry on a user turn and it resends', () => {
+    const send = vi.fn();
+    seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
+    renderChat('c-fork', wsWith(send));
+    fireEvent.contextMenu(screen.getByTestId('msg'));
+    fireEvent.click(screen.getByText('Retry'));
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'chat.input', message: 'ask one' }),
+    );
+  });
+
+  it('Retry on an assistant reply re-runs the user message it answered', () => {
+    const send = vi.fn();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', wsWith(send));
+    fireEvent.click(screen.getAllByTestId('msg-retry-trigger')[1]!);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'chat.input', chatId: 'c-fork', message: 'ask one' }),
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('Retry takes the old reply off screen and shows the switcher at once, before the host answers', () => {
+    const send = vi.fn();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', wsWith(send));
+    expect(screen.queryByTestId('attempt-switcher')).toBeNull();
+    fireEvent.click(screen.getAllByTestId('msg-retry-trigger')[1]!);
+    expect(screen.queryByText('answer one')).toBeNull();
+    expect(screen.getByTestId('attempt-count').textContent).toBe('2/2');
+  });
+
+  it('then only the new reply shows, and ‹ walks back to the old one', () => {
+    const send = vi.fn();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', wsWith(send));
+    fireEvent.click(screen.getAllByTestId('msg-retry-trigger')[1]!);
+    act(() => {
+      const s = useChatStore.getState();
+      s.applyEvent({
+        type: 'chat.message',
+        chatId: 'c-fork',
+        role: 'user',
+        content: 'ask one',
+        seq: 6,
+        retryOfSeq: 4,
+      });
+      s.applyEvent({
+        type: 'chat.message',
+        chatId: 'c-fork',
+        role: 'assistant',
+        content: 'answer two',
+        seq: 7,
+      });
+    });
+    expect(screen.queryByText('answer one')).toBeNull();
+    expect(screen.getByText('answer two')).toBeTruthy();
+    expect(screen.getByTestId('attempt-count').textContent).toBe('2/2');
+    fireEvent.click(screen.getByTestId('attempt-prev'));
+    expect(screen.getByText('answer one')).toBeTruthy();
+    expect(screen.queryByText('answer two')).toBeNull();
+  });
+
+  it('assistant right-click menu offers Retry', () => {
+    const send = vi.fn();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', wsWith(send));
+    fireEvent.contextMenu(screen.getAllByTestId('msg')[1]!);
+    fireEvent.click(screen.getByText('Retry'));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ message: 'ask one' }));
   });
 });

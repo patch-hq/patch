@@ -75,7 +75,7 @@ function row(overrides: Partial<HydrateRow> & { chatId: string }): HydrateRow {
 
 function hit(overrides: Partial<ChatSearchHit> & { chatId: string }): ChatSearchHit {
   return {
-    daemonId: 'd1',
+    hostId: 'd1',
     name: null,
     preview: null,
     folder: '/home/tom/work',
@@ -93,7 +93,7 @@ function hit(overrides: Partial<ChatSearchHit> & { chatId: string }): ChatSearch
   };
 }
 
-const SEARCHED: ChatSearchHostResult = { daemonId: 'd1', hostName: 'box', state: 'searched' };
+const SEARCHED: ChatSearchHostResult = { hostId: 'd1', hostName: 'box', state: 'searched' };
 
 function answer(
   hits: ChatSearchHit[],
@@ -207,6 +207,18 @@ describe('one character — the instant local filter', () => {
     expect(hasText(r.root, 'Snoozed ▸')).toBe(true);
   });
 
+  it('a search that matches nothing on a phone with no archived or hidden chats still says "No matches", not "No chats yet"', async () => {
+    useChatStore
+      .getState()
+      .hydrate([row({ chatId: 'only', name: 'Only chat', folder: '/a', lastUpdated: 1 })]);
+    const r = renderRN(<ChatsScreen />);
+    await actAsync(async () => undefined);
+    openSearch(r);
+    type(r, 'q');
+    expect(hasText(r.root, 'No matches')).toBe(true);
+    expect(hasText(r.root, 'No chats yet')).toBe(false);
+  });
+
   it('one character that matches nothing shows the chat-search empty state', () => {
     hydrateEverySection();
     const r = renderRN(<ChatsScreen />);
@@ -310,7 +322,7 @@ describe('server search — results', () => {
     usePresenceStore.setState({
       hosts: {
         d1: {
-          daemonId: 'd1',
+          hostId: 'd1',
           online: false,
           lastSeenAt: null,
           host: { hostName: 'Mac' } as never,
@@ -321,10 +333,10 @@ describe('server search — results', () => {
     searchSpy.mockResolvedValue(
       answer([], {
         hosts: [
-          { daemonId: 'd1', hostName: 'macbook', state: 'offline' },
-          { daemonId: 'd2', hostName: 'Box', state: 'timeout' },
-          { daemonId: 'd3', hostName: null, state: 'error', message: 'disk full' },
-          { daemonId: 'd4', hostName: 'Searched', state: 'searched' },
+          { hostId: 'd1', hostName: 'macbook', state: 'offline' },
+          { hostId: 'd2', hostName: 'Box', state: 'timeout' },
+          { hostId: 'd3', hostName: null, state: 'error', message: 'disk full' },
+          { hostId: 'd4', hostName: 'Searched', state: 'searched' },
         ],
       }),
     );
@@ -475,7 +487,7 @@ describe('server search — results', () => {
     searchSpy.mockResolvedValue(
       answer([
         hit({ chatId: 'c1', name: 'chat_01ABC', preview: 'First words' }),
-        hit({ chatId: 'c2', daemonId: 'gone' }),
+        hit({ chatId: 'c2', hostId: 'gone' }),
       ]),
     );
     const r = renderRN(<ChatsScreen />);
@@ -525,7 +537,7 @@ describe('search — archived rows', () => {
         {
           chatId: 'a9',
           name: 'Old pancakes',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/old',
           activity: 'idle',
           permissionMode: 'default',

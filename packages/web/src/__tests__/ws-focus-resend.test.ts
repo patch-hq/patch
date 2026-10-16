@@ -86,7 +86,7 @@ describe('PatchWs — auth.ok resends the currently-open chat focus', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c-held',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'held',
         folder: 'foo',

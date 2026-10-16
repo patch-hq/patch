@@ -15,7 +15,7 @@ import { verifySurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { FolderRegistry } from './folder-registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from './host-addressing.js';
 
 export async function requireAuth(
@@ -46,7 +46,7 @@ export interface FolderRoutesDeps {
   logger: Logger;
   registry: Registry;
   folderRegistry: FolderRegistry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   idGenerator: () => string;
 }
 
@@ -76,7 +76,7 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
 
   // ---- GET /api/folders/browse?dir=<abs> ----
   // spec/04 § Browsing (directory listing) — the folder BROWSER. Round-trips
-  // `patch.folders.browse.request` over the daemon-link (the host owns the
+  // `patch.folders.browse.request` over the host-link (the host owns the
   // project filesystem) and returns its child-directory listing. With no `dir`
   // the host returns its browsable roots. NO FALLBACK: a dir escaping the
   // project roots → 404 folder_not_found; timeout → 504.
@@ -87,7 +87,7 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.folders.browse.response') return;
     const w = browsePending.get(event.requestId);
     if (!w) return;
@@ -95,7 +95,7 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
     clearTimeout(w.timeout);
     w.resolve(event);
   });
-  app.get<{ Querystring: { dir?: string; daemonId?: string } }>(
+  app.get<{ Querystring: { dir?: string; hostId?: string } }>(
     '/api/folders/browse',
     async (req, reply) => {
       let auth;
@@ -113,16 +113,16 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
       // Browsing is addressed to ONE host — the surface must say which, because
       // it is never the surface's own filesystem being browsed (spec/04 §
       // Browsing).
-      const daemonId = (req.query?.daemonId ?? '').toString().trim();
-      if (!daemonId) {
-        return reply.code(400).send({ error: 'invalid query', message: 'daemonId is required' });
+      const hostId = (req.query?.hostId ?? '').toString().trim();
+      if (!hostId) {
+        return reply.code(400).send({ error: 'invalid query', message: 'hostId is required' });
       }
       // …and it must be a machine this account registered. Browsing an unknown
       // machine's filesystem must not fall through to whichever host is
       // attached — that would list the wrong host's directories.
-      const unknownHost = checkRegisteredHost(deps.registry, daemonId);
+      const unknownHost = checkRegisteredHost(deps.registry, hostId);
       if (unknownHost) {
-        deps.logger.warn({ daemonId }, 'GET /api/folders/browse rejected: unregistered daemonId');
+        deps.logger.warn({ hostId }, 'GET /api/folders/browse rejected: unregistered hostId');
         return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
       }
       const dir = (req.query?.dir ?? '').toString().trim();
@@ -135,10 +135,10 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
           resolveP('timeout');
         }, BROWSE_REQUEST_TIMEOUT_MS);
         browsePending.set(requestId, { resolve: resolveP, timeout });
-        deps.daemonLink.send(auth.surfaceId, {
+        deps.hostLink.send(auth.surfaceId, {
           type: 'patch.folders.browse.request',
           requestId,
-          daemonId,
+          hostId,
           // Empty dir → omit so the host returns its browsable roots.
           ...(dir ? { dir } : {}),
         });
@@ -154,7 +154,7 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
           .send({ error: code, message: result.error?.message ?? 'browse error' });
       }
       return reply.code(200).send({
-        daemonId: result.daemonId,
+        hostId: result.hostId,
         dir: result.dir ?? null,
         parent: result.parent ?? null,
         entries: result.entries ?? [],

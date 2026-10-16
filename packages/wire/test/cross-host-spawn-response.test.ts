@@ -14,7 +14,7 @@ const ok = {
   type: 'patch.spawn.response',
   requestId: 'req-1',
   sourceChatId: 'chat-src',
-  daemonId: 'host-b',
+  hostId: 'host-b',
   folder: '/work/qa',
   ok: true,
   chatId: 'chat-new',
@@ -30,7 +30,7 @@ describe('patch.spawn.response', () => {
       type: 'patch.spawn.response',
       requestId: 'req-1',
       sourceChatId: 'chat-src',
-      daemonId: 'host-b',
+      hostId: 'host-b',
       folder: '/work/qa',
       ok: false,
       error: { code: 'no_model_catalogue', message: 'never read a model catalogue' },
@@ -39,11 +39,11 @@ describe('patch.spawn.response', () => {
   });
 
   it('requires the machine that answered — an error that names no host is unactionable', () => {
-    const { daemonId: _drop, ...noHost } = ok;
+    const { hostId: _drop, ...noHost } = ok;
     void _drop;
     const res = PatchSpawnResponseEvent.safeParse(noHost);
     expect(res.success).toBe(false);
-    expect(res.success ? [] : res.error.issues.map((i) => i.path.join('.'))).toContain('daemonId');
+    expect(res.success ? [] : res.error.issues.map((i) => i.path.join('.'))).toContain('hostId');
   });
 
   it('requires the requestId — an answer nobody can correlate resolves nothing', () => {
@@ -77,7 +77,7 @@ describe('patch.spawn.response', () => {
     const res = PatchSpawnEvent.safeParse({
       type: 'patch.spawn',
       sourceChatId: 'chat-src',
-      daemonId: 'host-b',
+      hostId: 'host-b',
       folder: '/work/qa',
       prompt: 'hi',
       requestId: 'req-1',
@@ -88,7 +88,7 @@ describe('patch.spawn.response', () => {
       PatchSpawnEvent.safeParse({
         type: 'patch.spawn',
         sourceChatId: 'chat-src',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         folder: '/work/qa',
         prompt: 'hi',
       }).success,

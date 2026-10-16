@@ -15,6 +15,7 @@ import {
   update,
   actAsync,
   flush,
+  flushMicrotasks,
 } from './testUtils/render';
 import { __clearAllMmkv } from './stubs/mmkv';
 import { usePresenceStore } from '../src/stores/presenceStore';
@@ -25,6 +26,12 @@ import { useComposerDraftStore } from '../src/lib/composerDraft';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 
 const { skillsSpy } = vi.hoisted(() => ({ skillsSpy: vi.fn() }));
+// Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
+
 vi.mock('../src/api/rest', () => ({
   api: { skills: skillsSpy, uploadAttachment: vi.fn() },
 }));
@@ -35,7 +42,7 @@ let submitSpy: ReturnType<typeof vi.spyOn>;
 
 // Tracked so `afterEach` can unmount every instance — a lingering one from a
 // prior test re-renders on THIS test's own `hydrate()` call below and, now
-// that the skill fetch reads `row.daemonId`, can fire an extra `api.skills`
+// that the skill fetch reads `row.hostId`, can fire an extra `api.skills`
 // through the same shared `skillsSpy` mock (see Composer.skills.test.tsx).
 const renderers: ReactTestRenderer[] = [];
 function renderRN(element: React.ReactElement): ReactTestRenderer {
@@ -59,11 +66,11 @@ beforeEach(() => {
   });
   useChatStore.getState()._reset();
   // Skills are per-host (Todoist 6hfrrmrhG6GM3V36) — the fetch needs `c1`'s
-  // row to carry a daemonId.
+  // row to carry a hostId.
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       name: 'Chat',
       folder: 'work',
       activity: 'idle',
@@ -189,6 +196,7 @@ describe('Composer — skill chips (mobile)', () => {
     });
     update(r, <Composer chatId="c1" folder="work" />);
     findHost(r.root, byLabel('Send message')).props['onPress']();
+    await flushMicrotasks();
     expect(submitSpy).toHaveBeenCalledTimes(1);
     const [, text] = submitSpy.mock.calls[0] as [string, string];
     expect(text).toBe('please run /plant now');

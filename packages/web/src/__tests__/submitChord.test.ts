@@ -4,7 +4,7 @@
 // drifts with it, which is the whole reason it exists.
 
 import { describe, it, expect } from 'vitest';
-import { isSubmitChord, type SubmitChordEvent } from '../lib/submitChord.js';
+import { isSubmitChord, isPlainEnter, type SubmitChordEvent } from '../lib/submitChord.js';
 
 function key(over: Partial<SubmitChordEvent> = {}): SubmitChordEvent {
   return {
@@ -50,5 +50,15 @@ describe('isSubmitChord', () => {
     expect(isSubmitChord(key({ metaKey: true, isComposing: true }))).toBe(false);
     expect(isSubmitChord(key({ metaKey: true, nativeEvent: { isComposing: false } }))).toBe(true);
     expect(isSubmitChord(key({ metaKey: true, isComposing: false }))).toBe(true);
+  });
+});
+
+describe('isPlainEnter', () => {
+  const base = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
+  it('is Enter, except while an IME is composing', () => {
+    expect(isPlainEnter({ ...base, key: 'Enter' })).toBe(true);
+    expect(isPlainEnter({ ...base, key: 'a' })).toBe(false);
+    expect(isPlainEnter({ ...base, key: 'Enter', isComposing: true })).toBe(false);
+    expect(isPlainEnter({ ...base, key: 'Enter', nativeEvent: { isComposing: true } })).toBe(false);
   });
 });

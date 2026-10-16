@@ -9,7 +9,7 @@
 import React, { type ReactElement } from 'react';
 import type { ChatRow } from '../stores/types';
 import { OfflineBanner } from './OfflineBanner';
-import { DaemonOfflineBanner } from './DaemonOfflineBanner';
+import { HostOfflineBanner } from './HostOfflineBanner';
 import { WakeBar } from './WakeBar';
 import { BackgroundTaskBar } from './BackgroundTaskBar';
 import { SnoozedBanner } from './SnoozedBanner';
@@ -21,6 +21,7 @@ import { HiddenBar } from './chatBars/HiddenBar';
 import { ArchivedBar } from './chatBars/ArchivedBar';
 import { ClaudeDisconnectedBar } from './chatBars/ClaudeDisconnectedBar';
 import { ArtifactBar } from './chatBars/ArtifactBar';
+import { BrowserHandoffBar } from './chatBars/BrowserHandoffBar';
 import { JobBar } from './chatBars/JobBar';
 
 export function ChatBars({
@@ -35,21 +36,22 @@ export function ChatBars({
       {/* WS-reconnecting and daemon-offline are DISTINCT states, each with its
           own self-gating banner (spec/12 § Daemon-offline UX). */}
       <OfflineBanner />
-      <DaemonOfflineBanner />
+      <HostOfflineBanner />
       {row ? <JobBar row={row} /> : null}
       {row ? <GoalBar row={row} /> : null}
-      {row ? <TaskBar row={row} /> : null}
+      {row ? <TaskBar key={`tasks-${row.chatId}`} row={row} /> : null}
       {row ? <ReminderBar row={row} /> : null}
       <ProviderContextBar chatId={chatId} />
       <WakeBar row={row} />
       <BackgroundTaskBar chatId={chatId} />
+      <BrowserHandoffBar chatId={chatId} />
       <ArtifactBar chatId={chatId} />
       {row ? <ArchivedBar row={row} /> : null}
       {row ? <HiddenBar row={row} /> : null}
       <SnoozedBanner row={row} />
       {/* Credentials are per host: this speaks only for the machine THIS chat
           runs on. */}
-      {row ? <ClaudeDisconnectedBar daemonId={row.daemonId} model={row.model} /> : null}
+      {row ? <ClaudeDisconnectedBar model={row.model} /> : null}
     </>
   );
 }

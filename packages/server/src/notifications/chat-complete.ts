@@ -66,6 +66,12 @@ export class ChatCompletionNotifier {
   private readonly now: () => number;
   /** Last observed activity per chat, so a transition can be told from a repeat. */
   private readonly lastActivity = new Map<string, ChatSummary['activity']>();
+  /**
+   * Chats whose user turn has settled but which still owe work (spec/09 § A
+   * chat that is not done yet). The ring waits for the real finish, which may
+   * arrive on a machine turn or on no turn at all (a goal being met).
+   */
+  private readonly owed = new Set<string>();
 
   constructor(deps: ChatCompletionNotifierDeps) {
     this.deps = deps;
@@ -88,10 +94,14 @@ export class ChatCompletionNotifier {
       return;
     }
 
-    // Only the running → idle edge. A chat spawns idle, and a later `chat.state`
-    // carrying the async-generated status summary is idle → idle; neither is a
-    // completed turn.
-    if (event.activity !== 'idle' || previous !== 'running') return;
+    // The running → idle edge, or an idle frame for a chat that is owed a ring
+    // (spec/09 § A chat that is not done yet). A chat spawns idle, and a later
+    // `chat.state` carrying the async-generated status summary is idle → idle;
+    // neither is a completed turn unless something is owed.
+    const edge = previous === 'running';
+    if (event.activity !== 'idle' || !(edge || (previous === 'idle' && this.owed.has(chatId)))) {
+      return;
+    }
 
     // spec/09 § Whose turn it was. A chat finishing is only news if the user is
     // waiting on it. A turn the host started for itself — a self-wake tick, a
@@ -100,7 +110,7 @@ export class ChatCompletionNotifier {
     // doorbell all day. Absent means `user`: a host predating the field never
     // sends one, and reading that as `user` keeps the behaviour it already had
     // instead of silencing it.
-    if (event.turnOrigin === 'machine') return;
+    if (edge && event.turnOrigin !== 'machine') this.owed.add(chatId);
 
     // spec/09 § A turn the user stopped. A chat the user interrupted did not
     // finish, and saying it did is simply false — they pressed stop, so they
@@ -117,7 +127,21 @@ export class ChatCompletionNotifier {
     // Absent means NOT stopped: a host predating the field never sends it, so
     // its chats keep announcing a stopped turn as finished rather than falling
     // silent on turns that really did complete.
-    if (event.turnStopped === true) return;
+    if (event.turnStopped === true) {
+      this.owed.delete(chatId);
+      return;
+    }
+
+    // spec/09 § A chat that is not done yet. The turn settled, but a backgrounded
+    // command or sub-agent is still running, or the chat's goal is not yet met:
+    // the chat has not finished, and what finishes it is a machine turn (or
+    // nothing) that is silent on its own. Hold the ring until nothing is owed.
+    // Absent `backgroundTasks` is not a count, so it holds nothing back.
+    if (!this.owed.has(chatId)) return;
+    const goal =
+      event.goal !== undefined ? event.goal : (this.deps.chats.get(chatId)?.goal ?? null);
+    if ((event.backgroundTasks ?? 0) > 0 || goal !== null) return;
+    this.owed.delete(chatId);
 
     // The special threads each reach the user through their own channel already,
     // and the Manager's turn ending is caused by other chats finishing rather
@@ -193,6 +217,7 @@ export class ChatCompletionNotifier {
    */
   private notifyFailed(event: Extract<WireEvent, { type: 'chat.state' }>): void {
     const chatId = event.chatId;
+    this.owed.delete(chatId);
     if (event.turnRetrying === true) return;
     if (isTransientChatError(event.lastError?.code)) return;
     if (event.turnOrigin === 'machine') return;
@@ -273,7 +298,11 @@ export class ChatCompletionNotifier {
 /** An error message cut to notification length on one line. */
 function oneLine(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > FAILURE_REASON_MAX ? `${flat.slice(0, FAILURE_REASON_MAX - 1)}…` : flat;
+  // Cut on code points: a code-unit slice can split an emoji's surrogate pair.
+  const chars = Array.from(flat);
+  return chars.length > FAILURE_REASON_MAX
+    ? `${chars.slice(0, FAILURE_REASON_MAX - 1).join('')}…`
+    : flat;
 }
 
 const FAILURE_REASON_MAX = 200;

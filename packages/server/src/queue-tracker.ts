@@ -27,6 +27,7 @@ export class QueueTracker {
           localId: event.localId,
           message: event.message,
           queueSeq: event.queueSeq,
+          ...(event.ownTurn ? { ownTurn: true } : {}),
         });
         return;
       }
@@ -44,11 +45,11 @@ export class QueueTracker {
         // A chat that is not running cannot be holding anything behind a turn.
         if (event.activity === 'idle') this.queues.delete(event.chatId);
         return;
-      case 'daemon.offline':
+      case 'host.offline':
         // The host's queue is gone with the host's process; it announces what
         // it still holds again when it comes back.
         for (const chatId of [...this.queues.keys()]) {
-          if (this.chats.get(chatId)?.daemonId === event.daemonId) this.queues.delete(chatId);
+          if (this.chats.get(chatId)?.hostId === event.hostId) this.queues.delete(chatId);
         }
         return;
       default:

@@ -11,7 +11,7 @@
 
 import React from 'react';
 import { Alert, Linking, View } from 'react-native';
-import type { AccountStrategy, DaemonAccountSummary } from '@patch/wire';
+import type { AccountStrategy, HostAccountSummary } from '@patch/wire';
 import { api, type SharedBackendId, type SharedState } from '../../api/rest';
 import { space } from '../../lib/theme';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore';
@@ -22,6 +22,7 @@ import { moveAccount, moveItems, Rank, RowMenu, TokenEntry, UsageBars } from './
 import { hostLabel, sendToHost } from './hostSend';
 import { NoticeRow } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
+import { UsageHistorySection } from './UsageHistorySection';
 import { patchShared, writeShared } from './sharedWrite';
 import {
   ButtonRow,
@@ -54,11 +55,21 @@ type SharedRow = SharedState['secrets']['claude'][number] | SharedState['secrets
 
 export function UsagePage(): React.ReactElement {
   const shared = useSettingsStore((s) => s.data?.shared ?? null);
+  const error = useSettingsStore((s) => s.error);
   return (
     <SettingsPage title="Usage" testID="settings-page-usage">
+      <UsageHistorySection />
       {shared === null ? (
         <SettingsSection title="Claude">
-          <NoticeRow testID="usage-loading" text="Settings haven’t loaded yet" />
+          {error ? (
+            <ErrorLine
+              testID="usage-error"
+              message={`Couldn’t load settings: ${error}`}
+              onRetry={() => void useSettingsStore.getState().load()}
+            />
+          ) : (
+            <NoticeRow testID="usage-loading" text="Settings haven’t loaded yet" />
+          )}
         </SettingsSection>
       ) : (
         <>
@@ -75,6 +86,22 @@ export function UsagePage(): React.ReactElement {
               value={data.preferences.autoResumeRateLimit}
               onChange={(next) => void patchShared('Auto-resume', { autoResumeRateLimit: next })}
             />
+            <ToggleRow
+              label="Generate chat titles"
+              testID="title-generation"
+              value={data.preferences.titleGenerationEnabled}
+              onChange={(next) =>
+                void patchShared('Title generation', { titleGenerationEnabled: next })
+              }
+            />
+            <ToggleRow
+              label="Summarise chat status after each turn"
+              testID="status-generation"
+              value={data.preferences.statusGenerationEnabled}
+              onChange={(next) =>
+                void patchShared('Status generation', { statusGenerationEnabled: next })
+              }
+            />
           </SettingsSection>
         )}
       </WithSettings>
@@ -86,9 +113,9 @@ export function UsagePage(): React.ReactElement {
 function useReading(
   backendId: SharedBackendId,
   accountId: string,
-): { summary: DaemonAccountSummary; host: HostPresence } | null {
+): { summary: HostAccountSummary; host: HostPresence } | null {
   const hosts = usePresenceStore((s) => s.hosts);
-  let best: { summary: DaemonAccountSummary; host: HostPresence } | null = null;
+  let best: { summary: HostAccountSummary; host: HostPresence } | null = null;
   for (const host of Object.values(hosts)) {
     const summary = host.accounts[backendId]?.accounts?.find((a) => a.id === accountId);
     if (!summary) continue;
@@ -192,7 +219,7 @@ function AccountRow({
     row.email ?? null,
     row.connected ? null : 'Not connected',
     'kind' in row && row.kind === 'apiKey' ? 'API key' : null,
-    reading ? `read on ${hostLabel(reading.host.daemonId)}` : null,
+    reading ? `read on ${hostLabel(reading.host.hostId)}` : null,
   ]
     .filter((x): x is string => x !== null)
     .join(' · ');
@@ -207,8 +234,8 @@ function AccountRow({
       return;
     }
     sendToHost(
-      host.daemonId,
-      { type: 'host.backend_usage_refresh', daemonId: host.daemonId, backendId },
+      host.hostId,
+      { type: 'host.backend_usage_refresh', hostId: host.hostId, backendId },
       'Refresh usage',
     );
   };
@@ -342,12 +369,12 @@ function AddClaude(): React.ReactElement {
       ) : null}
       {online.map((h) => (
         <SettingsButton
-          key={h.daemonId}
-          testID={`adopt-claude-${h.daemonId}`}
-          label={`Use the login on ${hostLabel(h.daemonId)}`}
+          key={h.hostId}
+          testID={`adopt-claude-${h.hostId}`}
+          label={`Use the login on ${hostLabel(h.hostId)}`}
           variant="quiet"
           onPress={() =>
-            void writeShared('Use login', () => api.adoptAccount('claude-code', h.daemonId))
+            void writeShared('Use login', () => api.adoptAccount('claude-code', h.hostId))
           }
         />
       ))}
@@ -365,17 +392,17 @@ function AddChatGPT(): React.ReactElement {
   const online = Object.values(hosts).filter((h) => h.online);
   const [hostId, setHostId] = React.useState<string | null>(null);
   const [keyOpen, setKeyOpen] = React.useState(false);
-  const host = online.find((h) => h.daemonId === hostId) ?? online[0] ?? null;
+  const host = online.find((h) => h.hostId === hostId) ?? online[0] ?? null;
   const login = host?.accounts['codex']?.login;
   const pending = login?.status === 'pending';
   const signIn = (authMethod: 'device' | 'cancel', requestId?: string): void => {
     if (!host) return;
-    setHostId(host.daemonId);
+    setHostId(host.hostId);
     sendToHost(
-      host.daemonId,
+      host.hostId,
       {
         type: 'host.backend_add_account',
-        daemonId: host.daemonId,
+        hostId: host.hostId,
         backendId: 'codex',
         authMethod,
         requestId: requestId ?? `signin-${Date.now()}`,

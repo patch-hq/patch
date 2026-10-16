@@ -34,7 +34,7 @@ const SCRIPT_JOB = {
   filter: null,
   action: {
     type: 'script',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: FOLDER,
     command: GATE,
     timeoutMs: 120_000,
@@ -51,8 +51,8 @@ const GATED_JOB = {
   enabled: true,
   trigger: { type: 'cron', expression: '*/15 * * * *', timezone: 'Europe/London' },
   filter: null,
-  gate: { daemonId: 'd1', folder: FOLDER, command: GATE, timeoutMs: 120_000 },
-  action: { type: 'spawn', daemonId: 'd1', folder: FOLDER, skill: 'foreman' },
+  gate: { hostId: 'd1', folder: FOLDER, command: GATE, timeoutMs: 120_000 },
+  action: { type: 'spawn', hostId: 'd1', folder: FOLDER, skill: 'foreman' },
   concurrency: 1,
   createdAt: 1,
   updatedAt: 1,
@@ -148,7 +148,7 @@ async function stub(
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: [FOLDER], recent: [] }] }),
+      body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: [FOLDER], recent: [] }] }),
     }),
   );
   await page.route('**/api/skills**', (route) =>
@@ -382,7 +382,7 @@ test.describe('gated job — the decision and the work are separate', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: [FOLDER], recent: [] }] }),
+        body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: [FOLDER], recent: [] }] }),
       }),
     );
     await page.route('**/api/skills**', (route) =>
@@ -440,12 +440,12 @@ test.describe('gated job — the decision and the work are separate', () => {
     await page.getByTestId('job-save').click();
     await expect.poll(() => posted.length).toBeGreaterThan(0);
     const body = posted[0] as {
-      gate: { command: string; folder: string; daemonId: string };
-      action: { folder: string; daemonId: string };
+      gate: { command: string; folder: string; hostId: string };
+      action: { folder: string; hostId: string };
     };
     expect(body.gate.command).toContain('test -s queue || exit 1');
     // The gate is asked on the same machine, in the same folder, as the work.
     expect(body.gate.folder).toBe(body.action.folder);
-    expect(body.gate.daemonId).toBe(body.action.daemonId);
+    expect(body.gate.hostId).toBe(body.action.hostId);
   });
 });

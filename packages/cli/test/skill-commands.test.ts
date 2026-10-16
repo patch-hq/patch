@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const skillPath = join(here, '..', '..', 'daemon', 'skill', 'patch-cli', 'SKILL.md');
+const skillPath = join(here, '..', '..', 'host', 'skill', 'patch-cli', 'SKILL.md');
 const entry = join(here, '..', 'src', 'index.ts');
 
 function documentedCommands(): string[][] {

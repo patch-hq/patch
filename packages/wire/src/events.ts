@@ -15,8 +15,10 @@ import {
   DEFAULT_GOAL_REFUSAL_LIMIT,
 } from './goal-prompt.js';
 import { MeetingState } from './meeting.js';
+import { SnoozeRecord } from './snooze.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
 import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
+import { PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
   HookImages,
@@ -60,20 +62,20 @@ export type TurnOrigin = z.infer<typeof TurnOrigin>;
  * is Patch's own and outlives any one harness (spec/04 § History), so the
  * history log names which one produced each turn and session.
  */
-export const HarnessId = z.enum(['claude', 'codex']);
+export const HarnessId = z.enum(PROVIDERS.map((p) => p.id) as [ProviderId, ...ProviderId[]]);
 export type HarnessId = z.infer<typeof HarnessId>;
 
 /**
  * Which harness a model id belongs to — the one client-safe copy of the
- * `openai/` prefix check (`packages/daemon/src/codexAccounts.ts`'s
+ * `openai/` prefix check (`packages/host/src/codexAccounts.ts`'s
  * `isCodexModel`, which callers on the host side keep using; this is the
- * same rule for surfaces, which have no reason to depend on `@patch/daemon`
+ * same rule for surfaces, which have no reason to depend on `@patch/host`
  * just for a string prefix). Used by a surface's model picker to tell a
  * same-provider model change from a cross-provider one (spec/04 § History —
  * the provider-switch confirmation).
  */
 export function harnessForModel(model: string | null | undefined): HarnessId {
-  return model?.startsWith('openai/') === true ? 'codex' : 'claude';
+  return providerForModel(model);
 }
 
 // `deleted` is a recoverable soft-delete (spec/04 § Lifecycle, spec/14 §
@@ -113,21 +115,6 @@ export type ChatStatus = z.infer<typeof ChatStatus>;
 // two options, silence or an interruption.
 export const StatusKind = z.enum(['question', 'report', 'complete']);
 export type StatusKind = z.infer<typeof StatusKind>;
-
-/**
- * A single item on a chat's todo list (patch/todo.md § Features to add — "todo
- * list"). The host mirrors the agent's native TodoWrite list onto chat state
- * so surfaces can render it, and uses it to keep the agent focused: when a turn
- * settles with items still pending, it fires the next one back as a fresh turn.
- * `text` is the item's content; `status` mirrors TodoWrite's own lifecycle.
- */
-export const TodoItem = z
-  .object({
-    text: z.string().min(1),
-    status: z.enum(['pending', 'in_progress', 'completed']),
-  })
-  .strict();
-export type TodoItem = z.infer<typeof TodoItem>;
 
 /**
  * The chat's pending self-wake (`02-daemon.md` § Self-wake) as surfaces see it:
@@ -192,6 +179,9 @@ export const ChatErrorCode = z.enum([
   'claude_session_missing',
   'folder_missing',
   'claude_oauth_missing',
+  // The ChatGPT/Codex counterpart: no ChatGPT login on the host is usable (never
+  // signed in, or the sign-in expired). Surfaces offer a button to sign in again.
+  'chatgpt_login_required',
   // Surface `file.write` refused because the chat was not `idle` (the agent
   // may be editing the same files) or escaped the chat folder. See
   // spec/14-design-web.md § Diff editor and spec/03-wire-protocol.md.
@@ -298,7 +288,7 @@ export type ChatErrorCode = z.infer<typeof ChatErrorCode>;
  *
  * So a surface drops a transient error entry the moment the host speaks for
  * that chat again (a `chat.state` whose activity is no longer `errored`) — and
- * ONLY then. No timer, and no clearing on `daemon.online` alone: a host coming
+ * ONLY then. No timer, and no clearing on `host.online` alone: a host coming
  * back does not mean this chat's turn did. If the host never returns, the
  * notice stays, which is the honest outcome.
  *
@@ -355,7 +345,7 @@ export const ClientType = z.enum([
   'surface-desktop',
   'surface-mobile',
   'surface-voice-device',
-  'daemon',
+  'host',
 ]);
 export type ClientType = z.infer<typeof ClientType>;
 
@@ -394,6 +384,28 @@ export type AttachmentRef = z.infer<typeof AttachmentRef>;
 /** Upper bound on attachments per turn — matches the server multipart `files` limit. */
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
+/**
+ * A single item on a chat's todo list (patch/todo.md § Features to add — "todo
+ * list"). The host mirrors the agent's native TodoWrite list onto chat state
+ * so surfaces can render it, and uses it to keep the agent focused: when a turn
+ * settles with items still pending, it fires the next one back as a fresh turn.
+ * `text` is the item's content; `status` mirrors TodoWrite's own lifecycle.
+ */
+export const TodoItem = z
+  .object({
+    text: z.string().min(1),
+    status: z.enum(['pending', 'in_progress', 'completed']),
+    /**
+     * Files the user attached when queueing the item from the composer ("Add to
+     * todo list"). Refs only, uploaded like composer attachments; the host
+     * sends them with the item's turn when it fires, so an item can stand in
+     * for a full prompt.
+     */
+    attachments: z.array(AttachmentRef).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
+  })
+  .strict();
+export type TodoItem = z.infer<typeof TodoItem>;
+
 // ---------------------------------------------------------------------------
 // Session events (server/host → surfaces)
 
@@ -401,7 +413,7 @@ export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
  * Routing envelope field present on host→server events that are streamed to
  * a SINGLE requesting surface rather than fanned out — i.e. `chat.replay`
  * results and the per-surface re-sync the host emits on (re)connect. The
- * server's `onDaemonEvent` reads it to route to one surface, then STRIPS it
+ * server's `onHostEvent` reads it to route to one surface, then STRIPS it
  * before forwarding (so surfaces never see it). It must be an allowed key on
  * every replayable event schema, otherwise the server's strict `decode()`
  * rejects the inbound frame and per-surface replay silently breaks (the host
@@ -415,16 +427,16 @@ const forSurfaceIdField = { forSurfaceId: z.string().min(1).optional() };
 //
 // There is no longer "the host" — there are N hosts, each running one. Every
 // event that describes, addresses, or originates from a machine names it with
-// `daemonId`. A frame that omits it is rejected by validation rather than
+// `hostId`. A frame that omits it is rejected by validation rather than
 // routed to whichever host happens to be attached (NO FALLBACK): silently
 // picking a host is how a chat ends up running on the wrong filesystem.
 
 /** A registered host's stable id, issued at registration (spec/02 § Host identity). */
-export const DaemonId = z.string().min(1);
-export type DaemonId = z.infer<typeof DaemonId>;
+export const HostId = z.string().min(1);
+export type HostId = z.infer<typeof HostId>;
 
 /** Required host addressing, spread into every host-scoped frame. */
-const daemonIdField = { daemonId: DaemonId };
+const hostIdField = { hostId: HostId };
 
 /**
  * Host addressing on a frame whose chat ALREADY pinned its machine at
@@ -432,7 +444,7 @@ const daemonIdField = { daemonId: DaemonId };
  * decoding a frame from a peer that predates it is not left unable to read the
  * rest of the state.
  */
-const daemonIdOptionalField = { daemonId: DaemonId.optional() };
+const hostIdOptionalField = { hostId: HostId.optional() };
 
 /**
  * The Claude Code permission modes Patch offers, taken as-is (spec/02 §
@@ -511,7 +523,7 @@ export const ChatSpawnedEvent = z
     type: z.literal('chat.spawned'),
     chatId: z.string().min(1),
     /** The host this chat is pinned to, fixed for the chat's lifetime. */
-    ...daemonIdField,
+    ...hostIdField,
     folder: z.string().min(1),
     parentChatId: z.string().min(1).optional(),
     ...forSurfaceIdField,
@@ -719,6 +731,20 @@ export const ChatMessageEvent = z
      * block's resubmit. Additive/optional for the same reason as `compaction`.
      */
     goalTrigger: z.object({ reason: z.string() }).strict().optional(),
+    /**
+     * Present ONLY on a user-role turn the host started itself rather than a
+     * person (spec/09 § Whose turn it was), mirroring `SendInputOptions.origin`
+     * onto the persisted turn — a self-wake firing (spec/02 § Self-wake), a
+     * Manager-sweep nudge/wake (spec/06 § Sweep), a `patch_delegate` subagent's
+     * relay into its parent, or the todo list advancing itself. Never 'user',
+     * which is the default and so omitted — only ever present as 'machine'.
+     * A turn already carrying `jobTrigger`/`hookTrigger`/`goalTrigger` above
+     * is more specifically one of those; this is everything else the host
+     * started on its own. `patch_activity` (spec/06) reads it to tell these
+     * apart from something a person actually typed. Additive/optional for the
+     * same reason as `compaction`.
+     */
+    origin: TurnOrigin.optional(),
     /**
      * Present ONLY on a `system` message whose `content` Claude Code wrote
      * itself and stamped `model: "<synthetic>"` — most often `No response
@@ -1005,9 +1031,11 @@ export const ChatToolRunSummaryEvent = z
     type: z.literal('chat.tool_run_summary'),
     chatId: z.string().min(1),
     /** The run's tool-call ids, in order. */
-    callIds: z.array(z.string().min(1)).min(2),
+    callIds: z.array(z.string().min(1)).min(1),
     summary: z.string().min(1).nullable(),
     error: z.string().min(1).optional(),
+    /** The run is still open: `summary` narrates it as it happens ("Looking at the picture…"). */
+    live: z.literal(true).optional(),
     seq: z.number().int().nonnegative(),
     ...forSurfaceIdField,
   })
@@ -1125,6 +1153,12 @@ export const GoalProgress = z
     lastVerdict: z.literal('not_met').nullable(),
     /** The evaluator's most recent reason, or `null` before the first one lands. */
     lastReason: z.string().nullable(),
+    /**
+     * True while the goal is on hold because the user stopped the chat's turn:
+     * the goal is still set but nothing is judging or resubmitting it until the
+     * next turn starts. Absent from hosts predating the field.
+     */
+    pausedByStop: z.boolean().optional(),
   })
   .strict();
 export type GoalProgress = z.infer<typeof GoalProgress>;
@@ -1164,6 +1198,12 @@ export const ChatStateEvent = z
       .object({ id: z.string().min(1), label: z.string().min(1) })
       .strict()
       .optional(),
+    /**
+     * The shared account this chat's turns START on (spec/10 § Backend
+     * credentials — preferred account); `null` is "by strategy". ABSENT means
+     * unchanged — a host too old to know the field never sends it.
+     */
+    preferredAccountId: z.string().min(1).nullable().optional(),
     chatId: z.string().min(1),
     /**
      * The highest seq this host's own log of the chat has recorded. The server
@@ -1179,7 +1219,7 @@ export const ChatStateEvent = z
      * map of its own, and the server's mirror never has to guess when a
      * `chat.state` is the first thing it hears about a chat.
      */
-    ...daemonIdOptionalField,
+    ...hostIdOptionalField,
     activity: ChatActivity,
     lastUpdated: z.number().int(),
     /**
@@ -1421,6 +1461,17 @@ export const ChatStateEvent = z
      */
     snoozedUntil: z.number().int().nullable().optional(),
     /**
+     * What each snooze of this chat was and what happened in it (spec/04 §
+     * Snooze), oldest first, the last being the current or most recent. Drives
+     * the Back state and the transcript divider. ABSENT ⇒ unchanged.
+     */
+    snoozeRecords: z.array(SnoozeRecord).optional(),
+    /**
+     * ms epoch the chat's current run began, or `null` when it is not running.
+     * Shown as the elapsed time in the snooze sheet. ABSENT ⇒ unchanged.
+     */
+    runningSince: z.number().int().nullable().optional(),
+    /**
      * Running out of the active list (spec/04 § Hidden) — a job's background
      * run, drawn only in the sidebar's Hidden section. Separate from `status`:
      * a hidden chat is `active`, and an archived one is never hidden. ABSENT
@@ -1602,6 +1653,13 @@ export const ChatQueuedEvent = z
     message: z.string(),
     /** Per-chat monotonic queue position for stable ordering across surfaces. */
     queueSeq: z.number().int().nonnegative(),
+    /**
+     * True when this turn needs a run of its own (a fork, job, hook or goal
+     * resubmit, or a side-branch message), so it can only go in once the
+     * running turn ends. Absent for a plain message, which the host hands to
+     * the agent at the next tool boundary (spec/04 § Message queueing).
+     */
+    ownTurn: z.boolean().optional(),
     ...forSurfaceIdField,
   })
   .strict();
@@ -1783,23 +1841,23 @@ export const ChatErrorEvent = z
 export type ChatErrorEvent = z.infer<typeof ChatErrorEvent>;
 
 /** Server-emitted when THAT host WS connects. */
-export const DaemonOnlineEvent = z
+export const HostOnlineEvent = z
   .object({
-    type: z.literal('daemon.online'),
-    ...daemonIdField,
+    type: z.literal('host.online'),
+    ...hostIdField,
   })
   .strict();
-export type DaemonOnlineEvent = z.infer<typeof DaemonOnlineEvent>;
+export type HostOnlineEvent = z.infer<typeof HostOnlineEvent>;
 
 /** Server-emitted on THAT host's WS drop or heartbeat timeout. */
-export const DaemonOfflineEvent = z
+export const HostOfflineEvent = z
   .object({
-    type: z.literal('daemon.offline'),
-    ...daemonIdField,
+    type: z.literal('host.offline'),
+    ...hostIdField,
     reason: z.string().optional(),
   })
   .strict();
-export type DaemonOfflineEvent = z.infer<typeof DaemonOfflineEvent>;
+export type HostOfflineEvent = z.infer<typeof HostOfflineEvent>;
 
 /**
  * Host → server: one backend's credential on one host is missing or expired
@@ -1807,15 +1865,15 @@ export type DaemonOfflineEvent = z.infer<typeof DaemonOfflineEvent>;
  * a host with two backends can be authenticated on one and not the other, and
  * Settings offers that backend's routes to a credential.
  */
-export const DaemonUnauthenticatedEvent = z
+export const HostUnauthenticatedEvent = z
   .object({
-    type: z.literal('daemon.unauthenticated'),
-    ...daemonIdField,
+    type: z.literal('host.unauthenticated'),
+    ...hostIdField,
     backendId: z.string().min(1),
     reason: z.string(),
   })
   .strict();
-export type DaemonUnauthenticatedEvent = z.infer<typeof DaemonUnauthenticatedEvent>;
+export type HostUnauthenticatedEvent = z.infer<typeof HostUnauthenticatedEvent>;
 
 /**
  * One MCP server a host wires into every chat it runs (Settings → MCP), beside
@@ -1894,6 +1952,16 @@ export type ClaudeSettingsSetting = z.infer<typeof ClaudeSettingsSetting>;
 export const SharedSettings = z
   .object({
     // ---- server-acted preferences ----
+    /** Public metadata served at `/agent` for this deployment's Web Bot Auth identity. */
+    agentIdentity: z
+      .object({
+        enabled: z.boolean().default(false),
+        name: z.string().trim().min(1).max(80),
+        description: z.string().trim().min(1).max(500),
+        operator: z.string().trim().max(200).default(''),
+        contact: z.string().trim().max(200),
+      })
+      .strict(),
     /** Whether the Manager sweep runs at all (spec/06 § Sweep). */
     sweepEnabled: z.boolean(),
     /** How often the interval trigger fires, subject to the gate. */
@@ -1920,6 +1988,8 @@ export const SharedSettings = z
     addressWord: z.string().min(1).max(32),
     reach: z.enum(['notify', 'auto-notify']),
     defaultModel: z.string().min(1),
+    /** The model a job's chat runs on unless the job's action names its own. */
+    jobDefaultModel: z.string().min(1),
     specialThreadModel: z.string().min(1),
     rotationEnabled: z.boolean(),
     rotationTime: TimeOfDay,
@@ -1937,7 +2007,17 @@ export const SharedSettings = z
     kokoroVoice: z.string().min(1).optional(),
     permissionModeDefault: PermissionMode,
     chatNameInterval: z.number().int().nonnegative(),
+    /** Whether the one-shot AI chat title (a token-spending call) runs. */
+    titleGenerationEnabled: z.boolean(),
+    /** Whether the one-shot AI per-turn status summary (a token-spending call) runs. */
+    statusGenerationEnabled: z.boolean(),
     autoResumeRateLimit: z.boolean(),
+    /**
+     * Whether the page and chat scroll position follows the user between
+     * surfaces (spec/05 § Handover). Off: no surface reports its position and
+     * none adopts another's.
+     */
+    syncPosition: z.boolean(),
     questionExpiry: z.boolean(),
     questionExpirySeconds: z
       .number()
@@ -1961,6 +2041,13 @@ export const SharedSettingsPatch = SharedSettings.partial().strict();
 export type SharedSettingsPatch = z.infer<typeof SharedSettingsPatch>;
 
 export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
+  agentIdentity: {
+    enabled: false,
+    name: 'Patch',
+    description: 'User-directed AI agent browsing on behalf of one person.',
+    operator: '',
+    contact: '',
+  },
   sweepEnabled: true,
   sweepIntervalMinutes: 30,
   stalledThresholdMinutes: 15,
@@ -1979,6 +2066,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Chats and jobs alike do real work, so the out-of-the-box choice is the
   // strongest model rather than the cheapest.
   defaultModel: 'claude-opus-5',
+  jobDefaultModel: 'claude-opus-5',
   specialThreadModel: 'claude-sonnet-5',
   rotationEnabled: true,
   rotationTime: '02:00',
@@ -1994,9 +2082,12 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   },
   permissionModeDefault: 'auto',
   chatNameInterval: 0,
+  titleGenerationEnabled: true,
+  statusGenerationEnabled: true,
   // On: a chat that hits a limit waits for the reset rather than being
   // silently abandoned mid-task.
   autoResumeRateLimit: true,
+  syncPosition: true,
   questionExpiry: true,
   questionExpirySeconds: QUESTION_EXPIRY_SECONDS_DEFAULT,
   harnessSystemPrompt: '',
@@ -2048,7 +2139,7 @@ export const SharedCodexAccount = z
   .strict();
 export type SharedCodexAccount = z.infer<typeof SharedCodexAccount>;
 
-/** Every shared secret, in order. Travels to hosts only. */
+/** Every host credential shared by the account, in order. Server-owned keys are never in this shape. */
 export const SharedSecrets = z
   .object({
     claude: z.array(SharedClaudeAccount),
@@ -2107,7 +2198,7 @@ export type SharedSecretsSummary = z.infer<typeof SharedSecretsSummary>;
 export const SettingsSnapshotEvent = z
   .object({
     type: z.literal('settings.snapshot'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     version: z.number().int().nonnegative(),
     settings: SharedSettings,
     secrets: SharedSecrets,
@@ -2119,7 +2210,7 @@ export type SettingsSnapshotEvent = z.infer<typeof SettingsSnapshotEvent>;
 export const SettingsAppliedEvent = z
   .object({
     type: z.literal('settings.applied'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     version: z.number().int().nonnegative(),
     error: z.string().min(1).optional(),
   })
@@ -2128,7 +2219,7 @@ export type SettingsAppliedEvent = z.infer<typeof SettingsAppliedEvent>;
 
 export const HostSettingsState = z
   .object({
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     /** Absent until the host has answered any snapshot. */
     appliedVersion: z.number().int().nonnegative().optional(),
     error: z.string().min(1).optional(),
@@ -2163,7 +2254,7 @@ export type NotificationsChangedEvent = z.infer<typeof NotificationsChangedEvent
 export const SettingsSecretUpdateEvent = z
   .object({
     type: z.literal('settings.secret_update'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     update: z.discriminatedUnion('backendId', [
       z
         .object({
@@ -2208,7 +2299,7 @@ export const SettingsAdoptRequestEvent = z
   .object({
     type: z.literal('settings.adopt.request'),
     requestId: z.string().min(1),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     kind: SettingsAdoptKind,
     /** The provider key id for `provider-key`; a label for a sign-in. */
     id: z.string().min(1).optional(),
@@ -2228,7 +2319,7 @@ export const SettingsAdoptResponseEvent = z
   .object({
     type: z.literal('settings.adopt.response'),
     requestId: z.string().min(1),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     ok: z.boolean(),
     /** Present on success, shaped by the request's kind. */
     result: z
@@ -2256,7 +2347,7 @@ export type SettingsAdoptResponseEvent = z.infer<typeof SettingsAdoptResponseEve
 export const HostClaudeSettingsDiscardEvent = z
   .object({
     type: z.literal('host.claude_settings_discard'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
   })
   .strict();
 export type HostClaudeSettingsDiscardEvent = z.infer<typeof HostClaudeSettingsDiscardEvent>;
@@ -2269,7 +2360,7 @@ export type HostClaudeSettingsDiscardEvent = z.infer<typeof HostClaudeSettingsDi
 export const SettingsAccountSignedInEvent = z
   .object({
     type: z.literal('settings.account_signed_in'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     requestId: z.string().min(1),
     account: SharedCodexAccount,
   })
@@ -2277,24 +2368,24 @@ export const SettingsAccountSignedInEvent = z
 export type SettingsAccountSignedInEvent = z.infer<typeof SettingsAccountSignedInEvent>;
 
 /**
- * A host's self-description (spec/03 § Session events → `daemon.host`,
+ * A host's self-description (spec/03 § Session events → `host.host`,
  * spec/02 § Host identity). Emitted by the host on connect and whenever any
  * field changes; the server caches the last report per host and replays it in
  * the `auth.ok` greeting so a surface renders the full host list immediately.
  */
-export const DaemonHostEvent = z
+export const HostInfoEvent = z
   .object({
-    type: z.literal('daemon.host'),
-    ...daemonIdField,
+    type: z.literal('host.host'),
+    ...hostIdField,
     /** User-editable label, defaulted from the machine's hostname. */
     hostName: z.string().min(1),
     platform: z.string().min(1),
     arch: z.string().min(1),
-    daemonVersion: z.string().min(1),
+    hostVersion: z.string().min(1),
     /**
      * The source commit and build instant stamped into this machine's artifact
      * (spec/11 § Version reporting: "the host carries the same three stamped
-     * into its artifact and reports them on `daemon.host`"). Optional because a
+     * into its artifact and reports them on `host.host`"). Optional because a
      * host run from a source checkout has no build stamp — an installed
      * artifact always carries both, and version reporting needs all three to
      * show drift between machines.
@@ -2303,6 +2394,8 @@ export const DaemonHostEvent = z
     builtAt: z.string().min(1).optional(),
     /** A newer host build is published for this host's os/arch. */
     updateAvailable: z.boolean(),
+    /** A newer build is published but this host's artifact is still being built; it applies on its own when it lands. */
+    updatePending: z.boolean().optional(),
     /** Applies to NEW chats on this host (spec/02 § Permission mode). */
     permissionModeDefault: PermissionMode,
     /** How many of this host's chats carry a per-chat override. */
@@ -2392,6 +2485,9 @@ export const DaemonHostEvent = z
      * treat as 0.
      */
     chatNameInterval: z.number().int().nonnegative().optional(),
+    /** Whether this host runs the AI chat title / status summary calls. Absent = host predates the setting (on). */
+    titleGenerationEnabled: z.boolean().optional(),
+    statusGenerationEnabled: z.boolean().optional(),
     /**
      * Whether this host will automatically retry a turn that was blocked by a
      * Claude API usage/rate limit (`host.settings` § autoResumeRateLimit).
@@ -2457,7 +2553,7 @@ export const DaemonHostEvent = z
     harnessClaudeMdEnabled: z.boolean().optional(),
     /**
      * Agent browser routing (spec/02 § Browser — Route through): the
-     * `daemonId` of another of the user's hosts whose network this host's
+     * `hostId` of another of the user's hosts whose network this host's
      * `patch_browser_*` traffic egresses through, or `null` when the browser
      * goes direct. Stated unconditionally once a host supports it, same
      * discipline as `questionExpiry` above — absent means this host
@@ -2465,9 +2561,23 @@ export const DaemonHostEvent = z
      * never as the field being merely unset.
      */
     browserRouteThrough: z.string().min(1).nullable().optional(),
+    /**
+     * The machine's power state: whether it is running on battery, and the
+     * charge, 0-100. Absent when the host has no battery (a desktop, a server)
+     * or cannot read one — absent never means "plugged in". The server warns
+     * when a host that owns enabled cron jobs is low on battery, because a
+     * machine that hibernates misses every job (spec/08 § Wake host).
+     */
+    power: z
+      .object({
+        onBattery: z.boolean(),
+        percent: z.number().min(0).max(100),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
-export type DaemonHostEvent = z.infer<typeof DaemonHostEvent>;
+export type HostInfoEvent = z.infer<typeof HostInfoEvent>;
 
 /**
  * One rate-limit window's state, as last reported by the SDK's
@@ -2496,10 +2606,10 @@ export type RateLimitWindow = z.infer<typeof RateLimitWindow>;
 /**
  * One stored Claude account on one host, as summarised for a surface (spec/10
  * § Backend credentials — multiple accounts). Mirrors a single
- * `DaemonAccountEvent`'s credential-state fields, scoped to just this one
+ * `HostAccountEvent`'s credential-state fields, scoped to just this one
  * stored account rather than the "active" one.
  */
-export const DaemonAccountSummary = z
+export const HostAccountSummary = z
   .object({
     id: z.string().min(1),
     /** User-facing name (Settings list, per-chat account picker). */
@@ -2507,6 +2617,11 @@ export const DaemonAccountSummary = z
     connected: z.boolean(),
     kind: z.enum(['chatgpt', 'apiKey']).optional(),
     error: z.string().optional(),
+    /**
+     * The login was refused as expired; the host has stopped using it and will
+     * not retry until it is signed in again (or a long back-off passes).
+     */
+    needsSignIn: z.boolean().optional(),
     accountEmail: z.string().min(1).nullable().optional(),
     /**
      * Which Anthropic organisation this account's token authenticates as.
@@ -2541,7 +2656,7 @@ export const DaemonAccountSummary = z
       .optional(),
   })
   .strict();
-export type DaemonAccountSummary = z.infer<typeof DaemonAccountSummary>;
+export type HostAccountSummary = z.infer<typeof HostAccountSummary>;
 
 /**
  * The credential state of ONE backend on ONE host (spec/10 § Backend
@@ -2549,7 +2664,7 @@ export type DaemonAccountSummary = z.infer<typeof DaemonAccountSummary>;
  * be connected on one backend and logged out on another, and the surface must
  * be able to say which. Cached per host and replayed in the auth greeting.
  */
-export const DaemonAccountEvent = z
+export const HostAccountEvent = z
   .object({
     login: z
       .object({
@@ -2560,8 +2675,8 @@ export const DaemonAccountEvent = z
         error: z.string().optional(),
       })
       .optional(),
-    type: z.literal('daemon.account'),
-    ...daemonIdField,
+    type: z.literal('host.account'),
+    ...hostIdField,
     backendId: z.string().min(1),
     connected: z.boolean(),
     accountEmail: z.string().min(1).nullable().optional(),
@@ -2602,7 +2717,7 @@ export const DaemonAccountEvent = z
      * renders correctly off the fields it already reads. Optional/absent for
      * a host that predates multi-account support.
      */
-    accounts: z.array(DaemonAccountSummary).optional(),
+    accounts: z.array(HostAccountSummary).optional(),
     /** Which entry in `accounts` is the default a chat takes when it names none. */
     activeAccountId: z.string().min(1).optional(),
     /**
@@ -2634,7 +2749,7 @@ export const DaemonAccountEvent = z
       .optional(),
   })
   .strict();
-export type DaemonAccountEvent = z.infer<typeof DaemonAccountEvent>;
+export type HostAccountEvent = z.infer<typeof HostAccountEvent>;
 
 /**
  * Voice-device session presence (host → server → surfaces).
@@ -2685,7 +2800,7 @@ export type DeviceSessionEvent = z.infer<typeof DeviceSessionEvent>;
  * `/tmp/work` is a deliberate designation and must survive.
  *
  * Account-scoped (no `chatId`) so the server's ws-hub fans them out to every
- * connected surface unconditionally; `daemonId` says whose filesystem they
+ * connected surface unconditionally; `hostId` says whose filesystem they
  * describe, so two hosts sharing a path string stay two entries.
  *
  * The published list is NOT a substitute for the host's spawn-time
@@ -2693,7 +2808,7 @@ export type DeviceSessionEvent = z.infer<typeof DeviceSessionEvent>;
  * loudly with `folder_not_found` on send (NO FALLBACK).
  */
 const folderRegistryFields = {
-  ...daemonIdField,
+  ...hostIdField,
   /** User-designated project roots on this host, in registration order. */
   roots: z.array(z.string().min(1)),
   /** Folders seen in recent chats on this host, most-recent-used first. */
@@ -2782,6 +2897,18 @@ export const ChatInputSource = z.discriminatedUnion('kind', [
       jobId: z.string().min(1),
     })
     .strict(),
+  /**
+   * A Pad's Send (or the agent's collect) delivering the user's batch of
+   * changes into the Pad's chat. Set only by the server's Pad routes. The
+   * message is written by Patch from what the user did in the Pad, not typed,
+   * so a surface renders it as system input rather than a user bubble.
+   */
+  z
+    .object({
+      kind: z.literal('pad'),
+      padId: z.string().min(1),
+    })
+    .strict(),
 ]);
 export type ChatInputSource = z.infer<typeof ChatInputSource>;
 
@@ -2832,6 +2959,22 @@ export const ChatInputEvent = z
      * active branch is doing.
      */
     branchId: z.string().min(1).optional(),
+    /**
+     * A person re-running a turn that already has a bubble (spec/12 § Retry in
+     * place): the seq of that turn's ORIGINAL user message. The host sends the
+     * message again as a new turn and stamps the resulting `chat.message` with
+     * the same `retryOfSeq`, so every surface folds it into the existing bubble
+     * as another attempt (the `< >` pager) instead of drawing it a second time.
+     * Additive/optional: absent means a brand new turn.
+     */
+    retryOfSeq: z.number().int().nonnegative().optional(),
+    /**
+     * "Send, wait until agent finished" (spec/04 § Message queueing): behind a
+     * running turn, hold this message until that turn ends instead of handing
+     * it over at the next tool boundary. Absent means a plain send. No effect
+     * on an idle chat.
+     */
+    afterTurn: z.boolean().optional(),
   })
   .strict();
 export type ChatInputEvent = z.infer<typeof ChatInputEvent>;
@@ -2845,8 +2988,21 @@ export type ChatInputEvent = z.infer<typeof ChatInputEvent>;
  * lands is per-tool — `Edit.new_string` / `Write.content` /
  * `NotebookEdit.new_source` for the Monaco-edited file content, and
  * `AskUserQuestion.answers` for the options the user picked.
+ *
+ * `approve_with_session_allow` is option 2 of the backend's own three
+ * (spec/15-design-mobile.md § Chat detail — "Yes, allow all <X> during this
+ * session"): this call is approved AND the tool is added to the running
+ * SDK session's own permission rules (`PermissionUpdate` with
+ * `destination: 'session'`, built in `buildCanUseTool` — sdkBackend.ts), so
+ * the SDK itself stops escalating that tool to `canUseTool` for the rest of
+ * the session, rather than Patch tracking an always-allow set of its own.
  */
-export const PermissionDecision = z.enum(['approve', 'deny', 'approve_with_edits']);
+export const PermissionDecision = z.enum([
+  'approve',
+  'deny',
+  'approve_with_edits',
+  'approve_with_session_allow',
+]);
 export type PermissionDecision = z.infer<typeof PermissionDecision>;
 
 export const ChatPermissionResponseEvent = z
@@ -2866,9 +3022,10 @@ export const ChatPermissionResponseEvent = z
     chatId: z.string().min(1).optional(),
     /**
      * Backwards-compat boolean flag. `true` ↔ `decision === 'approve'`
-     * (or `'approve_with_edits'`); `false` ↔ `'deny'`. Surfaces SHOULD
-     * emit `decision` for new code paths; `approve` is preserved so
-     * older surfaces (CLI, mobile) continue to work without changes.
+     * (or `'approve_with_edits'` / `'approve_with_session_allow'`);
+     * `false` ↔ `'deny'`. Surfaces SHOULD emit `decision` for new code
+     * paths; `approve` is preserved so older surfaces (CLI, mobile)
+     * continue to work without changes.
      */
     approve: z.boolean(),
     /** Group 19: explicit decision discriminator. */
@@ -2942,7 +3099,7 @@ export const ChatSpawnRequestEvent = z
      * be attached — the same folder string on two hosts is two different
      * directories, so guessing means running in the wrong one.
      */
-    ...daemonIdField,
+    ...hostIdField,
     folder: z.string().min(1),
     prompt: z.string().optional(),
     parentChatId: z.string().min(1).optional(),
@@ -3283,6 +3440,47 @@ export const ComposerDraftListEvent = z
 export type ComposerDraftListEvent = z.infer<typeof ComposerDraftListEvent>;
 
 /**
+ * Where on the app a surface is looking — the pages that exist on every
+ * surface. `seq` is the message at the top edge of an open chat's transcript;
+ * absent means "at the latest message".
+ */
+export const ViewPage = z.enum(['chat', 'jobs', 'job', 'pads', 'pad', 'settings']);
+export type ViewPage = z.infer<typeof ViewPage>;
+
+/**
+ * Surface → server: the page and position the user is on right now (spec/05
+ * § Handover). Sent debounced by a foregrounded surface. The server stamps the
+ * surface id and receipt time and keeps one account-wide position.
+ */
+export const ViewPositionSetEvent = z
+  .object({
+    type: z.literal('view_position.set'),
+    page: ViewPage,
+    id: z.string().min(1).optional(),
+    seq: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type ViewPositionSetEvent = z.infer<typeof ViewPositionSetEvent>;
+
+/**
+ * Server → every surface: the account's current position, and which surface
+ * reported it. Sent on connect and after every `view_position.set`. A surface
+ * ignores its own reports and applies another's only on launch or when it
+ * returns to the foreground, so a handover never moves a screen under a hand.
+ */
+export const ViewPositionUpdatedEvent = z
+  .object({
+    type: z.literal('view_position.updated'),
+    page: ViewPage,
+    id: z.string().min(1).optional(),
+    seq: z.number().int().nonnegative().optional(),
+    surfaceId: z.string().min(1),
+    updatedAt: z.number(),
+  })
+  .strict();
+export type ViewPositionUpdatedEvent = z.infer<typeof ViewPositionUpdatedEvent>;
+
+/**
  * A not-yet-sent NEW chat (spec/14 § New chat drafts): folder + host + model
  * + text. Server-owned exactly like composer drafts — one account-wide set,
  * so a draft typed on one surface is listed and deletable from every other.
@@ -3291,7 +3489,7 @@ export const NewChatDraftBody = z
   .object({
     id: z.string().min(1),
     folder: z.string(),
-    daemonId: z.string().min(1).optional(),
+    hostId: z.string().min(1).optional(),
     text: z.string(),
     model: z.string().min(1).optional(),
   })
@@ -3444,7 +3642,7 @@ export type ChatRotateRequestEvent = z.infer<typeof ChatRotateRequestEvent>;
 export const ManagerSweepCandidate = z
   .object({
     chatId: z.string().min(1),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     folder: z.string().min(1),
     edge: z.enum(['settled', 'stalled', 'permission', 'question', 'job-failed', 'task-ended']),
     idleMinutes: z.number().nonnegative(),
@@ -3507,9 +3705,23 @@ export const ChatSnoozeRequestEvent = z
     type: z.literal('chat.snooze_request'),
     chatId: z.string().min(1),
     snoozedUntil: z.number().int().nullable(),
+    /** The set this snooze belongs to (one id per user action); the host makes one if absent. */
+    setId: z.string().min(1).optional(),
   })
   .strict();
 export type ChatSnoozeRequestEvent = z.infer<typeof ChatSnoozeRequestEvent>;
+
+/**
+ * Surface → host: the user has opened a chat that is showing Back (spec/04 §
+ * Snooze). The host clears the Back state for the chat's whole set.
+ */
+export const ChatSnoozeBackClearRequestEvent = z
+  .object({
+    type: z.literal('chat.snooze_back_clear_request'),
+    chatId: z.string().min(1),
+  })
+  .strict();
+export type ChatSnoozeBackClearRequestEvent = z.infer<typeof ChatSnoozeBackClearRequestEvent>;
 
 /**
  * Surface → host hide / show (spec/04 § Hidden). `hidden: false` is the
@@ -3622,8 +3834,13 @@ export const ChatLoopRequestEvent = z
     loop: z
       .object({
         message: z.string().min(1),
-        every: z.union([z.string(), z.number()]),
+        every: z.union([z.string(), z.number()]).optional(),
+        /** ISO timestamp for a one-shot scheduled send (instead of `every`). */
+        at: z.string().optional(),
         notAfter: z.string().optional(),
+      })
+      .refine((l) => (l.every === undefined) !== (l.at === undefined), {
+        message: "provide exactly one of 'every' or 'at'",
       })
       .nullable(),
   })
@@ -3667,6 +3884,23 @@ export const ChatModelRequestEvent = z
   .strict();
 export type ChatModelRequestEvent = z.infer<typeof ChatModelRequestEvent>;
 
+/**
+ * Surface → host: start this chat's turns on a different shared account from
+ * its NEXT turn (spec/10 § Backend credentials — preferred account). `null`
+ * clears the preference, returning the chat to the account strategy. The host
+ * answers by emitting the chat's state carrying the new `preferredAccountId`;
+ * an id it does not hold for the chat's backend is refused `account_not_found`
+ * and the chat keeps its preference — no fallback to a near match.
+ */
+export const ChatAccountRequestEvent = z
+  .object({
+    type: z.literal('chat.account_request'),
+    chatId: z.string().min(1),
+    preferredAccountId: z.string().min(1).nullable(),
+  })
+  .strict();
+export type ChatAccountRequestEvent = z.infer<typeof ChatAccountRequestEvent>;
+
 export const FileWriteEvent = z
   .object({
     type: z.literal('file.write'),
@@ -3700,6 +3934,168 @@ export const PatchFileChangedEvent = z
   .strict();
 export type PatchFileChangedEvent = z.infer<typeof PatchFileChangedEvent>;
 
+/**
+ * Agent browser live view and hand-off (spec/02 § Browser — Hand-off).
+ *
+ * `patch.browser_view.frame` (host → surfaces) is one picture of a browser tab,
+ * sent while a surface is watching it. The picture, the page's address and the
+ * input below travel ONLY between the host and the user's surfaces — they are
+ * not tool results, so the model never sees them. Frames carry no `seq`: they
+ * are live-only and never enter the chat's history.
+ */
+export const PatchBrowserViewFrameEvent = z
+  .object({
+    type: z.literal('patch.browser_view.frame'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    /** Base64 JPEG. */
+    data: z.string().min(1),
+    /** The tab's viewport in CSS pixels — the coordinate space of `patch.browser_handoff.input`. */
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    /** Address without query or fragment (they can carry authorization codes). */
+    url: z.string(),
+    title: z.string(),
+  })
+  .strict();
+export type PatchBrowserViewFrameEvent = z.infer<typeof PatchBrowserViewFrameEvent>;
+
+/**
+ * Surface → host: keep streaming `tabId` to the user's surfaces. Sent again
+ * every few seconds while the view is open; the host stops streaming a tab
+ * that has not been asked for lately, so a surface that vanished costs nothing.
+ * `watch: false` stops it at once.
+ */
+export const PatchBrowserViewWatchEvent = z
+  .object({
+    type: z.literal('patch.browser_view.watch'),
+    chatId: z.string().min(1),
+    /** Absent: the chat's most recently opened tab. */
+    tabId: z.string().min(1).optional(),
+    watch: z.boolean(),
+  })
+  .strict();
+export type PatchBrowserViewWatchEvent = z.infer<typeof PatchBrowserViewWatchEvent>;
+
+/**
+ * Host → surfaces: what one chat's agent browser is doing right now — whether
+ * an action is running (`action`, in plain words) and which tabs the chat has
+ * open, addresses without query or fragment. Sent whenever that changes, so a
+ * surface can show "Browsing <site>" with Watch and Stop beside it without
+ * polling. `tabs: []` and `active: false` means the chat has no browser open.
+ */
+export const PatchBrowserViewStatusEvent = z
+  .object({
+    type: z.literal('patch.browser_view.status'),
+    chatId: z.string().min(1),
+    active: z.boolean(),
+    /** Plain-language label of the running action ("Clicking"), when active. */
+    action: z.string().optional(),
+    tabs: z.array(
+      z
+        .object({
+          tabId: z.string().min(1),
+          url: z.string(),
+          handedOff: z.boolean(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type PatchBrowserViewStatusEvent = z.infer<typeof PatchBrowserViewStatusEvent>;
+
+/**
+ * Surface → host: the Stop beside a chat's browser view. Cancels that chat's
+ * in-flight `patch_browser_*` calls (they fail with `browser_stopped`) and
+ * closes its tabs. Other chats' browsers are untouched.
+ */
+export const PatchBrowserViewStopEvent = z
+  .object({
+    type: z.literal('patch.browser_view.stop'),
+    chatId: z.string().min(1),
+  })
+  .strict();
+export type PatchBrowserViewStopEvent = z.infer<typeof PatchBrowserViewStopEvent>;
+
+export const BrowserHandoffOutcome = z.enum([
+  'done',
+  'cancelled',
+  'timeout',
+  'tab_closed',
+  'callback',
+]);
+export type BrowserHandoffOutcome = z.infer<typeof BrowserHandoffOutcome>;
+
+/**
+ * Host → surfaces: the agent asked the user to take over a tab
+ * (`status: 'waiting'`, repeated every few seconds while it waits so a surface
+ * that opens the chat late still hears it), or that hand-off finished
+ * (`status: 'ended'`).
+ */
+export const PatchBrowserHandoffStateEvent = z
+  .object({
+    type: z.literal('patch.browser_handoff.state'),
+    chatId: z.string().min(1),
+    handoffId: z.string().min(1),
+    tabId: z.string().min(1),
+    status: z.enum(['waiting', 'ended']),
+    /** Why the agent needs the user, in the agent's words. */
+    reason: z.string(),
+    startedAt: z.number().int().nonnegative(),
+    outcome: BrowserHandoffOutcome.optional(),
+  })
+  .strict();
+export type PatchBrowserHandoffStateEvent = z.infer<typeof PatchBrowserHandoffStateEvent>;
+
+/** Surface → host: what the user did in the live view, at viewport coordinates. */
+export const BrowserHandoffInput = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('pointer'),
+      action: z.enum(['click', 'double_click', 'right_click', 'move']),
+      x: z.number(),
+      y: z.number(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('scroll'),
+      x: z.number(),
+      y: z.number(),
+      dx: z.number(),
+      dy: z.number(),
+    })
+    .strict(),
+  /** Literal text, typed into whatever has focus. Never logged. */
+  z.object({ kind: z.literal('text'), text: z.string().min(1) }).strict(),
+  /** A key name or chord ("Enter", "Backspace", "Control+a"). */
+  z.object({ kind: z.literal('key'), key: z.string().min(1) }).strict(),
+]);
+export type BrowserHandoffInput = z.infer<typeof BrowserHandoffInput>;
+
+export const PatchBrowserHandoffInputEvent = z
+  .object({
+    type: z.literal('patch.browser_handoff.input'),
+    chatId: z.string().min(1),
+    handoffId: z.string().min(1),
+    input: BrowserHandoffInput,
+  })
+  .strict();
+export type PatchBrowserHandoffInputEvent = z.infer<typeof PatchBrowserHandoffInputEvent>;
+
+/**
+ * Surface → host: the user is finished (`done`) or declines (`cancel`).
+ */
+export const PatchBrowserHandoffControlEvent = z
+  .object({
+    type: z.literal('patch.browser_handoff.control'),
+    chatId: z.string().min(1),
+    handoffId: z.string().min(1),
+    action: z.enum(['done', 'cancel']),
+  })
+  .strict();
+export type PatchBrowserHandoffControlEvent = z.infer<typeof PatchBrowserHandoffControlEvent>;
+
 export const SurfaceHeartbeatEvent = z
   .object({
     type: z.literal('surface.heartbeat'),
@@ -3725,11 +4121,11 @@ export type SurfaceHeartbeatAckEvent = z.infer<typeof SurfaceHeartbeatAckEvent>;
 // Host events (spec/03 § Host events)
 //
 // Every host-scoped control a surface can change has a surface-originated
-// frame HERE carrying `daemonId` — no exceptions. A surface with no frame to
+// frame HERE carrying `hostId` — no exceptions. A surface with no frame to
 // send renders a read-only list instead, which is exactly how a machine
 // setting ends up changeable from the web app and not from the phone. The
 // host-owned lists are therefore PAIRED: a snapshot and a change push
-// outward (`folders.list` / `folders.updated`, `daemon.account`), and an edit
+// outward (`folders.list` / `folders.updated`, `host.account`), and an edit
 // frame inward. The folder registry was the case that was previously
 // outward-only.
 //
@@ -3741,7 +4137,7 @@ export type SurfaceHeartbeatAckEvent = z.infer<typeof SurfaceHeartbeatAckEvent>;
 export const HostRenameEvent = z
   .object({
     type: z.literal('host.rename'),
-    ...daemonIdField,
+    ...hostIdField,
     /**
      * Non-empty. An empty name is rejected naming the offending value rather
      * than falling back to the machine hostname — a host that silently renames
@@ -3756,23 +4152,23 @@ export type HostRenameEvent = z.infer<typeof HostRenameEvent>;
 export const HostSetHomeEvent = z
   .object({
     type: z.literal('host.set_home'),
-    ...daemonIdField,
+    ...hostIdField,
   })
   .strict();
 export type HostSetHomeEvent = z.infer<typeof HostSetHomeEvent>;
 
 /**
  * Server → surfaces: this host was removed from the account
- * (`DELETE /api/hosts/:daemonId`). Its credential is revoked, so it cannot
+ * (`DELETE /api/hosts/:hostId`). Its credential is revoked, so it cannot
  * reconnect without being paired again; a surface drops it from its host list
- * and forgets its cached `daemon.host` / `daemon.account` reports. Sent once,
+ * and forgets its cached `host.host` / `host.account` reports. Sent once,
  * to every connected surface; a surface that was offline learns it from the
  * next `auth.ok` roster, which no longer names the host.
  */
 export const HostRemovedEvent = z
   .object({
     type: z.literal('host.removed'),
-    ...daemonIdField,
+    ...hostIdField,
   })
   .strict();
 export type HostRemovedEvent = z.infer<typeof HostRemovedEvent>;
@@ -3781,7 +4177,7 @@ export type HostRemovedEvent = z.infer<typeof HostRemovedEvent>;
 export const HostSettingsEvent = z
   .object({
     type: z.literal('host.settings'),
-    ...daemonIdField,
+    ...hostIdField,
     /**
      * LEGACY, for surfaces that predate `harnessMcpServers`: set `enabled` on
      * the two browser servers. Ignored when the same frame carries the list.
@@ -3797,7 +4193,7 @@ export const HostSettingsEvent = z
     harnessClaudeMdEnabled: z.boolean().optional(),
     /**
      * Set this host's agent-browser routing (spec/02 § Browser — Route
-     * through): a `daemonId` routes `patch_browser_*` traffic through that
+     * through): a `hostId` routes `patch_browser_*` traffic through that
      * host's network instead of this one's; `null` turns routing off (direct
      * again); absent leaves the current setting unchanged. Changing this
      * value (either direction) closes this host's open browser tabs — the
@@ -3813,7 +4209,7 @@ export type HostSettingsEvent = z.infer<typeof HostSettingsEvent>;
 export const HostComponentInstallEvent = z
   .object({
     type: z.literal('host.component_install'),
-    ...daemonIdField,
+    ...hostIdField,
     componentId: z.string().min(1),
   })
   .strict();
@@ -3823,7 +4219,7 @@ export type HostComponentInstallEvent = z.infer<typeof HostComponentInstallEvent
 export const HostComponentRemoveEvent = z
   .object({
     type: z.literal('host.component_remove'),
-    ...daemonIdField,
+    ...hostIdField,
     componentId: z.string().min(1),
   })
   .strict();
@@ -3832,7 +4228,7 @@ export type HostComponentRemoveEvent = z.infer<typeof HostComponentRemoveEvent>;
 /**
  * Host → surfaces: live component-download progress (spec/02 § Optional
  * components). LIVE-ONLY, like `chat.message_delta`: no `seq`, never
- * persisted, never replayed. The SETTLED result lands on `daemon.host`'s
+ * persisted, never replayed. The SETTLED result lands on `host.host`'s
  * `components[]` instead, which is what a surface that connects mid-download
  * or after one finished reads. Streams to EVERY surface, so a download started
  * on the phone is visible on the desktop.
@@ -3840,7 +4236,7 @@ export type HostComponentRemoveEvent = z.infer<typeof HostComponentRemoveEvent>;
 export const HostComponentProgressEvent = z
   .object({
     type: z.literal('host.component_progress'),
-    ...daemonIdField,
+    ...hostIdField,
     componentId: z.string().min(1),
     state: HostComponentState,
     receivedBytes: z.number().int().nonnegative(),
@@ -3862,7 +4258,7 @@ export type HostComponentProgressEvent = z.infer<typeof HostComponentProgressEve
 export const HostUpdateEvent = z
   .object({
     type: z.literal('host.update'),
-    ...daemonIdField,
+    ...hostIdField,
   })
   .strict();
 export type HostUpdateEvent = z.infer<typeof HostUpdateEvent>;
@@ -3871,7 +4267,7 @@ export type HostUpdateEvent = z.infer<typeof HostUpdateEvent>;
 export const HostFolderAddEvent = z
   .object({
     type: z.literal('host.folder_add'),
-    ...daemonIdField,
+    ...hostIdField,
     /** Absolute path on THAT host. Empty is rejected, not ignored. */
     path: z.string().min(1),
   })
@@ -3882,7 +4278,7 @@ export type HostFolderAddEvent = z.infer<typeof HostFolderAddEvent>;
 export const HostFolderRemoveEvent = z
   .object({
     type: z.literal('host.folder_remove'),
-    ...daemonIdField,
+    ...hostIdField,
     path: z.string().min(1),
   })
   .strict();
@@ -3921,7 +4317,7 @@ export const ClaudeMemoryEntry = z
 export type ClaudeMemoryEntry = z.infer<typeof ClaudeMemoryEntry>;
 
 const claudeSettingsFields = {
-  ...daemonIdField,
+  ...hostIdField,
   /**
    * Raw text of that host's `~/.claude/settings.json` — permissions, hooks,
    * model, statusLine, env and anything else Claude Code itself reads from
@@ -3966,7 +4362,7 @@ export type ClaudeSettingsUpdatedEvent = z.infer<typeof ClaudeSettingsUpdatedEve
 export const HostClaudeMemoryDeleteEvent = z
   .object({
     type: z.literal('host.claude_memory_delete'),
-    ...daemonIdField,
+    ...hostIdField,
     project: z.string().min(1),
     file: z.string().min(1),
   })
@@ -3981,7 +4377,7 @@ export type HostClaudeMemoryDeleteEvent = z.infer<typeof HostClaudeMemoryDeleteE
 export const HostClaudeMemorySetEvent = z
   .object({
     type: z.literal('host.claude_memory_set'),
-    ...daemonIdField,
+    ...hostIdField,
     project: z.string().min(1),
     file: z.string().min(1),
     body: z.string(),
@@ -3996,14 +4392,14 @@ export type HostClaudeMemorySetEvent = z.infer<typeof HostClaudeMemorySetEvent>;
  *
  * Exists because the figure a person most wants is the one they are looking at
  * while deciding whether to wait or to add an account, and a reading up to ten
- * minutes old is not that. The host answers with a fresh `daemon.account`;
+ * minutes old is not that. The host answers with a fresh `host.account`;
  * there is no dedicated reply frame, because the report IS the answer and a
  * second shape would be a second thing to keep in step.
  */
 export const HostBackendUsageRefreshEvent = z
   .object({
     type: z.literal('host.backend_usage_refresh'),
-    ...daemonIdField,
+    ...hostIdField,
     backendId: z.string().min(1),
   })
   .strict();
@@ -4023,7 +4419,7 @@ export type HostBackendUsageRefreshEvent = z.infer<typeof HostBackendUsageRefres
 export const HostBackendAddAccountEvent = z
   .object({
     type: z.literal('host.backend_add_account'),
-    ...daemonIdField,
+    ...hostIdField,
     backendId: z.string().min(1),
     token: z.string().min(1).optional(),
     authMethod: z.enum(['browser', 'device', 'cancel']).optional(),
@@ -4129,6 +4525,16 @@ export const PatchSendToEvent = z
     /** Present iff this is a cross-host relay the caller is waiting on. */
     requestId: z.string().min(1).optional(),
     voicePrefix: z.string().optional(),
+    /**
+     * Whether the host should bring the target chat back into the main list.
+     * The sending host always computes this from its own caller's hidden
+     * state before the frame leaves — a receiving host has no way to look
+     * that caller up itself, so it is carried rather than re-derived. Optional
+     * only for a sender on an older build that predates this field (spec/01 §
+     * wire compatibility); a receiver that sees it absent must NOT default to
+     * revealing — see the handler's own note.
+     */
+    revealTarget: z.boolean().optional(),
   })
   .strict();
 export type PatchSendToEvent = z.infer<typeof PatchSendToEvent>;
@@ -4167,7 +4573,7 @@ export const PatchSpawnEvent = z
      * spawn request — an agent spawning a chat is choosing a machine whether it
      * realises it or not, so the contract makes it say which.
      */
-    ...daemonIdField,
+    ...hostIdField,
     folder: z.string().min(1),
     /** Optional; omitted takes the NAMED host's last-used model (spec/04 § Spawn). */
     model: z.string().min(1).optional(),
@@ -4191,7 +4597,7 @@ export type PatchSpawnEvent = z.infer<typeof PatchSpawnEvent>;
  * NO FALLBACK: without this frame a spawn the target REFUSED (no model
  * catalogue, unknown folder, SDK failure) left the calling agent's tool call
  * reporting success for a chat that does not exist. `ok:false` carries the
- * machine's own reason, and `daemonId` is required so the error can name the
+ * machine's own reason, and `hostId` is required so the error can name the
  * machine that refused rather than leaving the agent to guess which of its
  * hosts failed.
  */
@@ -4203,7 +4609,7 @@ export const PatchSpawnResponseEvent = z
     /** The chat that called `patch_spawn` — the machine the answer is relayed back to. */
     sourceChatId: z.string().min(1),
     /** The machine that handled the spawn. Required, exactly as on the request. */
-    ...daemonIdField,
+    ...hostIdField,
     folder: z.string().min(1),
     ok: z.boolean(),
     /** The new chat, present iff `ok`. */
@@ -4282,7 +4688,7 @@ export const PatchListChatsResponseEvent = z
       z
         .object({
           chatId: z.string().min(1),
-          ...daemonIdField,
+          ...hostIdField,
         })
         .strict(),
     ),
@@ -4303,14 +4709,32 @@ export const PatchActivityRequestEvent = z
   .strict();
 export type PatchActivityRequestEvent = z.infer<typeof PatchActivityRequestEvent>;
 
+/**
+ * What produced an `ActivityMessage` (spec/06 § `patch_activity`), read
+ * straight off the persisted turn's own `jobTrigger`/`hookTrigger`/
+ * `goalTrigger`/`origin` flags (`ChatMessageEvent` above). Absent means
+ * `'user'` — a person actually typing it (composer, voice, a fork/side
+ * message) — which is also why `'user'` is never sent explicitly, the same
+ * convention as those flags themselves. `'job'`/`'hook'`/`'goal'` are a job's
+ * fire into an existing chat, an agent-response hook's block resubmit, and a
+ * goal evaluator's not-met resubmit respectively; `'machine'` is everything
+ * else the host started on its own — a self-wake firing, a Manager-sweep
+ * nudge/wake, a `patch_delegate` subagent's relay to its parent, the todo
+ * list advancing.
+ */
+export const ActivityMessageKind = z.enum(['job', 'hook', 'goal', 'machine']);
+export type ActivityMessageKind = z.infer<typeof ActivityMessageKind>;
+
 export const ActivityMessage = z
   .object({
     chatId: z.string().min(1),
     chatName: z.string().nullable(),
-    ...daemonIdField,
+    ...hostIdField,
     folder: z.string(),
     text: z.string(),
     ts: z.number().int().nonnegative(),
+    /** See {@link ActivityMessageKind}. Absent means a person typed this. */
+    kind: ActivityMessageKind.optional(),
   })
   .strict();
 export type ActivityMessage = z.infer<typeof ActivityMessage>;
@@ -4355,12 +4779,138 @@ export const PatchActivityReadResponseEvent = z
           chatId: z.string().min(1),
           text: z.string(),
           ts: z.number().int().nonnegative(),
+          /** See {@link ActivityMessageKind}. Absent means a person typed this. */
+          kind: ActivityMessageKind.optional(),
         })
         .strict(),
     ),
   })
   .strict();
 export type PatchActivityReadResponseEvent = z.infer<typeof PatchActivityReadResponseEvent>;
+
+/**
+ * Settings → Computer use (spec/06 § Browser tools). Server → host: report
+ * whether this machine's agent browser is driving it, or stop it.
+ */
+export const PatchBrowserUseRequestEvent = z
+  .object({
+    type: z.literal('patch.browser_use.request'),
+    requestId: z.string().min(1),
+    action: z.enum(['status', 'stop']),
+  })
+  .strict();
+export type PatchBrowserUseRequestEvent = z.infer<typeof PatchBrowserUseRequestEvent>;
+
+export const PatchBrowserUseResponseEvent = z
+  .object({
+    type: z.literal('patch.browser_use.response'),
+    requestId: z.string().min(1),
+    /** True while an action that moves the pointer or types is running. */
+    active: z.boolean(),
+    /** Plain-language label of the running action, when active. */
+    actionLabel: z.string().min(1).optional(),
+    /** When the current run of activity began (ms epoch), when active. */
+    since: z.number().int().nonnegative().optional(),
+    /** Browser windows currently open. */
+    tabs: z.number().int().nonnegative(),
+    /** When the user last pressed Stop (ms epoch). */
+    lastStoppedAt: z.number().int().nonnegative().optional(),
+    /** Present on a `stop` answer: how many windows it closed. */
+    closed: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type PatchBrowserUseResponseEvent = z.infer<typeof PatchBrowserUseResponseEvent>;
+
+/**
+ * One cross-chat tool call (spec/06 § Cross-chat toolset — Settings →
+ * Activity). `callerChatId`/`targetChatId` absent for a tool with no caller
+ * or target chat (e.g. `patch_list_devices`). `err` present only when `ok` is
+ * false.
+ */
+export const ToolLogEntry = z
+  .object({
+    ts: z.number().int().nonnegative(),
+    tool: z.string().min(1),
+    callerChatId: z.string().min(1).optional(),
+    targetChatId: z.string().min(1).optional(),
+    durationMs: z.number().int().nonnegative(),
+    ok: z.boolean(),
+    err: z.string().optional(),
+  })
+  .strict();
+export type ToolLogEntry = z.infer<typeof ToolLogEntry>;
+
+/** Server → host: read this machine's own cross-chat tool-call log for a window. */
+export const PatchToolLogReadRequestEvent = z
+  .object({
+    type: z.literal('patch.tool_log.read.request'),
+    requestId: z.string().min(1),
+    since: z.number().int().nonnegative(),
+    until: z.number().int().nonnegative(),
+    /** Most rows the machine may return — the oldest `limit` in the window. */
+    limit: z.number().int().positive(),
+  })
+  .strict();
+export type PatchToolLogReadRequestEvent = z.infer<typeof PatchToolLogReadRequestEvent>;
+
+export const PatchToolLogReadResponseEvent = z
+  .object({
+    type: z.literal('patch.tool_log.read.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    entries: z.array(ToolLogEntry),
+  })
+  .strict();
+export type PatchToolLogReadResponseEvent = z.infer<typeof PatchToolLogReadResponseEvent>;
+
+/** One reading of an account's limit windows, kept so Usage can chart how it went down. */
+export const UsageSample = z
+  .object({
+    ts: z.number().int().nonnegative(),
+    accountId: z.string().min(1),
+    label: z.string().min(1),
+    /** 0..1 fraction of each window spent, as the probe reported it. */
+    session: z.number().min(0).max(1).optional(),
+    week: z.number().min(0).max(1).optional(),
+    sessionResetsAt: z.number().optional(),
+    weekResetsAt: z.number().optional(),
+  })
+  .strict();
+export type UsageSample = z.infer<typeof UsageSample>;
+
+/** One chat's token total over a window, summed from its turn records. */
+export const ChatTokenUsage = z
+  .object({
+    chatId: z.string().min(1),
+    name: z.string().optional(),
+    tokens: z.number().int().nonnegative(),
+    costUsd: z.number().nonnegative(),
+    turns: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ChatTokenUsage = z.infer<typeof ChatTokenUsage>;
+
+/** Server → host: this machine's usage history and per-chat tokens for a window. */
+export const PatchUsageReadRequestEvent = z
+  .object({
+    type: z.literal('patch.usage.read.request'),
+    requestId: z.string().min(1),
+    since: z.number().int().nonnegative(),
+    until: z.number().int().nonnegative(),
+  })
+  .strict();
+export type PatchUsageReadRequestEvent = z.infer<typeof PatchUsageReadRequestEvent>;
+
+export const PatchUsageReadResponseEvent = z
+  .object({
+    type: z.literal('patch.usage.read.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    samples: z.array(UsageSample),
+    chats: z.array(ChatTokenUsage),
+  })
+  .strict();
+export type PatchUsageReadResponseEvent = z.infer<typeof PatchUsageReadResponseEvent>;
 
 export const PatchStopEvent = z
   .object({
@@ -4415,7 +4965,7 @@ export type PatchJobToggleEvent = z.infer<typeof PatchJobToggleEvent>;
 // The host's MCP child invokes `patch_job_*` tools that hit the host's
 // UDS. The host then needs to relay the mutation upstream to the SERVER
 // (which is the canonical owner of `/data/jobs/*.json`). The transport is
-// the existing daemon-link WebSocket; the protocol is a request/response
+// the existing host-link WebSocket; the protocol is a request/response
 // pair carried by these two events.
 //
 // `payload` and `result` are open-ended JSON; the receiving side validates
@@ -4951,12 +5501,12 @@ export type PatchBackgroundTaskStatsResponseEvent = z.infer<
 // Background task bar (spec/14 § Main chat panel — Background task bar).
 //
 // Distinct from `patch_watch`/`patch_watch_list`/etc's own agent-facing MCP
-// tools (daemon/src/mcp.ts) — those run INSIDE a chat's own turn, addressed by
+// tools (host/src/mcp.ts) — those run INSIDE a chat's own turn, addressed by
 // `PATCH_CHAT_ID`. This pair is surface-facing: a REST client with no turn of
 // its own asks "what does THIS chat have running" and "kill this one", the
 // same server→host→server round-trip `patch.background_task_stats.*` uses.
 //
-// `WatchTaskRow` mirrors `packages/daemon/src/watch.ts`'s persisted
+// `WatchTaskRow` mirrors `packages/host/src/watch.ts`'s persisted
 // `WatchRecord`, minus the daemon-internal `chatId`/`pid` a surface has no use
 // for — `chatId` is already the request's own scope, and a kill goes through
 // `patch.watch_stop.request` below, never a raw pid. `outputFile` DOES cross:
@@ -5045,7 +5595,7 @@ export type PatchWatchStopResponseEvent = z.infer<typeof PatchWatchStopResponseE
 // `patch.chat_history.request` is server-originated: it backs the REST
 // endpoint `GET /api/chats/:id/history?since=<seq>`. The server doesn't share
 // the host's filesystem (the host owns Claude Code's persisted JSONL), so
-// it round-trips this RPC over the daemon-link and collects the events into
+// it round-trips this RPC over the host-link and collects the events into
 // the HTTP response body. Distinct from the agent-facing `patch.history.*`
 // pair (cross-chat peek, delivered via per-surface replay) — this one returns
 // the events array inline so a stateless HTTP caller can render history.
@@ -5112,6 +5662,12 @@ export const PatchLogRestoreEvent = z
   .strict();
 export type PatchLogRestoreEvent = z.infer<typeof PatchLogRestoreEvent>;
 
+/** Server -> host: ownership reconciliation is complete; startup work may resume. */
+export const HostReconciledEvent = z
+  .object({ type: z.literal('host.reconciled'), ...hostIdField })
+  .strict();
+export type HostReconciledEvent = z.infer<typeof HostReconciledEvent>;
+
 /**
  * Server -> host: the server holds this chat's transcript up to `through`
  * (spec/01 § Message log). Sent a moment after events are committed, batched per
@@ -5139,7 +5695,7 @@ export type ChatCommittedEvent = z.infer<typeof ChatCommittedEvent>;
 export const HostManagerAdoptEvent = z
   .object({
     type: z.literal('host.manager_adopt'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     epoch: z.number().int().nonnegative(),
     handoff: z.string(),
     nextSeq: z.number().int().nonnegative(),
@@ -5151,7 +5707,7 @@ export type HostManagerAdoptEvent = z.infer<typeof HostManagerAdoptEvent>;
 export const HostManagerReleaseEvent = z
   .object({
     type: z.literal('host.manager_release'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     epoch: z.number().int().nonnegative(),
   })
   .strict();
@@ -5231,7 +5787,7 @@ export const PatchChatHistoryResponseEvent = z
 export type PatchChatHistoryResponseEvent = z.infer<typeof PatchChatHistoryResponseEvent>;
 
 // `patch.skills.request` is server-originated: it backs
-// `GET /api/skills?folder=&daemonId=` (the job-editor's Skill picker, the
+// `GET /api/skills?folder=&hostId=` (the job-editor's Skill picker, the
 // chat transcript's Skill tool-call link, and the composer's `/`
 // autocomplete). The host owns the project filesystem, so the server
 // round-trips this RPC and the host lists the skills available in
@@ -5250,9 +5806,9 @@ export const PatchSkillsRequestEvent = z
      * `~/.claude/skills` only where a particular tool is installed) only
      * exists on that one machine. Required so the request is routed to the
      * caller's actual folder/host rather than falling back to "whichever
-     * host last attached" (NO FALLBACK — see `daemonIdField` above).
+     * host last attached" (NO FALLBACK — see `hostIdField` above).
      */
-    ...daemonIdField,
+    ...hostIdField,
   })
   .strict();
 export type PatchSkillsRequestEvent = z.infer<typeof PatchSkillsRequestEvent>;
@@ -5322,7 +5878,7 @@ export const PatchModelsRequestEvent = z
      * a chat's host is chosen before its model, and the models offered are that
      * host's, across that host's backends (spec/02 § Model catalogue).
      */
-    ...daemonIdField,
+    ...hostIdField,
     /** Stamped by the hub — the surface the response routes back to. */
     ...forSurfaceIdField,
   })
@@ -5353,7 +5909,7 @@ export const PatchModelsResponseEvent = z
   .object({
     type: z.literal('patch.models.response'),
     requestId: z.string().min(1),
-    ...daemonIdField,
+    ...hostIdField,
     /**
      * Selectable models, newest-first. `id` is the SDK `--model` value;
      * `backend` names which of the host's backends serves it, and is what a
@@ -5396,7 +5952,7 @@ export const PatchRecurrenceTranslateRequestEvent = z
      * credential and the account-failover credit gate, exactly as
      * `patch.models.request` names a host for its catalogue read.
      */
-    ...daemonIdField,
+    ...hostIdField,
     /** Stamped by the hub — the surface the response routes back to. */
     ...forSurfaceIdField,
   })
@@ -5409,7 +5965,7 @@ export const PatchRecurrenceTranslateResponseEvent = z
   .object({
     type: z.literal('patch.recurrence.translate.response'),
     requestId: z.string().min(1),
-    ...daemonIdField,
+    ...hostIdField,
     /**
      * The bare RRULE value string the model produced, present only when
      * `ok:true`. The SERVER still validates this (`RRule.fromString`) and
@@ -5451,7 +6007,7 @@ export const PatchTerminalOpenEvent = z
     /** Surface-minted session id; every later frame correlates on it. */
     sessionId: z.string().min(1),
     /** The host the shell starts on — a terminal is a shell on ONE machine. */
-    ...daemonIdField,
+    ...hostIdField,
     /**
      * Absolute host-side directory the shell starts in. Validated exactly
      * like a chat spawn — a NAMED folder that does not exist on the host is a
@@ -5661,7 +6217,7 @@ export const PatchBrowserTunnelOpenEvent = z
     /** Minted by the browsing host; every later frame of this stream carries it. */
     streamId: z.string().min(1),
     /** The ROUTING host asked to make the real outbound connection. */
-    ...daemonIdField,
+    ...hostIdField,
     /** Destination the browsing host's Chromium asked its SOCKS proxy for. */
     host: z.string().min(1),
     port: z.number().int().min(1).max(65535),
@@ -5715,6 +6271,37 @@ export const PatchBrowserTunnelErrorEvent = z
   .strict();
 export type PatchBrowserTunnelErrorEvent = z.infer<typeof PatchBrowserTunnelErrorEvent>;
 
+// A browser host asks its own authenticated Patch server to sign one outbound
+// authority. The deployment private key never crosses the host link.
+export const WebBotAuthSignRequestEvent = z
+  .object({
+    type: z.literal('web_bot_auth.sign_request'),
+    hostId: z.string().min(1),
+    requestId: z.string().min(1),
+    authority: z.string().min(1),
+    directoryUrl: z.string().url(),
+  })
+  .strict();
+export type WebBotAuthSignRequestEvent = z.infer<typeof WebBotAuthSignRequestEvent>;
+
+export const WebBotAuthSignResponseEvent = z
+  .object({
+    type: z.literal('web_bot_auth.sign_response'),
+    hostId: z.string().min(1),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    result: z
+      .object({ headers: z.record(z.string()) })
+      .strict()
+      .optional(),
+    error: z
+      .object({ code: z.string().min(1), message: z.string().min(1) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type WebBotAuthSignResponseEvent = z.infer<typeof WebBotAuthSignResponseEvent>;
+
 // ---------------------------------------------------------------------------
 // Cross-host audio relay over the host link (spec/07-voice-app.md § Voice is
 // a per-host capability, spec/03-wire-protocol.md § Audio relay over the
@@ -5724,7 +6311,7 @@ export type PatchBrowserTunnelErrorEvent = z.infer<typeof PatchBrowserTunnelErro
 // itself internet-reachable (spec/01-server.md § WebSocket hub — it only
 // dials out), so the server relaying `/audio/:sessionId` to a chat on any
 // OTHER host has nothing to dial INTO unless that host has separately
-// declared a direct address (`daemon.host.audioRelayHost` — an optional
+// declared a direct address (`host.host.audioRelayHost` — an optional
 // latency optimisation, correct only when the host is co-located with the
 // server). This is the path that needs NOTHING declared: the server tunnels
 // every frame of the session over the SAME outbound link the host already
@@ -5845,7 +6432,7 @@ export const PatchFoldersBrowseRequestEvent = z
      * at a time — the one whose picker group the user is in (spec/04
      * § Browsing). It is never the surface's own filesystem, even on desktop.
      */
-    ...daemonIdField,
+    ...hostIdField,
     ...forSurfaceIdField,
     /**
      * Absolute directory to list. Omitted → the host returns its browsable
@@ -5861,7 +6448,7 @@ export const PatchFoldersBrowseResponseEvent = z
     type: z.literal('patch.folders.browse.response'),
     requestId: z.string().min(1),
     /** Echoes the host that answered, so a surface cannot mis-file a listing. */
-    ...daemonIdField,
+    ...hostIdField,
     ok: z.boolean(),
     /**
      * The directory that was listed (absolute), or `null` for the roots view
@@ -5933,7 +6520,7 @@ export const PatchHostFilesRequestEvent = z
   .object({
     type: z.literal('patch.host_files.request'),
     requestId: z.string().min(1),
-    ...daemonIdField,
+    ...hostIdField,
     /**
      * `list` a directory's entries, `read` a text file, `write` a text file
      * that already exists (the editor only ever saves a file it opened).
@@ -5954,7 +6541,7 @@ export const PatchHostFilesResponseEvent = z
     type: z.literal('patch.host_files.response'),
     requestId: z.string().min(1),
     /** Echoes the host that answered. */
-    ...daemonIdField,
+    ...hostIdField,
     ok: z.boolean(),
     /** The absolute path acted on (the resolved home for a path-less `list`). */
     path: z.string().optional(),
@@ -6023,7 +6610,7 @@ export const PatchBlobRequestEvent = z
   .object({
     type: z.literal('patch.blob.request'),
     requestId: z.string().min(1),
-    ...daemonIdField,
+    ...hostIdField,
     /** Which chat the reader is looking at — the host that owns it answers. */
     chatId: z.string().min(1),
     /** Content hash of the wanted blob, as carried on the reference. */
@@ -6037,7 +6624,7 @@ export const PatchBlobResponseEvent = z
     type: z.literal('patch.blob.response'),
     requestId: z.string().min(1),
     /** Echoes the host that answered. */
-    ...daemonIdField,
+    ...hostIdField,
     ok: z.boolean(),
     /** What the bytes are, so the server can set `Content-Type` honestly. */
     mime: z.string().min(1).optional(),
@@ -6101,6 +6688,8 @@ export const ChatMoveBundle = z
     files: z.array(ChatMoveFile),
     /** The chat's own entries from its folder's attachment manifest, keyed by id. */
     attachments: z.record(z.string(), z.unknown()),
+    /** Canonical transcript included by a server-copy takeover. */
+    events: z.array(z.object({ type: z.string().min(1) }).passthrough()).optional(),
   })
   .strict();
 export type ChatMoveBundle = z.infer<typeof ChatMoveBundle>;
@@ -6113,13 +6702,19 @@ export const PatchChatMoveRequestEvent = z
     type: z.literal('patch.chat_move.request'),
     requestId: z.string().min(1),
     /** The host this step runs on. */
-    ...daemonIdField,
+    ...hostIdField,
     chatId: z.string().min(1),
     op: ChatMoveOp,
     /** `import` only: the absolute folder the chat will run in on this host. */
     folder: z.string().min(1).optional(),
-    /** `import` only: what `export` produced. */
+    /** `import` only: what `export` produced, or what the server built from its own copy. */
     bundle: ChatMoveBundle.optional(),
+    /**
+     * `retire` only: this host was never asked to export the chat — another host
+     * took it over from the server's copy. Whatever is running for it here is
+     * stopped, then its directory is set aside.
+     */
+    force: z.boolean().optional(),
   })
   .strict();
 export type PatchChatMoveRequestEvent = z.infer<typeof PatchChatMoveRequestEvent>;
@@ -6146,7 +6741,7 @@ export const PatchChatMoveResponseEvent = z
     type: z.literal('patch.chat_move.response'),
     requestId: z.string().min(1),
     /** Echoes the host that answered. */
-    ...daemonIdField,
+    ...hostIdField,
     chatId: z.string().min(1),
     op: ChatMoveOp,
     ok: z.boolean(),
@@ -6223,7 +6818,7 @@ export type ChatSearchSnippet = z.infer<typeof ChatSearchSnippet>;
 export const ChatSearchHit = z
   .object({
     chatId: z.string().min(1),
-    daemonId: DaemonId,
+    hostId: HostId,
     name: z.string().nullable(),
     preview: z.string().nullable(),
     folder: z.string(),
@@ -6267,7 +6862,7 @@ export const PatchChatSearchRequestEvent = z
   .object({
     type: z.literal('patch.chat_search.request'),
     requestId: z.string().min(1),
-    ...daemonIdField,
+    ...hostIdField,
     /** Trimmed, at least `CHAT_SEARCH_MIN_QUERY` characters. */
     query: z.string().min(CHAT_SEARCH_MIN_QUERY),
     /** How many of the host's top hits to send back. */
@@ -6282,7 +6877,7 @@ export const PatchChatSearchResponseEvent = z
   .object({
     type: z.literal('patch.chat_search.response'),
     requestId: z.string().min(1),
-    ...daemonIdField,
+    ...hostIdField,
     ok: z.boolean(),
     /** The host's top hits, best first (name matches, then most recent). */
     hits: z.array(ChatSearchHit).optional(),
@@ -6309,7 +6904,7 @@ export type PatchChatSearchResponseEvent = z.infer<typeof PatchChatSearchRespons
  */
 export const ChatSearchHostResult = z
   .object({
-    daemonId: DaemonId,
+    hostId: HostId,
     hostName: z.string().nullable(),
     /**
      * - `searched` — the host answered.
@@ -6391,8 +6986,13 @@ export function makeSnippet(
   terms: string[],
 ): { text: string; highlights: ChatSearchRange[] } {
   const flat = text.replace(/\s+/g, ' ').trim();
-  const lower = flat.toLowerCase();
-  const first = terms.length > 0 ? lower.indexOf(terms[0]!) : -1;
+  // Found on `flat` itself, the way `highlightRanges` matches: lower-casing first
+  // (`İ` becomes two code units) shifts every index after it.
+  const firstTerm = terms[0];
+  const first =
+    firstTerm === undefined
+      ? -1
+      : (new RegExp(escapeRegExp(firstTerm).replace(/ /g, '\\s+'), 'i').exec(flat)?.index ?? -1);
   let start = Math.max(0, (first < 0 ? 0 : first) - SNIPPET_BEFORE);
   let end = Math.min(flat.length, start + SNIPPET_LENGTH);
   start = Math.max(0, Math.min(start, end - SNIPPET_LENGTH));
@@ -6457,7 +7057,7 @@ export const JobExecRequestEvent = z
   .object({
     type: z.literal('job.exec_request'),
     /** The host the command runs on. */
-    ...daemonIdField,
+    ...hostIdField,
     /** The job this fire belongs to, echoed back so the run can be logged. */
     jobId: z.string().min(1),
     /** This fire's id — the correlation key for the result. */
@@ -6494,6 +7094,37 @@ export const JobExecResultEvent = z
 export type JobExecResultEvent = z.infer<typeof JobExecResultEvent>;
 
 // ---------------------------------------------------------------------------
+// Wake host (spec/08 § Wake host)
+//
+// A job with `wakeHost` asks its macOS host to schedule a wake-from-sleep a
+// minute before the job's next fire, so a closed lid on AC power does not hold
+// the fire for hours. The server sends the request while the host is awake; the
+// host schedules it with `pmset` and says whether that worked.
+
+export const HostWakeRequestEvent = z
+  .object({
+    type: z.literal('host.wake_request'),
+    ...hostIdField,
+    jobId: z.string().min(1),
+    /** When the host should be awake by (ms epoch). */
+    at: z.number().int(),
+  })
+  .strict();
+export type HostWakeRequestEvent = z.infer<typeof HostWakeRequestEvent>;
+
+export const HostWakeResultEvent = z
+  .object({
+    type: z.literal('host.wake_result'),
+    jobId: z.string().min(1),
+    at: z.number().int(),
+    ok: z.boolean(),
+    /** Why the wake could not be scheduled. Present when `ok` is false. */
+    error: z.string().optional(),
+  })
+  .strict();
+export type HostWakeResultEvent = z.infer<typeof HostWakeResultEvent>;
+
+// ---------------------------------------------------------------------------
 // Message hooks (spec/20-hooks.md)
 //
 // Backing `POST /api/hooks/check`. The server dispatches one of these per
@@ -6503,7 +7134,7 @@ export type JobExecResultEvent = z.infer<typeof JobExecResultEvent>;
 export const HookCheckRequestEvent = z
   .object({
     type: z.literal('hook.check_request'),
-    ...daemonIdField,
+    ...hostIdField,
     requestId: z.string().min(1),
     hookId: z.string().min(1),
     kind: HookKind,
@@ -6517,7 +7148,7 @@ export const HookCheckRequestEvent = z
         images: HookImages.optional(),
         chatId: z.string().min(1),
         folder: z.string().min(1),
-        daemonId: z.string().min(1),
+        hostId: z.string().min(1),
         specialThread: z.boolean(),
         /** `agent_response` only (spec/20-hooks.md § On the agent's response). */
         toolCallsSummary: z.string().optional(),
@@ -6565,7 +7196,7 @@ export type HookCheckResultEvent = z.infer<typeof HookCheckResultEvent>;
 export const HookAgentResponseCheckRequestEvent = z
   .object({
     type: z.literal('hook.agent_response_check_request'),
-    ...daemonIdField,
+    ...hostIdField,
     chatId: z.string().min(1),
     /** Correlates the eventual `hook.agent_response_outcome`. */
     checkId: z.string().min(1),
@@ -6582,7 +7213,7 @@ export type HookAgentResponseCheckRequestEvent = z.infer<typeof HookAgentRespons
 export const HookAgentResponseOutcomeEvent = z
   .object({
     type: z.literal('hook.agent_response_outcome'),
-    ...daemonIdField,
+    ...hostIdField,
     chatId: z.string().min(1),
     checkId: z.string().min(1),
     /** Every matching hook's own result — the host sorts out what each means. */
@@ -6762,7 +7393,7 @@ export const PatchPadRequestEvent = z
   .object({
     type: z.literal('patch.pad.request'),
     requestId: z.string().min(1),
-    op: z.enum(['create', 'update', 'reply', 'list']),
+    op: z.enum(['create', 'update', 'reply', 'list', 'collect']),
     /** The chat the agent is calling from — the owner of a created Pad. */
     chatId: z.string().min(1),
     padId: z.string().min(1).optional(),
@@ -7269,7 +7900,7 @@ export type AuthExpiredEvent = z.infer<typeof AuthExpiredEvent>;
 
 /**
  * One registered host as the server knows it at greeting time: its presence,
- * plus the server's CACHED last `daemon.host` / `daemon.account` reports.
+ * plus the server's CACHED last `host.host` / `host.account` reports.
  *
  * `host` and `accounts` are null/empty for a host that has never connected
  * since the server started — the server caches what a host told it, and has
@@ -7278,14 +7909,16 @@ export type AuthExpiredEvent = z.infer<typeof AuthExpiredEvent>;
  */
 export const AuthOkHost = z
   .object({
-    ...daemonIdField,
+    ...hostIdField,
     online: z.boolean(),
     /** ms-epoch of the last time this host's link was seen; null if never. */
     lastSeenAt: z.number().int().nullable(),
-    /** The cached `daemon.host` payload, minus its envelope. */
-    host: DaemonHostEvent.omit({ type: true }).nullable(),
-    /** The cached per-backend `daemon.account` payloads, minus their envelopes. */
-    accounts: z.array(DaemonAccountEvent.omit({ type: true })),
+    /** The cached `host.host` payload, minus its envelope. */
+    host: HostInfoEvent.omit({ type: true }).nullable(),
+    /** The name the registry holds for this machine, for hosts that have not reported one since the server started. */
+    registeredName: z.string().nullable().optional(),
+    /** The cached per-backend `host.account` payloads, minus their envelopes. */
+    accounts: z.array(HostAccountEvent.omit({ type: true })),
   })
   .strict();
 export type AuthOkHost = z.infer<typeof AuthOkHost>;
@@ -7299,7 +7932,7 @@ export const AuthOkEvent = z
      * EVERY registered host, not just the connected ones. A surface must be
      * able to render the full Hosts list — including the machines that are
      * asleep — from the greeting alone, without a second round trip and
-     * without waiting for a `daemon.online` that may never come.
+     * without waiting for a `host.online` that may never come.
      */
     hosts: z.array(AuthOkHost),
     /**
@@ -7316,7 +7949,7 @@ export type AuthOkEvent = z.infer<typeof AuthOkEvent>;
  * Every surface-originated frame that names a machine (spec/03 § Host events).
  *
  * The contract's rule is "every host-scoped control a surface changes has a
- * surface-originated frame carrying `daemonId`, no exceptions" — this is that
+ * surface-originated frame carrying `hostId`, no exceptions" — this is that
  * list, made enumerable so the server can gate the whole set at one ingress
  * instead of one `if` per route. A new host-addressed surface frame that is not
  * added here is ungated, which is the failure this list exists to prevent.
@@ -7353,7 +7986,7 @@ const HOST_ADDRESSED_SURFACE_EVENT_SET: ReadonlySet<string> = new Set(
   HOST_ADDRESSED_SURFACE_EVENTS,
 );
 
-/** Does this frame type carry a `daemonId` a surface chose? */
+/** Does this frame type carry a `hostId` a surface chose? */
 export function isHostAddressedSurfaceEvent(type: string): type is HostAddressedSurfaceEventType {
   return HOST_ADDRESSED_SURFACE_EVENT_SET.has(type);
 }
@@ -7381,11 +8014,11 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatDequeuedEvent,
   ChatBranchesEvent,
   ChatErrorEvent,
-  DaemonOnlineEvent,
-  DaemonOfflineEvent,
-  DaemonUnauthenticatedEvent,
-  DaemonHostEvent,
-  DaemonAccountEvent,
+  HostOnlineEvent,
+  HostOfflineEvent,
+  HostUnauthenticatedEvent,
+  HostInfoEvent,
+  HostAccountEvent,
   DeviceSessionEvent,
   FoldersListEvent,
   FoldersUpdatedEvent,
@@ -7397,6 +8030,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   ComposerDraftUpdatedEvent,
   ComposerDraftClearedEvent,
   ComposerDraftListEvent,
+  ViewPositionSetEvent,
+  ViewPositionUpdatedEvent,
   NewChatDraftSetEvent,
   NewChatDraftRemoveEvent,
   NewChatDraftUpdatedEvent,
@@ -7455,6 +8090,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ManagerSweepRunEvent,
   ManagerSweepResultEvent,
   ChatSnoozeRequestEvent,
+  ChatSnoozeBackClearRequestEvent,
   ChatHideRequestEvent,
   ChatDeleteRequestEvent,
   ChatGoalRequestEvent,
@@ -7463,8 +8099,16 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatReminderRequestEvent,
   ChatLoopRequestEvent,
   ChatModelRequestEvent,
+  ChatAccountRequestEvent,
   FileWriteEvent,
   PatchFileChangedEvent,
+  PatchBrowserViewFrameEvent,
+  PatchBrowserViewWatchEvent,
+  PatchBrowserViewStatusEvent,
+  PatchBrowserViewStopEvent,
+  PatchBrowserHandoffStateEvent,
+  PatchBrowserHandoffInputEvent,
+  PatchBrowserHandoffControlEvent,
   SurfaceHeartbeatEvent,
   SurfaceHeartbeatAckEvent,
   SurfaceForegroundedEvent,
@@ -7485,6 +8129,12 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchActivityResponseEvent,
   PatchActivityReadRequestEvent,
   PatchActivityReadResponseEvent,
+  PatchBrowserUseRequestEvent,
+  PatchBrowserUseResponseEvent,
+  PatchToolLogReadRequestEvent,
+  PatchToolLogReadResponseEvent,
+  PatchUsageReadRequestEvent,
+  PatchUsageReadResponseEvent,
   PatchStopEvent,
   PatchJobCreateEvent,
   PatchJobUpdateEvent,
@@ -7515,6 +8165,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchLogSyncBatchEvent,
   PatchLogRestoreEvent,
   ChatCommittedEvent,
+  HostReconciledEvent,
   HostManagerAdoptEvent,
   HostManagerReleaseEvent,
   PatchQueuePullRequestEvent,
@@ -7555,6 +8206,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchBrowserTunnelDataEvent,
   PatchBrowserTunnelCloseEvent,
   PatchBrowserTunnelErrorEvent,
+  WebBotAuthSignRequestEvent,
+  WebBotAuthSignResponseEvent,
   // Audio relay over the host link
   PatchAudioRelayOpenEvent,
   PatchAudioRelayReadyEvent,
@@ -7564,6 +8217,9 @@ export const WireEvent = z.discriminatedUnion('type', [
   // Script jobs
   JobExecRequestEvent,
   JobExecResultEvent,
+  // Wake host
+  HostWakeRequestEvent,
+  HostWakeResultEvent,
   // Message hooks
   HookCheckRequestEvent,
   HookCheckResultEvent,
@@ -7634,11 +8290,11 @@ export const EVENT_SCHEMAS = {
   'chat.dequeued': ChatDequeuedEvent,
   'chat.branches': ChatBranchesEvent,
   'chat.error': ChatErrorEvent,
-  'daemon.online': DaemonOnlineEvent,
-  'daemon.offline': DaemonOfflineEvent,
-  'daemon.unauthenticated': DaemonUnauthenticatedEvent,
-  'daemon.host': DaemonHostEvent,
-  'daemon.account': DaemonAccountEvent,
+  'host.online': HostOnlineEvent,
+  'host.offline': HostOfflineEvent,
+  'host.unauthenticated': HostUnauthenticatedEvent,
+  'host.host': HostInfoEvent,
+  'host.account': HostAccountEvent,
   'device.session': DeviceSessionEvent,
   'folders.list': FoldersListEvent,
   'folders.updated': FoldersUpdatedEvent,
@@ -7649,6 +8305,8 @@ export const EVENT_SCHEMAS = {
   'composer_draft.updated': ComposerDraftUpdatedEvent,
   'composer_draft.cleared': ComposerDraftClearedEvent,
   'composer_draft.list': ComposerDraftListEvent,
+  'view_position.set': ViewPositionSetEvent,
+  'view_position.updated': ViewPositionUpdatedEvent,
   'new_chat_draft.set': NewChatDraftSetEvent,
   'new_chat_draft.remove': NewChatDraftRemoveEvent,
   'new_chat_draft.updated': NewChatDraftUpdatedEvent,
@@ -7705,6 +8363,7 @@ export const EVENT_SCHEMAS = {
   'manager.sweep_run': ManagerSweepRunEvent,
   'manager.sweep_result': ManagerSweepResultEvent,
   'chat.snooze_request': ChatSnoozeRequestEvent,
+  'chat.snooze_back_clear_request': ChatSnoozeBackClearRequestEvent,
   'chat.hide_request': ChatHideRequestEvent,
   'chat.delete_request': ChatDeleteRequestEvent,
   'chat.goal_request': ChatGoalRequestEvent,
@@ -7713,8 +8372,16 @@ export const EVENT_SCHEMAS = {
   'chat.reminder_request': ChatReminderRequestEvent,
   'chat.loop_request': ChatLoopRequestEvent,
   'chat.model_request': ChatModelRequestEvent,
+  'chat.account_request': ChatAccountRequestEvent,
   'file.write': FileWriteEvent,
   'patch.file_changed': PatchFileChangedEvent,
+  'patch.browser_view.frame': PatchBrowserViewFrameEvent,
+  'patch.browser_view.watch': PatchBrowserViewWatchEvent,
+  'patch.browser_view.status': PatchBrowserViewStatusEvent,
+  'patch.browser_view.stop': PatchBrowserViewStopEvent,
+  'patch.browser_handoff.state': PatchBrowserHandoffStateEvent,
+  'patch.browser_handoff.input': PatchBrowserHandoffInputEvent,
+  'patch.browser_handoff.control': PatchBrowserHandoffControlEvent,
   'surface.heartbeat': SurfaceHeartbeatEvent,
   'surface.heartbeat_ack': SurfaceHeartbeatAckEvent,
   'surface.foregrounded': SurfaceForegroundedEvent,
@@ -7734,6 +8401,12 @@ export const EVENT_SCHEMAS = {
   'patch.activity.response': PatchActivityResponseEvent,
   'patch.activity.read.request': PatchActivityReadRequestEvent,
   'patch.activity.read.response': PatchActivityReadResponseEvent,
+  'patch.browser_use.request': PatchBrowserUseRequestEvent,
+  'patch.browser_use.response': PatchBrowserUseResponseEvent,
+  'patch.tool_log.read.request': PatchToolLogReadRequestEvent,
+  'patch.tool_log.read.response': PatchToolLogReadResponseEvent,
+  'patch.usage.read.request': PatchUsageReadRequestEvent,
+  'patch.usage.read.response': PatchUsageReadResponseEvent,
   'patch.stop': PatchStopEvent,
   'patch.job_create': PatchJobCreateEvent,
   'patch.job_update': PatchJobUpdateEvent,
@@ -7764,6 +8437,7 @@ export const EVENT_SCHEMAS = {
   'patch.log_sync.batch': PatchLogSyncBatchEvent,
   'patch.log_restore': PatchLogRestoreEvent,
   'chat.committed': ChatCommittedEvent,
+  'host.reconciled': HostReconciledEvent,
   'host.manager_adopt': HostManagerAdoptEvent,
   'host.manager_release': HostManagerReleaseEvent,
   'patch.queue_pull.request': PatchQueuePullRequestEvent,
@@ -7802,6 +8476,8 @@ export const EVENT_SCHEMAS = {
   'patch.browser_tunnel.data': PatchBrowserTunnelDataEvent,
   'patch.browser_tunnel.close': PatchBrowserTunnelCloseEvent,
   'patch.browser_tunnel.error': PatchBrowserTunnelErrorEvent,
+  'web_bot_auth.sign_request': WebBotAuthSignRequestEvent,
+  'web_bot_auth.sign_response': WebBotAuthSignResponseEvent,
   'patch.audio_relay.open': PatchAudioRelayOpenEvent,
   'patch.audio_relay.ready': PatchAudioRelayReadyEvent,
   'patch.audio_relay.frame': PatchAudioRelayFrameEvent,
@@ -7809,6 +8485,8 @@ export const EVENT_SCHEMAS = {
   'patch.audio_relay.error': PatchAudioRelayErrorEvent,
   'job.exec_request': JobExecRequestEvent,
   'job.exec_result': JobExecResultEvent,
+  'host.wake_request': HostWakeRequestEvent,
+  'host.wake_result': HostWakeResultEvent,
   'hook.check_request': HookCheckRequestEvent,
   'hook.check_result': HookCheckResultEvent,
   'hook.agent_response_check_request': HookAgentResponseCheckRequestEvent,

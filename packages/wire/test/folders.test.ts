@@ -18,7 +18,7 @@ describe('folder registry wire events', () => {
   it('round-trips folders.list through encode/decode', () => {
     const ev: WireEvent = {
       type: 'folders.list',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       roots: ['/home/tom/projects/patch'],
       recent: ['/home/tom/notes'],
     };
@@ -29,7 +29,7 @@ describe('folder registry wire events', () => {
   it('round-trips folders.updated through encode/decode', () => {
     const ev: WireEvent = {
       type: 'folders.updated',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       roots: ['/home/tom/projects/patch'],
       recent: [],
     };
@@ -40,7 +40,7 @@ describe('folder registry wire events', () => {
   it('accepts an empty folder list', () => {
     const parsed = FoldersListEvent.parse({
       type: 'folders.list',
-      daemonId: 'host-a',
+      hostId: 'host-a',
       roots: [],
       recent: [],
     });
@@ -54,7 +54,7 @@ describe('folder registry wire events', () => {
   it('rejects a folders.list that names no host', () => {
     const res = FoldersListEvent.safeParse({ type: 'folders.list', roots: [], recent: [] });
     expect(res.success).toBe(false);
-    expect(JSON.stringify(res)).toContain('daemonId');
+    expect(JSON.stringify(res)).toContain('hostId');
   });
 
   it('rejects a folders.updated that names no host', () => {
@@ -66,7 +66,7 @@ describe('folder registry wire events', () => {
     expect(() =>
       FoldersListEvent.parse({
         type: 'folders.list',
-        daemonId: 'host-a',
+        hostId: 'host-a',
         roots: ['/ok', 42],
         recent: [],
       }),

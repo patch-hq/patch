@@ -130,7 +130,7 @@ export interface VersionReport {
    * a build has nulls: unknown reads as unknown, never as "same as the rest".
    */
   hosts: {
-    daemonId: string;
+    hostId: string;
     hostName: string | null;
     online: boolean;
     version: string | null;
@@ -147,12 +147,14 @@ export interface VersionReport {
   drift: VersionDrift[];
 }
 
+export * from './agent-return.js';
 export * from './events.js';
 export * from './meeting.js';
 // A chat's own history log, kept independently of any harness (spec/04 § History).
 export * from './chatLog.js';
 // Provider keys a host holds, set from Settings → Hosts (spec/02 § Provider keys).
 export * from './provider-keys.js';
+export * from './providers.js';
 // Which permission modes each model can actually run in (spec/02 § Permission
 // mode). Static, mirroring Claude Code's own denylist — see the module header.
 export * from './modelCapabilities.js';
@@ -161,6 +163,7 @@ export * from './modelCapabilities.js';
 // all render from it.
 export * from './usageWindows.js';
 export * from './codec.js';
+export * from './codepoints.js';
 export * from './cron-tz.js';
 // The one natural-language renderer for a cron expression, shared by every
 // surface that shows a schedule (spec/08 § Cron).
@@ -174,6 +177,7 @@ export * from './goal-outcome.js';
 // The Manager's Threads list — which chats it shows, needs-you first (spec/14
 // § Manager view). Shared by the desktop strip and the phone's Chats tab.
 export * from './thread-rows.js';
+export * from './snooze.js';
 export * from './tool-runs.js';
 export * from './chat-move.js';
 export * from './sweep-prompt.js';
@@ -186,7 +190,7 @@ export { WireDecodeError } from './errors.js';
  * stringly-typed literals so a typo can't silently mis-route.
  *
  * The host owns the *full* registration list (including thread_manager) in
- * `packages/daemon/src/specialThreads.ts`; only the externally-addressable
+ * `packages/host/src/specialThreads.ts`; only the externally-addressable
  * channels (speakers) need to be visible from server/surfaces.
  */
 export const SPECIAL_THREAD_IDS = {
@@ -300,8 +304,9 @@ export function isJunkFolder(folder: string): boolean {
   // A dot-directory anywhere in the path.
   if (segments.some((s) => s.startsWith('.'))) return true;
   // System scratch roots.
-  if (folder === '/tmp' || folder.startsWith('/tmp/')) return true;
-  if (folder.startsWith('/var/tmp/') || folder.startsWith('/private/tmp/')) return true;
+  for (const root of ['/tmp', '/var/tmp', '/private/tmp']) {
+    if (folder === root || folder.startsWith(`${root}/`)) return true;
+  }
   if (folder === '/var/folders' || folder.startsWith('/var/folders/')) return true;
   return false;
 }
@@ -369,3 +374,5 @@ export function folderLabels(folders: string[]): string[] {
 // Jobs canonical types are exported via the subpath import `@patch/wire/jobs`
 // to avoid bloating the default surface.
 export * from './pairing.js';
+export * from './ambiguous-titles.js';
+export * from './snooze-format.js';

@@ -4,15 +4,15 @@
 // draws a real picture of each change in a real browser and delivers the batch
 // into the owning chat as a `chat.input` → the agent's reply closes it.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const PAGE = `<!doctype html><html><head><title>Home</title></head><body style="margin:0">
 <h1 id="t" style="margin:40px">Credit</h1><button id="b" style="margin:40px">Go</button></body></html>`;
@@ -33,10 +33,10 @@ describe('pads', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(7));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '/tmp/chat2' });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '/tmp/chat2' });
     const bearer = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-test',
@@ -46,13 +46,13 @@ describe('pads', () => {
     const auth = { authorization: `Bearer ${bearer}` };
     const ask = async (chatId: string, req: Record<string, unknown>): Promise<Res> => {
       const requestId = `r${++n}`;
-      daemonLink.emit({ type: 'patch.pad.request', requestId, chatId, ...req } as WireEvent);
+      hostLink.emit({ type: 'patch.pad.request', requestId, chatId, ...req } as WireEvent);
       for (let i = 0; i < 300; i++) {
-        const hit = daemonLink.sent.find(
+        const hit = hostLink.sent.find(
           (s) => s.event.type === 'patch.pad.response' && s.event.requestId === requestId,
         );
         if (hit) {
-          expect(hit.daemonId).toBe('d1'); // the reply goes back to the asking machine
+          expect(hit.hostId).toBe('d1'); // the reply goes back to the asking machine
           return hit.event as Res;
         }
         await new Promise((r) => setTimeout(r, 10));
@@ -77,7 +77,7 @@ describe('pads', () => {
         screens: { id: string; name: string }[];
       };
     };
-    return { built, daemonLink, auth, ask, create };
+    return { built, hostLink, auth, ask, create };
   }
 
   it('an agent creates a Pad; the editor, files and API are served from its signed URL', async () => {
@@ -114,8 +114,82 @@ describe('pads', () => {
     }
   });
 
+  it('answers a signature of multi-byte characters with 401, not a 500', async () => {
+    const { built, create } = await makeApp();
+    try {
+      const pad = await create();
+      // 64 characters, 128 bytes: the length of a signature only by counting characters.
+      const forged = pad.frameUrl.replace(/[0-9a-f]{64}/, encodeURIComponent('é'.repeat(64)));
+      expect((await built.app.inject({ method: 'GET', url: forged })).statusCode).toBe(401);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('serves a pad file whose name holds a percent sign', async () => {
+    const { built, ask } = await makeApp();
+    try {
+      const res = await ask('c1', {
+        op: 'create',
+        name: 'Odd names',
+        app: 'Dog Log',
+        device: 'phone',
+        files: [
+          { path: 'index.html', base64: b64(PAGE) },
+          { path: 'pic%.txt', base64: b64('hello') },
+        ],
+      });
+      expect(res.ok, JSON.stringify(res.error)).toBe(true);
+      const { frameUrl } = res.result as { frameUrl: string };
+      const file = await built.app.inject({ method: 'GET', url: `${frameUrl}f/pic%25.txt` });
+      expect(file.statusCode).toBe(200);
+      expect(file.body).toBe('hello');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('a Pad can take two library screens that share a name, as captures can', async () => {
+    const { built, auth } = await makeApp();
+    try {
+      const src = (
+        await built.app.inject({
+          method: 'POST',
+          url: '/api/pads',
+          headers: auth,
+          payload: {
+            name: 'Source',
+            app: 'Patch',
+            chatId: 'c1',
+            screens: [{ name: 'Chat', html: PAGE }],
+          },
+        })
+      ).json();
+      const from = await built.app.inject({
+        method: 'POST',
+        url: '/api/pads',
+        headers: auth,
+        payload: {
+          name: 'Twice',
+          app: 'Patch',
+          chatId: 'c1',
+          from: [
+            { padId: src.id, screenId: 'chat' },
+            { padId: src.id, screenId: 'chat' },
+          ],
+        },
+      });
+      expect(from.statusCode, from.body).toBe(200);
+      const ids = from.json().screens.map((s: { id: string }) => s.id);
+      expect(ids).toHaveLength(2);
+      expect(new Set(ids).size).toBe(2);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('changes are shared and fold; Send draws pictures and delivers into the owning chat; the reply closes the batch', async () => {
-    const { built, daemonLink, create, ask } = await makeApp();
+    const { built, hostLink, create, ask } = await makeApp();
     try {
       const pad = await create();
       const api = `${pad.frameUrl}api`;
@@ -152,11 +226,12 @@ describe('pads', () => {
         headers: { host: 'patch.test', 'x-forwarded-proto': 'https' },
       });
       expect(sent.statusCode, sent.body).toBe(200);
-      const input = daemonLink.sent.find((s) => s.event.type === 'chat.input')!.event as Extract<
+      const input = hostLink.sent.find((s) => s.event.type === 'chat.input')!.event as Extract<
         WireEvent,
         { type: 'chat.input' }
       >;
       expect(input.chatId).toBe('c1');
+      expect(input.source).toEqual({ kind: 'pad', padId: expect.any(String) });
       expect(input.message).toContain('[Pad] Tom sent 2 changes on "Care screens"');
       expect(input.message).toContain('Moved h1 "Credit" 30px right, 12px down');
       expect(input.message).toContain('Note on h1 "Credit": "Make it bigger"');
@@ -209,6 +284,70 @@ describe('pads', () => {
     }
   }, 60_000);
 
+  it('collect is Send by the agent: nothing pending sends nothing; pending changes arrive as the same [Pad] message', async () => {
+    const { built, hostLink, create, ask } = await makeApp();
+    try {
+      const pad = await create();
+      const api = `${pad.frameUrl}api`;
+      const inputs = () => hostLink.sent.filter((s) => s.event.type === 'chat.input');
+
+      const empty = await ask('c1', { op: 'collect', padId: pad.id });
+      expect(empty.ok, JSON.stringify(empty.error)).toBe(true);
+      expect(empty.result).toMatchObject({ id: pad.id, collected: 0 });
+      expect((empty.result as { message: string }).message).toMatch(/no pending changes/);
+      expect(inputs()).toHaveLength(0);
+
+      await built.app.inject({
+        method: 'POST',
+        url: `${api}/changes`,
+        payload: { screen: 'index', kind: 'delete', target: SEL },
+      });
+      const foreign = await ask('c2', { op: 'collect', padId: pad.id });
+      expect(foreign.ok).toBe(false);
+      expect(foreign.error?.message).toMatch(/belongs to another chat/);
+
+      vi.stubEnv('PATCH_PUBLIC_URL', '');
+      vi.stubEnv('PATCH_SERVER_URL', '');
+      const noUrl = await ask('c1', { op: 'collect', padId: pad.id });
+      expect(noUrl.ok).toBe(false);
+      expect(noUrl.error?.message).toMatch(/no public URL configured/);
+      expect(inputs()).toHaveLength(0);
+
+      vi.stubEnv('PATCH_PUBLIC_URL', 'https://patch.test/');
+      const first = await ask('c1', { op: 'collect', padId: pad.id });
+      expect(first.ok, JSON.stringify(first.error)).toBe(true);
+      expect(first.result).toMatchObject({ collected: 1, pending: 0, working: true });
+      expect((first.result as { message: string }).message).not.toMatch(/earlier batch/);
+      const input = inputs()[0]!.event as Extract<WireEvent, { type: 'chat.input' }>;
+      expect(input.chatId).toBe('c1');
+      expect(input.message).toContain('[Pad] Tom sent 1 change on "Care screens"');
+      expect(input.message).toContain('Deleted h1 "Credit"');
+      const pic = /picture: https:\/\/patch\.test(\/\S+\.png)/.exec(input.message);
+      expect(pic).not.toBeNull();
+      expect((await built.app.inject({ method: 'GET', url: pic![1]! })).statusCode).toBe(200);
+
+      // A batch still waiting on a reply stays open; the next queues behind it.
+      await built.app.inject({
+        method: 'POST',
+        url: `${api}/changes`,
+        payload: { screen: 'other', kind: 'delete', target: SEL },
+      });
+      const second = await ask('c1', { op: 'collect', padId: pad.id });
+      expect(second.ok, JSON.stringify(second.error)).toBe(true);
+      expect(second.result).toMatchObject({ collected: 1 });
+      expect((second.result as { message: string }).message).toMatch(
+        /1 earlier batch was already waiting on a reply/,
+      );
+      expect(inputs()).toHaveLength(2);
+      await ask('c1', { op: 'reply', padId: pad.id, text: 'Removed the heading' });
+      const state = (await built.app.inject({ method: 'GET', url: api })).json();
+      expect(state.batches.map((b: { status: string }) => b.status)).toEqual(['done', 'sent']);
+    } finally {
+      vi.unstubAllEnvs();
+      await built.app.close();
+    }
+  }, 60_000);
+
   it('only the owning chat can update or reply; update replaces the files and reports new screens', async () => {
     const { built, ask, create } = await makeApp();
     try {
@@ -238,6 +377,27 @@ describe('pads', () => {
       });
       expect(bad.ok).toBe(false);
       expect(bad.error?.message).toMatch(/no .html files/);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it("an update naming a bad path is refused before it removes the Pad's existing files", async () => {
+    const { built, ask, create } = await makeApp();
+    try {
+      const pad = await create();
+      const res = await ask('c1', {
+        op: 'update',
+        padId: pad.id,
+        files: [
+          { path: 'index.html', base64: b64(PAGE.replace('Credit', 'Changed')) },
+          { path: '../escape.html', base64: b64(PAGE) },
+        ],
+      });
+      expect(res.ok).toBe(false);
+      const file = await built.app.inject({ method: 'GET', url: `${pad.frameUrl}f/index.html` });
+      expect(file.statusCode).toBe(200);
+      expect(file.body).toContain('Credit');
     } finally {
       await built.app.close();
     }
@@ -334,6 +494,61 @@ describe('pads', () => {
           .statusCode,
       ).toBe(404);
       void create;
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('refuses malformed captured screens with a 400, writing none of them', async () => {
+    const { built, auth } = await makeApp();
+    try {
+      const made = await built.app.inject({
+        method: 'POST',
+        url: '/api/pads',
+        headers: auth,
+        payload: { name: 'Shapes', chatId: 'c1', screens: [{ name: 'Chat', html: PAGE }] },
+      });
+      expect(made.statusCode, made.body).toBe(200);
+      const pad = made.json();
+      const captures = (): string[] =>
+        readdirSync(dir, { recursive: true })
+          .map(String)
+          .filter((f) => /cap-[^/]*\.html$/.test(f));
+      const before = captures();
+
+      for (const screens of [
+        [null],
+        [{ name: 5, html: PAGE }],
+        [{ name: 'Good', html: PAGE }, { name: 'Bad' }],
+        5,
+        { name: 'Chat', html: PAGE },
+      ]) {
+        const res = await built.app.inject({
+          method: 'POST',
+          url: `/api/pads/${pad.id}/screens`,
+          headers: auth,
+          payload: { screens },
+        });
+        expect(res.statusCode, JSON.stringify(screens)).toBe(400);
+        expect(res.json().error).toBe('each screen needs a name and html');
+      }
+      // Not even the good screen that came before the bad one reached disk.
+      expect(captures()).toEqual(before);
+      const after = await built.app.inject({
+        method: 'GET',
+        url: `/api/pads/${pad.id}`,
+        headers: auth,
+      });
+      expect(after.json().screens).toHaveLength(1);
+
+      const create = await built.app.inject({
+        method: 'POST',
+        url: '/api/pads',
+        headers: auth,
+        payload: { name: 'Broken', chatId: 'c1', screens: [null] },
+      });
+      expect(create.statusCode).toBe(400);
+      expect(create.json().error).toBe('each screen needs a name and html');
     } finally {
       await built.app.close();
     }

@@ -9,6 +9,9 @@
 //   so from one the screen opens on its usual default.
 // - Call starts the same sustained voice call as the header's phone button.
 // - Tools pushes the full-screen per-chat tools page (app/chats/[chatId]/tools).
+// - Documents pushes the chat-folder document browser (app/chats/[chatId]/docs).
+// - Add tasks (only while the chat has no list) summons the task bar, open.
+// - Design a change to Chat opens New Pad on this chat with Patch preselected.
 // - Move to… pushes the Move page (app/chats/[chatId]/move): another machine,
 //   and the folder the chat will run in there.
 // - Show / Pin / Snooze / Archive call the very functions the Chats-tab row
@@ -31,6 +34,8 @@ import {
   toggleArchive,
 } from './ChatLongPressSheet';
 import { chatKebabItems } from '../lib/chatActions';
+import { docsRoute } from '../lib/docEditor';
+import { newPadHref, PATCH_APP } from '../lib/newPad';
 import { clearContext, toggleDisabled } from '../lib/chatMeta';
 import { startVoiceCall } from '../lib/voiceCall';
 import { api } from '../api/rest';
@@ -38,6 +43,7 @@ import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { isHidden, isSnoozed, type ChatRow } from '../stores/types';
 import { space, useTheme } from '../lib/theme';
+import { markLeavingForArchive } from '../lib/leaveArchived';
 
 /** The route of a chat's full-screen Tools page. */
 export function chatToolsRoute(chatId: string): `/chats/${string}/tools` {
@@ -61,6 +67,7 @@ export function ChatActionsMenu({
     archived: row?.status === 'archived',
     hidden: row !== undefined && isHidden(row),
     disabled: row?.disabled ?? false,
+    noTasks: row !== undefined && row.todos.length === 0,
   }).map((label) => ({ id: label, label, destructive: label === 'Delete chat' }));
 
   const newChatHere = (): void => {
@@ -70,13 +77,13 @@ export function ChatActionsMenu({
     }
     // No fallback to the picker: a chat whose host is not known yet (not yet
     // spawned) has no "here" to start another in, and saying so is honest.
-    if (!row || row.daemonId === '' || row.folder === '') {
+    if (!row || row.hostId === '' || row.folder === '') {
       useUiStore.getState().pushError("new chat failed: this chat's machine isn't known yet");
       return;
     }
     router.push({
       pathname: '/new-chat',
-      params: { daemonId: row.daemonId, folder: row.folder },
+      params: { hostId: row.hostId, folder: row.folder },
     });
   };
 
@@ -91,6 +98,15 @@ export function ChatActionsMenu({
         return;
       case 'Tools':
         router.push(chatToolsRoute(chatId));
+        return;
+      case 'Documents':
+        router.push(docsRoute(chatId));
+        return;
+      case 'Add tasks':
+        useUiStore.getState().setTaskAddChatId(chatId);
+        return;
+      case 'Design a change to Chat':
+        router.push(newPadHref({ chatId, app: PATCH_APP }));
         return;
       case 'Move to…':
         router.push(`/chats/${chatId}/move`);
@@ -112,6 +128,7 @@ export function ChatActionsMenu({
         // Archiving takes the chat off the active list, so go back to it, as
         // Delete does; unarchiving keeps the user in the chat just restored.
         if (!row) return;
+        if (id === 'Archive chat') markLeavingForArchive(chatId);
         toggleArchive(row);
         if (id === 'Archive chat') router.back();
         return;

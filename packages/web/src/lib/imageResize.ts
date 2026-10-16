@@ -37,6 +37,9 @@ export async function downscaleImageFile(file: File): Promise<File> {
     canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2d canvas context unavailable');
+    // JPEG has no alpha: paint white first or transparent areas encode black.
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
     ctx.drawImage(bitmap, 0, 0, w, h);
 
     const blob = await new Promise<Blob | null>((resolve) =>

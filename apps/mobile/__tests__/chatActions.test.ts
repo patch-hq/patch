@@ -1,5 +1,5 @@
 // The chat-detail ⋯ menu (spec/15 ## Chat detail) — desktop parity: New chat,
-// Call, Tools, Pin, Snooze, Archive, Disable, Clear context, Delete last, each
+// Call, Tools, Documents, Design, Pin, Snooze, Archive, Disable, Clear context, Delete last, each
 // only where it applies. The raw wire event log is NOT reachable from the
 // chat view.
 
@@ -10,12 +10,19 @@ import { chatKebabItems } from '../src/lib/chatActions';
 const PLAIN = { pinned: false, snoozed: false, archived: false, hidden: false, disabled: false };
 
 describe('chatKebabItems', () => {
-  it('a regular chat: New chat, Call, Tools, Pin, Snooze, Archive, Delete — Delete last', () => {
+  it('offers Add tasks only while the chat has no list', () => {
+    expect(chatKebabItems('01HXREGULARCHATID', { ...PLAIN, noTasks: true })).toContain('Add tasks');
+    expect(chatKebabItems('01HXREGULARCHATID', PLAIN)).not.toContain('Add tasks');
+  });
+
+  it('a regular chat: New chat, Call, Tools, Documents, Design, Pin, Snooze, Archive, Delete — Delete last', () => {
     const items = chatKebabItems('01HXREGULARCHATID', PLAIN);
     expect(items).toEqual([
       'New chat',
       'Call',
       'Tools',
+      'Documents',
+      'Design a change to Chat',
       'Pin chat',
       'Snooze chat',
       'Archive chat',
@@ -37,6 +44,8 @@ describe('chatKebabItems', () => {
       'New chat',
       'Call',
       'Tools',
+      'Documents',
+      'Design a change to Chat',
       'Unpin chat',
       'Unsnooze chat',
       'Unarchive chat',
@@ -50,6 +59,8 @@ describe('chatKebabItems', () => {
       'New chat',
       'Call',
       'Tools',
+      'Documents',
+      'Design a change to Chat',
       'Show chat',
       'Pin chat',
       'Snooze chat',
@@ -59,11 +70,13 @@ describe('chatKebabItems', () => {
     ]);
   });
 
-  it('Manager: New chat, Call, Tools, Disable, Clear context — never Pin/Snooze/Archive/Delete', () => {
+  it('Manager: New chat, Call, Tools, Documents, Disable, Clear context — never Pin/Snooze/Archive/Delete', () => {
     expect(chatKebabItems(SPECIAL_THREAD_IDS.manager, { ...PLAIN, pinned: true })).toEqual([
       'New chat',
       'Call',
       'Tools',
+      'Documents',
+      'Design a change to Chat',
       'Disable',
       'Clear context',
     ]);
@@ -74,14 +87,21 @@ describe('chatKebabItems', () => {
       'New chat',
       'Call',
       'Tools',
+      'Documents',
+      'Design a change to Chat',
       'Enable',
       'Clear context',
     ]);
   });
 
-  it('read-only mirror (Speakers) drops Call and Tools too', () => {
+  it('read-only mirror (Speakers) drops Call, Tools and Documents too', () => {
     for (const id of [SPECIAL_THREAD_IDS.speakers]) {
-      expect(chatKebabItems(id, PLAIN)).toEqual(['New chat', 'Disable', 'Clear context']);
+      expect(chatKebabItems(id, PLAIN)).toEqual([
+        'New chat',
+        'Design a change to Chat',
+        'Disable',
+        'Clear context',
+      ]);
     }
   });
 

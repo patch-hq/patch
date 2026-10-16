@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { hostConfirms } from './host-answer.js';
 
 describe('todoist webhook ingress', () => {
@@ -24,8 +24,8 @@ describe('todoist webhook ingress', () => {
 
   async function setup() {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     return { built, link };
   }
 
@@ -66,7 +66,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'not-todoist',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -85,7 +85,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'todoist-disabled',
         trigger: { type: 'todoist', clientSecret: 'fake-secret' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       built.jobs.disable(job.id);
       const res = await built.app.inject({
@@ -109,7 +109,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'no-secret',
         trigger: { type: 'todoist' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -131,7 +131,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'missing-sig',
         trigger: { type: 'todoist', clientSecret: 'fake-secret' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -152,7 +152,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'bad-sig',
         trigger: { type: 'todoist', clientSecret: 'fake-secret' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const res = await built.app.inject({
         method: 'POST',
@@ -179,7 +179,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'no-json-parser',
         trigger: { type: 'todoist', clientSecret: secret },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       // content-type text/plain never hits the custom JSON parser registered
       // in webhooks.ts (shared app-level parser, keyed on application/json),
@@ -258,7 +258,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'todoist-spawn',
         trigger: { type: 'todoist', clientSecret: secret },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
       });
       const body = JSON.stringify({ event_name: 'item:added' });
       const sig = createHmac('sha256', secret).update(body).digest('base64');
@@ -288,7 +288,7 @@ describe('todoist webhook ingress', () => {
         name: 'todoist-reject',
         trigger: { type: 'todoist', clientSecret: secret },
         filter: 'payload.event_name = "item:completed"',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const body = JSON.stringify({ event_name: 'item:added' });
       const sig = createHmac('sha256', secret).update(body).digest('base64');
@@ -321,7 +321,7 @@ describe('todoist webhook ingress', () => {
         // reach the fire-time filter-error path (parse-time-broken filters
         // are rejected at create time by the store's semantic gate).
         filter: '$assert(false, "boom")',
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const body = JSON.stringify({ event_name: 'item:added' });
       const sig = createHmac('sha256', secret).update(body).digest('base64');
@@ -355,7 +355,7 @@ describe('todoist webhook ingress', () => {
       const job = built.jobs.create({
         name: 'todoist-offline',
         trigger: { type: 'todoist', clientSecret: secret },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const body = JSON.stringify({ event_name: 'item:added' });
       const sig = createHmac('sha256', secret).update(body).digest('base64');

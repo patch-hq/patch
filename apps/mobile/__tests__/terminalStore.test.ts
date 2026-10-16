@@ -20,7 +20,7 @@ describe('terminalStore', () => {
   it('starts a session as starting, empty, where it was asked to start', () => {
     expect(s1()).toMatchObject({
       sessionId: 's1',
-      daemonId: 'd1',
+      hostId: 'd1',
       cwd: '/home/tom',
       status: 'starting',
       output: [],

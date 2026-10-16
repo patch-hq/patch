@@ -55,10 +55,10 @@ beforeEach(() => {
   useFolderStore.getState()._reset();
   // Every folder list and every browse is scoped to ONE machine (spec/04
   // § Folders / § Browsing), so the roster carries the single registered host
-  // these screens address. Without it `defaultDaemonId` is null and the screen
+  // these screens address. Without it `defaultHostId` is null and the screen
   // correctly refuses to guess — which is a different test.
   usePresenceStore.setState({
-    hosts: { [HOST]: { daemonId: HOST, online: true, lastSeenAt: 1, host: null, accounts: {} } },
+    hosts: { [HOST]: { hostId: HOST, online: true, lastSeenAt: 1, host: null, accounts: {} } },
   });
 });
 

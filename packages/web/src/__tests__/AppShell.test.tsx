@@ -14,6 +14,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { AppShell } from '../AppShell.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { useSelectionStore } from '../stores/selectionStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
@@ -149,7 +150,7 @@ function makeRow(chatId: string, overrides: Partial<ChatRow> = {}): ChatRow {
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: chatId,
     folder: '/tmp',
@@ -193,7 +194,7 @@ function makeFetch(chats: ChatRow[] = []): ReturnType<typeof vi.fn> {
       return json({
         chats: chats.map((c) => ({
           chatId: c.chatId,
-          daemonId: 'd1',
+          hostId: 'd1',
           permissionMode: 'bypassPermissions' as const,
           name: c.name,
           preview: c.preview,
@@ -210,6 +211,9 @@ function makeFetch(chats: ChatRow[] = []): ReturnType<typeof vi.fn> {
     // The folder roster the sidebar seeds Recent projects from (spec/04
     // § Folders → Folder roster) — loaded at boot alongside GET /api/chats.
     if (u === '/api/chats/folders') return json({ folders: [] });
+    // Snoozed chats follow the snapshot in at boot (the sidebar folds them into
+    // their project) — none in these fixtures.
+    if (u.startsWith('/api/chats?snoozed=only')) return json({ chats: [], nextOffset: null });
     // The section totals the collapsed sidebar rows badge (spec/04 § Section
     // counts) — also loaded at boot. Cold storage is empty in these fixtures.
     if (u === '/api/chats/counts') {
@@ -288,7 +292,7 @@ describe('AppShell', () => {
     vi.unstubAllGlobals();
     delete (window as unknown as { patch?: unknown }).patch;
     permissionDeliveryTracker.reset();
-    usePresenceStore.setState({ connection: 'offline', daemonOnline: false });
+    usePresenceStore.setState({ connection: 'offline', hostOnline: false });
   });
 
   // Patch Updates: "a bar when something not connected on main screen" — the
@@ -298,14 +302,14 @@ describe('AppShell', () => {
   // is no window where the UI says connected while the agent is actually
   // unreachable."). It now lives in AppShell, once, so it reaches every route.
   it('shows the daemon-offline banner on a non-chat route (Jobs) when connected but every host is offline', async () => {
-    usePresenceStore.setState({ connection: 'connected', daemonOnline: false, hostsSeeded: true });
+    usePresenceStore.setState({ connection: 'connected', hostOnline: false, hostsSeeded: true });
     await renderShell('/jobs');
     expect(screen.getByTestId('jobs-route')).toBeInTheDocument();
     expect(screen.getByTestId('daemon-offline-banner')).toBeInTheDocument();
   });
 
   it('does not show the daemon-offline banner on a non-chat route once a host is online', async () => {
-    usePresenceStore.setState({ connection: 'connected', daemonOnline: true });
+    usePresenceStore.setState({ connection: 'connected', hostOnline: true });
     await renderShell('/jobs');
     expect(screen.getByTestId('jobs-route')).toBeInTheDocument();
     expect(screen.queryByTestId('daemon-offline-banner')).not.toBeInTheDocument();
@@ -967,8 +971,8 @@ describe('AppShell', () => {
   });
 
   it('⌘↑/⌘↓ step through non-archived chats ordered by recency; ⌘⇧↑/⌘⇧↓ step folders', async () => {
-    const a = makeRow('chat-a', { folder: '/proj/a', lastUpdated: 300 });
-    const b = makeRow('chat-b', { folder: '/proj/b', lastUpdated: 200 });
+    const a = makeRow('chat-a', { folder: '/proj/a', lastUpdated: 300, lastUserActivity: 300 });
+    const b = makeRow('chat-b', { folder: '/proj/b', lastUpdated: 200, lastUserActivity: 200 });
     await renderShell('/chats/chat-a', [a, b]);
     await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('chat-a'));
     fireEvent.keyDown(window, { key: 'ArrowDown', metaKey: true });
@@ -979,6 +983,19 @@ describe('AppShell', () => {
     await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('chat-b'));
   });
 
+  it('⌘↓ skips snoozed chats the sidebar does not draw', async () => {
+    const a = makeRow('vis-a', { lastUserActivity: 300 });
+    const hidden = makeRow('vis-snoozed', {
+      lastUserActivity: 200,
+      snoozedUntil: Date.now() + 3_600_000,
+    });
+    const c = makeRow('vis-c', { lastUserActivity: 100 });
+    await renderShell('/chats/vis-a', [a, hidden, c]);
+    await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('vis-a'));
+    fireEvent.keyDown(window, { key: 'ArrowDown', metaKey: true });
+    await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('vis-c'));
+  });
+
   it('⌘↓ with no chats at all is a no-op', async () => {
     await renderShell('/', []);
     fireEvent.keyDown(window, { key: 'ArrowDown', metaKey: true });
@@ -986,19 +1003,41 @@ describe('AppShell', () => {
   });
 
   it('⌘↓ from a chat view with no current chatId in the URL jumps to the most-recent chat', async () => {
-    const a = makeRow('nc-a', { lastUpdated: 100 });
-    const b = makeRow('nc-b', { lastUpdated: 200 });
+    const a = makeRow('nc-a', { lastUpdated: 100, lastUserActivity: 100 });
+    const b = makeRow('nc-b', { lastUpdated: 200, lastUserActivity: 200 });
     await renderShell('/', [a, b]);
     await waitFor(() => expect(useChatStore.getState().chats['nc-b']).toBeDefined());
+    // The cold-start payload strips lastUserActivity, which the sidebar sorts by.
+    useChatStore.setState((s) => ({
+      chats: {
+        ...s.chats,
+        ['nc-a']: { ...s.chats['nc-a']!, lastUserActivity: 100 },
+        ['nc-b']: { ...s.chats['nc-b']!, lastUserActivity: 200 },
+      },
+    }));
+    await waitFor(() =>
+      expect(useSelectionStore.getState().order.slice(0, 2)).toEqual(['nc-b', 'nc-a']),
+    );
     fireEvent.keyDown(window, { key: 'ArrowDown', metaKey: true });
     await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('nc-b'));
   });
 
   it('⌘↑ from a chat route whose chatId is unknown (not in the ordered list) jumps to the last chat', async () => {
-    const a = makeRow('kc-a', { lastUpdated: 100 });
-    const b = makeRow('kc-b', { lastUpdated: 200 });
+    const a = makeRow('kc-a', { lastUpdated: 100, lastUserActivity: 100 });
+    const b = makeRow('kc-b', { lastUpdated: 200, lastUserActivity: 200 });
     await renderShell('/chats/does-not-exist', [a, b]);
     await waitFor(() => expect(useChatStore.getState().chats['kc-b']).toBeDefined());
+    // The cold-start payload strips lastUserActivity, which the sidebar sorts by.
+    useChatStore.setState((s) => ({
+      chats: {
+        ...s.chats,
+        ['kc-a']: { ...s.chats['kc-a']!, lastUserActivity: 100 },
+        ['kc-b']: { ...s.chats['kc-b']!, lastUserActivity: 200 },
+      },
+    }));
+    await waitFor(() =>
+      expect(useSelectionStore.getState().order.slice(0, 2)).toEqual(['kc-b', 'kc-a']),
+    );
     fireEvent.keyDown(window, { key: 'ArrowUp', metaKey: true });
     await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('kc-a'));
   });

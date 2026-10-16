@@ -26,7 +26,7 @@ import type { WireEvent } from '@patch/wire';
 import type { PatchWs } from '../api/ws.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useChatStore } from '../stores/chatStore.js';
-import { defaultDaemonId, usePresenceStore } from '../stores/presenceStore.js';
+import { defaultHostId, usePresenceStore } from '../stores/presenceStore.js';
 
 export interface TerminalPanelProps {
   /** Session key: a chatId, or `new` for the not-yet-spawned chat's shell. */
@@ -74,7 +74,7 @@ export function TerminalPanel({
   // The chat's own host — the terminal exists to work on that chat's files, so
   // the shell belongs on that machine and nowhere else. `/chats/new` has no
   // chat yet, hence the fall-through to the account's default host below.
-  const chatDaemonId = useChatStore((s) => s.chats[chatId]?.daemonId ?? null) || null;
+  const chatHostId = useChatStore((s) => s.chats[chatId]?.hostId ?? null) || null;
   const session = useTerminalStore((s) => s.sessions[chatId]);
   const startSession = useTerminalStore((s) => s.startSession);
   const recordCommand = useTerminalStore((s) => s.recordCommand);
@@ -82,6 +82,7 @@ export function TerminalPanel({
   const appendLocal = useTerminalStore((s) => s.appendLocal);
   const pending = useTerminalStore((s) => s.pending[chatId]);
   const takePending = useTerminalStore((s) => s.takePending);
+  const ingest = useTerminalStore((s) => s.ingest);
 
   const [line, setLine] = useState('');
   // Position in `session.history` while walking it with ↑/↓; null = "at the
@@ -104,9 +105,18 @@ export function TerminalPanel({
     // A shell runs on ONE machine. The chat's own host is the only right answer
     // — the terminal exists to work on the files that chat works on — so this
     // refuses rather than opening a shell on some other box.
-    const daemonId = chatDaemonId ?? defaultDaemonId(usePresenceStore.getState().hosts);
-    if (daemonId === null) {
-      appendLocal(chatId, '\n[no host to open a shell on]\n');
+    const hostId = chatHostId ?? defaultHostId(usePresenceStore.getState().hosts);
+    if (hostId === null) {
+      // A session is needed to show anything: with none, `appendLocal` is a
+      // no-op and the user would get a blank, apparently-live prompt.
+      const sessionId = newSessionId();
+      startSession(chatId, folder ?? '', sessionId);
+      ingest({
+        type: 'patch.terminal.error',
+        sessionId,
+        code: 'internal',
+        message: 'no host to open a shell on',
+      });
       return;
     }
     const sessionId = newSessionId();
@@ -115,8 +125,8 @@ export function TerminalPanel({
     // roots the shell and tells us where — never a path this surface guessed.
     send(
       folder
-        ? { type: 'patch.terminal.open', sessionId, daemonId, folder }
-        : { type: 'patch.terminal.open', sessionId, daemonId },
+        ? { type: 'patch.terminal.open', sessionId, hostId, folder }
+        : { type: 'patch.terminal.open', sessionId, hostId },
       chatId,
     );
   }

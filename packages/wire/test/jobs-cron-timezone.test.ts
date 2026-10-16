@@ -7,7 +7,7 @@
 import { describe, test, expect } from 'vitest';
 import { CronTrigger, Job, JobCreateBody, JobPatchBody, JobTrigger } from '../src/jobs.js';
 
-const ACTION = { type: 'spawn', daemonId: 'host-a', folder: '/tmp', prompt: 'go' } as const;
+const ACTION = { type: 'spawn', hostId: 'host-a', folder: '/tmp', prompt: 'go' } as const;
 
 describe('CronTrigger.timezone', () => {
   test('is optional — a trigger with no zone still parses, and stays absent', () => {

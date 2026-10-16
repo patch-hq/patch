@@ -21,24 +21,24 @@
 
 import type { Logger } from 'pino';
 import type { WireEvent } from '@patch/wire';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 import type { Registry } from './registry.js';
 
 const BRIDGE_SURFACE_ID = 'browser-tunnel-bridge';
 
 export interface BrowserTunnelBridgeDeps {
   logger: Logger;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   registry: Registry;
 }
 
 interface Route {
-  browsingDaemonId: string;
-  routingDaemonId: string;
+  browsingHostId: string;
+  routingHostId: string;
 }
 
 export function registerBrowserTunnelBridge(deps: BrowserTunnelBridgeDeps): () => void {
-  const { logger, daemonLink, registry } = deps;
+  const { logger, hostLink, registry } = deps;
 
   /** streamId → the two machines carrying this stream, for as long as it's open. */
   const routes = new Map<string, Route>();
@@ -46,18 +46,18 @@ export function registerBrowserTunnelBridge(deps: BrowserTunnelBridgeDeps): () =
   const otherSide = (streamId: string, from: string): string | undefined => {
     const route = routes.get(streamId);
     if (!route) return undefined;
-    if (route.browsingDaemonId === from) return route.routingDaemonId;
-    if (route.routingDaemonId === from) return route.browsingDaemonId;
+    if (route.browsingHostId === from) return route.routingHostId;
+    if (route.routingHostId === from) return route.browsingHostId;
     return undefined;
   };
 
   const refuseOpen = (
-    browsingDaemonId: string,
+    browsingHostId: string,
     streamId: string,
     code: 'host_not_registered' | 'host_offline',
     message: string,
   ): void => {
-    daemonLink.sendTo(browsingDaemonId, BRIDGE_SURFACE_ID, {
+    hostLink.sendTo(browsingHostId, BRIDGE_SURFACE_ID, {
       type: 'patch.browser_tunnel.error',
       streamId,
       code,
@@ -65,45 +65,45 @@ export function registerBrowserTunnelBridge(deps: BrowserTunnelBridgeDeps): () =
     });
   };
 
-  const unsubEvent = daemonLink.onEvent((event: WireEvent, fromDaemonId: string | null) => {
-    if (fromDaemonId === null) return;
+  const unsubEvent = hostLink.onEvent((event: WireEvent, fromHostId: string | null) => {
+    if (fromHostId === null) return;
 
     if (event.type === 'patch.browser_tunnel.open') {
-      if (!registry.isRegisteredDaemon(event.daemonId)) {
+      if (!registry.isRegisteredHost(event.hostId)) {
         logger.warn(
-          { from: fromDaemonId, target: event.daemonId, streamId: event.streamId },
+          { from: fromHostId, target: event.hostId, streamId: event.streamId },
           'browser tunnel open named an unregistered machine',
         );
         refuseOpen(
-          fromDaemonId,
+          fromHostId,
           event.streamId,
           'host_not_registered',
-          `no machine registered with daemonId: ${event.daemonId}`,
+          `no machine registered with hostId: ${event.hostId}`,
         );
         return;
       }
-      if (!daemonLink.isOnline(event.daemonId)) {
+      if (!hostLink.isOnline(event.hostId)) {
         logger.warn(
-          { from: fromDaemonId, target: event.daemonId, streamId: event.streamId },
+          { from: fromHostId, target: event.hostId, streamId: event.streamId },
           'browser tunnel open named an offline machine',
         );
         refuseOpen(
-          fromDaemonId,
+          fromHostId,
           event.streamId,
           'host_offline',
-          `routing host ${event.daemonId} is offline`,
+          `routing host ${event.hostId} is offline`,
         );
         return;
       }
       routes.set(event.streamId, {
-        browsingDaemonId: fromDaemonId,
-        routingDaemonId: event.daemonId,
+        browsingHostId: fromHostId,
+        routingHostId: event.hostId,
       });
       logger.info(
-        { from: fromDaemonId, target: event.daemonId, streamId: event.streamId, host: event.host },
+        { from: fromHostId, target: event.hostId, streamId: event.streamId, host: event.host },
         'relaying browser tunnel open to the routing machine',
       );
-      daemonLink.sendTo(event.daemonId, BRIDGE_SURFACE_ID, event);
+      hostLink.sendTo(event.hostId, BRIDGE_SURFACE_ID, event);
       return;
     }
 
@@ -112,22 +112,24 @@ export function registerBrowserTunnelBridge(deps: BrowserTunnelBridgeDeps): () =
       event.type === 'patch.browser_tunnel.data' ||
       event.type === 'patch.browser_tunnel.error'
     ) {
-      const to = otherSide(event.streamId, fromDaemonId);
+      const to = otherSide(event.streamId, fromHostId);
       if (!to) {
         logger.warn(
-          { type: event.type, from: fromDaemonId, streamId: event.streamId },
+          { type: event.type, from: fromHostId, streamId: event.streamId },
           'browser tunnel frame for a stream this server is not carrying; dropping',
         );
         return;
       }
-      daemonLink.sendTo(to, BRIDGE_SURFACE_ID, event);
+      // An error always ends the stream, and no close follows it.
+      if (event.type === 'patch.browser_tunnel.error') routes.delete(event.streamId);
+      hostLink.sendTo(to, BRIDGE_SURFACE_ID, event);
       return;
     }
 
     if (event.type === 'patch.browser_tunnel.close') {
-      const to = otherSide(event.streamId, fromDaemonId);
+      const to = otherSide(event.streamId, fromHostId);
       routes.delete(event.streamId);
-      if (to) daemonLink.sendTo(to, BRIDGE_SURFACE_ID, event);
+      if (to) hostLink.sendTo(to, BRIDGE_SURFACE_ID, event);
       return;
     }
   });
@@ -135,18 +137,17 @@ export function registerBrowserTunnelBridge(deps: BrowserTunnelBridgeDeps): () =
   // A machine on either side of an open stream drops: the other side cannot
   // be answered any more, so it is told rather than left hanging against a
   // machine that will never reply.
-  const unsubStatus = daemonLink.onHostStatus((daemonId, status) => {
+  const unsubStatus = hostLink.onHostStatus((hostId, status) => {
     if (status !== 'offline') return;
     for (const [streamId, route] of routes) {
-      if (route.browsingDaemonId !== daemonId && route.routingDaemonId !== daemonId) continue;
-      const survivor =
-        route.browsingDaemonId === daemonId ? route.routingDaemonId : route.browsingDaemonId;
+      if (route.browsingHostId !== hostId && route.routingHostId !== hostId) continue;
+      const survivor = route.browsingHostId === hostId ? route.routingHostId : route.browsingHostId;
       routes.delete(streamId);
-      daemonLink.sendTo(survivor, BRIDGE_SURFACE_ID, {
+      hostLink.sendTo(survivor, BRIDGE_SURFACE_ID, {
         type: 'patch.browser_tunnel.error',
         streamId,
         code: 'host_offline',
-        message: `machine ${daemonId} went offline mid-stream`,
+        message: `machine ${hostId} went offline mid-stream`,
       });
     }
   });

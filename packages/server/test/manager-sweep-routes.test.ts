@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('manager sweep REST routes', () => {
   let dir: string;
@@ -35,8 +35,8 @@ describe('manager sweep REST routes', () => {
       surfaceKind: 'terminal',
       label: 'cli',
     });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     return { jwt, built };
   }
 

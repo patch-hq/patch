@@ -10,12 +10,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   diagnoseUpdater,
+  createInstaller,
+  installDownloaded,
+  shouldPollFeed,
   emptyPersisted,
   initialUpdaterState,
   INSTALL_WATCHDOG_MS,
   parsePersisted,
   persistedOf,
   quitAndInstallNow,
+  savePersisted,
   reduceUpdater,
   updateUrgency,
   URGENCY_DUE_MS,
@@ -153,7 +157,12 @@ test('a downloaded update becomes installable', () => {
 test('a FAILED check is never reported as up to date', () => {
   // The whole point: "I checked, nothing new" and "I could not check" must be
   // distinguishable. The old code swallowed the error entirely.
-  const s = reduceUpdater(state(), { type: 'error', message: 'ENOTFOUND feed', at: AT });
+  const s = reduceUpdater(state(), {
+    type: 'error',
+    kind: 'check',
+    message: 'ENOTFOUND feed',
+    at: AT,
+  });
   assert.equal(s.lastResult, 'error');
   assert.equal(s.lastError, 'ENOTFOUND feed');
   assert.equal(s.checking, false);
@@ -168,6 +177,7 @@ test('an error after a successful download leaves the update installable', () =>
   });
   const errored = reduceUpdater(downloaded, {
     type: 'error',
+    kind: 'install',
     message: 'could not get code signature for running application',
     at: AT,
   });
@@ -224,6 +234,11 @@ test('initial state does not claim a downloaded update survived a relaunch', () 
   assert.equal(s.downloaded, false, 'the downloaded file is not re-verified on boot');
   assert.equal(s.staleSince, AT, 'but being BEHIND does survive — same build, same lag');
   assert.equal(s.lastCheckedAt, AT, 'but the check history is preserved');
+  assert.equal(
+    s.lastResult,
+    'update-available',
+    'so the panel must not still say "ready — restart to apply" for a download it no longer trusts',
+  );
 });
 
 test('initial state carries the disabled reason through to the panel', () => {
@@ -304,25 +319,62 @@ test('a refused install is surfaced verbatim, not swallowed', () => {
 // old process just kept running. Nothing reported that as a failure, so
 // "Restart now" looked like a dead button. -----------------------------
 
-test('a quitAndInstall that returns but never actually quits is reported once the watchdog elapses', () => {
+test('a stalled install resets the installer and retries instead of blaming the user', () => {
   const app = { isQuitting: false };
   const errors: string[] = [];
-  let firedAfter: number | null = null;
+  let installs = 0;
+  let recoveries = 0;
+  const timers: Array<() => void> = [];
   quitAndInstallNow({
     app,
-    autoUpdater: { quitAndInstall: () => {} }, // returns cleanly; process just... stays up.
+    autoUpdater: {
+      quitAndInstall: () => {
+        installs++;
+      },
+    },
+    recoverStall: () => {
+      recoveries++;
+    },
     onError: (err) => errors.push(err.message),
     setTimer: (fn, ms) => {
-      firedAfter = ms;
-      fn(); // simulate the watchdog elapsing, as it would in a real stalled install
+      assert.equal(ms, INSTALL_WATCHDOG_MS);
+      timers.push(fn);
       return {};
     },
   });
-  assert.equal(firedAfter, INSTALL_WATCHDOG_MS);
-  assert.deepEqual(errors, [
-    'Restart did not finish — Patch is still running the old build. Quit it by hand (⌘Q) and reopen it.',
-  ]);
+  timers.shift()!(); // first stall
+  assert.equal(recoveries, 1);
+  assert.equal(installs, 2, 'the install is asked for again after the reset');
+  assert.deepEqual(errors, []);
+  assert.equal(app.isQuitting, true);
+  timers.shift()!(); // stalls again
+  assert.equal(recoveries, 1, 'only one reset');
+  assert.equal(errors.length, 1);
+  assert.doesNotMatch(errors[0]!, /by hand|⌘Q/);
   assert.equal(app.isQuitting, false, 'a stalled install must not leave Cmd+W quitting the app');
+});
+
+test('a reset that itself fails is reported, not retried', () => {
+  const errors: string[] = [];
+  let installs = 0;
+  quitAndInstallNow({
+    app: { isQuitting: false },
+    autoUpdater: {
+      quitAndInstall: () => {
+        installs++;
+      },
+    },
+    recoverStall: () => {
+      throw new Error('pkill missing');
+    },
+    onError: (err) => errors.push(err.message),
+    setTimer: (fn) => {
+      fn();
+      return {};
+    },
+  });
+  assert.equal(installs, 1);
+  assert.match(errors[0]!, /could not be reset: pkill missing/);
 });
 
 test('a real relaunch never lets the watchdog speak', () => {
@@ -415,7 +467,12 @@ test('a failed check does not clear a pending update or its clock', () => {
     persisted: emptyPersisted(),
   });
   s = reduceUpdater(s, { type: 'downloaded', version: '0.1.901', at: '2026-09-14T09:00:00Z' });
-  s = reduceUpdater(s, { type: 'error', message: 'ENOTFOUND', at: '2026-09-16T09:00:00Z' });
+  s = reduceUpdater(s, {
+    type: 'error',
+    kind: 'check',
+    message: 'ENOTFOUND',
+    at: '2026-09-16T09:00:00Z',
+  });
   assert.equal(s.downloaded, true);
   assert.equal(s.staleSince, '2026-09-14T09:00:00Z');
 });
@@ -529,4 +586,270 @@ test('createCheckRunner: a check that resolves silently is an error, never up to
   await run();
   assert.equal(events.length, 1);
   assert.equal(events[0]?.type, 'error');
+});
+
+test('after installing, the relaunched shell is not still "behind" the version it now runs', () => {
+  // quitAndInstall replaces the binary but update-state.json still names the
+  // version that was waiting. The new process must not inherit that clock.
+  const persisted = parsePersisted(
+    JSON.stringify({
+      lastCheckedAt: '2026-09-14T09:00:00Z',
+      lastResult: 'downloaded',
+      lastError: null,
+      availableVersion: '0.1.901',
+      staleSince: '2026-09-14T09:00:00Z',
+    }),
+  );
+  const s = initialUpdaterState({
+    currentVersion: '0.1.901',
+    gitSha: null,
+    builtAt: null,
+    feedUrl: 'https://example.invalid/feed',
+    disabledReason: null,
+    persisted,
+  });
+  assert.equal(s.staleSince, null);
+  assert.equal(s.availableVersion, null);
+  assert.equal(updateUrgency(s.staleSince, Date.parse('2026-09-17T10:00:00Z')), 'none');
+});
+
+test('a newer version appearing after a download means nothing newer is installable yet', () => {
+  // Restart installs whatever is on disk. If 0.1.902 has just been offered while
+  // 0.1.901 is the staged one, "ready to install" must not be claimed for 0.1.902.
+  let s = state();
+  s = reduceUpdater(s, { type: 'downloaded', version: '0.1.901', at: AT });
+  s = reduceUpdater(s, { type: 'available', version: '0.1.902', at: '2026-07-28T13:00:00Z' });
+  assert.equal(s.availableVersion, '0.1.902');
+  assert.equal(s.downloaded, false);
+  // Re-sighting the same staged version leaves it installable.
+  let t = reduceUpdater(state(), { type: 'downloaded', version: '0.1.901', at: AT });
+  t = reduceUpdater(t, { type: 'available', version: '0.1.901', at: '2026-07-28T13:00:00Z' });
+  assert.equal(t.downloaded, true);
+});
+
+// --- shouldPollFeed: never poll the build's placeholder feed ----------------
+
+test('a shell with no feed of its own never polls the placeholder in app-update.yml', () => {
+  // The shipped app-update.yml points at https://updates.invalid/ — "On this Mac"
+  // has no feed, so polling would record a DNS error hourly over the honest reason.
+  assert.equal(shouldPollFeed({ hasUpdateConfig: true, feedUrl: null }), false);
+});
+
+test('a shell with a feed and an update config polls', () => {
+  assert.equal(
+    shouldPollFeed({ hasUpdateConfig: true, feedUrl: 'https://patch.example/api/desktop/' }),
+    true,
+  );
+});
+
+test('a shell without app-update.yml never polls, feed or not', () => {
+  assert.equal(
+    shouldPollFeed({ hasUpdateConfig: false, feedUrl: 'https://patch.example/api/desktop/' }),
+    false,
+  );
+});
+
+// --- installDownloaded: Restart with nothing staged ------------------------
+
+test('Restart with no downloaded update records an error and never arms the quit', () => {
+  // quitAndInstall with nothing staged returns without relaunching, so the
+  // watchdog would pkill ShipIt, retry, and only then complain — with the app
+  // armed to quit on Cmd+W throughout.
+  const app = { isQuitting: false };
+  const calls: string[] = [];
+  const errors: Error[] = [];
+  installDownloaded(
+    { ...state(), downloaded: false },
+    {
+      app,
+      autoUpdater: { quitAndInstall: () => calls.push('quitAndInstall') },
+      onError: (e) => errors.push(e),
+      setTimer: () => {
+        calls.push('timer');
+        return {};
+      },
+    },
+  );
+  assert.deepEqual(calls, []);
+  assert.equal(app.isQuitting, false);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0]!.message, /finished downloading/);
+});
+
+test('Restart with a downloaded update installs it', () => {
+  const app = { isQuitting: false };
+  const calls: string[] = [];
+  installDownloaded(
+    { ...state(), downloaded: true },
+    {
+      app,
+      autoUpdater: { quitAndInstall: () => calls.push('quitAndInstall') },
+      onError: () => assert.fail('no error expected'),
+      setTimer: () => ({}),
+    },
+  );
+  assert.deepEqual(calls, ['quitAndInstall']);
+  assert.equal(app.isQuitting, true);
+});
+
+test('initialUpdaterState: a prerelease that has been superseded by its release counts as installed', () => {
+  const s = initialUpdaterState({
+    currentVersion: '1.0.0',
+    gitSha: null,
+    builtAt: null,
+    feedUrl: 'https://patch.example/api/desktop/',
+    disabledReason: null,
+    persisted: {
+      ...emptyPersisted(),
+      lastResult: 'update-available',
+      availableVersion: '1.0.0-rc.1',
+      staleSince: AT,
+    },
+  });
+  assert.equal(s.availableVersion, null);
+  assert.equal(s.staleSince, null);
+});
+
+test('initialUpdaterState: a release is not installed by running its older prerelease', () => {
+  const s = initialUpdaterState({
+    currentVersion: '1.0.0-rc.1',
+    gitSha: null,
+    builtAt: null,
+    feedUrl: 'https://patch.example/api/desktop/',
+    disabledReason: null,
+    persisted: {
+      ...emptyPersisted(),
+      lastResult: 'update-available',
+      availableVersion: '1.0.0',
+      staleSince: AT,
+    },
+  });
+  assert.equal(s.availableVersion, '1.0.0');
+  assert.equal(s.staleSince, AT);
+});
+
+test('savePersisted: a write that dies midway leaves the previous file untouched', () => {
+  const files = new Map<string, string>([['state.json', 'GOOD']]);
+  const fs = {
+    writeFile: (path: string, data: string) => {
+      files.set(path, data.slice(0, 5)); // truncated, then the process dies
+      throw new Error('disk full');
+    },
+    rename: (from: string, to: string) => {
+      files.set(to, files.get(from) ?? '');
+      files.delete(from);
+    },
+  };
+  assert.throws(() => savePersisted('state.json', emptyPersisted(), fs), /disk full/);
+  assert.equal(files.get('state.json'), 'GOOD');
+});
+
+test('savePersisted: a completed write lands at the target and leaves no temp file', () => {
+  const files = new Map<string, string>();
+  const fs = {
+    writeFile: (path: string, data: string) => void files.set(path, data),
+    rename: (from: string, to: string) => {
+      files.set(to, files.get(from) ?? '');
+      files.delete(from);
+    },
+  };
+  const p = { ...emptyPersisted(), lastCheckedAt: AT };
+  savePersisted('state.json', p, fs);
+  assert.deepEqual([...files.keys()], ['state.json']);
+  assert.deepEqual(parsePersisted(files.get('state.json') ?? ''), p);
+});
+
+// --- Restart pressed twice -------------------------------------------------
+
+test('createInstaller: a second Restart while an install is pending does not start a second one', () => {
+  const errors: string[] = [];
+  let installs = 0;
+  let recoveries = 0;
+  const timers: Array<() => void> = [];
+  const install = createInstaller({
+    app: { isQuitting: false },
+    autoUpdater: {
+      quitAndInstall: () => {
+        installs++;
+      },
+    },
+    recoverStall: () => {
+      recoveries++;
+    },
+    onError: (err) => errors.push(err.message),
+    setTimer: (fn) => {
+      timers.push(fn);
+      return {};
+    },
+  });
+  const ready = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
+  install(ready);
+  install(ready); // the impatient second press
+  assert.equal(installs, 1, 'one quitAndInstall for two presses');
+  assert.equal(timers.length, 1, 'one watchdog, not two racing');
+  timers.shift()!();
+  timers.shift()!();
+  assert.equal(recoveries, 1);
+  assert.equal(errors.length, 1, 'one failure report');
+});
+
+test('createInstaller: after a reported failure the user can press Restart again', () => {
+  let installs = 0;
+  const install = createInstaller({
+    app: { isQuitting: false },
+    autoUpdater: {
+      quitAndInstall: () => {
+        installs++;
+        throw new Error('refused');
+      },
+    },
+    onError: () => {},
+  });
+  const ready = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
+  install(ready);
+  install(ready);
+  assert.equal(installs, 2);
+});
+
+// --- what failed: a check, or an install ----------------------------------
+// The banner offers Restart for a downloaded update. A failed hourly CHECK
+// (network blip) leaves that update installable and is no reason to put a raw
+// error next to the button; a failed INSTALL is the one the button must show.
+
+test('an error records whether it was a check or an install that failed', () => {
+  const checked = reduceUpdater(state(), { type: 'error', kind: 'check', message: 'x', at: AT });
+  assert.equal(checked.lastErrorKind, 'check');
+  const installed = reduceUpdater(state(), {
+    type: 'error',
+    kind: 'install',
+    message: 'x',
+    at: AT,
+  });
+  assert.equal(installed.lastErrorKind, 'install');
+});
+
+test('a later successful outcome clears the error kind with the error', () => {
+  const failed = reduceUpdater(state(), { type: 'error', kind: 'install', message: 'x', at: AT });
+  for (const event of [
+    { type: 'up-to-date', at: AT },
+    { type: 'available', version: '0.1.318', at: AT },
+    { type: 'downloaded', version: '0.1.318', at: AT },
+  ] as UpdaterEvent[]) {
+    const s = reduceUpdater(failed, event);
+    assert.equal(s.lastError, null);
+    assert.equal(s.lastErrorKind, null);
+  }
+});
+
+test('a persisted error comes back as a check error — an install failure did not survive a relaunch', () => {
+  const s = initialUpdaterState({
+    currentVersion: '0.1.317',
+    gitSha: null,
+    builtAt: null,
+    feedUrl: 'https://x/api/desktop/',
+    disabledReason: null,
+    persisted: { ...emptyPersisted(), lastResult: 'error', lastError: 'boom', lastCheckedAt: AT },
+  });
+  assert.equal(s.lastErrorKind, 'check');
+  assert.equal(state().lastErrorKind, null);
 });

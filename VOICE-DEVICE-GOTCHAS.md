@@ -2,7 +2,7 @@
 
 Everything below is specific to the **Home Assistant Voice Preview Edition**
 hardware running our custom `packages/voice-firmware` (ESP-IDF, NOT ESPHome) +
-the local `packages/daemon`. Most of this cost hours to (re)discover. Read it
+the local `packages/host`. Most of this cost hours to (re)discover. Read it
 before touching the voice device again.
 
 Guiding principle (learned the hard way): **the hardware audio is a solved
@@ -85,7 +85,7 @@ speech: …` then `… done`; the delta ÷ sample-count must equal 48 kHz
 
 - **Content must ALSO be true 48 kHz.** Our wire/Kokoro path is 16 kHz, so TTS is
   resampled to 48 kHz on the **host** (`resampleTtsTo48k` in
-  `packages/daemon/src/audio/session.ts` — a 63-tap Kaiser windowed-sinc,
+  `packages/host/src/audio/session.ts` — a 63-tap Kaiser windowed-sinc,
   zero-stuff + FIR, validated vs scipy `resample_poly`, <1 % imaging) and the
   device plays the 48 kHz raw. If you ever feed the 48 kHz bus 16 kHz samples
   directly, **everything plays 3× too fast** (a 480 Hz tone came out at 1446 Hz =
@@ -243,7 +243,7 @@ API-key fallback)`. The agent can't reply, so wake→ask→reply produces nothin
   diag-speak.
 - **faster-whisper STT sidecar** can crash/respawn → STT destabilises. Only
   matters for real wake→ask→reply, not for diag-speak audio tests.
-- Restart: kill the listener on :3023 + `pkill -f daemon/src/index.ts`, re-run
+- Restart: kill the listener on :3023 + `pkill -f host/src/index.ts`, re-run
   the launch script. The device then needs a DTR/RTS reset to reconnect (§9).
 
 ## 8. Provisioning / NVS restore

@@ -16,7 +16,13 @@ import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { useToolsStore } from '../src/stores/toolsStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
-import { _resetSendQueue, discardUpload, retryUpload, sendMessage } from '../src/lib/sendQueue';
+import {
+  _resetSendQueue,
+  discardUpload,
+  retryTurn,
+  retryUpload,
+  sendMessage,
+} from '../src/lib/sendQueue';
 
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
@@ -144,5 +150,24 @@ describe('chatStore — outgoing-turn actions', () => {
     expect(list).toHaveLength(2);
     expect(list[0]!.localId).toBe('L1');
     expect(list[0]!.upload).toEqual({ done: 0, total: 1, failed: false });
+  });
+});
+
+describe('retryTurn', () => {
+  it('re-runs the turn in place: names its seq and draws no second bubble', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 3,
+      role: 'user',
+      content: 'do the thing',
+    } as never);
+    const before = useChatStore.getState().timelines['c1']!.length;
+    retryTurn('c1', { role: 'user', seq: 3 });
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+    const args = submitSpy.mock.calls[0]!;
+    expect(args[1]).toBe('do the thing');
+    expect(args[6]).toBe(3);
+    expect(useChatStore.getState().timelines['c1']!.length).toBe(before);
   });
 });

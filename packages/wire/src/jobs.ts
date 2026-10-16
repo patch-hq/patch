@@ -3,7 +3,7 @@
 // Per group 10 BLOCKER B.8: server (canonical owner of /data/jobs/*.json)
 // and host (cross-chat tools relay) share these schemas. The host's
 // `RemoteJobsStore` implements JobsInterface by sending `patch.jobs.request`
-// events upstream over the daemon-link and awaiting the matching
+// events upstream over the host-link and awaiting the matching
 // `patch.jobs.response` (see `./events.ts`).
 
 import { z } from 'zod';
@@ -36,7 +36,7 @@ export const CronTrigger = z
      * required:
      *   1. Every job stored before this field existed has a UTC expression.
      *      Absent === UTC keeps them firing at exactly the same instant.
-     *   2. `CronTrigger` is `.strict()` and travels the daemon-link. A host
+     *   2. `CronTrigger` is `.strict()` and travels the host-link. A host
      *      OTAs its host on a different cadence to the server, so a host
      *      on an older `@patch/wire` has a `CronTrigger` with no `timezone`
      *      key at all — posting one to that host's `/internal/jobs` is a
@@ -125,11 +125,27 @@ export const TodoistTrigger = z
   .strict();
 export type TodoistTrigger = z.infer<typeof TodoistTrigger>;
 
+/**
+ * Fires when another job's run settles (spec/08 § Follows). `jobId` is the job
+ * being followed; `on` picks which outcomes count — `success` (the default,
+ * absent) only a run that settled `ok`, `any` every settled run, failures
+ * included.
+ */
+export const FollowsTrigger = z
+  .object({
+    type: z.literal('follows'),
+    jobId: z.string().min(1),
+    on: z.enum(['success', 'any']).optional(),
+  })
+  .strict();
+export type FollowsTrigger = z.infer<typeof FollowsTrigger>;
+
 export const JobTrigger = z.discriminatedUnion('type', [
   CronTrigger,
   WebhookTrigger,
   TodoistTrigger,
   RecurrenceTrigger,
+  FollowsTrigger,
 ]);
 export type JobTrigger = z.infer<typeof JobTrigger>;
 
@@ -255,7 +271,7 @@ const jobActionIncludePayloadField = { includePayload: z.boolean().optional() };
 export const SpawnAction = z
   .object({
     type: z.literal('spawn'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     folder: z.string().min(1),
     prompt: z.string().optional(),
     skill: z.string().optional(),
@@ -313,7 +329,7 @@ export type MessageAction = z.infer<typeof MessageAction>;
 export const ContinueAction = z
   .object({
     type: z.literal('continue'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     folder: z.string().min(1),
     prompt: z.string().optional(),
     skill: z.string().optional(),
@@ -435,7 +451,7 @@ function acceptLegacyActionNames(value: unknown): unknown {
 export const ScriptAction = z
   .object({
     type: z.literal('script'),
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     folder: z.string().min(1),
     command: z.string().min(1),
     timeoutMs: z.number().int().min(1000).max(600_000).optional(),
@@ -501,7 +517,8 @@ export function scriptVerdictLine(output: string): string | null {
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = (lines[i] ?? '').trim();
     if (line.length === 0) continue;
-    if (line.startsWith(SCRIPT_CHAT_MARKER)) continue;
+    // Same test as `parseScriptChatId`: the marker word, then whitespace or the end.
+    if (new RegExp(`^${SCRIPT_CHAT_MARKER}(?:\\s|$)`).test(line)) continue;
     return line;
   }
   return null;
@@ -544,7 +561,7 @@ export function scriptVerdictLine(output: string): string | null {
  */
 export const JobGate = z
   .object({
-    daemonId: z.string().min(1),
+    hostId: z.string().min(1),
     folder: z.string().min(1),
     command: z.string().min(1),
     timeoutMs: z.number().int().min(1000).max(600_000).optional(),
@@ -768,6 +785,12 @@ export const Job = z
      */
     oneOff: z.boolean().optional(),
     /**
+     * Wake the job's host from sleep a minute before each cron fire (spec/08
+     * § Wake host). macOS hosts on AC power only; a host that cannot schedule
+     * the wake reports why and the server raises a notification.
+     */
+    wakeHost: z.boolean().optional(),
+    /**
      * When the server retired this one-off job (epoch ms). PRESENCE is what
      * "expired" means — there is no second flag that could fall out of step
      * with it.
@@ -787,7 +810,7 @@ export const Job = z
      * OPTIONAL, and absent means not archived — the `CronTrigger.timezone`
      * shape, and for the same reasons: `Job` is `.strict()`, every job stored
      * before this field existed has no such key, and a job travels the
-     * daemon-link to hosts whose `@patch/wire` OTAs on their own clock.
+     * host-link to hosts whose `@patch/wire` OTAs on their own clock.
      *
      * Orthogonal to `enabled` and never written together with it, so
      * un-archiving restores the job exactly as it was rather than guessing
@@ -935,6 +958,8 @@ export const JobCreateBody = z
     queueing: Queueing.optional(),
     /** Retire this job after its first successful fire (spec/08 § One-off jobs). */
     oneOff: z.boolean().optional(),
+    /** Wake the host before each fire (spec/08 § Wake host). */
+    wakeHost: z.boolean().optional(),
     /** Free-text organisational label (spec/08 § Groups). Settable at birth. */
     group: z.string().optional(),
     /**
@@ -970,6 +995,7 @@ export const JobPatchBody = z
      * enabling is what re-arms one.
      */
     oneOff: z.boolean().optional(),
+    wakeHost: z.boolean().optional(),
     /**
      * Put the job away, or bring it back (spec/08 § Archived jobs). Absent
      * from `JobCreateBody`, whose `.strict()` therefore refuses it: a job is
@@ -1002,7 +1028,7 @@ export type JobPatchBody = z.infer<typeof JobPatchBody>;
  *   - Cron scheduler — re-registers on changes
  *   - Webhook ingress (webhook/todoist)
  *   - Cross-chat MCP tools on the host — host's `patch_job_*` MCP tools
- *     forward to the server over the daemon-link via `patch.jobs.request`.
+ *     forward to the server over the host-link via `patch.jobs.request`.
  *
  * Jobs DATA lives on the SERVER (persisted at `/data/jobs/*.json`); the
  * host is a thin RPC client.
@@ -1041,7 +1067,7 @@ export interface JobsInterface {
 
 /**
  * Async-tolerant interface, used by the host's `RemoteJobsStore` which
- * proxies every call over the daemon-link to the server. Structurally a
+ * proxies every call over the host-link to the server. Structurally a
  * superset of `JobsInterface` (all methods may return `Promise<T>`).
  */
 export interface AsyncJobsInterface {

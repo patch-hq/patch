@@ -11,7 +11,7 @@ test.describe('move a chat to another host', () => {
     await page.route('**/api/chats/chat_md/move', async (route) => {
       posted = route.request().postDataJSON();
       await route.fulfill({
-        json: { ok: true, chatId: 'chat_md', daemonId: 'd2', folder: '/Users/dev/portfolio' },
+        json: { ok: true, chatId: 'chat_md', hostId: 'd2', folder: '/Users/dev/portfolio' },
       });
     });
     await page.goto('/app/dev-harness.html?chat=chat_md&hosts=two');
@@ -39,7 +39,7 @@ test.describe('move a chat to another host', () => {
 
     await page.getByTestId('move-chat-confirm').click();
     await expect(modal).toHaveCount(0);
-    expect(posted).toEqual({ daemonId: 'd2', folder: '/Users/dev/portfolio' });
+    expect(posted).toEqual({ hostId: 'd2', folder: '/Users/dev/portfolio' });
   });
 
   test('a refusal keeps the dialog open with the reason', async ({ page }) => {

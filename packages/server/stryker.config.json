@@ -4,7 +4,14 @@
   "plugins": ["@stryker-mutator/vitest-runner"],
   "coverageAnalysis": "perTest",
   "ignoreStatic": true,
-  "mutate": ["src/ws-hub.ts", "src/daemon-link.ts", "src/chat-registry.ts", "src/registry.ts", "src/jobs/dispatcher.ts", "src/jobs/validate.ts"],
+  "mutate": [
+    "src/ws-hub.ts",
+    "src/host-link.ts",
+    "src/chat-registry.ts",
+    "src/registry.ts",
+    "src/jobs/dispatcher.ts",
+    "src/jobs/validate.ts"
+  ],
   "reporters": ["clear-text", "progress"],
   "concurrency": 6,
   "timeoutMS": 20000,

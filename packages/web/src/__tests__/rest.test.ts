@@ -52,11 +52,11 @@ describe('request() helper', () => {
   });
 
   it('sets content-type: application/json and serializes the body when a body is given', async () => {
-    await api.createChat({ daemonId: 'd1', folder: '~/p' });
+    await api.createChat({ hostId: 'd1', folder: '~/p' });
     const [, init] = lastCall();
     const headers = init.headers as Headers;
     expect(headers.get('content-type')).toBe('application/json');
-    expect(init.body).toBe(JSON.stringify({ daemonId: 'd1', folder: '~/p' }));
+    expect(init.body).toBe(JSON.stringify({ hostId: 'd1', folder: '~/p' }));
   });
 
   it('sends a null body (no content-type) when no body is given', async () => {
@@ -81,7 +81,7 @@ describe('request() helper', () => {
 
   it('throws ApiError with the server-provided error message on a non-2xx JSON response', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'folder not found' }, 404));
-    await expect(api.createChat({ daemonId: 'd1', folder: '~/missing' })).rejects.toMatchObject({
+    await expect(api.createChat({ hostId: 'd1', folder: '~/missing' })).rejects.toMatchObject({
       name: 'ApiError',
       status: 404,
       message: 'folder not found',
@@ -133,7 +133,7 @@ describe('api.* methods — URL/method/body contracts', () => {
   });
 
   it('createChat POSTs to /api/chats with the body', async () => {
-    await api.createChat({ daemonId: 'd1', folder: '~/p', prompt: 'go', name: 'n', localId: 'l1' });
+    await api.createChat({ hostId: 'd1', folder: '~/p', prompt: 'go', name: 'n', localId: 'l1' });
     const [url, init] = lastCall();
     expect(url).toBe('/api/chats');
     expect(init.method).toBe('POST');
@@ -239,7 +239,7 @@ describe('api.* methods — URL/method/body contracts', () => {
     expect(init.body).toBe(JSON.stringify({ id: 'surface-9' }));
   });
 
-  it('settings / setProjectFolders / surfacePairStart / daemonPairStart', async () => {
+  it('settings / setProjectFolders / surfacePairStart / hostPairStart', async () => {
     await api.settings();
     expect(lastCall()[0]).toBe('/api/settings');
     await api.setProjectFolders(['~/a', '~/b']);
@@ -252,7 +252,7 @@ describe('api.* methods — URL/method/body contracts', () => {
     ]);
     await api.surfacePairStart();
     expect(lastCall()[0]).toBe('/api/auth/pair/start');
-    await api.daemonPairStart();
+    await api.hostPairStart();
     expect(lastCall()[0]).toBe('/api/auth/daemon/pair/start');
   });
 
@@ -266,7 +266,7 @@ describe('api.* methods — URL/method/body contracts', () => {
     await api.getFileContentAtHead('c1', 'a.ts');
     expect(lastCall()[0]).toBe('/api/chats/c1/files?path=a.ts&content=1&ref=head');
     await api.skills('~/p', 'd1');
-    expect(lastCall()[0]).toBe('/api/skills?folder=~%2Fp&daemonId=d1');
+    expect(lastCall()[0]).toBe('/api/skills?folder=~%2Fp&hostId=d1');
   });
 
   // Editor overhaul (binary preview): its own small fetch (not `request()`,
@@ -300,9 +300,9 @@ describe('api.* methods — URL/method/body contracts', () => {
   // only optional part; omitted, the host answers with its browsable roots.
   it('browseFolders always names the host, and adds dir only when given', async () => {
     await api.browseFolders('d1');
-    expect(lastCall()[0]).toBe('/api/folders/browse?daemonId=d1');
+    expect(lastCall()[0]).toBe('/api/folders/browse?hostId=d1');
     await api.browseFolders('d1', '~/projects');
-    expect(lastCall()[0]).toBe('/api/folders/browse?daemonId=d1&dir=~%2Fprojects');
+    expect(lastCall()[0]).toBe('/api/folders/browse?hostId=d1&dir=~%2Fprojects');
   });
 });
 
@@ -367,6 +367,28 @@ describe('api.uploadAttachment', () => {
     const form = init.body as FormData;
     expect(form.get('file')).not.toBeNull();
     expect(form.get('model')).toBeNull();
+  });
+
+  // A request that never answers used to leave the turn on "Uploading" forever.
+  it('rejects with a timeout error when the server never answers', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementationOnce(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal!.addEventListener('abort', () =>
+              reject(new DOMException('x', 'AbortError')),
+            );
+          }),
+      );
+      const file = new File(['bytes'], 'x.png', { type: 'image/png' });
+      const p = api.uploadAttachment('c1', file);
+      const assertion = expect(p).rejects.toThrow(/upload timed out/);
+      await vi.advanceTimersByTimeAsync(61_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('throws ApiError on a non-2xx response, with the server error message', async () => {
@@ -499,13 +521,41 @@ describe('api.voiceTranscribe (composer dictation)', () => {
   });
 });
 
+const enabledList = () => jsonResponse({ hooks: [hookRow({})] }, 200);
+
 const failedNote = (re: RegExp) => ({
   decision: 'advise',
   results: [expect.objectContaining({ status: 'failed', error: expect.stringMatching(re) })],
 });
 
+const hookRow = (over: Record<string, unknown>) => ({
+  id: 'h1',
+  name: 'h',
+  when: 'user_message',
+  enabled: true,
+  ...over,
+});
+
+describe('checkHooks skips all work when no user_message hook is enabled', () => {
+  it('passes without encoding images or posting a check', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { hooks: [hookRow({ enabled: false }), hookRow({ id: 'h2', when: 'agent_response' })] },
+        200,
+      ),
+    );
+    const big = new File([new Uint8Array(5_000_000)], 'shot.png', { type: 'image/png' });
+    const res = await api.checkHooks('c1', 'hi', [{ file: big, name: 'shot.png', kind: 'image' }]);
+    expect(res).toEqual({ decision: 'pass', results: [] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/hooks');
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('/check');
+  });
+});
+
 describe('checkHooks never throws — a failed check sends with a note', () => {
   it.each([502, 503, 504])('reports an HTTP %i as the server being unreachable', async (status) => {
+    fetchMock.mockResolvedValueOnce(enabledList());
     fetchMock.mockResolvedValueOnce(new Response('Bad Gateway', { status }));
     await expect(api.checkHooks('c1', 'hi')).resolves.toEqual(
       failedNote(new RegExp(`Patch server unreachable \\(HTTP ${status}\\)`)),
@@ -513,16 +563,19 @@ describe('checkHooks never throws — a failed check sends with a note', () => {
   });
 
   it('keeps the server-supplied error for a JSON failure', async () => {
+    fetchMock.mockResolvedValueOnce(enabledList());
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'invalid body' }, 400));
     await expect(api.checkHooks('c1', 'hi')).resolves.toEqual(failedNote(/invalid body/));
   });
 
   it('a network error still resolves', async () => {
+    fetchMock.mockResolvedValueOnce(enabledList());
     fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
     await expect(api.checkHooks('c1', 'hi')).resolves.toEqual(failedNote(/Failed to fetch/));
   });
 
   it('an oversize attachment is skipped, the check still runs and notes it', async () => {
+    fetchMock.mockResolvedValueOnce(enabledList());
     fetchMock.mockResolvedValueOnce(jsonResponse({ decision: 'pass', results: [] }, 200));
     const big = new File([new Uint8Array(5_000_000)], 'shot.png', { type: 'image/png' });
     const res = await api.checkHooks('c1', 'hi', [{ file: big, name: 'shot.png', kind: 'image' }]);
@@ -536,6 +589,7 @@ describe('checkHooks timeout', () => {
   it('resolves with a note instead of hanging when the server never answers', async () => {
     vi.useFakeTimers();
     try {
+      fetchMock.mockResolvedValueOnce(enabledList());
       fetchMock.mockImplementation(
         (_path: string, init: RequestInit) =>
           new Promise((_resolve, reject) => {

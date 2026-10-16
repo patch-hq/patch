@@ -14,7 +14,8 @@ import { useUiStore } from '../../stores/uiStore';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { SettingsSection } from '../SettingsSection';
 import { SettingsPage } from './SettingsPage';
-import { Row, SettingsButton, ValueRow } from './ui';
+import { Row, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
+import { patchShared } from './sharedWrite';
 
 interface Me {
   account: { accountId: string; userPublicKey: string; createdAt: number };
@@ -53,6 +54,18 @@ export function AccountPage(): React.ReactElement {
           onPress={() => useUiStore.getState().setDiagnosticsOpen(true)}
         />
       </SettingsSection>
+      <WithSettings testID="sync-position-settings">
+        {(data) => (
+          <SettingsSection testID="settings-sync">
+            <ToggleRow
+              label="Sync position between surfaces"
+              testID="sync-position"
+              value={data.preferences.syncPosition}
+              onChange={(next) => void patchShared('Sync position', { syncPosition: next })}
+            />
+          </SettingsSection>
+        )}
+      </WithSettings>
       <ThisSurfaceSection />
     </SettingsPage>
   );

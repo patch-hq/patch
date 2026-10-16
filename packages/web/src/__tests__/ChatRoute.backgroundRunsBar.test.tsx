@@ -38,7 +38,7 @@ function seedChats(
   useChatStore.getState().hydrate([
     {
       chatId: 'current',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto' as const,
       name: 'open-chat',
       folder: '/home/tom/projects/open',
@@ -51,7 +51,7 @@ function seedChats(
     },
     ...others.map((o) => ({
       chatId: o.chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto' as const,
       name: o.name,
       folder: `/home/tom/projects/${o.chatId}`,

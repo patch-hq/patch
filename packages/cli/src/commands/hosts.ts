@@ -24,8 +24,8 @@ interface HostsOpts extends CommonOpts {
   host?: string;
 }
 
-interface HostSummary {
-  daemonId: string;
+export interface HostSummary {
+  hostId: string;
   hostName: string | null;
   online: boolean;
   isHomeHost: boolean;
@@ -33,26 +33,32 @@ interface HostSummary {
 }
 
 /**
- * Resolve `--host` against the registry: a host NAME or a `daemonId` prefix.
+ * Resolve `--host` against the registry: a host NAME or a `hostId` prefix.
  * An ambiguous or unknown value is an error listing the candidates, rather than
  * a silent pick — acting on the wrong machine is the failure this prevents.
  */
 export async function resolveHost(opts: HostsOpts): Promise<string> {
   const t = getTransport({ ...opts, remote: true });
   const { hosts } = await t.get<{ hosts: HostSummary[] }>('/api/hosts');
-  const needle = opts.host!;
+  return pickHost(hosts, opts.host!);
+}
+
+/** The matching half of `resolveHost`, on a list already fetched. */
+export function pickHost(hosts: HostSummary[], needle: string): string {
+  // An empty needle is a prefix of every id; it names no machine at all.
+  if (needle === '') throw new Error('--host must not be empty');
   const byName = hosts.filter((h) => h.hostName === needle);
-  if (byName.length === 1) return byName[0]!.daemonId;
-  const byPrefix = hosts.filter((h) => h.daemonId.startsWith(needle));
-  if (byPrefix.length === 1) return byPrefix[0]!.daemonId;
+  if (byName.length === 1) return byName[0]!.hostId;
+  const byPrefix = hosts.filter((h) => h.hostId.startsWith(needle));
+  if (byPrefix.length === 1) return byPrefix[0]!.hostId;
   const candidates = (byName.length > 1 ? byName : byPrefix)
-    .map((h) => `${h.daemonId}${h.hostName ? ` (${h.hostName})` : ''}`)
+    .map((h) => `${h.hostId}${h.hostName ? ` (${h.hostName})` : ''}`)
     .join(', ');
   throw new Error(
     candidates.length > 0
       ? `--host "${needle}" is ambiguous — candidates: ${candidates}`
       : `--host "${needle}" matches no registered machine (known: ${hosts
-          .map((h) => h.hostName ?? h.daemonId)
+          .map((h) => h.hostName ?? h.hostId)
           .join(', ')})`,
   );
 }
@@ -62,17 +68,17 @@ export async function resolveHost(opts: HostsOpts): Promise<string> {
  * over its local socket. With `--host` it is another machine, so it must route
  * through the server.
  */
-async function daemonRoute(
+async function hostRoute(
   opts: HostsOpts,
   udsPath: string,
-  restPath: (daemonId: string) => string,
+  restPath: (hostId: string) => string,
 ): Promise<{ t: ReturnType<typeof getTransport>; path: string }> {
   if (opts.host === undefined) {
     const t = getTransport(opts);
     return { t, path: t.kind === 'uds' ? udsPath : restPath('') };
   }
-  const daemonId = await resolveHost(opts);
-  return { t: getTransport({ ...opts, remote: true }), path: restPath(daemonId) };
+  const hostId = await resolveHost(opts);
+  return { t: getTransport({ ...opts, remote: true }), path: restPath(hostId) };
 }
 
 export function registerHostsCommands(program: Command): void {
@@ -93,10 +99,8 @@ export function registerHostsCommands(program: Command): void {
         for (const h of res.hosts) {
           // A machine that has never reported has no name — say so rather than
           // printing an id dressed up as one.
-          const name = h.hostName ?? `${h.daemonId} (no report yet)`;
-          emitText(
-            `${h.online ? '●' : '○'} ${name}${h.isHomeHost ? '  [home]' : ''}  ${h.daemonId}`,
-          );
+          const name = h.hostName ?? `${h.hostId} (no report yet)`;
+          emitText(`${h.online ? '●' : '○'} ${name}${h.isHomeHost ? '  [home]' : ''}  ${h.hostId}`);
         }
       });
     });
@@ -104,14 +108,14 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('get')
     .description('One machine: platform, backends, components, home marker')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(
+        const { t, path } = await hostRoute(
           opts,
           '/host',
-          (id) => `/api/hosts${id ? `?daemonId=${encodeURIComponent(id)}` : ''}`,
+          (id) => `/api/hosts${id ? `?hostId=${encodeURIComponent(id)}` : ''}`,
         );
         const res = await t.get<unknown>(path);
         emitJson(res);
@@ -123,11 +127,11 @@ export function registerHostsCommands(program: Command): void {
   folders
     .command('list', { isDefault: true })
     .description('List the project roots')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(opts, '/folders', () => '/api/folders');
+        const { t, path } = await hostRoute(opts, '/folders', () => '/api/folders');
         emitJson(await t.get<unknown>(path));
       });
     });
@@ -135,11 +139,11 @@ export function registerHostsCommands(program: Command): void {
   folders
     .command('add <path>')
     .description('Designate a project root on that machine')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (folderPath: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(opts, '/folders/add', () => '/api/folders/add');
+        const { t, path } = await hostRoute(opts, '/folders/add', () => '/api/folders/add');
         emitJson(await t.post<unknown>(path, { path: folderPath }));
       });
     });
@@ -147,11 +151,11 @@ export function registerHostsCommands(program: Command): void {
   folders
     .command('remove <path>')
     .description('Drop a designated project root')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (folderPath: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(opts, '/folders/remove', () => '/api/folders/remove');
+        const { t, path } = await hostRoute(opts, '/folders/remove', () => '/api/folders/remove');
         emitJson(await t.post<unknown>(path, { path: folderPath }));
       });
     });
@@ -159,11 +163,11 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('backends')
     .description("Each backend's version and that machine's view of the shared accounts")
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(opts, '/backends', () => '/api/hosts/backends');
+        const { t, path } = await hostRoute(opts, '/backends', () => '/api/hosts/backends');
         emitJson(await t.get<unknown>(path));
       });
     });
@@ -171,14 +175,14 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('models')
     .description("That machine's model catalogue across its backends")
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(
+        const { t, path } = await hostRoute(
           opts,
           '/models',
-          (id) => `/api/models?daemonId=${encodeURIComponent(id)}`,
+          (id) => `/api/models?hostId=${encodeURIComponent(id)}`,
         );
         emitJson(await t.get<unknown>(path));
       });
@@ -187,11 +191,11 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('install <component>')
     .description('Install an optional component on that machine')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (component: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(
+        const { t, path } = await hostRoute(
           opts,
           '/components/install',
           () => '/api/hosts/components/install',
@@ -203,11 +207,11 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('uninstall <component>')
     .description('Delete an installed component from that machine')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (component: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(
+        const { t, path } = await hostRoute(
           opts,
           '/components/remove',
           () => '/api/hosts/components/remove',
@@ -223,11 +227,11 @@ export function registerHostsCommands(program: Command): void {
   claudeSettings
     .command('get', { isDefault: true })
     .description('Show memory entries and any settings.json drift')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(
+        const { t, path } = await hostRoute(
           opts,
           '/claude-settings',
           () => '/api/hosts/claude-settings',
@@ -239,11 +243,11 @@ export function registerHostsCommands(program: Command): void {
   claudeSettings
     .command('discard')
     .description("Rewrite that host's drifted settings.json from the shared settings")
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(
+        const { t, path } = await hostRoute(
           opts,
           '/claude-settings/discard',
           () => '/api/hosts/claude-settings/discard',
@@ -257,11 +261,11 @@ export function registerHostsCommands(program: Command): void {
   memory
     .command('remove <project> <file>')
     .description('Delete one memory entry')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (project: string, file: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(
+        const { t, path } = await hostRoute(
           opts,
           '/claude-settings/memory/delete',
           () => '/api/hosts/claude-settings/memory/delete',
@@ -273,11 +277,11 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('update')
     .description('Apply an available host update on that machine')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await daemonRoute(opts, '/update', () => '/api/hosts/update');
+        const { t, path } = await hostRoute(opts, '/update', () => '/api/hosts/update');
         emitJson(await t.post<unknown>(path, {}));
       });
     });
@@ -329,17 +333,17 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('rename <name>')
     .description('Rename a machine (server-owned)')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (name: string, opts: HostsOpts) => {
       await run(opts, async () => {
         if (name.trim().length === 0) throw new Error('a machine name cannot be empty');
         const t = getTransport({ ...opts, remote: true });
-        const daemonId = opts.host !== undefined ? await resolveHost(opts) : undefined;
+        const hostId = opts.host !== undefined ? await resolveHost(opts) : undefined;
         emitJson(
           await t.post<unknown>('/api/hosts/rename', {
             hostName: name,
-            ...(daemonId ? { daemonId } : {}),
+            ...(hostId ? { hostId } : {}),
           }),
         );
       });
@@ -348,30 +352,28 @@ export function registerHostsCommands(program: Command): void {
   hosts
     .command('set-home')
     .description('Make a machine the account home, where the special threads run')
-    .option('--host <h>', 'machine name or daemonId prefix (default: this machine)')
+    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
         const t = getTransport({ ...opts, remote: true });
-        const daemonId = opts.host !== undefined ? await resolveHost(opts) : undefined;
-        emitJson(
-          await t.post<unknown>('/api/hosts/set-home', { ...(daemonId ? { daemonId } : {}) }),
-        );
+        const hostId = opts.host !== undefined ? await resolveHost(opts) : undefined;
+        emitJson(await t.post<unknown>('/api/hosts/set-home', { ...(hostId ? { hostId } : {}) }));
       });
     });
 
   hosts
     .command('remove')
     .description('Revoke a machine (requires --host)')
-    .requiredOption('--host <h>', 'machine name or daemonId prefix — never defaulted')
+    .requiredOption('--host <h>', 'machine name or hostId prefix — never defaulted')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
         // `--host` is REQUIRED here: an irreversible revocation must never be
         // aimed at a machine by default (spec/17 § Hosts and the CLI).
-        const daemonId = await resolveHost(opts);
+        const hostId = await resolveHost(opts);
         const t = getTransport({ ...opts, remote: true });
-        emitJson(await t.post<unknown>('/api/auth/revoke', { id: daemonId }));
+        emitJson(await t.post<unknown>('/api/auth/revoke', { id: hostId }));
       });
     });
 }

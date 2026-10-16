@@ -81,7 +81,7 @@ const REPORT: VersionReport = {
   daemon: null,
   hosts: [
     {
-      daemonId: 'd1',
+      hostId: 'd1',
       hostName: 'laptop',
       online: false,
       version: '0.1.899',
@@ -376,7 +376,7 @@ describe('Settings — Updates — this app', () => {
 
 describe('Settings — Updates — hosts behind', () => {
   it('lists each host with an update, by name and host version, with Update', async () => {
-    reportHost('h1', { hostName: 'studio', daemonVersion: '0.1.370', updateAvailable: true });
+    reportHost('h1', { hostName: 'studio', hostVersion: '0.1.370', updateAvailable: true });
     reportHost('h2', { hostName: 'attic', updateAvailable: true });
     reportHost('h3', { hostName: 'current', updateAvailable: false });
     const r = await mount();
@@ -394,7 +394,7 @@ describe('Settings — Updates — hosts behind', () => {
     reportHost('h1', { updateAvailable: true });
     const r = await mount();
     await actAsync(() => findHost(r.root, byTestId('updates-host-h1-update')).props.onPress());
-    expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', daemonId: 'h1' });
+    expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'h1' });
   });
 
   it('Update to an offline host sends nothing and says why', async () => {
@@ -434,7 +434,7 @@ describe('Settings — Updates — cross-layer report (GET /api/version)', () =>
       },
       hosts: [
         {
-          daemonId: 'd2',
+          hostId: 'd2',
           hostName: null,
           online: true,
           version: '0.1.900',
@@ -485,7 +485,7 @@ describe('Settings — Updates — cross-layer report (GET /api/version)', () =>
       ...REPORT,
       hosts: [
         {
-          daemonId: 'd3',
+          hostId: 'd3',
           hostName: 'new',
           online: true,
           version: null,

@@ -81,7 +81,7 @@ it('requests a replay when opening a chat that appeared after connect', async ()
   useChatStore.getState().hydrate([
     {
       chatId: CHAT,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'Petty Spurge Deep Dive',
       folder: 'portfolio',
@@ -129,7 +129,7 @@ it('asks for a chat’s transcript once when open and connect race on a cold sta
   useChatStore.getState().hydrate([
     {
       chatId: CHAT,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'Cold open',
       folder: 'portfolio',
@@ -167,7 +167,7 @@ it('asks again from the same cursor after a reconnect', async () => {
   useChatStore.getState().hydrate([
     {
       chatId: CHAT,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'Reconnect',
       folder: 'portfolio',

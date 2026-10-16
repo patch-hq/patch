@@ -33,14 +33,20 @@ export type RateLimitWindows = Partial<
  */
 export function refusingRateLimitScope(
   windows: RateLimitWindows | undefined,
+  now: number = Date.now(),
 ): SpendableRateLimitScope | undefined {
   if (!windows) return undefined;
-  return SPENDABLE_RATE_LIMIT_SCOPES.find((scope) => windows[scope]?.status === 'rejected');
+  return SPENDABLE_RATE_LIMIT_SCOPES.find((scope) =>
+    rateLimitWindowBlocks(scope, windows[scope], now),
+  );
 }
 
 /** True when a spendable pool is refusing work right now. */
-export function rateLimitWindowsBlocked(windows: RateLimitWindows | undefined): boolean {
-  return refusingRateLimitScope(windows) !== undefined;
+export function rateLimitWindowsBlocked(
+  windows: RateLimitWindows | undefined,
+  now: number = Date.now(),
+): boolean {
+  return refusingRateLimitScope(windows, now) !== undefined;
 }
 
 /**
@@ -48,10 +54,46 @@ export function rateLimitWindowsBlocked(windows: RateLimitWindows | undefined): 
  *
  * The per-window form, for a renderer drawing one line at a time: the same
  * `rejected` reads as blocked on the session and as "off" on overage.
+ *
+ * A reading is a statement about the moment it was taken. Once the window's
+ * stated reset has passed it no longer holds, and a probe can be ten minutes
+ * away: without this a pool that cleared at 10:40 went on reading "blocked,
+ * back 10:40" until the next probe landed.
  */
 export function rateLimitWindowBlocks(
   scope: SpendableRateLimitScope | 'overage',
   window: RateLimitWindow | undefined,
+  now: number = Date.now(),
 ): boolean {
-  return window?.status === 'rejected' && scope !== 'overage';
+  if (window?.status !== 'rejected' || scope === 'overage') return false;
+  return window.resetsAt === undefined || window.resetsAt > now;
+}
+
+/** Fraction of a pool used at which it is drawn as a warning. */
+export const RATE_LIMIT_WARN_UTILIZATION = 0.8;
+
+/**
+ * How one window should be drawn, decided once for every surface.
+ *
+ * `off` is a rejected overage — the add-on was never bought, which is not a
+ * fault. A warning is Anthropic's own `allowed_warning` verdict OR a figure
+ * past the threshold; honouring only the figure missed a warning whose
+ * utilization was absent or low.
+ */
+export type RateLimitWindowState = 'blocked' | 'off' | 'warn' | 'ok';
+
+export function rateLimitWindowState(
+  scope: SpendableRateLimitScope | 'overage',
+  window: RateLimitWindow,
+  now: number = Date.now(),
+): RateLimitWindowState {
+  if (rateLimitWindowBlocks(scope, window, now)) return 'blocked';
+  if (scope === 'overage' && window.status === 'rejected') return 'off';
+  if (
+    window.status === 'allowed_warning' ||
+    (window.utilization ?? 0) >= RATE_LIMIT_WARN_UTILIZATION
+  ) {
+    return 'warn';
+  }
+  return 'ok';
 }

@@ -13,7 +13,7 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -59,9 +59,9 @@ describe('composer attachments', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function makeApp(opts: { daemonOk?: boolean; daemonReply?: boolean } = {}) {
-    const daemonOk = opts.daemonOk ?? true;
-    const daemonReply = opts.daemonReply ?? true;
+  async function makeApp(opts: { hostOk?: boolean; hostReply?: boolean; logger?: object } = {}) {
+    const hostOk = opts.hostOk ?? true;
+    const hostReply = opts.hostReply ?? true;
     const user = generateUserKeypair(() => new Uint8Array(32).fill(13));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
@@ -71,18 +71,18 @@ describe('composer attachments', () => {
       label: 'browser',
       issuedAt: 1,
     });
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     // Every store_request the server sends — lets a test assert WHICH bytes the
     // host (and so the agent) was handed.
     const storeRequests: Extract<WireEvent, { type: 'patch.attachment.store_request' }>[] = [];
     // Simulate the host: respond to every store_request the server sends.
-    const origSend = daemonLink.send.bind(daemonLink);
-    daemonLink.send = (surfaceId: string, event: WireEvent): void => {
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId: string, event: WireEvent): void => {
       origSend(surfaceId, event);
       if (event.type === 'patch.attachment.store_request') storeRequests.push(event);
-      if (event.type === 'patch.attachment.store_request' && daemonReply) {
-        daemonLink.emit(
-          daemonOk
+      if (event.type === 'patch.attachment.store_request' && hostReply) {
+        hostLink.emit(
+          hostOk
             ? {
                 type: 'patch.attachment.store_response',
                 requestId: event.requestId,
@@ -98,9 +98,9 @@ describe('composer attachments', () => {
         );
       }
     };
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const built = await buildAll({ logger: opts.logger ?? false, registry, hostLink });
     // Seed a chat so the route sees it as existing.
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
     const credential = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-web-1',
@@ -111,11 +111,40 @@ describe('composer attachments', () => {
       built,
       credential,
       registry,
-      daemonLink,
+      hostLink,
       storeRequests,
       attachmentsDir: join(dir, 'attachments'),
     };
   }
+
+  // "Chat stuck uploading" had no server trace at all: log each stage of an
+  // upload so the stage a hung one reached is visible.
+  it('logs each stage of an upload: received, parsed, sent to host, done', async () => {
+    const lines: string[] = [];
+    const stream = { write: (l: string) => void lines.push(l) };
+    const { built, credential } = await makeApp({ logger: { level: 'info', stream } });
+    try {
+      const mp = multipart('shot.png', 'image/png', PNG);
+      await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c1/attachment',
+        headers: { authorization: `Bearer ${credential}`, ...mp.headers },
+        payload: mp.payload,
+      });
+      const msgs = lines
+        .map((l) => JSON.parse(l) as { msg?: string; component?: string })
+        .filter((o) => o.component === 'attachments')
+        .map((o) => o.msg);
+      expect(msgs).toEqual([
+        'attachment: upload received',
+        'attachment: body parsed',
+        'attachment: sent to host',
+        'attachment: upload complete',
+      ]);
+    } finally {
+      await built.app.close();
+    }
+  });
 
   it('uploads an image, returns a ref, and serves it back inline', async () => {
     const { built, credential } = await makeApp();
@@ -143,6 +172,34 @@ describe('composer attachments', () => {
       expect(get.statusCode).toBe(200);
       expect(get.headers['content-type']).toBe('image/png');
       expect(get.rawPayload.equals(PNG)).toBe(true);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('serves a filename outside Latin-1 with an ASCII fallback plus filename*', async () => {
+    const { built, credential } = await makeApp();
+    try {
+      // macOS screenshot names carry U+202F before "PM"; CJK and emoji too.
+      const name = 'Screenshot 3.04 PM 截图 😀.png';
+      const mp = multipart(name, 'image/png', PNG);
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c1/attachment',
+        headers: { authorization: `Bearer ${credential}`, ...mp.headers },
+        payload: mp.payload,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { ref: { name: string; url: string } };
+      expect(body.ref.name).toBe(name);
+
+      const get = await built.app.inject({ method: 'GET', url: body.ref.url });
+      expect(get.statusCode).toBe(200);
+      expect(get.rawPayload.equals(PNG)).toBe(true);
+      const cd = String(get.headers['content-disposition']);
+      expect(cd).toMatch(/^inline; filename="[\x20-\x7e]+"; filename\*=UTF-8''/);
+      const star = /filename\*=UTF-8''(.+)$/.exec(cd)![1]!;
+      expect(decodeURIComponent(star)).toBe(name);
     } finally {
       await built.app.close();
     }
@@ -288,7 +345,7 @@ describe('composer attachments', () => {
   });
 
   it('surfaces a host store failure as 502 (NO FALLBACK)', async () => {
-    const { built, credential } = await makeApp({ daemonOk: false });
+    const { built, credential } = await makeApp({ hostOk: false });
     try {
       const mp = multipart('shot.png', 'image/png', PNG);
       const res = await built.app.inject({
@@ -334,8 +391,8 @@ describe('composer attachments', () => {
 
   it('rejects when no account has been bootstrapped', async () => {
     const registry = Registry.load(dir); // no bootstrapAccount() call
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const mp = multipart('shot.png', 'image/png', PNG);
       const res = await built.app.inject({
@@ -479,7 +536,7 @@ describe('composer attachments', () => {
   });
 
   it('returns 504 when the host never replies to the store request', async () => {
-    const { built, credential } = await makeApp({ daemonReply: false });
+    const { built, credential } = await makeApp({ hostReply: false });
     try {
       const mp = multipart('shot.png', 'image/png', PNG);
       const res = await built.app.inject({
@@ -601,9 +658,9 @@ describe('composer attachments', () => {
   });
 
   it('ignores a patch.attachment.store_response frame with an unmatched requestId', async () => {
-    const { built, daemonLink } = await makeApp();
+    const { built, hostLink } = await makeApp();
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'patch.attachment.store_response',
         requestId: 'no-such-request-id',
         ok: true,
@@ -620,12 +677,12 @@ describe('composer attachments', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(13));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const daemonLink = new InProcessDaemonLink();
-    const origSend = daemonLink.send.bind(daemonLink);
-    daemonLink.send = (surfaceId: string, event: WireEvent): void => {
+    const hostLink = new InProcessHostLink();
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId: string, event: WireEvent): void => {
       origSend(surfaceId, event);
       if (event.type === 'patch.attachment.store_request') {
-        daemonLink.emit({
+        hostLink.emit({
           type: 'patch.attachment.store_response',
           requestId: event.requestId,
           ok: false,
@@ -633,8 +690,8 @@ describe('composer attachments', () => {
         });
       }
     };
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+    const built = await buildAll({ logger: false, registry, hostLink });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
     const credential = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-web-1',
@@ -662,12 +719,12 @@ describe('composer attachments', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(13));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    const daemonLink = new InProcessDaemonLink();
-    const origSend = daemonLink.send.bind(daemonLink);
-    daemonLink.send = (surfaceId: string, event: WireEvent): void => {
+    const hostLink = new InProcessHostLink();
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId: string, event: WireEvent): void => {
       origSend(surfaceId, event);
       if (event.type === 'patch.attachment.store_request') {
-        daemonLink.emit({
+        hostLink.emit({
           type: 'patch.attachment.store_response',
           requestId: event.requestId,
           ok: false,
@@ -675,8 +732,8 @@ describe('composer attachments', () => {
         });
       }
     };
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
+    const built = await buildAll({ logger: false, registry, hostLink });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/chat' });
     const credential = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-web-1',

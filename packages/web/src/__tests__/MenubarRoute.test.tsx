@@ -38,7 +38,7 @@ function seedChats(): void {
   useChatStore.getState().hydrate([
     {
       chatId: MGR,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'Manager',
       folder: 'manager',
@@ -51,7 +51,7 @@ function seedChats(): void {
     },
     {
       chatId: 'c-bed',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'fix layout bug',
       folder: 'bed-planner',
@@ -64,7 +64,7 @@ function seedChats(): void {
     },
     {
       chatId: 'c-port',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'manifest write',
       folder: 'portfolio',
@@ -290,7 +290,7 @@ describe('MenubarRoute', () => {
   it('excludes archived chats from the recents list and shows at most 5, sorted by recency', () => {
     const rows = Array.from({ length: 7 }, (_, i) => ({
       chatId: `extra-${i}`,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: `chat ${i}`,
       folder: 'f',
@@ -305,7 +305,7 @@ describe('MenubarRoute', () => {
       ...rows,
       {
         chatId: 'archived-1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'old',
         folder: 'f',
@@ -332,7 +332,7 @@ describe('MenubarRoute', () => {
     useChatStore.getState().mergeChats([
       {
         chatId: 'c-unnamed',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: 'f',
@@ -363,7 +363,7 @@ describe('MenubarRoute', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'r-now',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'a',
         folder: 'f',
@@ -376,7 +376,7 @@ describe('MenubarRoute', () => {
       },
       {
         chatId: 'r-min',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'b',
         folder: 'f',
@@ -389,7 +389,7 @@ describe('MenubarRoute', () => {
       },
       {
         chatId: 'r-hr',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'c',
         folder: 'f',
@@ -402,7 +402,7 @@ describe('MenubarRoute', () => {
       },
       {
         chatId: 'r-day',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'd',
         folder: 'f',
@@ -439,6 +439,16 @@ describe('MenubarRoute', () => {
     expect(send).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('the Enter that confirms an IME composition does not send', () => {
+    const send = vi.fn();
+    setActiveWs({ send } as unknown as PatchWs);
+    renderMenubar();
+    const input = screen.getByTestId('menubar-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'にほん' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
     expect(send).not.toHaveBeenCalled();
   });
 

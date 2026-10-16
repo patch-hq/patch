@@ -18,7 +18,7 @@
 //
 //   android-latest.json   the APK the phone downloads (and `patch.apk`, the
 //                         stable alias the ntfy link and QR use)
-//   daemon-latest.json    one artifact per target, for self-update
+//   host-latest.json    one artifact per target, for self-update
 //   desktop-latest.json   the zip a fresh install pulls
 //   latest-mac.yml        the zip Squirrel fetches for an auto-update
 //
@@ -39,6 +39,9 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs
 import { join, resolve } from 'node:path';
 import { isMain } from './lib/is-main.mjs';
 
+/** A version in a filename: `0.1.9`, or a prerelease like `1.0.0-rc.2`. */
+const VERSION = String.raw`\d[\w.]*?(?:-[A-Za-z]+\.\d+)?`;
+
 /** Artifact families this program is allowed to delete from. */
 const FAMILIES = [
   {
@@ -51,17 +54,17 @@ const FAMILIES = [
   },
   {
     id: 'daemon',
-    matches: (n) => /^patch-daemon-.+\.tar\.gz$/.test(n),
-    manifest: 'daemon-latest.json',
-    // patch-daemon-<version>-<target>.tar.gz — one line per target.
-    line: (n) => n.match(/^patch-daemon-\d[\w.]*-(.+)\.tar\.gz$/)?.[1] ?? n,
+    matches: (n) => /^patch-host-.+\.tar\.gz$/.test(n),
+    manifest: 'host-latest.json',
+    // patch-host-<version>-<target>.tar.gz — one line per target.
+    line: (n) => n.match(new RegExp(`^patch-host-${VERSION}-(.+)\\.tar\\.gz$`))?.[1] ?? n,
   },
   {
     id: 'desktop',
     matches: (n) => /^Patch-.+-mac\.zip$/.test(n),
     manifest: 'desktop-latest.json',
     // Patch-<version>-<arch>-mac.zip — one line per arch.
-    line: (n) => n.match(/^Patch-\d[\w.]*?-(.+)-mac\.zip$/)?.[1] ?? 'mac',
+    line: (n) => n.match(new RegExp(`^Patch-${VERSION}-(.+)-mac\\.zip$`))?.[1] ?? 'mac',
   },
 ];
 

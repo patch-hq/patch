@@ -54,7 +54,7 @@ import {
   withLockstep,
 } from './deploy-scope.mjs';
 import { verifyOtaBundle } from './verify-ota-bundle.mjs';
-import { mergeDaemonArtifact } from './daemon-manifest.mjs';
+import { mergeHostArtifact } from './host-manifest.mjs';
 import {
   MAC_SURFACES,
   MacUnreachable,
@@ -74,13 +74,16 @@ import {
   signerCheck,
 } from './apk-publish.mjs';
 import { verifyApkBundle } from './verify-apk-bundle.mjs';
-import { APK_OUTPUT, boxBuildCommand } from './build-apk-local.mjs';
+import { APK_OUTPUT, boxBuildCommand, smokeBuildArgs } from './build-apk-local.mjs';
 import { prepareWorktree } from './build-tree.mjs';
 import { recordDeployTree } from './deploy-lock.mjs';
 import { apkOutputDirs, formatCleanup, runCleanup } from './deploy-cleanup.mjs';
 import { deployTarget, publishPlan } from './deploy-target.mjs';
 import { sameCommit } from './same-commit.mjs';
-import { classifyUpdate, patchCliCommand, updateLine } from './daemon-apply.mjs';
+import { desktopUploadOrder } from './desktop-publish.mjs';
+import { classifyUpdate, patchCliCommand, updateLine } from './host-apply.mjs';
+import { waitFor as pollUntil } from './wait-for.mjs';
+import { detachCommand } from './detach-command.mjs';
 import { buildServerRelease, writeInstallChannel } from './build-server.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -120,12 +123,12 @@ const DEPLOY_STATE = '/home/claude-dev/.patch-deploy';
 const MAC_PENDING = `${DEPLOY_STATE}/mac-pending.json`;
 const MAC_HOST = 'mac'; // ssh alias for the Mac, used from the box
 const MAC_REPO = '~/projects/patch';
-const DAEMON_LOG = '/home/claude-dev/.patch/logs/daemon.log';
+const HOST_LOG = '/home/claude-dev/.patch/logs/daemon.log';
 const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const EAS_CHANNEL = 'preview';
 // Signing material lives OUTSIDE the repo: /srv/patch is a shared checkout that
 // other agents reset and clean, and these are gitignored so a clone never has them.
-const DAEMON_BUILD = `${process.env.HOME}/.patch-daemon-build`; // vendor/ + artifact-signing.key
+const HOST_BUILD = `${process.env.HOME}/.patch-daemon-build`; // vendor/ + artifact-signing.key
 // Reused between deploys so node_modules survives; see prepareBuildTree().
 const BUILD_TREE =
   process.env.PATCH_DEPLOY_BUILD_TREE ??
@@ -218,12 +221,9 @@ function dropApkOutputs(tree) {
 
 const curlJson = (u) => JSON.parse(out('curl', ['-sf', u]));
 
-function waitFor(label, check, tries = 60) {
-  for (let i = 0; i < tries; i++) {
-    if (check()) return;
-    execFileSync('sleep', ['2']);
-  }
-  throw new Error(`timed out waiting for: ${label}`);
+/** Poll `check`, logging progress every minute so a long wait does not look dead. */
+function waitFor(label, check, tries = 60, detail) {
+  pollUntil(label, check, { tries, reportEvery: 30, report: log, ...(detail ? { detail } : {}) });
 }
 
 function notify(title, message, priority = 'default') {
@@ -414,7 +414,12 @@ function prepareBuildTree(sha) {
   }
   sh('ln', ['-sfn', serverEnv, `${BUILD_TREE}/deploy/.env`]);
   log('build → installing dependencies');
-  sh('pnpm', ['install', '--frozen-lockfile', '--silent'], { cwd: BUILD_TREE });
+  sh('pnpm', ['install', '--frozen-lockfile'], {
+    cwd: BUILD_TREE,
+    // A reused worktree may need pnpm to replace its modules directory. The
+    // detached deploy has no TTY, so pnpm requires explicit CI semantics.
+    env: { ...process.env, CI: 'true' },
+  });
   BUILD = BUILD_TREE;
   process.chdir(BUILD);
 }
@@ -506,7 +511,7 @@ function release(info) {
   rmSync(out, { recursive: true, force: true });
   // The host reconnects on its own; prove it did rather than assuming.
   waitFor('host re-linked', () =>
-    ok('sh', ['-c', `tail -n 200 ${DAEMON_LOG} | grep -q "server-link: authenticated"`]),
+    ok('sh', ['-c', `tail -n 200 ${HOST_LOG} | grep -q "server-link: authenticated"`]),
   );
   return bundle;
 }
@@ -550,29 +555,29 @@ function verifyWeb(expectedBundle) {
 
 /**
  * Build + publish the host artifact. Publishing only makes the build VISIBLE
- * at /api/daemon/daemon-latest.json; applyDaemon() is what restarts anything.
+ * at /api/daemon/host-latest.json; applyHost() is what restarts anything.
  */
-function daemonPublish() {
-  if (!existsSync(`${DAEMON_BUILD}/artifact-signing.key`)) {
-    throw new Error(`no host signing key at ${DAEMON_BUILD}/artifact-signing.key`);
+function hostPublish() {
+  if (!existsSync(`${HOST_BUILD}/artifact-signing.key`)) {
+    throw new Error(`no host signing key at ${HOST_BUILD}/artifact-signing.key`);
   }
   log('host → building linux-x64 artifact');
-  const dist = `${BUILD}/dist/daemon`;
+  const dist = `${BUILD}/dist/host`;
   sh('rm', ['-rf', dist]);
-  sh('pnpm', ['build:daemon'], {
+  sh('pnpm', ['build:host'], {
     env: {
       ...process.env,
-      PATCH_BUILD_VENDOR: `${DAEMON_BUILD}/vendor`,
-      PATCH_ARTIFACT_SIGNING_KEY: `${DAEMON_BUILD}/artifact-signing.key`,
+      PATCH_BUILD_VENDOR: `${HOST_BUILD}/vendor`,
+      PATCH_ARTIFACT_SIGNING_KEY: `${HOST_BUILD}/artifact-signing.key`,
       // linux-x64 only: the darwin target is the only one that needs macOS
       // codesigning, so restricting targets keeps this box self-sufficient.
       PATCH_BUILD_TARGETS: 'linux-x64',
     },
   });
-  const version = JSON.parse(readFileSync(`${dist}/daemon-latest.json`, 'utf8')).version;
+  const version = JSON.parse(readFileSync(`${dist}/host-latest.json`, 'utf8')).version;
   sh('sh', [
     '-c',
-    `cp ${dist}/daemon-latest.json ${dist}/install.sh ${dist}/*.tar.gz ${dist}/*.tar.gz.sig ${DOWNLOADS}/`,
+    `cp ${dist}/host-latest.json ${dist}/install.sh ${dist}/*.tar.gz ${dist}/*.tar.gz.sig ${DOWNLOADS}/`,
   ]);
   sh('rm', ['-rf', dist]);
   log(`host → published ${version}`);
@@ -587,43 +592,45 @@ function daemonPublish() {
  * host meanwhile reports "no artifact for darwin-arm64" in Settings → Hosts
  * rather than updating to something else.
  */
-function daemonMac(info) {
+function hostMac(info) {
   if (onMac()) throw new Error('daemon-mac is driven from the box; run the deploy there');
   if (!ok('ssh', ['-o', 'ConnectTimeout=10', MAC_HOST, 'true'])) {
-    throw new MacUnreachable(`Mac (${MAC_HOST}) unreachable — the macOS host can only be built there.`);
+    throw new MacUnreachable(
+      `Mac (${MAC_HOST}) unreachable — the macOS host can only be built there.`,
+    );
   }
   const target = 'darwin-arm64';
-  const staging = `/tmp/patch-daemon-${target}-${info.gitSha}`;
-  const macOut = `/tmp/patch-daemon-${target}-${info.gitSha}`;
+  const staging = `/tmp/patch-host-${target}-${info.gitSha}`;
+  const macOut = `/tmp/patch-host-${target}-${info.gitSha}`;
   sh('rm', ['-rf', staging]);
   mkdirSync(staging, { recursive: true });
   log(`daemon-mac → building ${target} on the Mac`);
   sh('ssh', [
     MAC_HOST,
     macCommand(
-      `corepack pnpm turbo build --filter=@patch/daemon... --output-logs=errors-only && ` +
+      `corepack pnpm turbo build --filter=@patch/host... --output-logs=errors-only && ` +
         `rm -rf ${macOut} && ` +
         `PATCH_BUILD_VENDOR=~/.patch-daemon-build/vendor ` +
         `PATCH_ARTIFACT_SIGNING_KEY=~/.patch-daemon-build/artifact-signing.key ` +
         `PATCH_CODESIGN_IDENTITY="${CSC_NAME}" PATCH_BUILD_TARGETS=${target} ` +
-        `PATCH_BUILD_OUT=${macOut} node scripts/build-daemon.mjs && ` +
-        `scp -q ${macOut}/daemon-latest.json ${macOut}/*.tar.gz ${macOut}/*.tar.gz.sig ${BOX_HOST}:${staging}/ && ` +
+        `PATCH_BUILD_OUT=${macOut} node scripts/build-host.mjs && ` +
+        `scp -q ${macOut}/host-latest.json ${macOut}/*.tar.gz ${macOut}/*.tar.gz.sig ${BOX_HOST}:${staging}/ && ` +
         `rm -rf ${macOut}`,
       info.gitSha,
     ),
   ]);
   const downloads = DOWNLOADS;
-  const published = JSON.parse(readFileSync(`${downloads}/daemon-latest.json`, 'utf8'));
-  const built = JSON.parse(readFileSync(`${staging}/daemon-latest.json`, 'utf8'));
-  const merged = mergeDaemonArtifact(published, built, target);
+  const published = JSON.parse(readFileSync(`${downloads}/host-latest.json`, 'utf8'));
+  const built = JSON.parse(readFileSync(`${staging}/host-latest.json`, 'utf8'));
+  const merged = mergeHostArtifact(published, built, target);
   const artifact = merged.artifacts.find((a) => a.target === target);
   // Files first, manifest last: a manifest naming a tarball not yet there is a
   // failed update on every Mac that reads it in between.
   sh('cp', [`${staging}/${artifact.file}`, `${staging}/${artifact.file}.sig`, `${downloads}/`]);
-  writeFileSync(`${downloads}/daemon-latest.json.tmp`, `${JSON.stringify(merged, null, 2)}\n`);
-  renameSync(`${downloads}/daemon-latest.json.tmp`, `${downloads}/daemon-latest.json`);
+  writeFileSync(`${downloads}/host-latest.json.tmp`, `${JSON.stringify(merged, null, 2)}\n`);
+  renameSync(`${downloads}/host-latest.json.tmp`, `${downloads}/host-latest.json`);
   sh('rm', ['-rf', staging]);
-  const served = curlJson(`${URL}/api/daemon/daemon-latest.json`);
+  const served = curlJson(`${URL}/api/daemon/host-latest.json`);
   const listed = served.artifacts?.find((a) => a.target === target);
   if (served.version !== info.version || listed?.sha256 !== artifact.sha256) {
     throw new Error(`the server is not serving the ${target} build just published`);
@@ -634,12 +641,15 @@ function daemonMac(info) {
   log(`daemon-mac → published ${target} ${info.version}`);
 }
 
+/** How long to wait on a held host update before calling it pending: 5 minutes. */
+const DEFERRED_WAIT_TRIES = 150;
+
 /**
  * THE DESTRUCTIVE STEP. Restarts the host service, dropping every live chat on
  * this host — including the chat that started this deploy. Runs last, and only
  * from a detached process that can outlive it.
  */
-function daemonApply(expectedVersion) {
+function hostApply(expectedVersion) {
   log(`host → applying ${expectedVersion} (restarts the host, drops live chats)`);
   // Not `|| true`: the output says whether we lost the race with the host's own
   // self-update, and the exit code is not trusted either way — the host restarting
@@ -656,10 +666,10 @@ function daemonApply(expectedVersion) {
   // anything until the hold clears.
   if (kind !== 'deferred') {
     waitFor('host back up', () =>
-      ok('sh', ['-c', 'systemctl --user is-active --quiet patch-daemon']),
+      ok('sh', ['-c', 'systemctl --user is-active --quiet patch-host || systemctl --user is-active --quiet patch-daemon']),
     );
     waitFor('host re-linked', () =>
-      ok('sh', ['-c', `tail -n 200 ${DAEMON_LOG} | grep -q "server-link: authenticated"`]),
+      ok('sh', ['-c', `tail -n 200 ${HOST_LOG} | grep -q "server-link: authenticated"`]),
     );
   }
   let running;
@@ -670,7 +680,7 @@ function daemonApply(expectedVersion) {
         const get = patchCliCommand(REPO, ['hosts', 'get', '--json']);
         const r = spawnSync(get.cmd, get.args, { encoding: 'utf8' });
         try {
-          running = JSON.parse(r.stdout).daemonVersion;
+          running = JSON.parse(r.stdout).hostVersion;
         } catch {
           running = undefined;
         }
@@ -681,14 +691,27 @@ function daemonApply(expectedVersion) {
       // this call returns. 30 minutes, not 2, gives the hold room to clear
       // instead of this deploy declaring failure on an update still correctly
       // in flight.
-      kind === 'deferred' ? 900 : 60,
+      kind === 'deferred' ? DEFERRED_WAIT_TRIES : 60,
+      () => `host is on ${running ?? 'an unknown version'}`,
     );
   } catch {
+    // A held update is the host doing what it should: it applies itself the
+    // moment no turn is running. Failing the deploy for it told the owner
+    // something was broken when it was only waiting (2026-10-11: a 30-minute
+    // wait ended in DEPLOY FAILED, and the host updated by itself shortly after).
+    // It is reported as PENDING, loudly, in the summary instead.
+    if (kind === 'deferred') {
+      log(
+        `host → update to ${expectedVersion} is still held by running turns; it applies itself when they finish`,
+      );
+      return 'pending';
+    }
     throw new Error(
       `host is on ${running ?? 'an unknown version'}, not ${expectedVersion} (update call: ${kind})`,
     );
   }
   if (kind !== 'applied') log(`host → already on ${expectedVersion}`);
+  return 'applied';
 }
 
 /**
@@ -791,60 +814,19 @@ async function ota(info) {
  * files on one URL — and a `<Redirect>` that resolves back to itself — are
  * invisible to it by construction. Only a real navigator has that opinion.
  *
- * It runs AFTER `ota`, and that ordering is the point. What a phone runs is the
- * OTA, not the APK: the app checks the channel on launch and reloads into
- * whatever it serves, within seconds. Smoking the APK before the OTA exists
- * grades a bundle nobody will run; smoking it after grades the real thing, and
- * the harness fails the run if the app does not report this commit.
+ * It grades an APK built from this commit on the Mac, which carries the commit's
+ * own bundle and reports its sha on the Updates page; the harness fails the run
+ * if it does not. It used to grade the published APK after the OTA, but that
+ * APK is as old as the last native change and the OTA never reached it.
  *
  * It needs an emulator, and this box has none — so, exactly like the desktop
  * shell, it delegates to the Mac over ssh. That makes a deploy depend on the Mac
  * being awake, which it already did.
  */
-/**
- * Block until the channel actually serves this commit's bundle.
- *
- * `smoke` "runs AFTER ota, and that ordering is the point" — but ota lives in
- * the `mobile` lane and smoke in the `mac` lane, and lanes run CONCURRENTLY.
- * The ordering was therefore documented and not enforced: on 9 Sep the smoke
- * launched the app before the update existed, the app reloaded into the
- * previous bundle, and the run failed with "the running app does not report
- * <sha>" — a true statement about a race, reported as if the build were broken.
- *
- * Waiting on the real artifact rather than on an inter-lane handshake also
- * covers the hand-run case (`--only=smoke`), where the publish belongs to some
- * earlier deploy entirely.
- */
-async function waitForOta(info, timeoutMs = 8 * 60 * 1000) {
-  const identity = apkUpdateIdentity('apps/mobile/android');
-  if (!identity.deliverable) throw new Error(`OTA NOT DELIVERABLE: ${identity.why}`);
-  const deadline = Date.now() + timeoutMs;
-  let why = 'never checked';
-  while (Date.now() < deadline) {
-    const verdict = await verifyOtaBundle({
-      projectId: EAS_PROJECT_ID,
-      runtime: identity.runtime,
-      channel: identity.channel,
-      version: info.version,
-      gitSha: info.gitSha,
-    });
-    if (verdict.ok) return;
-    why = verdict.why;
-    log(`smoke → waiting for the ${identity.channel} channel to carry ${info.gitSha}`);
-    await new Promise((r) => setTimeout(r, 15_000));
-  }
-  throw new Error(
-    `the ${identity.channel} channel never carried ${info.gitSha} within ${Math.round(
-      timeoutMs / 60000,
-    )} minutes, so there is nothing for the smoke to grade: ${why}`,
-  );
-}
-
 async function smoke(info) {
-  // The app OTAs on launch, so the bundle under test must be published before
-  // the emulator is even booted — on the box AND before delegating to the Mac,
-  // which would otherwise sit holding an emulator open through the wait.
-  await waitForOta(info);
+  // No wait for the OTA channel: the APK under test is built from this commit
+  // on the Mac and carries its own bundle, so what is graded does not depend on
+  // what has been published.
   if (!onMac()) {
     log('smoke → delegating the mobile surface layer to the Mac over ssh');
     if (!ok('ssh', ['-o', 'ConnectTimeout=10', MAC_HOST, 'true'])) {
@@ -867,12 +849,27 @@ async function smoke(info) {
         'Pair this Mac (`patch pair`) or run the deploy with --only excluding smoke.',
     );
   }
+  // The APK under test is built HERE from this commit, not the published one.
+  // The published APK is whatever the last native change produced, which can
+  // be months old: it predates the Updates page, or asks for a runtime the
+  // channel no longer serves, so the OTA never replaces it and the smoke could
+  // not read which bundle it was driving. A build from this commit carries the
+  // sha itself.
+  log(`smoke → building the APK under test from ${info.gitSha}`);
+  const built = execFileSync('node', ['scripts/build-apk-local.mjs', ...smokeBuildArgs(info)], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  process.stdout.write(built);
   sh(
     'node',
     [
       'scripts/mobile-surface-smoke.mjs',
       '--apk',
-      `${URL}/api/download/patch.apk`,
+      builtApkPath(built),
+      '--server',
+      URL,
       '--sha',
       info.gitSha,
     ],
@@ -1340,9 +1337,9 @@ function desktop(info) {
     PATCH_SKIP_NOTARIZE: '1', // no Apple account; these install by direct copy, never quarantined
   };
   // The app carries this Mac's host build (stage-resources.cjs refuses to package
-  // without dist/daemon), so it is built first, here, from the same commit.
+  // without dist/host), so it is built first, here, from the same commit.
   const home = process.env.HOME;
-  sh('pnpm', ['build:daemon'], {
+  sh('pnpm', ['build:host'], {
     env: {
       ...env,
       PATCH_BUILD_VENDOR: `${home}/.patch-daemon-build/vendor`,
@@ -1377,10 +1374,8 @@ function desktop(info) {
     },
   });
   const dest = `${BOX_HOST}:${DOWNLOADS}`;
-  sh('rsync', ['-az', `${rel}/latest-mac.yml`, `${dest}/latest-mac.yml`]);
-  sh('rsync', ['-az', `${rel}/${zip}`, `${dest}/${zip}`]);
-  if (existsSync(`${rel}/${zip}.blockmap`)) {
-    sh('rsync', ['-az', `${rel}/${zip}.blockmap`, `${dest}/${zip}.blockmap`]);
+  for (const f of desktopUploadOrder(zip, { blockmap: existsSync(`${rel}/${zip}.blockmap`) })) {
+    sh('rsync', ['-az', `${rel}/${f}`, `${dest}/${f}`]);
   }
   // electron-builder's yml carries a version but no git sha; this sidecar is what
   // lets /api/version trace the published binary back to a commit.
@@ -1406,7 +1401,7 @@ function prune() {
  * absence let a stale SPA sit in prod for eight days while /api/healthz reported
  * a newer commit and nobody compared the two.
  */
-function verify(info, expectedDaemon, expectOta) {
+function verify(info, expectedHost, expectOta) {
   // A surface this deploy did not SHIP cannot be expected to report this commit —
   // it is correctly still serving the last one that touched it. `desktop` and
   // `apk` already worked this way for exactly that reason; surface scoping made
@@ -1429,9 +1424,9 @@ function verify(info, expectedDaemon, expectOta) {
   const spa = curlJson(`${URL}/app/version.json`);
   rows.push(['web', spa.gitSha, expected('web') || sameCommit(spa.gitSha, info.gitSha)]);
 
-  if (expectedDaemon) {
-    const d = curlJson(`${URL}/api/daemon/daemon-latest.json`);
-    rows.push(['daemon', d.version, d.version === expectedDaemon]);
+  if (expectedHost) {
+    const d = curlJson(`${URL}/api/daemon/host-latest.json`);
+    rows.push(['daemon', d.version, d.version === expectedHost]);
   }
   // The OTA is the mobile surface that actually carries this commit's JS, so it
   // IS required to match -- unlike the APK below. Without this row a failed or
@@ -1492,7 +1487,19 @@ function detach(args, tag) {
   mkdirSync(dir, { recursive: true });
   const file = `${dir}/${tag}-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
   const fd = openSync(file, 'a');
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...args], {
+  // Outside the host's cgroup where systemd allows it, so the restart at the
+  // end of a deploy cannot kill the deploy (see detach-command.mjs). On a Mac
+  // there is no host service to protect, so it runs plainly.
+  const systemdRun = process.platform === 'linux' && ok('systemd-run', ['--user', '--version']);
+  const launch = detachCommand(process.execPath, [fileURLToPath(import.meta.url), ...args], {
+    systemdRun,
+  });
+  if (process.platform === 'linux' && !launch.scoped) {
+    console.warn(
+      'detach: systemd-run --user is unavailable — the host restart may end this deploy',
+    );
+  }
+  const child = spawn(launch.cmd, launch.args, {
     detached: true,
     stdio: ['ignore', fd, fd],
     cwd: REPO,
@@ -1803,7 +1810,9 @@ async function surface(name, fn) {
  * Run one lane's surfaces in this process, in order. Only the couplings named on
  * LANES are sequential; a lane never waits on another lane.
  */
-let daemonVersion = null;
+let hostVersion = null;
+/** Set when the host update is accepted but still held behind running turns. */
+let hostPending = null;
 
 async function runLane() {
   // One release carries both: `server` builds the server and the SPA, `web`
@@ -1824,8 +1833,8 @@ async function runLane() {
       shipped.delete('web');
     }
   }
-  daemonVersion = (await surface('daemon', () => daemonPublish())) ?? null;
-  await surface('daemon-mac', () => daemonMac(info));
+  hostVersion = (await surface('daemon', () => hostPublish())) ?? null;
+  await surface('daemon-mac', () => hostMac(info));
   await surface('ota', () => ota(info));
   await surface('apk', () => apk(info));
   await surface('desktop', () => desktop(info));
@@ -1835,14 +1844,17 @@ async function runLane() {
   if (!onMac() && want('daemon')) prune();
   // The host restart can take this whole process tree down with it (see the
   // lanes below), so clean up BEFORE it rather than after.
-  if (daemonVersion && want('apply') && !prepared && !onMac()) cleanupOnce();
-  if (daemonVersion) await surface('apply', () => daemonApply(daemonVersion));
+  if (hostVersion && want('apply') && !prepared && !onMac()) cleanupOnce();
+  if (hostVersion) {
+    const outcome = await surface('apply', () => hostApply(hostVersion));
+    if (outcome === 'pending') hostPending = hostVersion;
+  }
   // A lane child reports what it managed upward; the parent cannot see this
   // process's `shipped` set, and marking a whole lane failed because one of its
   // surfaces was would hide the one that worked.
   if (prepared) {
     console.log(
-      `##lane ${JSON.stringify({ shipped: [...shipped], daemonVersion, cleanupWarnings })}`,
+      `##lane ${JSON.stringify({ shipped: [...shipped], hostVersion, hostPending, cleanupWarnings })}`,
     );
   }
 }
@@ -1873,20 +1885,36 @@ async function runLanes(lanes) {
             { cwd: BUILD, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] },
           );
           let output = '';
-          child.stdout.on('data', (d) => (output += d));
-          child.stderr.on('data', (d) => (output += d));
+          // A lane running alone has nothing to interleave with, so show it as
+          // it happens. Buffered, the final daemon step (which can wait many
+          // minutes for the host's turns to finish) left the log silent.
+          const alone = lanes.length === 1;
+          const take = (d) => {
+            output += d;
+            if (alone) process.stdout.write(d);
+          };
+          child.stdout.on('data', take);
+          child.stderr.on('data', take);
           child.on('close', (code) => resolve({ name, surfaces, code, output }));
         }),
     ),
   );
   for (const r of results) {
-    console.log(`\n──────── lane ${r.name} ────────`);
-    process.stdout.write(r.output);
+    if (lanes.length > 1) {
+      console.log(`\n──────── lane ${r.name} ────────`);
+      process.stdout.write(r.output);
+    }
     const reported = r.output.match(/^##lane (.*)$/m);
     if (reported) {
-      const { shipped: got, daemonVersion: v, cleanupWarnings: warned } = JSON.parse(reported[1]);
+      const {
+        shipped: got,
+        hostVersion: v,
+        hostPending: held,
+        cleanupWarnings: warned,
+      } = JSON.parse(reported[1]);
+      if (held) hostPending = held;
       for (const sfc of got) shipped.add(sfc);
-      if (v) daemonVersion = v;
+      if (v) hostVersion = v;
       cleanupWarnings.push(...(warned ?? []));
     } else if (r.code === 0) {
       // Exited clean without saying what it did — treat the lane as shipped
@@ -1918,12 +1946,12 @@ if (prepared || only || onMac() || lanesToRun.length <= 1) {
   // server silently stuck on the old one (2026-09-17). Running it after
   // everything else has resolved means the one surface capable of taking this
   // process down with it is the one surface left with nothing more to lose.
-  const daemonLane = lanesToRun.filter(([name]) => name === 'daemon');
+  const hostLane = lanesToRun.filter(([name]) => name === 'daemon');
   const otherLanes = lanesToRun.filter(([name]) => name !== 'daemon');
   if (otherLanes.length > 0) await runLanes(otherLanes);
   // Clean up before the lane that can kill this process, not after it.
-  if (daemonLane.length > 0) cleanupOnce();
-  if (daemonLane.length > 0) await runLanes(daemonLane);
+  if (hostLane.length > 0) cleanupOnce();
+  if (hostLane.length > 0) await runLanes(hostLane);
 }
 
 if (prepared) process.exit(failures.length ? 1 : 0);
@@ -1946,7 +1974,7 @@ try {
   // A surface that threw above did not ship, so don't also demand it converged:
   // it is already named in `failures`, and a second row for it just buries the
   // surfaces that are genuinely wrong.
-  summary = verify(info, daemonVersion, shipped.has('ota'));
+  summary = verify(info, hostVersion, shipped.has('ota'));
 } catch (err) {
   failures.push(err.message);
 }
@@ -1963,8 +1991,15 @@ if (failures.length) {
 console.log(`\n${cleaned}`);
 const owed = describePending(readPending(MAC_PENDING));
 if (owed) console.log(`\n${owed}`);
+const held = hostPending
+  ? `HOST UPDATE PENDING: ${hostPending} is accepted but held behind running turns; the host applies it itself when idle`
+  : '';
 notify(
-  cleaned.startsWith('CLEANUP FAILED') ? 'Patch deployed (cleanup FAILED)' : 'Patch deployed',
-  `${info.version} / ${info.gitSha}\n${summary}\n${cleaned}${owed ? `\n${owed}` : ''}`,
+  cleaned.startsWith('CLEANUP FAILED')
+    ? 'Patch deployed (cleanup FAILED)'
+    : held
+      ? 'Patch deployed (host update pending)'
+      : 'Patch deployed',
+  `${info.version} / ${info.gitSha}\n${summary}\n${cleaned}${held ? `\n${held}` : ''}${owed ? `\n${owed}` : ''}`,
 );
 log('done');

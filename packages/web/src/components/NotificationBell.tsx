@@ -47,11 +47,6 @@ export function NotificationBell(): JSX.Element {
         }}
       >
         <Bell size={16} aria-hidden />
-        {unread > 0 ? (
-          <span className="notif-badge" data-testid="notif-badge">
-            {unread > 99 ? '99+' : unread}
-          </span>
-        ) : null}
       </button>
       {open
         ? createPortal(

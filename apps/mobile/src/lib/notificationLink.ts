@@ -104,19 +104,31 @@ export function deepLinkWords(url: string): string[] {
 
 /**
  * Whether a deep link corresponds to the notification the user read. True when
- * at least one of the link's identifying words occurs, case-insensitively, in
- * the notification's title or body.
+ * at least one of the link's identifying words occurs, case-insensitively and
+ * as a whole word, in the notification's title or body.
  */
 export function deepLinkMatchesText(url: string, text: NotificationText): boolean {
   const words = deepLinkWords(url);
   if (words.length === 0) return false;
-  const haystack = [
-    typeof text.title === 'string' ? text.title : '',
-    typeof text.body === 'string' ? text.body : '',
-  ]
-    .join(' ')
-    .toLowerCase();
-  return words.some((w) => haystack.includes(w));
+  // Whole words, not fragments: "pay" is not named by "Display", nor "art" by
+  // "start". A plural still counts ("tasks" names /task).
+  const named = new Set(
+    [
+      typeof text.title === 'string' ? text.title : '',
+      typeof text.body === 'string' ? text.body : '',
+    ]
+      .join(' ')
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter(Boolean),
+  );
+  // A scheme or host written in camel case ("CityMapper") offers both its parts
+  // and the run as a whole, which is how a notification would spell the name.
+  const runs = url
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter((w) => w.length >= MIN_WORD_LENGTH && !URI_NOISE.has(w));
+  return [...words, ...runs].some((w) => named.has(w) || named.has(`${w}s`) || named.has(`${w}es`));
 }
 
 function chatAction(data: NotificationData): NotificationAction | null {

@@ -14,6 +14,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { downscaleImageFile, MAX_IMAGE_EDGE } from '../lib/imageResize.js';
 
 let drawImage: ReturnType<typeof vi.fn>;
+let fillRect: ReturnType<typeof vi.fn>;
+let calls: string[];
 let toBlobSpy: ReturnType<typeof vi.spyOn>;
 let getContextSpy: ReturnType<typeof vi.spyOn>;
 
@@ -26,10 +28,13 @@ function stubDecode(width: number, height: number): void {
 }
 
 beforeEach(() => {
-  drawImage = vi.fn();
+  calls = [];
+  const ctx = { fillStyle: '' as string, drawImage: vi.fn(), fillRect: vi.fn() };
+  drawImage = ctx.drawImage.mockImplementation(() => calls.push('drawImage'));
+  fillRect = ctx.fillRect.mockImplementation(() => calls.push(`fillRect ${ctx.fillStyle}`));
   getContextSpy = vi
     .spyOn(HTMLCanvasElement.prototype, 'getContext' as never)
-    .mockReturnValue({ drawImage } as never);
+    .mockReturnValue(ctx as never);
   toBlobSpy = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (
     this: HTMLCanvasElement,
     cb: BlobCallback,
@@ -61,6 +66,18 @@ describe('downscaleImageFile', () => {
     expect(out).not.toBe(input);
     expect(out.type).toBe('image/jpeg');
     expect(out.name).toBe('huge.jpg');
+  });
+
+  it('paints the canvas white before drawing, so transparency does not encode as black', async () => {
+    stubDecode(4000, 3000);
+    await downscaleImageFile(new File(['png-bytes'], 'huge.png', { type: 'image/png' }));
+    expect(fillRect).toHaveBeenCalledWith(
+      0,
+      0,
+      MAX_IMAGE_EDGE,
+      Math.round(3000 * (MAX_IMAGE_EDGE / 4000)),
+    );
+    expect(calls).toEqual(['fillRect #fff', 'drawImage']);
   });
 
   it('leaves a small image UNCHANGED (same File, no re-encode)', async () => {

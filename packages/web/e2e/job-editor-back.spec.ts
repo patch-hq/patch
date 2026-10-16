@@ -21,7 +21,7 @@ const LINKED_JOB = {
   trigger: { type: 'cron', expression: '*/5 7-22 * * *', timezone: 'Europe/London' },
   action: {
     type: 'spawn',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/home/tom/projects/bus',
     prompt: 'watch the bus',
   },
@@ -33,7 +33,7 @@ async function stubJobEditorApis(page: import('@playwright/test').Page): Promise
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        hosts: [{ daemonId: 'd1', roots: ['/home/tom/projects/bus'], recent: [] }],
+        hosts: [{ hostId: 'd1', roots: ['/home/tom/projects/bus'], recent: [] }],
       }),
     }),
   );
@@ -76,53 +76,7 @@ async function stubJobEditorApis(page: import('@playwright/test').Page): Promise
   );
 }
 
-test.describe('job editor — back button', () => {
-  test('back button is present on the new-job form', async ({ page }) => {
-    // Stub the API calls the editor makes (folders, skills).
-    await page.route('**/api/folders', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ hosts: [] }),
-      }),
-    );
-    await page.route('**/api/jobs**', (route) => {
-      if (route.request().method() === 'GET') {
-        return route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ jobs: [] }),
-        });
-      }
-      return route.continue();
-    });
-    await page.goto(NEW_JOB);
-    const back = page.getByTestId('job-editor-back');
-    await expect(back).toBeVisible();
-  });
-
-  test('clicking back on new-job navigates to /jobs', async ({ page }) => {
-    await page.route('**/api/folders', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ hosts: [] }),
-      }),
-    );
-    await page.route('**/api/jobs**', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ jobs: [] }),
-      }),
-    );
-    await page.goto(NEW_JOB);
-    await expect(page.getByTestId('job-editor-back')).toBeVisible();
-    await page.getByTestId('job-editor-back').click();
-    // After clicking back, the jobs list route must render.
-    await expect(page.getByTestId('jobs-route')).toBeVisible();
-  });
-
+test.describe('job editor — back', () => {
   test('opened from a chat, back returns to that chat rather than the jobs list', async ({
     page,
   }) => {
@@ -134,7 +88,7 @@ test.describe('job editor — back button', () => {
     await expect(page.getByTestId('job-editor')).toBeVisible();
     await expect(page.getByTestId('job-name')).toHaveValue(LINKED_JOB.name);
 
-    await page.getByTestId('job-editor-back').click();
+    await page.getByTestId('nav-back').click();
     await expect(page.getByText(CHAT_FIXTURE_MESSAGE)).toBeVisible();
     await expect(page.getByTestId('jobs-route')).toHaveCount(0);
   });

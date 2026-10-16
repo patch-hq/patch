@@ -18,7 +18,7 @@ export interface DaemonKeyClaims {
 
 export interface MintDaemonKeyOptions {
   userPrivateKey: string;
-  daemonId: string;
+  hostId: string;
   label: string;
   now?: number;
 }
@@ -38,7 +38,7 @@ export async function mintDaemonKey(opts: MintDaemonKeyOptions): Promise<string>
   const iat = opts.now ?? Math.floor(Date.now() / 1000);
 
   return new SignJWT({
-    daemon_id: opts.daemonId,
+    daemon_id: opts.hostId,
     label: opts.label,
     kind: 'daemon',
   })
@@ -74,9 +74,9 @@ export async function verifyDaemonKey(
   if (payload['kind'] !== 'daemon') {
     throw new CredentialVerificationError('kind is not "daemon"');
   }
-  const daemonId = payload['daemon_id'];
+  const hostId = payload['daemon_id'];
   const label = payload['label'];
-  if (typeof daemonId !== 'string' || daemonId.length === 0) {
+  if (typeof hostId !== 'string' || hostId.length === 0) {
     throw new CredentialVerificationError('daemon_id missing');
   }
   if (typeof label !== 'string') {
@@ -88,7 +88,7 @@ export async function verifyDaemonKey(
 
   return {
     sub: payload.sub,
-    daemon_id: daemonId,
+    daemon_id: hostId,
     label,
     kind: 'daemon',
     iat: payload.iat,

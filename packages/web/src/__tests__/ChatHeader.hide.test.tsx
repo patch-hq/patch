@@ -33,7 +33,7 @@ function render(ui: JSX.Element): ReturnType<typeof rtlRender> {
 function row(overrides: Partial<ChatRow> = {}): ChatRow {
   return {
     chatId: 'c1',
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',

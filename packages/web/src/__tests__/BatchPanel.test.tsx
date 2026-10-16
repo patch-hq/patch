@@ -27,7 +27,7 @@ function row(chatId: string, badge: 'working' | 'done', name = chatId): ChatRow 
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name,
     folder: '~/proj',

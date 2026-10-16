@@ -12,7 +12,7 @@ const JOB = {
   enabled: true,
   trigger: { type: 'todoist' },
   filter: null,
-  action: { type: 'continue', daemonId: 'd1', folder: FOLDER, skill: 'app-update', key: 'k' },
+  action: { type: 'continue', hostId: 'd1', folder: FOLDER, skill: 'app-update', key: 'k' },
   createdAt: 1,
   updatedAt: 1,
 };
@@ -24,7 +24,7 @@ async function stub(page: import('@playwright/test').Page): Promise<void> {
     body: JSON.stringify(body),
   });
   await page.route('**/api/folders**', (r) =>
-    r.fulfill(json({ hosts: [{ daemonId: 'd1', roots: [FOLDER], recent: [] }] })),
+    r.fulfill(json({ hosts: [{ hostId: 'd1', roots: [FOLDER], recent: [] }] })),
   );
   await page.route('**/api/skills**', (r) =>
     r.fulfill(json({ skills: ['app-update'], paths: {} })),

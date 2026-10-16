@@ -3,6 +3,7 @@
 
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { dropLastCodePoint } from './text.js';
 
 export interface PickerProps {
   recents: string[];
@@ -22,7 +23,7 @@ export function Picker(props: PickerProps): React.JSX.Element {
       const choice = filtered[safeIndex] ?? filter;
       if (choice && choice.length > 0) props.onSubmit(choice);
     } else if (key.backspace || key.delete) {
-      setFilter((f) => f.slice(0, -1));
+      setFilter(dropLastCodePoint);
     } else if (input && !key.ctrl && !key.meta) {
       setFilter((f) => f + input);
     }

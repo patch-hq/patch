@@ -40,6 +40,12 @@ import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { _resetSendQueue } from '../src/lib/sendQueue';
 
 const { uploadAttachmentSpy } = vi.hoisted(() => ({ uploadAttachmentSpy: vi.fn() }));
+// Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
+
 vi.mock('../src/api/rest', () => ({
   api: {
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
@@ -77,7 +83,7 @@ beforeEach(async () => {
   useComposerAttachmentStore.getState()._reset();
   useUiStore.setState({ errors: [] });
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   submitSpy = vi.spyOn(deliveryTracker, 'submit').mockImplementation(() => {});
   uploads = [];
   uploadAttachmentSpy.mockImplementation(

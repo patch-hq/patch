@@ -16,7 +16,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { MIN_SUPPORTED_DAEMON_VERSION, type DaemonSupport } from './daemon-compat.js';
+import { MIN_SUPPORTED_HOST_VERSION, type HostSupport } from './host-compat.js';
 import type {
   ClientBuild,
   LayerBuild,
@@ -72,26 +72,26 @@ export function compareVersions(
  * § Deployment). An UNKNOWN version is NOT treated as supported — a machine
  * that cannot say what it runs is exactly the one most likely to be too old.
  */
-export function daemonSupport(version: string | null | undefined): DaemonSupport {
+export function hostSupport(version: string | null | undefined): HostSupport {
   if (!version) {
     return {
       supported: false,
       reason: 'this machine does not report a host version',
-      remedy: `reinstall the host (this server supports ${MIN_SUPPORTED_DAEMON_VERSION} and newer)`,
+      remedy: `reinstall the host (this server supports ${MIN_SUPPORTED_HOST_VERSION} and newer)`,
     };
   }
-  const cmp = compareVersions(version, MIN_SUPPORTED_DAEMON_VERSION);
+  const cmp = compareVersions(version, MIN_SUPPORTED_HOST_VERSION);
   if (cmp === null) {
     return {
       supported: false,
       reason: `unrecognised host version: ${version}`,
-      remedy: `reinstall the host (this server supports ${MIN_SUPPORTED_DAEMON_VERSION} and newer)`,
+      remedy: `reinstall the host (this server supports ${MIN_SUPPORTED_HOST_VERSION} and newer)`,
     };
   }
   if (cmp < 0) {
     return {
       supported: false,
-      reason: `host ${version} is older than this server supports (${MIN_SUPPORTED_DAEMON_VERSION})`,
+      reason: `host ${version} is older than this server supports (${MIN_SUPPORTED_HOST_VERSION})`,
       remedy: 'update this machine (Settings → Hosts → Update)',
     };
   }
@@ -216,7 +216,7 @@ export function computeDrift(input: DriftInput): VersionDrift[] {
         (v) =>
           `${v} (${stamped
             .filter((h) => h.version === v)
-            .map((h) => h.daemonId)
+            .map((h) => h.hostId)
             .join(', ')})`,
       )
       .join(' vs ');
@@ -229,7 +229,7 @@ export function computeDrift(input: DriftInput): VersionDrift[] {
   for (const h of online.filter((x) => x.version === null)) {
     drift.push({
       kind: 'host-unstamped',
-      detail: `machine ${h.hostName ?? h.daemonId} is connected but reports no build version`,
+      detail: `machine ${h.hostName ?? h.hostId} is connected but reports no build version`,
       remedy: 'reinstall the host on that machine from a published artifact',
     });
   }
@@ -237,11 +237,11 @@ export function computeDrift(input: DriftInput): VersionDrift[] {
   // outside the range this server supports is SHOWN as needing an update rather
   // than left to misbehave quietly against frame shapes it cannot speak.
   for (const h of stamped) {
-    const support = daemonSupport(h.version);
+    const support = hostSupport(h.version);
     if (support.supported) continue;
     drift.push({
       kind: 'host-unsupported',
-      detail: `machine ${h.hostName ?? h.daemonId}: ${support.reason}`,
+      detail: `machine ${h.hostName ?? h.hostId}: ${support.reason}`,
       remedy: support.remedy,
     });
   }

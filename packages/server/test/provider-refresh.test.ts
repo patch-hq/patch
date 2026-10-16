@@ -34,15 +34,15 @@ it('serializes renewal, preserves rotated credentials across restart and repairs
   const refresh = vi.fn(async () => auth(Math.floor(Date.now() / 1000) + 3600, 'rotated'));
   const options = {
     dataDir: dir,
-    sendToDaemon: () => {},
-    onlineDaemonIds: () => [],
+    sendToHost: () => {},
+    onlineHostIds: () => [],
     broadcast: () => {},
     refreshOpenAI: refresh,
   };
   const service = new SharedSettingsService(options);
-  service.handleDaemonEvent({
+  service.handleHostEvent({
     type: 'settings.account_signed_in',
-    daemonId: 'd',
+    hostId: 'd',
     requestId: 'r',
     account: {
       id: 'original',
@@ -57,9 +57,9 @@ it('serializes renewal, preserves rotated credentials across restart and repairs
   const restarted = new SharedSettingsService(options);
   await restarted.refreshCredentials();
   expect(refresh).toHaveBeenCalledTimes(1);
-  restarted.handleDaemonEvent({
+  restarted.handleHostEvent({
     type: 'settings.account_signed_in',
-    daemonId: 'd2',
+    hostId: 'd2',
     requestId: 'r2',
     account: {
       id: 'new',
@@ -82,22 +82,22 @@ it('reports renewal failure without losing credentials or allowing an older host
   });
   const service = new SharedSettingsService({
     dataDir: dir,
-    sendToDaemon: () => {},
-    onlineDaemonIds: () => [],
+    sendToHost: () => {},
+    onlineHostIds: () => [],
     broadcast: () => {},
     refreshOpenAI: refresh,
   });
-  service.handleDaemonEvent({
+  service.handleHostEvent({
     type: 'settings.account_signed_in',
-    daemonId: 'd',
+    hostId: 'd',
     requestId: 'r',
     account: { id: 'a', label: 'Mine', identity: 'pool', kind: 'chatgpt', authJson: auth(1) },
   });
   await service.refreshCredentials();
   expect(service.changedEvent().problem).toContain('Sign in again');
-  service.handleDaemonEvent({
+  service.handleHostEvent({
     type: 'settings.secret_update',
-    daemonId: 'd',
+    hostId: 'd',
     update: { backendId: 'codex', accountId: 'a', authJson: auth(1, 'stale') },
   });
   await service.refreshCredentials();

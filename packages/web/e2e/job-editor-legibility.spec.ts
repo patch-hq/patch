@@ -26,7 +26,7 @@ const JOB = {
   filter: null,
   action: {
     type: 'continue',
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: FOLDER,
     skill: 'app-update',
     key: '{{payload.event_data.id}}',
@@ -46,7 +46,7 @@ async function stub(page: import('@playwright/test').Page, saved: Saved): Promis
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: [FOLDER], recent: [] }] }),
+      body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: [FOLDER], recent: [] }] }),
     }),
   );
   await page.route('**/api/skills**', (route) =>
@@ -147,60 +147,7 @@ test.describe('job editor — Hide chat on a continue job', () => {
     // separately from the server, so an untouched job must still serialise to
     // exactly what a host that predates this field accepts.
     expect('hidden' in action).toBe(false);
-    expect(Object.keys(action).sort()).toEqual(['daemonId', 'folder', 'key', 'skill', 'type']);
-  });
-});
-
-test.describe('job editor — back button and title', () => {
-  test('the back button clears the minimum hit target on both axes', async ({ page }) => {
-    await stub(page, []);
-    await page.goto(EDIT_JOB);
-    const back = page.getByTestId('job-editor-back');
-    await expect(back).toBeVisible({ timeout: 15_000 });
-
-    const box = await back.boundingBox();
-    if (box === null) throw new Error('back button has no box');
-    // It was `padding: 0` at 13px — roughly 50x16.
-    const floor = await page.evaluate(() =>
-      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tap-min')),
-    );
-    expect(floor).toBe(44);
-    expect(box.height).toBeGreaterThanOrEqual(floor);
-    expect(box.width).toBeGreaterThanOrEqual(floor);
-  });
-
-  test('a long title cannot butt into the back button', async ({ page }) => {
-    await stub(page, []);
-    await page.goto(EDIT_JOB);
-    await expect(page.getByTestId('job-name')).toHaveValue(JOB.name, { timeout: 15_000 });
-
-    const back = await page.getByTestId('job-editor-back').boundingBox();
-    const title = await page.locator('.job-editor .route-head h1').boundingBox();
-    if (back === null || title === null) throw new Error('head has no box');
-
-    // Same row, and a real gap between them. `.route-head` is
-    // `justify-content: space-between` with no `gap`, so this job's name — the
-    // longest in the app — grew until it touched the button.
-    expect(title.x - (back.x + back.width)).toBeGreaterThanOrEqual(12);
-  });
-
-  test('the back button still stays flush with the form below it', async ({ page }) => {
-    await stub(page, []);
-    await page.goto(NEW_JOB);
-    const back = page.getByTestId('job-editor-back');
-    await expect(back).toBeVisible({ timeout: 15_000 });
-
-    // The bigger hit target is bought with padding plus a negative margin of the
-    // same size, so the GLYPH must land where it did before — measure the text
-    // itself, not the button's border box, which is deliberately 12px wider.
-    const textX = await back.evaluate((el) => {
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      return range.getBoundingClientRect().x;
-    });
-    const field = await page.getByTestId('job-name').boundingBox();
-    if (field === null) throw new Error('no box');
-    expect(Math.abs(textX - field.x)).toBeLessThanOrEqual(2);
+    expect(Object.keys(action).sort()).toEqual(['folder', 'hostId', 'key', 'skill', 'type']);
   });
 });
 

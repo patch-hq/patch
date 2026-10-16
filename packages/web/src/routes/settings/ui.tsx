@@ -182,19 +182,19 @@ export function Pills<T extends string>({
  * about that host.
  */
 export function HostSwitch(): JSX.Element | null {
-  const { options, daemonId, select } = useSettingsHost();
+  const { options, hostId, select } = useSettingsHost();
   if (options.length < 2) return null;
   return (
     <div className="set-seg" role="tablist" aria-label="Host" data-testid="settings-host-switch">
       {options.map((h) => (
         <button
-          key={h.daemonId}
+          key={h.hostId}
           type="button"
           role="tab"
-          aria-selected={h.daemonId === daemonId}
-          className={h.daemonId === daemonId ? 'on' : undefined}
-          data-testid={`settings-host-${h.daemonId}`}
-          onClick={() => select(h.daemonId)}
+          aria-selected={h.hostId === hostId}
+          className={h.hostId === hostId ? 'on' : undefined}
+          data-testid={`settings-host-${h.hostId}`}
+          onClick={() => select(h.hostId)}
         >
           <OnlineDot online={h.online} />
           {hostLabel(h)}

@@ -65,4 +65,30 @@ test.describe('tool call summaries', () => {
     await group.locator('[data-testid="tool-group-summary"]').click();
     await expect(group.locator('[data-testid="tool-call"]').nth(1)).toContainText('Read poll.ts');
   });
+
+  test('a run label squeezed by a narrow row ellipsizes inside its own box instead of being cut mid-word', async ({
+    page,
+  }) => {
+    await page.goto('/app/dev-harness.html?chat=chat_tools');
+    const group = page.locator('[data-testid="tool-group"]').first();
+    const text = group.locator('.tool-summary-text');
+    await group.evaluate((el) => {
+      (el as HTMLElement).style.width = '120px';
+    });
+    const m = await text.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const btn = el.parentElement!.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      return {
+        overflow: cs.overflow,
+        textOverflow: cs.textOverflow,
+        clipped: el.scrollWidth > el.clientWidth,
+        inside: box.right <= btn.right + 0.5,
+      };
+    });
+    expect(m.overflow).toBe('hidden');
+    expect(m.textOverflow).toBe('ellipsis');
+    expect(m.clipped).toBe(true);
+    expect(m.inside).toBe(true);
+  });
 });

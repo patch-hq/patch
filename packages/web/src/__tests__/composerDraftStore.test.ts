@@ -325,4 +325,25 @@ describe('composerDraftStore', () => {
       expect(applied).toBe('server snapshot');
     });
   });
+
+  describe('an echo of an earlier send', () => {
+    it('does not cancel a newer edit still owed to the server', () => {
+      const send = vi.fn();
+      setActiveWs({ send } as unknown as PatchWs);
+      const s = useComposerDraftStore.getState();
+      s.setFocused('c1', true);
+      s.setDraft('c1', 'a');
+      vi.advanceTimersByTime(DRAFT_SEND_DEBOUNCE_MS); // 'a' goes out
+      const echoAt = Date.now();
+      vi.advanceTimersByTime(10);
+      s.setDraft('c1', 'ab'); // typed before the echo of 'a' came back
+      s.applyDraftUpdated('c1', 'a', echoAt);
+      vi.advanceTimersByTime(5000);
+      expect(send).toHaveBeenLastCalledWith({
+        type: 'composer_draft.set',
+        chatId: 'c1',
+        text: 'ab',
+      });
+    });
+  });
 });

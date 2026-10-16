@@ -25,7 +25,7 @@ function chatState(page: Page, activity: string): Promise<void> {
     store.getState().applyEvent({
       type: 'chat.state',
       chatId: 'chat_limit_past_reset',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: a,
       lastUpdated: Date.now(),

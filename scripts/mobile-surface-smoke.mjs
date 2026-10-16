@@ -125,6 +125,55 @@ export function runningVersion(xml) {
   return null;
 }
 
+/** `am start` args that open the Updates page from a cold process. `-S` force-stops first: a bare VIEW is delivered to the already-running app as a new intent and may never navigate. */
+export function versionPageIntent(pkg) {
+  return [
+    'shell',
+    'am',
+    'start',
+    '-S',
+    '-a',
+    'android.intent.action.VIEW',
+    '-d',
+    'patch://settings/updates',
+    pkg,
+  ];
+}
+
+/** `am start` args that cold-start the app on the tab root (where the tab bar is), not on the last open chat. */
+export function homeIntent(pkg) {
+  return ['shell', 'am', 'start', '-S', '-a', 'android.intent.action.VIEW', '-d', 'patch://home', pkg];
+}
+
+/**
+ * Is the running bundle the commit being shipped? One cause, one message: the
+ * walk only runs when this is confirmed, so a stale bundle is reported once
+ * rather than again as "the navigation does not navigate".
+ *
+ * `versions` is every version string the Updates page showed, across launches.
+ */
+export function judgeBuildIdentity({ sha, versions }) {
+  if (versions.some((v) => v.includes(sha))) return { confirmed: true, failure: null };
+  if (versions.length === 0) {
+    return {
+      confirmed: false,
+      failure:
+        `the smoke never reached the Updates page, so it cannot tell which bundle is running (wanted ${sha}). ` +
+        'Either the app did not open it or the installed bundle has no such page (an APK older than the ' +
+        'Updates page that the OTA has not replaced). The destinations were not walked: they would be a ' +
+        'verdict on an unknown bundle.',
+    };
+  }
+  return {
+    confirmed: false,
+    failure:
+      `the running app reports ${versions.at(-1)}, not ${sha}, after three launches: the APK ` +
+      'under test is not built from this commit (the deploy builds one from the pinned commit; a hand run ' +
+      'must pass an APK built from it, or publish the OTA for it). The destinations were not walked: they would be a ' +
+      'verdict on a different bundle.',
+  };
+}
+
 function decodeXml(s) {
   return s
     .replace(/&amp;/g, '&')
@@ -602,7 +651,12 @@ async function screen() {
   let last = null;
   for (let i = 0; i < 8; i++) {
     try {
-      const xml = runAdb(execFileSync, TARGET, ['exec-out', 'uiautomator', 'dump', '/dev/tty'], 25_000);
+      const xml = runAdb(
+        execFileSync,
+        TARGET,
+        ['exec-out', 'uiautomator', 'dump', '/dev/tty'],
+        25_000,
+      );
       if (xml.includes('<node ')) return xml;
     } catch (err) {
       last = err; // retry, but say what the last attempt died of
@@ -643,6 +697,40 @@ function appPid() {
   } catch {
     return null;
   }
+}
+
+/**
+ * The JS thread's CPU use over a window of an app that is just sitting there.
+ *
+ * A render loop that React does not catch (no "Maximum update depth") leaves
+ * every screen painted and every process healthy, but pins `mqt_js` at 100%
+ * from the first frame and runs the app out of memory in about two minutes. The
+ * tab screens did exactly that. An idle cold-started app uses a few percent of
+ * one core at most.
+ *
+ * `before` and `after` are the thread's utime+stime in clock ticks (`/proc/<pid>/
+ * task/<tid>/stat` fields 14 and 15); Android's tick is 100 Hz.
+ */
+export const IDLE_JS_BUDGET = 0.5;
+export function judgeJsThread({ before, after, seconds, hz = 100 }) {
+  const busy = (after - before) / (seconds * hz);
+  if (busy <= IDLE_JS_BUDGET) return null;
+  return (
+    `the JS thread used ${Math.round(busy * 100)}% of a core for ${seconds}s on an app nobody ` +
+    'was touching — a render loop that never settles'
+  );
+}
+
+/** utime+stime of the app's JS thread, in ticks. */
+function jsThreadTicks(pid) {
+  const threads = shell(`ps -A -T -p ${pid}`).split('\n');
+  const row = threads.find((line) => /\bmqt_js\b/.test(line));
+  if (!row) throw new Error(`no mqt_js thread in pid ${pid} — is this a React Native app?`);
+  const tid = row.trim().split(/\s+/)[2];
+  const stat = shell(`cat /proc/${pid}/task/${tid}/stat`).trim();
+  // The thread name is parenthesised and may hold spaces; fields count from after it.
+  const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+  return Number(fields[11]) + Number(fields[12]);
 }
 
 /**
@@ -716,8 +804,9 @@ export async function openSettled(label, io) {
 
 /** Cold-start the app. The way home from a root route, and a state worth revisiting. */
 async function relaunch() {
-  shell(`am force-stop ${PKG}`);
-  adb('shell', 'am', 'start', '-n', ACTIVITY);
+  // Cold start AT the tab root: the paired app otherwise reopens on the last
+  // chat, whose composer controls the walk then discovered as "navigation".
+  adb(...homeIntent(PKG));
   await sleep(12000);
 }
 
@@ -884,50 +973,30 @@ async function drive({ apkPath, sha, avd, link }) {
     // below tests THAT bundle and not the one being shipped — silently. Settings
     // → Version is where the running build names itself.
     say('==> checking the running build is the build under test');
-    let sawSha = false;
-    // Keep what the version line DID say: "does not report <sha>" alone leaves
-    // you unable to tell a stale bundle from a screen that never reached the
-    // version line at all, and those want opposite fixes.
-    let saidInstead = null;
+    const versions = [];
     // expo-updates fetches in the background and applies on the NEXT launch, so
-    // the first launch after a fresh install ALWAYS runs the APK's own bundle.
-    // Checking once therefore fails on a cold emulator (which is the only kind
-    // a deploy has) and passes on a warm one — a harness that reports the build
-    // broken depending on how recently it last ran is worse than none. Give the
-    // update the relaunch it is waiting for, twice, before believing it.
-    //
-    // Updates is a nested settings page. Open its public route directly;
-    // scanning only tabs no longer reaches it after the Settings redesign.
-    for (let launch = 0; launch < 3 && !sawSha; launch++) {
+    // the first launch after a fresh install runs the APK's own bundle. Give
+    // the update the relaunch it is waiting for, twice, before believing it.
+    // Updates is a nested settings page: open its route from a cold process.
+    for (let launch = 0; launch < 3; launch++) {
       await relaunch();
-      adb(
-        'shell',
-        'am',
-        'start',
-        '-a',
-        'android.intent.action.VIEW',
-        '-d',
-        'patch://settings/updates',
-        PKG,
-      );
-      await sleep(2500);
-      for (let i = 0; i < 6 && !sawSha; i++) {
-        const version = runningVersion(await screen());
-        if (version !== null) saidInstead = version;
-        sawSha = version?.includes(sha) === true;
-        if (version !== null) break;
-        adb('shell', 'input', 'swipe', '540', '1800', '540', '700', '250');
-        await sleep(800);
+      adb(...versionPageIntent(PKG));
+      await sleep(12000);
+      let version = null;
+      for (let i = 0; i < 6 && version === null; i++) {
+        version = runningVersion(await screen());
+        if (version === null) {
+          adb('shell', 'input', 'swipe', '540', '1800', '540', '700', '250');
+          await sleep(800);
+        }
       }
+      if (version !== null) versions.push(version);
+      if (version?.includes(sha)) break;
     }
     await relaunch();
-    if (!sawSha) {
-      failures.push(
-        `the running app reports ${saidInstead ?? 'no version at all'}, not ${sha}, after three ` +
-          'launches. It is running whatever the channel serves, so this run tested a different ' +
-          'bundle. Publish the OTA for this commit first, or disable updates for the test build.',
-      );
-    }
+    const identity = judgeBuildIdentity({ sha, versions });
+    const sawSha = identity.confirmed;
+    if (!sawSha) failures.push(identity.failure);
 
     // Pair the version actually being tested. The APK may predate persisted
     // server routes and ignore that part of the initial link before its OTA.
@@ -949,11 +1018,25 @@ async function drive({ apkPath, sha, avd, link }) {
       await relaunch();
     }
 
+    // ---- idle ------------------------------------------------------------
+    {
+      const pid = appPid();
+      if (pid === null) {
+        failures.push('the app is not running after launch, so its idle CPU cannot be read');
+      } else {
+        const before = jsThreadTicks(pid);
+        await sleep(5000);
+        const busy = judgeJsThread({ before, after: jsThreadTicks(pid), seconds: 5 });
+        if (busy !== null) failures.push(busy);
+      }
+    }
+
     // ---- the walk -------------------------------------------------------
     //
     // Discovered, not declared. Whatever navigation this build paints is what
     // gets visited, so a renamed tab is not a failure and a NEW tab is covered
     // the day it ships without anyone remembering to add it here.
+    if (!sawSha) return failures;
     const nav = discoverNav(await screen());
     if (nav.length === 0) {
       failures.push(

@@ -4,8 +4,8 @@
 // real `buildAll` server (the same entry `pnpm --filter @patch/server dev`
 // uses), has it LISTEN on a real TCP port, connects real WebSocket surface
 // clients through the real JWT hello handshake, and drives the full C3 path:
-//   host → InProcessDaemonLink.emit(notify|patch.call) → server's
-//   daemonLink.onEvent wiring → NotificationRouter / CallOrchestrator →
+//   host → InProcessHostLink.emit(notify|patch.call) → server's
+//   hostLink.onEvent wiring → NotificationRouter / CallOrchestrator →
 //   real PresenceTracker / Registry (real registry.json file IO) / real WsHub
 //   fanout to real connected sockets / real /data/undelivered.jsonl writes.
 //
@@ -23,7 +23,7 @@ import { WireTestClient } from '@patch/wire/test-client';
 import type { NotifyEvent, PatchCallEvent, ChatCallResponseEvent, SurfaceKind } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import type { PushBackend } from '../src/notifications/router.js';
 
 // One account keypair shared by the server account + every surface credential
@@ -55,7 +55,7 @@ function fakePushThatThrows() {
 interface Harness {
   url: string;
   registry: Registry;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   dataDir: string;
   push: ReturnType<typeof fakePush>;
   presenceOnline: (surfaceId: string, nowMs?: number) => void;
@@ -70,12 +70,12 @@ async function startServer(opts: {
 }): Promise<Harness> {
   const registry = Registry.load(opts.dir);
   registry.bootstrapAccount({ keypair: ACCOUNT_KP });
-  const daemonLink = new InProcessDaemonLink();
+  const hostLink = new InProcessHostLink();
   const push = (opts.push as ReturnType<typeof fakePush>) ?? fakePush();
   const built = await buildAll({
     logger: false,
     registry,
-    daemonLink,
+    hostLink,
     pushBackend: push.backend,
     ...(opts.callTimeoutMs !== undefined ? { callTimeoutMs: opts.callTimeoutMs } : {}),
   });
@@ -84,7 +84,7 @@ async function startServer(opts: {
   return {
     url: `ws://127.0.0.1:${addr.port}/ws`,
     registry,
-    daemonLink,
+    hostLink,
     dataDir: opts.dir,
     push,
     // A web surface the user is using right now: online, and input just now.
@@ -155,7 +155,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
         channel: 'push',
         message: 'build done',
       };
-      h.daemonLink.emit(notify);
+      h.hostLink.emit(notify);
       await waitUntil(() => h.push.sent.length === 1);
       expect(h.push.sent[0]?.payload.body).toBe('build done');
     } finally {
@@ -173,7 +173,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
     });
     h.presenceOnline('web-surface'); // input just now ⇒ isActive() true
     try {
-      h.daemonLink.emit({ type: 'notify', chatId: 'c', channel: 'push', message: 'quiet' });
+      h.hostLink.emit({ type: 'notify', chatId: 'c', channel: 'push', message: 'quiet' });
       await sleep(150);
       expect(h.push.sent.length).toBe(0); // suppressed
     } finally {
@@ -191,7 +191,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
     });
     h.presenceOnline('web-surface');
     try {
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'notify',
         chatId: 'c',
         channel: 'push',
@@ -214,7 +214,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
       registeredAt: Date.now(),
     });
     try {
-      h.daemonLink.emit({ type: 'notify', chatId: 'c', channel: 'push', message: 'oops' });
+      h.hostLink.emit({ type: 'notify', chatId: 'c', channel: 'push', message: 'oops' });
       const path = join(h.dataDir, 'undelivered.jsonl');
       await waitUntil(() => existsSync(path) && readFileSync(path, 'utf8').includes('oops'));
       const entry = JSON.parse(readFileSync(path, 'utf8').trim().split('\n').pop() as string);
@@ -256,7 +256,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
     const path = join(h.dataDir, 'undelivered.jsonl');
     try {
       // First urgent push: dead token rejected + logged + pruned.
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'notify',
         chatId: 'c',
         channel: 'push',
@@ -273,7 +273,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
 
       // Second urgent push: must NOT re-attempt the dead token and must NOT
       // append another 'Expo push rejected' line for it.
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'notify',
         chatId: 'c',
         channel: 'push',
@@ -299,7 +299,7 @@ describe('TC3 [test-runner] desktop channel — always fires (running server + r
     h.presenceOnline('phone-surface');
     try {
       const got = desktop.waitFor('notify', undefined, 3000);
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'notify',
         chatId: 'chat-x',
         channel: 'desktop',
@@ -318,7 +318,7 @@ describe('TC3 [test-runner] speakers channel server fanout — undelivered on no
   it('B6 speakers notify with no voice-device surfaces online logs undelivered', async () => {
     const h = await startServer({ dir });
     try {
-      h.daemonLink.emit({ type: 'notify', chatId: 'c', channel: 'speakers', message: 'spoke' });
+      h.hostLink.emit({ type: 'notify', chatId: 'c', channel: 'speakers', message: 'spoke' });
       const path = join(h.dataDir, 'undelivered.jsonl');
       await waitUntil(() => existsSync(path) && readFileSync(path, 'utf8').includes('spoke'));
       const entry = JSON.parse(readFileSync(path, 'utf8').trim().split('\n').pop() as string);
@@ -347,7 +347,7 @@ describe('TC3 [test-runner] patch_call — concurrent ring, first-accept-wins, 3
         chatId: 'project-chat',
         message: 'I need a decision',
       };
-      h.daemonLink.emit(call);
+      h.hostLink.emit(call);
       const ringEv = await ring;
       expect(ringEv).toMatchObject({ type: 'chat.call_request', chatId: 'project-chat' });
       // Concurrent urgent push also fired.
@@ -363,7 +363,7 @@ describe('TC3 [test-runner] patch_call — concurrent ring, first-accept-wins, 3
     const mobile = await connectSurface(h.url, h.registry, 'phone-srf', 'mobile');
     try {
       const ring = mobile.waitFor('chat.call_request', undefined, 3000);
-      h.daemonLink.emit({ type: 'patch.call', chatId: 'c', message: 'pick up' });
+      h.hostLink.emit({ type: 'patch.call', chatId: 'c', message: 'pick up' });
       const ringEv = (await ring) as { callId: string };
       const winner = mobile.waitFor('chat.call_winner', undefined, 3000);
       const resp: ChatCallResponseEvent = {
@@ -392,7 +392,7 @@ describe('TC3 [test-runner] patch_call — concurrent ring, first-accept-wins, 3
     const mobile = await connectSurface(h.url, h.registry, 'phone-srf', 'mobile');
     try {
       const timeout = mobile.waitFor('chat.call_timeout', undefined, 3000);
-      h.daemonLink.emit({ type: 'patch.call', chatId: 'c', message: 'urgent reason text' });
+      h.hostLink.emit({ type: 'patch.call', chatId: 'c', message: 'urgent reason text' });
       await timeout;
       await waitUntil(() => h.push.sent.some((p) => p.payload.body === 'urgent reason text'));
       const fb = h.push.sent.find((p) => p.payload.body === 'urgent reason text');

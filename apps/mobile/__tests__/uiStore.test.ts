@@ -35,6 +35,18 @@ describe('uiStore', () => {
     expect(errors[0]!.id).not.toBe(errors[1]!.id);
   });
 
+  it('pushError with a message already showing keeps one toast and restarts its timer (as web)', () => {
+    useUiStore.getState().pushError('socket dropped');
+    const before = useUiStore.getState().errors;
+    useUiStore.getState().pushError('socket dropped');
+    useUiStore.getState().pushError('socket dropped');
+    const after = useUiStore.getState().errors;
+    expect(after.map((e) => e.message)).toEqual(['socket dropped']);
+    expect(after[0]!.id).toBe(before[0]!.id);
+    // A new array identity is what ErrorToasts' effect keys its timers on.
+    expect(after).not.toBe(before);
+  });
+
   it('dismissError removes only the matching error by id', () => {
     useUiStore.getState().pushError('first');
     useUiStore.getState().pushError('second');

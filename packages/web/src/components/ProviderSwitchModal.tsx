@@ -7,6 +7,7 @@
 // has no room for anything else: no token estimate, no other text.
 
 import { useState, type JSX } from 'react';
+import { ModalOverlay } from './ModalOverlay.js';
 
 export interface ProviderSwitchModalProps {
   onCancel: () => void;
@@ -17,7 +18,7 @@ export function ProviderSwitchModal({ onCancel, onSwitch }: ProviderSwitchModalP
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
   return (
-    <div className="modal-overlay" data-testid="provider-switch-modal-overlay">
+    <ModalOverlay testId="provider-switch-modal-overlay">
       <div
         className="modal-backdrop"
         data-testid="provider-switch-modal-backdrop"
@@ -62,6 +63,6 @@ export function ProviderSwitchModal({ onCancel, onSwitch }: ProviderSwitchModalP
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

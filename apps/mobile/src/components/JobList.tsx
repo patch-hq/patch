@@ -13,7 +13,7 @@ import { api } from '../api/rest';
 import { EmptyState } from './EmptyState';
 import { EMPTY_STATES } from '../lib/emptyStates';
 import { cronRowSubtitle, recurrenceRowSubtitle } from '../lib/jobRow';
-import { fonts, radii, space, typography, useTheme } from '../lib/theme';
+import { fonts, radii, space, textMin, typography, useTheme } from '../lib/theme';
 
 interface JobShape {
   id: string;
@@ -94,7 +94,7 @@ export function JobList({ onOpen }: { onOpen: (jobId?: string) => void }): React
         backgroundColor: colors.leaf,
       }}
     >
-      <Text style={{ color: colors.onAccent, fontFamily: fonts.bodyBold, fontSize: 13 }}>
+      <Text style={{ color: colors.onAccent, fontFamily: fonts.bodyBold, fontSize: textMin }}>
         + Add job
       </Text>
     </Pressable>

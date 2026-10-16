@@ -25,7 +25,7 @@ function hiddenRow(chatId: string, lastUpdated: number) {
     snoozedUntil: null,
     hidden: true,
     lastUpdated,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'auto' as const,
     jobId: 'j1',
     statusSummary: null,

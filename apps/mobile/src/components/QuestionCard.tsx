@@ -11,7 +11,7 @@
 // beneath it — and returns the selections through `approve_with_edits`
 // (spec/03 § Answering with content). Cancel is a real deny.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import type { ChatEventEntry } from '../stores/chatStore';
@@ -67,7 +67,9 @@ function QuestionCountdown({
     return () => clearInterval(id);
   }, [expiry.at, expiry.windowMs, now]);
 
-  const fraction = Math.min(1, Math.max(0, remainingMs / expiry.windowMs));
+  // A window of zero (a malformed deadline) would be 0/0 — NaN in the dash offset.
+  const fraction =
+    expiry.windowMs > 0 ? Math.min(1, Math.max(0, remainingMs / expiry.windowMs)) : 0;
   // Rounded UP so the last whole second on screen is a second the user still
   // has: `floor` would show 0 for the final 999ms of a window not yet run out.
   const secondsLeft = Math.ceil(remainingMs / 1000);
@@ -147,8 +149,8 @@ function OptionIndicator({
 
 export function QuestionCard({
   entry,
-  onAnswer,
-  onCancel,
+  onAnswer: answerRequest,
+  onCancel: cancelRequest,
 }: {
   entry: ChatEventEntry;
   onAnswer(requestId: string, answers: Record<string, string>): void;
@@ -156,6 +158,21 @@ export function QuestionCard({
 }): React.JSX.Element {
   const colors = useTheme();
   const questions = useMemo(() => parseAskUserQuestion(entry.toolArgs), [entry.toolArgs]);
+  // One decision per request. A double tap lands twice before the card has
+  // re-rendered as resolved, and each would send (and optimistically resolve)
+  // its own response; so would Cancel after an answer.
+  const decidedRef = useRef<string | null>(null);
+  const decide = (requestId: string): boolean => {
+    if (decidedRef.current === requestId) return false;
+    decidedRef.current = requestId;
+    return true;
+  };
+  const onAnswer = (requestId: string, answers: Record<string, string>): void => {
+    if (decide(requestId)) answerRequest(requestId, answers);
+  };
+  const onCancel = (requestId: string): void => {
+    if (decide(requestId)) cancelRequest(requestId);
+  };
 
   if (questions === null) {
     // NO FALLBACK: an unreadable question is not silently downgraded to an

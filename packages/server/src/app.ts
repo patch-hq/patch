@@ -1,6 +1,7 @@
 // Fastify app factory — exported separately from the listener so tests can
 // `await build()` and call `app.inject()` without binding a port.
 
+import { multipartByteRanges, parseByteRanges } from './byte-range.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve as resolvePath, sep } from 'node:path';
 import { existsSync, readFileSync, createReadStream, statSync } from 'node:fs';
@@ -13,6 +14,7 @@ import helmetPlugin from '@fastify/helmet';
 import { ulid } from 'ulid';
 import type { Logger } from 'pino';
 import {
+  canonicalizeHostNames,
   DEFAULT_SHARED_SETTINGS,
   type ChatInputEvent,
   type HealthzResponse,
@@ -24,10 +26,14 @@ import { buildVersionReport, readPublishedArtifact, readWebLayer } from './versi
 import { Registry } from './registry.js';
 import { PresenceTracker } from './presence.js';
 import { createActivityReader } from './activity.js';
+import { createBrowserUseReader, HostOfflineError } from './browser-use.js';
+import { createToolLogReader } from './tool-log.js';
+import { createUsageReader } from './usage-report.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SharedSettingsService } from './shared-settings.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { ComposerDraftStore } from './composer-drafts.js';
+import { ViewPositionStore } from './view-position.js';
 import { NewChatDraftStore } from './new-chat-drafts.js';
 import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
 import { ChatLogStore } from './chat-log-store.js';
@@ -40,7 +46,7 @@ import { ServerQueue } from './server-queue.js';
 import { createSweepRunStore } from './sweep-run-store.js';
 import { registerManagerSweepRoutes } from './manager-sweep-routes.js';
 import { ThreadRotator } from './thread-rotation.js';
-import { type DaemonLink, InboundDaemonLink } from './daemon-link.js';
+import { type HostLink, InboundHostLink } from './host-link.js';
 import { WsHub } from './ws-hub.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import type { RelayService } from './relay-service.js';
@@ -80,6 +86,7 @@ import { JobDispatcher } from './jobs/dispatcher.js';
 import { JobChatLinks } from './jobs/chat-links.js';
 import { JobLogs } from './jobs/logs.js';
 import { CronScheduler } from './jobs/cron.js';
+import { HostWaker } from './jobs/host-wake.js';
 import { RecurrenceScheduler } from './jobs/recurrence.js';
 import { registerWebhookRoutes } from './jobs/webhooks.js';
 import { registerTodoistRoutes } from './jobs/todoist.js';
@@ -94,6 +101,8 @@ import { NotificationRouter, type PushBackend } from './notifications/router.js'
 import { CallOrchestrator } from './notifications/call-orchestrator.js';
 import { ChatCompletionNotifier } from './notifications/chat-complete.js';
 import { AwaitingPermissionNotifier } from './notifications/awaiting-permission.js';
+import { LowBatteryNotifier } from './notifications/low-battery.js';
+import { SignInNeededNotifier } from './notifications/sign-in-needed.js';
 import { ReplyRouter } from './notifications/reply-router.js';
 import { registerNotificationRoutes } from './notifications/routes.js';
 import { NotificationLog } from './notifications/log.js';
@@ -122,12 +131,14 @@ export interface BuildOptions {
   dataDir?: string;
   /** How long the home host must be offline before another takes over (tests shorten it). */
   managerFailoverGraceMs?: number;
+  /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
+  hostOfflineGraceMs?: number;
   /** How long a mismatch between a host's log and the server's must last before it is acted on (tests shorten it). */
   logSyncDelayMs?: number;
   /** Inject a registry directly (tests); otherwise loaded from dataDir. */
   registry?: Registry;
-  /** Inject the host link (tests). Production uses InboundDaemonLink. */
-  daemonLink?: DaemonLink;
+  /** Inject the host link (tests). Production uses InboundHostLink. */
+  hostLink?: HostLink;
   /**
    * Shared HMAC secret for voice session tokens (spec/13). Surfaces present
    * the minted token to the host's audio WSS where the same secret verifies.
@@ -142,20 +153,19 @@ export interface BuildOptions {
   helloTimeoutMs?: number;
   /** Test hook: deterministic ULID generator. */
   idGenerator?: () => string;
-  /** Override InboundDaemonLink's unknown-chat-host wait window (default 3000ms). */
+  /** Override InboundHostLink's unknown-chat-host wait window (default 3000ms). */
   unknownChatHostWaitMs?: number;
-  /** Override InboundDaemonLink's unknown-chat-host poll interval (default 200ms). */
+  /** Override InboundHostLink's unknown-chat-host poll interval (default 200ms). */
   unknownChatHostPollMs?: number;
   /** Override the POST /api/chats spawn-error wait window (default 5000ms). */
   spawnErrorWaitMs?: number;
   /** Override POST /api/jobs/recurrence/translate's daemon-wait window (tests). */
   recurrenceTranslateTimeoutMs?: number;
-  /** Base64 PKCS#8 Ed25519 key for the Web Bot Auth directory; defaults to PATCH_WEB_BOT_AUTH_KEY. */
-  webBotAuthKey?: string;
   /** Inject a jobs store (tests); otherwise constructed from dataDir. */
   jobsStore?: JobsInterface;
   /** Inject a composer-draft store (tests); otherwise constructed from dataDir. */
   composerDrafts?: ComposerDraftStore;
+  viewPosition?: ViewPositionStore;
   /** Inject a new-chat-draft store (tests); otherwise constructed from dataDir. */
   newChatDrafts?: NewChatDraftStore;
   /** Disable the chokidar watcher in tests. */
@@ -180,10 +190,11 @@ export interface BuiltApp {
   app: FastifyInstance;
   registry: Registry;
   presence: PresenceTracker;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   wsHub: WsHub;
   chatRegistry: ChatRegistry;
   composerDrafts: ComposerDraftStore;
+  viewPosition: ViewPositionStore;
   newChatDrafts: NewChatDraftStore;
   folderRegistry: FolderRegistry;
   jobs: JobsInterface;
@@ -245,6 +256,26 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         ? { redact: { paths: PINO_REDACT_PATHS, remove: true } }
         : (opts.logger ?? false);
   const app = Fastify({ logger: loggerOption, trustProxy: true });
+
+  // Host rename, accept-both: a surface or CLI that predates the rename still
+  // sends `daemonId` in a JSON body or query string. Rewrite it to `hostId`
+  // before validation so every route sees one name. Phase 3b deletes this.
+  app.addHook('preValidation', async (req) => {
+    const body: unknown = req.body;
+    if (
+      Array.isArray(body) ||
+      (typeof body === 'object' &&
+        body !== null &&
+        Object.getPrototypeOf(body) === Object.prototype)
+    ) {
+      req.body = canonicalizeHostNames(body);
+    }
+    const q = req.query as Record<string, unknown> | undefined;
+    if (q && typeof q === 'object' && 'daemonId' in q && !('hostId' in q)) {
+      const { daemonId, ...rest } = q;
+      req.query = { ...rest, hostId: daemonId };
+    }
+  });
   // Group 10 MAJOR (DX-M6): unified error envelope.
   // Existing routes already handle their own typed errors with explicit
   // statusCode + structured body. This handler is the safety net for cases
@@ -342,24 +373,25 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // The host connects INTO the server's /ws and authenticates with its
-  // EdDSA-JWT daemonKey (spec/10). The InboundDaemonLink owns the single live
-  // host socket once the WS hello gate hands it over via `attachDaemon`.
+  // EdDSA-JWT daemonKey (spec/10). The InboundHostLink owns the single live
+  // host socket once the WS hello gate hands it over via `attachHost`.
   // Forward-declared: the link routes a chat-scoped frame to the machine that
   // chat lives on, and the mirror that knows is built just below.
   let chatRegistryRef: ChatRegistry | undefined;
-  const daemonLink: DaemonLink =
-    opts.daemonLink ??
-    new InboundDaemonLink({
-      logger: log.child({ component: 'daemon-link' }),
+  const hostLink: HostLink =
+    opts.hostLink ??
+    new InboundHostLink({
+      logger: log.child({ component: 'host-link' }),
       heldInputs: new HeldInputStore({
         ...((opts.dataDir ?? registry.dataDir)
           ? { dataDir: opts.dataDir ?? registry.dataDir }
           : {}),
         logger: log.child({ component: 'held-input' }),
       }),
-      resolveChatHost: (chatId: string) => chatRegistryRef?.get(chatId)?.daemonId ?? null,
-      homeDaemonId: () => registry.homeDaemonId(),
-      registeredDaemonIds: () => registry.registeredDaemonIds(),
+      resolveChatHost: (chatId: string) => chatRegistryRef?.get(chatId)?.hostId ?? null,
+      homeHostId: () => registry.homeHostId(),
+      registeredHostIds: () => registry.registeredHostIds(),
+      hostName: (hostId: string) => registry.hostName(hostId),
       specialThreadHost: () => managerFailover.specialThreadHost(),
       ...(opts.unknownChatHostWaitMs !== undefined
         ? { unknownChatHostWaitMs: opts.unknownChatHostWaitMs }
@@ -395,33 +427,33 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   app.addHook('onClose', async () => chatRegistry.flush());
   chatRegistryRef = chatRegistry;
   // Tap the host link so every event the host emits keeps our cache fresh.
-  daemonLink.onEvent((event) => chatRegistry.observe(event));
+  hostLink.onEvent((event) => chatRegistry.observe(event));
   const queueTracker = new QueueTracker(chatRegistry);
-  daemonLink.onEvent((event) => queueTracker.observe(event));
+  hostLink.onEvent((event) => queueTracker.observe(event));
 
   // The server-run message queue (spec/04 § Message queueing). It only takes a
   // message for a host that reports it can take queued messages from the
   // server, so an older host keeps its own queue.
   const serverQueue: ServerQueue = new ServerQueue({
     chats: chatRegistry,
-    sendTo: (daemonId, surfaceId, event) => daemonLink.sendTo(daemonId, surfaceId, event),
-    isOnline: (daemonId) => daemonLink.isOnline(daemonId),
-    hostSupports: (daemonId: string): boolean => wsHub.hostServerQueue(daemonId),
-    inject: (event) => daemonLink.injectDaemonEvent(event),
+    sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
+    isOnline: (hostId) => hostLink.isOnline(hostId),
+    hostSupports: (hostId: string): boolean => wsHub.hostServerQueue(hostId),
+    inject: (event) => hostLink.injectHostEvent(event),
     ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
     logger: log.child({ component: 'server-queue' }),
   });
-  daemonLink.setEventGate?.((event, from) => serverQueue.gate(event, from));
+  hostLink.setEventGate?.((event, from) => serverQueue.gate(event, from));
   // Tell each host, as it attaches, that the server is running its queues.
-  daemonLink.onHostStatus((daemonId, status) => {
+  hostLink.onHostStatus((hostId, status) => {
     if (status === 'online') {
-      daemonLink.sendTo(daemonId, '_server', { type: 'server.queue_mode', enabled: true });
+      hostLink.sendTo(hostId, '_server', { type: 'server.queue_mode', enabled: true });
     }
   });
   // A host asks at a tool boundary what is waiting.
-  daemonLink.onEvent((event, from) => {
+  hostLink.onEvent((event, from) => {
     if (event.type !== 'patch.queue_pull.request' || from === null) return;
-    daemonLink.sendTo(from, '_server', {
+    hostLink.sendTo(from, '_server', {
       type: 'patch.queue_pull.response',
       requestId: event.requestId,
       items: serverQueue.pull(event.chatId),
@@ -435,8 +467,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // How far the server's log of each chat reaches, sent back to the chat's host.
   const commitAcks = new CommitAcks({
-    sendTo: (daemonId, surfaceId, event) => daemonLink.sendTo(daemonId, surfaceId, event),
-    isOnline: (daemonId) => daemonLink.isOnline(daemonId),
+    sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
+    isOnline: (hostId) => hostLink.isOnline(hostId),
   });
   app.addHook('onClose', async () => commitAcks.stop());
 
@@ -444,22 +476,22 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const logSync = new LogSync({
     store: chatLogStore,
     chats: chatRegistry,
-    sendTo: (daemonId, surfaceId, event) => daemonLink.sendTo(daemonId, surfaceId, event),
-    isOnline: (daemonId) => daemonLink.isOnline(daemonId),
-    inject: (event) => daemonLink.injectDaemonEvent(event),
+    sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
+    isOnline: (hostId) => hostLink.isOnline(hostId),
+    inject: (event) => hostLink.injectHostEvent(event),
     logger: log.child({ component: 'log-sync' }),
     ...(opts.logSyncDelayMs !== undefined ? { delayMs: opts.logSyncDelayMs } : {}),
   });
-  daemonLink.onEvent((event) => logSync.observe(event));
+  hostLink.onEvent((event) => logSync.observe(event));
   app.addHook('onClose', async () => logSync.stop());
 
   // Manager failover (spec/06 § Manager failover).
   const managerFailover = new ManagerFailover({
-    homeDaemonId: () => registry.homeDaemonId(),
-    registeredDaemonIds: () => registry.registeredDaemonIds(),
-    isOnline: (daemonId) => daemonLink.isOnline(daemonId),
-    onHostStatus: (handler) => daemonLink.onHostStatus(handler),
-    sendTo: (daemonId, surfaceId, event) => daemonLink.sendTo(daemonId, surfaceId, event),
+    homeHostId: () => registry.homeHostId(),
+    registeredHostIds: () => registry.registeredHostIds(),
+    isOnline: (hostId) => hostLink.isOnline(hostId),
+    onHostStatus: (handler) => hostLink.onHostStatus(handler),
+    sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
     log: chatLogStore,
     contextWindow: () => DEFAULT_SHARED_SETTINGS.managerContextWindow,
     ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
@@ -469,7 +501,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   managerFailover.start();
   app.addHook('onClose', async () => managerFailover.stop());
   const specialThreadHost = (): string | null =>
-    managerFailover.specialThreadHost() ?? registry.homeDaemonId();
+    managerFailover.specialThreadHost() ?? registry.homeHostId();
 
   // Durable copy of message text so an offline host's chats stay searchable.
   const chatMirror = registry.dataDir
@@ -478,12 +510,25 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         logger: log.child({ component: 'chat-mirror' }),
       })
     : undefined;
-  if (chatMirror) daemonLink.onEvent((event) => chatMirror.observe(event));
+  if (chatMirror) hostLink.onEvent((event) => chatMirror.observe(event));
 
   // The user's own messages (`patch_activity`, spec/06 § Cross-chat toolset),
   // read through every machine's chat logs.
-  const activity = createActivityReader({ daemonLink, chatRegistry });
+  const activity = createActivityReader({ hostLink, chatRegistry });
   app.addHook('onClose', async () => activity.close());
+
+  // Settings → Computer use: is an agent driving a machine's browser, and Stop.
+  const browserUse = createBrowserUseReader({
+    hostLink,
+    hostName: (id) => registry.hostName(id),
+  });
+  app.addHook('onClose', async () => browserUse.close());
+  // Every cross-chat tool call, account-wide (Settings → Activity), read
+  // through each machine's own bounded tool-calls.jsonl the same way.
+  const toolLog = createToolLogReader({ hostLink });
+  app.addHook('onClose', async () => toolLog.close());
+  const usageReader = createUsageReader({ hostLink });
+  app.addHook('onClose', async () => usageReader.close());
 
   // Server-owned composer drafts (spec/14 § Composer, spec/15 § Composer).
   // Same dataDir resolution as the jobs subsystem: absent one (a bare-registry
@@ -493,6 +538,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     new ComposerDraftStore({
       ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
       logger: log.child({ component: 'composer-drafts' }),
+      ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
+    });
+
+  // Where the user was last looking, for handover between surfaces (spec/05).
+  const viewPosition =
+    opts.viewPosition ??
+    new ViewPositionStore({
+      ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
+      logger: log.child({ component: 'view-position' }),
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });
 
@@ -512,10 +566,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const accountSettings = jobChatLinksDataDir
     ? new SharedSettingsService({
         dataDir: jobChatLinksDataDir,
-        sendToDaemon: (daemonId, event) => daemonLink.sendTo(daemonId, SETTINGS_SURFACE, event),
-        onlineDaemonIds: () => daemonLink.onlineDaemonIds(),
+        sendToHost: (hostId, event) => hostLink.sendTo(hostId, SETTINGS_SURFACE, event),
+        onlineHostIds: () => hostLink.onlineHostIds(),
         broadcast: (event) => broadcastSettings(event),
-        hostName: (daemonId) => registry.hostName(daemonId),
+        hostName: (hostId) => registry.hostName(hostId),
         ...(opts.validateClaudeToken ? { validateClaude: opts.validateClaudeToken } : {}),
         ...(opts.validateOpenAIKey ? { validateOpenAIKey: opts.validateOpenAIKey } : {}),
         logger: log.child({ component: 'shared-settings' }),
@@ -524,28 +578,28 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   if (accountSettings) {
     accountSettings.startCredentialRefresh();
     app.addHook('onClose', async () => accountSettings.close());
-    daemonLink.onEvent((event: WireEvent) => accountSettings.handleDaemonEvent(event));
-    daemonLink.onHostStatus((daemonId, status) => {
-      if (status === 'online') accountSettings.hostOnline(daemonId);
-      else accountSettings.hostOffline(daemonId);
+    hostLink.onEvent((event: WireEvent) => accountSettings.handleHostEvent(event));
+    hostLink.onHostStatus((hostId, status) => {
+      if (status === 'online') accountSettings.hostOnline(hostId);
+      else accountSettings.hostOffline(hostId);
     });
     // A host already attached before this subscription (an in-process link in
     // tests) is greeted too.
-    for (const daemonId of daemonLink.onlineDaemonIds()) accountSettings.hostOnline(daemonId);
+    for (const hostId of hostLink.onlineHostIds()) accountSettings.hostOnline(hostId);
   }
 
   const sweepRuns = createSweepRunStore(opts.dataDir ?? registry.dataDir);
   const managerSweeper = new ManagerSweeper({
     chats: chatRegistry,
     settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
-    homeDaemonId: () => {
+    homeHostId: () => {
       const id = specialThreadHost();
-      return id && daemonLink.onlineDaemonIds().includes(id) ? id : undefined;
+      return id && hostLink.onlineHostIds().includes(id) ? id : undefined;
     },
     runSweep: (req) => {
       const id = specialThreadHost();
       if (!id) return;
-      daemonLink.sendTo(id, 'manager-sweep', { type: 'manager.sweep_run', ...req });
+      hostLink.sendTo(id, 'manager-sweep', { type: 'manager.sweep_run', ...req });
     },
     runs: sweepRuns,
     logger: log.child({ component: 'manager-sweep' }),
@@ -554,7 +608,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   // Observe AFTER the chat registry, so a sweep candidate built on this tick
   // reads the state the same event just wrote rather than the previous one.
-  daemonLink.onEvent((event) => {
+  hostLink.onEvent((event) => {
     managerSweeper.observe(event);
     if (event.type === 'manager.sweep_result') managerSweeper.onResult(event);
   });
@@ -565,7 +619,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const threadRotator = new ThreadRotator({
     chats: chatRegistry,
     settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
-    rotate: (chatId) => daemonLink.send('thread-rotation', { type: 'chat.rotate_request', chatId }),
+    rotate: (chatId) => hostLink.send('thread-rotation', { type: 'chat.rotate_request', chatId }),
     logger: log.child({ component: 'thread-rotation' }),
   });
   const threadRotationTimer = setInterval(() => threadRotator.tick(), THREAD_ROTATION_TICK_MS);
@@ -575,10 +629,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // `folders.list` / `folders.updated`) so `GET /api/folders` can serve
   // cold-start surfaces. Live updates still fan out over the WS unchanged.
   const folderRegistry = new FolderRegistry();
-  daemonLink.onEvent((event) => folderRegistry.observe(event));
+  hostLink.onEvent((event) => folderRegistry.observe(event));
   // Server-side mirror of the host-owned secret store (spec/15 § Secrets).
   const secretsRegistry = new SecretsRegistry();
-  daemonLink.onEvent((event) => secretsRegistry.observe(event));
+  hostLink.onEvent((event) => secretsRegistry.observe(event));
 
   // ---- group 11: notification + call infrastructure ----
   // Push backend: prefer injected (tests). Production always builds an
@@ -605,6 +659,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     wsHub: undefined as unknown as WsHub, // backfilled below
     dataDir: notificationsDataDir,
     pushBackend,
+    isChatSnoozed: (chatId) => {
+      const until = chatRegistry.get(chatId)?.snoozedUntil ?? null;
+      return until !== null && until > (opts.nowMs ? opts.nowMs() : Date.now());
+    },
     ...(speakersRecorder ? { speakersRecorder } : {}),
     ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
   });
@@ -638,7 +696,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'batch-notifier' }),
     ...(opts.nowMs ? { now: opts.nowMs } : {}),
   });
-  daemonLink.onEvent((event) => batchNotifier.observe(event));
+  hostLink.onEvent((event) => batchNotifier.observe(event));
   batchNotifier.start();
 
   const replyRouter = new ReplyRouter({
@@ -651,6 +709,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'call-orchestrator' }),
     wsHub: undefined as unknown as WsHub, // backfilled below
     router: notificationRouter,
+    isChatSnoozed: (chatId) => {
+      const until = chatRegistry.get(chatId)?.snoozedUntil ?? null;
+      return until !== null && until > (opts.nowMs ? opts.nowMs() : Date.now());
+    },
     ...(opts.callTimeoutMs !== undefined ? { timeoutMs: opts.callTimeoutMs } : {}),
     ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     idGenerator,
@@ -678,14 +740,18 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ...(accountSettings ? { sharedSettings: () => accountSettings.changedEvent() } : {}),
     registry,
     presence,
-    daemonLink,
+    hostLink,
     chatRegistry,
+    ...(opts.hostOfflineGraceMs !== undefined
+      ? { hostOfflineGraceMs: opts.hostOfflineGraceMs }
+      : {}),
     queueTracker,
     serverQueue,
     chatLogStore,
     commitAcks,
     managerFailover,
     composerDrafts,
+    viewPosition,
     newChatDrafts,
     idGenerator,
     getAppVersion: () => appBundleVersion,
@@ -694,10 +760,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // this server in one run, but a hand-published host must count too. A
     // missing or unreadable manifest is null — "nothing published", which the
     // hub reports as an error for a host that is behind.
-    publishedDaemon: () => {
+    publishedHost: () => {
       try {
         const manifest = JSON.parse(
-          readFileSync(join(downloadsDir, 'daemon-latest.json'), 'utf8'),
+          readFileSync(join(downloadsDir, 'host-latest.json'), 'utf8'),
         ) as { version?: unknown; artifacts?: { target?: unknown }[] };
         if (typeof manifest.version !== 'string') return null;
         const targets = (manifest.artifacts ?? [])
@@ -708,11 +774,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         return null;
       }
     },
-    // Only an InboundDaemonLink can accept a live host socket. When tests
-    // inject the InProcessDaemonLink there is no socket to attach, so host
-    // hellos are rejected by the gate (no attachDaemon wired).
-    ...(daemonLink instanceof InboundDaemonLink
-      ? { attachDaemon: (socket, daemonId) => daemonLink.attach(socket, daemonId) }
+    // Only an InboundHostLink can accept a live host socket. When tests
+    // inject the InProcessHostLink there is no socket to attach, so host
+    // hellos are rejected by the gate (no attachHost wired).
+    ...(hostLink instanceof InboundHostLink
+      ? { attachHost: (socket, hostId) => hostLink.attach(socket, hostId) }
       : {}),
     ...(opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: opts.helloTimeoutMs } : {}),
     onCallResponse: (surfaceId, event) => callOrchestrator.handleResponse(surfaceId, event),
@@ -721,11 +787,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   broadcastNotifications = (unread) =>
     void wsHub.sendToAll({ type: 'notifications.changed', unread });
   // Catch the host build being published after this server started — see
-  // WsHub.recheckDaemonVersions. Cheap: one small file read per tick.
-  const daemonRecheck = setInterval(() => wsHub.recheckDaemonVersions(), 30_000);
-  daemonRecheck.unref();
+  // WsHub.recheckHostVersions. Cheap: one small file read per tick.
+  const hostRecheck = setInterval(() => wsHub.recheckHostVersions(), 30_000);
+  hostRecheck.unref();
   app.addHook('onClose', async () => {
-    clearInterval(daemonRecheck);
+    clearInterval(hostRecheck);
   });
 
   // spec/03 § Cross-chat tools: relay an agent's `patch.spawn` to the machine
@@ -734,7 +800,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // (only the server sees every machine's chats).
   registerCrossHostBridge({
     logger: log.child({ component: 'cross-host' }),
-    daemonLink,
+    hostLink,
     chatRegistry,
     registry,
     activity,
@@ -745,7 +811,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // and forth, for as long as it stays open.
   registerBrowserTunnelBridge({
     logger: log.child({ component: 'browser-tunnel' }),
-    daemonLink,
+    hostLink,
     registry,
   });
 
@@ -781,7 +847,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       isSuppressedMember: (chatId: string): boolean => batchStore.isSuppressedMember(chatId),
     },
   });
-  daemonLink.onEvent((event) => chatCompletionNotifier.observe(event));
+  hostLink.onEvent((event) => chatCompletionNotifier.observe(event));
 
   // spec/09 § Waiting on you. The other half of the same doorbell: a turn that
   // stops on a permission decision or a question never reaches `idle`, so the
@@ -793,11 +859,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'awaiting-permission' }),
     ...(opts.nowMs ? { now: opts.nowMs } : {}),
   });
-  daemonLink.onEvent((event) => awaitingPermissionNotifier.observe(event));
+  hostLink.onEvent((event) => awaitingPermissionNotifier.observe(event));
 
-  // Wire the daemon-link → notification + reply routing.
-  daemonLink.onEvent((event) => {
+  // Wire the host-link → notification + reply routing.
+  hostLink.onEvent((event) => {
     if (event.type === 'notify') {
+      // Snoozed chats are silent everywhere, the bell included (spec/09 §
+      // Snoozed chats); the router drops the delivery, this drops the log line.
+      const until = chatRegistry.get(event.chatId)?.snoozedUntil ?? null;
+      if (until !== null && until > (opts.nowMs ? opts.nowMs() : Date.now())) return;
       // Agent-sent only: a call ring is not a message (spec/09 § bell).
       if (event.kind !== 'call') {
         notificationLog.add({
@@ -822,9 +892,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // Tap surface→host `chat.input` to capture source metadata for replies.
-  // We piggy-back on the daemonLink.send path by wrapping it.
-  const originalSend = daemonLink.send.bind(daemonLink);
-  daemonLink.send = (surfaceId: string, event: unknown): void => {
+  // We piggy-back on the hostLink.send path by wrapping it.
+  const originalSend = hostLink.send.bind(hostLink);
+  hostLink.send = (surfaceId: string, event: unknown): void => {
     if ((event as { type?: string }).type === 'chat.input') {
       replyRouter.observeInput(event as ChatInputEvent);
     }
@@ -834,7 +904,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Tear everything down on Fastify close so port-0 tests don't leak handles.
   app.addHook('onClose', async () => {
     wsHub.shutdown();
-    await daemonLink.close();
+    await hostLink.close();
   });
 
   // ---- core endpoints ----
@@ -928,10 +998,35 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         : name.endsWith('.json')
           ? 'application/json'
           : 'application/octet-stream';
+      // electron-updater's differential download asks for byte ranges of the
+      // zip (guided by the .blockmap) — all the changed blocks in ONE multi-range
+      // request, which it only accepts as 206 multipart/byteranges. Answering
+      // with the whole file made every update a full download.
+      const size = statSync(artifact).size;
+      const ranges = parseByteRanges(req.headers.range, size);
+      reply.header('content-type', contentType).header('accept-ranges', 'bytes');
+      if (ranges === 'unsatisfiable') {
+        return reply.code(416).header('content-range', `bytes */${size}`).send();
+      }
+      if (ranges && ranges.length > 1) {
+        const multi = multipartByteRanges(artifact, ranges, size, contentType);
+        return reply
+          .code(206)
+          .header('content-type', `multipart/byteranges; boundary=${multi.boundary}`)
+          .header('content-length', String(multi.length))
+          .send(multi.body);
+      }
+      if (ranges) {
+        const range = ranges[0]!;
+        return reply
+          .code(206)
+          .header('content-range', `bytes ${range.start}-${range.end}/${size}`)
+          .header('content-length', String(range.end - range.start + 1))
+          .send(createReadStream(artifact, { start: range.start, end: range.end }));
+      }
       return reply
         .code(200)
-        .header('content-type', contentType)
-        .header('content-length', String(statSync(artifact).size))
+        .header('content-length', String(size))
         .send(createReadStream(artifact));
     },
   );
@@ -948,16 +1043,19 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   //
   // `install.sh` is served with the server's own public URL substituted in, so
   // the pasted one-liner needs no arguments. Everything else is whitelisted to
-  // the exact shapes `pnpm build:daemon` emits, so `:name` cannot traverse out
+  // the exact shapes `pnpm build:host` emits, so `:name` cannot traverse out
   // of the downloads dir.
-  app.get<{ Params: { name: string } }>(
-    '/api/daemon/:name',
-    { logLevel: 'warn' },
-    async (req, reply) => {
-      const name = req.params.name;
+  for (const path of ['/api/daemon/:name', '/api/host/:name'])
+    app.get<{ Params: { name: string } }>(path, { logLevel: 'warn' }, async (req, reply) => {
+      // Rename phase 3a: published files carry the `host` names. The old
+      // `daemon` names are still accepted here (a build or an older client may
+      // ask for them) and resolve to the same files; phase 3b drops them.
+      const name = req.params.name
+        .replace(/^daemon-latest\.json$/, 'host-latest.json')
+        .replace(/^patch-daemon-/, 'patch-host-');
       const isScript = name === 'install.sh';
-      const isManifest = name === 'daemon-latest.json';
-      const isArtifact = /^patch-daemon-[A-Za-z0-9._-]+\.tar\.gz(\.sig)?$/.test(name);
+      const isManifest = name === 'host-latest.json';
+      const isArtifact = /^patch-host-[A-Za-z0-9._-]+\.tar\.gz(\.sig)?$/.test(name);
       if (!isScript && !isManifest && !isArtifact) {
         return reply.code(404).send({ error: 'not found' });
       }
@@ -984,8 +1082,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         .header('content-type', isManifest ? 'application/json' : 'application/gzip')
         .header('content-length', String(statSync(artifact).size))
         .send(createReadStream(artifact));
-    },
-  );
+    });
 
   // Public server install channel (spec/11 § Server installation): what
   // `curl <url>/install.sh | sudo sh` fetches — the installer, the release tarball
@@ -1021,28 +1118,59 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Liveness is therefore read directly from the host WS connection state.
   //
   // Authed (E1-d5): unlike `GET /api/healthz` (public server liveness for the
-  // load balancer's own probe), the daemon-link status is account-internal
+  // load balancer's own probe), the host-link status is account-internal
   // operational state. We require the same surface Bearer JWT as the sibling
   // `/api/jobs` / `/api/auth/me` routes — no unauthenticated daemon-status
   // leak. NO FALLBACK: missing/invalid/revoked → 401.
-  app.get(
-    '/api/daemon/healthz',
-    {
-      // Same as /api/healthz: don't spam structured logs at probe frequency.
-      logLevel: 'warn',
-    },
-    async (req, reply) => {
+  for (const path of ['/api/daemon/healthz', '/api/host/healthz'])
+    app.get(
+      path,
+      {
+        // Same as /api/healthz: don't spam structured logs at probe frequency.
+        logLevel: 'warn',
+      },
+      async (req, reply) => {
+        const account = registry.getAccount();
+        if (!account) {
+          return reply.code(401).send({ error: 'unauthenticated' });
+        }
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          return reply.code(401).send({ error: 'unauthenticated' });
+        }
+        const jwt = authHeader.slice('Bearer '.length).trim();
+        try {
+          const claims = await verifySurfaceCredential(jwt, {
+            userPublicKey: account.userPublicKey,
+          });
+          if (registry.isRevoked(claims.surface_id)) {
+            return reply.code(401).send({ error: 'unauthenticated' });
+          }
+        } catch {
+          return reply.code(401).send({ error: 'unauthenticated' });
+        }
+        if (hostLink.status() === 'online') {
+          return reply.code(200).send({ ok: true });
+        }
+        return reply.code(503).send({ ok: false, reason: 'host offline' });
+      },
+    );
+
+  // The one-line install command for a target OS (spec/11 § Host
+  // installation). The SERVER is its single source: a surface renders what it
+  // is given and never composes the command from its own idea of the server's
+  // address or of how a build is named — otherwise the command a phone shows
+  // and the command the desktop shows drift apart, and both can be wrong.
+  for (const path of ['/api/daemon/install-command', '/api/host/install-command'])
+    app.get<{ Querystring: { os?: string } }>(path, async (req, reply) => {
       const account = registry.getAccount();
-      if (!account) {
-        return reply.code(401).send({ error: 'unauthenticated' });
-      }
+      if (!account) return reply.code(401).send({ error: 'unauthenticated' });
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return reply.code(401).send({ error: 'unauthenticated' });
       }
-      const jwt = authHeader.slice('Bearer '.length).trim();
       try {
-        const claims = await verifySurfaceCredential(jwt, {
+        const claims = await verifySurfaceCredential(authHeader.slice('Bearer '.length).trim(), {
           userPublicKey: account.userPublicKey,
         });
         if (registry.isRevoked(claims.surface_id)) {
@@ -1051,91 +1179,62 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       } catch {
         return reply.code(401).send({ error: 'unauthenticated' });
       }
-      if (daemonLink.status() === 'online') {
-        return reply.code(200).send({ ok: true });
-      }
-      return reply.code(503).send({ ok: false, reason: 'host offline' });
-    },
-  );
 
-  // The one-line install command for a target OS (spec/11 § Host
-  // installation). The SERVER is its single source: a surface renders what it
-  // is given and never composes the command from its own idea of the server's
-  // address or of how a build is named — otherwise the command a phone shows
-  // and the command the desktop shows drift apart, and both can be wrong.
-  app.get<{ Querystring: { os?: string } }>('/api/daemon/install-command', async (req, reply) => {
-    const account = registry.getAccount();
-    if (!account) return reply.code(401).send({ error: 'unauthenticated' });
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.code(401).send({ error: 'unauthenticated' });
-    }
-    try {
-      const claims = await verifySurfaceCredential(authHeader.slice('Bearer '.length).trim(), {
-        userPublicKey: account.userPublicKey,
-      });
-      if (registry.isRevoked(claims.surface_id)) {
-        return reply.code(401).send({ error: 'unauthenticated' });
+      const os = req.query.os;
+      if (os !== 'macos' && os !== 'linux') {
+        return reply.code(400).send({
+          error: 'unknown_os',
+          message: `os must be "macos" or "linux" (got: ${os ?? 'none'})`,
+        });
       }
-    } catch {
-      return reply.code(401).send({ error: 'unauthenticated' });
-    }
-
-    const os = req.query.os;
-    if (os !== 'macos' && os !== 'linux') {
-      return reply.code(400).send({
-        error: 'unknown_os',
-        message: `os must be "macos" or "linux" (got: ${os ?? 'none'})`,
-      });
-    }
-    // Read the manifest the artifacts are actually served from — the same one
-    // feeding a self-update — so the command can never name a build that isn't
-    // published.
-    const manifestPath = join(downloadsDir, 'daemon-latest.json');
-    if (!existsSync(manifestPath)) {
-      return reply.code(409).send({
-        error: 'nothing_published',
-        message: 'no host build has been published yet, so there is no install command to give',
-      });
-    }
-    let manifest: { version: string; artifacts: { target: string }[] };
-    try {
-      manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as typeof manifest;
-    } catch {
-      return reply.code(409).send({
-        error: 'manifest_unreadable',
-        message: 'the published manifest could not be read',
-      });
-    }
-    const wanted = os === 'macos' ? 'darwin-' : 'linux-';
-    const targets = (manifest.artifacts ?? []).filter((a) => a.target.startsWith(wanted));
-    if (targets.length === 0) {
-      return reply.code(409).send({
-        error: 'no_build_for_os',
-        message: `the published build ${manifest.version} has no artifact for ${os}`,
-      });
-    }
-    const publicUrl = (
-      process.env['PATCH_PUBLIC_URL'] ??
-      process.env['PATCH_SERVER_URL'] ??
-      ''
-    ).replace(/\/+$/, '');
-    if (publicUrl.length === 0) {
-      // NO FALLBACK: a command pointing at a placeholder would fail on the
-      // machine being added, with nothing to say why.
-      return reply.code(409).send({
-        error: 'no_public_url',
-        message:
-          'this server has no public URL configured, so it cannot state where a new machine should fetch from',
-      });
-    }
-    return {
-      os,
-      version: manifest.version,
-      targets: targets.map((t) => t.target),
-      command: `curl -fsSL ${publicUrl}/api/daemon/install.sh | sh`,
-    };
-  });
+      // Read the manifest the artifacts are actually served from — the same one
+      // feeding a self-update — so the command can never name a build that isn't
+      // published.
+      const manifestPath = join(downloadsDir, 'host-latest.json');
+      if (!existsSync(manifestPath)) {
+        return reply.code(409).send({
+          error: 'nothing_published',
+          message: 'no host build has been published yet, so there is no install command to give',
+        });
+      }
+      let manifest: { version: string; artifacts: { target: string }[] };
+      try {
+        manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as typeof manifest;
+      } catch {
+        return reply.code(409).send({
+          error: 'manifest_unreadable',
+          message: 'the published manifest could not be read',
+        });
+      }
+      const wanted = os === 'macos' ? 'darwin-' : 'linux-';
+      const targets = (manifest.artifacts ?? []).filter((a) => a.target.startsWith(wanted));
+      if (targets.length === 0) {
+        return reply.code(409).send({
+          error: 'no_build_for_os',
+          message: `the published build ${manifest.version} has no artifact for ${os}`,
+        });
+      }
+      const publicUrl = (
+        process.env['PATCH_PUBLIC_URL'] ??
+        process.env['PATCH_SERVER_URL'] ??
+        ''
+      ).replace(/\/+$/, '');
+      if (publicUrl.length === 0) {
+        // NO FALLBACK: a command pointing at a placeholder would fail on the
+        // machine being added, with nothing to say why.
+        return reply.code(409).send({
+          error: 'no_public_url',
+          message:
+            'this server has no public URL configured, so it cannot state where a new machine should fetch from',
+        });
+      }
+      return {
+        os,
+        version: manifest.version,
+        targets: targets.map((t) => t.target),
+        command: `curl -fsSL ${publicUrl}/api/daemon/install.sh | sh`,
+      };
+    });
 
   // The host registry (spec/01 § Endpoints): every registered machine with its
   // presence and what the server knows about it — the SAME roster the `auth.ok`
@@ -1148,7 +1247,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Accepts EITHER a surface credential (a surface reading for itself) OR a
   // daemonKey (a host reading on behalf of a tool call that has no surface
   // credential to present — `patch_list_hosts`/`patch_activity`).
-  const authSurfaceOrDaemon = async (authHeader: string | undefined): Promise<boolean> => {
+  const authSurfaceOrHost = async (authHeader: string | undefined): Promise<boolean> => {
     const account = registry.getAccount();
     if (!account) return false;
     if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
@@ -1165,7 +1264,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
           userPublicKey: account.userPublicKey,
         });
         // A revoked machine's key must not read either.
-        return registry.registeredDaemonIds().includes(claims.daemon_id);
+        return (
+          registry.registeredHostIds().includes(claims.daemon_id) &&
+          !registry.isDaemonKeySuperseded(claims.daemon_id, claims.iat)
+        );
       } catch {
         return false;
       }
@@ -1173,12 +1275,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   };
 
   app.get('/api/hosts', async (req, reply) => {
-    if (!(await authSurfaceOrDaemon(req.headers.authorization))) {
+    if (!(await authSurfaceOrHost(req.headers.authorization))) {
       return reply.code(401).send({ error: 'unauthenticated' });
     }
     return {
       hosts: wsHub.hosts().map((h) => ({
-        daemonId: h.daemonId,
+        hostId: h.hostId,
         // A machine that has never spoken has no self-description; report what
         // is known and do not invent a name for it.
         hostName: h.host?.hostName ?? null,
@@ -1193,8 +1295,33 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // the REST counterpart surfaces and the CLI call directly; a host asks the
   // same way for the ACCOUNT-WIDE case (no chat-specific routing, so no
   // cross-host relay needed). Dual-authed like `/api/hosts` above.
+  app.get('/api/browser-use', async (req, reply) => {
+    if (!(await authSurfaceOrHost(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    return { hosts: await browserUse.statusAll() };
+  });
+
+  app.post('/api/browser-use/:hostId/stop', async (req, reply) => {
+    if (!(await authSurfaceOrHost(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    const { hostId } = req.params as { hostId: string };
+    try {
+      return await browserUse.stop(hostId);
+    } catch (err) {
+      if (err instanceof HostOfflineError) {
+        return reply.code(409).send({ error: 'host_offline', message: err.message });
+      }
+      return reply.code(502).send({
+        error: 'browser_use_unavailable',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/activity', async (req, reply) => {
-    if (!(await authSurfaceOrDaemon(req.headers.authorization))) {
+    if (!(await authSurfaceOrHost(req.headers.authorization))) {
       return reply.code(401).send({ error: 'unauthenticated' });
     }
     const q = req.query as Record<string, string | undefined>;
@@ -1229,19 +1356,83 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     }
   });
 
+  // Every cross-chat tool call, account-wide (Settings → Activity — "things
+  // agents did"). Same shape as `/api/activity` just above: a read-through
+  // across every online machine's own log, merged and paged the same way.
+  app.get('/api/tool-log', async (req, reply) => {
+    if (!(await authSurfaceOrHost(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    const q = req.query as Record<string, string | undefined>;
+    const now = Date.now();
+    const until = q.until !== undefined ? Number(q.until) : now;
+    const since = q.since !== undefined ? Number(q.since) : until - 24 * 60 * 60 * 1000;
+    const cursor = q.cursor !== undefined ? Number(q.cursor) : undefined;
+    const limit = q.limit !== undefined ? Number(q.limit) : undefined;
+    if (
+      !Number.isFinite(since) ||
+      !Number.isFinite(until) ||
+      (cursor !== undefined && !Number.isFinite(cursor)) ||
+      (limit !== undefined && !Number.isFinite(limit))
+    ) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: 'since/until/cursor/limit must be numbers',
+      });
+    }
+    try {
+      return await toolLog.query({
+        since,
+        until,
+        ...(cursor !== undefined ? { cursor } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'tool_log_unavailable',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  // Settings → Usage: account limit history (for the burndown) and per-chat
+  // token totals, read through every online machine and merged.
+  app.get('/api/usage-report', async (req, reply) => {
+    if (!(await authSurfaceOrHost(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    const q = req.query as Record<string, string | undefined>;
+    const now = Date.now();
+    const until = q.until !== undefined ? Number(q.until) : now;
+    const since = q.since !== undefined ? Number(q.since) : until - 7 * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(since) || !Number.isFinite(until)) {
+      return reply
+        .code(400)
+        .send({ error: 'invalid_input', message: 'since/until must be numbers' });
+    }
+    try {
+      return await usageReader.query({ since, until });
+    } catch (err) {
+      return reply.code(502).send({
+        error: 'usage_unavailable',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   // Remove a machine from the account (Settings → Hosts → "Remove this host").
   //
-  //   DELETE /api/hosts/:daemonId   → 200 {ok, hosts}   | 404 unknown_host
+  //   DELETE /api/hosts/:hostId   → 200 {ok, hosts}   | 404 unknown_host
   //
   // Surface-authenticated like the other host routes. In order: the registry
   // revokes the machine's credential (so its next hello is answered
   // `auth.revoked` and it wipes its key), its live link is closed and its
   // buffered frames dropped, the hub forgets every cached report about it and
-  // tells every surface `host.removed {daemonId}`. If it was the home machine,
+  // tells every surface `host.removed {hostId}`. If it was the home machine,
   // home passes to the next registered one and every machine and surface is
   // told, exactly as a `set-home` would. Chats that ran on it are left as they
   // are: their history is the account's, not the machine's.
-  app.delete<{ Params: { daemonId: string } }>('/api/hosts/:daemonId', async (req, reply) => {
+  app.delete<{ Params: { hostId: string } }>('/api/hosts/:hostId', async (req, reply) => {
     let auth;
     try {
       auth = await requireAuth(req, registry);
@@ -1250,29 +1441,29 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         .code((e as Error & { statusCode?: number }).statusCode ?? 401)
         .send({ error: (e as Error).message });
     }
-    const { daemonId } = req.params;
-    if (!registry.isRegisteredDaemon(daemonId)) {
+    const { hostId } = req.params;
+    if (!registry.isRegisteredHost(hostId)) {
       return reply.code(404).send({
         error: 'unknown_host',
-        message: `no machine registered with daemonId: ${daemonId}`,
-        daemonId,
-        knownHosts: registry.registeredDaemonIds(),
+        message: `no machine registered with hostId: ${hostId}`,
+        hostId,
+        knownHosts: registry.registeredHostIds(),
       });
     }
-    const homeBefore = registry.homeDaemonId();
-    registry.removeDaemon(daemonId);
-    const linkClosed = daemonLink.forget(daemonId);
-    const told = wsHub.removeHost(daemonId);
-    const homeAfter = registry.homeDaemonId();
-    if (homeBefore === daemonId && homeAfter !== null) {
-      for (const id of registry.registeredDaemonIds()) {
-        daemonLink.sendTo(id, 'server', { type: 'host.set_home', daemonId: homeAfter });
+    const homeBefore = registry.homeHostId();
+    registry.removeHost(hostId);
+    const linkClosed = wsHub.disconnectHostNow(hostId, () => hostLink.forget(hostId));
+    const told = wsHub.removeHost(hostId);
+    const homeAfter = registry.homeHostId();
+    if (homeBefore === hostId && homeAfter !== null) {
+      for (const id of registry.registeredHostIds()) {
+        hostLink.sendTo(id, 'server', { type: 'host.set_home', hostId: homeAfter });
       }
-      wsHub.sendToAll({ type: 'host.set_home', daemonId: homeAfter });
+      wsHub.sendToAll({ type: 'host.set_home', hostId: homeAfter });
       wsHub.republishAllHosts();
     }
     log.info(
-      { daemonId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told, homeAfter },
+      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told, homeAfter },
       'host removed from the account',
     );
     return { ok: true, hosts: wsHub.hosts() };
@@ -1286,7 +1477,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ['/api/hosts/rename', 'rename'] as const,
     ['/api/hosts/set-home', 'set-home'] as const,
   ]) {
-    app.post<{ Body: { daemonId?: string; hostName?: string } }>(route, async (req, reply) => {
+    app.post<{ Body: { hostId?: string; hostName?: string } }>(route, async (req, reply) => {
       const account = registry.getAccount();
       if (!account) return reply.code(401).send({ error: 'unauthenticated' });
       const authHeader = req.headers.authorization;
@@ -1304,20 +1495,20 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         return reply.code(401).send({ error: 'unauthenticated' });
       }
 
-      const daemonId = req.body?.daemonId;
-      if (typeof daemonId !== 'string' || daemonId.length === 0) {
+      const hostId = req.body?.hostId;
+      if (typeof hostId !== 'string' || hostId.length === 0) {
         return reply
           .code(400)
-          .send({ error: 'daemonId_required', message: 'name the machine this applies to' });
+          .send({ error: 'hostId_required', message: 'name the machine this applies to' });
       }
-      if (!registry.registeredDaemonIds().includes(daemonId)) {
+      if (!registry.registeredHostIds().includes(hostId)) {
         // Named, not swallowed — acting on an unregistered machine is the
         // failure the host-addressing gate exists to prevent.
         return reply.code(404).send({
           error: 'unknown_host',
-          message: `no machine registered with daemonId: ${daemonId}`,
-          daemonId,
-          knownHosts: registry.registeredDaemonIds(),
+          message: `no machine registered with hostId: ${hostId}`,
+          hostId,
+          knownHosts: registry.registeredHostIds(),
         });
       }
 
@@ -1329,23 +1520,23 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
             .code(400)
             .send({ error: 'invalid_name', message: 'a machine name cannot be empty' });
         }
-        registry.setHostName(daemonId, hostName.trim());
+        registry.setHostName(hostId, hostName.trim());
         // The machine keeps its own self-description in step (and persists the
         // rename so a restart does not revert it); every surface is told too.
-        daemonLink.sendTo(daemonId, 'server', {
+        hostLink.sendTo(hostId, 'server', {
           type: 'host.rename',
-          daemonId,
+          hostId,
           hostName: hostName.trim(),
         });
-        wsHub.sendToAll({ type: 'host.rename', daemonId, hostName: hostName.trim() });
+        wsHub.sendToAll({ type: 'host.rename', hostId, hostName: hostName.trim() });
       } else {
-        registry.setHomeDaemonId(daemonId);
+        registry.setHomeHostId(hostId);
         // Broadcast to EVERY machine: the named one becomes home and the rest
         // lose it, so exactly one machine reports the flag.
-        for (const id of registry.registeredDaemonIds()) {
-          daemonLink.sendTo(id, 'server', { type: 'host.set_home', daemonId });
+        for (const id of registry.registeredHostIds()) {
+          hostLink.sendTo(id, 'server', { type: 'host.set_home', hostId });
         }
-        wsHub.sendToAll({ type: 'host.set_home', daemonId });
+        wsHub.sendToAll({ type: 'host.set_home', hostId });
       }
       return { ok: true, hosts: wsHub.hosts() };
     });
@@ -1376,7 +1567,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       return reply.code(401).send({ error: 'unauthenticated' });
     }
 
-    const daemonBuild = wsHub.getDaemonBuild();
+    const hostBuild = wsHub.getHostBuild();
     const report = buildVersionReport({
       now: new Date(),
       server: {
@@ -1389,21 +1580,21 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         serverSha: SERVER_SHA,
       },
       web: webRootPath ? readWebLayer(webRootPath) : null,
-      daemon: daemonBuild
+      daemon: hostBuild
         ? {
-            version: daemonBuild.version,
-            gitSha: daemonBuild.gitSha ?? null,
-            builtAt: daemonBuild.builtAt ?? null,
-            online: daemonLink.status() === 'online',
+            version: hostBuild.version,
+            gitSha: hostBuild.gitSha ?? null,
+            builtAt: hostBuild.builtAt ?? null,
+            online: hostLink.status() === 'online',
           }
         : null,
-      // Per machine, from each one's own `daemon.host` report — so drift
+      // Per machine, from each one's own `host.host` report — so drift
       // BETWEEN machines is visible instead of collapsing into one number.
       hosts: wsHub.hosts().map((h) => ({
-        daemonId: h.daemonId,
+        hostId: h.hostId,
         hostName: h.host?.hostName ?? null,
         online: h.online,
-        version: h.host?.daemonVersion ?? null,
+        version: h.host?.hostVersion ?? null,
         gitSha: h.host?.gitSha ?? null,
         builtAt: h.host?.builtAt ?? null,
       })),
@@ -1447,15 +1638,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerAudioRelayRoute(app, {
     logger: log.child({ component: 'audio-relay' }),
     router: audioSessionRouter,
-    daemonLink,
-    audioRelayHostFor: (daemonId) => wsHub.audioRelayHost(daemonId),
+    hostLink,
+    audioRelayHostFor: (hostId) => wsHub.audioRelayHost(hostId),
   });
 
   // ---- chat REST routes ----
   registerChatRoutes(app, {
     logger: log.child({ component: 'chat-routes' }),
     registry,
-    daemonLink,
+    hostLink,
     chatRegistry,
     composerDrafts,
     chatLogStore,
@@ -1479,7 +1670,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'folder-routes' }),
     registry,
     folderRegistry,
-    daemonLink,
+    hostLink,
     idGenerator,
   });
 
@@ -1487,7 +1678,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerChatSearchRoutes(app, {
     logger: log.child({ component: 'chat-search-routes' }),
     registry,
-    daemonLink,
+    hostLink,
     chatRegistry,
     ...(chatMirror ? { mirror: chatMirror } : {}),
     idGenerator,
@@ -1497,7 +1688,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerHostFilesRoutes(app, {
     logger: log.child({ component: 'host-files-routes' }),
     registry,
-    daemonLink,
+    hostLink,
     idGenerator,
   });
 
@@ -1507,7 +1698,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerBlobRoutes(app, {
     logger: log.child({ component: 'blob-routes' }),
     chatRegistry,
-    daemonLink,
+    hostLink,
     chatLogStore,
     idGenerator,
   });
@@ -1516,8 +1707,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerChatMoveRoutes(app, {
     logger: log.child({ component: 'chat-move-routes' }),
     registry,
-    daemonLink,
+    hostLink,
     chatRegistry,
+    chatLogStore,
+    attachmentsDir:
+      process.env['PATCH_ATTACHMENTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'attachments'),
     idGenerator,
   });
 
@@ -1532,13 +1726,19 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // ---- secrets REST routes (spec/15 § Secrets) ----
   registerWebBotAuthRoutes(app, {
-    keyB64: opts.webBotAuthKey ?? process.env['PATCH_WEB_BOT_AUTH_KEY'],
+    hostLink,
+    registry,
+    settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
+    keyB64: () => {
+      if (!accountSettings) throw new Error('Web Bot Auth identity store is unavailable');
+      return accountSettings.webBotAuthKey();
+    },
   });
   registerSecretsRoutes(app, {
     logger: log.child({ component: 'secrets-routes' }),
     registry,
     secretsRegistry,
-    daemonLink,
+    hostLink,
     idGenerator,
   });
 
@@ -1548,7 +1748,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerNotificationRoutes(app, {
     logger: log.child({ component: 'notification-routes' }),
     registry,
-    daemonLink,
+    hostLink,
     ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     idGenerator,
   });
@@ -1565,7 +1765,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   ) {
     registerDevDiagRoutes(app, {
       logger: log.child({ component: 'dev-diag' }),
-      daemonLink,
+      hostLink,
       internalToken: opts.internalToken,
       speakersRecorder,
       idGenerator,
@@ -1583,7 +1783,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       registry,
       chatRegistry,
       internalToken: opts.internalToken,
-      recordSessionHost: (sessionId, daemonId) => audioSessionRouter.record(sessionId, daemonId),
+      recordSessionHost: (sessionId, hostId) => audioSessionRouter.record(sessionId, hostId),
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });
   }
@@ -1596,7 +1796,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'voice-note' }),
     registry,
     chatRegistry,
-    daemonLink,
+    hostLink,
     idGenerator,
   });
 
@@ -1609,7 +1809,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'attachments' }),
     registry,
     chatRegistry,
-    daemonLink,
+    hostLink,
     idGenerator,
     attachmentsDir:
       process.env['PATCH_ATTACHMENTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'attachments'),
@@ -1621,7 +1821,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // `<dataDir>/artifacts` (override with PATCH_ARTIFACTS_DIR).
   registerArtifactRoutes(app, {
     logger: log.child({ component: 'artifacts' }),
-    daemonLink,
+    hostLink,
     registry,
     artifactsDir:
       process.env['PATCH_ARTIFACTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'artifacts'),
@@ -1632,10 +1832,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // with PATCH_PADS_DIR). Signed links share the artifacts' secret.
   registerPadRoutes(app, {
     logger: log.child({ component: 'pads' }),
-    daemonLink,
+    hostLink,
     registry,
     chatRegistry,
     idGenerator,
+    publicUrl: () => process.env['PATCH_PUBLIC_URL'] ?? process.env['PATCH_SERVER_URL'] ?? '',
     padsDir: process.env['PATCH_PADS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'pads'),
     secretDir: process.env['PATCH_ARTIFACTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'artifacts'),
   });
@@ -1647,15 +1848,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     presence,
     ...(opts.internalToken ? { internalToken: opts.internalToken } : {}),
     ...(opts.relay ? { relay: opts.relay } : {}),
-    daemonLink,
+    hostLink,
     ...(accountSettings ? { accountSettings } : {}),
     // A changed default model reaches every host that is up; one that is down
-    // is corrected by the `daemon.host` reconcile when it comes back.
+    // is corrected by the `host.host` reconcile when it comes back.
     terminateSurface: (surfaceId: string) => wsHub.terminateSurface(surfaceId),
-    ...(daemonLink instanceof InboundDaemonLink
+    ...(hostLink instanceof InboundHostLink
       ? {
-          terminateDaemon: (daemonId: string): boolean =>
-            daemonLink.terminateDaemonSocket(daemonId),
+          terminateHost: (hostId: string): boolean =>
+            wsHub.disconnectHostNow(hostId, () => hostLink.terminateHostSocket(hostId)),
         }
       : {}),
     ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
@@ -1680,7 +1881,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // ---- jobs system (group 9 task B) ----
   // Jobs DATA lives on the server (persisted at <dataDir>/jobs/*.json).
   // The cross-chat tools on the host (`patch_job_*`) hop through the
-  // daemon-link to this same JobsInterface — see packages/server/README.md.
+  // host-link to this same JobsInterface — see packages/server/README.md.
   let jobs: JobsInterface;
   let cronScheduler: CronScheduler;
   let recurrenceScheduler: RecurrenceScheduler;
@@ -1704,7 +1905,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       watch: opts.jobsWatch ?? watchDefault,
     });
   }
-  // The completion notifier's job gate (wired above, before the daemon-link
+  // The completion notifier's job gate (wired above, before the host-link
   // subscription order mattered) reads the store through here.
   jobsForCompletionGate = jobs;
 
@@ -1718,20 +1919,41 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   jobDispatcher = new JobDispatcher({
     dataDir: jobsDataDir,
-    daemonLink,
+    hostLink,
     logger: log.child({ component: 'job-dispatcher' }),
     // The dispatcher writes every fire's run entry, from the outcome the host
     // reports back (spec/08 ## Execution model step 6).
     logs: jobLogs,
+    // A fire waiting on a host that is down or asleep is announced once it is
+    // 10 minutes late, naming the host and how long it has been due.
+    onLate: (info) => {
+      const since = new Intl.DateTimeFormat('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+        ...(info.timezone !== undefined ? { timeZone: info.timezone } : {}),
+      }).format(info.dueAt);
+      void notificationRouter
+        .route({
+          type: 'notify',
+          chatId: info.chatId,
+          message: `${info.jobName} has not run: host ${info.hostId ?? 'unknown'} unreachable since ${since}. It will run when the host is back.`,
+          priority: 'normal',
+        })
+        .catch((err: unknown) => {
+          log.warn({ err: (err as Error).message }, 'late-fire notify failed');
+        });
+    },
     // `ensure` (upsert) actions key on whether their persistent chat already
     // exists in the registry mirror to decide spawn-vs-message.
     chatExists: (chatId) => chatRegistry.get(chatId) !== undefined,
     // A `message` action's host is the host its target chat lives on — that is
     // the machine whose reachability decides send-vs-buffer.
-    chatHost: (chatId) => chatRegistry.get(chatId)?.daemonId ?? null,
+    chatHost: (chatId) => chatRegistry.get(chatId)?.hostId ?? null,
+    chatModel: (chatId) => chatRegistry.get(chatId)?.model ?? null,
     // After a restart the mirror is empty until each host re-announces its
     // chats, so an `ensure` miss before that is "unknown", not "missing".
-    hostReported: (daemonId) => chatRegistry.hasSynced(daemonId),
+    hostReported: (hostId) => chatRegistry.hasSynced(hostId),
     // The concurrency gate holds a slot until its chat stops working, and
     // reconciles slots that outlived a restart against this same mirror
     // (spec/08 ## Concurrency).
@@ -1741,14 +1963,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // allocates a fresh chatId, so the sidebar's Automations group
     // (spec/14 § Sidebar) can tag it before the host even confirms.
     chatLinks: jobChatLinks,
-    // The model every job's chat runs on unless the job names its own. Read
+    // The account's job default model (`jobDefaultModel`), used unless the job names its own. Read
     // per fire, not captured once, so a change in Settings reaches the next
     // fire rather than waiting for a server restart. Only the settings store's
     // absence (a test with no dataDir) leaves it unset.
     ...(accountSettings
       ? {
           defaultModel: (): string =>
-            accountSettings.current().defaultModel ?? DEFAULT_SETTINGS.defaultModel,
+            accountSettings.current().jobDefaultModel ?? DEFAULT_SETTINGS.jobDefaultModel,
           // The autonomy prompt every fire carries unless its job overrides it
           // (spec/08 § Autonomy prompt). Per fire, for the same reason.
           autonomyPrompt: (): string => accountSettings.current().jobAutonomyPrompt,
@@ -1766,6 +1988,53 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'cron-scheduler' }),
   });
   cronScheduler.start();
+  // spec/08 § Wake host — jobs with `wakeHost` get their macOS host woken
+  // ahead of each fire; a host that cannot is reported, not assumed.
+  const hostWaker = new HostWaker({
+    jobs,
+    hostLink,
+    logger: log.child({ component: 'host-waker' }),
+    nextRun: (jobId) => cronScheduler.nextRun(jobId),
+    hostFor: (job) =>
+      job.action.type === 'message'
+        ? (chatRegistry.get(job.action.chatId)?.hostId ?? null)
+        : job.action.hostId,
+    onFailure: ({ job, hostId, error }) => {
+      void notificationRouter
+        .route({
+          type: 'notify',
+          chatId: `job_${job.id}`,
+          message: `${job.name}: host ${hostId ?? 'unknown'} could not schedule its wake — ${error}`,
+          priority: 'normal',
+        })
+        .catch((err: unknown) => {
+          log.warn({ err: (err as Error).message }, 'wake-failure notify failed');
+        });
+    },
+  });
+  hostWaker.start();
+  // A host that owns cron jobs and is about to run flat will miss them.
+  const lowBatteryNotifier = new LowBatteryNotifier({
+    router: notificationRouter,
+    logger: log.child({ component: 'low-battery' }),
+    ownsEnabledCronJobs: (hostId) =>
+      jobs
+        .list()
+        .some(
+          (job) =>
+            job.enabled &&
+            job.trigger.type === 'cron' &&
+            (job.action.type === 'message'
+              ? chatRegistry.get(job.action.chatId)?.hostId
+              : job.action.hostId) === hostId,
+        ),
+  });
+  hostLink.onEvent((event) => lowBatteryNotifier.observe(event));
+  const signInNeededNotifier = new SignInNeededNotifier({
+    router: notificationRouter,
+    logger: log.child({ component: 'sign-in-needed' }),
+  });
+  hostLink.onEvent((event) => signInNeededNotifier.observe(event));
   recurrenceScheduler = new RecurrenceScheduler({
     jobs,
     dispatcher: jobDispatcher,
@@ -1793,9 +2062,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     });
   }
 
-  // Bridge the host's RemoteJobsStore RPC over the daemon-link.
+  // Bridge the host's RemoteJobsStore RPC over the host-link.
   const detachJobsBridge = attachJobsRpcBridge({
-    link: daemonLink,
+    link: hostLink,
     jobs,
     logs: jobLogs,
     logger: log.child({ component: 'jobs-rpc-bridge' }),
@@ -1809,7 +2078,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     jobLogs,
     jobCounts: (jobId) => jobDispatcher.counts(jobId),
     dispatcher: jobDispatcher,
-    daemonLink,
+    hostLink,
     idGenerator,
     ...(opts.recurrenceTranslateTimeoutMs !== undefined
       ? { recurrenceTranslateTimeoutMs: opts.recurrenceTranslateTimeoutMs }
@@ -1846,7 +2115,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   }
   const hookRunner = new HookRunner({
     hooks,
-    daemonLink,
+    hostLink,
     logger: log.child({ component: 'hook-runner' }),
     idGenerator,
   });
@@ -1860,6 +2129,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // Tear down on close.
   app.addHook('onClose', async () => {
+    hostWaker.stop();
     cronScheduler.stop();
     recurrenceScheduler.stop();
     jobDispatcher.close();
@@ -2009,10 +2279,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     app,
     registry,
     presence,
-    daemonLink,
+    hostLink,
     wsHub,
     chatRegistry,
     composerDrafts,
+    viewPosition,
     newChatDrafts,
     folderRegistry,
     jobs,

@@ -39,6 +39,12 @@ const { requestPermSpy, launchLibrarySpy, requestCameraPermSpy, launchCameraSpy 
     launchCameraSpy: vi.fn(),
   }),
 );
+// Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
+
 vi.mock('expo-image-picker', () => ({
   MediaTypeOptions: { Images: 'Images' },
   requestMediaLibraryPermissionsAsync: requestPermSpy,

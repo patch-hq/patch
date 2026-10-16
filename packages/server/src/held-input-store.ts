@@ -7,6 +7,7 @@
 // surface sends to an offline host is a control the surface sends again when it
 // matters.
 
+import { parsePersisted } from './persisted-json.js';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
@@ -16,7 +17,7 @@ import type { WireEvent } from '@patch/wire';
 export const HELD_INPUT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface HeldInput {
-  daemonId: string;
+  hostId: string;
   surfaceId: string;
   event: WireEvent;
   at: number;
@@ -41,7 +42,7 @@ export class HeldInputStore {
     this.path = opts.dataDir ? join(opts.dataDir, 'held-input.json') : null;
     if (this.path !== null && existsSync(this.path)) {
       try {
-        const parsed: unknown = JSON.parse(readFileSync(this.path, 'utf8'));
+        const parsed: unknown = parsePersisted(readFileSync(this.path, 'utf8'));
         if (Array.isArray(parsed)) this.held = parsed as HeldInput[];
       } catch (err) {
         // NO FALLBACK: say so, then start empty rather than guess at a damaged file.
@@ -56,15 +57,15 @@ export class HeldInputStore {
     return this.held.filter((h) => h.at >= cutoff);
   }
 
-  add(daemonId: string, surfaceId: string, event: WireEvent): void {
-    this.held.push({ daemonId, surfaceId, event, at: this.now() });
+  add(hostId: string, surfaceId: string, event: WireEvent): void {
+    this.held.push({ hostId, surfaceId, event, at: this.now() });
     this.save();
   }
 
   /** The host took everything held for it, or the message was delivered another way. */
-  clearHost(daemonId: string): void {
+  clearHost(hostId: string): void {
     const before = this.held.length;
-    this.held = this.held.filter((h) => h.daemonId !== daemonId);
+    this.held = this.held.filter((h) => h.hostId !== hostId);
     if (this.held.length !== before) this.save();
   }
 

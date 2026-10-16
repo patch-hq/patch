@@ -70,7 +70,7 @@ The command receives one JSON object on stdin:
   "message": "...",
   "chatId": "c_abc",
   "folder": "/path",
-  "daemonId": "d_abc",
+  "hostId": "d_abc",
   "specialThread": false,
   "toolCallsSummary": "Ran 2 commands, read 1 file"
 }
@@ -175,7 +175,7 @@ sends a `chat.input`, never by the agent. The server resolves the chat's
 host, folder and whether it is a special thread, finds every enabled
 `user_message` hook whose gate matches, and dispatches each to the chat's own
 host in parallel (`hook.check_request` / `hook.check_result` over the
-daemon-link, `03-wire-protocol.md` § Hooks), each bounded by its own
+host-link, `03-wire-protocol.md` § Hooks), each bounded by its own
 `timeoutMs`. The response is every matching hook's outcome:
 
 ```json
@@ -221,7 +221,7 @@ without a round trip:
 
 ```
 hook.agent_response_check_request  (daemon → server)
-{ daemonId, chatId, checkId, folder, specialThread, reply, toolCallsSummary }
+{ hostId, chatId, checkId, folder, specialThread, reply, toolCallsSummary }
 ```
 
 The server resolves every enabled `agent_response` hook whose gate matches —
@@ -235,7 +235,7 @@ response), not the server:
 
 ```
 hook.agent_response_outcome  (server → daemon)
-{ daemonId, chatId, checkId, results: HookRunResult[] }
+{ hostId, chatId, checkId, results: HookRunResult[] }
 ```
 
 `checkId` is minted by the host and echoed back, so a slow round-trip

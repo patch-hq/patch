@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { verifySignature } from '../src/jobs/webhooks.js';
 
 const SECRET = 'fake-todoist-client-secret';
@@ -64,13 +64,13 @@ describe('todoist-scheme webhook jobs', () => {
   });
 
   const BODY = JSON.stringify({ event_name: 'item:added', event_data: { id: '1' } });
-  const action = { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' } as const;
+  const action = { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' } as const;
 
   async function setup() {
     const built = await buildAll({
       logger: false,
       registry: Registry.load(dir),
-      daemonLink: new InProcessDaemonLink(),
+      hostLink: new InProcessHostLink(),
     });
     return built;
   }

@@ -14,7 +14,7 @@ import {
   actSync,
   actAsync,
 } from './testUtils/render';
-import HostFileEditor from '../app/hosts/[daemonId]/edit';
+import HostFileEditor from '../app/hosts/[hostId]/edit';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import {
   __clearLastAlert,
@@ -59,7 +59,7 @@ describe('Host file editor', () => {
     readSpy.mockReset();
     writeSpy.mockReset();
     usePresenceStore.setState({ hosts: {} });
-    __setLocalSearchParams({ daemonId: 'd1', path: PATH });
+    __setLocalSearchParams({ hostId: 'd1', path: PATH });
     readSpy.mockResolvedValue({ path: PATH, content: '# plant\n', size: 8, version: 'v1' });
   });
   afterEach(() => {

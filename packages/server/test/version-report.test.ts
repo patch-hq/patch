@@ -669,7 +669,7 @@ describe('serverSha comparison (the fix for the fix)', () => {
 // looked like agreement.
 describe('drift between machines', () => {
   const host = (over: Record<string, unknown> = {}) => ({
-    daemonId: 'host-a',
+    hostId: 'host-a',
     hostName: 'host-a',
     online: true,
     version: '0.1.375',
@@ -680,7 +680,7 @@ describe('drift between machines', () => {
 
   it('is silent when every connected machine agrees', () => {
     const drift = computeDrift(
-      baseInput({ hosts: [host(), host({ daemonId: 'host-b', hostName: 'beta' })] }),
+      baseInput({ hosts: [host(), host({ hostId: 'host-b', hostName: 'beta' })] }),
     );
     expect(drift.filter((d) => d.kind.startsWith('host'))).toEqual([]);
   });
@@ -688,7 +688,7 @@ describe('drift between machines', () => {
   it('names the machines on each build when they disagree', () => {
     const drift = computeDrift(
       baseInput({
-        hosts: [host(), host({ daemonId: 'host-b', hostName: 'beta', version: '0.1.374' })],
+        hosts: [host(), host({ hostId: 'host-b', hostName: 'beta', version: '0.1.374' })],
       }),
     );
     const d = drift.find((x) => x.kind === 'hosts-disagree');
@@ -701,7 +701,7 @@ describe('drift between machines', () => {
   it('ignores an OFFLINE machine on an older build — it is not drift until it is back', () => {
     const drift = computeDrift(
       baseInput({
-        hosts: [host(), host({ daemonId: 'host-b', version: '0.1.100', online: false })],
+        hosts: [host(), host({ hostId: 'host-b', version: '0.1.100', online: false })],
       }),
     );
     expect(drift.find((x) => x.kind === 'hosts-disagree')).toBeUndefined();

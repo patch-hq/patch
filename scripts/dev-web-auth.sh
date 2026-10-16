@@ -50,7 +50,7 @@ INTERNAL_TOKEN="${PATCH_INTERNAL_TOKEN:-dev-internal-token-0123456789}"
 PID_FILE="$ROOT/.dev-data/.dev-web-auth.pids"
 SERVER_LOG="/tmp/patch-dev-server.log"
 WEB_LOG="/tmp/patch-dev-web.log"
-DAEMON_LOG="/tmp/patch-dev-daemon.log"
+HOST_LOG="/tmp/patch-dev-daemon.log"
 
 free_port() { # $1=port — kill whatever still listens on it (TERM then KILL)
   local pids
@@ -105,7 +105,7 @@ wait_for() { # url, name
 DAEMON_HOME="$DATA_DIR/home"
 DAEMON_HEALTHZ_PORT="${PATCH_DAEMON_HEALTHZ_PORT:-3011}"
 DAEMON_AUDIO_PORT="${PATCH_DAEMON_AUDIO_PORT:-3013}"
-DAEMON_ID="dev-daemon-1"
+HOST_ID="dev-daemon-1"
 
 # Registers the host key in registry.json AND writes <home>/daemon.key.
 # MUST run before the server boots (server loads registry.json once at startup).
@@ -113,7 +113,7 @@ mint_daemon() {
   mkdir -p "$DAEMON_HOME"
   pnpm --filter @patch/server fixtures:mint-daemon-key \
     --data-dir "$DATA_DIR" --patch-home "$DAEMON_HOME" \
-    --daemon-id "$DAEMON_ID" --label local-dev >/dev/null
+    --daemon-id "$HOST_ID" --label local-dev >/dev/null
 }
 
 # --- CLI dev config provisioning (TG1 e2e seam) ---------------------------
@@ -228,7 +228,7 @@ if [[ "$WITH_DAEMON" == 1 ]]; then
     PATCH_DAEMON_AUDIO_PORT="$DAEMON_AUDIO_PORT" \
     PATCH_MOCK_TURN_DELAY_MS="${PATCH_MOCK_TURN_DELAY_MS:-2500}" \
     SDK_BACKEND="$SDK_MODE" WHISPER_BACKEND=mock KOKORO_BACKEND=mock VAD_BACKEND=mock \
-    nohup pnpm --filter @patch/daemon dev > "$DAEMON_LOG" 2>&1 &
+    nohup pnpm --filter @patch/host dev > "$HOST_LOG" 2>&1 &
   echo "$!" >> "$PID_FILE"
   wait_for "http://127.0.0.1:$DAEMON_HEALTHZ_PORT/healthz" "daemon"
 fi
@@ -285,7 +285,7 @@ echo "============================================================"
 echo " patch dev web — AUTHENTICATED"
 echo "   server:  http://127.0.0.1:$SERVER_PORT   (dataDir: $DATA_DIR)"
 if [[ "$WITH_DAEMON" == 1 ]]; then
-echo "   daemon:  http://127.0.0.1:$DAEMON_HEALTHZ_PORT/healthz  (id: $DAEMON_ID, home: $DAEMON_HOME, SDK_BACKEND=$SDK_MODE)"
+echo "   daemon:  http://127.0.0.1:$DAEMON_HEALTHZ_PORT/healthz  (id: $HOST_ID, home: $DAEMON_HOME, SDK_BACKEND=$SDK_MODE)"
 if [[ "$SDK_MODE" == "real" ]]; then
 echo "            REAL Claude backend — chats produce genuine streamed completions via your \`claude login\` OAuth (no API key)."
 fi

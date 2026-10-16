@@ -22,7 +22,13 @@ function flags(over = {}) {
 
 /** No-op deps (override the ones a given test cares about). */
 function deps(over: Partial<ContextMenuDeps> = {}): ContextMenuDeps {
-  return { openExternal: () => {}, openInPatch: () => {}, writeText: () => {}, ...over };
+  return {
+    openExternal: () => {},
+    openInPatch: () => {},
+    writeText: () => {},
+    copyImageAt: () => {},
+    ...over,
+  };
 }
 
 /** Find a menu item by label anywhere in the (possibly nested) template. */
@@ -146,4 +152,43 @@ test('an empty context (nothing actionable) still returns a non-empty menu', () 
     t.some((i) => i.role === 'selectAll'),
     'select all should always be available',
   );
+});
+
+test('"Open Link in Browser" hands only a real web page to the OS, never file:/javascript:/custom schemes', () => {
+  for (const [linkURL, expected] of [
+    ['https://example.com/x', true],
+    ['http://localhost:3000/a', true],
+    ['file:///etc/passwd', false],
+    ['javascript:alert(1)', false],
+    ['smb://evil/share', false],
+    ['ms-msdt:/id', false],
+    ['not a url', false],
+  ] as const) {
+    const opened: string[] = [];
+    const t = buildContextMenuTemplate(
+      { linkURL, editFlags: flags() },
+      deps({ openExternal: (u) => opened.push(u) }),
+    );
+    const item = t.find((i) => i.label === 'Open Link in Browser');
+    assert.ok(item?.click, 'missing Open Link in Browser');
+    (item.click as () => void)();
+    assert.equal(opened.length === 1, expected, `${linkURL}: opened=${JSON.stringify(opened)}`);
+  }
+});
+
+test('right-click on an image offers Copy Image, which copies at the click point', () => {
+  const copied: [number, number][] = [];
+  const t = buildContextMenuTemplate(
+    { mediaType: 'image', x: 12, y: 34, editFlags: flags() },
+    deps({ copyImageAt: (x, y) => copied.push([x, y]) }),
+  );
+  const item = t.find((i) => i.label === 'Copy Image');
+  assert.ok(item, 'missing Copy Image');
+  (item.click as () => void)();
+  assert.deepEqual(copied, [[12, 34]]);
+});
+
+test('no Copy Image when the click is not on an image', () => {
+  const t = buildContextMenuTemplate({ editFlags: flags() }, deps());
+  assert.ok(!labels(t).includes('Copy Image'));
 });

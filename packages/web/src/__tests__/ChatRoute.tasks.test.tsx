@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { TodoItem } from '@patch/wire';
 import { ChatRoute } from '../routes/ChatRoute.js';
@@ -41,7 +42,7 @@ function seed(todos: TodoItem[], goal: string | null = null): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'index rebuild',
       folder: 'foo',
@@ -59,11 +60,13 @@ function seed(todos: TodoItem[], goal: string | null = null): void {
 
 function renderChat(): ReturnType<typeof render> {
   return render(
-    <MemoryRouter initialEntries={['/chats/c1']}>
-      <Routes>
-        <Route path="/chats/:chatId" element={<ChatRoute ws={null} />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={['/chats/c1']}>
+        <Routes>
+          <Route path="/chats/:chatId" element={<ChatRoute ws={null} />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -81,6 +84,7 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
+    useUiStore.getState().setTaskAddChatId(null);
     usePresenceStore.getState().setConnection('connected');
     usePresenceStore.getState().setHostOnline('d1', true);
     setActiveWs(null);
@@ -97,10 +101,69 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
     setActiveWs(null);
   });
 
-  it('shows no task bar until the agent has written a list', () => {
+  it('with no list yet, there is no bar; the ⋯ menu offers "Add tasks", which opens it', () => {
     seed([]);
     renderChat();
     expect(screen.queryByTestId('task-bar')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-add-tasks'));
+    expect(screen.getByTestId('task-bar-head')).toHaveTextContent('Add tasks');
+    expect(screen.getByTestId('task-add-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-bar-count')).not.toBeInTheDocument();
+    // Collapsing the empty bar puts it away again.
+    expand();
+    expect(screen.queryByTestId('task-bar')).not.toBeInTheDocument();
+  });
+
+  it('the ⋯ menu does not offer "Add tasks" once the chat has a list', () => {
+    seed(LIST);
+    renderChat();
+    fireEvent.click(screen.getByTestId('action-more'));
+    expect(screen.queryByTestId('action-add-tasks')).not.toBeInTheDocument();
+  });
+
+  it('queues typed tasks as a draft without telling the agent until Done', async () => {
+    seed([]);
+    renderChat();
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-add-tasks'));
+    const input = screen.getByTestId('task-add-input');
+    for (const t of ['x', 'y', 'z']) {
+      fireEvent.change(input, { target: { value: t } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+    }
+    expect(api.setTodos).not.toHaveBeenCalled();
+    expect(screen.getAllByTestId('task-draft-row')).toHaveLength(3);
+    expect(screen.getByTestId('task-bar-queued')).toHaveTextContent('3 queued');
+
+    fireEvent.click(screen.getByTestId('task-draft-done'));
+    await waitFor(() => expect(api.setTodos).toHaveBeenCalledTimes(1));
+    expect(lastSent()).toEqual([
+      { text: 'x', status: 'pending' },
+      { text: 'y', status: 'pending' },
+      { text: 'z', status: 'pending' },
+    ]);
+    expect(screen.queryByTestId('task-draft-row')).not.toBeInTheDocument();
+  });
+
+  it('removes a queued task before release, and Done includes text still in the field', async () => {
+    seed(LIST);
+    renderChat();
+    expand();
+    const input = screen.getByTestId('task-add-input');
+    fireEvent.change(input, { target: { value: 'a' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.change(input, { target: { value: 'b' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(screen.getAllByTestId('task-draft-delete-btn')[0] as HTMLElement);
+    fireEvent.change(input, { target: { value: 'c' } });
+    fireEvent.click(screen.getByTestId('task-draft-done'));
+
+    await waitFor(() => expect(api.setTodos).toHaveBeenCalledTimes(1));
+    expect(lastSent().slice(3)).toEqual([
+      { text: 'b', status: 'pending' },
+      { text: 'c', status: 'pending' },
+    ]);
   });
 
   it('collapsed, names the in-progress task and the progress count', () => {
@@ -193,13 +256,15 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
     ]);
   });
 
-  it('adds a task at the end as pending', async () => {
+  it('adds a queued task at the end as pending on Done', async () => {
     seed(LIST);
     renderChat();
     expand();
     const input = screen.getByTestId('task-add-input');
     fireEvent.change(input, { target: { value: 'benchmark it' } });
     fireEvent.keyDown(input, { key: 'Enter' });
+    expect(api.setTodos).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('task-draft-done'));
 
     await waitFor(() => expect(api.setTodos).toHaveBeenCalled());
     expect(lastSent()[3]).toEqual({ text: 'benchmark it', status: 'pending' });
@@ -227,6 +292,7 @@ describe('ChatRoute — goal bar edits in place (spec/14 § Goal bar)', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
+    useUiStore.getState().setTaskAddChatId(null);
     usePresenceStore.getState().setConnection('connected');
     usePresenceStore.getState().setHostOnline('d1', true);
     setActiveWs(null);

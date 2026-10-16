@@ -12,6 +12,7 @@ import {
   formatWakeTime,
   formatWakeTimeCompact,
   resolvePreset,
+  parseCustomSnooze,
 } from '../src/lib/snooze';
 import { isSnoozed } from '../src/stores/types';
 
@@ -20,7 +21,7 @@ afterEach(() => {
 });
 
 describe('SNOOZE_PRESETS', () => {
-  it('is the spec/04 ladder, in order, with no custom entry (the phone has no date/time field)', () => {
+  it('is the spec/04 ladder, in order, with no custom entry (Custom is a separate page)', () => {
     expect(SNOOZE_PRESETS.map((p) => p.label)).toEqual([
       '2 minutes',
       '5 minutes',
@@ -29,7 +30,7 @@ describe('SNOOZE_PRESETS', () => {
       '5pm',
       'Tomorrow 8am',
       '1 day',
-      'Next week',
+      'Next Monday',
     ]);
   });
 
@@ -43,7 +44,6 @@ describe('SNOOZE_PRESETS', () => {
     expect(byLabel['30 minutes']).toBe(30 * 60_000);
     expect(byLabel['1 hour']).toBe(60 * 60_000);
     expect(byLabel['1 day']).toBe(24 * 60 * 60_000);
-    expect(byLabel['Next week']).toBe(7 * 24 * 60 * 60_000);
   });
 });
 
@@ -77,6 +77,37 @@ describe('resolvePreset', () => {
 
     vi.setSystemTime(new Date(2026, 7, 25, 23, 59, 0));
     expect(resolvePreset(tomorrow8am)).toBe(new Date(2026, 7, 26, 8, 0, 0, 0).getTime());
+  });
+});
+
+describe('Next Monday', () => {
+  const nextMonday = SNOOZE_PRESETS.find((p) => p.id === 'next-monday')!;
+  it('from a Tuesday is the following Monday 08:00', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 13, 10, 0, 0)); // Tue 13 Oct 2026
+    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 19, 8, 0, 0, 0).getTime());
+  });
+  it('from a Sunday is the next day', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 18, 10, 0, 0));
+    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 19, 8, 0, 0, 0).getTime());
+  });
+  it('from a Monday is a week out, even before 8am', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 19, 6, 0, 0));
+    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 26, 8, 0, 0, 0).getTime());
+  });
+});
+
+describe('parseCustomSnooze', () => {
+  const now = new Date(2026, 9, 15, 12, 0, 0).getTime();
+  it('parses a local date and time', () => {
+    expect(parseCustomSnooze('2026-10-16 09:30', now)).toBe(new Date(2026, 9, 16, 9, 30).getTime());
+  });
+  it('rejects malformed, impossible and past input', () => {
+    expect(() => parseCustomSnooze('tomorrow', now)).toThrow(/YYYY-MM-DD/);
+    expect(() => parseCustomSnooze('2026-02-31 09:00', now)).toThrow(/does not exist/);
+    expect(() => parseCustomSnooze('2026-10-15 11:00', now)).toThrow(/future/);
   });
 });
 

@@ -24,7 +24,7 @@ const ctx: HookCheckContext = {
   message: 'hello world',
   chatId: 'c_abc',
   folder: '/home/tom/projects/bus',
-  daemonId: 'd_abc',
+  hostId: 'd_abc',
   specialThread: false,
 };
 

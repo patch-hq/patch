@@ -112,7 +112,7 @@ scaffold-level smoke tests are:
 
 - `packages/server` — `GET /api/healthz` returns ok+version+gitSha; host
   proxy returns 503 when unconfigured.
-- `packages/daemon` — `GET /healthz` (loopback fastify) returns
+- `packages/host` — `GET /healthz` (loopback fastify) returns
   ok+version+gitSha.
 - `packages/cli` — `healthz` client parses JSON from a real HTTP server.
 - `packages/web` — Vitest sanity smoke on the placeholder component.
@@ -120,7 +120,7 @@ scaffold-level smoke tests are:
 ## Local dev (no Docker)
 
 ```bash
-SDK_BACKEND=real pnpm --filter @patch/daemon dev   # UDS at ~/.patch/daemon.sock + TCP :3001 (real Claude via `claude login`; SDK_BACKEND has no default)
+SDK_BACKEND=real pnpm --filter @patch/host dev   # UDS at ~/.patch/daemon.sock + TCP :3001 (real Claude via `claude login`; SDK_BACKEND has no default)
 pnpm --filter @patch/server dev   # http://localhost:3000 (PORT env override-able)
 pnpm --filter @patch/web dev      # http://localhost:5173 (proxies /api, /ws)
 ```
@@ -165,7 +165,7 @@ Open `http://localhost:5173/?credential=<jwt>` — the app loads authenticated (
 param is stripped after the credential is persisted to localStorage). To populate
 the Manager/Speakers threads in the sidebar, register and boot a host
 the same way (`fixtures:mint-daemon-key` → `<dataDir>/daemon.key` →
-`pnpm --filter @patch/daemon dev`). The host runs against its **real** SDK
+`pnpm --filter @patch/host dev`). The host runs against its **real** SDK
 backend via your `claude login` OAuth (Keychain on macOS,
 `~/.claude/.credentials.json` on Linux — NEVER an API key); it aborts loudly if it
 can't resolve a credential.

@@ -117,7 +117,7 @@ export function registerJobsCommands(program: Command): void {
           folder?: string;
           chatId?: string;
           command?: string;
-          daemonId?: string;
+          hostId?: string;
           timeoutMs?: string;
           prompt?: string;
           skill?: string;
@@ -154,13 +154,13 @@ export function registerJobsCommands(program: Command): void {
             if (opts.action === 'script') {
               if (!opts.command) throw new Error('--command is required when --action script');
               if (!folder) throw new Error('--folder is required when --action script');
-              if (!opts.daemonId) throw new Error('--daemon-id is required when --action script');
+              if (!opts.hostId) throw new Error('--daemon-id is required when --action script');
               if (opts.prompt !== undefined || opts.skill !== undefined) {
                 throw new Error('--action script takes --command, not --prompt / --skill');
               }
               action['command'] = opts.command;
               action['folder'] = folder;
-              action['daemonId'] = opts.daemonId;
+              action['hostId'] = opts.hostId;
               if (opts.timeoutMs !== undefined) {
                 const ms = Number(opts.timeoutMs);
                 if (!Number.isInteger(ms)) throw new Error('--timeout-ms must be a whole number');

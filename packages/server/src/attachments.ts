@@ -43,7 +43,7 @@ import { verifySurfaceCredential } from '@patch/auth';
 import { type AttachmentKind, type AttachmentRef, type WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { ChatRegistry } from './chat-registry.js';
-import type { DaemonLink } from './daemon-link.js';
+import type { HostLink } from './host-link.js';
 
 const STORE_REQUEST_TIMEOUT_MS = 30_000;
 /** Reject files larger than this before spending a host round-trip on them. */
@@ -80,6 +80,14 @@ function kindForMime(mime: string): AttachmentKind {
   return mime.toLowerCase().startsWith('image/') ? 'image' : 'file';
 }
 
+/** RFC 5987 ext-value: percent-encode everything outside attr-char. */
+function encodeRFC5987(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
 interface AttachmentSidecar {
   name: string;
   mimeType: string;
@@ -90,7 +98,7 @@ export interface AttachmentRoutesDeps {
   logger: Logger;
   registry: Registry;
   chatRegistry: ChatRegistry;
-  daemonLink: DaemonLink;
+  hostLink: HostLink;
   idGenerator: () => string;
   /** Root the server writes its serving-copies under: `<dir>/<chatId>/<id>`. */
   attachmentsDir: string;
@@ -106,7 +114,7 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
       timeout: NodeJS.Timeout;
     }
   >();
-  deps.daemonLink.onEvent((event: WireEvent) => {
+  deps.hostLink.onEvent((event: WireEvent) => {
     if (event.type !== 'patch.attachment.store_response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
@@ -115,7 +123,7 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
     w.resolve(event);
   });
 
-  function awaitDaemon(
+  function awaitHost(
     surfaceId: string,
     build: (requestId: string) => WireEvent,
   ): Promise<Extract<WireEvent, { type: 'patch.attachment.store_response' }> | 'timeout'> {
@@ -126,7 +134,7 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
         resolveP('timeout');
       }, STORE_REQUEST_TIMEOUT_MS);
       pending.set(requestId, { resolve: resolveP, timeout });
-      deps.daemonLink.send(surfaceId, build(requestId));
+      deps.hostLink.send(surfaceId, build(requestId));
     });
   }
 
@@ -145,6 +153,12 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
     if (!chatId || chatId.length === 0) {
       return reply.code(400).send({ error: 'chatId is required' });
     }
+    // Stage logs: an upload that hangs leaves its last stage as the trace.
+    const startedAt = Date.now();
+    deps.logger.info(
+      { chatId, contentLength: req.headers['content-length'] },
+      'attachment: upload received',
+    );
 
     if (!req.isMultipart()) {
       return reply.code(400).send({ error: 'expected multipart/form-data' });
@@ -174,12 +188,27 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
         }
       }
     } catch (err) {
+      deps.logger.warn(
+        { chatId, err: (err as Error).message, afterMs: Date.now() - startedAt },
+        'attachment: multipart parse failed',
+      );
       return reply.code(400).send({ error: `invalid multipart body: ${(err as Error).message}` });
     }
 
     if (!bytes || bytes.byteLength === 0) {
       return reply.code(400).send({ error: 'file is required' });
     }
+    deps.logger.info(
+      {
+        chatId,
+        filename,
+        mimeType,
+        bytes: bytes.byteLength,
+        modelBytes: modelBytes?.byteLength,
+        parseMs: Date.now() - startedAt,
+      },
+      'attachment: body parsed',
+    );
     // Unreachable via HTTP: @fastify/multipart's own `fileSize` limit (app.ts,
     // registered at the same 25MB ceiling) always truncates/rejects an
     // oversized part first, landing in the `catch` above with a 400, so
@@ -222,7 +251,8 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
     // image was already within the cap, or it isn't an image), so the one blob
     // legitimately serves both purposes.
     const dataBase64 = (modelBytes ?? bytes).toString('base64');
-    const result = await awaitDaemon(auth.surfaceId, (requestId) => ({
+    deps.logger.info({ chatId, id }, 'attachment: sent to host');
+    const result = await awaitHost(auth.surfaceId, (requestId) => ({
       type: 'patch.attachment.store_request',
       requestId,
       chatId,
@@ -245,6 +275,10 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
         .send({ error: code, message: result.error?.message ?? 'attachment store failed' });
     }
 
+    deps.logger.info(
+      { chatId, id, totalMs: Date.now() - startedAt },
+      'attachment: upload complete',
+    );
     const ref: AttachmentRef & { url: string } = {
       id,
       name: filename,
@@ -282,9 +316,12 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
           .header('content-type', sidecar.mimeType)
           .header('content-length', String(statSync(dataPath).size))
           // `inline` so images render in-page; the filename rides for downloads.
+          // A header value can't carry chars past U+00FF (Node throws), so
+          // `filename` gets an ASCII stand-in and `filename*` the real name.
           .header(
             'content-disposition',
-            `inline; filename="${sidecar.name.replace(/["\\]/g, '_')}"`,
+            `inline; filename="${sidecar.name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; ` +
+              `filename*=UTF-8''${encodeRFC5987(sidecar.name)}`,
           )
           .send(createReadStream(dataPath))
       );

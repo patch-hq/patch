@@ -26,11 +26,11 @@ export function useSkillTarget(
   const setActiveChat = useChatStore((s) => s.setActiveChat);
   const openFileInBrowser = useUiStore((s) => s.openFileInBrowser);
   const folder = chatRow?.folder ?? '';
-  const daemonId = chatRow?.daemonId ?? '';
+  const hostId = chatRow?.hostId ?? '';
   const { data } = useQuery({
-    queryKey: ['skills', folder, daemonId],
-    queryFn: () => api.skills(folder, daemonId),
-    enabled: folder.trim() !== '' && daemonId.trim() !== '' && skillName !== '',
+    queryKey: ['skills', folder, hostId],
+    queryFn: () => api.skills(folder, hostId),
+    enabled: folder.trim() !== '' && hostId.trim() !== '' && skillName !== '',
   });
   const target =
     skillName === ''
@@ -38,12 +38,12 @@ export function useSkillTarget(
       : resolveSkillLink({
           skill: skillName,
           paths: data?.paths,
-          daemonId,
+          hostId,
           folder,
           chats: Object.values(chats).map((c) => ({
             chatId: c.chatId,
             folder: c.folder,
-            daemonId: c.daemonId,
+            hostId: c.hostId,
           })),
         });
   return {

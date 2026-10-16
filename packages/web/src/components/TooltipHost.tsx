@@ -22,6 +22,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
+import { fitTooltipText } from '../lib/tooltipText.js';
 import { computeTooltipPosition, type TooltipPosition } from '../lib/tooltipPosition.js';
 
 /** Hover shows after a short pause, like a native tooltip but far faster. */
@@ -32,6 +33,7 @@ const FOCUS_DELAY_MS = 0;
 interface Shown {
   el: HTMLElement;
   text: string;
+  full: boolean;
 }
 
 export function TooltipHost(): JSX.Element | null {
@@ -96,7 +98,7 @@ export function TooltipHost(): JSX.Element | null {
         }
         stash.set(source, text);
         source.removeAttribute('title');
-        setShown({ el: source, text });
+        setShown({ el: source, text, full: source.hasAttribute('data-tooltip-full') });
       }, delay);
     }
 
@@ -187,7 +189,7 @@ export function TooltipHost(): JSX.Element | null {
         visibility: pos ? 'visible' : 'hidden',
       }}
     >
-      {shown.text}
+      {shown.full ? shown.text : fitTooltipText(shown.text)}
     </div>,
     document.body,
   );

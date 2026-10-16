@@ -6,7 +6,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '../src/jobs/types.js';
 import type { Job } from '../src/jobs/types.js';
@@ -58,7 +58,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     enabled: true,
     trigger: { type: 'cron', expression: '* * * * *' },
     filter: null,
-    action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+    action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -78,7 +78,7 @@ describe('JobDispatcher', () => {
     const out = JobDispatcher.renderPrompt(
       {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/x',
         prompt: 'PR by {{payload.user.login}} merged: {{payload.title}}',
       },
@@ -95,7 +95,7 @@ describe('JobDispatcher', () => {
     const out = JobDispatcher.renderPrompt(
       {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/x',
         prompt: 'comment: {{payload.event_data.content}}',
       },
@@ -110,7 +110,7 @@ describe('JobDispatcher', () => {
 
   it('skill action turns into /skill\\n\\n<json-payload>', () => {
     const out = JobDispatcher.renderPrompt(
-      { type: 'spawn', daemonId: 'd1', folder: '/x', skill: 'todoist-handler' },
+      { type: 'spawn', hostId: 'd1', folder: '/x', skill: 'todoist-handler' },
       { payload: { task: { id: 1 } } },
       'todoist',
     );
@@ -123,7 +123,7 @@ describe('JobDispatcher', () => {
     const out = JobDispatcher.renderPrompt(
       {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/x',
         skill: 'forage-podcast',
         prompt: 'Focus on {{season}} near home.',
@@ -137,7 +137,7 @@ describe('JobDispatcher', () => {
   });
 
   describe('renderPrompt trigger event block', () => {
-    const spawn = { type: 'spawn', daemonId: 'd1', folder: '/x' } as const;
+    const spawn = { type: 'spawn', hostId: 'd1', folder: '/x' } as const;
     const payload = { payload: { event_data: { id: 7 } } };
     const block = (out: string): unknown =>
       JSON.parse(out.slice(out.indexOf('```json\n') + 8, out.lastIndexOf('\n```')));
@@ -187,7 +187,7 @@ describe('JobDispatcher', () => {
     });
 
     it('a script action renders nothing', () => {
-      const script = { type: 'script', daemonId: 'd1', folder: '/x', command: 'true' } as const;
+      const script = { type: 'script', hostId: 'd1', folder: '/x', command: 'true' } as const;
       expect(JobDispatcher.renderPrompt(script, payload, 'todoist')).toBeUndefined();
     });
 
@@ -244,12 +244,12 @@ describe('JobDispatcher', () => {
     });
   });
 
-  it('spawn → daemon-link send when online', () => {
-    const link = new InProcessDaemonLink();
+  it('spawn → host-link send when online', () => {
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
@@ -272,11 +272,11 @@ describe('JobDispatcher', () => {
   it('a todoist fire delivers the event after the autonomy prompt; includePayload:false drops it', () => {
     const payload = { payload: { event_data: { id: 'abc' } } };
     const sentPrompt = (action: Job['action']): string => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => 'fixed1',
       });
@@ -286,13 +286,13 @@ describe('JobDispatcher', () => {
       if (!sent || sent.event.type !== 'chat.spawn_request') throw new Error('no spawn sent');
       return sent.event.prompt as string;
     };
-    const on = sentPrompt({ type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' });
+    const on = sentPrompt({ type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' });
     expect(on).toContain('go\n\nTrigger event:\n```json');
     expect(on).toContain('"id": "abc"');
     expect(on.indexOf(withDefaultAutonomyPrompt('go').split('go')[0]!)).toBe(0);
     const off = sentPrompt({
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
       prompt: 'go',
       includePayload: false,
@@ -301,17 +301,17 @@ describe('JobDispatcher', () => {
   });
 
   it('spawn with action.startHidden spawns into Hidden (spec/08 ## Action)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
     const action = {
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
       prompt: 'go',
       startHidden: true,
@@ -324,17 +324,17 @@ describe('JobDispatcher', () => {
   });
 
   it('spawn with action.goal forwards it on the chat.spawn_request (spec/04 § Goals, spec/08 ## Action)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
     const action = {
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
       prompt: 'go',
       goal: 'Ship the release by Friday',
@@ -349,11 +349,11 @@ describe('JobDispatcher', () => {
   });
 
   it('spawn with no action.goal sends no goal field at all', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
@@ -373,11 +373,11 @@ describe('JobDispatcher', () => {
   // frame carrying an unknown key. Pinned so nobody later "plumbs it through".
   it('spawn with action.notifyOnComplete sends a frame identical to one without it', () => {
     function frameFor(action: Record<string, unknown>): unknown {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => 'fixed1',
       });
@@ -387,7 +387,7 @@ describe('JobDispatcher', () => {
       expect(sent).toBeDefined();
       return sent?.event;
     }
-    const base = { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' };
+    const base = { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' };
     const plain = frameFor(base);
     for (const value of [false, true]) {
       const withFlag = frameFor({ ...base, notifyOnComplete: value });
@@ -397,11 +397,11 @@ describe('JobDispatcher', () => {
   });
 
   it('a continue action keeps the flag off the wire on both the spawn and the input', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
     });
@@ -409,7 +409,7 @@ describe('JobDispatcher', () => {
       id: 'j_00000000000000000000notify',
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/persist',
         prompt: 'tick',
         notifyOnComplete: false,
@@ -431,12 +431,12 @@ describe('JobDispatcher', () => {
   // option would be unreadable at settle time (and the chat would drop out of
   // `▸ Automations` too).
   it('a silenced job still records its chatId → jobId link', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'chat-silenced',
       chatLinks: { get: () => null, record: (chatId, jobId) => recorded.push([chatId, jobId]) },
@@ -445,7 +445,7 @@ describe('JobDispatcher', () => {
       id: 'j_0000000000000000000silent',
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'go',
         notifyOnComplete: false,
@@ -462,11 +462,11 @@ describe('JobDispatcher', () => {
   // blocking mode for the person sitting at it cannot silently stall every
   // unattended job running there.
   it('spawn without action.permissionMode sends auto (spec/08 § Action)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
@@ -479,17 +479,17 @@ describe('JobDispatcher', () => {
   });
 
   it('spawn forwards action.permissionMode onto the spawn request (spec/08 § Action)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
     const action = {
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
       prompt: 'go',
       permissionMode: 'plan',
@@ -507,17 +507,17 @@ describe('JobDispatcher', () => {
   // selects the host's last-used model — so an action without one must send no
   // field at all rather than a null/empty placeholder.
   it('spawn forwards action.model onto the spawn request (spec/08 § Action)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
     const action = {
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/work',
       prompt: 'go',
       model: 'claude-opus-5',
@@ -531,11 +531,11 @@ describe('JobDispatcher', () => {
   });
 
   it('spawn with no action.model omits the field entirely (host last-used wins)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
     });
@@ -550,12 +550,12 @@ describe('JobDispatcher', () => {
   });
 
   it('ensure forwards action.model on the fire that CREATES the durable chat', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     let n = 0;
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => `fid${++n}`,
     });
@@ -563,7 +563,7 @@ describe('JobDispatcher', () => {
       id: 'j_00000000000000000000000009',
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/persist',
         prompt: 'tick',
         model: 'claude-haiku-4-5',
@@ -584,13 +584,13 @@ describe('JobDispatcher', () => {
   });
 
   it('spawn action records the chatId → jobId link (sidebar Automations group, spec/08 § Action)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
     const chatLinks = { record: (chatId: string, jobId: string) => recorded.push([chatId, jobId]) };
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
       chatLinks,
@@ -601,13 +601,13 @@ describe('JobDispatcher', () => {
   });
 
   it('message action does NOT record a chat link (delivers into a chat the user already owns)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
     const chatLinks = { record: (chatId: string, jobId: string) => recorded.push([chatId, jobId]) };
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
       chatLinks,
@@ -628,13 +628,13 @@ describe('JobDispatcher', () => {
   // link it would be in Archived and in no Automations row either — invisible
   // in a way a hidden SPAWN never is.
   it('ensure action records the chatId → jobId link on every fire, so a hidden ensure chat is still watchable in Automations', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
     const chatLinks = { record: (chatId: string, jobId: string) => recorded.push([chatId, jobId]) };
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
       chatLinks,
@@ -642,7 +642,7 @@ describe('JobDispatcher', () => {
     const job = makeJob({
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/persist',
         prompt: 'tick',
         startHidden: true,
@@ -664,11 +664,11 @@ describe('JobDispatcher', () => {
   // which is the only fire that places anything; every later fire is a
   // `chat.input` into a chat that already has a home.
   it('ensure with action.startHidden creates its durable chat in Hidden', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
     });
@@ -676,7 +676,7 @@ describe('JobDispatcher', () => {
       id: 'j_0000000000000000000000hide',
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/persist',
         prompt: 'tick',
         startHidden: true,
@@ -697,11 +697,11 @@ describe('JobDispatcher', () => {
 
   // spec/04 § Goals, spec/08 ## Action — same creation-only rule as `hidden`.
   it('continue with action.goal sets it on the durable chat it creates, never on a later input', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
     });
@@ -709,7 +709,7 @@ describe('JobDispatcher', () => {
       id: 'j_0000000000000000000000goal',
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/persist',
         prompt: 'tick',
         goal: 'Keep the queue empty',
@@ -731,11 +731,11 @@ describe('JobDispatcher', () => {
   // A KEYED ensure is the case `hidden` was actually asked for: one durable
   // chat per Todoist task is one inbox row per task.
   it('a keyed ensure hides each subject chat it creates', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
     });
@@ -743,7 +743,7 @@ describe('JobDispatcher', () => {
       id: 'j_00000000000000000000000key',
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/persist',
         prompt: 'build {{task}}',
         key: '{{task}}',
@@ -763,18 +763,18 @@ describe('JobDispatcher', () => {
   // The default is unchanged: an ensure job nobody has ticked the box on still
   // creates its chat in the active inbox.
   it('ensure without hidden still creates its chat in the active inbox', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
     });
     disp.dispatch(
       makeJob({
         id: 'j_000000000000000000000shown',
-        action: { type: 'continue', daemonId: 'd1', folder: '/persist', prompt: 'tick' },
+        action: { type: 'continue', hostId: 'd1', folder: '/persist', prompt: 'tick' },
       }),
       {},
       'cron',
@@ -786,11 +786,11 @@ describe('JobDispatcher', () => {
   });
 
   it('message action → chat.input event', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fid',
     });
@@ -812,18 +812,18 @@ describe('JobDispatcher', () => {
   });
 
   it('ensure action: first fire SPAWNS the durable chat, later fires MESSAGE the same chat', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     let n = 0;
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => `fid${++n}`,
     });
     const job = makeJob({
       id: 'j_00000000000000000000000008',
-      action: { type: 'continue', daemonId: 'd1', folder: '/persist', prompt: 'tick' },
+      action: { type: 'continue', hostId: 'd1', folder: '/persist', prompt: 'tick' },
     });
     disp.dispatch(job, {}, 'cron');
     disp.dispatch(job, {}, 'cron');
@@ -848,11 +848,11 @@ describe('JobDispatcher', () => {
   });
 
   it('ensure action: a chat already in the registry is messaged, never re-spawned', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'x',
       // Simulate the persistent chat already existing (e.g. after a restart).
@@ -861,7 +861,7 @@ describe('JobDispatcher', () => {
     disp.dispatch(
       makeJob({
         id: 'j_00000000000000000000000014',
-        action: { type: 'continue', daemonId: 'd1', folder: '/p', prompt: 'go' },
+        action: { type: 'continue', hostId: 'd1', folder: '/p', prompt: 'go' },
       }),
       {},
       'cron',
@@ -875,13 +875,46 @@ describe('JobDispatcher', () => {
     disp.close();
   });
 
+  it('continue action: editing the job model switches the chat it already owns, ahead of the input', () => {
+    const id = 'jobchat-j_00000000000000000000000015';
+    const run = (chatModel: string | null): string[] => {
+      const link = new InProcessHostLink();
+      const disp = new JobDispatcher({
+        dataDir: dir,
+        logs: new JobLogs(dir),
+        hostLink: link,
+        logger: silentLogger,
+        idGenerator: () => 'x',
+        chatExists: (c) => c === id,
+        chatModel: () => chatModel,
+      });
+      disp.dispatch(
+        makeJob({
+          id: 'j_00000000000000000000000015',
+          action: { type: 'continue', hostId: 'd1', folder: '/p', prompt: 'go', model: 'new-m' },
+        }),
+        {},
+        'cron',
+      );
+      disp.close();
+      return link.sent.map((s) =>
+        s.event.type === 'chat.model_request'
+          ? `model:${s.event.chatId}:${s.event.model}`
+          : s.event.type,
+      );
+    };
+    expect(run('old-m')).toEqual([`model:${id}:new-m`, 'chat.input']);
+    expect(run('new-m')).toEqual(['chat.input']);
+    expect(run(null)).toEqual(['chat.input']);
+  });
+
   it('buffers when host offline, flushes on reconnect', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
     });
     disp.dispatch(makeJob({ id: 'j_00000000000000000000000003' }), { firedAt: 'a' }, 'cron');
@@ -897,13 +930,13 @@ describe('JobDispatcher', () => {
   });
 
   it('caps pending per job, drops oldest', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
     let counter = 0;
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       pendingCapPerJob: 2,
       idGenerator: () => `id${++counter}`,
@@ -921,18 +954,18 @@ describe('JobDispatcher', () => {
   });
 
   it('an action with neither skill nor prompt renders no prompt at all (spawn)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'noop1',
     });
     // Bypasses the REST/RPC-level "must carry a skill, a prompt, or both"
     // gate (jobs/types.ts JobAction refinement) — a direct dispatcher call
     // still has to behave sanely if it's ever reached this way.
-    const job = makeJob({ action: { type: 'spawn', daemonId: 'd1', folder: '/x' } });
+    const job = makeJob({ action: { type: 'spawn', hostId: 'd1', folder: '/x' } });
     const result = disp.dispatch(job, {}, 'cron');
     expect(result.event.type).toBe('chat.spawn_request');
     if (result.event.type === 'chat.spawn_request') {
@@ -942,17 +975,17 @@ describe('JobDispatcher', () => {
   });
 
   it('an action with neither skill nor prompt renders no prompt at all (ensure)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'noop2',
     });
     const job = makeJob({
       id: 'j_00000000000000000000000002',
-      action: { type: 'continue', daemonId: 'd1', folder: '/x' },
+      action: { type: 'continue', hostId: 'd1', folder: '/x' },
     });
     const result = disp.dispatch(job, {}, 'cron');
     expect(result.event.type).toBe('chat.spawn_request');
@@ -963,11 +996,11 @@ describe('JobDispatcher', () => {
   });
 
   it('keyed ensure: different subjects get their own durable chats', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'k',
     });
@@ -975,7 +1008,7 @@ describe('JobDispatcher', () => {
       id: 'j_00000000000000000000000020',
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'task {{payload.event_data.id}}',
         key: '{{payload.event_data.id}}',
@@ -997,11 +1030,11 @@ describe('JobDispatcher', () => {
   });
 
   it('keyed ensure: a second fire for the SAME subject messages that subject’s chat', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'k',
     });
@@ -1009,7 +1042,7 @@ describe('JobDispatcher', () => {
       id: 'j_00000000000000000000000021',
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'edit: {{payload.event_data.content}}',
         key: '{{payload.event_data.id}}',
@@ -1036,12 +1069,12 @@ describe('JobDispatcher', () => {
   });
 
   it('keyed ensure: a key that renders empty is REFUSED, never collapsed onto the job-wide chat', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const logs = new JobLogs(dir);
     const disp = new JobDispatcher({
       dataDir: dir,
       logs,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'k',
     });
@@ -1050,7 +1083,7 @@ describe('JobDispatcher', () => {
       id: jobId,
       action: {
         type: 'continue',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'go',
         key: '{{payload.event_data.id}}',
@@ -1073,11 +1106,11 @@ describe('JobDispatcher', () => {
   });
 
   it('flush() called directly while offline is a no-op (public API guard)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
     const disp = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -1086,13 +1119,13 @@ describe('JobDispatcher', () => {
   });
 
   it('listPendingForJob skips an empty pending file (no non-blank first line)', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
     let counter = 0;
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       pendingCapPerJob: 5,
       idGenerator: () => `id${++counter}`,
@@ -1108,11 +1141,11 @@ describe('JobDispatcher', () => {
   });
 
   it('flush skips a non-.jsonl stray file and an empty .jsonl file in the pending dir', () => {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
     const disp = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -1132,13 +1165,13 @@ describe('JobDispatcher', () => {
     });
 
     it('enforceCap logs and continues when removing the overflowed entry fails', () => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         pendingCapPerJob: 1,
         idGenerator: () => `id${++counter}`,
@@ -1161,13 +1194,13 @@ describe('JobDispatcher', () => {
     });
 
     it('listPendingForJob skips an entry it cannot read (does not throw, cap still enforced on the rest)', () => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         pendingCapPerJob: 5,
         idGenerator: () => `id${++counter}`,
@@ -1182,13 +1215,13 @@ describe('JobDispatcher', () => {
     });
 
     it('listPendingForJob skips a malformed (non-JSON) pending entry without throwing', () => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         pendingCapPerJob: 5,
         idGenerator: () => `id${++counter}`,
@@ -1208,11 +1241,11 @@ describe('JobDispatcher', () => {
     });
 
     it('flush logs and continues when removing a flushed entry fails', () => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       link.setStatus('offline');
       const disp = new JobDispatcher({
         dataDir: dir,
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         logs: new JobLogs(dir),
       });
@@ -1230,13 +1263,13 @@ describe('JobDispatcher', () => {
     });
 
     it('flush skips an entry it cannot read, and a malformed entry, without throwing', () => {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
       const disp = new JobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => `id${++counter}`,
       });
@@ -1261,13 +1294,13 @@ describe('JobDispatcher', () => {
     const JOB_ID = 'j_00000000000000000000000099';
 
     function setup(opts: { offline?: boolean } = {}) {
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       if (opts.offline) link.setStatus('offline');
       const logs = new JobLogs(dir);
       const disp = new JobDispatcher({
         dataDir: dir,
         logs,
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => 'fire1',
         ackTimeoutMs: 50,
@@ -1286,12 +1319,12 @@ describe('JobDispatcher', () => {
       const { link, logs, disp } = setup();
       const result = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'webhook');
       const chatId = result.event.chatId as string;
-      link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
       const runs = logs.readRuns(JOB_ID);
       expect(runs).toHaveLength(1);
       expect(runs[0]?.status).toBe('ok');
       expect(runs[0]?.action?.chatId).toBe(chatId);
-      expect(runs[0]?.action?.daemonId).toBe('d1');
+      expect(runs[0]?.action?.hostId).toBe('d1');
       disp.close();
     });
 
@@ -1313,7 +1346,7 @@ describe('JobDispatcher', () => {
       expect(runs[0]?.error).toContain('folder does not exist: /work');
       // A fire that never landed must not offer a chat link that 404s.
       expect(runs[0]?.action?.chatId).toBeUndefined();
-      expect(runs[0]?.action?.daemonId).toBe('d1');
+      expect(runs[0]?.action?.hostId).toBe('d1');
       disp.close();
     });
 
@@ -1341,12 +1374,12 @@ describe('JobDispatcher', () => {
       const job = makeJob({
         id: JOB_ID,
         concurrency: 1,
-        action: { type: 'continue', daemonId: 'd1', folder: '/work', prompt: 'go' },
+        action: { type: 'continue', hostId: 'd1', folder: '/work', prompt: 'go' },
       });
       // First fire creates the durable chat.
       const first = disp.dispatch(job, {}, 'todoist');
       const chatId = first.event.chatId as string;
-      link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
       // Second fire appends to it — this is the one that can hit the guard.
       const second = disp.dispatch(job, {}, 'todoist');
       const inputsBefore = link.sent.filter((x) => x.event.type === 'chat.input').length;
@@ -1390,11 +1423,11 @@ describe('JobDispatcher', () => {
       const { link, disp } = setup();
       const job = makeJob({
         id: JOB_ID,
-        action: { type: 'continue', daemonId: 'd1', folder: '/work', prompt: 'go' },
+        action: { type: 'continue', hostId: 'd1', folder: '/work', prompt: 'go' },
       });
       const first = disp.dispatch(job, {}, 'todoist');
       const chatId = first.event.chatId as string;
-      link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
       const second = disp.dispatch(job, {}, 'todoist');
       link.emit({
         type: 'chat.input_ack',
@@ -1422,7 +1455,7 @@ describe('JobDispatcher', () => {
       const { link, disp } = setup();
       const result = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'todoist');
       const chatId = result.event.chatId as string;
-      link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
       link.emit({
         type: 'chat.error',
         chatId,
@@ -1442,7 +1475,7 @@ describe('JobDispatcher', () => {
       const { link, logs, disp } = setup();
       const result = disp.dispatch(makeJob({ id: JOB_ID, concurrency: 1 }), {}, 'todoist');
       const chatId = result.event.chatId as string;
-      link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
       expect(logs.readRuns(JOB_ID)).toHaveLength(1);
 
       // Same chat, later: its first turn throws.
@@ -1468,12 +1501,12 @@ describe('JobDispatcher', () => {
       // No concurrency limit means no slot (acquireSlot), so the link store is
       // the only thing that still knows whose chat this was.
       const links = new Map<string, string>();
-      const link = new InProcessDaemonLink();
+      const link = new InProcessHostLink();
       const logs = new JobLogs(dir);
       const disp = new JobDispatcher({
         dataDir: dir,
         logs,
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => 'fire1',
         ackTimeoutMs: 50,
@@ -1484,7 +1517,7 @@ describe('JobDispatcher', () => {
       });
       const result = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'todoist');
       const chatId = result.event.chatId as string;
-      link.emit({ type: 'chat.spawned', chatId, daemonId: 'd1', folder: '/work' });
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
       link.emit({
         type: 'chat.error',
         chatId,
@@ -1518,20 +1551,20 @@ describe('JobDispatcher', () => {
       const runs = logs.readRuns(JOB_ID);
       expect(runs).toHaveLength(1);
       expect(runs[0]?.status).toBe('buffered');
-      expect(runs[0]?.action?.daemonId).toBe('d1');
+      expect(runs[0]?.action?.hostId).toBe('d1');
       // Nothing landed, so nothing to link to.
       expect(runs[0]?.action?.chatId).toBeUndefined();
       disp.close();
     });
 
     it('a fire queued for host X is NOT released because host Y came online', () => {
-      const link = new InProcessDaemonLink();
-      link.setDaemonId('other-host');
+      const link = new InProcessHostLink();
+      link.setHostId('other-host');
       const logs = new JobLogs(dir);
       const disp = new JobDispatcher({
         dataDir: dir,
         logs,
-        daemonLink: link,
+        hostLink: link,
         logger: silentLogger,
         idGenerator: () => 'fire2',
         ackTimeoutMs: 50,
@@ -1541,6 +1574,119 @@ describe('JobDispatcher', () => {
       expect(res.status).toBe('buffered');
       expect(disp.flush()).toEqual({ flushed: 0 });
       expect(link.sent).toHaveLength(0);
+      disp.close();
+    });
+  });
+
+  // A fire buffered against a sleeping host used to sit silently for hours.
+  // spec/12 § Cron fires while a host is down.
+  describe('late fires', () => {
+    const MIN = 60_000;
+    function lateSetup() {
+      const link = new InProcessHostLink();
+      link.setStatus('offline');
+      const clock = { now: Date.UTC(2026, 9, 16, 3, 0, 0) };
+      const late: Array<{ jobId: string; hostId: string | null; dueAt: number; jobName: string }> =
+        [];
+      const disp = new JobDispatcher({
+        dataDir: dir,
+        logs: new JobLogs(dir),
+        hostLink: link,
+        logger: silentLogger,
+        idGenerator: () => 'fire1',
+        ackTimeoutMs: 50,
+        nowMs: () => clock.now,
+        onLate: (info) => late.push(info),
+      });
+      return { link, clock, late, disp };
+    }
+    const cronJob = (): Job =>
+      makeJob({
+        name: 'Daily reset',
+        trigger: { type: 'cron', expression: '0 3 * * *', timezone: 'Europe/London' },
+      });
+
+    it('reports a buffered fire once it is more than 10 minutes late, and only once', () => {
+      const { clock, late, disp } = lateSetup();
+      disp.dispatch(cronJob(), {}, 'cron');
+      clock.now += 9 * MIN;
+      disp.checkLate();
+      expect(late).toHaveLength(0);
+      clock.now += 2 * MIN;
+      disp.checkLate();
+      disp.checkLate();
+      expect(late).toHaveLength(1);
+      expect(late[0]).toMatchObject({
+        jobName: 'Daily reset',
+        hostId: 'd1',
+        dueAt: Date.UTC(2026, 9, 16, 3, 0, 0),
+      });
+      disp.close();
+    });
+
+    it('does not report again after a restart', () => {
+      const { clock, late, disp } = lateSetup();
+      disp.dispatch(cronJob(), {}, 'cron');
+      clock.now += 20 * MIN;
+      disp.checkLate();
+      disp.close();
+      const late2: unknown[] = [];
+      const link = new InProcessHostLink();
+      link.setStatus('offline');
+      const disp2 = new JobDispatcher({
+        dataDir: dir,
+        logs: new JobLogs(dir),
+        hostLink: link,
+        logger: silentLogger,
+        nowMs: () => clock.now,
+        onLate: (i) => late2.push(i),
+      });
+      disp2.checkLate();
+      expect(late).toHaveLength(1);
+      expect(late2).toHaveLength(0);
+      disp2.close();
+    });
+
+    it('labels a late spawn "ran late (due HH:MM)" in the job timezone when the host returns', () => {
+      const { link, clock, disp } = lateSetup();
+      disp.dispatch(cronJob(), {}, 'cron');
+      clock.now += 6 * 60 * MIN;
+      link.setStatus('online');
+      expect(link.sent).toHaveLength(1);
+      const ev = link.sent[0]!.event as { type: string; name?: string };
+      expect(ev.type).toBe('chat.spawn_request');
+      // 03:00 UTC on 16 Oct is 04:00 in London (BST).
+      expect(ev.name).toBe('Daily reset — ran late (due 04:00)');
+      disp.close();
+    });
+
+    it('does not label a fire released within 10 minutes', () => {
+      const { link, clock, disp } = lateSetup();
+      disp.dispatch(cronJob(), {}, 'cron');
+      clock.now += 5 * MIN;
+      link.setStatus('online');
+      const ev = link.sent[0]!.event as { name?: string };
+      expect(ev.name).toBeUndefined();
+      disp.close();
+    });
+
+    it('marks a late message fire in its text', () => {
+      const { link, clock, disp } = lateSetup();
+      disp.dispatch(
+        makeJob({
+          name: 'Nudge',
+          trigger: { type: 'cron', expression: '0 3 * * *', timezone: 'Europe/London' },
+          action: { type: 'message', chatId: 'c_abc', prompt: 'hi' },
+        }),
+        {},
+        'cron',
+      );
+      clock.now += 60 * MIN;
+      link.setStatus('online');
+      // c_abc's host is unknown to this link, so it is addressed to no host and flushes.
+      const ev = link.sent[0]!.event as { type: string; message: string };
+      expect(ev.type).toBe('chat.input');
+      expect(ev.message.startsWith('[Ran late (due 04:00)')).toBe(true);
       disp.close();
     });
   });
@@ -1566,11 +1712,11 @@ describe('JobDispatcher — the model a job runs on', () => {
   });
 
   function spawnFrom(job: Job, defaultModel?: () => string | undefined) {
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => 'fixed1',
       ...(defaultModel ? { defaultModel } : {}),
@@ -1591,7 +1737,7 @@ describe('JobDispatcher — the model a job runs on', () => {
       makeJob({
         action: {
           type: 'spawn',
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/work',
           prompt: 'go',
           model: 'claude-haiku-4-5-20251001',
@@ -1604,7 +1750,7 @@ describe('JobDispatcher — the model a job runs on', () => {
 
   it('sends the account default for an `ensure` action too — the same drift applied there', () => {
     const event = spawnFrom(
-      makeJob({ action: { type: 'continue', daemonId: 'd1', folder: '/work', prompt: 'go' } }),
+      makeJob({ action: { type: 'continue', hostId: 'd1', folder: '/work', prompt: 'go' } }),
       () => 'claude-opus-5',
     );
     expect(event?.model).toBe('claude-opus-5');
@@ -1633,16 +1779,16 @@ describe('JobDispatcher — ensure before its host has reported', () => {
 
   const job = makeJob({
     id: 'j_0000000000000000000000ENSR',
-    action: { type: 'continue', daemonId: 'd1', folder: '/persist', prompt: 'tick' },
+    action: { type: 'continue', hostId: 'd1', folder: '/persist', prompt: 'tick' },
   });
   const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-  function setup(state: { reported: boolean; exists: boolean }, link = new InProcessDaemonLink()) {
+  function setup(state: { reported: boolean; exists: boolean }, link = new InProcessHostLink()) {
     let n = 0;
     const disp = new JobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       idGenerator: () => `fid${++n}`,
       chatExists: () => state.exists,
@@ -1662,7 +1808,7 @@ describe('JobDispatcher — ensure before its host has reported', () => {
     // The host re-announces its chats; the durable one is among them.
     state.reported = true;
     state.exists = true;
-    link.emit({ type: 'folders.list', daemonId: 'd1', roots: [], recent: [] });
+    link.emit({ type: 'folders.list', hostId: 'd1', roots: [], recent: [] });
     await tick();
     expect(types()).toEqual(['chat.input']);
     const input = link.sent[0]!.event;
@@ -1680,7 +1826,7 @@ describe('JobDispatcher — ensure before its host has reported', () => {
     expect(types()).toEqual([]);
 
     state.reported = true;
-    link.emit({ type: 'folders.list', daemonId: 'd1', roots: [], recent: [] });
+    link.emit({ type: 'folders.list', hostId: 'd1', roots: [], recent: [] });
     await tick();
     // The first held fire creates the chat; the second goes into it.
     expect(types()).toEqual(['chat.spawn_request', 'chat.input']);
@@ -1691,7 +1837,7 @@ describe('JobDispatcher — ensure before its host has reported', () => {
     const state = { reported: false, exists: false };
     const { link, disp, types } = setup(state);
     disp.dispatch(job, {}, 'cron');
-    link.emit({ type: 'folders.list', daemonId: 'd2', roots: [], recent: [] });
+    link.emit({ type: 'folders.list', hostId: 'd2', roots: [], recent: [] });
     await tick();
     expect(types()).toEqual([]);
     disp.close();
@@ -1719,7 +1865,7 @@ describe('JobDispatcher — ensure before its host has reported', () => {
     const second = setup(state);
     state.reported = true;
     state.exists = true;
-    second.link.emit({ type: 'folders.list', daemonId: 'd1', roots: [], recent: [] });
+    second.link.emit({ type: 'folders.list', hostId: 'd1', roots: [], recent: [] });
     await tick();
     expect(second.types()).toEqual(['chat.input']);
     second.disp.close();

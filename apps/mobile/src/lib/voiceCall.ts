@@ -142,6 +142,10 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
     console.log(`[patch-voice] call connect TIMED OUT after ${secs}s`);
     st.setError(`Could not connect — no answer from the host after ${secs}s`);
     useUiStore.getState().pushError(`voice call: no answer from the host after ${secs}s`);
+    // The setup may still be waiting on the token or the mic permission: end
+    // this attempt, so it stops where it is instead of waking up later and
+    // opening a live call under a bar that says it failed.
+    _callGen++;
     void releaseAudio();
   }, CALL_CONNECT_TIMEOUT_MS);
   // Diagnostic (logcat ReactNativeJS) — proves the tap handler fired and the
@@ -194,7 +198,7 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
       // Upgrade the call bar to the live session (real id + audio URL). The
       // timer keeps running off the original startedAt.
       const startedAt = useVoiceStore.getState().activeSession?.startedAt ?? Date.now();
-      useVoiceStore.getState().setActive({
+      useVoiceStore.getState().upgradeActive({
         sessionId: tok.sessionId,
         chatId,
         audioUrl: tok.audioUrl,
@@ -206,7 +210,13 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
 
       // Foreground service holds phoneCall|microphone — required on Android
       // to keep the mic alive while CallKeep's UI is in foreground.
-      await startVoiceAudioService(chatId, mode, useVoiceStore.getState().callMuted);
+      // The mode and mute as they stand NOW: the bar is up from the tap, so the
+      // user may have changed either while the token minted.
+      await startVoiceAudioService(
+        chatId,
+        useVoiceStore.getState().callMode,
+        useVoiceStore.getState().callMuted,
+      );
       // The notification's own buttons are the control surface for a phone in a
       // pocket (spec/15 § Voice tab). Route them into the same state the
       // call bar drives, so the two can never disagree about what the session is
@@ -226,6 +236,11 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
         setCallMode(store.callMode === 'hands-free' ? 'call' : 'hands-free');
       });
       if (gen !== _callGen) {
+        // Superseded while the service came up: the listener taken just above
+        // is this attempt's own (nothing awaited since), and nobody else will
+        // ever release it.
+        _serviceActions?.();
+        _serviceActions = null;
         await stopVoiceAudioService().catch(() => undefined);
         return;
       }
@@ -362,7 +377,7 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
           token: tok.token,
           // Android voice path uses hardware AEC; host bypasses its own.
           surfaceHasAec: true,
-          mode,
+          mode: useVoiceStore.getState().callMode,
           ...(addressWord !== null ? { addressWord } : {}),
         };
         try {
@@ -519,8 +534,18 @@ export async function endVoiceCall(): Promise<void> {
   _serviceActions = null;
   await stopMicCapture().catch(() => undefined);
   await stopTtsPlayback().catch(() => undefined);
-  await stopVoiceAudioService();
-  useVoiceStore.getState().setActive(null);
+  try {
+    await stopVoiceAudioService();
+  } catch (e) {
+    // Said, not swallowed — but the call is over either way: a bar left up over
+    // a closed socket cannot be retried, and a cross-engine mode switch that is
+    // waiting on this would never start its new session.
+    useUiStore
+      .getState()
+      .pushError(`voice call: audio service did not stop: ${(e as Error).message}`);
+  } finally {
+    useVoiceStore.getState().setActive(null);
+  }
 }
 
 /**

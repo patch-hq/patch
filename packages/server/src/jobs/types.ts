@@ -10,6 +10,7 @@ export {
   WebhookTrigger,
   TodoistTrigger,
   RecurrenceTrigger,
+  FollowsTrigger,
   JobTrigger,
   SpawnAction,
   MessageAction,

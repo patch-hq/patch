@@ -173,7 +173,7 @@ export function formatCleanup(report, host = hostname()) {
   const disk =
     report.after != null ? `; disk ${report.usedPct}% used, ${gb(report.after)} free` : '';
   const daemons =
-    report.buildDaemons > 0 ? `; ${report.buildDaemons} gradle/kotlin daemon(s) still running` : '';
+    report.buildHosts > 0 ? `; ${report.buildHosts} gradle/kotlin daemon(s) still running` : '';
   const what = parts.length ? parts.join(', ') : 'nothing to remove';
   const line = `cleanup on ${host}: freed ${gb(Math.max(0, report.freed))} (${what})${disk}${daemons}`;
   if (report.errors.length === 0) return line;
@@ -279,11 +279,11 @@ export function runCleanup({
   // Who is standing where. Without it, nothing that needs the in-use rule is
   // touched: "could not look" must never read as "nobody is there".
   let inUse = null;
-  let buildDaemons = 0;
+  let buildHosts = 0;
   step('process scan (nothing in use was swept)', () => {
     const procs = scan();
     inUse = inUseChecker(procs.flatMap((p) => p.refs));
-    buildDaemons = procs.filter((p) =>
+    buildHosts = procs.filter((p) =>
       p.args.some((a) => /GradleDaemon|KotlinCompileDaemon/.test(a)),
     ).length;
   });
@@ -377,7 +377,7 @@ export function runCleanup({
     /* unknown */
   }
   const freed = before && after != null ? after - before.free : 0;
-  return { removed, errors, freed, after, usedPct, buildDaemons };
+  return { removed, errors, freed, after, usedPct, buildHosts };
 }
 
 if (isMain(import.meta.url)) {

@@ -14,24 +14,24 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 interface Harness {
   url: string;
   registry: Registry;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   close: () => Promise<void>;
 }
 
 async function startServer(opts: { registry: Registry }): Promise<Harness> {
-  const daemonLink = new InProcessDaemonLink();
-  const built = await buildAll({ logger: false, registry: opts.registry, daemonLink });
+  const hostLink = new InProcessHostLink();
+  const built = await buildAll({ logger: false, registry: opts.registry, hostLink });
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
   return {
     url: `ws://127.0.0.1:${addr.port}/ws`,
     registry: opts.registry,
-    daemonLink,
+    hostLink,
     close: async () => {
       await built.app.close();
     },
@@ -57,7 +57,7 @@ async function makeAuthedClient(
   });
   const client = new WireTestClient({ url: h.url, auth: jwt });
   await client.connect();
-  await client.waitFor('daemon.online');
+  await client.waitFor('host.online');
   return client;
 }
 
@@ -74,7 +74,7 @@ describe('WS hub per-chat subscription routing', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(40));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const watcher = await makeAuthedClient(h, user, 'srf-watcher');
@@ -89,7 +89,7 @@ describe('WS hub per-chat subscription routing', () => {
       watcher.send({ type: 'chat.focus_change', chatId: 'chat-A' });
       await new Promise((r) => setTimeout(r, 30));
 
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.message',
         chatId: 'chat-A',
         role: 'assistant',
@@ -111,7 +111,7 @@ describe('WS hub per-chat subscription routing', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(41));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const a = await makeAuthedClient(h, user, 'srf-A');
@@ -121,7 +121,7 @@ describe('WS hub per-chat subscription routing', () => {
       a.on('chat.state', (e) => aSeen.push(e.chatId));
       b.on('chat.state', (e) => bSeen.push(e.chatId));
 
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'chat-Z',
@@ -142,7 +142,7 @@ describe('WS hub per-chat subscription routing', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(42));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const c = await makeAuthedClient(h, user, 'srf-unsub');
@@ -151,7 +151,7 @@ describe('WS hub per-chat subscription routing', () => {
 
       c.send({ type: 'chat.focus_change', chatId: 'chat-X' });
       await new Promise((r) => setTimeout(r, 30));
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.message',
         chatId: 'chat-X',
         role: 'assistant',
@@ -162,7 +162,7 @@ describe('WS hub per-chat subscription routing', () => {
       // Unsubscribe.
       c.send({ type: 'chat.focus_change', chatId: null });
       await new Promise((r) => setTimeout(r, 30));
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.message',
         chatId: 'chat-X',
         role: 'assistant',
@@ -181,13 +181,13 @@ describe('WS hub per-chat subscription routing', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(45));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const c = await makeAuthedClient(h, user, 'srf-voice');
       c.send({ type: 'chat.focus_change', chatId: 'chat-voice-B' });
       await new Promise((r) => setTimeout(r, 50));
-      const fwd = h.daemonLink.sent.find((s) => s.event.type === 'chat.focus_change');
+      const fwd = h.hostLink.sent.find((s) => s.event.type === 'chat.focus_change');
       expect(fwd).toBeDefined();
       if (fwd && fwd.event.type === 'chat.focus_change') {
         expect(fwd.event.chatId).toBe('chat-voice-B');
@@ -203,13 +203,13 @@ describe('WS hub per-chat subscription routing', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(43));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const c = await makeAuthedClient(h, user, 'srf-spawner');
-      c.send({ type: 'chat.spawn_request', daemonId: 'd1', folder: '/work/x', prompt: 'go' });
+      c.send({ type: 'chat.spawn_request', hostId: 'd1', folder: '/work/x', prompt: 'go' });
       await new Promise((r) => setTimeout(r, 50));
-      const fwd = h.daemonLink.sent.find((s) => s.event.type === 'chat.spawn_request');
+      const fwd = h.hostLink.sent.find((s) => s.event.type === 'chat.spawn_request');
       expect(fwd).toBeDefined();
       if (fwd && fwd.event.type === 'chat.spawn_request') {
         expect(fwd.event.chatId).toBeDefined();
@@ -226,7 +226,7 @@ describe('WS hub per-chat subscription routing', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(44));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
       const a = await makeAuthedClient(h, user, 'srf-replay-A');
@@ -234,7 +234,7 @@ describe('WS hub per-chat subscription routing', () => {
       // A requests replay.
       a.replay('chat-R', 0);
       await new Promise((r) => setTimeout(r, 30));
-      const replayFwd = h.daemonLink.sent.find((s) => s.event.type === 'chat.replay');
+      const replayFwd = h.hostLink.sent.find((s) => s.event.type === 'chat.replay');
       expect(replayFwd).toBeDefined();
       if (replayFwd && replayFwd.event.type === 'chat.replay') {
         expect(replayFwd.event.forSurfaceId).toBe('srf-replay-A');
@@ -251,7 +251,7 @@ describe('WS hub per-chat subscription routing', () => {
       b.send({ type: 'chat.focus_change', chatId: 'chat-R' });
       await new Promise((r) => setTimeout(r, 30));
 
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.message',
         chatId: 'chat-R',
         role: 'assistant',

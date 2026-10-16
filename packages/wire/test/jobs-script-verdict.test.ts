@@ -62,6 +62,10 @@ describe('scriptVerdictLine', () => {
     expect(scriptVerdictLine('4 new -> spawned\npatch:chat 01M2ABC\n')).toBe('4 new -> spawned');
   });
 
+  test('a verdict that merely starts with the marker text is still a verdict', () => {
+    expect(scriptVerdictLine('hello\npatch:chatty verdict')).toBe('patch:chatty verdict');
+  });
+
   test('a command that printed nothing has no verdict to show', () => {
     expect(scriptVerdictLine('')).toBeNull();
     expect(scriptVerdictLine('\n\n  \n')).toBeNull();

@@ -20,12 +20,19 @@ describe('mobile DeliveryTracker (spec/12 § Guaranteed input delivery)', () => 
   beforeEach(() => {
     useChatStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
-    usePresenceStore.getState().setDaemon('online');
+    usePresenceStore.getState().setHost('online');
     vi.useFakeTimers();
   });
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('carries retryOfSeq on the chat.input (retry in place)', () => {
+    const send = vi.fn();
+    const t = new DeliveryTracker({ send });
+    t.submit('c1', 'hi', 'L1', undefined, undefined, undefined, 4);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ retryOfSeq: 4 }));
   });
 
   it('marks pending on submit and clears on chat.input_ack', () => {
@@ -142,7 +149,7 @@ describe('mobile DeliveryTracker (spec/12 § Guaranteed input delivery)', () => 
   it('does not re-dial while the host is offline', () => {
     const reconnect = vi.fn();
     const t = new DeliveryTracker({ send: vi.fn(), reconnect, timeoutMs: 1000 });
-    usePresenceStore.getState().setDaemon('offline');
+    usePresenceStore.getState().setHost('offline');
     useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
     t.submit('c1', 'hi', 'L1');
     vi.advanceTimersByTime(5000);
@@ -150,7 +157,7 @@ describe('mobile DeliveryTracker (spec/12 § Guaranteed input delivery)', () => 
   });
 
   it('does NOT redeliver or fail while the host is offline — stays queued', () => {
-    usePresenceStore.getState().setDaemon('offline');
+    usePresenceStore.getState().setHost('offline');
     const send = vi.fn();
     const t = new DeliveryTracker({ send, timeoutMs: 8000, maxAttempts: 3 });
     useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
@@ -229,6 +236,30 @@ describe('mobile DeliveryTracker (spec/12 § Guaranteed input delivery)', () => 
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ localId: 'L1' }));
     expect(entry('c1', 'L2')?.deliveryFailed).toBe(true);
     expect(entry('c2', 'L9')?.deliveryFailed).toBe(true);
+  });
+
+  it('a transient daemon_unavailable chat.error does NOT retire the pending input; it redelivers the moment the host is back', () => {
+    const send = vi.fn();
+    const t = new DeliveryTracker({ send });
+    useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
+    t.submit('c1', 'hi', 'L1');
+    send.mockClear();
+
+    t.observe({
+      type: 'chat.error',
+      chatId: 'c1',
+      error: {
+        code: 'daemon_unavailable',
+        message: 'Connection to the host was lost. Message will resend.',
+      },
+      seq: 0,
+    } as WireEvent);
+    expect(t.size()).toBe(1);
+
+    t.onReconnect();
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'chat.input', chatId: 'c1', localId: 'L1' }),
+    );
   });
 
   it('onReconnect re-sends every still-pending input', () => {

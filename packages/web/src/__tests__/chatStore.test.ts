@@ -26,7 +26,7 @@ describe('chatStore reducer', () => {
   it('chat.spawned adds a row', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/projects/foo',
     });
@@ -38,7 +38,7 @@ describe('chatStore reducer', () => {
 
   it('addLocalMessage optimistically renders the user turn, reconciled (not duplicated) on replay', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // User sends a message: it must appear immediately, before any echo —
     // the host never emits a live chat.message for the user's own input.
     s.addLocalMessage('c1', 'hello world', 'lid-1');
@@ -77,7 +77,7 @@ describe('chatStore reducer', () => {
   // and `systemContext`.
   it('chat.message carries jobTrigger onto the timeline entry', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -92,7 +92,7 @@ describe('chatStore reducer', () => {
 
   it('chat.message with no jobTrigger leaves the field absent', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -268,7 +268,7 @@ describe('chatStore reducer', () => {
     // chat.spawned then reconciles the row in place (no duplicate, folder kept).
     s.applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c_new',
       folder: '~/projects/portfolio',
     });
@@ -280,7 +280,7 @@ describe('chatStore reducer', () => {
 
   it('chat.message_delta accumulates progressively, then chat.message finalises in place (no duplicate)', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
 
     // Deltas stream in for an in-flight assistant turn (messageSeq 0).
     s.applyEvent({ type: 'chat.message_delta', chatId: 'c1', messageSeq: 0, delta: 'The ' });
@@ -323,7 +323,7 @@ describe('chatStore reducer', () => {
     // messageSeq. Matching the streaming accumulator by seq would append the
     // new reply onto an OLD message; it must match by the `streaming` flag.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // Replayed history: an older assistant turn at seq 1.
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'old q', seq: 0 });
     s.applyEvent({
@@ -363,6 +363,20 @@ describe('chatStore reducer', () => {
     expect(tl2.find((e) => e.content === 'New answer.')?.streaming).toBe(false);
   });
 
+  it('sidebar preview never ends on half of an emoji when the first message is cut at 140', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: `${'a'.repeat(139)}😀 tail`,
+      seq: 0,
+    });
+    const preview = useChatStore.getState().chats['c1']?.preview ?? '';
+    expect(preview).toBe(`${'a'.repeat(139)}😀`);
+  });
+
   it('sidebar preview is a STABLE first-user-message label — never flips to later assistant/user text', () => {
     // Bug ("Preview on left message is flipping around"): the sidebar row
     // preview is the host's durable first-user-message snippet (chatRunner
@@ -372,7 +386,7 @@ describe('chatStore reducer', () => {
     // all leave the preview untouched, or the left-hand label flips as a turn
     // runs.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
 
     // The first user message becomes the durable preview.
     s.applyEvent({
@@ -424,7 +438,7 @@ describe('chatStore reducer', () => {
   it('chat.state updates an existing row', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/projects/foo',
     });
@@ -450,7 +464,7 @@ describe('chatStore reducer', () => {
 
   it('chat.state carries the current-status summary + kind, and only an OMITTED field is preserved', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // New row defaults to no status.
     expect(useChatStore.getState().chats['c1']?.statusSummary).toBeNull();
     expect(useChatStore.getState().chats['c1']?.statusKind).toBeNull();
@@ -499,7 +513,7 @@ describe('chatStore reducer', () => {
 
   it('chat.state carries the task list, and an OMITTED list is preserved (spec/02 § Task list)', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     expect(useChatStore.getState().chats['c1']?.todos).toEqual([]);
 
     s.applyEvent({
@@ -542,7 +556,7 @@ describe('chatStore reducer', () => {
 
   it('setTodos replaces the row’s task list wholesale', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.setTodos('c1', [{ text: 'benchmark it', status: 'pending' }]);
     expect(useChatStore.getState().chats['c1']?.todos).toEqual([
       { text: 'benchmark it', status: 'pending' },
@@ -554,7 +568,7 @@ describe('chatStore reducer', () => {
   it('local archive flips status optimistically', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
     });
@@ -567,7 +581,7 @@ describe('chatStore reducer', () => {
   it('setDeleted flips status to deleted / active optimistically, and is a no-op for an unknown chat (E5)', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().setDeleted('c1', true);
     expect(useChatStore.getState().chats['c1']?.status).toBe('deleted');
     useChatStore.getState().setDeleted('c1', false);
@@ -578,7 +592,7 @@ describe('chatStore reducer', () => {
   it('chat.permission_request queues a pending permission', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
     });
@@ -602,7 +616,7 @@ describe('chatStore reducer', () => {
     // with nothing to count to and no ring at all.
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
     });
@@ -623,7 +637,7 @@ describe('chatStore reducer', () => {
     // far-future instant would both draw a countdown to nothing.
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
     });
@@ -644,7 +658,7 @@ describe('chatStore reducer', () => {
     // so a `chat.state activity:idle` arrives while the prompt is still
     // unanswered. The badge + waiting-pill must stay on `permission`.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -667,7 +681,7 @@ describe('chatStore reducer', () => {
 
   it('resolvePermission clears the pending permission + badge + marks the card', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -698,7 +712,7 @@ describe('chatStore reducer', () => {
   // request) must not relabel a card the user already approved.
   it('a deny echo after an approval keeps the card Approved and marks it cancelled', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -721,7 +735,7 @@ describe('chatStore reducer', () => {
   // state and were gone the moment it remounted.
   it('resolvePermission stores the answers an AskUserQuestion was resolved with', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -741,7 +755,7 @@ describe('chatStore reducer', () => {
 
   it('resolvePermission leaves permissionAnswers unset when no answers are given', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -759,7 +773,7 @@ describe('chatStore reducer', () => {
   it('chat.state with status:archived flips a chat into archived', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
@@ -774,7 +788,7 @@ describe('chatStore reducer', () => {
   it('removeChat drops the row + timeline', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -821,7 +835,7 @@ describe('chatStore reducer', () => {
     // Retraction is scoped to the one chat: every other chat still applies.
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '~/p' });
     expect(useChatStore.getState().chats['c2']).toBeDefined();
   });
 
@@ -839,6 +853,94 @@ describe('chatStore reducer', () => {
     expect(useChatStore.getState().timelines['pending-spawn']).toBeUndefined();
   });
 
+  it('orphan invalid-session errors do not manufacture New chat rows', () => {
+    const s = useChatStore.getState();
+    for (let i = 0; i < 30; i++) {
+      s.applyEvent({
+        type: 'chat.error',
+        chatId: `stale-${i}`,
+        error: {
+          code: 'claude_session_invalid',
+          message: `No conversation found with session ID: stale-${i}`,
+        },
+        seq: -1,
+      });
+    }
+    expect(Object.keys(useChatStore.getState().chats)).toEqual([]);
+    expect(Object.keys(useChatStore.getState().timelines)).toEqual([]);
+  });
+
+  it('invalid-session errors retract rows seeded by stale state outside the authoritative roster', () => {
+    const s = useChatStore.getState();
+    s.hydrate([]);
+    for (let i = 0; i < 30; i++) {
+      s.applyEvents([
+        {
+          type: 'chat.state',
+          permissionMode: 'bypassPermissions' as const,
+          chatId: `stale-${i}`,
+          folder: '/Users/tomchambers/projects/portfolio',
+          activity: 'errored',
+          lastUpdated: Date.now(),
+        },
+        {
+          type: 'chat.error',
+          chatId: `stale-${i}`,
+          error: {
+            code: 'claude_session_invalid',
+            message: `No conversation found with session ID: stale-${i}`,
+          },
+          seq: -1,
+        },
+      ]);
+    }
+    expect(Object.keys(useChatStore.getState().chats)).toEqual([]);
+    expect(Object.keys(useChatStore.getState().timelines)).toEqual([]);
+  });
+
+  it('stale state alone cannot recreate chats missing from the authoritative roster', () => {
+    const s = useChatStore.getState();
+    s.hydrate([]);
+    for (let i = 0; i < 30; i++) {
+      s.applyEvent({
+        type: 'chat.state',
+        permissionMode: 'bypassPermissions' as const,
+        chatId: `stale-${i}`,
+        folder: '/Users/tomchambers/projects/portfolio',
+        activity: 'errored',
+        lastUpdated: Date.now(),
+      });
+    }
+    expect(Object.keys(useChatStore.getState().chats)).toEqual([]);
+  });
+
+  it('replayed job errors cannot create chats missing from the authoritative roster', () => {
+    const s = useChatStore.getState();
+    s.hydrate([]);
+    for (let i = 0; i < 30; i++) {
+      const chatId = `jobchat-job-${i}`;
+      s.applyEvents([
+        {
+          type: 'chat.error',
+          chatId,
+          error: {
+            code: 'claude_session_invalid',
+            message: `No conversation found with session ID: stale-${i}`,
+          },
+          seq: -1,
+        },
+        {
+          type: 'chat.error',
+          chatId,
+          error: { code: 'sdk_error', message: 'session limit' },
+          seq: -1,
+        },
+      ]);
+    }
+    expect(Object.keys(useChatStore.getState().chats)).toEqual([]);
+    expect(Object.keys(useChatStore.getState().timelines)).toEqual([]);
+  });
+
   // `_reset` clears the tombstones too — without it a chatId retracted by one
   // test would stay ignored for the rest of the file (one jsdom window, one
   // module instance).
@@ -847,14 +949,14 @@ describe('chatStore reducer', () => {
     useChatStore.getState()._reset();
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     expect(useChatStore.getState().chats['c1']).toBeDefined();
   });
 
   it('deriveBadge maps activities correctly', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
@@ -879,7 +981,7 @@ describe('chatStore reducer', () => {
   it('opening (markRead) flips an unread chat to read, by seq watermark', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -908,7 +1010,7 @@ describe('chatStore reducer', () => {
     // timestamp and perpetually showing `done`. The seq watermark is immune.
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -947,7 +1049,7 @@ describe('chatStore reducer', () => {
   it('genuinely new activity (higher seq) re-marks a read chat unread', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -977,12 +1079,12 @@ describe('chatStore reducer', () => {
 
   it('hydrate on an already-known chat with no persisted watermark keeps its in-memory lastReadSeq', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // Never marked read, so localStorage carries no watermark for c1.
     s.hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
@@ -1003,7 +1105,7 @@ describe('chatStore reducer', () => {
     // from defaults, wiping lastReadSeq/lastSeq back to unread.
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -1025,7 +1127,7 @@ describe('chatStore reducer', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
@@ -1047,7 +1149,7 @@ describe('chatStore reducer', () => {
   it('events arriving in the active chat keep it read (seen while open)', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().setActiveChat('c1'); // open it
     expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('read');
     // A post-open chat.replay raises lastSeq while the chat is active — must
@@ -1072,7 +1174,7 @@ describe('chatStore reducer', () => {
     // the green `done` dot at all: it went straight from `working` to `read`.
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().setActiveChat('c1'); // open it while visible
     expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('read');
 
@@ -1097,7 +1199,7 @@ describe('chatStore reducer', () => {
     // Build an unread chat with activity at seq 7.
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -1120,7 +1222,7 @@ describe('chatStore reducer', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
@@ -1147,7 +1249,7 @@ describe('chatStore reducer', () => {
     'an unanswered tool call does not hold the row on working once the chat is %s',
     (activity) => {
       const s = useChatStore.getState();
-      s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+      s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
       s.applyEvent({
         type: 'chat.tool_call',
         chatId: 'c1',
@@ -1174,7 +1276,7 @@ describe('chatStore reducer', () => {
   // follows to clear the count, so the row sat orange on a finished chat.
   it('a replayed unanswered tool call does not make an idle chat working', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
@@ -1195,7 +1297,7 @@ describe('chatStore reducer', () => {
 
   it('a REST snapshot reporting idle clears a leaked open-call count', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
@@ -1214,7 +1316,7 @@ describe('chatStore reducer', () => {
     s.hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
@@ -1236,7 +1338,7 @@ describe('chatStore reducer', () => {
   // working, and orange on one that had finished.
   it('a stale chat.state does not roll activity back', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const state = (activity: 'idle' | 'running', lastUpdated: number) =>
       s.applyEvent({
         type: 'chat.state',
@@ -1255,7 +1357,7 @@ describe('chatStore reducer', () => {
 
   it('a stale REST refetch (hydrate) does not roll activity back', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
@@ -1272,7 +1374,7 @@ describe('chatStore reducer', () => {
 
   it('chat.tool_call and chat.tool_result append timeline entries and bump lastSeq', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.tool_call',
       chatId: 'c1',
@@ -1300,7 +1402,7 @@ describe('chatStore reducer', () => {
 
   it('the same tool call arriving again at a different seq renders once', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const call = (seq: number) =>
       ({
         type: 'chat.tool_call',
@@ -1328,7 +1430,7 @@ describe('chatStore reducer', () => {
     // TAIL of the timeline — after the (correctly deduped) later message —
     // which is exactly "tool calls not shown in message order".
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const deliverTurn = () => {
       s.applyEvent({
         type: 'chat.message',
@@ -1386,7 +1488,7 @@ describe('chatStore reducer', () => {
     // doubled `pendingPermissions` entry also inflates the awaiting-permission
     // state and the `2` "Approve all outstanding" sweep.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const deliverPermission = () => {
       s.applyEvent({
         type: 'chat.permission_request',
@@ -1417,7 +1519,7 @@ describe('chatStore reducer', () => {
   // into the main transcript, which draws only the active branch's track.
   it('a permission_request tagged with a non-active branch is kept out of the main view, in sideThreadPermissions instead', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.branches',
       chatId: 'c1',
@@ -1462,7 +1564,7 @@ describe('chatStore reducer', () => {
 
   it('a permission_request tagged with the ACTIVE branch renders in the main view exactly as before branches existed', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.branches',
       chatId: 'c1',
@@ -1491,7 +1593,7 @@ describe('chatStore reducer', () => {
     // card is still in the transcript — or the re-delivery would draw a fresh,
     // still-actionable Approve/Deny for a request already decided.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const event = {
       type: 'chat.permission_request' as const,
       chatId: 'c1',
@@ -1519,7 +1621,7 @@ describe('chatStore reducer', () => {
     // one approval at once, which is the whole reason `pendingPermissions` is a
     // list and "Approve all outstanding" exists.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -1542,7 +1644,7 @@ describe('chatStore reducer', () => {
 
   it('chat.message with attachments carries them onto the timeline entry', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const attachments = [
       { id: 'a1', name: 'x.png', mimeType: 'image/png', kind: 'image' as const },
     ];
@@ -1566,7 +1668,7 @@ describe('chatStore reducer', () => {
 
   it('resolvePermission leaves non-matching timeline entries untouched and no-ops with no timeline', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -1589,7 +1691,7 @@ describe('chatStore reducer', () => {
 
     // A row with pending permissions but literally no timeline entries at all
     // (defensive branch: `existing` is undefined).
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '~/p' });
     useChatStore.setState((st) => {
       const row = st.chats['c2']!;
       return {
@@ -1607,7 +1709,7 @@ describe('chatStore reducer', () => {
 
   it("updatePermissionExpiry moves the question card's countdown to a live reset (spec/02 § Questions are not approvals)", () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -1623,7 +1725,7 @@ describe('chatStore reducer', () => {
 
   it('updatePermissionExpiry does not touch an already-resolved card', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -1651,7 +1753,7 @@ describe('chatStore reducer', () => {
 
   it('mergeChats folds new rows in WITHOUT dropping chats already present', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -1664,7 +1766,7 @@ describe('chatStore reducer', () => {
     s.mergeChats([
       {
         chatId: 'c-archived',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'old thread',
         folder: '~/old',
@@ -1686,7 +1788,7 @@ describe('chatStore reducer', () => {
 
   it('mergeChats refreshes server-authoritative fields on an already-known chat and preserves its read watermark', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -1698,7 +1800,7 @@ describe('chatStore reducer', () => {
     s.mergeChats([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'renamed',
         folder: '~/p',
@@ -1720,7 +1822,7 @@ describe('chatStore reducer', () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
       jobId: 'j1',
@@ -1728,9 +1830,22 @@ describe('chatStore reducer', () => {
     expect(useChatStore.getState().chats['c1']?.jobId).toBe('j1');
   });
 
+  it('applyEvent chat.spawned without a jobId keeps the tag the row already has', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.spawned',
+      hostId: 'd1',
+      chatId: 'c1',
+      folder: '~/p',
+      jobId: 'j1',
+    });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    expect(useChatStore.getState().chats['c1']?.jobId).toBe('j1');
+  });
+
   it('applyEvent chat.spawned defaults jobId to null for a chat no job spawned', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     expect(useChatStore.getState().chats['c1']?.jobId).toBeNull();
   });
 
@@ -1738,7 +1853,7 @@ describe('chatStore reducer', () => {
     useChatStore.getState().mergeChats([
       {
         chatId: 'c-auto',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'automation run',
         folder: '~/p',
@@ -1758,7 +1873,7 @@ describe('chatStore reducer', () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
       jobId: 'j1',
@@ -1766,7 +1881,7 @@ describe('chatStore reducer', () => {
     s.mergeChats([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'renamed',
         folder: '~/p',
@@ -1783,12 +1898,12 @@ describe('chatStore reducer', () => {
 
   it('mergeChats on an already-known chat with no persisted watermark keeps its in-memory lastReadSeq', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // Never marked read, so localStorage carries no watermark for c1.
     s.mergeChats([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
@@ -1810,7 +1925,7 @@ describe('chatStore reducer', () => {
     useChatStore.getState().mergeChats([
       {
         chatId: 'c-old',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
@@ -1827,7 +1942,7 @@ describe('chatStore reducer', () => {
 
   it('setPinned pins and unpins a chat, stamping/clearing pinnedAt', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.setPinned('c1', true);
     let row = useChatStore.getState().chats['c1']!;
     expect(row.pinned).toBe(true);
@@ -1874,7 +1989,7 @@ describe('chatStore reducer', () => {
     const s = useChatStore.getState();
     expect(() => s.markRead('never-seen')).not.toThrow();
 
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -1891,7 +2006,7 @@ describe('chatStore reducer', () => {
   it('applyEvent no-ops for an unhandled event type (switch default)', () => {
     const s = useChatStore.getState();
     const before = useChatStore.getState().chats;
-    expect(() => s.applyEvent({ type: 'daemon.online', daemonId: 'd1' })).not.toThrow();
+    expect(() => s.applyEvent({ type: 'host.online', hostId: 'd1' })).not.toThrow();
     // The default case returns early — no state mutation at all.
     expect(useChatStore.getState().chats).toBe(before);
   });
@@ -1905,7 +2020,7 @@ describe('chatStore reducer', () => {
 
   it('clearDelivery/failDelivery/retryDelivery are no-ops when the localId is not found', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'hi', 'lid-1');
     const before = useChatStore.getState().timelines['c1'];
     s.clearDelivery('c1', 'does-not-exist');
@@ -1916,8 +2031,8 @@ describe('chatStore reducer', () => {
 
   it('removeChat clears activeChatId and openKebabFor only when they point at the removed chat', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '~/p' });
     s.setActiveChat('c2');
     s.setKebabOpen('c2');
     // Removing an unrelated chat leaves activeChatId/openKebabFor untouched.
@@ -1933,7 +2048,7 @@ describe('chatStore reducer', () => {
   it('an unvisited unread chat stays unread across a reload (no auto-mark-read)', () => {
     useChatStore
       .getState()
-      .applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '~/p' });
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '~/p' });
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c2',
@@ -1950,7 +2065,7 @@ describe('chatStore reducer', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c2',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
@@ -1973,7 +2088,7 @@ describe('chatStore — chat.provider_context (spec/02 § Provider-level context
 
   it('upserts one row per providerType rather than accumulating one per occurrence', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.provider_context',
       chatId: 'c1',
@@ -2003,7 +2118,7 @@ describe('chatStore — chat.provider_context (spec/02 § Provider-level context
 
   it('keeps distinct providerTypes as separate rows', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.provider_context',
       chatId: 'c1',
@@ -2031,7 +2146,7 @@ describe('chatStore — chat.provider_context (spec/02 § Provider-level context
     // opening a chat re-asks from fromSeq: -1, so a live event already applied
     // can arrive a second time.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const deliver = () =>
       s.applyEvent({
         type: 'chat.provider_context',
@@ -2056,7 +2171,7 @@ describe('chatStore message queueing (spec/04)', () => {
 
   it('chat.queued flags the optimistic message; dequeued{running} clears it', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'second message', 'lid-2');
     // Queued behind a running turn.
     s.applyEvent({
@@ -2076,9 +2191,26 @@ describe('chatStore message queueing (spec/04)', () => {
     expect(tl.filter((e) => e.kind === 'message')).toHaveLength(1);
   });
 
+  it('chat.queued records whether the turn needs a run of its own', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.queued', chatId: 'c1', localId: 'a', message: 'x', queueSeq: 1 });
+    s.applyEvent({
+      type: 'chat.queued',
+      chatId: 'c1',
+      localId: 'b',
+      message: 'y',
+      queueSeq: 2,
+      ownTurn: true,
+    });
+    const tl = useChatStore.getState().timelines['c1'] ?? [];
+    expect(tl.find((e) => e.localId === 'a')?.queuedOwnTurn).toBeUndefined();
+    expect(tl.find((e) => e.localId === 'b')?.queuedOwnTurn).toBe(true);
+  });
+
   it('the persisted copy of a queued message clears QUEUED even when chat.dequeued was missed', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'second message', 'lid-2');
     s.applyEvent({
       type: 'chat.queued',
@@ -2102,9 +2234,55 @@ describe('chatStore message queueing (spec/04)', () => {
     expect(tl[0]?.queued).toBe(false);
   });
 
+  it('a chat.queued that arrives AFTER the persisted echo does not add a second QUEUED bubble', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.addLocalMessage('c1', 'stuck screw', 'lid-9');
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: 'stuck screw',
+      seq: 3,
+      localId: 'lid-9',
+    });
+    s.applyEvent({
+      type: 'chat.queued',
+      chatId: 'c1',
+      localId: 'lid-9',
+      message: 'stuck screw',
+      queueSeq: 1,
+    });
+    const tl = (useChatStore.getState().timelines['c1'] ?? []).filter((e) => e.kind === 'message');
+    expect(tl).toHaveLength(1);
+    expect(tl[0]?.queued).toBeFalsy();
+  });
+
+  it('a chat going idle releases its QUEUED messages even when chat.dequeued was missed', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.addLocalMessage('c1', 'second message', 'lid-2');
+    s.applyEvent({
+      type: 'chat.queued',
+      chatId: 'c1',
+      localId: 'lid-2',
+      message: 'second message',
+      queueSeq: 1,
+    });
+    expect(useChatStore.getState().timelines['c1']?.[0]?.queued).toBe(true);
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      activity: 'idle',
+      permissionMode: 'default',
+      lastUpdated: Date.now() + 1000,
+    } as never);
+    expect(useChatStore.getState().timelines['c1']?.[0]?.queued).toBe(false);
+  });
+
   it('a message delivered mid-turn lands where the agent saw it and records the step', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'start', seq: 1 });
     for (const n of [2, 3]) {
       s.applyEvent({
@@ -2150,7 +2328,7 @@ describe('chatStore message queueing (spec/04)', () => {
 
   it('a send-now flag set on a queued message survives its persisted copy arriving', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'stop that', 'lid-9');
     s.applyEvent({
       type: 'chat.queued',
@@ -2177,7 +2355,7 @@ describe('chatStore message queueing (spec/04)', () => {
 
   it('a queued message stays below the running turn output that arrives after it (position = process time, not send time)', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // Turn 1 is in flight: a user turn + an assistant reply streaming in.
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'turn one', seq: 0 });
     s.applyEvent({ type: 'chat.message_delta', chatId: 'c1', messageSeq: 1, delta: 'working ' });
@@ -2226,7 +2404,7 @@ describe('chatStore message queueing (spec/04)', () => {
 
   it('chat.dequeued{cancelled} removes the queued message', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'cancel me', 'lid-x');
     s.applyEvent({
       type: 'chat.queued',
@@ -2242,7 +2420,7 @@ describe('chatStore message queueing (spec/04)', () => {
 
   it('chat.queued from another surface (no optimistic echo) appends a pending turn', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.queued',
       chatId: 'c1',
@@ -2257,7 +2435,7 @@ describe('chatStore message queueing (spec/04)', () => {
 
   it('removeQueued optimistically drops a queued message', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'drop me', 'lid-d');
     s.applyEvent({
       type: 'chat.queued',
@@ -2277,7 +2455,7 @@ describe('chatStore message queueing (spec/04)', () => {
 
   it('removeQueued is a no-op when the localId is not found (or not queued)', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'not queued', 'lid-nq');
     const before = (useChatStore.getState().timelines['c1'] ?? []).length;
     s.removeQueued('c1', 'lid-nq'); // present but not `queued: true`
@@ -2297,7 +2475,7 @@ describe('chatStore message queueing (spec/04)', () => {
       }),
     ).not.toThrow();
 
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'hi', seq: 1 });
     const before = useChatStore.getState().timelines['c1'];
     s.applyEvent({
@@ -2321,7 +2499,7 @@ describe('chatStore — chat.stopped (a stopped or interrupted turn)', () => {
 
   function seedRunningTurn(chatId: string): void {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '~/p' });
     s.applyEvent({ type: 'chat.message', chatId, role: 'user', content: 'refactor it', seq: 1 });
     s.applyEvent({ type: 'chat.message_delta', chatId, messageSeq: 2, delta: 'Reading the' });
   }
@@ -2426,7 +2604,7 @@ describe('chatStore — chat.stopped (a stopped or interrupted turn)', () => {
 
   it('leaves a turn that already FAILED alone — an error is not a cancellation', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'boom', seq: 1 });
     s.applyEvent({
       type: 'chat.error',
@@ -2563,7 +2741,7 @@ describe('chatStore — live voice-note transcription', () => {
   it('addTranscribingMessage reuses an existing chat row and tolerates an omitted folder', () => {
     const s = useChatStore.getState();
     // Row already exists (spawned) → the optimistic seed reuses it, not emptyRow.
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/proj' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/proj' });
     s.addTranscribingMessage('c1', 'VN1'); // no folder arg
     expect(useChatStore.getState().chats['c1']?.folder).toBe('~/proj');
     // A brand-new chat with no folder arg still seeds a row (empty folder).
@@ -2577,7 +2755,7 @@ describe('chatStore — live voice-note transcription', () => {
   // makes it its own kind of transcript entry.
   it('turns a chat.message carrying compaction figures into a compaction entry', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -2597,7 +2775,7 @@ describe('chatStore — live voice-note transcription', () => {
 
   it('leaves a system message with no compaction figures an ordinary message', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -2616,7 +2794,7 @@ describe('chatStore — live voice-note transcription', () => {
   // a system message anyone would read as the agent talking.
   it('turns a chat.message carrying permissionModeChange into a permission_mode entry', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -2641,7 +2819,7 @@ describe('chatStore — live voice-note transcription', () => {
   // made the change.
   it('carries permissionModeChangeAutomatic through onto the entry, when Claude Code made the change', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -2661,7 +2839,7 @@ describe('chatStore — live voice-note transcription', () => {
 
   it('omits permissionModeChangeAutomatic for an ordinary (human) mode change', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -2676,7 +2854,7 @@ describe('chatStore — live voice-note transcription', () => {
 
   it('draws one line when the same record is replayed twice', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     const ev = {
       type: 'chat.message',
       chatId: 'c1',
@@ -2692,7 +2870,7 @@ describe('chatStore — live voice-note transcription', () => {
 
   it('does not take the record as the chat’s preview — nobody typed it', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -2727,7 +2905,7 @@ describe('chat.error reducer (spec/12 § Guaranteed input delivery)', () => {
 
   it('sdk_error with a causeSeq attaches turnFailed to the matching message, not a standalone row', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'do the thing', 'lid-1');
     // The host always persists (and this reconciles) the user's chat.message
     // BEFORE the SDK query that can fail even starts, so by the time chat.error
@@ -2757,7 +2935,7 @@ describe('chat.error reducer (spec/12 § Guaranteed input delivery)', () => {
 
   it('sdk_error with no causeSeq (older host) falls back to the newest un-failed user message', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'first', 'lid-1');
     s.applyEvent({
       type: 'chat.message',
@@ -2783,7 +2961,7 @@ describe('chat.error reducer (spec/12 § Guaranteed input delivery)', () => {
 
   it('a replayed chat.error at the same seq does not re-search or double-apply', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'do the thing', 'lid-1');
     s.applyEvent({
       type: 'chat.message',
@@ -2818,7 +2996,7 @@ describe('chat.error reducer (spec/12 § Guaranteed input delivery)', () => {
 
   it('other error codes still render as a standalone error row, untouched by the sdk_error path', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'do the thing', 'lid-1');
     s.applyEvent({
       type: 'chat.error',
@@ -2835,7 +3013,7 @@ describe('chat.error reducer (spec/12 § Guaranteed input delivery)', () => {
 
   it('sdk_error with no matching message and no fallback target falls through to a standalone row (no silent drop)', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // No user message in the timeline at all to attach to.
     s.applyEvent({
       type: 'chat.error',
@@ -2867,7 +3045,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
   /** Spawn c1, send a turn, then drop the link: what ws-hub emits on offline. */
   function blip(): void {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.addLocalMessage('c1', 'do the thing', 'lid-1');
     s.applyEvent({
       type: 'chat.error',
@@ -2880,7 +3058,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'errored',
       lastUpdated: 1,
@@ -2903,7 +3081,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'running',
       lastUpdated: 2,
@@ -2922,7 +3100,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'idle',
       lastUpdated: 2,
@@ -2940,7 +3118,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
 
   it('leaves a REAL turn failure in place when the chat goes running again', () => {
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     // A code with no message to attach to falls through to a standalone row.
     s.applyEvent({
       type: 'chat.error',
@@ -2951,7 +3129,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'running',
       lastUpdated: 2,
@@ -2964,7 +3142,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
   it('clears only the blipped chat — a chat on another host is untouched', () => {
     blip();
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd2', chatId: 'c2', folder: '~/q' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd2', chatId: 'c2', folder: '~/q' });
     s.applyEvent({
       type: 'chat.error',
       chatId: 'c2',
@@ -2975,7 +3153,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'running',
       lastUpdated: 2,
@@ -2990,7 +3168,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     // spec/12 — a reconnect lands as ONE applyEvents commit. The offline pair
     // and the host's recovery state can arrive in the same fold.
     const s = useChatStore.getState();
-    s.applyEvent({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     s.applyEvents([
       {
         type: 'chat.error',
@@ -3001,7 +3179,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       {
         type: 'chat.state',
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'auto',
         activity: 'errored',
         lastUpdated: 1,
@@ -3009,7 +3187,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       {
         type: 'chat.state',
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'auto',
         activity: 'running',
         lastUpdated: 2,
@@ -3018,16 +3196,16 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     expect(errorRows()).toHaveLength(0);
   });
 
-  it('a re-delivered daemon_unavailable after the recovery draws the card again', () => {
-    // A second, genuine blip is a new failure — clearing the first one must not
-    // leave a dedupe ghost that swallows it (identity is (seq, code, message),
-    // and out-of-band errors all share the sentinel seq).
+  it('a late daemon_unavailable frame cannot re-poison an already-running chat', () => {
+    // Host recovery and the server's out-of-band error travel on different
+    // streams. A delayed copy of the old error can therefore land after the
+    // fresh running state; it describes the resolved blip, not a new failure.
     blip();
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'running',
       lastUpdated: 2,
@@ -3039,7 +3217,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       error: { code: 'daemon_unavailable', message: 'Connection to the host was lost.' },
       seq: -1,
     });
-    expect(errorRows()).toHaveLength(1);
+    expect(errorRows()).toHaveLength(0);
   });
 });
 
@@ -3055,7 +3233,7 @@ describe('chatStore — a chat model change arriving on chat.state', () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
       model: 'claude-sonnet-4-6',
@@ -3077,7 +3255,7 @@ describe('chatStore — a chat model change arriving on chat.state', () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c1',
       folder: '~/p',
       model: 'claude-sonnet-4-6',
@@ -3188,14 +3366,14 @@ describe('a limit pause the chat has moved past clears itself', () => {
   function blocked(): void {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c-lim',
       folder: '~/p',
     } as never);
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c-lim',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'errored',
       lastUpdated: 1,
@@ -3213,7 +3391,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c-lim',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity,
       lastUpdated: 2,
@@ -3244,7 +3422,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c-lim',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'idle',
       lastUpdated: 1,
@@ -3272,7 +3450,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c-lim',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       activity: 'errored',
       lastUpdated: 3,
@@ -3284,7 +3462,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
   it('does not disturb a chat that never had a pause', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.spawned',
-      daemonId: 'd1',
+      hostId: 'd1',
       chatId: 'c-lim',
       folder: '~/p',
     } as never);
@@ -3292,5 +3470,36 @@ describe('a limit pause the chat has moved past clears itself', () => {
     silentState('running');
     expect(useChatStore.getState().chats['c-lim']?.limitBlock).toBeNull();
     expect(useChatStore.getState().chats).not.toBe(before);
+  });
+});
+
+describe('pending message is not swallowed by an older same-text echo', () => {
+  it('an echo carrying a DIFFERENT localId never folds into the pending bubble', () => {
+    useChatStore.getState()._reset();
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: 'ok',
+      seq: 1,
+      localId: 'old',
+    });
+    s.addLocalMessage('c1', 'ok', 'new');
+    // A replayed earlier "ok" must leave the pending one where it is.
+    s.applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: 'ok',
+      seq: 3,
+      localId: 'other',
+    });
+    const tl = useChatStore.getState().timelines['c1'] ?? [];
+    const pending = tl.find((e) => e.localId === 'new');
+    expect(pending).toBeDefined();
+    expect(pending?.deliveryPending).toBe(true);
+    expect(tl.filter((e) => e.role === 'user')).toHaveLength(3);
   });
 });

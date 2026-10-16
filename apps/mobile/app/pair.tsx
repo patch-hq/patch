@@ -33,13 +33,15 @@ export default function Pair(): React.ReactElement {
   const colors = useTheme();
   // Why the server refused us, when it did. Null on an ordinary first pairing.
   const authRejected = usePresenceStore((s) => s.authRejected);
-  const [scanned, setScanned] = React.useState(false);
   const [pasted, setPasted] = React.useState('');
   const router = useRouter();
 
+  // The camera reports a code several times per frame, before React has
+  // re-rendered, so the guard has to be a ref: state would still read false.
+  const scanning = React.useRef(false);
   const onScan = async (raw: string): Promise<void> => {
-    if (scanned) return;
-    setScanned(true);
+    if (scanning.current) return;
+    scanning.current = true;
     try {
       // The QR carries the pairing nonce in a `patch-pair://` URI. The new
       // surface generates its OWN device keypair locally (spec/10-auth.md §
@@ -76,7 +78,7 @@ export default function Pair(): React.ReactElement {
       router.replace('/(tabs)/chats');
     } catch (e) {
       Alert.alert('Pairing failed', (e as Error).message);
-      setScanned(false);
+      scanning.current = false;
     }
   };
 

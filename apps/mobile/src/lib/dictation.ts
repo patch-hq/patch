@@ -11,7 +11,7 @@
 //       and the note SILENTLY vanished — worst on the fastest gesture.
 //
 // (a) no longer holds: the host's `VoiceSession.maybeTranscribePartial()`
-// (`packages/daemon/src/audio/session.ts`, added in `71be70e`, AFTER the
+// (`packages/host/src/audio/session.ts`, added in `71be70e`, AFTER the
 // revert) periodically RE-transcribes the growing utterance and emits real
 // `audio.transcript_partial` frames even over the non-streaming Groq backend.
 // That already ships today and needs no wire/daemon change here.
@@ -182,6 +182,7 @@ export function startDictation(
   chatId: string,
   onPartial: (text: string) => void,
   onError: (message: string) => void,
+  onPreviewError: (message: string) => void,
 ): DictationHandle {
   let closed = false;
   let finished = false;
@@ -206,9 +207,19 @@ export function startDictation(
         }),
       );
       ws.send(pcm.buffer as ArrayBuffer);
-    } catch {
-      // Best-effort preview only — never surfaced (see file header).
+    } catch (e) {
+      reportPreview((e as Error).message);
     }
+  }
+
+  // The preview is the expendable half, but a dead one must be SEEN (spec/07
+  // § Dictation into the composer): reported once, recording carries on.
+  let previewReported = false;
+  function reportPreview(message: string): void {
+    if (closed || previewReported) return;
+    previewReported = true;
+    console.error(`[patch-voice] live dictation preview: ${message}`);
+    onPreviewError(message);
   }
 
   function onMicFrame(pcm: Int16Array): void {
@@ -292,7 +303,8 @@ export function startDictation(
               surfaceHasAec: true,
             }),
           );
-        } catch {
+        } catch (e) {
+          reportPreview((e as Error).message);
           return;
         }
         wsOpen = true;
@@ -303,7 +315,8 @@ export function startDictation(
         let frame: AudioEvent;
         try {
           frame = decodeAudio(evt.data);
-        } catch {
+        } catch (e) {
+          reportPreview(`malformed audio frame: ${(e as Error).message}`);
           return;
         }
         if (frame.type === 'audio.transcript_partial') onPartial(frame.text);
@@ -312,15 +325,20 @@ export function startDictation(
         // has no key on this host. The final upload would be refused with the
         // same sentence, so stop now and say it while the user is still
         // holding the mic, rather than after they have finished speaking.
-        if (frame.type === 'audio.error' && frame.code === 'voice_key_missing') {
-          void refuse(frame.message);
+        if (frame.type === 'audio.error') {
+          if (frame.code === 'voice_key_missing') void refuse(frame.message);
+          else reportPreview(frame.message);
         }
       };
-      // onerror / onclose intentionally left as no-ops: a dead preview socket
-      // is invisible to the user by design (see file header).
-    } catch {
-      // Swallowed — see comment above. The recording is unaffected; the user
-      // simply gets no live/greyed preview text for this session.
+      socket.onerror = (): void => reportPreview('the audio connection failed');
+      socket.onclose = (evt: { code?: number; reason?: string }): void =>
+        reportPreview(
+          `the audio connection closed${evt?.code ? ` (${evt.code}${evt.reason ? `: ${evt.reason}` : ''})` : ''}`,
+        );
+    } catch (e) {
+      // Not onError: the recording is unaffected and the transcript still
+      // lands. But it is reported, never swallowed.
+      reportPreview((e as Error).message);
     }
   })();
 

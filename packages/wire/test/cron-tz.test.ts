@@ -140,6 +140,26 @@ describe('assertValidCron', () => {
     expect(() => assertValidCron('1/0 8 * * *')).toThrowError(/bad field 1/); // step <= 0
     expect(() => assertValidCron('a-5 8 * * *')).toThrowError(/bad field 1/); // non-digit range bound
   });
+
+  // node-cron (the server's validator) accepts month and weekday names, short
+  // or full, in any case — so a cron the server would take is not refused here.
+  test('accepts month and weekday names, as node-cron does', () => {
+    expect(() => assertValidCron('0 9 * * MON-FRI')).not.toThrow();
+    expect(() => assertValidCron('0 9 * jan *')).not.toThrow();
+    expect(() => assertValidCron('0 9 * JAN-MAR *')).not.toThrow();
+    expect(() => assertValidCron('0 9 * January *')).not.toThrow();
+    expect(() => assertValidCron('0 9 * * monday')).not.toThrow();
+    expect(() => assertValidCron('0 9 * * Sun,Sat')).not.toThrow();
+    expect(() => assertValidCron('0 9 * * mon-fri/2')).not.toThrow();
+    expect(() => assertValidCron('0 9 * jan-dec/3 *')).not.toThrow();
+  });
+
+  test('a name is only accepted in its own field, and only when node-cron knows it', () => {
+    expect(() => assertValidCron('0 9 * * jan')).toThrowError(/bad field 5/);
+    expect(() => assertValidCron('0 9 * mon *')).toThrowError(/bad field 4/);
+    expect(() => assertValidCron('0 9 * * mo')).toThrowError(/bad field 5/);
+    expect(() => assertValidCron('jan 9 * * *')).toThrowError(/bad field 1/);
+  });
 });
 
 // The display half of the same rule: a schedule label is ambiguous unless the

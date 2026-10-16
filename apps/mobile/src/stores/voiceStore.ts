@@ -89,6 +89,11 @@ interface VoiceState {
 
   setIncoming(call: IncomingCall | null): void;
   setActive(session: ActiveVoiceSession | null): void;
+  /**
+   * The open session got its real id and audio URL: swap them in WITHOUT
+   * resetting what the user has done since the bar came up (mute, phase).
+   */
+  upgradeActive(session: ActiveVoiceSession): void;
   startVoiceNote(chatId: string, mode: VoiceNoteMode): void;
   setVoiceNoteState(s: VoiceNoteState): void;
   setVoiceNoteTranscript(t: string): void;
@@ -133,6 +138,9 @@ export const useVoiceStore = create<VoiceState>((set) => ({
       callUnaddressed: null,
       callConnectedAt: null,
     });
+  },
+  upgradeActive(session) {
+    set({ activeSession: session });
   },
   setError(msg) {
     set({ callError: msg });

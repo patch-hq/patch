@@ -21,7 +21,7 @@ interface SharedState {
     codex: Array<{ id: string; label: string; kind: string; connected: boolean; email?: string }>;
     providerKeys: Array<{ id: string; set: boolean; last4?: string }>;
   };
-  hosts: Array<{ daemonId: string; appliedVersion?: number; error?: string }>;
+  hosts: Array<{ hostId: string; appliedVersion?: number; error?: string }>;
   problem?: string;
 }
 
@@ -35,6 +35,9 @@ const SETTING_KEYS: Record<string, string> = {
   'question-expiry-seconds': 'questionExpirySeconds',
   'auto-resume': 'autoResumeRateLimit',
   'chat-name-interval': 'chatNameInterval',
+  'title-generation': 'titleGenerationEnabled',
+  'status-generation': 'statusGenerationEnabled',
+  'sync-position': 'syncPosition',
   'kokoro-voice': 'kokoroVoice',
   memory: 'harnessMemoryEnabled',
 };
@@ -88,7 +91,7 @@ export function registerSettingsCommands(program: Command): void {
           emitText(`  ${k}: ${JSON.stringify(v)}`);
         for (const h of state.hosts) {
           emitText(
-            `host ${h.daemonId}: ${h.error ? `could not apply — ${h.error}` : h.appliedVersion === state.version ? 'up to date' : `on ${h.appliedVersion ?? 'none'}`}`,
+            `host ${h.hostId}: ${h.error ? `could not apply — ${h.error}` : h.appliedVersion === state.version ? 'up to date' : `on ${h.appliedVersion ?? 'none'}`}`,
           );
         }
       });
@@ -257,14 +260,14 @@ export function registerSettingsCommands(program: Command): void {
   accounts
     .command('adopt <backend>')
     .description("Store a machine's own login as a shared account")
-    .option('--host <h>', 'machine name or daemonId prefix (default: the home host)')
+    .option('--host <h>', 'machine name or hostId prefix (default: the home host)')
     .option('--json', 'JSON output')
     .action(async (backend: string, opts: CommonOpts & { host?: string }) => {
       await run(opts, async () => {
-        const daemonId = await hostOrHome(opts);
+        const hostId = await hostOrHome(opts);
         const id = backendOf(backend);
         const state = await server(opts).post<SharedState>(`/api/accounts/${id}/adopt`, {
-          daemonId,
+          hostId,
         });
         if (opts.json) emitJson(state);
         else printAccounts(state, id);
@@ -295,7 +298,7 @@ export function registerSettingsCommands(program: Command): void {
     .description(
       "Set a key for every host; with --host and no value, adopt that machine's environment key",
     )
-    .option('--host <h>', 'machine name or daemonId prefix to adopt from')
+    .option('--host <h>', 'machine name or hostId prefix to adopt from')
     .option('--json', 'JSON output')
     .action(
       async (keyId: string, value: string | undefined, opts: CommonOpts & { host?: string }) => {
@@ -305,7 +308,7 @@ export function registerSettingsCommands(program: Command): void {
           const res =
             value !== undefined
               ? await t.put<unknown>(path, { value })
-              : await t.post<unknown>(`${path}/adopt`, { daemonId: await hostOrHome(opts) });
+              : await t.post<unknown>(`${path}/adopt`, { hostId: await hostOrHome(opts) });
           if (opts.json) emitJson(res);
           else emitText(`${keyId}: set`);
         });
@@ -331,9 +334,9 @@ export function registerSettingsCommands(program: Command): void {
 async function hostOrHome(opts: CommonOpts & { host?: string }): Promise<string> {
   if (opts.host !== undefined) return resolveHost(opts);
   const { hosts } = await server(opts).get<{
-    hosts: Array<{ daemonId: string; isHomeHost: boolean }>;
+    hosts: Array<{ hostId: string; isHomeHost: boolean }>;
   }>('/api/hosts');
   const home = hosts.find((h) => h.isHomeHost);
   if (!home) throw new Error('no home host — name one with --host');
-  return home.daemonId;
+  return home.hostId;
 }

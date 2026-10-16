@@ -114,17 +114,18 @@ const NATIVE_TOOLS: ToolCatalogEntry[] = [
     description: 'Stops a running background task — the way a monitor is cancelled early.',
     params: 'task_id: string',
   },
-  {
-    name: 'Task',
-    label: 'Task',
-    category: 'native',
-    description:
-      'Spawns an ephemeral sub-agent to run a scoped task on its own, then returns its result.',
-    params: 'description: string, prompt: string, subagent_type: string',
-  },
 ];
 
 const PATCH_TOOLS: ToolCatalogEntry[] = [
+  {
+    name: patchToolId('patch_agent'),
+    label: 'patch_agent',
+    category: 'patch',
+    description:
+      'Runs a scoped task in a Patch-owned child agent and returns its result directly to this chat.',
+    params:
+      'prompt: string, title?: string, model?: string, folder?: string, disallowedTools?: string[], background?: boolean',
+  },
   {
     name: patchToolId('patch_spawn'),
     label: 'patch_spawn',
@@ -201,6 +202,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description: 'Lists the Pads this chat owns and whether a batch is waiting on the agent.',
     params: '(no params)',
+  },
+  {
+    name: patchToolId('patch_pad_collect'),
+    label: 'patch_pad_collect',
+    category: 'patch',
+    description:
+      'Collects the changes you made on a Pad but have not sent, as if you had pressed Send.',
+    params: 'padId: string',
   },
   {
     name: patchToolId('view_file'),
@@ -318,37 +327,6 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description: 'Kills a running background task outright, its whole process group.',
     params: 'taskId: string',
-  },
-  {
-    name: patchToolId('patch_delegate'),
-    label: 'patch_delegate',
-    category: 'patch',
-    description:
-      'Runs a sub-task as a durable, invisible subagent and delivers its full result back to this chat when it finishes.',
-    params:
-      'prompt: string, model?: string, folder?: string, disallowedTools?: string[], wait?: boolean',
-  },
-  {
-    name: patchToolId('patch_delegate_list'),
-    label: 'patch_delegate_list',
-    category: 'patch',
-    description: "Lists this chat's subagents and their running/done/failed status.",
-    params: '(no params)',
-  },
-  {
-    name: patchToolId('patch_delegate_send'),
-    label: 'patch_delegate_send',
-    category: 'patch',
-    description:
-      "Sends a follow-up message to one of this chat's subagents, optionally waiting for its reply.",
-    params: 'id: string, message: string, wait?: boolean',
-  },
-  {
-    name: patchToolId('patch_delegate_stop'),
-    label: 'patch_delegate_stop',
-    category: 'patch',
-    description: "Stops one of this chat's own subagents outright.",
-    params: 'id: string',
   },
   {
     name: patchToolId('patch_history'),
@@ -488,8 +466,9 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_browser_read',
     category: 'patch',
     description:
-      "Reads a tab's page as an accessible snapshot — title, url, and every visible element with a ref.",
-    params: 'tabId: string',
+      "Reads a tab's page: an element snapshot with stable refs (iframes and shadow DOM included), its full text, structured tables and lists, or the accessibility tree.",
+    params:
+      "tabId: string, mode?: 'snapshot' | 'text' | 'structured' | 'accessibility', ref?: string, maxChars?: number",
   },
   {
     name: patchToolId('patch_browser_click'),
@@ -523,8 +502,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_browser_upload'),
     label: 'patch_browser_upload',
     category: 'patch',
-    description: 'Attaches local file(s) to a file input at a ref.',
-    params: 'tabId: string, ref: string, filePaths: string[]',
+    description: 'Attaches local file(s) to a file input or to the file chooser a button opens.',
+    params: 'tabId: string, filePaths: string[], ref?: string',
   },
   {
     name: patchToolId('patch_browser_mouse'),
@@ -545,8 +524,16 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_browser_screenshot'),
     label: 'patch_browser_screenshot',
     category: 'patch',
-    description: "Takes a PNG screenshot of the tab's current page.",
-    params: 'tabId: string',
+    description: "Takes a PNG screenshot of a tab's viewport, the whole page, or one element.",
+    params: 'tabId: string, ref?: string, fullPage?: boolean',
+  },
+  {
+    name: patchToolId('patch_browser_handoff'),
+    label: 'patch_browser_handoff',
+    category: 'patch',
+    description:
+      'Hands a browser tab to the user to sign in, pass 2FA or approve consent, and waits for them to finish without seeing what they enter.',
+    params: 'tabId: string, reason: string, callbackPort?: number, timeoutSeconds?: number',
   },
   {
     name: patchToolId('patch_browser_tabs'),
@@ -554,6 +541,89 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description: 'Lists every open browser tab on this host.',
     params: '(no params)',
+  },
+  {
+    name: patchToolId('patch_browser_navigate'),
+    label: 'patch_browser_navigate',
+    category: 'patch',
+    description: 'Moves an existing tab: go to a URL, back, forward or reload.',
+    params: "tabId: string, action: 'goto' | 'back' | 'forward' | 'reload', url?: string",
+  },
+  {
+    name: patchToolId('patch_browser_switch_tab'),
+    label: 'patch_browser_switch_tab',
+    category: 'patch',
+    description: 'Brings a tab to the front.',
+    params: 'tabId: string',
+  },
+  {
+    name: patchToolId('patch_browser_wait'),
+    label: 'patch_browser_wait',
+    category: 'patch',
+    description:
+      'Waits for text, an element, a URL change, idle network or a pause, and fails clearly on timeout.',
+    params:
+      'tabId: string, text?: string, textGone?: string, selector?: string, state?: string, ref?: string, url?: string, networkIdle?: boolean, ms?: number, timeoutMs?: number',
+  },
+  {
+    name: patchToolId('patch_browser_interact'),
+    label: 'patch_browser_interact',
+    category: 'patch',
+    description:
+      'Hovers, scrolls to an element, drags, presses keys on an element, selects text, copies, pastes and reads or writes the clipboard.',
+    params:
+      'tabId: string, action: string, ref?: string, selector?: string, toRef?: string, toSelector?: string, keys?: string[], text?: string',
+  },
+  {
+    name: patchToolId('patch_browser_dialog'),
+    label: 'patch_browser_dialog',
+    category: 'patch',
+    description: 'Answers the next confirm or prompt, or lists the dialogs a tab has shown.',
+    params: 'tabId: string, accept?: boolean, promptText?: string',
+  },
+  {
+    name: patchToolId('patch_browser_downloads'),
+    label: 'patch_browser_downloads',
+    category: 'patch',
+    description: 'Lists files the browser downloaded, saved on the host.',
+    params: 'tabId?: string, waitSeconds?: number',
+  },
+  {
+    name: patchToolId('patch_browser_state'),
+    label: 'patch_browser_state',
+    category: 'patch',
+    description:
+      'Gets, sets, saves, loads or clears cookies and localStorage, for using a saved sign-in.',
+    params:
+      "tabId: string, action: 'get' | 'set' | 'save' | 'load' | 'clear', domain?: string, path?: string, cookies?: object[] | boolean, origins?: object[], localStorage?: object | boolean",
+  },
+  {
+    name: patchToolId('patch_browser_eval'),
+    label: 'patch_browser_eval',
+    category: 'patch',
+    description: 'Runs JavaScript in the page and returns its value.',
+    params: 'tabId: string, expression: string, frameUrl?: string',
+  },
+  {
+    name: patchToolId('patch_browser_console'),
+    label: 'patch_browser_console',
+    category: 'patch',
+    description: "Reads a tab's console messages and page errors.",
+    params: 'tabId: string, level?: string, limit?: number, clear?: boolean',
+  },
+  {
+    name: patchToolId('patch_browser_network'),
+    label: 'patch_browser_network',
+    category: 'patch',
+    description: "Lists a tab's network requests, or returns one response body.",
+    params: 'tabId: string, urlContains?: string, limit?: number, clear?: boolean, bodyOf?: number',
+  },
+  {
+    name: patchToolId('patch_browser_viewport'),
+    label: 'patch_browser_viewport',
+    category: 'patch',
+    description: 'Resizes a tab, emulates a named device, or resets it.',
+    params: 'tabId: string, width?: number, height?: number, device?: string, reset?: boolean',
   },
   {
     name: patchToolId('patch_browser_close'),

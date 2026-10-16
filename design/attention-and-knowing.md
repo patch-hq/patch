@@ -9,7 +9,7 @@ something* — given the app is hidden most of the time.
 ## What already exists
 
 - `StatusKind` = `question | complete` on every chat, generated per-turn by a
-  Haiku one-shot (`packages/daemon/src/statusGen.ts`), rendered nested under the
+  Haiku one-shot (`packages/host/src/statusGen.ts`), rendered nested under the
   sidebar row with distinct treatment per kind.
 - Needs-attention mode: `uiStore.attentionOnly`, `chatGroups.needsAttention`,
   FIFO oldest-first via `sortAttentionQueue`.

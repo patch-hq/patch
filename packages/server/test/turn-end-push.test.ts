@@ -18,7 +18,7 @@ import type { WireEvent } from '@patch/wire';
 import { generateUserKeypair } from '@patch/auth';
 import { Registry } from '../src/registry.js';
 import type { PushBackend } from '../src/notifications/router.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { build } from '../src/app.js';
 
 const ACCOUNT = generateUserKeypair(() => new Uint8Array(32).fill(7));
@@ -57,12 +57,12 @@ async function harness() {
     token: 'fcm-phone-token',
     registeredAt: 1,
   });
-  const link = new InProcessDaemonLink();
+  const link = new InProcessHostLink();
   const push = fakePush();
   const app = await build({
     dataDir: dir,
     registry,
-    daemonLink: link,
+    hostLink: link,
     pushBackend: push.backend,
     jobsWatch: false,
   });
@@ -73,7 +73,7 @@ function spawned(chatId: string): WireEvent {
   return {
     type: 'chat.spawned',
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/home/tom/projects/bed-planner',
     seq: 1,
     ts: 0,
@@ -84,7 +84,7 @@ function state(chatId: string, over: Record<string, unknown>): WireEvent {
   return {
     type: 'chat.state',
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     activity: 'idle',
     permissionMode: 'auto',
     folder: '/home/tom/projects/bed-planner',
@@ -96,7 +96,7 @@ function state(chatId: string, over: Record<string, unknown>): WireEvent {
 }
 
 /** Run a whole turn through the link, exactly as a host emits it. */
-function runTurn(link: InProcessDaemonLink, chatId: string, over: Record<string, unknown>): void {
+function runTurn(link: InProcessHostLink, chatId: string, over: Record<string, unknown>): void {
   link.emit(state(chatId, { activity: 'running', ...over }));
   link.emit(state(chatId, { activity: 'idle', ...over }));
 }
@@ -188,7 +188,7 @@ describe('turn-end push, end to end (spec/09 § Chat completion)', () => {
       const decoded = ChatStateEvent.parse({
         type: 'chat.state',
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         activity: 'idle',
         permissionMode: 'auto',
         folder: '/home/tom/projects/bed-planner',

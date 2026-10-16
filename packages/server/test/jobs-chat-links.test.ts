@@ -2,7 +2,15 @@
 // Automations group (spec/14 § Sidebar, spec/08 § Action).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  statSync,
+  readdirSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JobChatLinks } from '../src/jobs/chat-links.js';
@@ -37,6 +45,17 @@ describe('JobChatLinks', () => {
     links.record('c1', 'j_1');
     const raw = readFileSync(join(dir, 'job-chat-links.json'), 'utf8');
     expect(JSON.parse(raw)).toEqual({ c1: 'j_1' });
+  });
+
+  it('persists by replacing the file (temp + rename), never rewriting it in place', () => {
+    const links = new JobChatLinks({ dataDir: dir });
+    const file = join(dir, 'job-chat-links.json');
+    links.record('c1', 'j_1');
+    const before = statSync(file).ino;
+    links.record('c2', 'j_2');
+    // A fresh inode means a crash mid-write can only lose the temp file.
+    expect(statSync(file).ino).not.toBe(before);
+    expect(readdirSync(dir)).toEqual(['job-chat-links.json']);
   });
 
   it('evicts the oldest entry once past its cap', () => {

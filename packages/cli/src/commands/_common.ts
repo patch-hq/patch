@@ -122,6 +122,17 @@ export function parseLimit(raw: string): number {
   return n;
 }
 
+/**
+ * A `<bool>` flag value: exactly `true` or `false`. Anything else (`0`, `no`,
+ * `False`) is rejected — reading it as the default would, for `--archived 0`,
+ * do the opposite of what was asked.
+ */
+export function parseBoolFlag(flag: string, raw: string): boolean {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`--${flag} must be true or false (got ${raw})`);
+}
+
 /** Wrap a command body so all thrown errors become `fail()`. */
 export async function run(opts: CommonOpts, body: () => Promise<void>): Promise<void> {
   try {

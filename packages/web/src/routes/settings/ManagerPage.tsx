@@ -15,6 +15,7 @@ import { Group, Row, SettingsPage } from './ui.js';
 import { LayerEditor } from './AgentPage.js';
 import { patchShared } from './sharedWrite.js';
 import { failed } from '../../lib/errorCopy.js';
+import { PositiveNumberInput } from './PositiveNumberInput.js';
 
 export function ManagerPage(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
@@ -47,47 +48,32 @@ export function ManagerPage(): JSX.Element {
           />
         </Row>
         <Row title="Interval">
-          <input
-            type="number"
-            min={1}
-            aria-label="Sweep interval (minutes)"
+          <PositiveNumberInput
+            ariaLabel="Sweep interval (minutes)"
             value={preferences.sweepIntervalMinutes}
             disabled={!loaded}
-            data-testid="sweep-interval-minutes"
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (Number.isFinite(next) && next > 0) write({ sweepIntervalMinutes: next });
-            }}
+            testid="sweep-interval-minutes"
+            onCommit={(next) => write({ sweepIntervalMinutes: next })}
           />
           <span className="set-unit">min</span>
         </Row>
         <Row title="Stalled after">
-          <input
-            type="number"
-            min={1}
-            aria-label="Stalled threshold (minutes)"
+          <PositiveNumberInput
+            ariaLabel="Stalled threshold (minutes)"
             value={preferences.stalledThresholdMinutes}
             disabled={!loaded}
-            data-testid="sweep-stalled-threshold"
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (Number.isFinite(next) && next > 0) write({ stalledThresholdMinutes: next });
-            }}
+            testid="sweep-stalled-threshold"
+            onCommit={(next) => write({ stalledThresholdMinutes: next })}
           />
           <span className="set-unit">min with no new output</span>
         </Row>
         <Row title="Messages per chat">
-          <input
-            type="number"
-            min={1}
-            aria-label="Messages per chat in the digest"
+          <PositiveNumberInput
+            ariaLabel="Messages per chat in the digest"
             value={preferences.sweepMessagesPerChat}
             disabled={!loaded}
-            data-testid="sweep-messages-per-chat"
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (Number.isFinite(next) && next > 0) write({ sweepMessagesPerChat: next });
-            }}
+            testid="sweep-messages-per-chat"
+            onCommit={(next) => write({ sweepMessagesPerChat: next })}
           />
         </Row>
         <Row title="Model">
@@ -118,17 +104,12 @@ export function ManagerPage(): JSX.Element {
 
       <Group label="Manager" testid="settings-manager">
         <Row title="Context window">
-          <input
-            type="number"
-            min={1}
-            aria-label="Manager context window (messages)"
+          <PositiveNumberInput
+            ariaLabel="Manager context window (messages)"
             value={preferences.managerContextWindow}
             disabled={!loaded}
-            data-testid="manager-context-window"
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (Number.isFinite(next) && next > 0) write({ managerContextWindow: next });
-            }}
+            testid="manager-context-window"
+            onCommit={(next) => write({ managerContextWindow: next })}
           />
           <span className="set-unit">messages</span>
         </Row>

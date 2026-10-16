@@ -83,6 +83,14 @@ describe('new-chat drafts in the sidebar', () => {
     expect(section.textContent).toContain('something worth keeping');
   });
 
+  it('a long draft title is cut on a code point, never through the middle of an emoji', () => {
+    renderNewChat();
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: `${'a'.repeat(41)}😀${'b'.repeat(20)}` },
+    });
+    expect(screen.getByTestId('drafts-section').textContent).toContain(`${'a'.repeat(41)}😀…`);
+  });
+
   it('typed then deleted is NOT a draft — the row goes with the text', () => {
     renderNewChat();
     const input = screen.getByTestId('composer-input');

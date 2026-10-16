@@ -21,14 +21,14 @@ vi.mock('../src/api/rest', async (orig) => ({
   },
 }));
 
-function report(daemonId: string, hostName: string): void {
+function report(hostId: string, hostName: string): void {
   usePresenceStore.getState().setHostReport({
-    type: 'daemon.host',
-    daemonId,
+    type: 'host.host',
+    hostId,
     hostName,
     platform: 'linux',
     arch: 'x64',
-    daemonVersion: '0.1.400',
+    hostVersion: '0.1.400',
     updateAvailable: false,
     permissionModeDefault: 'default',
     permissionOverrides: 0,
@@ -36,7 +36,7 @@ function report(daemonId: string, hostName: string): void {
     backends: [],
     components: [],
   });
-  usePresenceStore.getState().setHostOnline(daemonId, true);
+  usePresenceStore.getState().setHostOnline(hostId, true);
 }
 
 const press = (root: Parameters<typeof findHost>[0], id: string): void =>
@@ -54,13 +54,13 @@ describe('Chat Move screen', () => {
     report('mac', 'Mac');
     report('box', 'Hetzner');
     useFolderStore.getState().setAllFolders([
-      { daemonId: 'mac', roots: ['/Users/tom/wpp/Unite'], recent: [] },
-      { daemonId: 'box', roots: [], recent: ['/home/tom/projects', '/home/tom/Unite'] },
+      { hostId: 'mac', roots: ['/Users/tom/wpp/Unite'], recent: [] },
+      { hostId: 'box', roots: [], recent: ['/home/tom/projects', '/home/tom/Unite'] },
     ]);
     useChatStore
       .getState()
       .applyEvents([
-        { type: 'chat.spawned', chatId: 'c1', daemonId: 'mac', folder: '/Users/tom/wpp/Unite' },
+        { type: 'chat.spawned', chatId: 'c1', hostId: 'mac', folder: '/Users/tom/wpp/Unite' },
       ]);
     __setLocalSearchParams({ chatId: 'c1' });
   });
@@ -74,11 +74,31 @@ describe('Chat Move screen', () => {
     expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
   });
 
+  it('keeps the path being typed when any host publishes its folders again', () => {
+    const r = renderRN(<ChatMove />);
+    actSync(() => {
+      (findHost(r.root, byTestId('move-folder')).props.onChangeText as (t: string) => void)(
+        '/srv/custom',
+      );
+    });
+    expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/srv/custom');
+
+    // The folder list is re-announced (this host's, or another's): same content.
+    actSync(() => {
+      useFolderStore.getState().setHostFolders({
+        hostId: 'box',
+        roots: [],
+        recent: ['/home/tom/projects', '/home/tom/Unite'],
+      });
+    });
+    expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/srv/custom');
+  });
+
   it('moves, then goes back to the chat', async () => {
     moveSpy.mockResolvedValue({
       ok: true,
       chatId: 'c1',
-      daemonId: 'box',
+      hostId: 'box',
       folder: '/home/tom/Unite',
     });
     const r = renderRN(<ChatMove />);
@@ -110,10 +130,85 @@ describe('Chat Move screen', () => {
 
   it('with no same-named folder, the first folder the machine offers is selected', () => {
     useFolderStore.getState().setAllFolders([
-      { daemonId: 'mac', roots: ['/Users/tom/wpp/Unite'], recent: [] },
-      { daemonId: 'box', roots: [], recent: ['/home/tom/projects', '/home/tom/other'] },
+      { hostId: 'mac', roots: ['/Users/tom/wpp/Unite'], recent: [] },
+      { hostId: 'box', roots: [], recent: ['/home/tom/projects', '/home/tom/other'] },
     ]);
     const r = renderRN(<ChatMove />);
     expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/projects');
+  });
+
+  describe('from the server copy', () => {
+    const OK = { ok: true, chatId: 'c1', hostId: 'box', folder: '/srv/x' };
+    const hasAny = (r: ReturnType<typeof renderRN>, id: string): boolean => {
+      try {
+        findHost(r.root, byTestId(id));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it('an offline host: note shown, folder empty, suggestion applied only when tapped', async () => {
+      usePresenceStore.getState().setHostOnline('mac', false);
+      moveSpy.mockResolvedValue(OK);
+      const r = renderRN(<ChatMove />);
+      const note = findHost(r.root, byTestId('move-takeover-note'));
+      expect(hasText(note, 'Mac is offline. The chat continues from the server')).toBe(true);
+      expect(
+        hasText(note, 'watched processes stay on that machine. Timers and attachments move'),
+      ).toBe(true);
+      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('');
+      expect(hasAny(r, 'move-from-copy')).toBe(false);
+      expect(hasText(findHost(r.root, byTestId('move-confirm')), 'Continue')).toBe(true);
+      expect(findHost(r.root, byTestId('move-confirm')).props.disabled).toBe(true);
+      expect(
+        hasText(findHost(r.root, byTestId('move-suggest')), 'Suggested: /home/tom/Unite'),
+      ).toBe(true);
+      press(r.root, 'move-suggest');
+      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
+      press(r.root, 'move-confirm');
+      await flush();
+      expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
+    });
+
+    it('choosing it on an online host sends fromServerCopy', async () => {
+      moveSpy.mockResolvedValue(OK);
+      const r = renderRN(<ChatMove />);
+      expect(hasAny(r, 'move-takeover-note')).toBe(false);
+      expect(
+        hasText(
+          findHost(r.root, byTestId('move-from-copy')),
+          "Continue from the server's copy instead",
+        ),
+      ).toBe(true);
+      press(r.root, 'move-from-copy');
+      const note = findHost(r.root, byTestId('move-takeover-note'));
+      expect(hasText(note, 'is offline')).toBe(false);
+      expect(hasText(note, "The chat continues from the server's copy.")).toBe(true);
+      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('');
+      expect(hasText(findHost(r.root, byTestId('move-from-copy')), 'Move as it is instead')).toBe(
+        true,
+      );
+      press(r.root, 'move-suggest');
+      press(r.root, 'move-confirm');
+      await flush();
+      expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite', {
+        fromServerCopy: true,
+      });
+    });
+
+    it('switching back restores the ordinary move', async () => {
+      moveSpy.mockResolvedValue(OK);
+      const r = renderRN(<ChatMove />);
+      press(r.root, 'move-from-copy');
+      press(r.root, 'move-from-copy');
+      expect(hasAny(r, 'move-takeover-note')).toBe(false);
+      expect(hasAny(r, 'move-suggest')).toBe(false);
+      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
+      expect(hasText(findHost(r.root, byTestId('move-confirm')), 'Move')).toBe(true);
+      press(r.root, 'move-confirm');
+      await flush();
+      expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
+    });
   });
 });

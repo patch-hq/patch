@@ -38,6 +38,8 @@ interface Outgoing {
   files: PendingAttachment[];
   /** The Tools panel's OFF set captured at SEND time (see deliveryTracker). */
   disabledTools: string[];
+  /** Original seq of the turn this re-runs: the host folds it into that bubble. */
+  retryOfSeq?: number;
   /** The uploaded refs; `null` while the files are still uploading. */
   refs: AttachmentRef[] | null;
 }
@@ -75,6 +77,54 @@ export function sendMessage(chatId: string, text: string, files: PendingAttachme
   });
   enqueue(item);
   return localId;
+}
+
+/**
+ * The user turn Retry re-runs for `entry`: the row itself when it is a user
+ * message, or the nearest user message before it when it is an assistant
+ * reply. Null when there is none to resend.
+ */
+export function retrySource(
+  chatId: string,
+  entry: { role?: string; seq: number },
+): { content: string; seq: number } | null {
+  const tl = useChatStore.getState().timelines[chatId] ?? [];
+  const at = tl.findIndex((e) => e.seq === entry.seq && e.role === entry.role);
+  const upto =
+    entry.role === 'user'
+      ? tl.slice(at < 0 ? 0 : at, at + 1)
+      : tl.slice(0, at < 0 ? 0 : at).reverse();
+  const hit = upto.find(
+    (e) =>
+      e.kind === 'message' &&
+      e.role === 'user' &&
+      (e.content ?? '').length > 0 &&
+      (e.attachments ?? []).length === 0,
+  );
+  return hit ? { content: hit.content ?? '', seq: hit.seq } : null;
+}
+
+/**
+ * Retry a turn (see {@link retrySource}) in place: its user text is sent again
+ * naming the turn it re-runs, and the host folds the result into the same
+ * bubble as another attempt (spec/12 § Retry in place).
+ */
+export function retryTurn(chatId: string, entry: { role?: string; seq: number }): void {
+  const src = retrySource(chatId, entry);
+  if (!src) {
+    useUiStore.getState().pushError('nothing to retry: no earlier text-only message');
+    return;
+  }
+  const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  enqueue({
+    chatId,
+    localId,
+    text: src.content,
+    files: [],
+    disabledTools: useToolsStore.getState().disabledFor(chatId),
+    retryOfSeq: src.seq,
+    refs: [],
+  });
 }
 
 /** Retry: upload the same files again, then send (spec/15). */
@@ -124,6 +174,7 @@ function drain(chatId: string): void {
       item.refs!.length > 0 ? item.refs! : undefined,
       (e) => getWs().send(e),
       item.disabledTools,
+      item.retryOfSeq,
     );
   }
   if (chain.length === 0) chains.delete(chatId);

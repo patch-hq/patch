@@ -81,7 +81,7 @@ const SURFACES: { key: VoiceSurfaceKey; label: string }[] = [
 /**
  * What actually happens for a given cell, right now (spec/07 § Voice — a
  * config matrix — "Implemented today" / "Not implemented"). Mirrors
- * `packages/daemon/src/audio/server.ts`'s branching exactly, so this can
+ * `packages/host/src/audio/server.ts`'s branching exactly, so this can
  * never claim a cell works when the host would refuse it — the UI accepts
  * every combination the schema does (nothing here blocks a selection), it
  * only tells you honestly what picking it will do.
@@ -96,9 +96,6 @@ export function voiceCellStatus(
   }
   if (backend === 'local' && layer !== undefined && layer !== 'direct') {
     return 'Not implemented yet — no front model built for local. Refused at connect time.';
-  }
-  if (backend === 'gemini' && surface === 'handsFree') {
-    return 'Gemini answers everything it hears — the address word is not enforced.';
   }
   return null;
 }
@@ -175,7 +172,7 @@ function EngineGroup(): JSX.Element {
   const loaded = usePreferencesStore((s) => s.loaded);
   const update = usePreferencesStore((s) => s.update);
   const pushError = useUiStore((s) => s.pushError);
-  // Per-host key status (`daemon.host.voiceKeys`): a hosted cell names each
+  // Per-host key status (`host.host.voiceKeys`): a hosted cell names each
   // host that cannot run it — the host refuses its sessions there.
   const hosts = usePresenceStore((s) => s.hosts);
   const hostReports = Object.values(hosts).flatMap((h) =>
@@ -264,11 +261,11 @@ function EngineGroup(): JSX.Element {
         );
       })}
       {/* spec/07 § Call cost — what each host's voice calls have cost. */}
-      {Object.entries(hosts).flatMap(([daemonId, h]) => {
+      {Object.entries(hosts).flatMap(([hostId, h]) => {
         const usage = h.host?.voiceUsage;
         if (!h.host || !usage) return [];
         return [
-          <Note key={daemonId} testid={`voice-usage-${daemonId}`}>
+          <Note key={hostId} testid={`voice-usage-${hostId}`}>
             {`${h.host.hostName}: this month ${formatUsd(usage.monthUsd)} across ${calls(
               usage.monthCalls,
             )} · in all ${formatUsd(usage.allUsd)} across ${calls(usage.allCalls)}`}

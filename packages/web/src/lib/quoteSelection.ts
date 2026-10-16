@@ -5,16 +5,14 @@
 // (spec/14 § Composer — server-owned, so it's there the moment the user
 // switches back to the chat) rather than sending anything itself — the user
 // still writes and sends their own question.
+import { joinQuotes, splitQuotes } from './composerQuotes.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 
-/** Pure for testability — the DOM-touching part is just reading/writing the store. */
+/** Pure for testability — the DOM-touching part is just reading/writing the store.
+ * The new quote joins the stack of quotes already at the head of the draft. */
 export function withQuotedSelection(existingDraft: string, selectedText: string): string {
-  const quote = selectedText
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
-  const trimmedExisting = existingDraft.replace(/\s+$/, '');
-  return trimmedExisting.length > 0 ? `${trimmedExisting}\n\n${quote}\n\n` : `${quote}\n\n`;
+  const { quotes, body } = splitQuotes(existingDraft);
+  return joinQuotes([...quotes, selectedText], body);
 }
 
 export function quoteSelectionIntoComposer(chatId: string, selectedText: string): void {

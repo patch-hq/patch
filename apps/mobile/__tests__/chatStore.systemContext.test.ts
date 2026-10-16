@@ -138,7 +138,7 @@ describe('chat.provider_context', () => {
       {
         chatId: 'c1',
         name: null,
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '~/p',
         activity: 'idle',
         permissionMode: 'auto',

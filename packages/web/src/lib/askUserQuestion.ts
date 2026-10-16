@@ -147,9 +147,13 @@ export function isQuestionRowCoveredByCard(
 ): boolean {
   if (entry.kind !== 'tool_call' && entry.kind !== 'tool_result') return false;
   if (entry.tool !== ASK_USER_QUESTION) return false;
-  const card = timeline.find(
-    (e) => e.kind === 'permission' && e.tool === ASK_USER_QUESTION && e.seq < entry.seq,
-  );
+  // The card this row belongs to is the NEAREST one before it: a chat can ask
+  // several questions, and each result answers its own card.
+  let card: (typeof timeline)[number] | undefined;
+  for (const e of timeline) {
+    if (e.kind !== 'permission' || e.tool !== ASK_USER_QUESTION || e.seq >= entry.seq) continue;
+    if (card === undefined || e.seq > card.seq) card = e;
+  }
   if (!card) return false;
   return entry.kind === 'tool_call' || card.permissionResolved === 'approve';
 }

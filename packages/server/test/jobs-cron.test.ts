@@ -9,7 +9,7 @@ import { JobStore } from '../src/jobs/store.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { CronScheduler } from '../src/jobs/cron.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { hostConfirms } from './host-answer.js';
 
 const silentLogger = pino({ level: 'silent' });
@@ -30,10 +30,10 @@ describe('CronScheduler', () => {
     // twice (logged twice) and could double-fire.
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: true });
     await jobs.watcherReady;
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -53,7 +53,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'morning',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work' },
     });
     // Give chokidar time to fire — without the fix it would emit 'add'.
     await new Promise((r) => setTimeout(r, 200));
@@ -64,10 +64,10 @@ describe('CronScheduler', () => {
 
   it('registers + fires + deregisters a cron job', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -90,7 +90,7 @@ describe('CronScheduler', () => {
       trigger: { type: 'cron', expression: '0 7 * * *' },
       action: {
         type: 'spawn',
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/work',
         prompt: 'gm at {{payload.firedAt}}',
       },
@@ -134,10 +134,10 @@ describe('CronScheduler', () => {
 
   it('disabled jobs do not run', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -156,7 +156,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'x',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y' },
     });
     jobs.disable(job.id);
     expect(tasks.has(job.id)).toBe(false);
@@ -167,10 +167,10 @@ describe('CronScheduler', () => {
 
   it('filter rejection logs filter-rejected and does not dispatch', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -190,7 +190,7 @@ describe('CronScheduler', () => {
       name: 'gated',
       trigger: { type: 'cron', expression: '0 7 * * *' },
       filter: 'payload.firedAt = "never"',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y' },
     });
     await tasks.get(job.id)!();
     expect(link.sent.find((s) => s.event.type === 'chat.spawn_request')).toBeUndefined();
@@ -205,10 +205,10 @@ describe('CronScheduler', () => {
 
   it('filter sees a plain `now` field (spec/08 § Filter) — a date-bounded condition works with no bespoke start-date field', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -228,7 +228,7 @@ describe('CronScheduler', () => {
       name: 'starts-in-the-past-so-fires',
       trigger: { type: 'cron', expression: '0 7 * * *' },
       filter: 'now >= "2000-01-01T00:00:00.000Z"',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y' },
     });
     await tasks.get(job.id)!();
     expect(link.sent.find((s) => s.event.type === 'chat.spawn_request')).toBeDefined();
@@ -239,10 +239,10 @@ describe('CronScheduler', () => {
 
   it('runtime JSONata error fails closed (no dispatch, filter-error logged)', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -265,7 +265,7 @@ describe('CronScheduler', () => {
       name: 'broken',
       trigger: { type: 'cron', expression: '0 7 * * *' },
       filter: '$assert(false, "boom")',
-      action: { type: 'spawn', daemonId: 'd1', folder: '/y' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/y' },
     });
     await tasks.get(job.id)!();
     expect(link.sent.find((s) => s.event.type === 'chat.spawn_request')).toBeUndefined();
@@ -280,10 +280,10 @@ describe('CronScheduler', () => {
 
   it('registers with the REAL node-cron scheduler (no registerTask hook) and hasLiveTask reflects it', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -299,7 +299,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'real-schedule',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     expect(scheduler.hasLiveTask(job.id)).toBe(true);
     // A job using the registerTask test hook (none here) never appears.
@@ -314,10 +314,10 @@ describe('CronScheduler', () => {
 
   it('fireForTesting throws for an unknown jobId', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -337,10 +337,10 @@ describe('CronScheduler', () => {
 
   it('fireForTesting drives the real fire() path directly for an existing job', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -355,7 +355,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'direct-fire',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     await scheduler.fireForTesting(job.id);
     expect(link.sent.find((s) => s.event.type === 'chat.spawn_request')).toBeDefined();
@@ -367,10 +367,10 @@ describe('CronScheduler', () => {
   it('an invalid cron expression from an externally-edited job file is refused under the REAL scheduler (no registerTask)', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: true });
     await jobs.watcherReady;
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -393,7 +393,7 @@ describe('CronScheduler', () => {
       enabled: true,
       trigger: { type: 'cron', expression: 'not a real cron' },
       filter: null,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -412,10 +412,10 @@ describe('CronScheduler', () => {
 
   it('a dispatcher.dispatch() throw inside fire() is caught, logged, and recorded as dispatch-error', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -437,7 +437,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'bad-template',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: '{{#unclosed}}oops' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: '{{#unclosed}}oops' },
     });
     await tasks.get(job.id)!();
     // The run is written from the host's own answer (spec/08 step 6).
@@ -454,10 +454,10 @@ describe('CronScheduler', () => {
 
   it('start() picks up jobs that already existed in the store before it was constructed', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -467,7 +467,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'pre-existing',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     const registrations: string[] = [];
     const scheduler = new CronScheduler({
@@ -489,10 +489,10 @@ describe('CronScheduler', () => {
 
   it('a non-cron trigger job is left alone by the scheduler (no task, no crash)', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -511,7 +511,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'webhook-job',
       trigger: { type: 'webhook', scheme: 'none' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
     });
     expect(registrations).not.toContain(job.id);
     expect(scheduler.hasLiveTask(job.id)).toBe(false);
@@ -522,10 +522,10 @@ describe('CronScheduler', () => {
 
   it('stop() deregisters a still-live REAL node-cron task (not just registerTask-hook ones)', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -539,7 +539,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'still-live-on-stop',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     expect(scheduler.hasLiveTask(job.id)).toBe(true);
     // stop() while the real task is still registered — exercises the
@@ -552,10 +552,10 @@ describe('CronScheduler', () => {
 
   it('fire() re-checks liveness at fire time: a job disabled between schedule and tick does not dispatch', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -570,7 +570,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'disabled-before-tick',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     jobs.disable(job.id);
     await scheduler.fireForTesting(job.id);
@@ -582,10 +582,10 @@ describe('CronScheduler', () => {
 
   it('a cron fire against a "message" action omits `folder` from the run log action', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -621,10 +621,10 @@ describe('CronScheduler', () => {
 
   it('a cron fire against an "continue" action includes `folder` in the run log action', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -643,7 +643,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'ensure-action',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'continue', daemonId: 'd1', folder: '/persist', prompt: 'ping' },
+      action: { type: 'continue', hostId: 'd1', folder: '/persist', prompt: 'ping' },
     });
     await tasks.get(job.id)!();
     // The run is written from the host's own answer (spec/08 step 6).
@@ -660,11 +660,11 @@ describe('CronScheduler', () => {
 
   it('a buffered dispatch (host offline) is reflected as status:buffered in the run log', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     link.setStatus('offline');
     const dispatcher = new JobDispatcher({
       dataDir: dir,
-      daemonLink: link,
+      hostLink: link,
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
@@ -683,7 +683,7 @@ describe('CronScheduler', () => {
     const job = jobs.create({
       name: 'offline-cron',
       trigger: { type: 'cron', expression: '0 7 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/work', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/work', prompt: 'go' },
     });
     await tasks.get(job.id)!();
     // The run is written from the host's own answer (spec/08 step 6).

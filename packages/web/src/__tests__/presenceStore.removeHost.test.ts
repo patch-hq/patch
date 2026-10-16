@@ -47,22 +47,22 @@ describe('presenceStore.removeHost', () => {
     expect(h?.accounts).toEqual({});
   });
 
-  it('recomputes daemonOnline: false once the only online host is gone', () => {
+  it('recomputes hostOnline: false once the only online host is gone', () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportHost('host-b', { hostName: 'beta', isHomeHost: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
-    expect(usePresenceStore.getState().daemonOnline).toBe(true);
+    expect(usePresenceStore.getState().hostOnline).toBe(true);
     usePresenceStore.getState().removeHost('host-a');
-    expect(usePresenceStore.getState().daemonOnline).toBe(false);
+    expect(usePresenceStore.getState().hostOnline).toBe(false);
   });
 
-  it('recomputes daemonOnline: still true while another host is online', () => {
+  it('recomputes hostOnline: still true while another host is online', () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportHost('host-b', { hostName: 'beta', isHomeHost: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
     usePresenceStore.getState().setHostOnline('host-b', true);
     usePresenceStore.getState().removeHost('host-a');
-    expect(usePresenceStore.getState().daemonOnline).toBe(true);
+    expect(usePresenceStore.getState().hostOnline).toBe(true);
   });
 
   it('an unknown id is a no-op that leaves the state untouched', () => {
@@ -73,7 +73,7 @@ describe('presenceStore.removeHost', () => {
     const after = usePresenceStore.getState();
     // The hosts map is the same object, so nothing reading it re-renders.
     expect(after.hosts).toBe(before.hosts);
-    expect(after.daemonOnline).toBe(true);
+    expect(after.hostOnline).toBe(true);
     expect(Object.keys(after.hosts)).toEqual(['host-a']);
   });
 
@@ -86,7 +86,7 @@ describe('presenceStore.removeHost', () => {
     // reconnect greeting names only host-b.
     usePresenceStore
       .getState()
-      .setHosts([{ daemonId: 'host-b', online: true, lastSeenAt: null, host: null, accounts: [] }]);
+      .setHosts([{ hostId: 'host-b', online: true, lastSeenAt: null, host: null, accounts: [] }]);
 
     const { hosts } = usePresenceStore.getState();
     expect(Object.keys(hosts)).toEqual(['host-b']);

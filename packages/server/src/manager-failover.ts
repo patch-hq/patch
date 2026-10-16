@@ -11,10 +11,11 @@
 // same on its return. The stretch the home host's own log is missing is
 // answered from the server's copy (`gapEvents`).
 
+import { parsePersisted } from './persisted-json.js';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
-import { SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
+import { headCodePoints, tailCodePoints, SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
 import type { ChatLogStore } from './chat-log-store.js';
 
 /** How long the home host must be offline before another host takes over. */
@@ -43,11 +44,11 @@ interface State {
 
 export interface ManagerFailoverDeps {
   /** The account's home host, as the registry names it. */
-  homeDaemonId: () => string | null;
-  registeredDaemonIds: () => string[];
-  isOnline: (daemonId: string) => boolean;
-  onHostStatus: (handler: (daemonId: string, status: 'online' | 'offline') => void) => () => void;
-  sendTo: (daemonId: string, surfaceId: string, event: WireEvent) => void;
+  homeHostId: () => string | null;
+  registeredHostIds: () => string[];
+  isOnline: (hostId: string) => boolean;
+  onHostStatus: (handler: (hostId: string, status: 'online' | 'offline') => void) => () => void;
+  sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
   log: Pick<ChatLogStore, 'read'>;
   /** How many messages of the conversation to hand over. */
   contextWindow: () => number;
@@ -71,9 +72,7 @@ export class ManagerFailover {
 
   /** Begin watching host presence. */
   start(): void {
-    this.unsubscribe = this.deps.onHostStatus((daemonId, status) =>
-      this.onStatus(daemonId, status),
-    );
+    this.unsubscribe = this.deps.onHostStatus((hostId, status) => this.onStatus(hostId, status));
     // A server restart while the home host was already down.
     if (this.homeOffline() && this.state.acting === null) this.armTimer();
   }
@@ -91,7 +90,7 @@ export class ManagerFailover {
 
   /** The host that owns the Manager and Speakers right now. */
   specialThreadHost(): string | null {
-    return this.state.acting ?? this.deps.homeDaemonId();
+    return this.state.acting ?? this.deps.homeHostId();
   }
 
   /**
@@ -106,24 +105,24 @@ export class ManagerFailover {
     });
   }
 
-  private onStatus(daemonId: string, status: 'online' | 'offline'): void {
-    const home = this.deps.homeDaemonId();
+  private onStatus(hostId: string, status: 'online' | 'offline'): void {
+    const home = this.deps.homeHostId();
     if (status === 'online') {
       // A host that missed an order while it was away is told again; it acts on
       // each takeover once.
-      const order = this.state.orders[daemonId];
-      if (order) this.deps.sendTo(daemonId, SERVER_SURFACE, order.event);
-      if (daemonId === home) {
+      const order = this.state.orders[hostId];
+      if (order) this.deps.sendTo(hostId, SERVER_SURFACE, order.event);
+      if (hostId === home) {
         this.clearTimer();
-        if (this.state.acting !== null) this.handBack(this.state.acting, daemonId);
+        if (this.state.acting !== null) this.handBack(this.state.acting, hostId);
       } else if (this.homeOffline() && this.state.acting === null) {
         this.armTimer();
       }
       return;
     }
-    if (daemonId === home) {
+    if (hostId === home) {
       if (this.state.acting === null) this.armTimer();
-    } else if (daemonId === this.state.acting) {
+    } else if (hostId === this.state.acting) {
       // The stand-in went away: another may take over, or the home host returns.
       this.state.acting = null;
       this.closeGap();
@@ -133,7 +132,7 @@ export class ManagerFailover {
   }
 
   private homeOffline(): boolean {
-    const home = this.deps.homeDaemonId();
+    const home = this.deps.homeHostId();
     return home !== null && !this.deps.isOnline(home);
   }
 
@@ -158,9 +157,9 @@ export class ManagerFailover {
   }
 
   private activate(): void {
-    const home = this.deps.homeDaemonId();
+    const home = this.deps.homeHostId();
     const candidate = this.deps
-      .registeredDaemonIds()
+      .registeredHostIds()
       .find((id) => id !== home && this.deps.isOnline(id));
     if (candidate === undefined) {
       this.deps.logger.warn({}, 'manager-failover: home host offline and no other host is up');
@@ -172,7 +171,7 @@ export class ManagerFailover {
     this.state.gaps.push({ from: nextSeq, to: null });
     const event: WireEvent = {
       type: 'host.manager_adopt',
-      daemonId: candidate,
+      hostId: candidate,
       epoch: this.state.epoch,
       handoff: this.handoffText(-1, 'the home machine is offline'),
       nextSeq,
@@ -180,7 +179,7 @@ export class ManagerFailover {
     this.state.orders[candidate] = { kind: 'adopt', event };
     this.save();
     this.deps.logger.info(
-      { daemonId: candidate, epoch: this.state.epoch },
+      { hostId: candidate, epoch: this.state.epoch },
       'manager-failover: stand-in chosen',
     );
     this.deps.sendTo(candidate, SERVER_SURFACE, event);
@@ -193,7 +192,7 @@ export class ManagerFailover {
     this.state.epoch += 1;
     this.state.orders[standIn] = {
       kind: 'release',
-      event: { type: 'host.manager_release', daemonId: standIn, epoch: this.state.epoch },
+      event: { type: 'host.manager_release', hostId: standIn, epoch: this.state.epoch },
     };
     const gap = this.state.gaps.at(-1);
     const nextSeq = this.maxSeq() + 1;
@@ -203,7 +202,7 @@ export class ManagerFailover {
         kind: 'adopt',
         event: {
           type: 'host.manager_adopt',
-          daemonId: home,
+          hostId: home,
           epoch: this.state.epoch,
           handoff: this.handoffText(
             gapFrom - 1,
@@ -232,11 +231,10 @@ export class ManagerFailover {
     const lines: string[] = [];
     for (const e of this.deps.log.read(SPECIAL_THREAD_IDS.manager, afterSeq)) {
       if (e.type !== 'chat.message' || e.role === 'system') continue;
-      lines.push(`${e.role}: ${e.content.slice(0, MESSAGE_CHARS)}`);
+      lines.push(`${e.role}: ${headCodePoints(e.content, MESSAGE_CHARS)}`);
     }
     const recent = lines.slice(-this.deps.contextWindow());
-    let body = recent.join('\n\n');
-    if (body.length > HANDOFF_CHARS) body = body.slice(body.length - HANDOFF_CHARS);
+    const body = tailCodePoints(recent.join('\n\n'), HANDOFF_CHARS);
     return (
       `[handoff] You are the Manager, and ${why}. This is the recent conversation, oldest first, ` +
       `for you to carry on from:\n\n${body === '' ? '(nothing yet)' : body}`
@@ -246,7 +244,7 @@ export class ManagerFailover {
   private load(): void {
     if (this.path === null || !existsSync(this.path)) return;
     try {
-      this.state = { ...this.state, ...(JSON.parse(readFileSync(this.path, 'utf8')) as State) };
+      this.state = { ...this.state, ...(parsePersisted(readFileSync(this.path, 'utf8')) as State) };
     } catch (err) {
       this.deps.logger.warn({ err }, 'manager-failover: could not read its state; starting clean');
     }

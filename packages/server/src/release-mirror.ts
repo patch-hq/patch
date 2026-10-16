@@ -3,7 +3,7 @@
 // and phone (the update channel of spec/11 § Version reporting).
 //
 // Nothing about delivery changes for a client. A host asks THIS server for
-// `daemon-latest.json`, the desktop app for `latest-mac.yml`, the phone for
+// `host-latest.json`, the desktop app for `latest-mac.yml`, the phone for
 // `android-latest.json`; what changes is where this server gets them from: a
 // published release instead of a deploy someone ran by hand.
 //
@@ -49,8 +49,8 @@ export interface MirrorState {
   mirroredAt: string;
 }
 
-/** Host manifest as build-daemon writes it; only what the merge needs is typed. */
-interface DaemonManifest {
+/** Host manifest as build-host writes it; only what the merge needs is typed. */
+interface HostManifest {
   version: string;
   gitSha: string;
   signingPublicKey: string;
@@ -72,10 +72,10 @@ export function selectRelease(releases: Release[], channel: Channel): Release | 
 
 /**
  * One manifest from the per-target ones a release carries
- * (`daemon-latest-<target>.json`). They must describe ONE build and ONE signing
+ * (`host-latest-<target>.json`). They must describe ONE build and ONE signing
  * key: mixing two would install code that claims to be a version it is not.
  */
-export function mergeHostManifests(manifests: DaemonManifest[]): DaemonManifest {
+export function mergeHostManifests(manifests: HostManifest[]): HostManifest {
   const [first, ...rest] = manifests;
   if (!first) throw new Error('the release has no host manifest');
   for (const m of rest) {
@@ -88,7 +88,7 @@ export function mergeHostManifests(manifests: DaemonManifest[]): DaemonManifest 
       throw new Error('host manifests were signed with different artifact keys');
     }
   }
-  const byTarget = new Map<string, DaemonManifest['artifacts'][number]>();
+  const byTarget = new Map<string, HostManifest['artifacts'][number]>();
   for (const m of manifests) for (const a of m.artifacts) byTarget.set(a.target, a);
   return { ...first, artifacts: [...byTarget.values()] };
 }
@@ -104,7 +104,7 @@ export function parseChecksum(text: string): string {
 
 /** Files copied into the downloads folder as they are, when the release has them. */
 const PASS_THROUGH = [
-  /^patch-daemon-.+\.tar\.gz(\.sig)?$/,
+  /^patch-host-.+\.tar\.gz(\.sig)?$/,
   /^patch-.+\.apk$/,
   /^android-latest\.json$/,
   /^latest-mac\.yml$/,
@@ -112,7 +112,7 @@ const PASS_THROUGH = [
   /^desktop-latest\.json$/,
 ];
 const SERVER_RELEASE = ['patch-server.tar.gz', 'patch-server.tar.gz.sha256', 'install.sh'];
-const HOST_MANIFEST = /^daemon-latest-.+\.json$/;
+const HOST_MANIFEST = /^host-latest-.+\.json$/;
 
 export interface MirrorOptions {
   repo: string;
@@ -122,10 +122,25 @@ export interface MirrorOptions {
   log?: (msg: string) => void;
 }
 
-export function readMirrorState(downloadsDir: string): MirrorState | null {
+/**
+ * What was last mirrored, or null. The record is re-derivable (the next check
+ * just mirrors the release again), so a corrupt file is reported and read as
+ * nothing mirrored rather than failing every check forever.
+ */
+export function readMirrorState(
+  downloadsDir: string,
+  log: (msg: string) => void = () => {},
+): MirrorState | null {
   const file = join(downloadsDir, STATE_FILE);
   if (!existsSync(file)) return null;
-  return JSON.parse(readFileSync(file, 'utf8')) as MirrorState;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as MirrorState;
+  } catch (err: unknown) {
+    log(
+      `release mirror: ${STATE_FILE} is corrupt (${err instanceof Error ? err.message : String(err)}); mirroring again`,
+    );
+    return null;
+  }
 }
 
 /**
@@ -159,7 +174,7 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
     log(`release mirror: ${opts.repo} has no ${opts.channel} release yet`);
     return null;
   }
-  if (readMirrorState(opts.downloadsDir)?.tag === release.tag_name) return null;
+  if (readMirrorState(opts.downloadsDir, log)?.tag === release.tag_name) return null;
 
   const assets = new Map(release.assets.map((a) => [a.name, a]));
   const fetchAsset = async (name: string): Promise<Buffer> => {
@@ -201,7 +216,7 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
       const merged = mergeHostManifests(
         await Promise.all(
           manifestNames.map(
-            async (n) => JSON.parse((await fetchAsset(n)).toString('utf8')) as DaemonManifest,
+            async (n) => JSON.parse((await fetchAsset(n)).toString('utf8')) as HostManifest,
           ),
         ),
       );
@@ -213,7 +228,7 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
           );
         }
       }
-      writeFileSync(join(staging, 'daemon-latest.json'), `${JSON.stringify(merged, null, 2)}\n`);
+      writeFileSync(join(staging, 'host-latest.json'), `${JSON.stringify(merged, null, 2)}\n`);
       version = merged.version;
     }
 
@@ -224,7 +239,7 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
       renameSync(from, to);
     };
     const MANIFESTS = new Set([
-      'daemon-latest.json',
+      'host-latest.json',
       'android-latest.json',
       'latest-mac.yml',
       'desktop-latest.json',
@@ -242,7 +257,10 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
       version,
       mirroredAt: new Date().toISOString(),
     };
-    writeFileSync(join(opts.downloadsDir, STATE_FILE), `${JSON.stringify(state)}\n`);
+    // Temp + rename, so a crash mid-write cannot leave a truncated record.
+    const stateFile = join(opts.downloadsDir, STATE_FILE);
+    writeFileSync(`${stateFile}.tmp`, `${JSON.stringify(state)}\n`);
+    renameSync(`${stateFile}.tmp`, stateFile);
     log(`release mirror: ${opts.repo} ${release.tag_name} (${version}) is now served`);
     return release.tag_name;
   } finally {

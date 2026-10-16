@@ -20,16 +20,16 @@ import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const SURFACE = 'srf-desktop-multiwindow';
 
 async function start(registry: Registry) {
-  const daemonLink = new InProcessDaemonLink();
-  const built = await buildAll({ logger: false, registry, daemonLink });
+  const hostLink = new InProcessHostLink();
+  const built = await buildAll({ logger: false, registry, hostLink });
   await built.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = built.app.server.address() as AddressInfo;
-  return { url: `ws://127.0.0.1:${addr.port}/ws`, daemonLink, built };
+  return { url: `ws://127.0.0.1:${addr.port}/ws`, hostLink, built };
 }
 
 describe('WS hub — two windows of the same surface', () => {
@@ -63,12 +63,12 @@ describe('WS hub — two windows of the same surface', () => {
       // Main window.
       const main = new WireTestClient({ url: h.url, auth: jwt });
       await main.connect();
-      await main.waitFor('daemon.online');
+      await main.waitFor('host.online');
 
       // Sidebar window — same credential, same surfaceId.
       const sidebar = new WireTestClient({ url: h.url, auth: jwt });
       await sidebar.connect();
-      await sidebar.waitFor('daemon.online');
+      await sidebar.waitFor('host.online');
 
       // Both windows are addressable; the surface is listed exactly once.
       expect(hub.connectedSurfaceIds()).toEqual([SURFACE]);
@@ -80,7 +80,7 @@ describe('WS hub — two windows of the same surface', () => {
       expect(hub.connectedSurfaceIds()).toEqual([SURFACE]);
 
       // The ack the composer is waiting on is addressed with `forSurfaceId`.
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.input_ack',
         chatId: 'chat-1',
         localId: 'L1',
@@ -122,17 +122,17 @@ describe('WS hub — two windows of the same surface', () => {
     try {
       const main = new WireTestClient({ url: h.url, auth: jwt });
       await main.connect();
-      await main.waitFor('daemon.online');
+      await main.waitFor('host.online');
       const sidebar = new WireTestClient({ url: h.url, auth: jwt });
       await sidebar.connect();
-      await sidebar.waitFor('daemon.online');
+      await sidebar.waitFor('host.online');
 
       // Both waiters are armed BEFORE the emit: a frame that arrives while only
       // one of them is subscribed is dropped by the client, which would fail
       // this test for a reason that has nothing to do with the hub.
       const onMain = main.waitFor('chat.input_ack');
       const onSidebar = sidebar.waitFor('chat.input_ack');
-      h.daemonLink.emit({
+      h.hostLink.emit({
         type: 'chat.input_ack',
         chatId: 'chat-2',
         localId: 'L2',

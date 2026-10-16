@@ -15,7 +15,7 @@ import {
   registerJobsDiagRoutes,
   InMemorySpeakersRecorder,
 } from '../src/dev-diag.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import type { CronScheduler } from '../src/jobs/cron.js';
 
 const TOKEN = 'unit-test-internal-token-abc';
@@ -31,8 +31,8 @@ afterEach(async () => {
 describe('registerDevDiagRoutes — dependency-missing branches', () => {
   it('POST /internal/diag/incoming-call → 503 when callOrchestrator/wsHub are not configured', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -46,8 +46,8 @@ describe('registerDevDiagRoutes — dependency-missing branches', () => {
 
   it('GET /internal/diag/speakers/sent → 503 when speakersRecorder is not configured', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'GET',
@@ -60,7 +60,7 @@ describe('registerDevDiagRoutes — dependency-missing branches', () => {
 
   it('GET /internal/diag/speakers/sent → 200 with recorded entries when speakersRecorder IS configured', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const speakersRecorder = new InMemorySpeakersRecorder();
     speakersRecorder.record({
       ts: 1,
@@ -70,7 +70,7 @@ describe('registerDevDiagRoutes — dependency-missing branches', () => {
     });
     registerDevDiagRoutes(app, {
       logger: silentLogger,
-      daemonLink: link,
+      hostLink: link,
       internalToken: TOKEN,
       speakersRecorder,
     });
@@ -88,8 +88,8 @@ describe('registerDevDiagRoutes — dependency-missing branches', () => {
 describe('registerDevDiagRoutes — voice-device/transcript invalid body', () => {
   it('POST /internal/diag/voice-device/transcript → 401 without a valid internal token', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -101,8 +101,8 @@ describe('registerDevDiagRoutes — voice-device/transcript invalid body', () =>
 
   it('POST /internal/diag/voice-device/transcript falls back to Date.now() when no idGenerator is configured', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN }); // no idGenerator
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN }); // no idGenerator
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -118,10 +118,10 @@ describe('registerDevDiagRoutes — voice-device/transcript invalid body', () =>
 
   it('POST /internal/diag/voice-device/transcript uses a custom idGenerator when provided', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     registerDevDiagRoutes(app, {
       logger: silentLogger,
-      daemonLink: link,
+      hostLink: link,
       internalToken: TOKEN,
       idGenerator: () => 'fixed-id-1',
     });
@@ -140,8 +140,8 @@ describe('registerDevDiagRoutes — voice-device/transcript invalid body', () =>
 
   it('POST /internal/diag/voice-device/transcript → 400 on an invalid body', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -157,10 +157,10 @@ describe('registerDevDiagRoutes — voice-device/transcript invalid body', () =>
 describe('registerDevDiagRoutes — voice-device/session route', () => {
   it('POST /internal/diag/voice-device/session injects a device.session event', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const received: WireEvent[] = [];
     link.onEvent((e) => received.push(e));
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -180,8 +180,8 @@ describe('registerDevDiagRoutes — voice-device/session route', () => {
 
   it('POST /internal/diag/voice-device/session → 401 without a valid internal token', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -193,8 +193,8 @@ describe('registerDevDiagRoutes — voice-device/session route', () => {
 
   it('POST /internal/diag/voice-device/session → 400 on an invalid body', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -209,7 +209,7 @@ describe('registerDevDiagRoutes — voice-device/session route', () => {
 describe('registerDevDiagRoutes — incoming-call success path', () => {
   it('POST /internal/diag/incoming-call → 202 + callId when callOrchestrator/wsHub ARE configured', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const sentToWeb: WireEvent[] = [];
     const fakeWsHub = {
       sendToKind: (_kind: string, event: WireEvent) => {
@@ -221,7 +221,7 @@ describe('registerDevDiagRoutes — incoming-call success path', () => {
     };
     registerDevDiagRoutes(app, {
       logger: silentLogger,
-      daemonLink: link,
+      hostLink: link,
       internalToken: TOKEN,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       callOrchestrator: fakeCallOrchestrator as any,
@@ -248,7 +248,7 @@ describe('registerDevDiagRoutes — incoming-call success path', () => {
 
   it('POST /internal/diag/incoming-call → 202 with just chatId (no optional message)', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     const sentToWeb: WireEvent[] = [];
     const fakeWsHub = {
       sendToKind: (_kind: string, event: WireEvent) => {
@@ -260,7 +260,7 @@ describe('registerDevDiagRoutes — incoming-call success path', () => {
     };
     registerDevDiagRoutes(app, {
       logger: silentLogger,
-      daemonLink: link,
+      hostLink: link,
       internalToken: TOKEN,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       callOrchestrator: fakeCallOrchestrator as any,
@@ -280,8 +280,8 @@ describe('registerDevDiagRoutes — incoming-call success path', () => {
 
   it('POST /internal/diag/incoming-call → 400 on an invalid body (missing chatId)', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -296,8 +296,8 @@ describe('registerDevDiagRoutes — incoming-call success path', () => {
 describe('registerDevDiagRoutes — permission-request / voice-inject invalid bodies', () => {
   it('POST /internal/diag/permission-request → 202 applying defaults when tool/description are omitted', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -316,8 +316,8 @@ describe('registerDevDiagRoutes — permission-request / voice-inject invalid bo
 
   it('POST /internal/diag/permission-request → 400 on invalid body', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -330,8 +330,8 @@ describe('registerDevDiagRoutes — permission-request / voice-inject invalid bo
 
   it('POST /internal/diag/voice-inject → 400 on invalid body', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'POST',
@@ -346,8 +346,8 @@ describe('registerDevDiagRoutes — permission-request / voice-inject invalid bo
 describe('registerDevDiagRoutes — dev CORS/OPTIONS preflight hook', () => {
   it('sets CORS headers + short-circuits with 204 on an OPTIONS preflight to a diag route', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'OPTIONS',
@@ -361,8 +361,8 @@ describe('registerDevDiagRoutes — dev CORS/OPTIONS preflight hook', () => {
 
   it('does not set access-control-allow-origin when no Origin header is present', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    const link = new InProcessHostLink();
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'GET',
@@ -374,9 +374,9 @@ describe('registerDevDiagRoutes — dev CORS/OPTIONS preflight hook', () => {
 
   it('the CORS hook does not touch non-diag routes (early return)', async () => {
     app = Fastify();
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     app.get('/api/healthz', async () => ({ ok: true }));
-    registerDevDiagRoutes(app, { logger: silentLogger, daemonLink: link, internalToken: TOKEN });
+    registerDevDiagRoutes(app, { logger: silentLogger, hostLink: link, internalToken: TOKEN });
     await app.ready();
     const res = await app.inject({
       method: 'GET',

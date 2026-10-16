@@ -1,7 +1,7 @@
 // The ingress gate for host-addressed requests (spec/03 § Host events,
 // spec/04 § Spawn — "A spawn naming an unregistered host is an error").
 //
-// Every route and every surface frame that carries a `daemonId` names ONE
+// Every route and every surface frame that carries a `hostId` names ONE
 // machine. The id is checked against the account's registered machines HERE,
 // at the ingress, and a name that is not among them is refused with the
 // offending value in the body. It is deliberately not left to the routing
@@ -19,25 +19,25 @@ import type { Registry } from './registry.js';
 export interface UnregisteredHostError {
   error: 'unknown_host';
   message: string;
-  daemonId: string;
+  hostId: string;
   /** The machines that ARE registered, so a surface can say what to pick. */
   knownHosts: string[];
 }
 
 /**
- * `null` when `daemonId` names a registered machine; otherwise the 404 body
+ * `null` when `hostId` names a registered machine; otherwise the 404 body
  * naming the offending value.
  */
 export function checkRegisteredHost(
   registry: Registry,
-  daemonId: string,
+  hostId: string,
 ): UnregisteredHostError | null {
-  if (registry.isRegisteredDaemon(daemonId)) return null;
-  const knownHosts = registry.registeredDaemonIds();
+  if (registry.isRegisteredHost(hostId)) return null;
+  const knownHosts = registry.registeredHostIds();
   return {
     error: 'unknown_host',
-    message: `no machine registered with daemonId: ${daemonId}`,
-    daemonId,
+    message: `no machine registered with hostId: ${hostId}`,
+    hostId,
     knownHosts,
   };
 }

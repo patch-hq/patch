@@ -17,7 +17,7 @@ import { decode, encode, type WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import type { PushBackend } from '../src/notifications/router.js';
 
 class FrameLog {
@@ -52,7 +52,7 @@ class FrameLog {
 describe('chat completion — real server, real desktop socket', () => {
   let dataDir: string;
   let user: { publicKey: string; privateKey: string };
-  let link: InProcessDaemonLink;
+  let link: InProcessHostLink;
   let pushed: { tokens: string[]; payload: { body: string } }[];
   let pushBackend: PushBackend;
   let close: () => Promise<void>;
@@ -102,11 +102,11 @@ describe('chat completion — real server, real desktop socket', () => {
       },
     };
 
-    link = new InProcessDaemonLink();
+    link = new InProcessHostLink();
     const { app } = await buildAll({
       registry,
       presence: new PresenceTracker(),
-      daemonLink: link,
+      hostLink: link,
       pushBackend,
       jobsWatch: false,
       logger: false,
@@ -184,7 +184,7 @@ describe('chat completion — real server, real desktop socket', () => {
     link.emit({
       type: 'chat.spawned',
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/projects/bed-planner',
       seq: 1,
       ts: 0,
@@ -192,7 +192,7 @@ describe('chat completion — real server, real desktop socket', () => {
     const base = {
       type: 'chat.state',
       chatId,
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'auto',
       folder: '/home/tom/projects/bed-planner',
       lastUpdated: 0,
@@ -346,7 +346,7 @@ describe('chat completion — real server, real desktop socket', () => {
   describe('a job that has turned its doorbell off', () => {
     const base = {
       type: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: '/home/tom/projects/bed-planner',
       prompt: 'go',
     };

@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { ChatRegistry } from '../src/chat-registry.js';
 import {
   mintVoiceToken,
@@ -170,24 +170,24 @@ describe('POST /api/voice/token', () => {
       label: 'browser',
       issuedAt: 1,
     });
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const built = await buildAll({
       logger: false,
       registry,
-      daemonLink,
+      hostLink,
       internalToken: SECRET,
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });
     // Seed a real chat into the in-process ChatRegistry so the mint route
     // (E1-d1) sees 'c1' as an existing chat. Without this, every mint 404s.
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
     const credential = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-web-1',
       surfaceKind: 'web',
       label: 'browser',
     });
-    return { built, credential, daemonLink, registry };
+    return { built, credential, hostLink, registry };
   }
 
   it('mints a token for an authenticated surface', async () => {
@@ -307,8 +307,8 @@ describe('POST /api/voice/token', () => {
 
   it('rejects with 401 "no account" when no account has been bootstrapped', async () => {
     const registry = Registry.load(dir); // no bootstrapAccount() call
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink, internalToken: SECRET });
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink, internalToken: SECRET });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -405,7 +405,7 @@ describe('POST /api/voice/token', () => {
       issuedAt: 1,
     });
     const chatRegistry = new ChatRegistry();
-    chatRegistry.observe({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
+    chatRegistry.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
     const app = Fastify({ logger: false });
     registerVoiceTokenRoute(app, {
       logger: { warn: () => undefined, info: () => undefined } as unknown as import('pino').Logger,

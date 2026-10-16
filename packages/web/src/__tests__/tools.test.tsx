@@ -87,12 +87,13 @@ describe('toolsCatalog', () => {
 });
 
 // Pinned completeness gate (same shape as packages/wire's host-addressing /
-// codec gates, eb76ff89): every tool `buildPatchToolsServer` (daemon/src/mcp.ts)
+// codec gates, eb76ff89): every tool `buildPatchToolsServer` (host/src/mcp.ts)
 // registers, listed by hand here. A tool added to the MCP server but not to
 // this list — and so not to toolsCatalog.ts — is invisible in the Tools panel:
 // the user can neither see it nor turn it off. Update BOTH this list and
 // toolsCatalog.ts together when mcp.ts grows a new tool.
 const EXPECTED_PATCH_TOOLS = [
+  'patch_agent',
   'patch_peek',
   'patch_send_to',
   'patch_send_back',
@@ -112,10 +113,6 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_watch_list',
   'patch_watch_output',
   'patch_watch_stop',
-  'patch_delegate',
-  'patch_delegate_list',
-  'patch_delegate_send',
-  'patch_delegate_stop',
   'patch_history',
   'patch_list_chats',
   'patch_activity',
@@ -126,6 +123,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_ask_human',
   'patch_report',
   'patch_artifact',
+  'patch_pad_collect',
   'patch_pad_create',
   'patch_pad_list',
   'patch_pad_reply',
@@ -150,8 +148,20 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_browser_mouse',
   'patch_browser_key',
   'patch_browser_screenshot',
+  'patch_browser_handoff',
   'patch_browser_tabs',
   'patch_browser_close',
+  'patch_browser_navigate',
+  'patch_browser_switch_tab',
+  'patch_browser_wait',
+  'patch_browser_interact',
+  'patch_browser_dialog',
+  'patch_browser_downloads',
+  'patch_browser_state',
+  'patch_browser_eval',
+  'patch_browser_console',
+  'patch_browser_network',
+  'patch_browser_viewport',
 ];
 
 describe('toolsCatalog — completeness (patch/todo.md "nothing invisible or unexplained")', () => {

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 describe('hooks REST routes', () => {
   let dir: string;
@@ -34,9 +34,9 @@ describe('hooks REST routes', () => {
       surfaceKind: 'terminal',
       label: 'cli',
     });
-    const daemonLink = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink });
-    return { built, jwt, daemonLink };
+    const hostLink = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink });
+    return { built, jwt, hostLink };
   }
 
   function scriptHookBody(name = 'test') {
@@ -154,12 +154,12 @@ describe('hooks REST routes', () => {
   });
 
   it('POST /api/hooks/check dispatches to the chat host and aggregates a block', async () => {
-    const { built, jwt, daemonLink } = await bootstrap();
+    const { built, jwt, hostLink } = await bootstrap();
     const auth = { authorization: `Bearer ${jwt}` };
     try {
       built.chatRegistry.observe({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c_real',
         folder: '/home/tom/projects/bus',
       });
@@ -182,15 +182,15 @@ describe('hooks REST routes', () => {
       const deadline = Date.now() + 2000;
       // The host is also greeted with the shared settings (spec/01 § Settings),
       // so look only at the hook check.
-      const hookChecks = (): typeof daemonLink.sent =>
-        daemonLink.sent.filter((x) => (x.event as { type: string }).type === 'hook.check_request');
+      const hookChecks = (): typeof hostLink.sent =>
+        hostLink.sent.filter((x) => (x.event as { type: string }).type === 'hook.check_request');
       while (hookChecks().length === 0) {
         if (Date.now() > deadline) throw new Error('timed out waiting for hook.check_request');
         await new Promise((r) => setTimeout(r, 1));
       }
       const req = hookChecks()[0]?.event as { type: string; requestId: string; hookId: string };
       expect(req.type).toBe('hook.check_request');
-      daemonLink.emit({
+      hostLink.emit({
         type: 'hook.check_result',
         requestId: req.requestId,
         hookId: req.hookId,
@@ -212,12 +212,12 @@ describe('hooks REST routes', () => {
   });
 
   it('POST /api/hooks/check forwards images to a prompt hook only, and rejects a bad type', async () => {
-    const { built, jwt, daemonLink } = await bootstrap();
+    const { built, jwt, hostLink } = await bootstrap();
     const auth = { authorization: `Bearer ${jwt}` };
     try {
       built.chatRegistry.observe({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c_img',
         folder: '/home/tom/projects/bus',
       });
@@ -246,8 +246,8 @@ describe('hooks REST routes', () => {
         payload: { chatId: 'c_img', message: 'see screenshot', images },
       });
       const deadline = Date.now() + 2000;
-      const hookChecks = (): typeof daemonLink.sent =>
-        daemonLink.sent.filter((x) => (x.event as { type: string }).type === 'hook.check_request');
+      const hookChecks = (): typeof hostLink.sent =>
+        hostLink.sent.filter((x) => (x.event as { type: string }).type === 'hook.check_request');
       while (hookChecks().length < 2) {
         if (Date.now() > deadline) throw new Error('timed out waiting for hook.check_request');
         await new Promise((r) => setTimeout(r, 1));

@@ -30,7 +30,7 @@ import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 import { folderName } from '@patch/wire';
 
 export interface PickerHost {
-  daemonId: string;
+  hostId: string;
   name: string;
   online: boolean;
 }
@@ -44,7 +44,7 @@ export function FolderPickerSheet({
   visible,
   recents,
   hosts,
-  currentDaemonId,
+  currentHostId,
   onPick,
   onDismiss,
 }: {
@@ -52,8 +52,8 @@ export function FolderPickerSheet({
   recents: readonly FolderRecent[];
   hosts: readonly PickerHost[];
   /** The host the screen is on now — path mode and Browse… default to it. */
-  currentDaemonId: string | null;
-  onPick: (daemonId: string, folder: string) => void;
+  currentHostId: string | null;
+  onPick: (hostId: string, folder: string) => void;
   onDismiss: () => void;
 }): React.ReactElement {
   const colors = useTheme();
@@ -73,16 +73,14 @@ export function FolderPickerSheet({
   }, [visible]);
 
   const hostNames = React.useMemo(
-    () => Object.fromEntries(hosts.map((h) => [h.daemonId, h.name])),
+    () => Object.fromEntries(hosts.map((h) => [h.hostId, h.name])),
     [hosts],
   );
   // The host path completion and Browse… act on: the chosen chip, else the
   // current host, else the only host. Null (several hosts, none chosen) is
   // said out loud, never guessed.
   const actingHost =
-    hostTab !== 'all'
-      ? hostTab
-      : (currentDaemonId ?? (hosts.length === 1 ? hosts[0]!.daemonId : null));
+    hostTab !== 'all' ? hostTab : (currentHostId ?? (hosts.length === 1 ? hosts[0]!.hostId : null));
 
   const [dir, setDir] = React.useState<string | null>(null);
   const [parent, setParent] = React.useState<string | null>(null);
@@ -135,8 +133,8 @@ export function FolderPickerSheet({
     void load(actingHost, undefined);
   };
 
-  const choose = (daemonId: string, folder: string): void => {
-    onPick(daemonId, folder);
+  const choose = (hostId: string, folder: string): void => {
+    onPick(hostId, folder);
   };
 
   const rows = filterRows(recents, pathMode ? '' : query, hostTab);
@@ -223,12 +221,12 @@ export function FolderPickerSheet({
                 ) : error ? (
                   <Text
                     testID="folder-sheet-error"
-                    style={{ color: colors.red, padding: space.lg, fontSize: 13 }}
+                    style={{ color: colors.red, padding: space.lg, fontSize: textMin }}
                   >
                     {error}
                   </Text>
                 ) : entries.length === 0 ? (
-                  <Text style={{ color: colors.ink3, padding: space.lg, fontSize: 13 }}>
+                  <Text style={{ color: colors.ink3, padding: space.lg, fontSize: textMin }}>
                     No subfolders here.
                   </Text>
                 ) : (
@@ -286,14 +284,14 @@ export function FolderPickerSheet({
                   style={{ flexGrow: 0, marginTop: space.sm }}
                   contentContainerStyle={{ paddingHorizontal: space.lg, gap: space.xs }}
                 >
-                  {[{ daemonId: 'all', name: 'All', online: true }, ...hosts].map((h) => {
-                    const on = h.daemonId === hostTab;
+                  {[{ hostId: 'all', name: 'All', online: true }, ...hosts].map((h) => {
+                    const on = h.hostId === hostTab;
                     return (
                       <Pressable
-                        key={h.daemonId}
-                        testID={`folder-sheet-host-${h.daemonId}`}
+                        key={h.hostId}
+                        testID={`folder-sheet-host-${h.hostId}`}
                         accessibilityState={{ selected: on }}
-                        onPress={() => setHostTab(h.daemonId)}
+                        onPress={() => setHostTab(h.hostId)}
                         style={{
                           paddingHorizontal: space.md,
                           paddingVertical: space.xs,
@@ -328,7 +326,7 @@ export function FolderPickerSheet({
                     {actingHost === null ? (
                       <Text
                         testID="folder-sheet-error"
-                        style={{ color: colors.red, padding: space.lg, fontSize: 13 }}
+                        style={{ color: colors.red, padding: space.lg, fontSize: textMin }}
                       >
                         Choose which host to browse.
                       </Text>
@@ -352,7 +350,7 @@ export function FolderPickerSheet({
                     ) : error && actingHost !== null ? (
                       <Text
                         testID="folder-sheet-error"
-                        style={{ color: colors.red, padding: space.lg, fontSize: 13 }}
+                        style={{ color: colors.red, padding: space.lg, fontSize: textMin }}
                       >
                         {error}
                       </Text>
@@ -380,16 +378,16 @@ export function FolderPickerSheet({
                     {rows.length === 0 ? (
                       <Text
                         testID="folder-sheet-empty"
-                        style={{ color: colors.ink3, padding: space.lg, fontSize: 13 }}
+                        style={{ color: colors.ink3, padding: space.lg, fontSize: textMin }}
                       >
                         No matching folders.
                       </Text>
                     ) : (
                       rows.map((r) => (
                         <Pressable
-                          key={`${r.daemonId}\u0000${r.folder}`}
+                          key={`${r.hostId}\u0000${r.folder}`}
                           testID={`folder-sheet-row-${r.folder}`}
-                          onPress={() => choose(r.daemonId, r.folder)}
+                          onPress={() => choose(r.hostId, r.folder)}
                           style={rowStyle}
                         >
                           <Folder size={18} color={colors.ink3} />
@@ -409,7 +407,7 @@ export function FolderPickerSheet({
                           </View>
                           <View style={{ alignItems: 'flex-end' }}>
                             <Text style={{ color: colors.ink3, fontSize: textMin }}>
-                              {hostNames[r.daemonId] ?? r.daemonId}
+                              {hostNames[r.hostId] ?? r.hostId}
                             </Text>
                             {r.lastUpdated > 0 ? (
                               <Text style={{ color: colors.ink3, fontSize: textMin }}>
@@ -429,7 +427,7 @@ export function FolderPickerSheet({
                     {error ? (
                       <Text
                         testID="folder-sheet-error"
-                        style={{ color: colors.red, padding: space.lg, fontSize: 13 }}
+                        style={{ color: colors.red, padding: space.lg, fontSize: textMin }}
                       >
                         {error}
                       </Text>

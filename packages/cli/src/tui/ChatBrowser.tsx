@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { dropLastCodePoint } from './text.js';
 
 export interface ChatBrowserChat {
   chatId: string;
@@ -33,7 +34,7 @@ export function ChatBrowser(props: ChatBrowserProps): React.JSX.Element {
     else if (key.return) {
       const choice = filtered[safeIndex];
       if (choice) props.onPick(choice.chatId);
-    } else if (key.backspace || key.delete) setFilter((f) => f.slice(0, -1));
+    } else if (key.backspace || key.delete) setFilter(dropLastCodePoint);
     else if (input && !key.ctrl && !key.meta) setFilter((f) => f + input);
   });
 

@@ -39,7 +39,7 @@ let ChatDetailScreen: React.ComponentType;
 beforeEach(async () => {
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   ChatDetailScreen = (await import('../app/chats/[chatId]')).default;
   useChatStore.getState().hydrate([
     {

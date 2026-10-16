@@ -56,7 +56,15 @@ export async function downscaleImage(opts: {
   const scale = MAX_IMAGE_EDGE / longest;
   const result = await ImageManipulator.manipulateAsync(
     opts.uri,
-    [{ resize: { width: Math.round(width * scale), height: Math.round(height * scale) } }],
+    [
+      {
+        // At least 1px: a 40000x10 strip's short edge rounds to 0 otherwise.
+        resize: {
+          width: Math.max(1, Math.round(width * scale)),
+          height: Math.max(1, Math.round(height * scale)),
+        },
+      },
+    ],
     { compress: JPEG_QUALITY, format: ImageManipulator.SaveFormat.JPEG },
   );
   const baseName = opts.name.replace(/\.[^.]+$/, '') || 'image';

@@ -37,6 +37,7 @@ describe('usage wording', () => {
   it('says how long until, coarsely', () => {
     expect(formatUntil(now - 1, now)).toBe('now');
     expect(formatUntil(now + 28 * 60_000, now)).toBe('in 28 min');
+    expect(formatUntil(now + 20_000, now)).toBe('in 1 min');
     expect(formatUntil(now + 3 * 3_600_000, now)).toBe('in 3 h');
     expect(formatUntil(now + 5 * 86_400_000, now)).toBe('in 5 d');
   });
@@ -65,18 +66,18 @@ describe('sendToHost', () => {
   });
 
   it('sends to a reachable host', () => {
-    expect(sendToHost('d1', { type: 'host.update', daemonId: 'd1' }, 'Update')).toBe(true);
-    expect(send).toHaveBeenCalledWith({ type: 'host.update', daemonId: 'd1' });
+    expect(sendToHost('d1', { type: 'host.update', hostId: 'd1' }, 'Update')).toBe(true);
+    expect(send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'd1' });
   });
 
   it('refuses when this phone has no server link, naming the link', () => {
     usePresenceStore.setState({ connection: 'offline' });
-    expect(sendToHost('d1', { type: 'host.update', daemonId: 'd1' }, 'Update')).toBe(false);
+    expect(sendToHost('d1', { type: 'host.update', hostId: 'd1' }, 'Update')).toBe(false);
     expect(__getLastAlert()?.message).toMatch(/no link to the server \(offline\)/);
   });
 
   it('refuses an unknown host and names it by id', () => {
-    expect(sendToHost('ghost', { type: 'host.update', daemonId: 'ghost' }, 'Update')).toBe(false);
+    expect(sendToHost('ghost', { type: 'host.update', hostId: 'ghost' }, 'Update')).toBe(false);
     expect(__getLastAlert()?.message).toBe(
       'ghost is offline (last seen never), so nothing was sent.',
     );
@@ -87,6 +88,7 @@ describe('sendToHost', () => {
   it('labels a heartbeat age', () => {
     expect(agoLabel(null)).toBe('never');
     expect(agoLabel(1_000, 5_000)).toBe('4s ago');
+    expect(agoLabel(0, 3_570_000)).toBe('1h ago'); // not "60m ago"
     expect(agoLabel(0, 180_000)).toBe('3m ago');
     expect(agoLabel(0, 7_200_000)).toBe('2h ago');
     expect(agoLabel(0, 47 * 3_600_000)).toBe('47h ago');

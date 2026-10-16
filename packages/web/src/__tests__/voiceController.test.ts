@@ -16,6 +16,7 @@ vi.mock('../lib/callSound.js', () => ({ playCallSound: vi.fn() }));
 import {
   __setAudioOpenerForTests,
   __setRecorderFactoryForTests,
+  __setPreviewFactoryForTests,
   startVoiceNote,
   sendVoiceNote,
   cancelVoiceNote,
@@ -32,6 +33,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import type { VoiceRecording } from '../lib/voiceRecorder.js';
+import type { DictationPreviewCallbacks } from '../lib/dictationPreview.js';
 import type {
   AudioSession,
   AudioSessionCallbacks,
@@ -67,12 +69,20 @@ let recCancelSpy: ReturnType<typeof vi.fn>;
 let lastLevelCb: ((l: number) => void) | null = null;
 let voiceNoteSpy: MockInstance<typeof api.voiceNote>;
 
+// --- note live-transcript (preview) stub ------------------------------------
+let previewCbs: DictationPreviewCallbacks | null = null;
+let previewStopSpy: ReturnType<typeof vi.fn>;
+let previewPushSpy: ReturnType<typeof vi.fn>;
+let recPcmCb: ((pcm: Int16Array) => void) | null = null;
+
 function stubRecording(): VoiceRecording {
   return {
     onLevel: (cb) => {
       lastLevelCb = cb;
     },
-    onPcm: () => {},
+    onPcm: (cb) => {
+      recPcmCb = cb;
+    },
     stop: async () => {
       recStopSpy();
       return new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/wav' });
@@ -89,11 +99,20 @@ describe('voiceController', () => {
     recCancelSpy = vi.fn();
     lastCallbacks = null;
     lastLevelCb = null;
+    previewCbs = null;
+    recPcmCb = null;
+    previewStopSpy = vi.fn();
+    previewPushSpy = vi.fn();
+    __setPreviewFactoryForTests((_chatId, callbacks) => {
+      previewCbs = callbacks;
+      return { push: (pcm) => previewPushSpy(pcm), stop: () => previewStopSpy() };
+    });
+    useUiStore.getState().clearToasts();
     useVoiceStore.setState({ note: null, call: null, session: null, permission: null });
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'Manager',
         folder: 'm',
@@ -106,7 +125,7 @@ describe('voiceController', () => {
       },
       {
         chatId: 'c2',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'kitchen',
         folder: 'h',
@@ -128,6 +147,7 @@ describe('voiceController', () => {
   afterEach(() => {
     __setAudioOpenerForTests(null);
     __setRecorderFactoryForTests(null);
+    __setPreviewFactoryForTests(null);
     voiceNoteSpy.mockRestore();
   });
 
@@ -140,6 +160,68 @@ describe('voiceController', () => {
     expect(note?.gesture).toBe('ptt');
     // A live recording is in flight (level callback wired for the waveform).
     expect(lastLevelCb).toBeTypeOf('function');
+  });
+
+  // Todoist 6hjvWFWppq7GJWWc — "patch not displaying transcript while i'm
+  // speaking in dictation mode". The note overlay reads `note.transcript`, and
+  // nothing ever wrote to it: the words only appeared after the upload returned.
+  describe('live transcript while a note is being spoken', () => {
+    it('paints each interim transcript into the overlay as the host sends it', async () => {
+      await startVoiceNote('c1', 'toggle');
+      expect(previewCbs).not.toBeNull();
+      previewCbs!.onPartial('check on');
+      expect(useVoiceStore.getState().note?.transcript).toBe('check on');
+      previewCbs!.onPartial('check on agent two');
+      expect(useVoiceStore.getState().note?.transcript).toBe('check on agent two');
+    });
+
+    it('feeds the recorder PCM into the live leg', async () => {
+      await startVoiceNote('c1', 'toggle');
+      const pcm = new Int16Array([1, 2, 3]);
+      recPcmCb!(pcm);
+      expect(previewPushSpy).toHaveBeenCalledWith(pcm);
+    });
+
+    it('closes the live leg when the note is sent, and a late partial paints nothing', async () => {
+      await startVoiceNote('c1', 'toggle');
+      const cbs = previewCbs!;
+      await sendVoiceNote();
+      expect(previewStopSpy).toHaveBeenCalledOnce();
+      cbs.onPartial('too late');
+      expect(useVoiceStore.getState().note).toBeNull();
+    });
+
+    it('closes the live leg on cancel, and a late partial does not leak into the next note', async () => {
+      await startVoiceNote('c1', 'toggle');
+      const stale = previewCbs!;
+      cancelVoiceNote();
+      expect(previewStopSpy).toHaveBeenCalledOnce();
+      await startVoiceNote('c1', 'toggle');
+      stale.onPartial('from the cancelled note');
+      expect(useVoiceStore.getState().note?.transcript).toBe('');
+    });
+
+    it('a live-leg failure is surfaced loudly and does not stop the recording', async () => {
+      await startVoiceNote('c1', 'toggle');
+      previewCbs!.onPreviewError('socket closed');
+      expect(
+        useUiStore
+          .getState()
+          .errors.some((t) => /live transcript unavailable.*socket closed/.test(t.message)),
+      ).toBe(true);
+      await sendVoiceNote();
+      expect(voiceNoteSpy).toHaveBeenCalled();
+    });
+
+    it('a live leg that throws on open is surfaced, and the note still records and sends', async () => {
+      __setPreviewFactoryForTests(() => {
+        throw new Error('no token');
+      });
+      await startVoiceNote('c1', 'toggle');
+      expect(useUiStore.getState().errors.some((t) => /no token/.test(t.message))).toBe(true);
+      await sendVoiceNote();
+      expect(voiceNoteSpy).toHaveBeenCalled();
+    });
   });
 
   it('REAL PATH (D1 fidelity): the user message renders from the UPLOAD RESPONSE — no onTranscriptFinal is ever delivered', async () => {

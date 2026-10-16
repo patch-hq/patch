@@ -318,3 +318,40 @@ test.describe('composer dictation — live preview', () => {
     await expect(page.getByTestId('composer-live-preview')).toHaveCount(0);
   });
 });
+
+// Todoist 6hjvWFWppq7GJWWc — "patch not displaying transcript while i'm
+// speaking in dictation mode". The voice NOTE (⌃Space, ⌘;, the new-chat mic) is
+// dictation too, and its overlay stayed on `…` until the upload came back. Same
+// real recorder, real audioSession decoder and real CSS as above; only the mic
+// and the socket are stood in for.
+test.describe('voice note — live transcript', () => {
+  test("the overlay shows the host's words while the note is still being spoken", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await page.addInitScript(BOOT);
+    await stubVoiceRoutes(page);
+    await page.goto(`${CHAT}&ws=fake`);
+    await page.waitForFunction(
+      () => (window as unknown as { __startVoiceNote?: unknown }).__startVoiceNote !== undefined,
+    );
+    await page.evaluate(() =>
+      (
+        window as unknown as { __startVoiceNote: (c: string, g: string) => Promise<void> }
+      ).__startVoiceNote('thread_manager', 'toggle'),
+    );
+    const line = page.getByTestId('voice-note-transcript');
+    await expect(line).toBeVisible();
+    // The second pass rewrites the first, exactly as a prefix re-transcription does.
+    await expect(line).toHaveText('remind me to water the');
+    // Visible to a human, not just present in the DOM.
+    const box = (await line.boundingBox())!;
+    expect(box.width).toBeGreaterThan(40);
+    expect(box.height).toBeGreaterThan(8);
+    await page.screenshot({ path: 'test-results/voice-note-live-transcript.png' });
+    await page.evaluate(() =>
+      (window as unknown as { __cancelVoiceNote: () => void }).__cancelVoiceNote(),
+    );
+    await expect(page.getByTestId('voice-note-overlay')).toHaveCount(0);
+  });
+});

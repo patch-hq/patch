@@ -8,10 +8,10 @@ const src = readFileSync(new URL('./ship.mjs', import.meta.url), 'utf8');
 const desktopFn = src.slice(src.indexOf('function desktop(info)'));
 
 test('desktop() builds the darwin-arm64 host before the desktop build', () => {
-  const daemon = desktopFn.indexOf("['build:daemon']");
+  const daemon = desktopFn.indexOf("['build:host']");
   const build = desktopFn.indexOf("'@patch/desktop', 'build'");
   const dist = desktopFn.indexOf("'@patch/desktop', 'dist'");
-  assert.ok(daemon > 0, 'desktop() never runs build:daemon');
+  assert.ok(daemon > 0, 'desktop() never runs build:host');
   assert.ok(daemon < build && build < dist);
   assert.match(desktopFn.slice(daemon, build), /PATCH_BUILD_TARGETS: 'darwin-arm64'/);
 });

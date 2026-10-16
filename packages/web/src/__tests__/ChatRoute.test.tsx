@@ -55,13 +55,17 @@ vi.mock('../api/rest.js', async (importOriginal) => {
 function seedChat(
   chatId: string,
   timeline: ChatEventEntry[],
-  opts: { jobId?: string; activity?: 'idle' | 'running' } = {},
+  opts: {
+    jobId?: string;
+    activity?: 'idle' | 'running';
+    permissionMode?: 'bypassPermissions' | 'default';
+  } = {},
 ): void {
   useChatStore.getState().hydrate([
     {
       chatId,
-      daemonId: 'd1',
-      permissionMode: 'bypassPermissions' as const,
+      hostId: 'd1',
+      permissionMode: opts.permissionMode ?? ('bypassPermissions' as const),
       name: chatId,
       folder: 'foo',
       activity: opts.activity ?? 'idle',
@@ -128,7 +132,7 @@ describe('ChatRoute regression', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c1',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'one',
         folder: 'foo',
@@ -156,7 +160,7 @@ describe('ChatRoute regression', () => {
     useChatStore.getState().hydrate([
       {
         chatId,
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: 'speakers',
@@ -184,7 +188,7 @@ describe('ChatRoute regression', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'thread_manager',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'bypassPermissions' as const,
         name: 'Manager',
         folder: 'manager',
@@ -768,6 +772,40 @@ describe('ChatRoute regression', () => {
     expect(img?.getAttribute('loading')).toBe('lazy');
   });
 
+  it('offers the original image as a download from the viewer, at its stored resolution', () => {
+    const sha = 'c'.repeat(64);
+    seedChat('c-tool-image-download', [
+      {
+        seq: 1,
+        kind: 'tool_result',
+        tool: 'view_image',
+        toolResult: {
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'blob',
+                $blob: sha,
+                media_type: 'image/png',
+                bytes: 4096,
+                width: 1200,
+                height: 1500,
+              },
+            },
+          ],
+        },
+        at: 0,
+      },
+    ]);
+    renderChat('c-tool-image-download');
+    fireEvent.click(screen.getByTestId('tool-result-summary'));
+    fireEvent.click(screen.getByTestId('tool-field-image'));
+    const link = screen.getByTestId('lightbox-download') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe(`/api/chats/c-tool-image-download/blob/${sha}`);
+    expect(link.getAttribute('download')).toBe('image.png');
+    expect(link.getAttribute('aria-label')).toBe('Download original image');
+  });
+
   it('fetches the body the moment the row is opened — no second click to read a tool result', async () => {
     const sha = 'b'.repeat(64);
     const fetchMock = vi.fn().mockResolvedValue({
@@ -1077,7 +1115,7 @@ describe('ChatRoute regression', () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c-perm-plan',
-        daemonId: 'd1',
+        hostId: 'd1',
         permissionMode: 'plan' as const,
         name: 'c-perm-plan',
         folder: 'foo',
@@ -1113,7 +1151,12 @@ describe('ChatRoute regression', () => {
     renderChat('c-perm-plan', ws);
     const card = screen.getByTestId('permission');
     const labels = Array.from(card.querySelectorAll('button')).map((b) => b.textContent);
-    expect(labels).toEqual(['Approve 1', 'Deny 3', 'Approve & resume bypass 4']);
+    expect(labels).toEqual([
+      'Approve 1',
+      'Yes, allow all Bash during this session s',
+      'Deny 3',
+      'Approve & resume bypass 4',
+    ]);
 
     fireEvent.click(screen.getByTestId('permission-approve-resume-bypass'));
     expect(card.getAttribute('data-resolved')).toBe('approve');
@@ -1132,22 +1175,78 @@ describe('ChatRoute regression', () => {
   // clearer" → on a lone approval the sweep is indistinguishable from Approve,
   // and its old name read like a mode. It is not drawn at all here.
   it('hides the approve-all sweep while only one request is outstanding (spec/14)', () => {
-    seedChat('c-perm-one', [
-      {
-        seq: 1,
-        kind: 'permission',
-        tool: 'Edit',
-        requestId: 'req-only',
-        permissionDescription: 'edit src/a.ts',
-        at: 0,
-      },
-    ]);
+    seedChat(
+      'c-perm-one',
+      [
+        {
+          seq: 1,
+          kind: 'permission',
+          tool: 'Edit',
+          requestId: 'req-only',
+          permissionDescription: 'edit src/a.ts',
+          at: 0,
+        },
+      ],
+      { permissionMode: 'default' },
+    );
     renderChat('c-perm-one');
     expect(screen.queryByTestId('permission-approve-all')).toBeNull();
     const labels = Array.from(screen.getByTestId('permission').querySelectorAll('button')).map(
       (b) => b.textContent,
     );
+    expect(labels).toEqual(['Approve 1', 'Yes, allow all Edit during this session s', 'Deny 3']);
+  });
+
+  it('omits "allow all <tool> during this session" under bypass, where a card is only a safety check', () => {
+    seedChat('c-perm-bypass', [
+      { seq: 1, kind: 'permission', tool: 'Bash', requestId: 'req-bp', at: 0 },
+    ]);
+    renderChat('c-perm-bypass');
+    expect(screen.queryByTestId('permission-approve-session')).toBeNull();
+    const labels = Array.from(screen.getByTestId('permission').querySelectorAll('button')).map(
+      (b) => b.textContent,
+    );
     expect(labels).toEqual(['Approve 1', 'Deny 3']);
+  });
+
+  it('labels the computer-use ask Approve / Always allow / Deny', () => {
+    seedChat('c-perm-cu', [
+      { seq: 1, kind: 'permission', tool: 'Computer use', requestId: 'req-cu', at: 0 },
+    ]);
+    renderChat('c-perm-cu');
+    const labels = Array.from(screen.getByTestId('permission').querySelectorAll('button')).map(
+      (b) => b.textContent,
+    );
+    expect(labels).toEqual(['Approve 1', 'Always allow s', 'Deny 3']);
+  });
+
+  it('offers "Yes, allow all <tool> during this session" and sends approve_with_session_allow', () => {
+    seedChat(
+      'c-perm-sess',
+      [
+        {
+          seq: 1,
+          kind: 'permission',
+          tool: 'Edit',
+          requestId: 'req-sess',
+          permissionDescription: 'edit src/a.ts',
+          at: 0,
+        },
+      ],
+      { permissionMode: 'default' },
+    );
+    const send = vi.fn();
+    const ws = { send, requestReplay() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+    renderChat('c-perm-sess', ws);
+    fireEvent.click(screen.getByTestId('permission-approve-session'));
+    expect(screen.getByTestId('permission').getAttribute('data-resolved')).toBe('approve');
+    expect(send).toHaveBeenCalledWith({
+      type: 'chat.permission_response',
+      chatId: 'c-perm-sess',
+      requestId: 'req-sess',
+      approve: true,
+      decision: 'approve_with_session_allow',
+    });
   });
 
   it('offers "Approve all outstanding" on every card once two requests are outstanding, and sweeps both (spec/14)', () => {
@@ -1332,11 +1431,15 @@ describe('ChatRoute regression', () => {
   });
 
   it('renders a permission card with no description (no trailing " — ..." suffix)', () => {
-    seedChat('c-perm-nodesc', [
-      { seq: 1, kind: 'permission', tool: 'Bash', requestId: 'req-nd', at: 0 },
-    ]);
+    seedChat(
+      'c-perm-nodesc',
+      [{ seq: 1, kind: 'permission', tool: 'Bash', requestId: 'req-nd', at: 0 }],
+      { permissionMode: 'default' },
+    );
     renderChat('c-perm-nodesc');
-    expect(screen.getByTestId('permission').textContent).toBe('BashApprove 1Deny 3');
+    expect(screen.getByTestId('permission').textContent).toBe(
+      'BashApprove 1Yes, allow all Bash during this session sDeny 3',
+    );
   });
 
   it('a permission approve with no connected ws surfaces "not connected" and stays unresolved', () => {
@@ -1761,15 +1864,24 @@ describe('ChatRoute regression', () => {
     // Counted over the queued block only — the settled turns above it do not
     // push the first queued message to "3rd".
     expect(screen.getAllByTestId('queued-badge').map((el) => el.textContent)).toEqual([
-      'Queued',
-      '2nd in queue',
-      '3rd in queue',
+      'Queued · next tool call',
+      '2nd in queue · next tool call',
+      '3rd in queue · next tool call',
     ]);
   });
 
   it('names the event that releases each queued turn', () => {
     seedChat('c-queue-why', [
-      { seq: 1, kind: 'message', role: 'user', content: 'a', queued: true, localId: 'W1', at: 0 },
+      {
+        seq: 1,
+        kind: 'message',
+        role: 'user',
+        content: 'a',
+        queued: true,
+        queuedOwnTurn: true,
+        localId: 'W1',
+        at: 0,
+      },
       { seq: 2, kind: 'message', role: 'user', content: 'b', queued: true, localId: 'W2', at: 0 },
     ]);
     renderChat('c-queue-why');
@@ -1791,7 +1903,7 @@ describe('ChatRoute regression', () => {
     fireEvent.click(screen.getAllByTestId('queued-remove')[0]!);
     const chips = screen.getAllByTestId('queued-badge');
     expect(chips).toHaveLength(1);
-    expect(chips[0]!.textContent).toBe('Queued');
+    expect(chips[0]!.textContent).toBe('Queued · next tool call');
   });
 
   // spec/04 ## Message queueing — waiting on a running turn and waiting on the
@@ -1804,7 +1916,7 @@ describe('ChatRoute regression', () => {
     ]);
     renderChat('c-queue-vs-offline');
     const chip = screen.getByTestId('queued-badge');
-    expect(chip).toHaveTextContent('Queued');
+    expect(chip).toHaveTextContent('Host offline');
     // The offline line owns the "reconnect" wording; the chip must not echo it —
     // that's what actually tells the two states apart, not the shared "Queued" word.
     expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/reconnect/i);
@@ -1911,7 +2023,7 @@ describe('ChatRoute regression', () => {
     expect(screen.queryByTestId('delivery-failed')).not.toBeInTheDocument();
   });
 
-  it('tapping "retry" on a turnFailed message resends its text as a NEW turn (fresh localId), not the old one', () => {
+  it('tapping "retry" on a turnFailed message re-runs it IN PLACE: a fresh localId naming the original seq, and no second bubble', () => {
     const send = vi.fn();
     seedChat('c-turn-retry', [
       {
@@ -1935,15 +2047,16 @@ describe('ChatRoute regression', () => {
         type: 'chat.input',
         chatId: 'c-turn-retry',
         message: 'do the thing',
+        retryOfSeq: 1,
       }),
     );
     const sentLocalId = send.mock.calls[0]?.[0]?.localId;
     expect(sentLocalId).toBeDefined();
     expect(sentLocalId).not.toBe('L-turn-old');
-    // The retried message appears as a fresh, non-failed optimistic entry.
+    // Nothing new is drawn: the host's re-sent turn folds into this bubble.
     const tl = useChatStore.getState().timelines['c-turn-retry'] ?? [];
-    const fresh = tl.find((e) => e.localId === sentLocalId);
-    expect(fresh?.turnFailed).toBeUndefined();
+    expect(tl.filter((e) => e.kind === 'message' && e.role === 'user')).toHaveLength(1);
+    expect(tl.some((e) => e.localId === sentLocalId)).toBe(false);
   });
 
   // spec/14 § Running-turn controls — a bare-stopped turn is an outcome. The
@@ -1988,7 +2101,7 @@ describe('ChatRoute regression', () => {
     ]);
     renderChat('c-turn-interrupted');
     const line = screen.getByTestId('turn-interrupted');
-    expect(line).toHaveTextContent('Interrupted.');
+    expect(line).toHaveTextContent('Interrupted by a newer message.');
     expect(line).not.toHaveTextContent(/cancelled/i);
     const msg = screen.getByTestId('msg');
     expect(msg).toHaveAttribute('data-turn-interrupted', 'true');
@@ -2056,15 +2169,40 @@ describe('ChatRoute regression', () => {
     ]);
     renderChat('c-pending-online');
     expect(screen.getByTestId('delivery-pending')).toHaveTextContent('Sending…');
+    expect(screen.getByTestId('delivery-pending-icon')).toHaveAttribute('data-icon', 'clock');
   });
 
-  it('shows "queued — will send when the agent reconnects" while the host is offline', () => {
+  it('shows "host offline — will send when it reconnects" while the host is offline', () => {
     usePresenceStore.getState().setHostOnline('d1', false);
     seedChat('c-pending-offline', [
       { seq: 1, kind: 'message', role: 'user', content: 'x', deliveryPending: true, at: 0 },
     ]);
     renderChat('c-pending-offline');
-    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/queued.*reconnect/i);
+    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/host offline.*reconnect/i);
+    expect(screen.getByTestId('delivery-pending-icon')).toHaveAttribute('data-icon', 'cloud-off');
+  });
+
+  it("says the chat's own host is offline while ANOTHER host is still online", () => {
+    usePresenceStore.setState({ connection: 'connected', hostsSeeded: true });
+    usePresenceStore.getState().setHostOnline('d2', true);
+    usePresenceStore.getState().setHostOnline('d1', false);
+    seedChat('c-pending-other-host-up', [
+      { seq: 1, kind: 'message', role: 'user', content: 'x', deliveryPending: true, at: 0 },
+    ]);
+    renderChat('c-pending-other-host-up');
+    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/host offline.*reconnect/i);
+    expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(/offline.*queued/i);
+    usePresenceStore.getState().setHostOnline('d2', false);
+    usePresenceStore.setState({ connection: 'offline', hostsSeeded: false });
+  });
+
+  it('a queued message reads "Host offline" on its chip while the host is offline', () => {
+    usePresenceStore.getState().setHostOnline('d1', false);
+    seedChat('c-queued-offline', [
+      { seq: 1, kind: 'message', role: 'user', content: 'x', queued: true, localId: 'l1', at: 0 },
+    ]);
+    renderChat('c-queued-offline');
+    expect(screen.getByTestId('queued-badge')).toHaveTextContent('Host offline');
   });
 
   it('a deliveryPending AND queued message shows only the Queued chip, not the pending line', () => {
@@ -2178,6 +2316,39 @@ describe('ChatRoute regression', () => {
     fireEvent.click(screen.getByTestId('msg-attachment-img'));
     fireEvent.click(screen.getByTestId('image-lightbox'));
     expect(screen.queryByTestId('image-lightbox')).not.toBeInTheDocument();
+  });
+
+  it('the lightbox Copy button writes the displayed image to the clipboard as a PNG', async () => {
+    seedChat('c-lightbox-copy', [
+      {
+        seq: 0,
+        kind: 'message',
+        role: 'user',
+        content: '',
+        attachments: [{ id: 'att9', name: 'photo.png', mimeType: 'image/png', kind: 'image' }],
+        at: 0,
+      },
+    ]);
+    const png = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+    const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => png }));
+    vi.stubGlobal('fetch', fetchMock);
+    const write = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { write }, configurable: true });
+    vi.stubGlobal(
+      'ClipboardItem',
+      class {
+        constructor(public items: Record<string, Blob>) {}
+      },
+    );
+    renderChat('c-lightbox-copy');
+    fireEvent.click(screen.getByTestId('msg-attachment-img'));
+    fireEvent.click(screen.getByTestId('lightbox-copy'));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const item = (write.mock.calls[0] as unknown as [{ items: Record<string, Blob> }[]])[0][0]!;
+    expect(Object.keys(item.items)).toEqual(['image/png']);
+    // Copying does not close the viewer.
+    expect(screen.getByTestId('image-lightbox')).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it('lightbox renders at the document root, so it fills the whole window instead of being trapped inside the chat panel', () => {
@@ -2450,7 +2621,8 @@ describe('ChatRoute regression', () => {
     expect(card.getAttribute('data-kind')).toBe('pdf');
     const frame = screen.getByTestId('view-file-frame');
     expect(frame.getAttribute('src')).toBe('/api/chats/c-view-file-pdf/artifact/abc123');
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    // The PDF viewer cannot run in a sandboxed frame.
+    expect(frame.hasAttribute('sandbox')).toBe(false);
     expect(screen.queryByTestId('view-file-image')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('view-file-expand'));
     expect(screen.getByTestId('view-file').getAttribute('data-expanded')).toBe('true');
@@ -2925,6 +3097,35 @@ describe('ChatRoute regression', () => {
       expect(screen.getByTestId('job-trigger')).toBeInTheDocument();
     });
 
+    it('shows a Pad delivery as system input named after the Pad, not a user bubble', () => {
+      seedChat('c-pad-input', [
+        {
+          seq: 0,
+          kind: 'message',
+          role: 'user',
+          content: '[Pad] Tom sent 2 changes on "Settings" (pad id: settings)\n\n1. Moved h1',
+          jobTrigger: true,
+          at: 0,
+        },
+      ]);
+      renderChat('c-pad-input');
+      expect(screen.getByTestId('job-trigger-summary').textContent).toContain(
+        '[Pad] Tom sent 2 changes on "Settings" (pad id: settings)',
+      );
+      expect(document.querySelector('.msg-user')).toBeNull();
+    });
+
+    it('shows a host-started (machine origin) user turn as system input, not a user bubble', () => {
+      seedChat('c-machine-input', [
+        { seq: 0, kind: 'message', role: 'user', content: 'typed by Tom', at: 0 },
+        { seq: 1, kind: 'message', role: 'user', content: 'wake tick', origin: 'machine', at: 1 },
+      ]);
+      renderChat('c-machine-input');
+      expect(screen.getByTestId('job-trigger-summary').textContent).toContain('Automated message');
+      expect(screen.getByText('typed by Tom')).toBeInTheDocument();
+      expect(document.querySelectorAll('.msg-user')).toHaveLength(1);
+    });
+
     it('does NOT flag the first user turn of a chat with no jobId', () => {
       seedChat('c-no-job', [
         { seq: 0, kind: 'message', role: 'user', content: 'just a normal chat', at: 0 },
@@ -3042,6 +3243,24 @@ describe('ChatRoute regression', () => {
       expect(screen.queryByText(/Goal: ship it/)).toBeNull();
     });
 
+    it('shows a long reason in the summary in full, never truncated', () => {
+      const reason = `${'The agent ended by asking a question. '.repeat(6)}Check the rerun's output.`;
+      seedChat('c-goal-long', [
+        {
+          seq: 0,
+          kind: 'message',
+          role: 'user',
+          content: `[goal: not met]\nGoal: ship it\n\n${reason}`,
+          goalTrigger: { reason },
+          at: 0,
+        },
+      ]);
+      renderChat('c-goal-long');
+      expect(screen.getByTestId('goal-trigger-summary').textContent).toContain(
+        `Goal not met — ${reason}`,
+      );
+    });
+
     it("reveals the evaluator's reason verbatim on expand", () => {
       seedChat('c-goal-not-met-open', [
         {
@@ -3100,6 +3319,25 @@ describe('ChatRoute regression', () => {
       renderChat('c-no-goal-trigger');
       expect(screen.queryByTestId('goal-trigger')).toBeNull();
       expect(screen.getByText('just a normal message')).toBeInTheDocument();
+    });
+  });
+
+  describe('Account switch status line (spec/10 § Backend credentials)', () => {
+    it('is a muted status line, not an assistant message', () => {
+      seedChat('c-acct-switch', [
+        {
+          seq: 0,
+          kind: 'message',
+          role: 'system',
+          content: 'Switched from Default to work — Default is out of credit',
+          accountSwitch: true,
+          at: 0,
+        },
+      ]);
+      renderChat('c-acct-switch');
+      const line = screen.getByTestId('account-switch');
+      expect(line.className).toBe('call-summary-line');
+      expect(line.textContent).toBe('Switched from Default to work — Default is out of credit');
     });
   });
 
@@ -3697,6 +3935,18 @@ describe('ChatRoute regression', () => {
       );
     });
 
+    it('marks a failed summary as an error, in the danger colour, with the full reason uncut', () => {
+      seedChat('c-ai-err', run);
+      renderChat('c-ai-err');
+      const long = 'You have hit your limit for this account and the summary could not be written';
+      summarise('c-ai-err', ['k1', 'k2'], { summary: null, error: long });
+      const marker = screen.getByTestId('tool-group-summary-failed');
+      expect(marker.getAttribute('role')).toBe('img');
+      expect(marker.getAttribute('data-tooltip-full')).not.toBeNull();
+      expect(marker.className).toContain('tool-summary-failed');
+      expect(marker.innerHTML).toContain('circle-alert');
+    });
+
     it('marks a failed summary with a neutral glyph, not a warning triangle', () => {
       seedChat('c-ai-neutral', run);
       renderChat('c-ai-neutral');
@@ -3704,6 +3954,33 @@ describe('ChatRoute regression', () => {
       const marker = screen.getByTestId('tool-group-summary-failed');
       expect(marker.innerHTML).not.toContain('triangle-alert');
       expect(marker.querySelector('svg')).not.toBeNull();
+    });
+
+    it('reads a live narration on a run that has grown past what it was written for', () => {
+      seedChat('c-ai-live', run);
+      renderChat('c-ai-live');
+      summarise('c-ai-live', ['k1'], { summary: 'Installing dependencies…', live: true });
+      expect(screen.getByTestId('tool-group-summary').textContent).toContain(
+        'Installing dependencies…',
+      );
+    });
+
+    it('narrates a lone call too, never leaving it as a bare static row', () => {
+      seedChat('c-ai-lone', [
+        {
+          seq: 1,
+          kind: 'tool_call',
+          tool: 'Read',
+          toolArgs: { file_path: '/a/01M4N7ZF-image.png' },
+          callId: 'p1',
+          at: 0,
+        },
+      ]);
+      renderChat('c-ai-lone');
+      expect(screen.getByText(/Reading 01M4N7ZF-image\.png/)).toBeTruthy();
+      summarise('c-ai-lone', ['p1'], { summary: 'Looking at the picture…', live: true });
+      expect(screen.getByText('Looking at the picture…')).toBeTruthy();
+      expect(screen.queryByText(/Reading 01M4N7ZF/)).toBeNull();
     });
 
     it('does not put a label written for other calls on a run', () => {
@@ -3714,24 +3991,23 @@ describe('ChatRoute regression', () => {
     });
   });
 
-  it("shows the agent's own sentence before a run as its status while no label has arrived", () => {
+  it("labels a live run from its tool calls alone, never the agent's prose", () => {
     seedChat('c-narration', [
       {
         seq: 1,
         kind: 'message',
         role: 'assistant',
-        content: 'Researching how to set up shaver…\nThen I will check the manual.',
+        content: 'Researching how to set up shaver…',
         at: 0,
       },
       { seq: 2, kind: 'tool_call', tool: 'WebSearch', toolArgs: { query: 'shaver' }, at: 0 },
-      { seq: 3, kind: 'tool_call', tool: 'WebFetch', toolArgs: { url: 'https://x' }, at: 0 },
+      { seq: 3, kind: 'tool_call', tool: 'Read', toolArgs: { file_path: '/a/poll.ts' }, at: 0 },
     ]);
     renderChat('c-narration');
-    expect(screen.getByTestId('tool-group-summary').textContent).toContain(
-      'Researching how to set up shaver…',
-    );
-    expect(screen.getByTestId('tool-group-summary').textContent).not.toContain('manual');
-    expect(screen.getByTestId('tool-group').getAttribute('data-summary')).toBe('narration');
+    const text = screen.getByTestId('tool-group-summary').textContent ?? '';
+    expect(text).toContain('Searched the web, read 1 file');
+    expect(text).not.toContain('Researching');
+    expect(screen.getByTestId('tool-group').getAttribute('data-summary')).toBe('count');
   });
 
   it('narrates the batch by kind of work, in the order each kind first happened', () => {
@@ -4031,7 +4307,7 @@ describe('ChatRoute regression', () => {
         reminder: null,
         pendingWake: null,
         todos: [],
-        daemonId: 'd1',
+        hostId: 'd1',
         folder: '/home/tom/projects/old',
         activity: 'idle',
         status: 'archived',

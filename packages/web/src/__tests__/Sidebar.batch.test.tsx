@@ -23,7 +23,7 @@ function seedChat(chatId: string, name: string): void {
     todos: [],
     snoozedUntil: null,
     chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     name,
     folder: '~/proj',

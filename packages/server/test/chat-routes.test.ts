@@ -7,11 +7,11 @@ import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 async function makeApp(opts: {
   registry: Registry;
-  daemonLink: InProcessDaemonLink;
+  hostLink: InProcessHostLink;
   idGenerator?: () => string;
   spawnErrorWaitMs?: number;
   /** Whether `d1` has re-announced its chats (default true) — see unknown-chat.ts. */
@@ -20,14 +20,14 @@ async function makeApp(opts: {
   const built = await buildAll({
     logger: false,
     registry: opts.registry,
-    daemonLink: opts.daemonLink,
+    hostLink: opts.hostLink,
     // Default to a tiny window so tests don't wait the full 5s for the
     // synchronous spawn-error race when they don't simulate a host emit.
     spawnErrorWaitMs: opts.spawnErrorWaitMs ?? 50,
     ...(opts.idGenerator ? { idGenerator: opts.idGenerator } : {}),
   });
   if (opts.synced !== false) {
-    opts.daemonLink.emit({ type: 'folders.list', daemonId: 'd1', roots: [], recent: [] });
+    opts.hostLink.emit({ type: 'folders.list', hostId: 'd1', roots: [], recent: [] });
   }
   return built;
 }
@@ -60,17 +60,29 @@ describe('chat REST routes', () => {
     // `d1` must be a REGISTERED machine: every host-addressed route refuses an
     // id that is not (spec/04 § Spawn), so a fixture that skipped this would be
     // testing the refusal path instead of the route.
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     return { user, registry, jwt };
   }
 
-  it('POST /api/chats allocates a chatId, forwards spawn to daemon-link', async () => {
+  it('POST /api/chats allocates a chatId, forwards spawn to host-link', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId, event): void => {
+      origSend(surfaceId, event);
+      if (event.type === 'chat.spawn_request') {
+        hostLink.emit({
+          type: 'chat.spawned',
+          hostId: event.hostId,
+          chatId: event.chatId,
+          folder: event.folder,
+        });
+      }
+    };
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HSERVER${String(++nextId).padStart(17, '0')}`,
     });
     try {
@@ -78,12 +90,12 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/work/proj-A', prompt: 'go' },
+        payload: { hostId: 'd1', folder: '/work/proj-A', prompt: 'go' },
       });
       expect(res.statusCode).toBe(202);
       const body = res.json() as { chatId: string };
       expect(body.chatId).toBe('01HSERVER00000000000000001');
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.spawn_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.spawn_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.spawn_request') {
         expect(sent.event.chatId).toBe('01HSERVER00000000000000001');
@@ -99,9 +111,9 @@ describe('chat REST routes', () => {
   // chat on a not-yet-reconnected host answered chat_not_found.
   it('an unknown chat on a host that has not reported since the restart is 503, not 404', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    daemonLink.setDaemonId(null);
-    const built = await makeApp({ registry, daemonLink, synced: false });
+    const hostLink = new InProcessHostLink();
+    hostLink.setHostId(null);
+    const built = await makeApp({ registry, hostLink, synced: false });
     try {
       const get = () =>
         built.app.inject({
@@ -113,17 +125,17 @@ describe('chat REST routes', () => {
       expect(offline.statusCode).toBe(503);
       expect(offline.json()).toMatchObject({
         error: 'host_offline',
-        hosts: [{ daemonId: 'd1', online: false }],
+        hosts: [{ hostId: 'd1', online: false }],
       });
       expect(offline.json().message).toContain('offline');
 
-      daemonLink.setDaemonId('d1');
+      hostLink.setHostId('d1');
       const reconnecting = await get();
       expect(reconnecting.statusCode).toBe(503);
       expect(reconnecting.json().error).toBe('host_reconnecting');
 
       // The host's burst ends with folders.list: now a miss is a real miss.
-      daemonLink.emit({ type: 'folders.list', daemonId: 'd1', roots: [], recent: [] });
+      hostLink.emit({ type: 'folders.list', hostId: 'd1', roots: [], recent: [] });
       expect((await get()).statusCode).toBe(404);
     } finally {
       await built.app.close();
@@ -132,10 +144,10 @@ describe('chat REST routes', () => {
 
   it('a chat its host announced is found even before the host finishes reporting', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink, synced: false });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink, synced: false });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/a' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/a' });
       const res = await built.app.inject({
         method: 'GET',
         url: '/api/chats/c1',
@@ -149,12 +161,12 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats requires JWT', async () => {
     const { registry } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats',
-        payload: { daemonId: 'd1', folder: '/x' },
+        payload: { hostId: 'd1', folder: '/x' },
       });
       expect(res.statusCode).toBe(401);
     } finally {
@@ -164,12 +176,12 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats lists active chats from registry, sorted pinned-first', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       // Host emits chat.spawned + chat.state.
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/a' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/a' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
@@ -180,8 +192,8 @@ describe('chat REST routes', () => {
         name: null,
         folder: '/a',
       });
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c2', folder: '/b' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c2', folder: '/b' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c2',
@@ -207,11 +219,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats?archived=only returns only archived', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'a1', folder: '/x' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'a1', folder: '/x' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'a1',
@@ -221,8 +233,8 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/x',
       });
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'b1', folder: '/y' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'b1', folder: '/y' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'b1',
@@ -250,11 +262,11 @@ describe('chat REST routes', () => {
   // filter, but the slicing is generic to every filter combination.
   it('GET /api/chats?...&limit= pages the filtered list and reports nextOffset', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     const seedArchived = (chatId: string, lastUpdated: number) => {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/x' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/x' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId,
@@ -296,6 +308,11 @@ describe('chat REST routes', () => {
       const unpaged = await get('/api/chats?archived=only');
       expect(unpaged.body.chats.map((c) => c.chatId)).toEqual(['c3', 'c2', 'c1']);
       expect(unpaged.body.nextOffset).toBeNull();
+
+      // An offset without a limit still skips: it must not be silently ignored.
+      const offsetOnly = await get('/api/chats?archived=only&offset=2');
+      expect(offsetOnly.body.chats.map((c) => c.chatId)).toEqual(['c1']);
+      expect(offsetOnly.body.nextOffset).toBeNull();
     } finally {
       await built.app.close();
     }
@@ -303,7 +320,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats rejects a bad limit or offset with 400 (NO FALLBACK)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const get = async (url: string) =>
         built.app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${jwt}` } });
@@ -319,11 +336,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats?...&order=asc reverses the page order (oldest first — Hidden/Automations)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     const seedHidden = (chatId: string, lastUpdated: number) => {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/x' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/x' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId,
@@ -358,12 +375,12 @@ describe('chat REST routes', () => {
   // rather than silently mis-label the sidebar.
   it('GET /api/chats/counts returns totals equal to each section list length', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     const now = Date.now();
     const seed = (chatId: string, patch: Record<string, unknown>) => {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/x' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/x' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId,
@@ -417,7 +434,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/counts requires auth', async () => {
     const { registry } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({ method: 'GET', url: '/api/chats/counts' });
       expect(res.statusCode).toBe(401);
@@ -428,7 +445,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats?archived=true is rejected with 400 (legacy value, group 8)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -443,11 +460,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats?deleted=only returns only soft-deleted chats; a bogus value is 400 (E5)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'd1', folder: '/x' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'd1', folder: '/x' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'd1',
@@ -457,8 +474,8 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/x',
       });
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'e1', folder: '/y' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'e1', folder: '/y' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'e1',
@@ -489,11 +506,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats?archived=include returns active + archived', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'a1', folder: '/x' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'a1', folder: '/x' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'a1',
@@ -503,8 +520,8 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/x',
       });
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'b1', folder: '/y' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'b1', folder: '/y' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'b1',
@@ -528,7 +545,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats?automations=bogus is rejected with 400 (NO FALLBACK, matches archived/deleted/snoozed strictness)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -541,24 +558,24 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('GET /api/chats/:id/history round-trips via daemon-link and returns events since seq', async () => {
+  it('GET /api/chats/:id/history round-trips via host-link and returns events since seq', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HHIST0${String(++nextId).padStart(19, '0')}`,
     });
     try {
       // Seed a chat in the registry so the route doesn't 404.
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-hist',
         folder: '/work/h',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-hist',
@@ -594,15 +611,15 @@ describe('chat REST routes', () => {
           seq: 2,
         },
       ];
-      const originalSend = daemonLink.send.bind(daemonLink);
+      const originalSend = hostLink.send.bind(hostLink);
       let seenSince: number | undefined = -1;
-      daemonLink.send = (surfaceId, event) => {
+      hostLink.send = (surfaceId, event) => {
         originalSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenSince = event.since;
           const from = event.since ?? 0;
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: true,
@@ -630,12 +647,12 @@ describe('chat REST routes', () => {
 
   it("GET /api/chats/:id/history answers from the server's own copy while the chat's host is offline", async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c-off', folder: '/work/o' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-off', folder: '/work/o' });
       for (const seq of [1, 2, 3]) {
-        daemonLink.emit({
+        hostLink.emit({
           type: 'chat.message',
           chatId: 'c-off',
           role: 'assistant',
@@ -643,7 +660,7 @@ describe('chat REST routes', () => {
           seq,
         });
       }
-      daemonLink.setStatus('offline');
+      hostLink.setStatus('offline');
 
       const res = await built.app.inject({
         method: 'GET',
@@ -661,12 +678,12 @@ describe('chat REST routes', () => {
 
   it("GET /api/chats/:id/history from the server's copy honours limit, and reads everything with no since", async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c-all', folder: '/work/a' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-all', folder: '/work/a' });
       for (const seq of [0, 1, 2, 3]) {
-        daemonLink.emit({
+        hostLink.emit({
           type: 'chat.message',
           chatId: 'c-all',
           role: 'assistant',
@@ -674,7 +691,7 @@ describe('chat REST routes', () => {
           seq,
         });
       }
-      daemonLink.setStatus('offline');
+      hostLink.setStatus('offline');
       const res = await built.app.inject({
         method: 'GET',
         url: '/api/chats/c-all/history?limit=3',
@@ -682,6 +699,16 @@ describe('chat REST routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect((res.json().events as Array<{ seq: number }>).map((e) => e.seq)).toEqual([0, 1, 2]);
+      // The host's answer names where the next page starts when the limit cut it
+      // short; the server's copy must too, or a pager stops after page one.
+      expect(res.json().nextFromSeq).toBe(3);
+      const last = await built.app.inject({
+        method: 'GET',
+        url: '/api/chats/c-all/history?since=3&limit=3',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect((last.json().events as Array<{ seq: number }>).map((e) => e.seq)).toEqual([3]);
+      expect(last.json().nextFromSeq).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -691,16 +718,16 @@ describe('chat REST routes', () => {
   // REST path with a branchId, since a side branch isn't broadcast live.
   it('GET /api/chats/:id/history?branchId=<id> passes branchId through to the host request', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink, idGenerator: () => '01HHIST0BRANCH' });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink, idGenerator: () => '01HHIST0BRANCH' });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-hist-branch',
         folder: '/work/h',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-hist-branch',
@@ -711,14 +738,14 @@ describe('chat REST routes', () => {
         folder: '/work/h',
       });
 
-      const originalSend = daemonLink.send.bind(daemonLink);
+      const originalSend = hostLink.send.bind(hostLink);
       let seenBranchId: string | undefined;
-      daemonLink.send = (surfaceId, event) => {
+      hostLink.send = (surfaceId, event) => {
         originalSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenBranchId = event.branchId;
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: true,
@@ -742,20 +769,20 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:parentId/delegates/:id/history round-trips with requireParent, for a subagent chat never in the registry', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       // The PARENT is a real, known chat — the subagent `sub-1` is deliberately
       // NEVER spawned into the registry (spec/02 § Native subagent dispatch:
       // a delegate is never in it), which is exactly the case the ordinary
       // /api/chats/:id/history route can't serve.
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'parent-1',
         folder: '/work/p',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'parent-1',
@@ -766,14 +793,14 @@ describe('chat REST routes', () => {
         folder: '/work/p',
       });
 
-      const originalSend = daemonLink.send.bind(daemonLink);
+      const originalSend = hostLink.send.bind(hostLink);
       let seenRequest: { chatId?: string; requireParent?: string } | undefined;
-      daemonLink.send = (surfaceId, event) => {
+      hostLink.send = (surfaceId, event) => {
         originalSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenRequest = { chatId: event.chatId, requireParent: event.requireParent };
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: true,
@@ -808,8 +835,8 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:parentId/delegates/:id/history 404s when the PARENT is unknown, without ever asking the host', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -817,9 +844,7 @@ describe('chat REST routes', () => {
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(404);
-      expect(daemonLink.sent.some((s) => s.event.type === 'patch.chat_history.request')).toBe(
-        false,
-      );
+      expect(hostLink.sent.some((s) => s.event.type === 'patch.chat_history.request')).toBe(false);
     } finally {
       await built.app.close();
     }
@@ -827,16 +852,16 @@ describe('chat REST routes', () => {
 
   it("GET /api/chats/:parentId/delegates/:id/history maps the host's not_a_delegate refusal to 404", async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'parent-2',
         folder: '/work/p',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'parent-2',
@@ -846,12 +871,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/p',
       });
-      const originalSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const originalSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         originalSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: false,
@@ -875,7 +900,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/history returns 404 for an unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -890,11 +915,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/history rejects a non-numeric since with 400 (NO FALLBACK)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c-bad', folder: '/w' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-bad', folder: '/w' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-bad',
@@ -917,7 +942,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/history requires auth (401)', async () => {
     const { registry } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -931,22 +956,22 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats returns 400 + folder_not_found code when host emits chat.error within window', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HSERVER${String(++nextId).padStart(17, '0')}`,
       // Long window so we definitely see the synchronous emit.
       spawnErrorWaitMs: 1_000,
     });
     try {
       // When the server forwards the spawn, simulate the host rejecting it.
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, ev): void => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, ev): void => {
         origSend(surfaceId, ev);
         if (ev.type === 'chat.spawn_request') {
-          daemonLink.emit({
+          hostLink.emit({
             type: 'chat.error',
             chatId: ev.chatId ?? 'pending-spawn',
             error: { code: 'folder_not_found', message: `no such folder: ${ev.folder}` },
@@ -958,7 +983,7 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/no/such/path' },
+        payload: { hostId: 'd1', folder: '/no/such/path' },
       });
       expect(res.statusCode).toBe(400);
       const body = res.json() as { error: string; chatId?: string };
@@ -978,24 +1003,24 @@ describe('chat REST routes', () => {
   // (the caller is the only party that knows this spawn was refused).
   it('POST /api/chats names the chatId to retract when the host refuses the spawn', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HSERVER${String(++nextId).padStart(17, '0')}`,
       spawnErrorWaitMs: 1_000,
     });
     try {
       let forwardedChatId: string | undefined;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, ev): void => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, ev): void => {
         origSend(surfaceId, ev);
         if (ev.type === 'chat.spawn_request') {
           forwardedChatId = ev.chatId;
           // The reported repro: a spawn naming no model on a host that has
           // never read a catalogue. The host refuses under the supplied id.
-          daemonLink.emit({
+          hostLink.emit({
             type: 'chat.error',
             chatId: ev.chatId ?? 'pending-spawn',
             error: { code: 'no_model_catalogue', message: 'no last-used model on d1' },
@@ -1007,7 +1032,7 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/work/x' },
+        payload: { hostId: 'd1', folder: '/work/x' },
       });
       expect(res.statusCode).toBe(400);
       const body = res.json() as { error: string; chatId?: string; retractChatId?: string };
@@ -1035,19 +1060,19 @@ describe('chat REST routes', () => {
   // one, not the id the server allocated (which no surface ever saw).
   it('POST /api/chats retracts the pending-spawn placeholder when the host errors under it', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => '01HSERVER00000000000000001',
       spawnErrorWaitMs: 1_000,
     });
     try {
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, ev): void => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, ev): void => {
         origSend(surfaceId, ev);
         if (ev.type === 'chat.spawn_request') {
-          daemonLink.emit({
+          hostLink.emit({
             type: 'chat.error',
             chatId: 'pending-spawn',
             error: { code: 'folder_not_found', message: 'no such folder' },
@@ -1059,7 +1084,7 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/no/such/path' },
+        payload: { hostId: 'd1', folder: '/no/such/path' },
       });
       expect(res.statusCode).toBe(400);
       const body = res.json() as { retractChatId?: string };
@@ -1071,22 +1096,22 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats returns 202 quickly when host emits chat.spawned within window', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HSERVER${String(++nextId).padStart(17, '0')}`,
       spawnErrorWaitMs: 5_000,
     });
     try {
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, ev): void => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, ev): void => {
         origSend(surfaceId, ev);
         if (ev.type === 'chat.spawn_request') {
-          daemonLink.emit({
+          hostLink.emit({
             type: 'chat.spawned',
-            daemonId: 'd1',
+            hostId: 'd1',
             chatId: ev.chatId ?? 'pending-spawn',
             folder: ev.folder,
           });
@@ -1097,7 +1122,7 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/anywhere' },
+        payload: { hostId: 'd1', folder: '/anywhere' },
       });
       const elapsed = Date.now() - start;
       expect(res.statusCode).toBe(202);
@@ -1110,7 +1135,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id returns 404 on missing chat (NO FALLBACK)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -1123,14 +1148,14 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('POST /api/chats/:id/send-to forwards chat.input to daemon-link', async () => {
+  it('POST /api/chats/:id/send-to forwards chat.input to host-link', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       // The chat must exist in the registry first (H1-d3): send-to an unknown
       // chatId is rejected 404.
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/send-to',
@@ -1141,7 +1166,7 @@ describe('chat REST routes', () => {
       const body = res.json() as { ok: boolean; queued: boolean };
       expect(body.ok).toBe(true);
       expect(body.queued).toBe(true);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.input');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.input');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.input') {
         expect(sent.event.chatId).toBe('c1');
@@ -1155,8 +1180,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/send-to returns 404 for an unknown chat (H1-d3)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1167,7 +1192,7 @@ describe('chat REST routes', () => {
       expect(res.statusCode).toBe(404);
       expect(res.json()).toEqual({ error: 'chat not found: chat_does_not_exist_xyz' });
       // NO SILENT FALLBACK: the turn must NOT have been forwarded.
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.input')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.input')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1175,11 +1200,11 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/send-to rejects read-only mirror threads (H1-d2)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       for (const chatId of ['thread_speakers']) {
-        daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: `/${chatId}` });
+        hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: `/${chatId}` });
         const res = await built.app.inject({
           method: 'POST',
           url: `/api/chats/${chatId}/send-to`,
@@ -1192,9 +1217,9 @@ describe('chat REST routes', () => {
         );
       }
       // Manager (also a special thread) is NOT read-only — it still accepts.
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'thread_manager',
         folder: '/mgr',
       });
@@ -1206,7 +1231,7 @@ describe('chat REST routes', () => {
       });
       expect(ok.statusCode).toBe(200);
       // No chat.input was forwarded for the two refused mirror threads.
-      const forwarded = daemonLink.sent
+      const forwarded = hostLink.sent
         .filter((s) => s.event.type === 'chat.input')
         .map((s) => (s.event.type === 'chat.input' ? s.event.chatId : ''));
       expect(forwarded).not.toContain('thread_speakers');
@@ -1218,7 +1243,7 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/stop returns 404 on unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1233,12 +1258,12 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rotate forwards chat.rotate_request for a reserved special thread', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'thread_manager',
         folder: '/manager',
       });
@@ -1249,7 +1274,7 @@ describe('chat REST routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ ok: true });
-      const sent = daemonLink.sent.find(
+      const sent = hostLink.sent.find(
         (s) => s.event.type === 'chat.rotate_request' && s.event.chatId === 'thread_manager',
       );
       expect(sent).toBeDefined();
@@ -1260,10 +1285,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rotate refuses a non-special thread with 403', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c-ordinary', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-ordinary', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c-ordinary/rotate',
@@ -1271,7 +1296,7 @@ describe('chat REST routes', () => {
       });
       expect(res.statusCode).toBe(403);
       expect(
-        daemonLink.sent.some(
+        hostLink.sent.some(
           (s) =>
             s.event.type === 'chat.rotate_request' &&
             'chatId' in s.event &&
@@ -1285,7 +1310,7 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rotate returns 404 on unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1300,10 +1325,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/archive forwards chat.archive_request', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/archive',
@@ -1311,7 +1336,7 @@ describe('chat REST routes', () => {
         payload: { archived: true },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.archive_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.archive_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.archive_request') {
         expect(sent.event.chatId).toBe('c1');
@@ -1324,8 +1349,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/archive returns 404 on unknown chat (H1-d0-4)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1336,7 +1361,7 @@ describe('chat REST routes', () => {
       expect(res.statusCode).toBe(404);
       expect(res.json()).toEqual({ error: 'chat not found: chat_does_not_exist_zzz999' });
       // No-op: nothing forwarded to the host for a missing chat.
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.archive_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.archive_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1344,10 +1369,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/pin forwards chat.pin_request', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/pin',
@@ -1355,7 +1380,7 @@ describe('chat REST routes', () => {
         payload: { pinned: true },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.pin_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.pin_request');
       expect(sent).toBeDefined();
     } finally {
       await built.app.close();
@@ -1364,8 +1389,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/pin returns 404 on unknown chat (H1-d0-3)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1375,7 +1400,7 @@ describe('chat REST routes', () => {
       });
       expect(res.statusCode).toBe(404);
       expect(res.json()).toEqual({ error: 'chat not found: chat_does_not_exist_zzz999' });
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.pin_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.pin_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1383,10 +1408,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/goal forwards chat.goal_request (patch/todo.md — /goal)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/goal',
@@ -1394,7 +1419,7 @@ describe('chat REST routes', () => {
         payload: { goal: 'Ship the release by Friday' },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.goal_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.goal_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.goal_request') {
         expect(sent.event.chatId).toBe('c1');
@@ -1407,10 +1432,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/goal accepts a null goal (clear)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/goal',
@@ -1418,7 +1443,7 @@ describe('chat REST routes', () => {
         payload: { goal: null },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.goal_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.goal_request');
       expect(sent && sent.event.type === 'chat.goal_request' && sent.event.goal).toBe(null);
     } finally {
       await built.app.close();
@@ -1427,8 +1452,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/goal returns 404 on unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1437,7 +1462,7 @@ describe('chat REST routes', () => {
         payload: { goal: 'x' },
       });
       expect(res.statusCode).toBe(404);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.goal_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.goal_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1445,10 +1470,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/loop forwards chat.loop_request arming a recurring wake (02-daemon.md § Self-wake)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/loop',
@@ -1456,7 +1481,7 @@ describe('chat REST routes', () => {
         payload: { loop: { message: 'check on the build', every: '5m' } },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.loop_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.loop_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.loop_request') {
         expect(sent.event.chatId).toBe('c1');
@@ -1467,12 +1492,42 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats/:id/loop forwards a one-shot `at` (scheduled send) and rejects every+at together', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
+      const ok = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c1/loop',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { loop: { message: 'later', at: '2030-01-01T10:00:00.000Z' } },
+      });
+      expect(ok.statusCode).toBe(200);
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.loop_request');
+      expect(sent && sent.event.type === 'chat.loop_request' && sent.event.loop).toEqual({
+        message: 'later',
+        at: '2030-01-01T10:00:00.000Z',
+      });
+      const both = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c1/loop',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { loop: { message: 'x', every: '5m', at: '2030-01-01T10:00:00.000Z' } },
+      });
+      expect(both.statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats/:id/loop accepts `loop: null` (cancel)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/loop',
@@ -1480,7 +1535,7 @@ describe('chat REST routes', () => {
         payload: { loop: null },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.loop_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.loop_request');
       expect(sent && sent.event.type === 'chat.loop_request' && sent.event.loop).toBe(null);
     } finally {
       await built.app.close();
@@ -1489,8 +1544,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/loop returns 404 on unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1499,7 +1554,7 @@ describe('chat REST routes', () => {
         payload: { loop: { message: 'x', every: '1m' } },
       });
       expect(res.statusCode).toBe(404);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.loop_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.loop_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1507,10 +1562,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/loop returns 400 for an invalid body (missing every)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/loop',
@@ -1518,7 +1573,7 @@ describe('chat REST routes', () => {
         payload: { loop: { message: 'x' } },
       });
       expect(res.statusCode).toBe(400);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.loop_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.loop_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1526,10 +1581,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/todos forwards chat.todos_request (spec/02 § Task list)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/todos',
@@ -1542,7 +1597,7 @@ describe('chat REST routes', () => {
         },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.todos_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.todos_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.todos_request') {
         expect(sent.event.chatId).toBe('c1');
@@ -1558,10 +1613,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/todos accepts an emptied list', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/todos',
@@ -1569,7 +1624,7 @@ describe('chat REST routes', () => {
         payload: { todos: [] },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.todos_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.todos_request');
       expect(sent && sent.event.type === 'chat.todos_request' && sent.event.todos).toEqual([]);
     } finally {
       await built.app.close();
@@ -1578,10 +1633,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/todos rejects an unknown status with 400', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/todos',
@@ -1589,7 +1644,7 @@ describe('chat REST routes', () => {
         payload: { todos: [{ text: 'x', status: 'blocked' }] },
       });
       expect(res.statusCode).toBe(400);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.todos_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.todos_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1597,8 +1652,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/todos returns 404 on unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1607,7 +1662,7 @@ describe('chat REST routes', () => {
         payload: { todos: [] },
       });
       expect(res.statusCode).toBe(404);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.todos_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.todos_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1615,11 +1670,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats carries the task list the host last reported', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({
         type: 'chat.state',
         chatId: 'c1',
         todos: [{ text: 'rebuild the index', status: 'in_progress' }],
@@ -1641,10 +1696,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rename forwards chat.rename_request (spec/04 § Name)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/rename',
@@ -1652,7 +1707,7 @@ describe('chat REST routes', () => {
         payload: { name: 'Bed Planner Rework' },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.rename_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.rename_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.rename_request') {
         expect(sent.event.chatId).toBe('c1');
@@ -1665,10 +1720,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rename accepts a null name (clear back to the derived label)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/rename',
@@ -1676,7 +1731,7 @@ describe('chat REST routes', () => {
         payload: { name: null },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.rename_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.rename_request');
       expect(sent && sent.event.type === 'chat.rename_request' && sent.event.name).toBe(null);
     } finally {
       await built.app.close();
@@ -1685,8 +1740,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rename returns 404 on unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1695,7 +1750,7 @@ describe('chat REST routes', () => {
         payload: { name: 'x' },
       });
       expect(res.statusCode).toBe(404);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.rename_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.rename_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1703,10 +1758,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rename rejects a body with no name', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/rename',
@@ -1714,7 +1769,7 @@ describe('chat REST routes', () => {
         payload: { title: 'wrong key' },
       });
       expect(res.statusCode).toBe(400);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.rename_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.rename_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1722,17 +1777,17 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/rename requires auth', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/rename',
         payload: { name: 'Sneaky' },
       });
       expect(res.statusCode).toBe(401);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.rename_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.rename_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1740,10 +1795,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/reminder forwards chat.reminder_request (patch/todo.md — Reminders)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/reminder',
@@ -1751,7 +1806,7 @@ describe('chat REST routes', () => {
         payload: { reminder: 'Do not touch the prod database' },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.reminder_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.reminder_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.reminder_request') {
         expect(sent.event.chatId).toBe('c1');
@@ -1764,10 +1819,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/reminder accepts a null reminder (clear)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/reminder',
@@ -1775,7 +1830,7 @@ describe('chat REST routes', () => {
         payload: { reminder: null },
       });
       expect(res.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.reminder_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.reminder_request');
       expect(sent && sent.event.type === 'chat.reminder_request' && sent.event.reminder).toBe(null);
     } finally {
       await built.app.close();
@@ -1784,8 +1839,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/reminder returns 404 on unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1794,7 +1849,7 @@ describe('chat REST routes', () => {
         payload: { reminder: 'x' },
       });
       expect(res.statusCode).toBe(404);
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.reminder_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.reminder_request')).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -1802,8 +1857,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/threads/:thread/send-to forwards chat.input to thread_<name>', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -1814,7 +1869,7 @@ describe('chat REST routes', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json() as { chatId: string };
       expect(body.chatId).toBe('thread_manager');
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.input');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.input');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.input') {
         expect(sent.event.chatId).toBe('thread_manager');
@@ -1828,8 +1883,8 @@ describe('chat REST routes', () => {
     // spec/06 ## Composer policy: a surface cannot inject a user turn into the
     // Speakers mirror via this HTTP route — composer is disabled.
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       for (const thread of ['speakers']) {
         const res = await built.app.inject({
@@ -1840,7 +1895,7 @@ describe('chat REST routes', () => {
         });
         expect(res.statusCode).toBe(403);
       }
-      const sent = daemonLink.sent.filter((s) => s.event.type === 'chat.input');
+      const sent = hostLink.sent.filter((s) => s.event.type === 'chat.input');
       expect(sent).toHaveLength(0);
     } finally {
       await built.app.close();
@@ -1848,24 +1903,24 @@ describe('chat REST routes', () => {
   });
 
   // Group 19 — file browser route bridges to host via patch.files.{request,response}.
-  it('GET /api/chats/:id/files round-trips via daemon-link', async () => {
+  it('GET /api/chats/:id/files round-trips via host-link', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HFILES${String(++nextId).padStart(18, '0')}`,
     });
     try {
       // Seed a chat in the registry.
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-files',
         folder: '/work/x',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-files',
@@ -1877,13 +1932,13 @@ describe('chat REST routes', () => {
       });
 
       // Stand in for the host: when we see a patch.files.request, emit a response.
-      daemonLink.onEvent(() => undefined);
-      const originalSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      hostLink.onEvent(() => undefined);
+      const originalSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         originalSend(surfaceId, event);
         if (event.type === 'patch.files.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: true,
@@ -1916,15 +1971,15 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files returns 400 on path_escape', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HFILES${String(Date.now()).padStart(20, '0')}`,
     });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c-esc', folder: '/work/y' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-esc', folder: '/work/y' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-esc',
@@ -1934,12 +1989,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/y',
       });
-      const originalSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const originalSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         originalSend(surfaceId, event);
         if (event.type === 'patch.files.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: false,
@@ -1974,15 +2029,15 @@ describe('chat REST routes', () => {
     } | null,
   ): Promise<{ app: import('fastify').FastifyInstance; jwt: string }> {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HFILES${String(++nextId).padStart(18, '0')}`,
     });
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder });
-    daemonLink.emit({
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder });
+    hostLink.emit({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId,
@@ -1992,18 +2047,18 @@ describe('chat REST routes', () => {
       pinned: false,
       folder,
     });
-    const originalSend = daemonLink.send.bind(daemonLink);
-    daemonLink.send = (surfaceId, event) => {
+    const originalSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId, event) => {
       originalSend(surfaceId, event);
       if (event.type === 'patch.files.request') {
         const r = respond(event);
         if (r === null) return; // simulate host never responding (timeout)
         setImmediate(() => {
-          daemonLink.emit({
+          hostLink.emit({
             type: 'patch.files.response',
             requestId: event.requestId,
             ...r,
-          } as Parameters<typeof daemonLink.emit>[0]);
+          } as Parameters<typeof hostLink.emit>[0]);
         });
       }
     };
@@ -2072,9 +2127,9 @@ describe('chat REST routes', () => {
   });
 
   it('G3-d4: malformed maxEntries is rejected fast with a 400 (no host round-trip)', async () => {
-    let daemonHit = false;
+    let hostHit = false;
     const { app, jwt } = await bootFilesApp('c-max', '/work/real', () => {
-      daemonHit = true;
+      hostHit = true;
       return null; // would hang -> 504 if the request ever reached here
     });
     try {
@@ -2087,7 +2142,7 @@ describe('chat REST routes', () => {
       const elapsed = Date.now() - start;
       expect(res.statusCode).toBe(400);
       expect(res.json()).toMatchObject({ error: 'maxEntries_invalid' });
-      expect(daemonHit).toBe(false);
+      expect(hostHit).toBe(false);
       expect(elapsed).toBeLessThan(1000);
 
       const neg = await app.inject({
@@ -2097,7 +2152,7 @@ describe('chat REST routes', () => {
       });
       expect(neg.statusCode).toBe(400);
       expect(neg.json()).toMatchObject({ error: 'maxEntries_invalid' });
-      expect(daemonHit).toBe(false);
+      expect(hostHit).toBe(false);
     } finally {
       await app.close();
     }
@@ -2105,7 +2160,7 @@ describe('chat REST routes', () => {
 
   it('POST /api/threads/:thread/send-to rejects unknown thread name', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -2121,7 +2176,7 @@ describe('chat REST routes', () => {
 
   it('malformed JSON body returns 400 client-error envelope, not 500 (H1-d0-1)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -2138,7 +2193,7 @@ describe('chat REST routes', () => {
 
   it('404 for unknown route uses the unified {error} envelope (H1-d0-5)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -2159,7 +2214,7 @@ describe('chat REST routes', () => {
 
   it('404 for wrong HTTP method uses the unified {error} envelope (H1-d0-5)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       // /api/chats/:id/stop is POST-only; a GET must 404 with the unified shape.
       const res = await built.app.inject({
@@ -2178,13 +2233,13 @@ describe('chat REST routes', () => {
 
   it('DELETE /api/chats/:id refuses to remove reserved special threads (B2-d1)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       // Bootstrap the two reserved special threads into the registry mirror.
       for (const id of ['thread_manager', 'thread_speakers']) {
-        daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: id, folder: `/${id}` });
-        daemonLink.emit({
+        hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: id, folder: `/${id}` });
+        hostLink.emit({
           type: 'chat.state',
           permissionMode: 'bypassPermissions',
           chatId: id,
@@ -2209,7 +2264,7 @@ describe('chat REST routes', () => {
         expect(body.error).toContain(id);
         // No destructive intent must have been forwarded to the host.
         expect(
-          daemonLink.sent.some(
+          hostLink.sent.some(
             (s) =>
               (s.event.type === 'chat.stop_request' || s.event.type === 'chat.archive_request') &&
               'chatId' in s.event &&
@@ -2236,19 +2291,19 @@ describe('chat REST routes', () => {
 
   // E5: DELETE is a recoverable soft-delete. The chat leaves the active list,
   // appears under `?deleted=only`, and a restore brings it back — nothing is
-  // hard-removed. The daemon-link carries `chat.delete_request`, not archive.
+  // hard-removed. The host-link carries `chat.delete_request`, not archive.
   it('DELETE /api/chats/:id soft-deletes (out of active, into Deleted) and restore brings it back', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-ordinary',
         folder: '/work',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-ordinary',
@@ -2269,11 +2324,11 @@ describe('chat REST routes', () => {
       expect(res.json()).toEqual({ ok: true });
 
       // A soft-delete forwards chat.delete_request{deleted:true}, NOT archive.
-      const delReq = daemonLink.sent.find((s) => s.event.type === 'chat.delete_request');
+      const delReq = hostLink.sent.find((s) => s.event.type === 'chat.delete_request');
       expect(delReq && delReq.event.type === 'chat.delete_request' && delReq.event.deleted).toBe(
         true,
       );
-      expect(daemonLink.sent.find((s) => s.event.type === 'chat.archive_request')).toBeUndefined();
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.archive_request')).toBeUndefined();
 
       // Gone from the active list...
       const activeIds = (
@@ -2306,7 +2361,7 @@ describe('chat REST routes', () => {
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(restoreRes.statusCode).toBe(200);
-      const restoreReq = daemonLink.sent.filter((s) => s.event.type === 'chat.delete_request');
+      const restoreReq = hostLink.sent.filter((s) => s.event.type === 'chat.delete_request');
       expect(
         restoreReq.some((s) => s.event.type === 'chat.delete_request' && s.event.deleted === false),
       ).toBe(true);
@@ -2327,7 +2382,7 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/restore returns 404 for an unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'POST',
@@ -2344,7 +2399,7 @@ describe('chat REST routes', () => {
   // try/catch around requireAuth, so each is a distinct branch to exercise) ----
   it('every route rejects a request without a bearer with 401', async () => {
     const { registry } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const routes: Array<{ method: 'GET' | 'POST' | 'DELETE'; url: string }> = [
         { method: 'POST', url: '/api/chats' },
@@ -2355,7 +2410,7 @@ describe('chat REST routes', () => {
         { method: 'GET', url: '/api/chats/whatever/files' },
         { method: 'GET', url: '/api/chats/whatever/background-task-stats?taskIds=b1' },
         { method: 'GET', url: '/api/skills?folder=/x' },
-        { method: 'GET', url: '/api/models?daemonId=d1' },
+        { method: 'GET', url: '/api/models?hostId=d1' },
         { method: 'POST', url: '/api/chats/whatever/stop' },
         { method: 'DELETE', url: '/api/chats/whatever' },
         { method: 'POST', url: '/api/chats/whatever/archive' },
@@ -2377,7 +2432,7 @@ describe('chat REST routes', () => {
     // authorization header is present but verifySurfaceCredential throws),
     // distinct from the "missing bearer" branch above.
     const { registry } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const badAuth = { authorization: 'Bearer not-a-real-jwt-at-all' };
       const res = await built.app.inject({
@@ -2393,16 +2448,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id returns the chat summary on success', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-solo',
         folder: '/work/solo',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-solo',
@@ -2429,14 +2484,14 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats rejects an invalid body with 400 (NO FALLBACK)', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       // Missing required `folder`.
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', prompt: 'go' },
+        payload: { hostId: 'd1', prompt: 'go' },
       });
       expect(res.statusCode).toBe(400);
       const body = res.json() as { error: string; issues: unknown[] };
@@ -2448,7 +2503,7 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/x', bogusField: 1 },
+        payload: { hostId: 'd1', folder: '/x', bogusField: 1 },
       });
       expect(res2.statusCode).toBe(400);
     } finally {
@@ -2458,15 +2513,27 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats forwards every optional spawn field (name/parentChatId/localId/model/permissionMode)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId, event): void => {
+      origSend(surfaceId, event);
+      if (event.type === 'chat.spawn_request') {
+        hostLink.emit({
+          type: 'chat.spawned',
+          hostId: event.hostId,
+          chatId: event.chatId,
+          folder: event.folder,
+        });
+      }
+    };
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
         payload: {
-          daemonId: 'd1',
+          hostId: 'd1',
           folder: '/work/full',
           prompt: 'go',
           name: 'my chat',
@@ -2477,7 +2544,7 @@ describe('chat REST routes', () => {
         },
       });
       expect(res.statusCode).toBe(202);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.spawn_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.spawn_request');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.spawn_request') {
         expect(sent.event.name).toBe('my chat');
@@ -2496,19 +2563,19 @@ describe('chat REST routes', () => {
     // 'pending-spawn' chatId (rather than echoing the server-allocated id) —
     // the server falls back to its single most-recent pendingPlaceholder.
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => '01HPLACEHOLDER0000000000001',
       spawnErrorWaitMs: 1_000,
     });
     try {
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, ev): void => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, ev): void => {
         origSend(surfaceId, ev);
         if (ev.type === 'chat.spawn_request') {
-          daemonLink.emit({
+          hostLink.emit({
             type: 'chat.error',
             chatId: 'pending-spawn',
             error: { code: 'folder_not_found', message: 'no such folder' },
@@ -2520,7 +2587,7 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/no/such/path' },
+        payload: { hostId: 'd1', folder: '/no/such/path' },
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: string }).error).toBe('folder_not_found');
@@ -2531,21 +2598,21 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/history validates limit (valid, non-integer, out-of-range)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HLIMIT${String(++nextId).padStart(19, '0')}`,
     });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-limit',
         folder: '/work/l',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-limit',
@@ -2556,13 +2623,13 @@ describe('chat REST routes', () => {
         folder: '/work/l',
       });
       let seenLimit: number | undefined = -1;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenLimit = event.limit;
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: true,
@@ -2607,16 +2674,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/history surfaces nextFromSeq when the host returns one', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-next',
         folder: '/work/n',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-next',
@@ -2626,12 +2693,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/n',
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: true,
@@ -2659,16 +2726,16 @@ describe('chat REST routes', () => {
     // registers AFTER a fake-timer advance() call has already returned,
     // leaving it stuck forever) — so this waits out the real 5s timeout.
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-timeout',
         folder: '/work/t',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-timeout',
@@ -2693,11 +2760,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/history maps a host-side error to 502 (non chat_not_found)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c-err', folder: '/work/e' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-err', folder: '/work/e' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-err',
@@ -2707,12 +2774,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/e',
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: false,
@@ -2735,10 +2802,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/send-to rejects an invalid body with 400', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       // `message` is required by the schema.
       const res = await built.app.inject({
         method: 'POST',
@@ -2754,10 +2821,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/send-to prepends voicePrefix and defaults localId when omitted', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/send-to',
@@ -2767,7 +2834,7 @@ describe('chat REST routes', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json() as { localId: string };
       expect(body.localId.length).toBeGreaterThan(0);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.input');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.input');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.input') {
         expect(sent.event.message).toBe('[voice] water the plants');
@@ -2780,7 +2847,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files rejects an unknown chat with 404', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -2795,16 +2862,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files rejects a path escaping with .. or a leading / at the boundary (400, no host round-trip)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-esc2',
         folder: '/work/z',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-esc2',
@@ -2814,11 +2881,11 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/z',
       });
-      let daemonHit = false;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      let hostHit = false;
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
-        if (event.type === 'patch.files.request') daemonHit = true;
+        if (event.type === 'patch.files.request') hostHit = true;
       };
       const dotdot = await built.app.inject({
         method: 'GET',
@@ -2834,7 +2901,43 @@ describe('chat REST routes', () => {
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(leadingSlash.statusCode).toBe(400);
-      expect(daemonHit).toBe(false);
+      expect(hostHit).toBe(false);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('file-op and doc POST routes answer a non-string path or target with 400, not 500', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-bad', folder: '/work/z' });
+      hostLink.emit({
+        type: 'chat.state',
+        permissionMode: 'bypassPermissions',
+        chatId: 'c-bad',
+        activity: 'idle',
+        lastUpdated: 1,
+        status: 'active',
+        pinned: false,
+        folder: '/work/z',
+      });
+      const post = async (url: string, payload: unknown): Promise<number> =>
+        (
+          await built.app.inject({
+            method: 'POST',
+            url,
+            headers: { authorization: `Bearer ${jwt}` },
+            payload: payload as Record<string, unknown>,
+          })
+        ).statusCode;
+      expect(await post('/api/chats/c-bad/files', { op: 'create', path: 5 })).toBe(400);
+      expect(await post('/api/chats/c-bad/files', { op: 'create', path: ['a'] })).toBe(400);
+      expect(await post('/api/chats/c-bad/files', { op: 'rename', path: 'a', to: 7 })).toBe(400);
+      expect(await post('/api/chats/c-bad/doc/action', { path: 5, action: { op: 'x' } })).toBe(400);
+      expect(await post('/api/chats/c-bad/doc/export', { path: 5, format: 'md' })).toBe(400);
+      expect(await post('/api/chats/c-bad/doc/convert', { path: 5 })).toBe(400);
     } finally {
       await built.app.close();
     }
@@ -2842,16 +2945,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files?content=1 returns file content, and recursive listing round-trips', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-content',
         folder: '/work/c',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-content',
@@ -2863,14 +2966,14 @@ describe('chat REST routes', () => {
       });
       let seenRecursive = false;
       let seenMaxEntries: number | undefined;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.files.request') {
           seenRecursive = event.recursive === true;
           seenMaxEntries = event.maxEntries;
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: true,
@@ -2899,16 +3002,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files maps chat_not_found and internal host errors to 404/502', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-codes',
         folder: '/work/codes',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-codes',
@@ -2919,12 +3022,12 @@ describe('chat REST routes', () => {
         folder: '/work/codes',
       });
       let code: 'chat_not_found' | 'internal' = 'chat_not_found';
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.files.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: false,
@@ -2954,16 +3057,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files returns 504 when the host never replies', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-fto',
         folder: '/work/fto',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-fto',
@@ -2988,9 +3091,9 @@ describe('chat REST routes', () => {
   // The background task bar's readout (spec/14 § Main chat panel — Background
   // task bar), relayed to the chat's own host. The rule under every one of
   // these is that an unmeasured task is ABSENT, never a zero.
-  function seedStatsChat(daemonLink: InProcessDaemonLink, chatId: string): void {
-    daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder: '/work/bg' });
-    daemonLink.emit({
+  function seedStatsChat(hostLink: InProcessHostLink, chatId: string): void {
+    hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/work/bg' });
+    hostLink.emit({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId,
@@ -3002,20 +3105,20 @@ describe('chat REST routes', () => {
     });
   }
 
-  it('GET /api/chats/:id/background-task-stats round-trips via daemon-link, passing an unmeasured task through as absent', async () => {
+  it('GET /api/chats/:id/background-task-stats round-trips via host-link, passing an unmeasured task through as absent', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      seedStatsChat(daemonLink, 'c-bgstats');
+      seedStatsChat(hostLink, 'c-bgstats');
       let asked: string[] | undefined;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.background_task_stats.request') {
           asked = event.taskIds;
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.background_task_stats.response',
               requestId: event.requestId,
               ok: true,
@@ -3047,16 +3150,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/background-task-stats returns an empty list when the host measured nothing', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      seedStatsChat(daemonLink, 'c-bgnone');
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      seedStatsChat(hostLink, 'c-bgnone');
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.background_task_stats.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.background_task_stats.response',
               requestId: event.requestId,
               ok: true,
@@ -3079,15 +3182,15 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/background-task-stats rejects a request naming no task, and never asks the host', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      seedStatsChat(daemonLink, 'c-bgempty');
-      let daemonHit = false;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      seedStatsChat(hostLink, 'c-bgempty');
+      let hostHit = false;
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
-        if (event.type === 'patch.background_task_stats.request') daemonHit = true;
+        if (event.type === 'patch.background_task_stats.request') hostHit = true;
       };
       for (const url of [
         '/api/chats/c-bgempty/background-task-stats',
@@ -3102,7 +3205,7 @@ describe('chat REST routes', () => {
         expect(res.statusCode, url).toBe(400);
         expect((res.json() as { error: string }).error).toBe('taskIds_required');
       }
-      expect(daemonHit).toBe(false);
+      expect(hostHit).toBe(false);
     } finally {
       await built.app.close();
     }
@@ -3110,15 +3213,15 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/background-task-stats rejects ids that are not bare tokens, and an over-long batch', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      seedStatsChat(daemonLink, 'c-bgbad');
-      let daemonHit = false;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      seedStatsChat(hostLink, 'c-bgbad');
+      let hostHit = false;
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
-        if (event.type === 'patch.background_task_stats.request') daemonHit = true;
+        if (event.type === 'patch.background_task_stats.request') hostHit = true;
       };
       // A malformed id would be dropped by the host's strict schema and the
       // caller would wait out the timeout for a misleading 504, so it is
@@ -3133,7 +3236,7 @@ describe('chat REST routes', () => {
         expect(res.statusCode, q).toBe(400);
         expect((res.json() as { error: string }).error).toBe('taskIds_invalid');
       }
-      expect(daemonHit).toBe(false);
+      expect(hostHit).toBe(false);
     } finally {
       await built.app.close();
     }
@@ -3141,7 +3244,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/background-task-stats rejects an unknown chat with 404', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -3156,17 +3259,17 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/background-task-stats maps the host error codes to 404/501/502', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      seedStatsChat(daemonLink, 'c-bgcodes');
+      seedStatsChat(hostLink, 'c-bgcodes');
       let code: 'chat_not_found' | 'no_process_table' | 'internal' = 'chat_not_found';
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.background_task_stats.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.background_task_stats.response',
               requestId: event.requestId,
               ok: false,
@@ -3198,10 +3301,10 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/background-task-stats returns 504 when the host never replies', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      seedStatsChat(daemonLink, 'c-bgto');
+      seedStatsChat(hostLink, 'c-bgto');
       const res = await built.app.inject({
         method: 'GET',
         url: '/api/chats/c-bgto/background-task-stats?taskIds=baiw888mq',
@@ -3216,22 +3319,22 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/background-task-stats ignores a response with an unmatched requestId', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      seedStatsChat(daemonLink, 'c-bgstray');
-      daemonLink.emit({
+      seedStatsChat(hostLink, 'c-bgstray');
+      hostLink.emit({
         type: 'patch.background_task_stats.response',
         requestId: 'never-asked',
         ok: true,
         stats: [{ taskId: 'baiw888mq', cpuPercent: 1, rssBytes: 2048, processes: 1 }],
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.background_task_stats.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.background_task_stats.response',
               requestId: event.requestId,
               ok: true,
@@ -3252,21 +3355,21 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('GET /api/skills lists skills for a folder, and requires folder + daemonId', async () => {
+  it('GET /api/skills lists skills for a folder, and requires folder + hostId', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       let seenFolder: string | undefined;
-      let seenDaemonId: string | undefined;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      let seenHostId: string | undefined;
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.skills.request') {
           seenFolder = event.folder;
-          seenDaemonId = event.daemonId;
+          seenHostId = event.hostId;
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.skills.response',
               requestId: event.requestId,
               ok: true,
@@ -3277,27 +3380,27 @@ describe('chat REST routes', () => {
       };
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fproj&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fproj&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
       expect((res.json() as { skills: string[] }).skills).toEqual(['plant', 'deploy']);
       expect(seenFolder).toBe('/work/proj');
-      expect(seenDaemonId).toBe('d1');
+      expect(seenHostId).toBe('d1');
 
       const missingFolder = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?daemonId=d1',
+        url: '/api/skills?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(missingFolder.statusCode).toBe(400);
 
-      const missingDaemonId = await built.app.inject({
+      const missingHostId = await built.app.inject({
         method: 'GET',
         url: '/api/skills?folder=%2Fwork%2Fproj',
         headers: { authorization: `Bearer ${jwt}` },
       });
-      expect(missingDaemonId.statusCode).toBe(400);
+      expect(missingHostId.statusCode).toBe(400);
     } finally {
       await built.app.close();
     }
@@ -3310,16 +3413,16 @@ describe('chat REST routes', () => {
   // can't tell me" apart from "this host says there are none".
   it('GET /api/skills carries the file each skill is defined in, and omits it when the host names none', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       let namesFiles = true;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.skills.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.skills.response',
               requestId: event.requestId,
               ok: true,
@@ -3333,7 +3436,7 @@ describe('chat REST routes', () => {
       };
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fproj&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fproj&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
@@ -3345,7 +3448,7 @@ describe('chat REST routes', () => {
       namesFiles = false;
       const older = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fproj&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fproj&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(older.statusCode).toBe(200);
@@ -3362,16 +3465,16 @@ describe('chat REST routes', () => {
   // none.
   it('GET /api/skills carries each skill’s description, and omits it when the host names none', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       let namesDescriptions = true;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.skills.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.skills.response',
               requestId: event.requestId,
               ok: true,
@@ -3384,7 +3487,7 @@ describe('chat REST routes', () => {
       };
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fproj&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fproj&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
@@ -3397,7 +3500,7 @@ describe('chat REST routes', () => {
       namesDescriptions = false;
       const older = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fproj&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fproj&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(older.statusCode).toBe(200);
@@ -3416,16 +3519,16 @@ describe('chat REST routes', () => {
   // that reports none.
   it('GET /api/skills carries each skill’s whole frontmatter, and omits it when the host names none', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       let namesFrontmatter = true;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.skills.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.skills.response',
               requestId: event.requestId,
               ok: true,
@@ -3449,7 +3552,7 @@ describe('chat REST routes', () => {
       };
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fproj&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fproj&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
@@ -3469,7 +3572,7 @@ describe('chat REST routes', () => {
       namesFrontmatter = false;
       const older = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fproj&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fproj&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(older.statusCode).toBe(200);
@@ -3490,20 +3593,20 @@ describe('chat REST routes', () => {
   // backend failing is not the host failing.
   it('GET /api/models returns the host catalogue, and maps a total failure to 502', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       let ok = true;
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.models.request') {
           setImmediate(() => {
-            daemonLink.emit(
+            hostLink.emit(
               ok
                 ? {
                     type: 'patch.models.response',
-                    daemonId: 'd1',
+                    hostId: 'd1',
                     requestId: event.requestId,
                     models: [
                       { id: 'claude-opus-5', label: 'Claude Opus 5', backend: 'claude-code' },
@@ -3513,7 +3616,7 @@ describe('chat REST routes', () => {
                   }
                 : {
                     type: 'patch.models.response',
-                    daemonId: 'd1',
+                    hostId: 'd1',
                     requestId: event.requestId,
                     models: [],
                     errors: [
@@ -3530,7 +3633,7 @@ describe('chat REST routes', () => {
       };
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/models?daemonId=d1',
+        url: '/api/models?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
@@ -3541,7 +3644,7 @@ describe('chat REST routes', () => {
       ok = false;
       const bad = await built.app.inject({
         method: 'GET',
-        url: '/api/models?daemonId=d1',
+        url: '/api/models?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(bad.statusCode).toBe(502);
@@ -3557,17 +3660,17 @@ describe('chat REST routes', () => {
   // this to a 502 would empty a picker that has perfectly good models in it.
   it('GET /api/models is 200 with BOTH models and errors when one backend failed', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.models.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.models.response',
-              daemonId: 'd1',
+              hostId: 'd1',
               requestId: event.requestId,
               models: [{ id: 'claude-opus-5', label: 'Claude Opus 5', backend: 'claude-code' }],
               errors: [
@@ -3579,16 +3682,16 @@ describe('chat REST routes', () => {
       };
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/models?daemonId=d1',
+        url: '/api/models?hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
       const body = res.json() as {
-        daemonId: string;
+        hostId: string;
         models: { id: string; backend: string }[];
         errors: { backend: string; message: string }[];
       };
-      expect(body.daemonId).toBe('d1');
+      expect(body.hostId).toBe('d1');
       expect(body.models).toEqual([
         { id: 'claude-opus-5', label: 'Claude Opus 5', backend: 'claude-code' },
       ]);
@@ -3603,9 +3706,9 @@ describe('chat REST routes', () => {
   // The catalogue is PER HOST. Without a host there is nothing to ask, and
   // asking whichever host happens to be attached would offer the wrong
   // machine's models for a chat about to be pinned to a different one.
-  it('GET /api/models without a daemonId is 400, not a guess', async () => {
+  it('GET /api/models without a hostId is 400, not a guess', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -3620,16 +3723,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/skills maps folder_not_found to 404, other codes to 502, and times out to 504', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       let code: 'folder_not_found' | 'internal' = 'folder_not_found';
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.skills.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.skills.response',
               requestId: event.requestId,
               ok: false,
@@ -3640,7 +3743,7 @@ describe('chat REST routes', () => {
       };
       const notFound = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fno%2Fsuch&daemonId=d1',
+        url: '/api/skills?folder=%2Fno%2Fsuch&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(notFound.statusCode).toBe(404);
@@ -3648,7 +3751,7 @@ describe('chat REST routes', () => {
       code = 'internal';
       const internal = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fno%2Fsuch&daemonId=d1',
+        url: '/api/skills?folder=%2Fno%2Fsuch&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(internal.statusCode).toBe(502);
@@ -3659,11 +3762,11 @@ describe('chat REST routes', () => {
 
   it('GET /api/skills returns 504 when the host never replies', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(504);
@@ -3674,10 +3777,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/stop succeeds and forwards chat.stop_request', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c-stop', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-stop', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c-stop/stop',
@@ -3685,7 +3788,7 @@ describe('chat REST routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ ok: true });
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.stop_request');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.stop_request');
       expect(sent).toBeDefined();
     } finally {
       await built.app.close();
@@ -3694,7 +3797,7 @@ describe('chat REST routes', () => {
 
   it('DELETE /api/chats/:id returns 404 for an unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'DELETE',
@@ -3709,10 +3812,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/archive rejects an invalid body with 400', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/archive',
@@ -3727,10 +3830,10 @@ describe('chat REST routes', () => {
 
   it('POST /api/chats/:id/pin rejects an invalid body with 400', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'c1', folder: '/x' });
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/c1/pin',
@@ -3745,8 +3848,8 @@ describe('chat REST routes', () => {
 
   it('POST /api/threads/:thread/send-to rejects an invalid body with 400 and prepends voicePrefix', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const badBody = await built.app.inject({
         method: 'POST',
@@ -3763,7 +3866,7 @@ describe('chat REST routes', () => {
         payload: { message: 'status?', voicePrefix: '[voice] ' },
       });
       expect(withPrefix.statusCode).toBe(200);
-      const sent = daemonLink.sent.find((s) => s.event.type === 'chat.input');
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.input');
       expect(sent).toBeDefined();
       if (sent && sent.event.type === 'chat.input') {
         expect(sent.event.message).toBe('[voice] status?');
@@ -3782,7 +3885,7 @@ describe('chat REST routes', () => {
     (registry as unknown as { getAccount: () => never }).getAccount = () => {
       throw new Error('registry backing store exploded');
     };
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const routes: Array<{ method: 'GET' | 'POST' | 'DELETE'; url: string }> = [
         { method: 'POST', url: '/api/chats' },
@@ -3814,9 +3917,9 @@ describe('chat REST routes', () => {
   });
 
   it('requireAuth rejects when no account has been bootstrapped yet', async () => {
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     const registry = Registry.load(dir); // no bootstrapAccount() call
-    const built = await makeApp({ registry, daemonLink });
+    const built = await makeApp({ registry, hostLink });
     try {
       const res = await built.app.inject({ method: 'GET', url: '/api/chats' });
       expect(res.statusCode).toBe(401);
@@ -3828,7 +3931,7 @@ describe('chat REST routes', () => {
   it('requireAuth rejects a revoked surface', async () => {
     const { registry, jwt } = await bootstrap();
     registry.revoke('srf-rest');
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',
@@ -3846,14 +3949,14 @@ describe('chat REST routes', () => {
     // The host replies immediately with chat.spawned so the test doesn't
     // actually have to wait out the real 5s window.
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const origSend = daemonLink.send.bind(daemonLink);
-    daemonLink.send = (surfaceId, ev): void => {
+    const hostLink = new InProcessHostLink();
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId, ev): void => {
       origSend(surfaceId, ev);
       if (ev.type === 'chat.spawn_request') {
-        daemonLink.emit({
+        hostLink.emit({
           type: 'chat.spawned',
-          daemonId: 'd1',
+          hostId: 'd1',
           chatId: ev.chatId ?? 'x',
           folder: ev.folder,
         });
@@ -3862,13 +3965,13 @@ describe('chat REST routes', () => {
     // Bypass the local makeApp() helper (which always injects a test-friendly
     // spawnErrorWaitMs) and call buildAll directly so spawnErrorWaitMs is
     // genuinely undefined.
-    const built = await buildAll({ logger: false, registry, daemonLink });
+    const built = await buildAll({ logger: false, registry, hostLink });
     try {
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/anywhere' },
+        payload: { hostId: 'd1', folder: '/anywhere' },
       });
       expect(res.statusCode).toBe(202);
     } finally {
@@ -3876,19 +3979,19 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('POST /api/chats resolves a chat.error for an unrelated chatId without disturbing the pending waiter', async () => {
+  it('POST /api/chats ignores an unrelated chat.error and reports an unconfirmed spawn', async () => {
     // Covers the `if (!w) return;` branch in the chat.error dispatch: an
     // error for a chatId nobody is waiting on must be a safe no-op.
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
+    const hostLink = new InProcessHostLink();
     let nextId = 0;
     const built = await makeApp({
       registry,
-      daemonLink,
+      hostLink,
       idGenerator: () => `01HUNMATCHED${String(++nextId).padStart(15, '0')}`,
     });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.error',
         chatId: 'nobody-is-waiting-on-this-chat-id',
         error: { code: 'internal', message: 'irrelevant' },
@@ -3898,11 +4001,12 @@ describe('chat REST routes', () => {
         method: 'POST',
         url: '/api/chats',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { daemonId: 'd1', folder: '/ok' },
+        payload: { hostId: 'd1', folder: '/ok' },
       });
-      // No host reply simulated for THIS spawn — resolves via the (short
-      // test) timeout window, same as the very first spawn test in this file.
-      expect(res.statusCode).toBe(202);
+      // No host reply simulated for THIS spawn: an unrelated error must not
+      // confirm it, and a timeout must not invent a usable chat id.
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ error: 'daemon_timeout' });
     } finally {
       await built.app.close();
     }
@@ -3910,23 +4014,23 @@ describe('chat REST routes', () => {
 
   it('ignores patch.chat_history.response / files.response / skills.response frames with an unmatched requestId', async () => {
     const { registry } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'patch.chat_history.response',
         requestId: 'no-such-request-id',
         ok: true,
         events: [],
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'patch.files.response',
         requestId: 'no-such-request-id',
         ok: true,
         path: '',
         entries: [],
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'patch.skills.response',
         requestId: 'no-such-request-id',
         ok: true,
@@ -3942,16 +4046,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/history maps a chat_not_found host error to 404', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-hist-404',
         folder: '/work/h4',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-hist-404',
@@ -3961,12 +4065,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/h4',
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: false,
@@ -3988,16 +4092,16 @@ describe('chat REST routes', () => {
 
   it('history/files/skills responses default missing optional fields ([] / "")', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-defaults',
         folder: '/work/d',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-defaults',
@@ -4007,12 +4111,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/d',
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: true,
@@ -4021,7 +4125,7 @@ describe('chat REST routes', () => {
           });
         } else if (event.type === 'patch.files.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: true,
@@ -4030,7 +4134,7 @@ describe('chat REST routes', () => {
           });
         } else if (event.type === 'patch.skills.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.skills.response',
               requestId: event.requestId,
               ok: true,
@@ -4062,7 +4166,7 @@ describe('chat REST routes', () => {
 
       const skills = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fd&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fd&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(skills.statusCode).toBe(200);
@@ -4074,16 +4178,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files defaults path/content/size when the host omits them from a content response', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-nocontent',
         folder: '/work/nc',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-nocontent',
@@ -4093,12 +4197,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/nc',
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.files.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: true,
@@ -4124,16 +4228,16 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/:id/files maps an unrecognized host error code to 502 (statusByCode default)', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-weird',
         folder: '/work/w',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-weird',
@@ -4143,12 +4247,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/w',
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.files.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: false,
@@ -4172,16 +4276,16 @@ describe('chat REST routes', () => {
 
   it('history/files/skills host failures default code/message when `error` itself is omitted', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.spawned',
-        daemonId: 'd1',
+        hostId: 'd1',
         chatId: 'c-noerr',
         folder: '/work/ne',
       });
-      daemonLink.emit({
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c-noerr',
@@ -4191,12 +4295,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/ne',
       });
-      const origSend = daemonLink.send.bind(daemonLink);
-      daemonLink.send = (surfaceId, event) => {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
         origSend(surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.chat_history.response',
               requestId: event.requestId,
               ok: false,
@@ -4205,7 +4309,7 @@ describe('chat REST routes', () => {
           });
         } else if (event.type === 'patch.files.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.files.response',
               requestId: event.requestId,
               ok: false,
@@ -4214,7 +4318,7 @@ describe('chat REST routes', () => {
           });
         } else if (event.type === 'patch.skills.request') {
           setImmediate(() => {
-            daemonLink.emit({
+            hostLink.emit({
               type: 'patch.skills.response',
               requestId: event.requestId,
               ok: false,
@@ -4243,7 +4347,7 @@ describe('chat REST routes', () => {
 
       const skills = await built.app.inject({
         method: 'GET',
-        url: '/api/skills?folder=%2Fwork%2Fne&daemonId=d1',
+        url: '/api/skills?folder=%2Fwork%2Fne&hostId=d1',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(skills.statusCode).toBe(502);
@@ -4260,12 +4364,12 @@ describe('chat REST routes', () => {
   // matter how many archived chats accumulate.
   it('GET /api/chats/folders keeps a folder whose only chat is archived', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       // /arch's only chat is archived — the exact repro from the bug report.
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'a1', folder: '/arch' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'a1', folder: '/arch' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'a1',
@@ -4275,8 +4379,8 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/arch',
       });
-      daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId: 'b1', folder: '/live' });
-      daemonLink.emit({
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'b1', folder: '/live' });
+      hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'b1',
@@ -4294,12 +4398,12 @@ describe('chat REST routes', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json() as {
-        folders: { folder: string; daemonId: string; lastUpdated: number }[];
+        folders: { folder: string; hostId: string; lastUpdated: number }[];
       };
       // Most-recent-first, and the all-archived folder is present.
       expect(body.folders).toEqual([
-        { folder: '/live', daemonId: 'd1', lastUpdated: 20 },
-        { folder: '/arch', daemonId: 'd1', lastUpdated: 10 },
+        { folder: '/live', hostId: 'd1', lastUpdated: 20 },
+        { folder: '/arch', hostId: 'd1', lastUpdated: 10 },
       ]);
     } finally {
       await built.app.close();
@@ -4308,8 +4412,8 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/folders is one row per folder at its most-recent chat, and omits deleted-only folders', async () => {
     const { registry, jwt } = await bootstrap();
-    const daemonLink = new InProcessDaemonLink();
-    const built = await makeApp({ registry, daemonLink });
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
     try {
       const seed = (
         chatId: string,
@@ -4317,8 +4421,8 @@ describe('chat REST routes', () => {
         lastUpdated: number,
         status: 'active' | 'archived' | 'deleted',
       ): void => {
-        daemonLink.emit({ type: 'chat.spawned', daemonId: 'd1', chatId, folder });
-        daemonLink.emit({
+        hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder });
+        hostLink.emit({
           type: 'chat.state',
           permissionMode: 'bypassPermissions',
           chatId,
@@ -4352,7 +4456,7 @@ describe('chat REST routes', () => {
 
   it('GET /api/chats/folders requires a surface credential (NO FALLBACK)', async () => {
     const { registry } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({ method: 'GET', url: '/api/chats/folders' });
       expect(res.statusCode).toBe(401);
@@ -4366,7 +4470,7 @@ describe('chat REST routes', () => {
   // "folders") — Fastify prefers the static segment, and this pins that.
   it('GET /api/chats/folders is not shadowed by GET /api/chats/:id', async () => {
     const { registry, jwt } = await bootstrap();
-    const built = await makeApp({ registry, daemonLink: new InProcessDaemonLink() });
+    const built = await makeApp({ registry, hostLink: new InProcessHostLink() });
     try {
       const res = await built.app.inject({
         method: 'GET',

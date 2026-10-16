@@ -65,7 +65,7 @@ Stays "flat files" per spec, but with explicit shape:
 
 - `/data/registry.json` — accounts and host keys. Single file. Atomic write via temp + rename.
 - `/data/jobs/*.json` — one file per job. Watched.
-- `/data/pending/<daemonId>/*.jsonl` — buffered actions, per host, for a host that is offline.
+- `/data/pending/<hostId>/*.jsonl` — buffered actions, per host, for a host that is offline.
 - `/data/runs/<jobId>.jsonl` — per-job run log.
 - `/data/webhooks/<jobId>.jsonl` — per-job inbound webhook log.
 - `/data/undelivered.jsonl` — failed notifications.
@@ -140,7 +140,7 @@ No SQLite. If we hit limits, that's a separate spec change.
 - Docker Compose as the reference deployment (host sizing in `11-deployment.md`).
 - Two services: `server`, `caddy`. The host is not a container — it installs on each host as an OS service (§ Two shipping shapes, `02-daemon.md` § Runtime and installation).
 - Caddy as the reverse proxy (auto-TLS via Let's Encrypt). Terminates TLS and reverse-proxies everything to the server, which itself serves the web SPA at `/app` and the desktop feed at `/api/desktop/...`.
-- `pnpm deploy` runs the server via docker compose (`up -d --build`); the server image builds + serves the web SPA. No CI publish, no image registry. The host builds separately as an installable artifact (`pnpm build:daemon`), published for install and self-update (`11-deployment.md`). Machine-specific delivery (to a remote box / phone) lives in git-ignored `scripts/local/`.
+- `pnpm deploy` runs the server via docker compose (`up -d --build`); the server image builds + serves the web SPA. No CI publish, no image registry. The host builds separately as an installable artifact (`pnpm build:host`), published for install and self-update (`11-deployment.md`). Machine-specific delivery (to a remote box / phone) lives in git-ignored `scripts/local/`.
 - Backups: restic nightly cron on `/data` to off-host object storage.
 
 ## Testing

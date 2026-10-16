@@ -45,16 +45,16 @@ export function offlineBannerText(conn: ConnectionState, outageVisible: boolean)
 // banner: the server can be reachable while the host is down. Messages are
 // QUEUED (not blocked) and delivered on reconnect (spec/12 § Daemon-offline UX
 // + § Guaranteed input delivery); only real-time voice is paused.
-export const DAEMON_OFFLINE_BANNER =
+export const HOST_OFFLINE_BANNER =
   'Agent offline. Messages are queued and sent when your Hetzner box reconnects. Voice is paused until then.';
 
-export function daemonOfflineBannerText(daemon: DaemonPresence): string | null {
-  return daemon === 'offline' ? DAEMON_OFFLINE_BANNER : null;
+export function hostOfflineBannerText(daemon: DaemonPresence): string | null {
+  return daemon === 'offline' ? HOST_OFFLINE_BANNER : null;
 }
 
 // Controls that require the host (composer send, voice note/call, new-chat
 // spawn) are disabled unless the WS is connected AND the host is online.
-export function daemonControlsDisabled(conn: ConnectionState, daemon: DaemonPresence): boolean {
+export function hostControlsDisabled(conn: ConnectionState, daemon: DaemonPresence): boolean {
   return conn !== 'connected' || daemon !== 'online';
 }
 
@@ -63,13 +63,14 @@ export function daemonControlsDisabled(conn: ConnectionState, daemon: DaemonPres
 // the control is enabled. When the WS itself is down the reason names the
 // connection; when the WS is up but the host is down the reason names the
 // host as the cause.
-export function daemonControlDisabledReason(
+export function hostControlDisabledReason(
   conn: ConnectionState,
   daemon: DaemonPresence,
 ): string | null {
   if (conn === 'connecting') return 'Connecting…';
   if (conn === 'reconnecting') return 'Reconnecting to server…';
   if (conn === 'offline') return 'Offline — no connection to the server.';
+  if (conn === 'unauthenticated') return 'Signed out — link this device again.';
   // WS connected — the only remaining blocker is the host.
   if (daemon === 'offline') return 'Host offline — paused until your Hetzner box reconnects.';
   if (daemon === 'unknown') return 'Connecting to host…';

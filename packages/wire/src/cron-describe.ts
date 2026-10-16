@@ -143,7 +143,9 @@ function parseMinute(field: string): Minute | null {
   const step = field.match(/^\*\/(\d+)$/);
   if (step) {
     const n = Number(step[1]);
-    return n >= 1 && n <= 59 ? { kind: 'step', n } : null;
+    // Only a step that divides the hour is evenly spaced: `*/45` fires at :00
+    // and :45, so "every 45 minutes" would misreport the 15-minute gap.
+    return n >= 1 && n <= 59 && 60 % n === 0 ? { kind: 'step', n } : null;
   }
   if (/^\d+$/.test(field)) {
     const m = Number(field);
@@ -177,7 +179,8 @@ function parseHour(field: string): Hour | null {
   const step = field.match(/^\*\/(\d+)$/);
   if (step) {
     const n = Number(step[1]);
-    return n >= 1 && n <= 23 ? { kind: 'step', n } : null;
+    // Likewise a step must divide the day: `*/5` fires at 0, 5, … 20, then 0.
+    return n >= 1 && n <= 23 && 24 % n === 0 ? { kind: 'step', n } : null;
   }
   const window = field.match(/^(\d+)-(\d+)(?:\/(\d+))?$/);
   if (window) {

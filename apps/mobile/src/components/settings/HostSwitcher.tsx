@@ -16,20 +16,20 @@ import { usePresenceStore, type HostPresence } from '../../stores/presenceStore'
 import { Dot, Row } from './ui';
 
 interface HostChoice {
-  daemonId: string | null;
-  choose(daemonId: string | null): void;
+  hostId: string | null;
+  choose(hostId: string | null): void;
 }
 
 export const useSettingsHostChoice = create<HostChoice>((set) => ({
-  daemonId: null,
-  choose(daemonId) {
-    set({ daemonId });
+  hostId: null,
+  choose(hostId) {
+    set({ hostId });
   },
 }));
 
 /** The name a host goes by: its reported name, else its id. */
 export function hostName(h: HostPresence): string {
-  return h.host?.hostName ?? h.daemonId;
+  return h.host?.hostName ?? h.hostId;
 }
 
 /** Hosts in a stable order: by name. */
@@ -59,7 +59,7 @@ export function resolveSettingsHost(
 /** The host the current Settings page is showing. */
 export function useSettingsHost(): HostPresence | null {
   const hosts = usePresenceStore((s) => s.hosts);
-  const chosen = useSettingsHostChoice((s) => s.daemonId);
+  const chosen = useSettingsHostChoice((s) => s.hostId);
   return resolveSettingsHost(hosts, chosen);
 }
 
@@ -84,15 +84,15 @@ export function HostSwitcher(): React.ReactElement | null {
       }}
     >
       {reported.map((h) => {
-        const on = h.daemonId === current?.daemonId;
+        const on = h.hostId === current?.hostId;
         return (
           <Pressable
-            key={h.daemonId}
-            testID={`host-switcher-${h.daemonId}`}
+            key={h.hostId}
+            testID={`host-switcher-${h.hostId}`}
             accessibilityRole="tab"
             accessibilityLabel={hostName(h)}
             accessibilityState={{ selected: on }}
-            onPress={() => useSettingsHostChoice.getState().choose(h.daemonId)}
+            onPress={() => useSettingsHostChoice.getState().choose(h.hostId)}
             style={{
               flexDirection: 'row',
               alignItems: 'center',
@@ -126,7 +126,7 @@ export function HostSwitcher(): React.ReactElement | null {
  */
 export function unreportedText(host: HostPresence | null): string | null {
   if (host === null) return 'No hosts yet';
-  if (host.host === null) return `${host.daemonId} hasn’t reported yet`;
+  if (host.host === null) return `${host.hostId} hasn’t reported yet`;
   return null;
 }
 

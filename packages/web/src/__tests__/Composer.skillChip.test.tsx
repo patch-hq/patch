@@ -17,7 +17,7 @@ function seedChat(folder = '/proj'): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder,
@@ -61,7 +61,7 @@ describe('Composer — skill chips', () => {
     render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         folder="/proj"
         onSend={onSend}
         onStartVoiceNote={() => {}}
@@ -190,7 +190,7 @@ describe('Composer — skill chips', () => {
       <StrictMode>
         <Composer
           chatId="c1"
-          daemonId="d1"
+          hostId="d1"
           folder="/proj"
           onSend={() => {}}
           onStartVoiceNote={() => {}}
@@ -207,7 +207,7 @@ describe('Composer — skill chips', () => {
     render(
       <Composer
         chatId="c1"
-        daemonId="d1"
+        hostId="d1"
         folder="/proj"
         onSend={() => {}}
         onStartVoiceNote={() => {}}

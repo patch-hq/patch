@@ -99,10 +99,14 @@ test.describe('the sidebar brand row', () => {
     const openWin = (await page.getByTestId('sidebar-open-window').boundingBox())!;
     const collapse = (await page.getByTestId('sidebar-collapse').boundingBox())!;
 
-    // Clustered: the gap between them is smaller than either control.
+    // Spaced, not touching: the bell, open-window and collapse controls sit
+    // 8px apart (a 1px gap made them run together).
+    const bell = (await page.getByTestId('notif-bell').boundingBox())!;
     const gap = collapse.x - (openWin.x + openWin.width);
-    expect(gap).toBeGreaterThanOrEqual(0);
-    expect(gap).toBeLessThanOrEqual(2);
+    expect(gap).toBeGreaterThanOrEqual(8);
+    expect(gap).toBeLessThanOrEqual(10);
+    const bellGap = openWin.x - (bell.x + bell.width);
+    expect(bellGap).toBeGreaterThanOrEqual(8);
     // And close to the sidebar's own edge, not 20px off it.
     const trailing = sidebar.x + sidebar.width - (collapse.x + collapse.width);
     expect(trailing).toBeLessThanOrEqual(10);

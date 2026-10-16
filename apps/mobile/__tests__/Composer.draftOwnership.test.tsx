@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { findHost, byLabel, byType, renderRN, update } from './testUtils/render';
+import { findHost, byLabel, byType, renderRN, update, flushMicrotasks } from './testUtils/render';
 import {
   usePresenceStore,
   type ConnectionState,
@@ -24,6 +24,12 @@ import {
   clearComposerDraft,
   useComposerDraftStore,
 } from '../src/lib/composerDraft';
+
+// Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
+vi.mock('../src/lib/hookCheck', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/hookCheck')>()),
+  checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
+}));
 
 vi.mock('../src/api/rest', () => ({
   api: {
@@ -125,13 +131,14 @@ describe('Composer — per-chat draft ownership', () => {
     expect(findHost(second.root, byType('TextInput')).props['value']).toBe('still here later');
   });
 
-  it('a successful send clears the entry', () => {
+  it('a successful send clears the entry', async () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const input = findHost(r.root, byType('TextInput'));
     input.props['onChangeText']('send me');
     update(r, <Composer chatId="c1" folder="work" />);
 
     findHost(r.root, byLabel('Send message')).props['onPress']();
+    await flushMicrotasks();
     update(r, <Composer chatId="c1" folder="work" />);
 
     expect(submitSpy).toHaveBeenCalledTimes(1);

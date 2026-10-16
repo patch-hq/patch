@@ -183,6 +183,24 @@ describe('groupToolRuns', () => {
     expect(group.entries).toHaveLength(4);
   });
 
+  it('gives a batched view_file its own result, matched by callId, and does not redraw that result', () => {
+    const rows = groupToolRuns([
+      call(1, 'mcp__patch__view_file', { path: 'a' }, 'a'),
+      call(2, 'Read', { file_path: 'x' }, 'b'),
+      result(3, 'mcp__patch__view_file', 'a'),
+      result(4, 'Read', 'b'),
+    ]);
+    const file = rows.find((r) => r.kind === 'entry' && r.entry.callId === 'a');
+    if (file?.kind !== 'entry') throw new Error('expected the file row');
+    expect(file.result?.callId).toBe('a');
+    // The file's result is not drawn a second time as a row of its own.
+    const drawn = rows.flatMap((r) => (r.kind === 'group' ? r.entries : [r.entry]));
+    expect(drawn.filter((e) => e.kind === 'tool_result' && e.callId === 'a')).toHaveLength(0);
+    // The other call and its result still show.
+    expect(drawn.some((e) => e.callId === 'b' && e.kind === 'tool_call')).toBe(true);
+    expect(drawn.some((e) => e.callId === 'b' && e.kind === 'tool_result')).toBe(true);
+  });
+
   it('leaves a lone call as its own row — one call is not a run', () => {
     const rows = groupToolRuns([call(0, 'Read', { file_path: 'a.ts' }), result(1, 'Read')]);
     expect(rows.map((r) => r.kind)).toEqual(['entry', 'entry']);
@@ -304,5 +322,16 @@ describe('groupToolRuns — view_file takes its own result', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: 'entry' });
     expect((rows[0] as { result?: unknown }).result).toBeDefined();
+  });
+});
+
+describe('toolCallSummary — description that does not start on its first line', () => {
+  it('summarises the first non-empty line when the description opens with a newline', () => {
+    expect(toolCallSummary('Bash', { description: '\nRun the tests' })).toBe('Run the tests');
+  });
+
+  it('cuts a long description on a code point, never through half of an emoji', () => {
+    const out = toolCallSummary('Bash', { description: `${'A'.repeat(58)}😀${'b'.repeat(10)}` });
+    expect(out).toBe(`${'A'.repeat(58)}😀…`);
   });
 });

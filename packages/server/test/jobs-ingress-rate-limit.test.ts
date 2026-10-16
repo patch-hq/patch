@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { INGRESS_RATE_LIMIT_MAX } from '../src/jobs/ingress-rate-limit.js';
 
@@ -34,8 +34,8 @@ describe('webhook ingress rate limiting', () => {
 
   async function setup() {
     const registry = Registry.load(dir);
-    const link = new InProcessDaemonLink();
-    const built = await buildAll({ logger: false, registry, daemonLink: link });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ logger: false, registry, hostLink: link });
     return { built, link };
   }
 
@@ -46,7 +46,7 @@ describe('webhook ingress rate limiting', () => {
       // so the audit line count is exercised without dispatching anything.
       filter: 'false',
       trigger: { type: 'webhook', scheme: 'none' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
     });
   }
 
@@ -122,7 +122,7 @@ describe('webhook ingress rate limiting', () => {
       const job = built.jobs.create({
         name: 'rl-todoist',
         trigger: { type: 'todoist', clientSecret: 'fake-secret' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const todoistHit = () =>
         built.app.inject({
@@ -156,7 +156,7 @@ describe('webhook ingress rate limiting', () => {
       const job = built.jobs.create({
         name: 'rl-todoist-shared',
         trigger: { type: 'todoist' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'go' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
       });
       const sharedHit = () =>
         built.app.inject({

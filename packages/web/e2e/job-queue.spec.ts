@@ -15,7 +15,7 @@ const LIMITED_JOB = {
   enabled: true,
   trigger: { type: 'todoist' },
   filter: null,
-  action: { type: 'spawn', daemonId: 'd1', folder: FOLDER, skill: 'app-update' },
+  action: { type: 'spawn', hostId: 'd1', folder: FOLDER, skill: 'app-update' },
   concurrency: 1,
   createdAt: 1,
   updatedAt: 1,
@@ -30,7 +30,7 @@ const QUEUE = {
       startedAt: Date.parse('2026-09-07T09:00:00Z'),
       trigger: 'todoist',
       actionType: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: FOLDER,
     },
   ],
@@ -41,7 +41,7 @@ const QUEUE = {
       chatId: 'chat-waiting-1',
       trigger: 'todoist',
       actionType: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: FOLDER,
     },
     {
@@ -50,7 +50,7 @@ const QUEUE = {
       chatId: 'chat-waiting-2',
       trigger: 'todoist',
       actionType: 'spawn',
-      daemonId: 'd1',
+      hostId: 'd1',
       folder: FOLDER,
     },
   ],
@@ -67,7 +67,7 @@ async function stub(
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ hosts: [{ daemonId: 'd1', roots: [FOLDER], recent: [] }] }),
+      body: JSON.stringify({ hosts: [{ hostId: 'd1', roots: [FOLDER], recent: [] }] }),
     }),
   );
   await page.route('**/api/skills**', (route) =>

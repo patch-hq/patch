@@ -3,7 +3,7 @@ import { settingsUrl, stubSettingsApi } from './settingsHarness.js';
 
 // spec/10 § Surface in Settings — Usage. One row per shared Claude account
 // (spec/01 § Settings); its bars are the freshest reading any host has taken,
-// which a host reports on `daemon.account`. Settings renders each window it HAS as a percentage +
+// which a host reports on `host.account`. Settings renders each window it HAS as a percentage +
 // a human local reset time — never a raw epoch/enum. A window with no reading
 // is omitted entirely rather than drawn as a blank/zero placeholder, but the
 // row and its `Refresh` action are always present, so an account too spent to
@@ -12,7 +12,7 @@ import { settingsUrl, stubSettingsApi } from './settingsHarness.js';
 // `window.__presenceStore` the way the real WS greeting/report would.
 const SETTINGS = settingsUrl('usage');
 
-/** A host's reading of shared account `a1`, as its `daemon.account` report carries it. */
+/** A host's reading of shared account `a1`, as its `host.account` report carries it. */
 async function reading(page: import('@playwright/test').Page, usage: Record<string, unknown>) {
   await page.evaluate((u) => {
     (
@@ -24,8 +24,8 @@ async function reading(page: import('@playwright/test').Page, usage: Record<stri
     ).__presenceStore
       .getState()
       .setHostAccount({
-        type: 'daemon.account',
-        daemonId: 'd1',
+        type: 'host.account',
+        hostId: 'd1',
         backendId: 'claude-code',
         connected: true,
         accountEmail: 'dev@example.com',
@@ -69,7 +69,7 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     );
     expect(sent).toContainEqual({
       type: 'host.backend_usage_refresh',
-      daemonId: 'd1',
+      hostId: 'd1',
       backendId: 'claude-code',
     });
     // No window lines at all, for any of the three windows: "not read" and
@@ -117,10 +117,14 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     const overage = page.getByTestId('account-usage-overage-claude-code-a1');
     await expect(overage).toContainText('Extra usage');
     await expect(overage).toContainText('off');
-    // The reason, in words, under the bars.
+    // The account-controlled state, in words, under the bars.
     const bars = page.getByTestId('account-usage-claude-code-a1');
-    await expect(bars).toContainText(/not enabled/i);
-    await expect(bars).toContainText(/nothing has been overspent/i);
+    await expect(bars).toContainText('Extra usage: disabled');
+    await expect(page.getByTestId('account-extra-usage-settings')).toHaveAttribute(
+      'href',
+      'https://claude.ai/settings/usage',
+    );
+    await expect(bars).not.toContainText(/nothing has been overspent/i);
     // The session is what stopped the work, and it is the only line that says so.
     await expect(page.getByTestId('account-usage-session-claude-code-a1')).toContainText(
       /blocked/i,
@@ -159,14 +163,30 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     const bars = page.getByTestId('account-usage-claude-code-a1');
     await expect(bars).not.toContainText(/organisation/i);
     await expect(bars).not.toContainText(/switched off/i);
-    await expect(bars).toContainText(/not enabled/i);
-    await expect(bars).toContainText(/nothing has been overspent/i);
+    await expect(bars).toContainText('Extra usage: disabled');
+    await expect(bars).not.toContainText(/nothing has been overspent/i);
     // The pools that CAN stop work are drawn normally and say nothing is wrong.
     await expect(page.getByTestId('account-usage-session-claude-code-a1')).toContainText('5%');
     await expect(page.getByTestId('account-usage-session-claude-code-a1')).not.toContainText(
       /blocked/i,
     );
     await expect(page.getByTestId('account-usage-week-claude-code-a1')).toContainText('44%');
+  });
+
+  test('distinguishes an organisation-disabled extra-usage pool', async ({ page }) => {
+    await page.goto(SETTINGS);
+    await expect(page.getByTestId('account-claude-code-a1')).toBeVisible();
+
+    await reading(page, {
+      session: { status: 'allowed', utilization: 0.05 },
+      overage: { status: 'rejected', disabledReason: 'org_level_disabled' },
+      at: Date.now(),
+    });
+
+    const bars = page.getByTestId('account-usage-claude-code-a1');
+    await expect(bars).toContainText('Extra usage: disabled by organisation');
+    await expect(bars).not.toContainText('Extra usage: disabled ·');
+    await expect(page.getByTestId('account-extra-usage-settings')).toHaveCount(0);
   });
 
   test('a rejected window reads as blocked', async ({ page }) => {

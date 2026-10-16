@@ -25,12 +25,12 @@ test.describe('Recent projects survives archiving a project’s last chat', () =
       await route.fulfill({
         json: {
           folders: [
-            { folder: ARCHIVED_ONLY, daemonId: 'd1', lastUpdated: 900 },
+            { folder: ARCHIVED_ONLY, hostId: 'd1', lastUpdated: 900 },
             // The seeded active folders also come back from the real endpoint;
             // they are already drawn as open Folders sections, so they must NOT
             // be duplicated into Recent projects.
-            { folder: '/home/tom/projects/bus', daemonId: 'd1', lastUpdated: 800 },
-            { folder: '/home/tom/projects/portfolio', daemonId: 'd1', lastUpdated: 700 },
+            { folder: '/home/tom/projects/bus', hostId: 'd1', lastUpdated: 800 },
+            { folder: '/home/tom/projects/portfolio', hostId: 'd1', lastUpdated: 700 },
           ],
         },
       });
@@ -63,10 +63,10 @@ test.describe('Recent projects survives archiving a project’s last chat', () =
   }) => {
     // The row's whole purpose (spec/14 §4b) is to be an entry point. Its host
     // has to come from the roster too — the archived chat that would otherwise
-    // supply `daemonId` is absent after the reload.
+    // supply `hostId` is absent after the reload.
     await page.route('**/api/chats/folders', async (route) => {
       await route.fulfill({
-        json: { folders: [{ folder: ARCHIVED_ONLY, daemonId: 'd1', lastUpdated: 900 }] },
+        json: { folders: [{ folder: ARCHIVED_ONLY, hostId: 'd1', lastUpdated: 900 }] },
       });
     });
     await page.goto(HARNESS);
@@ -88,8 +88,8 @@ test.describe('Recent projects survives archiving a project’s last chat', () =
       await route.fulfill({
         json: {
           folders: [
-            { folder: ARCHIVED_ONLY, daemonId: 'd1', lastUpdated: 900 },
-            { folder: ALSO_ARCHIVED, daemonId: 'd1', lastUpdated: 850 },
+            { folder: ARCHIVED_ONLY, hostId: 'd1', lastUpdated: 900 },
+            { folder: ALSO_ARCHIVED, hostId: 'd1', lastUpdated: 850 },
           ],
         },
       });
@@ -112,8 +112,8 @@ test.describe('Recent projects survives archiving a project’s last chat', () =
       await route.fulfill({
         json: {
           folders: [
-            { folder: ALSO_ARCHIVED, daemonId: 'd1', lastUpdated: 10 },
-            { folder: ARCHIVED_ONLY, daemonId: 'd1', lastUpdated: 990 },
+            { folder: ALSO_ARCHIVED, hostId: 'd1', lastUpdated: 10 },
+            { folder: ARCHIVED_ONLY, hostId: 'd1', lastUpdated: 990 },
           ],
         },
       });

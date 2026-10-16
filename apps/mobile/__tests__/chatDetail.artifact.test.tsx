@@ -19,9 +19,14 @@ import {
 } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
-import { __getLinkingOpenedUrls, __resetLinkingOpenedUrls } from './stubs/react-native';
+import {
+  __getLinkingOpenedUrls,
+  __resetLinkingOpenedUrls,
+  __emitKeyboardEvent,
+} from './stubs/react-native';
 import { TEST_SERVER_URL as DEFAULT_SERVER_URL } from './stubs/mmkv';
-import { __setLocalSearchParams } from './stubs/expo-router';
+import { __resetArtifactViewer } from '../src/components/ArtifactViewer';
+import { routerMock, __setLocalSearchParams } from './stubs/expo-router';
 
 vi.mock('../src/api/rest', () => ({
   api: {
@@ -50,10 +55,11 @@ const artifactEvent = (artifactId: string, title: string, seq: number, chatId = 
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  __resetArtifactViewer();
   __resetLinkingOpenedUrls();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');
-  usePresenceStore.getState().setDaemon('online');
+  usePresenceStore.getState().setHost('online');
   const mod = await import('../app/chats/[chatId]');
   ChatDetailScreen = mod.default;
   useChatStore.getState().hydrate([
@@ -114,6 +120,19 @@ describe('Artifact card', () => {
     expect(__getLinkingOpenedUrls()).toEqual([`${DEFAULT_SERVER_URL}/api/chats/c1/artifact/a1`]);
   });
 
+  it('a Pad card opens the Pad screen, from the card and from the artifact bar, never the viewer', () => {
+    useChatStore.getState().applyEvent({
+      ...artifactEvent('pad-p1', 'Settings pad', 1),
+      url: '/pads/p1',
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    actSync(() => findHost(r.root, byTestId('artifact-card')).props.onPress());
+    expect(routerMock.push).toHaveBeenCalledWith('/pads/p1');
+    actSync(() => findHost(r.root, byTestId('artifact-bar-chip')).props.onPress());
+    expect(routerMock.push).toHaveBeenCalledTimes(2);
+    expect(queryHost(r.root, byTestId('artifact-viewer'))).toBeNull();
+  });
+
   it('closing the viewer removes it from the tree', () => {
     useChatStore.getState().applyEvent(artifactEvent('a1', 'Bristol bus times', 1));
     const r = renderRN(<ChatDetailScreen />);
@@ -148,6 +167,33 @@ describe('Artifact bar', () => {
     expect(chips).toHaveLength(2);
     expect(hasText(chips[0]!, 'Garden plan')).toBe(true);
     expect(hasText(chips[1]!, 'Bristol bus times')).toBe(true);
+  });
+
+  it('does not grow to fill the column (a horizontal ScrollView does by default, drawing one chip as a tall capsule over the transcript)', () => {
+    useChatStore.getState().applyEvent(artifactEvent('a1', 'Meeting mode', 1));
+    const r = renderRN(<ChatDetailScreen />);
+    const bar = findHost(r.root, byTestId('artifact-bar'));
+    expect(bar.props.style).toMatchObject({ flexGrow: 0 });
+    expect(bar.props.contentContainerStyle).toMatchObject({ alignItems: 'flex-start' });
+  });
+
+  it('steps out of the way while the keyboard is open, and comes back when it closes', () => {
+    useChatStore.getState().applyEvent(artifactEvent('a1', 'Meeting mode', 1));
+    const r = renderRN(<ChatDetailScreen />);
+    expect(queryHost(r.root, byTestId('artifact-bar'))).not.toBeNull();
+    actSync(() => __emitKeyboardEvent('keyboardDidShow'));
+    expect(queryHost(r.root, byTestId('artifact-bar'))).toBeNull();
+    actSync(() => __emitKeyboardEvent('keyboardDidHide'));
+    expect(queryHost(r.root, byTestId('artifact-bar'))).not.toBeNull();
+  });
+
+  it('is a slim strip: no top padding, tight chips', () => {
+    useChatStore.getState().applyEvent(artifactEvent('a1', 'Meeting mode', 1));
+    const r = renderRN(<ChatDetailScreen />);
+    const bar = findHost(r.root, byTestId('artifact-bar'));
+    expect(bar.props.contentContainerStyle.paddingTop).toBeUndefined();
+    const chip = findHost(r.root, byTestId('artifact-bar-chip'));
+    expect(chip.props.style.paddingVertical).toBeLessThanOrEqual(3);
   });
 
   it('tapping an earlier chip opens that artifact', () => {

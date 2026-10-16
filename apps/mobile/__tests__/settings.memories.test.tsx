@@ -71,8 +71,8 @@ function render(el: React.ReactElement): ReactTestRenderer {
   return r;
 }
 
-function seed(memories: ClaudeMemoryEntry[], daemonId = 'd1'): void {
-  usePresenceStore.getState().setClaudeSettings(daemonId, '{}', memories);
+function seed(memories: ClaudeMemoryEntry[], hostId = 'd1'): void {
+  usePresenceStore.getState().setClaudeSettings(hostId, '{}', memories);
 }
 
 beforeEach(() => {
@@ -161,7 +161,7 @@ describe('Memories page', () => {
     findHost(r.root, byTestId('memory--home-tom-portfolio-nav.md')).props.onPress();
     expect(routerMock.push).toHaveBeenCalledWith({
       pathname: '/settings/memory',
-      params: { daemonId: 'd1', project: '-home-tom-portfolio', file: 'nav.md' },
+      params: { hostId: 'd1', project: '-home-tom-portfolio', file: 'nav.md' },
     });
   });
 
@@ -180,7 +180,7 @@ describe('Memories page', () => {
 
 describe('a memory’s page', () => {
   it('shows type · project · date and the text to edit', () => {
-    const r = render(<MemoryDetail daemonId="d1" project={nav.project} file="nav.md" />);
+    const r = render(<MemoryDetail hostId="d1" project={nav.project} file="nav.md" />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Android nav bar');
     expect(textOf(findHost(r.root, byTestId('memory-meta')))).toBe('feedback · portfolio · 13 Sep');
     expect(findHost(r.root, byTestId('memory-body')).props.value).toBe(nav.body);
@@ -188,12 +188,12 @@ describe('a memory’s page', () => {
   });
 
   it('Save sends the new text and settles on the host’s fresh snapshot', async () => {
-    const r = render(<MemoryDetail daemonId="d1" project={nav.project} file="nav.md" />);
+    const r = render(<MemoryDetail hostId="d1" project={nav.project} file="nav.md" />);
     await actAsync(() => findHost(r.root, byTestId('memory-body')).props.onChangeText('New.'));
     await actAsync(() => findHost(r.root, byTestId('memory-save')).props.onPress());
     expect(send).toHaveBeenCalledWith({
       type: 'host.claude_memory_set',
-      daemonId: 'd1',
+      hostId: 'd1',
       project: nav.project,
       file: 'nav.md',
       body: 'New.',
@@ -207,7 +207,7 @@ describe('a memory’s page', () => {
   });
 
   it('a refusal is shown in the host’s own words', async () => {
-    const r = render(<MemoryDetail daemonId="d1" project={nav.project} file="nav.md" />);
+    const r = render(<MemoryDetail hostId="d1" project={nav.project} file="nav.md" />);
     await actAsync(() => findHost(r.root, byTestId('memory-body')).props.onChangeText('New.'));
     await actAsync(() => findHost(r.root, byTestId('memory-save')).props.onPress());
     await actAsync(() =>
@@ -222,7 +222,7 @@ describe('a memory’s page', () => {
 
   it('no answer in the window is said as unknown, and heartbeats do not extend it', async () => {
     vi.useFakeTimers();
-    const r = render(<MemoryDetail daemonId="d1" project={nav.project} file="nav.md" />);
+    const r = render(<MemoryDetail hostId="d1" project={nav.project} file="nav.md" />);
     await actAsync(() => findHost(r.root, byTestId('memory-body')).props.onChangeText('New.'));
     await actAsync(() => findHost(r.root, byTestId('memory-save')).props.onPress());
     await actAsync(() => vi.advanceTimersByTime(CLAUDE_ACK_TIMEOUT_MS - 1000));
@@ -234,7 +234,7 @@ describe('a memory’s page', () => {
   });
 
   it('Delete asks first, then goes back once the host has dropped it', async () => {
-    const r = render(<MemoryDetail daemonId="d1" project={nav.project} file="nav.md" />);
+    const r = render(<MemoryDetail hostId="d1" project={nav.project} file="nav.md" />);
     await actAsync(() => findHost(r.root, byTestId('memory-delete')).props.onPress());
     expect(__getLastAlert()?.title).toBe('Delete Android nav bar?');
     pressAlert('Cancel');
@@ -243,7 +243,7 @@ describe('a memory’s page', () => {
     await actAsync(() => pressAlert('Delete'));
     expect(send).toHaveBeenCalledWith({
       type: 'host.claude_memory_delete',
-      daemonId: 'd1',
+      hostId: 'd1',
       project: nav.project,
       file: 'nav.md',
     });
@@ -254,7 +254,7 @@ describe('a memory’s page', () => {
 
   it('an offline host is refused up front, naming it', async () => {
     usePresenceStore.getState().setHostOnline('d1', false);
-    const r = render(<MemoryDetail daemonId="d1" project={nav.project} file="nav.md" />);
+    const r = render(<MemoryDetail hostId="d1" project={nav.project} file="nav.md" />);
     await actAsync(() => findHost(r.root, byTestId('memory-body')).props.onChangeText('New.'));
     await actAsync(() => findHost(r.root, byTestId('memory-save')).props.onPress());
     expect(send).not.toHaveBeenCalled();
@@ -263,7 +263,7 @@ describe('a memory’s page', () => {
   });
 
   it('an entry from a host that predates sending text: its description, and update the host', () => {
-    const r = render(<MemoryDetail daemonId="d1" project={deploy.project} file="deploy.md" />);
+    const r = render(<MemoryDetail hostId="d1" project={deploy.project} file="deploy.md" />);
     expect(queryHost(r.root, byTestId('memory-body'))).toBeNull();
     expect(queryHost(r.root, byTestId('memory-save'))).toBeNull();
     expect(textOf(r.root)).toContain('wire changes ship together');
@@ -276,7 +276,7 @@ describe('a memory’s page', () => {
   });
 
   it('an entry the host no longer holds says so', () => {
-    const r = render(<MemoryDetail daemonId="d1" project="p" file="gone.md" />);
+    const r = render(<MemoryDetail hostId="d1" project="p" file="gone.md" />);
     expect(textOf(findHost(r.root, byTestId('memory-gone')))).toBe(
       'This memory is no longer on laptop',
     );

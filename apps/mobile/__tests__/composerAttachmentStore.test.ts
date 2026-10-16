@@ -55,3 +55,34 @@ describe('composerAttachmentStore', () => {
     expect(attachmentKindForMime('application/pdf')).toBe('file');
   });
 });
+
+describe('composerAttachmentStore.replace', () => {
+  it('swaps one attachment for another, keeping its position', () => {
+    const s = useComposerAttachmentStore.getState();
+    s.add('c1', [att('a'), att('b'), att('c')]);
+    s.replace('c1', 'b', { ...att('b2'), name: 'b-annotated.png' });
+    expect(useComposerAttachmentStore.getState().byKey['c1']?.map((a) => a.key)).toEqual([
+      'a',
+      'b2',
+      'c',
+    ]);
+    expect(useComposerAttachmentStore.getState().byKey['c1']?.[1]?.name).toBe('b-annotated.png');
+  });
+
+  it('can keep the same key, and still produces a new list and a new item', () => {
+    const s = useComposerAttachmentStore.getState();
+    s.add('c1', [att('a')]);
+    const before = useComposerAttachmentStore.getState().byKey['c1'];
+    s.replace('c1', 'a', { ...att('a'), uri: 'file:///new' });
+    const after = useComposerAttachmentStore.getState().byKey['c1'];
+    expect(after).not.toBe(before);
+    expect(after?.[0]?.uri).toBe('file:///new');
+  });
+
+  it('throws when the attachment is gone (removed while the editor was open)', () => {
+    const s = useComposerAttachmentStore.getState();
+    s.add('c1', [att('a')]);
+    expect(() => s.replace('c1', 'zzz', att('n'))).toThrow(/no attachment zzz/);
+    expect(() => s.replace('nokey', 'a', att('n'))).toThrow(/no attachment a/);
+  });
+});

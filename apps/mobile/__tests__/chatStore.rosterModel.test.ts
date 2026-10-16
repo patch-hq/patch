@@ -10,7 +10,7 @@ function row(chatId: string, model?: string | null): ChatListRow {
   return {
     chatId,
     name: chatId,
-    daemonId: 'd1',
+    hostId: 'd1',
     folder: '/f',
     activity: 'idle',
     permissionMode: 'default',

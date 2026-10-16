@@ -94,6 +94,19 @@ describe('ChatLogStore', () => {
     expect(second.read('c1', -1).map((e) => (e as { seq: number }).seq)).toEqual([1, 2]);
   });
 
+  test('an event committed after a torn last line is not lost with it', () => {
+    const first = new ChatLogStore({ dataDir: dir, logger });
+    first.observe(message('c1', 0));
+    appendFileSync(join(dir, 'chat-logs', 'c1.jsonl'), '{"type":"chat.message","chatId":"c1","ro');
+
+    const second = new ChatLogStore({ dataDir: dir, logger });
+    second.observe(message('c1', 1));
+
+    const third = new ChatLogStore({ dataDir: dir, logger });
+    expect(third.highWater('c1')).toBe(1);
+    expect(third.read('c1', -1).map((e) => (e as { seq: number }).seq)).toEqual([0, 1]);
+  });
+
   test('an unchanged event is not written again', async () => {
     const store = new ChatLogStore({ dataDir: dir, logger });
     store.observe(message('c1', 1));
@@ -292,6 +305,23 @@ describe('ChatLogStore', () => {
       expect(store.read('c1', -1).map((e) => (e as { seq: number }).seq)).toEqual([3, 4, 5]);
     });
 
+    test('holds a chat loaded from disk to the cap too, keeping its newest events', () => {
+      mkdirSync(join(dir, 'chat-logs'), { recursive: true });
+      writeFileSync(
+        join(dir, 'chat-logs', 'c1.jsonl'),
+        [5, 1, 4, 2, 3].map((seq) => `${JSON.stringify(message('c1', seq))}\n`).join(''),
+      );
+      const store = new ChatLogStore({ dataDir: dir, logger, maxEventsPerChat: 3 });
+      expect(store.read('c1', -1).map((e) => (e as { seq: number }).seq)).toEqual([3, 4, 5]);
+    });
+
+    test('drops the oldest event of a chat too long to spread into an argument list', () => {
+      const store = new ChatLogStore({ logger, maxEventsPerChat: 200_000 });
+      for (let seq = 200_000; seq >= 1; seq--) store.commit(message('c1', seq));
+      expect(store.commit(message('c1', 200_001))).toBe('new');
+      expect(store.read('c1', -1, 1)).toEqual([message('c1', 2)]);
+    });
+
     test('tells a provider context apart from an error at the same seq', () => {
       const store = new ChatLogStore({ logger });
       store.commit({
@@ -315,6 +345,12 @@ describe('ChatLogStore', () => {
       const store = new ChatLogStore({ dataDir: dir, logger });
       store.commit(toolResult(1, 'a'.repeat(9_000)));
       expect(previewOfStored(store)).toBe('a'.repeat(200));
+    });
+
+    test('a preview cut at 200 characters does not split an emoji', () => {
+      const store = new ChatLogStore({ dataDir: dir, logger });
+      store.commit(toolResult(1, `${'a'.repeat(199)}😀${'b'.repeat(9_000)}`));
+      expect(previewOfStored(store)).toBe(`${'a'.repeat(199)}😀`);
     });
 
     test('previews a big block result by its text blocks, with [image] for a picture and nothing for the rest', () => {

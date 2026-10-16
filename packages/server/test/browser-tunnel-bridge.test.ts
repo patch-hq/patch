@@ -7,13 +7,13 @@ import { describe, it, expect } from 'vitest';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { registerBrowserTunnelBridge } from '../src/browser-tunnel-bridge.js';
-import type { DaemonLink } from '../src/daemon-link.js';
+import type { HostLink } from '../src/host-link.js';
 import type { Registry } from '../src/registry.js';
 
 const logger = pino({ level: 'silent' });
 
 interface Sent {
-  daemonId: string;
+  hostId: string;
   surfaceId: string;
   event: WireEvent;
 }
@@ -23,11 +23,11 @@ function harness(opts: { registered?: string[]; online?: string[] } = {}) {
   const online = new Set(opts.online ?? ['host-a', 'host-b']);
   const sent: Sent[] = [];
   let handler: ((e: WireEvent, from: string | null) => void) | undefined;
-  let statusHandler: ((daemonId: string, status: 'online' | 'offline') => void) | undefined;
+  let statusHandler: ((hostId: string, status: 'online' | 'offline') => void) | undefined;
 
-  const daemonLink = {
-    sendTo: (daemonId: string, surfaceId: string, event: WireEvent) => {
-      sent.push({ daemonId, surfaceId, event });
+  const hostLink = {
+    sendTo: (hostId: string, surfaceId: string, event: WireEvent) => {
+      sent.push({ hostId, surfaceId, event });
     },
     isOnline: (id: string) => online.has(id),
     onEvent: (h: (e: WireEvent, from: string | null) => void) => {
@@ -36,24 +36,24 @@ function harness(opts: { registered?: string[]; online?: string[] } = {}) {
         handler = undefined;
       };
     },
-    onHostStatus: (h: (daemonId: string, status: 'online' | 'offline') => void) => {
+    onHostStatus: (h: (hostId: string, status: 'online' | 'offline') => void) => {
       statusHandler = h;
       return () => {
         statusHandler = undefined;
       };
     },
-  } as unknown as DaemonLink;
+  } as unknown as HostLink;
 
   const registry = {
-    isRegisteredDaemon: (id: string) => registered.has(id),
+    isRegisteredHost: (id: string) => registered.has(id),
   } as unknown as Registry;
 
-  const dispose = registerBrowserTunnelBridge({ logger, daemonLink, registry });
+  const dispose = registerBrowserTunnelBridge({ logger, hostLink, registry });
   return {
     sent,
     dispose,
     feed: (event: WireEvent, from: string | null) => handler?.(event, from),
-    goOffline: (daemonId: string) => statusHandler?.(daemonId, 'offline'),
+    goOffline: (hostId: string) => statusHandler?.(hostId, 'offline'),
   };
 }
 
@@ -61,7 +61,7 @@ const openFrame = (over: Partial<Record<string, unknown>> = {}): WireEvent =>
   ({
     type: 'patch.browser_tunnel.open',
     streamId: 'stream-1',
-    daemonId: 'host-b',
+    hostId: 'host-b',
     host: 'example.com',
     port: 443,
     ...over,
@@ -72,7 +72,7 @@ describe('browser tunnel bridge', () => {
     const h = harness();
     h.feed(openFrame(), 'host-a');
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-b');
+    expect(h.sent[0]!.hostId).toBe('host-b');
     expect(h.sent[0]!.event).toMatchObject({
       type: 'patch.browser_tunnel.open',
       streamId: 'stream-1',
@@ -86,7 +86,7 @@ describe('browser tunnel bridge', () => {
     h.sent.length = 0;
     h.feed({ type: 'patch.browser_tunnel.ready', streamId: 'stream-1' } as WireEvent, 'host-b');
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     expect(h.sent[0]!.event).toMatchObject({ type: 'patch.browser_tunnel.ready' });
     h.dispose();
   });
@@ -103,7 +103,7 @@ describe('browser tunnel bridge', () => {
       'host-a',
     );
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-b');
+    expect(h.sent[0]!.hostId).toBe('host-b');
 
     // routing → browsing
     h.feed(
@@ -111,7 +111,7 @@ describe('browser tunnel bridge', () => {
       'host-b',
     );
     expect(h.sent).toHaveLength(2);
-    expect(h.sent[1]!.daemonId).toBe('host-a');
+    expect(h.sent[1]!.hostId).toBe('host-a');
     h.dispose();
   });
 
@@ -123,7 +123,7 @@ describe('browser tunnel bridge', () => {
 
     h.feed({ type: 'patch.browser_tunnel.close', streamId: 'stream-1' } as WireEvent, 'host-a');
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-b');
+    expect(h.sent[0]!.hostId).toBe('host-b');
 
     // The route is gone — a later frame on the same streamId is dropped, not relayed.
     h.sent.length = 0;
@@ -135,11 +135,36 @@ describe('browser tunnel bridge', () => {
     h.dispose();
   });
 
+  it('relays an error to the other side and forgets the route, since an error always ends the stream', () => {
+    const h = harness();
+    h.feed(openFrame(), 'host-a');
+    h.sent.length = 0;
+
+    h.feed(
+      {
+        type: 'patch.browser_tunnel.error',
+        streamId: 'stream-1',
+        code: 'connect_failed',
+        message: 'ECONNREFUSED',
+      } as WireEvent,
+      'host-b',
+    );
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]!.hostId).toBe('host-a');
+
+    // No close follows an error, so the route must already be gone: a machine
+    // dropping later owes nobody a host_offline for this stream.
+    h.sent.length = 0;
+    h.goOffline('host-b');
+    expect(h.sent).toHaveLength(0);
+    h.dispose();
+  });
+
   it('refuses open to an UNREGISTERED routing host, naming it, with no relay', () => {
     const h = harness({ registered: ['host-a'] });
-    h.feed(openFrame({ daemonId: 'host-zzz' }), 'host-a');
+    h.feed(openFrame({ hostId: 'host-zzz' }), 'host-a');
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     expect(h.sent[0]!.event).toMatchObject({
       type: 'patch.browser_tunnel.error',
       streamId: 'stream-1',
@@ -153,7 +178,7 @@ describe('browser tunnel bridge', () => {
     const h = harness({ online: ['host-a'] });
     h.feed(openFrame(), 'host-a');
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     expect(h.sent[0]!.event).toMatchObject({
       type: 'patch.browser_tunnel.error',
       code: 'host_offline',
@@ -170,7 +195,7 @@ describe('browser tunnel bridge', () => {
 
     h.goOffline('host-b');
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]!.daemonId).toBe('host-a');
+    expect(h.sent[0]!.hostId).toBe('host-a');
     expect(h.sent[0]!.event).toMatchObject({
       type: 'patch.browser_tunnel.error',
       streamId: 'stream-1',

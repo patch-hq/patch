@@ -9,7 +9,7 @@
 // Delivery-pending (was my input received?) is kept strictly separate from the
 // type-ahead `chat.queued` (parked behind a running turn).
 
-import type { AttachmentRef, WireEvent } from '@patch/wire';
+import { isTransientChatError, type AttachmentRef, type WireEvent } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
@@ -31,6 +31,8 @@ interface PendingInput {
    * deliveryTracker.ts.
    */
   disabledTools?: string[];
+  /** Fold this turn into the bubble whose original seq this is (spec/12 § Retry in place). */
+  retryOfSeq?: number;
   attempts: number;
   /** The link has been re-dialled once for this input (see onTimeout). */
   probed: boolean;
@@ -79,6 +81,7 @@ export class DeliveryTracker {
         ...(entry.disabledTools && entry.disabledTools.length > 0
           ? { disabledTools: entry.disabledTools }
           : {}),
+        ...(entry.retryOfSeq !== undefined ? { retryOfSeq: entry.retryOfSeq } : {}),
       });
     } catch {
       // Not connected right now — held pending; onReconnect / the timer retries.
@@ -136,6 +139,7 @@ export class DeliveryTracker {
     attachments?: AttachmentRef[],
     send?: (event: WireEvent) => void,
     disabledTools?: string[],
+    retryOfSeq?: number,
   ): void {
     const key = this.key(chatId, localId);
     if (this.pending.has(key)) return;
@@ -145,6 +149,7 @@ export class DeliveryTracker {
       message,
       attachments,
       ...(disabledTools && disabledTools.length > 0 ? { disabledTools } : {}),
+      ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
       attempts: 0,
       probed: false,
       timer: null,
@@ -176,6 +181,10 @@ export class DeliveryTracker {
         this.resolve(event.chatId, event.localId);
         return;
       case 'chat.error':
+        // `daemon_unavailable` is the server saying the HOST is away, not that
+        // this input was answered: keep it pending so `onReconnect` redelivers
+        // it the moment the host is back ("Message will resend" must be true).
+        if (isTransientChatError(event.error.code)) return;
         this.resolveChat(event.chatId);
         return;
       case 'chat.message':

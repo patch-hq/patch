@@ -7,6 +7,7 @@
 // This is the canonical owner of job state for the server; cron scheduler,
 // webhook ingress, and REST routes all consume the same store.
 
+import { parsePersisted } from '../persisted-json.js';
 import {
   closeSync,
   existsSync,
@@ -27,11 +28,17 @@ import {
   Job,
   type JobCreateBody,
   type JobPatchBody,
+  type JobTrigger,
   type JobsChangeEvent,
   type JobsInterface,
 } from './types.js';
 import { assertValidJobId } from './logs.js';
-import { assertValidJobBody, assertValidQueueing } from './validate.js';
+import {
+  assertRecurrenceCanFire,
+  assertValidJobBody,
+  assertValidQueueing,
+  JobValidationError,
+} from './validate.js';
 
 export interface JobStoreOptions {
   /** Root data dir; jobs land in `<dataDir>/jobs/`. */
@@ -92,7 +99,7 @@ export class JobStore implements JobsInterface {
       const raw = readFileSync(path, 'utf8');
       let parsed: unknown;
       try {
-        parsed = JSON.parse(raw);
+        parsed = parsePersisted(raw);
       } catch (err) {
         this.logger.error({ path, err: (err as Error).message }, 'job: malformed JSON, skipping');
         continue;
@@ -171,7 +178,7 @@ export class JobStore implements JobsInterface {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      parsed = parsePersisted(raw);
     } catch (err) {
       this.logger.error(
         { path, err: (err as Error).message },
@@ -240,17 +247,21 @@ export class JobStore implements JobsInterface {
     assertValidJobBody(body);
     assertValidQueueing(body);
     const now = this.nowMs();
+    assertRecurrenceCanFire(body.trigger, new Date(now));
+    this.assertFollowable(undefined, body.trigger);
     const job: Job = {
       id: `j_${this.idGenerator()}`,
       name: body.name,
       enabled: body.enabled ?? true,
       trigger: body.trigger,
       filter: body.filter ?? null,
+      ...(body.gate !== undefined && body.gate !== null ? { gate: body.gate } : {}),
       action: body.action,
       ...(body.concurrency !== undefined ? { concurrency: body.concurrency } : {}),
       ...(body.queueing !== undefined ? { queueing: body.queueing } : {}),
       ...(body.window !== undefined && body.window !== null ? { window: body.window } : {}),
       ...(body.oneOff !== undefined ? { oneOff: body.oneOff } : {}),
+      ...(body.wakeHost !== undefined ? { wakeHost: body.wakeHost } : {}),
       ...(body.group !== undefined ? { group: body.group } : {}),
       // `null` means "use the default" same as omitted, since a brand-new
       // job has no stored override to clear either way (spec/08 § Autonomy
@@ -285,10 +296,46 @@ export class JobStore implements JobsInterface {
     return this.merge(id, body);
   }
 
+  /**
+   * A `follows` trigger must name a job that exists, and must not close a loop
+   * (a job following itself, directly or through a chain) — a loop would fire
+   * forever (spec/08 § Follows). `id` is the job being written, absent on create.
+   */
+  private assertFollowable(id: string | undefined, trigger: JobTrigger | undefined): void {
+    if (!trigger || trigger.type !== 'follows') return;
+    const seen = new Set<string>();
+    let cur: string = trigger.jobId;
+    if (!this.cache.has(cur)) {
+      throw new JobValidationError(`followed job not found: ${cur}`, 'trigger.jobId');
+    }
+    while (!seen.has(cur)) {
+      if (cur === id) {
+        throw new JobValidationError(
+          'a job cannot follow itself, even through a chain',
+          'trigger.jobId',
+        );
+      }
+      seen.add(cur);
+      const t = this.cache.get(cur)?.trigger;
+      if (!t || t.type !== 'follows') return;
+      cur = t.jobId;
+    }
+  }
+
   private merge(id: string, body: JobPatchBody): Job {
     const existing = this.cache.get(id);
     if (!existing) throw new Error(`job not found: ${id}`);
     assertValidJobBody(body);
+    // Only a NEW rule — the editor re-sends the stored one with every save.
+    const t = body.trigger;
+    const e = existing.trigger;
+    const unchanged =
+      t?.type === 'recurrence' &&
+      e.type === 'recurrence' &&
+      t.rrule === e.rrule &&
+      t.timezone === e.timezone;
+    if (!unchanged) assertRecurrenceCanFire(t, new Date(this.nowMs()));
+    this.assertFollowable(id, t);
     const next: Job = {
       ...existing,
       ...(body.name !== undefined ? { name: body.name } : {}),
@@ -297,6 +344,7 @@ export class JobStore implements JobsInterface {
       ...(body.filter !== undefined ? { filter: body.filter } : {}),
       ...(body.action !== undefined ? { action: body.action } : {}),
       ...(body.oneOff !== undefined ? { oneOff: body.oneOff } : {}),
+      ...(body.wakeHost !== undefined ? { wakeHost: body.wakeHost } : {}),
       // Put away / brought back (spec/08 § Archived jobs). Written on its own
       // — it never touches `enabled`, so un-archiving restores the job exactly
       // as it was rather than guessing whether it should now run.
@@ -314,6 +362,9 @@ export class JobStore implements JobsInterface {
     // § Concurrency); omitting the key leaves whatever the job already has.
     if (body.concurrency === null) delete next.concurrency;
     else if (body.concurrency !== undefined) next.concurrency = body.concurrency;
+    // Same convention for the gate (spec/08 § Gate): null removes it.
+    if (body.gate === null) delete next.gate;
+    else if (body.gate !== undefined) next.gate = body.gate;
     // Same convention for the queueing mode (spec/08 § Queueing).
     if (body.queueing === null) delete next.queueing;
     else if (body.queueing !== undefined) next.queueing = body.queueing;

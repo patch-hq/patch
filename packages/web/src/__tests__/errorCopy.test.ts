@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { humaniseError } from '../lib/errorCopy.js';
 
 // The real wording a host sends when a host has no model catalogue.
-const DAEMON_PARAGRAPH =
+const HOST_PARAGRAPH =
   'machine dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
   'name a model on the spawn or connect the backend credential on that machine';
 
@@ -27,13 +27,13 @@ describe('humaniseError', () => {
   });
 
   it('replaces a daemon-authored paragraph rather than passing it through', () => {
-    const out = humaniseError({ code: 'no_model_catalogue', message: DAEMON_PARAGRAPH }, 'spawn');
+    const out = humaniseError({ code: 'no_model_catalogue', message: HOST_PARAGRAPH }, 'spawn');
     expect(out.sentence).toBe('Pick a model before starting the chat.');
     expect(out.sentence).not.toContain('dev-daemon-1');
     expect(out.sentence).not.toContain('credential');
     // Kept in full — code AND the host's own words.
     expect(out.detail).toContain('no_model_catalogue');
-    expect(out.detail).toContain(DAEMON_PARAGRAPH);
+    expect(out.detail).toContain(HOST_PARAGRAPH);
   });
 
   it('says what to do for each code it knows, and never says the code', () => {

@@ -23,21 +23,21 @@
 // first-run state), never a silently-wrong draft.
 
 import { create } from 'zustand';
-import type { NewChatDraftBody } from '@patch/wire';
+import { canonicalizeHostNames, type NewChatDraftBody } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { hasDraftText } from '../lib/draftText.js';
 import { useUiStore } from './uiStore.js';
 
 export interface Draft {
   id: string;
-  /** Absolute folder on `daemonId`'s machine, or '' until chosen. */
+  /** Absolute folder on `hostId`'s machine, or '' until chosen. */
   folder: string;
   /**
    * The machine the chat will run on. A path means nothing without its host,
    * so a restored draft must come back on the machine it was typed against.
    * Absent on drafts saved before this existed, which take the default.
    */
-  daemonId?: string;
+  hostId?: string;
   /** Unsent composer text. */
   text: string;
   /** SDK `--model` override for the chat this draft will spawn (spec/13). */
@@ -51,7 +51,7 @@ function load(): { drafts: Record<string, Draft>; order: string[] } {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return { drafts: {}, order: [] };
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = canonicalizeHostNames(JSON.parse(raw));
     if (typeof parsed !== 'object' || parsed === null) return { drafts: {}, order: [] };
     const p = parsed as { drafts?: unknown; order?: unknown };
     const drafts: Record<string, Draft> = {};
@@ -64,7 +64,7 @@ function load(): { drafts: Record<string, Draft>; order: string[] } {
             folder: dd.folder,
             text: dd.text,
             ...(typeof dd.model === 'string' ? { model: dd.model } : {}),
-            ...(typeof dd.daemonId === 'string' ? { daemonId: dd.daemonId } : {}),
+            ...(typeof dd.hostId === 'string' ? { hostId: dd.hostId } : {}),
             updatedAt: typeof dd.updatedAt === 'number' ? dd.updatedAt : 0,
           };
         }
@@ -114,7 +114,7 @@ function toBody(d: Draft): NewChatDraftBody {
     id: d.id,
     folder: d.folder,
     text: d.text,
-    ...(d.daemonId ? { daemonId: d.daemonId } : {}),
+    ...(d.hostId ? { hostId: d.hostId } : {}),
     ...(d.model ? { model: d.model } : {}),
   };
 }
@@ -167,7 +167,7 @@ interface DraftStore {
   /** Mint a new empty draft (optionally seeded with a folder) and return its id. */
   create(folder?: string): string;
   /** Patch a draft's folder/text/model; no-op if the draft is gone. */
-  update(id: string, patch: Partial<Pick<Draft, 'folder' | 'text' | 'model' | 'daemonId'>>): void;
+  update(id: string, patch: Partial<Pick<Draft, 'folder' | 'text' | 'model' | 'hostId'>>): void;
   /** Drop a draft (discarded, or consumed on send). */
   remove(id: string): void;
   /**
@@ -292,7 +292,7 @@ function fromBody(b: NewChatDraftBody, updatedAt: number): Draft {
     folder: b.folder,
     text: b.text,
     ...(b.model ? { model: b.model } : {}),
-    ...(b.daemonId ? { daemonId: b.daemonId } : {}),
+    ...(b.hostId ? { hostId: b.hostId } : {}),
     updatedAt,
   };
 }

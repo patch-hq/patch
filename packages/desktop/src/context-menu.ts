@@ -20,11 +20,16 @@
 // type-imports MenuItemConstructorOptions.
 
 import type { MenuItemConstructorOptions } from 'electron';
+import { routeWindowOpen } from './link-policy';
 
 /** The subset of Electron's ContextMenuParams we consume. */
 export interface ContextMenuParams {
   linkURL?: string;
   selectionText?: string;
+  /** 'image' when the click landed on an <img>/canvas-backed image. */
+  mediaType?: string;
+  x?: number;
+  y?: number;
   isEditable?: boolean;
   editFlags?: {
     canCut?: boolean;
@@ -46,6 +51,8 @@ export interface ContextMenuDeps {
   openInPatch: (url: string) => void;
   /** Write a string to the system clipboard (clipboard.writeText). */
   writeText: (text: string) => void;
+  /** Copy the image under (x, y) to the clipboard (webContents.copyImageAt). */
+  copyImageAt: (x: number, y: number) => void;
 }
 
 /**
@@ -70,12 +77,26 @@ export function buildContextMenuTemplate(
       },
       {
         label: 'Open Link in Browser',
-        click: () => deps.openExternal(url),
+        // The same http(s)-only guard as every other way a link leaves the window:
+        // `file:`, `javascript:` and custom schemes would otherwise reach the OS.
+        click: () => {
+          const action = routeWindowOpen(url);
+          if (action.kind === 'external') deps.openExternal(action.url);
+        },
       },
       {
         label: 'Copy Link Address',
         click: () => deps.writeText(url),
       },
+      { type: 'separator' },
+    );
+  }
+
+  // --- Image action: the page's own <img> has no native copy otherwise ------
+  if (params.mediaType === 'image' && params.x !== undefined && params.y !== undefined) {
+    const { x, y } = params;
+    template.push(
+      { label: 'Copy Image', click: () => deps.copyImageAt(x, y) },
       { type: 'separator' },
     );
   }

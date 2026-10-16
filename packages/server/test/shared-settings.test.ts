@@ -29,7 +29,7 @@ import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
 import { SettingsError, SharedSettingsService } from '../src/shared-settings.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 
 const TOKEN_A = 'sk-ant-oat01-fake-token-aaaaaaaaaaaa';
 const TOKEN_B = 'sk-ant-oat01-fake-token-bbbbbbbbbbbb';
@@ -56,28 +56,28 @@ const validateClaude = async (token: string): Promise<ClaudeTokenValidation> =>
 
 describe('SharedSettingsService', () => {
   let dir: string;
-  let sent: Array<{ daemonId: string; event: WireEvent }>;
+  let sent: Array<{ hostId: string; event: WireEvent }>;
   let broadcasts: SettingsChangedEvent[];
   let online: string[];
   const make = () =>
     new SharedSettingsService({
       dataDir: dir,
-      sendToDaemon: (daemonId, event) => {
-        sent.push({ daemonId, event });
+      sendToHost: (hostId, event) => {
+        sent.push({ hostId, event });
         // An online host answers an import at once with nothing held.
         if (event.type === 'settings.adopt.request' && event.kind === 'import') {
           queueMicrotask(() =>
-            service.handleDaemonEvent({
+            service.handleHostEvent({
               type: 'settings.adopt.response',
               requestId: event.requestId,
-              daemonId,
+              hostId,
               ok: true,
               result: { kind: 'import', import: { settings: {}, secrets: EMPTY_SHARED_SECRETS } },
             }),
           );
         }
       },
-      onlineDaemonIds: () => online,
+      onlineHostIds: () => online,
       broadcast: (e) => broadcasts.push(e),
       hostName: (id) => ({ d1: 'hetzner', d2: 'mac' })[id],
       validateClaude,
@@ -89,10 +89,10 @@ describe('SharedSettingsService', () => {
     });
   let service: SharedSettingsService;
 
-  const snapshots = (daemonId?: string) =>
+  const snapshots = (hostId?: string) =>
     sent.filter(
-      (s): s is { daemonId: string; event: Extract<WireEvent, { type: 'settings.snapshot' }> } =>
-        s.event.type === 'settings.snapshot' && (daemonId === undefined || s.daemonId === daemonId),
+      (s): s is { hostId: string; event: Extract<WireEvent, { type: 'settings.snapshot' }> } =>
+        s.event.type === 'settings.snapshot' && (hostId === undefined || s.hostId === hostId),
     );
 
   beforeEach(() => {
@@ -105,9 +105,31 @@ describe('SharedSettingsService', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('starts from the defaults and reads an old preferences file as a partial one', () => {
-    expect(service.current()).toEqual(DEFAULT_SHARED_SETTINGS);
+    expect(service.current()).toMatchObject({
+      ...DEFAULT_SHARED_SETTINGS,
+      agentIdentity: {
+        ...DEFAULT_SHARED_SETTINGS.agentIdentity,
+        name: expect.stringMatching(/^Patch agent [A-Za-z0-9_-]{8}$/),
+      },
+    });
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: false }));
-    expect(make().current()).toEqual({ ...DEFAULT_SHARED_SETTINGS, sweepEnabled: false });
+    expect(make().current()).toMatchObject({
+      ...DEFAULT_SHARED_SETTINGS,
+      sweepEnabled: false,
+      agentIdentity: { name: expect.stringMatching(/^Patch agent [A-Za-z0-9_-]{8}$/) },
+    });
+  });
+
+  it('gives every deployment a stable public name from its generated identity key', () => {
+    const first = service.current().agentIdentity.name;
+    expect(make().current().agentIdentity.name).toBe(first);
+    const otherDir = mkdtempSync(join(tmpdir(), 'patch-shared-settings-other-'));
+    try {
+      dir = otherDir;
+      expect(make().current().agentIdentity.name).not.toBe(first);
+    } finally {
+      rmSync(otherDir, { recursive: true, force: true });
+    }
   });
 
   it('has the job autonomy prompt at its default, including for a settings file written before it existed', () => {
@@ -127,6 +149,7 @@ describe('SharedSettingsService', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(sent[0]!.event).toMatchObject({ type: 'settings.adopt.request', kind: 'import' });
     expect(snapshots('d1')).toHaveLength(1);
+    expect(snapshots('d1')[0]!.event.secrets).not.toHaveProperty('webBotAuthKey');
     // The next connect goes straight to the snapshot.
     sent = [];
     service.hostOnline('d1');
@@ -198,6 +221,7 @@ describe('SharedSettingsService', () => {
     const disk = everythingOnDisk(dir);
     expect(disk).not.toContain(TOKEN_A);
     expect(disk).not.toContain(GROQ);
+    expect(disk).not.toContain(service.webBotAuthKey());
     expect(
       make()
         .secretsSummary()
@@ -235,6 +259,15 @@ describe('SharedSettingsService', () => {
     expect(() => service.setProviderKey('groq', GROQ)).toThrow(/secrets\.key is missing/);
   });
 
+  it('keeps the job default model apart from the new-chat default model', () => {
+    expect(service.current().jobDefaultModel).toBe(DEFAULT_SHARED_SETTINGS.jobDefaultModel);
+    service.update({ jobDefaultModel: 'claude-sonnet-5' });
+    expect(service.current().jobDefaultModel).toBe('claude-sonnet-5');
+    expect(service.current().defaultModel).toBe(DEFAULT_SHARED_SETTINGS.defaultModel);
+    service.update({ defaultModel: 'claude-haiku-5' });
+    expect(service.current().jobDefaultModel).toBe('claude-sonnet-5');
+  });
+
   it('starts with the wrong key and says so', async () => {
     await service.addClaude(TOKEN_A);
     writeFileSync(join(dir, 'secrets.key'), randomBytes(32).toString('base64'));
@@ -253,7 +286,7 @@ describe('SharedSettingsService', () => {
     const before = service.currentVersion();
     service.update({ chatNameInterval: 5 });
     expect(service.currentVersion()).toBe(before + 1);
-    expect(snapshots().map((s) => s.daemonId)).toEqual(['d1']);
+    expect(snapshots().map((s) => s.hostId)).toEqual(['d1']);
     expect(snapshots('d1')[0]!.event.settings.chatNameInterval).toBe(5);
     expect(broadcasts.at(-1)!.settings.chatNameInterval).toBe(5);
   });
@@ -303,9 +336,9 @@ describe('SharedSettingsService', () => {
     service.mergeImport('d1', { settings: {}, secrets: EMPTY_SHARED_SECRETS });
     online = ['d1'];
     sent = [];
-    service.handleDaemonEvent({
+    service.handleHostEvent({
       type: 'settings.secret_update',
-      daemonId: 'd1',
+      hostId: 'd1',
       update: {
         backendId: 'claude-code',
         accountId: acct.id,
@@ -317,16 +350,16 @@ describe('SharedSettingsService', () => {
   });
 
   it('records which version each host applied, and a refusal by name', () => {
-    service.handleDaemonEvent({ type: 'settings.applied', daemonId: 'd1', version: 4 });
-    service.handleDaemonEvent({
+    service.handleHostEvent({ type: 'settings.applied', hostId: 'd1', version: 4 });
+    service.handleHostEvent({
       type: 'settings.applied',
-      daemonId: 'd2',
+      hostId: 'd2',
       version: 3,
       error: 'disk full',
     });
     expect(service.hostStates()).toEqual([
-      { daemonId: 'd1', appliedVersion: 4 },
-      { daemonId: 'd2', appliedVersion: 3, error: 'disk full' },
+      { hostId: 'd1', appliedVersion: 4 },
+      { hostId: 'd2', appliedVersion: 3, error: 'disk full' },
     ]);
   });
 
@@ -344,19 +377,19 @@ describe('SharedSettingsService', () => {
     online = ['d1'];
     const svc = new SharedSettingsService({
       dataDir: dir,
-      sendToDaemon: (daemonId, event) => {
+      sendToHost: (hostId, event) => {
         if (event.type !== 'settings.adopt.request') return;
         queueMicrotask(() =>
-          svc.handleDaemonEvent({
+          svc.handleHostEvent({
             type: 'settings.adopt.response',
             requestId: event.requestId,
-            daemonId,
+            hostId,
             ok: true,
             result: { kind: 'provider-key', id: 'groq', value: GROQ },
           }),
         );
       },
-      onlineDaemonIds: () => online,
+      onlineHostIds: () => online,
       broadcast: () => undefined,
     });
     await svc.adoptInto('d1', 'provider-key', 'groq');
@@ -374,8 +407,8 @@ describe('SharedSettingsService', () => {
     online = ['d9'];
     const silent = new SharedSettingsService({
       dataDir: dir,
-      sendToDaemon: () => undefined,
-      onlineDaemonIds: () => online,
+      sendToHost: () => undefined,
+      onlineHostIds: () => online,
       broadcast: () => undefined,
       adoptTimeoutMs: 20,
     });
@@ -398,21 +431,21 @@ describe('shared settings routes', () => {
     const registry = Registry.load(data);
     registry.bootstrapAccount({ keypair: user });
     registry.upsertSurface({ surfaceId: 'srf-web', surfaceKind: 'web', label: 'web', issuedAt: 1 });
-    registry.setDaemonKey({ daemonId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-web',
       surfaceKind: 'web',
       label: 'web',
     });
-    const link = new InProcessDaemonLink();
+    const link = new InProcessHostLink();
     // No host attached at build: each test brings its host online itself.
-    link.setDaemonId(null);
+    link.setHostId(null);
     const built = await buildAll({
       logger: false,
       registry,
       dataDir: data,
-      daemonLink: link,
+      hostLink: link,
       validateClaudeToken: validateClaude,
       jobsWatch: false,
       gcalSubscriptions: false,
@@ -585,8 +618,8 @@ describe('shared settings routes', () => {
       // The host answers its import with nothing held.
       const original = link.sendTo.bind(link);
       const seen: WireEvent[] = [];
-      link.sendTo = (daemonId, surfaceId, event) => {
-        original(daemonId, surfaceId, event);
+      link.sendTo = (hostId, surfaceId, event) => {
+        original(hostId, surfaceId, event);
         seen.push(event);
         if (event.type === 'settings.adopt.request') {
           queueMicrotask(() =>
@@ -594,11 +627,11 @@ describe('shared settings routes', () => {
               {
                 type: 'settings.adopt.response',
                 requestId: event.requestId,
-                daemonId,
+                hostId,
                 ok: true,
                 result: { kind: 'import', import: { settings: {}, secrets: EMPTY_SHARED_SECRETS } },
               },
-              daemonId,
+              hostId,
             ),
           );
         }

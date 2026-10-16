@@ -83,12 +83,12 @@ describe('TabLayout — screen options', () => {
     expect(voice.props.listeners).toBeUndefined();
   });
 
-  it('the voice tab icon renders a Mic glyph', () => {
+  it('the voice tab icon renders a Phone glyph, distinct from the composer dictate Mic', () => {
     const r = renderRN(<TabLayout />);
     const screens = findAllHost(r.root, byType('Tabs.Screen'));
     const voice = screens.find((s) => s.props.name === 'voice')!;
     const icon = voice.props.options.tabBarIcon({ color: '#111', size: 20 });
-    expect(icon.type.displayName ?? icon.type.name).toBe('Mic');
+    expect(icon.type.displayName ?? icon.type.name).toBe('Phone');
   });
 
   // The New chat tab is an ACTION, not a destination. Letting it focus and

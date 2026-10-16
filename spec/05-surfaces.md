@@ -37,6 +37,16 @@ Static SPA served by the server (subpath `/app`).
 - Push notifications via Expo's push API (see `09-notifications.md`).
 - Voice button per chat, Manager voice.
 
+## Handover
+
+The server keeps one account-wide **view position**: the page the user is on and, in a chat, the message at the top of the viewport. Pages that exist on every surface are covered — a chat, jobs, a job, pads, a pad and settings; anything else (new chat, lifecycle screens) reports nothing.
+
+- A surface sends `view_position.set {page, id?, seq?}` (debounced ~800 ms) only once the user has actually used it since it launched or came to the front — a surface that merely opened must not overwrite the position it is about to adopt. `seq` is absent when the chat is at the latest message. The server stamps the sender's surface id and a receipt time, persists it (`<dataDir>/view-position.json`, atomic write; a corrupt file is logged and read as empty) and broadcasts `view_position.updated`. A connecting surface is sent the current position right after `auth.ok`.
+- A surface adopts another surface's position only **on launch** (when the connect snapshot arrives before any input) and **when it returns to the foreground** (tab visible / window focus / app active). It never moves under a hand: once the user is using it, newer remote positions wait for the next foreground. Its own echoes are ignored, and a position is adopted once (`updatedAt` newer than the last adopted or authored).
+- Adopting navigates to the page; a chat opens at `seq` through the same jump-to-message path as a search hit. A launch snapshot that arrives before the navigator has mounted waits for it and is then adopted.
+- **Settings → Account → "Sync position between surfaces"** (shared setting `syncPosition`, default on) turns the whole handover off for the account: with it off no surface sends `view_position.set` and none adopts another's position. Until a surface has loaded the setting it does neither (no assumed default); turning it on mid-session takes effect without a relaunch.
+- The phone reads where it is from the navigation container's own `state`/`ready` events (`useCurrentRoute`), never from expo-router's `usePathname`/`useGlobalSearchParams`/`useRootNavigationState` under the navigator: those re-sync the router store during render, and with the tab group's nested navigator that loops forever (the JS thread at 100% on every tab screen until the app runs out of memory).
+
 ## Desktop notifier
 
 Optional small process on Mac/Linux that subscribes to `notify` events with `channel: desktop` and shows OS-native notifications. Pure surface — connects to the server like any other client, doesn't host chats.
@@ -99,7 +109,9 @@ title bar:
 - The window controls float over the app's top-left with nothing behind them,
   so the top row keeps a strip clear for them: the sidebar brand row while the
   sidebar is up, and the sidebar expand control plus the chat header while it
-  is collapsed — which is also how a chat opened in its own window starts. They
+  is collapsed — which is also how a chat opened in its own window starts. A single tab
+  detached into its own window has the tab bar as its top row, which clears them
+  the same way. They
   are pinned to that row's own centre-line, so the brand wordmark immediately
   right of them reads as part of the same row rather than staggered under it.
 - With no title bar there is nothing left to drag the window by, so the sidebar

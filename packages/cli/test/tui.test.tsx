@@ -6,6 +6,7 @@ import React from 'react';
 import { render } from 'ink-testing-library';
 import { StatusStrip } from '../src/tui/StatusStrip.js';
 import { ChatBrowser } from '../src/tui/ChatBrowser.js';
+import { Picker } from '../src/tui/Picker.js';
 import { ChatView, _resetChatHistory } from '../src/tui/ChatView.js';
 
 test('StatusStrip: connected state', () => {
@@ -371,4 +372,65 @@ test('ChatBrowser: lists chats and filter narrows the view', () => {
   assert.match(frame, /beta/);
   // Avoid unused-binding warning from picked.
   void picked;
+});
+
+// A lone UTF-16 surrogate: half of an emoji, which renders as garbage.
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+test('ChatView: Backspace removes a whole emoji, not half of it', async () => {
+  _resetChatHistory();
+  const { ws, sent } = makeFakeWs();
+  const { stdin, lastFrame } = render(
+    <ChatView ws={ws} chatId="c_emoji" onExit={(): void => undefined} />,
+  );
+  await type(stdin, ['h', 'i', '😀', '😀', '\x7f']);
+  await until('the draft to echo', () => /> hi😀/.test(lastFrame() ?? ''));
+  await type(stdin, ['\r']);
+  await until('the message to be sent', () => sent.length > 0);
+  assert.deepEqual(sent, ['hi😀']);
+});
+
+test('ChatView: a long tool result is clipped without splitting an emoji', async () => {
+  _resetChatHistory();
+  const { ws, emit } = makeDrivableWs();
+  const { lastFrame } = render(<ChatView ws={ws} chatId="c_clip" onExit={(): void => undefined} />);
+  await new Promise((r) => setTimeout(r, 30));
+  emit('chat.tool_result', {
+    type: 'chat.tool_result',
+    chatId: 'c_clip',
+    tool: 'Read',
+    callId: 'call-1',
+    // The 77th code unit is the first half of the first emoji.
+    result: `${'a'.repeat(76)}${'😀'.repeat(10)}`,
+    seq: 1,
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  const frame = lastFrame() ?? '';
+  assert.match(frame, /\[Read ✓\]/);
+  assert.doesNotMatch(frame, LONE_SURROGATE);
+  assert.match(frame, /a😀\.\.\./);
+});
+
+test('Picker: Backspace removes a whole emoji from the filter', async () => {
+  const { stdin, lastFrame } = render(
+    <Picker recents={['/tmp/x']} onSubmit={(): void => undefined} />,
+  );
+  await type(stdin, ['😀', '😀', '\x7f']);
+  const frame = lastFrame() ?? '';
+  assert.doesNotMatch(frame, LONE_SURROGATE);
+  assert.match(frame, /filter: 😀$/m);
+});
+
+test('ChatBrowser: Backspace removes a whole emoji from the filter', async () => {
+  const { stdin, lastFrame } = render(
+    <ChatBrowser
+      chats={[{ chatId: 'c_aaa111', name: 'alpha' }]}
+      onPick={(): void => undefined}
+      onClose={(): void => undefined}
+    />,
+  );
+  await type(stdin, ['😀', '😀', '\x7f']);
+  const frame = lastFrame() ?? '';
+  assert.doesNotMatch(frame, LONE_SURROGATE);
+  assert.match(frame, /filter: 😀 *│?$/m);
 });

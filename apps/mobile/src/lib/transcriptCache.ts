@@ -133,7 +133,10 @@ function flush(): void {
     for (const [chatId, events] of batch) writeMerged(chatId, events);
     const index = readIndex();
     const now = Date.now();
-    for (const [chatId] of batch) index[chatId] = index[chatId] ?? now;
+    // A chat that is receiving live events is in use: refresh its recency, or
+    // the sweep below could evict the blob it has just been written to and
+    // leave a tail of events that a later open takes for the whole transcript.
+    for (const [chatId] of batch) index[chatId] = now;
     // Bound the number of chats held, least-recently-opened first.
     const ordered = Object.entries(index).sort(([, a], [, b]) => b - a);
     for (const [chatId] of ordered.slice(MAX_CACHED_CHATS)) {

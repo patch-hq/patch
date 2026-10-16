@@ -69,12 +69,12 @@ const BOX_HOST = 'hetzner'; // ssh alias for the box, used from the Mac
 const BOX = '/srv/patch'; // the checkout the live stack runs from
 const MAC_HOST = 'mac'; // ssh alias for the Mac, used from the box
 const MAC_REPO = '~/projects/patch';
-const DAEMON_LOG = '/home/claude-dev/.patch/logs/daemon.log';
+const HOST_LOG = '/home/claude-dev/.patch/logs/daemon.log';
 const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const EAS_CHANNEL = 'preview';
 // Signing material lives OUTSIDE the repo: /srv/patch is a shared checkout that
 // other agents reset and clean, and these are gitignored so a clone never has them.
-const DAEMON_BUILD = `${process.env.HOME}/.patch-daemon-build`; // vendor/ + artifact-signing.key
+const HOST_BUILD = `${process.env.HOME}/.patch-daemon-build`; // vendor/ + artifact-signing.key
 // Reused between deploys so node_modules survives; see prepareBuildTree().
 const BUILD_TREE =
   process.env.PATCH_DEPLOY_BUILD_TREE ??
@@ -418,7 +418,7 @@ function server(info) {
   waitFor('server healthy', () => ok('curl', ['-sf', `${URL}/api/healthz`]));
   // The host reconnects on its own; prove it did rather than assuming.
   waitFor('host re-linked', () =>
-    ok('sh', ['-c', `tail -n 200 ${DAEMON_LOG} | grep -q "server-link: authenticated"`]),
+    ok('sh', ['-c', `tail -n 200 ${HOST_LOG} | grep -q "server-link: authenticated"`]),
   );
 }
 
@@ -454,29 +454,29 @@ function verifyWeb(expectedBundle) {
 
 /**
  * Build + publish the host artifact. Publishing only makes the build VISIBLE
- * at /api/daemon/daemon-latest.json; applyDaemon() is what restarts anything.
+ * at /api/daemon/host-latest.json; applyHost() is what restarts anything.
  */
-function daemonPublish() {
-  if (!existsSync(`${DAEMON_BUILD}/artifact-signing.key`)) {
-    throw new Error(`no host signing key at ${DAEMON_BUILD}/artifact-signing.key`);
+function hostPublish() {
+  if (!existsSync(`${HOST_BUILD}/artifact-signing.key`)) {
+    throw new Error(`no host signing key at ${HOST_BUILD}/artifact-signing.key`);
   }
   log('host → building linux-x64 artifact');
-  const dist = `${BUILD}/dist/daemon`;
+  const dist = `${BUILD}/dist/host`;
   sh('rm', ['-rf', dist]);
-  sh('pnpm', ['build:daemon'], {
+  sh('pnpm', ['build:host'], {
     env: {
       ...process.env,
-      PATCH_BUILD_VENDOR: `${DAEMON_BUILD}/vendor`,
-      PATCH_ARTIFACT_SIGNING_KEY: `${DAEMON_BUILD}/artifact-signing.key`,
+      PATCH_BUILD_VENDOR: `${HOST_BUILD}/vendor`,
+      PATCH_ARTIFACT_SIGNING_KEY: `${HOST_BUILD}/artifact-signing.key`,
       // linux-x64 only: the darwin target is the only one that needs macOS
       // codesigning, so restricting targets keeps this box self-sufficient.
       PATCH_BUILD_TARGETS: 'linux-x64',
     },
   });
-  const version = JSON.parse(readFileSync(`${dist}/daemon-latest.json`, 'utf8')).version;
+  const version = JSON.parse(readFileSync(`${dist}/host-latest.json`, 'utf8')).version;
   sh('sh', [
     '-c',
-    `cp ${dist}/daemon-latest.json ${dist}/install.sh ${dist}/*.tar.gz ${dist}/*.tar.gz.sig ${BOX}/deploy/downloads/`,
+    `cp ${dist}/host-latest.json ${dist}/install.sh ${dist}/*.tar.gz ${dist}/*.tar.gz.sig ${BOX}/deploy/downloads/`,
   ]);
   sh('rm', ['-rf', dist]);
   log(`host → published ${version}`);
@@ -488,14 +488,14 @@ function daemonPublish() {
  * this host — including the chat that started this deploy. Runs last, and only
  * from a detached process that can outlive it.
  */
-function daemonApply(expectedVersion) {
+function hostApply(expectedVersion) {
   log(`host → applying ${expectedVersion} (restarts the host, drops live chats)`);
   sh('sh', ['-c', 'patch hosts update --json || true']);
   waitFor('host back up', () =>
-    ok('sh', ['-c', 'systemctl --user is-active --quiet patch-daemon']),
+    ok('sh', ['-c', 'systemctl --user is-active --quiet patch-host || systemctl --user is-active --quiet patch-daemon']),
   );
   waitFor('host re-linked', () =>
-    ok('sh', ['-c', `tail -n 200 ${DAEMON_LOG} | grep -q "server-link: authenticated"`]),
+    ok('sh', ['-c', `tail -n 200 ${HOST_LOG} | grep -q "server-link: authenticated"`]),
   );
 }
 
@@ -944,7 +944,7 @@ function prune() {
  * absence let a stale SPA sit in prod for eight days while /api/healthz reported
  * a newer commit and nobody compared the two.
  */
-function verify(info, expectedDaemon, expectOta) {
+function verify(info, expectedHost, expectOta) {
   // A surface this deploy did not SHIP cannot be expected to report this commit —
   // it is correctly still serving the last one that touched it. `desktop` and
   // `apk` already worked this way for exactly that reason; surface scoping made
@@ -967,9 +967,9 @@ function verify(info, expectedDaemon, expectOta) {
   const spa = curlJson(`${URL}/app/version.json`);
   rows.push(['web', spa.gitSha, expected('web') || sameCommit(spa.gitSha, info.gitSha)]);
 
-  if (expectedDaemon) {
-    const d = curlJson(`${URL}/api/daemon/daemon-latest.json`);
-    rows.push(['daemon', d.version, d.version === expectedDaemon]);
+  if (expectedHost) {
+    const d = curlJson(`${URL}/api/daemon/host-latest.json`);
+    rows.push(['daemon', d.version, d.version === expectedHost]);
   }
   // The OTA is the mobile surface that actually carries this commit's JS, so it
   // IS required to match -- unlike the APK below. Without this row a failed or
@@ -1236,7 +1236,7 @@ async function surface(name, fn) {
  * Run one lane's surfaces in this process, in order. Only the couplings named on
  * LANES are sequential; a lane never waits on another lane.
  */
-let daemonVersion = null;
+let hostVersion = null;
 
 async function runLane() {
   const bundle = await surface('web', () => web(info));
@@ -1252,7 +1252,7 @@ async function runLane() {
       shipped.delete('web');
     }
   }
-  daemonVersion = (await surface('daemon', () => daemonPublish())) ?? null;
+  hostVersion = (await surface('daemon', () => hostPublish())) ?? null;
   await surface('ota', () => ota(info));
   await surface('apk', () => apk(info));
   await surface('desktop', () => desktop(info));
@@ -1260,12 +1260,12 @@ async function runLane() {
   // Clearing superseded host artifacts belongs with the host, not to every
   // lane that happens to be running.
   if (!onMac() && want('daemon')) prune();
-  if (daemonVersion) await surface('apply', () => daemonApply(daemonVersion));
+  if (hostVersion) await surface('apply', () => hostApply(hostVersion));
   // A lane child reports what it managed upward; the parent cannot see this
   // process's `shipped` set, and marking a whole lane failed because one of its
   // surfaces was would hide the one that worked.
   if (prepared) {
-    console.log(`##lane ${JSON.stringify({ shipped: [...shipped], daemonVersion })}`);
+    console.log(`##lane ${JSON.stringify({ shipped: [...shipped], hostVersion })}`);
   }
 }
 
@@ -1308,9 +1308,9 @@ async function runLanes(lanes) {
     process.stdout.write(r.output);
     const reported = r.output.match(/^##lane (.*)$/m);
     if (reported) {
-      const { shipped: got, daemonVersion: v } = JSON.parse(reported[1]);
+      const { shipped: got, hostVersion: v } = JSON.parse(reported[1]);
       for (const sfc of got) shipped.add(sfc);
-      if (v) daemonVersion = v;
+      if (v) hostVersion = v;
     } else if (r.code === 0) {
       // Exited clean without saying what it did — treat the lane as shipped
       // rather than silently reporting nothing.
@@ -1352,7 +1352,7 @@ try {
   // A surface that threw above did not ship, so don't also demand it converged:
   // it is already named in `failures`, and a second row for it just buries the
   // surfaces that are genuinely wrong.
-  summary = verify(info, daemonVersion, shipped.has('ota'));
+  summary = verify(info, hostVersion, shipped.has('ota'));
 } catch (err) {
   failures.push(err.message);
 }

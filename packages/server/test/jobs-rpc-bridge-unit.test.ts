@@ -4,7 +4,7 @@
 // exhaustiveness fallback, and the JobValidationError-vs-internal-error
 // catch split. Uses `attachJobsRpcBridge` directly (no HTTP, no buildAll) —
 // jobs-rpc-bridge.test.ts already covers the happy-path "create over the
-// daemon-link end to end" scenario via buildAll; this file is the exhaustive
+// host-link end to end" scenario via buildAll; this file is the exhaustive
 // branch sweep for the same source file.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -16,12 +16,12 @@ import type { WireEvent } from '@patch/wire';
 import { attachJobsRpcBridge } from '../src/jobs/rpc-bridge.js';
 import { JobStore } from '../src/jobs/store.js';
 import { JobLogs } from '../src/jobs/logs.js';
-import { InProcessDaemonLink } from '../src/daemon-link.js';
+import { InProcessHostLink } from '../src/host-link.js';
 import type { JobsInterface } from '../src/jobs/types.js';
 
 const silentLogger = pino({ level: 'silent' });
 
-function findResponse(link: InProcessDaemonLink, requestId: string) {
+function findResponse(link: InProcessHostLink, requestId: string) {
   const reply = link.sent.find(
     (s) => s.event.type === 'patch.jobs.response' && s.event.requestId === requestId,
   );
@@ -35,14 +35,14 @@ describe('attachJobsRpcBridge — every op branch', () => {
   let dir: string;
   let jobs: JobStore;
   let logs: JobLogs;
-  let link: InProcessDaemonLink;
+  let link: InProcessHostLink;
   let unsub: () => void;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-rpc-bridge-'));
     jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
     logs = new JobLogs(dir);
-    link = new InProcessDaemonLink();
+    link = new InProcessHostLink();
     unsub = attachJobsRpcBridge({ link, jobs, logs, logger: silentLogger });
   });
 
@@ -67,7 +67,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'listed',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({ type: 'patch.jobs.request', requestId: 'r-list', op: 'list' });
     const resp = findResponse(link, 'r-list');
@@ -99,7 +99,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'gettable',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({ type: 'patch.jobs.request', requestId: 'r-get-known', op: 'get', jobId: job.id });
     const resp = findResponse(link, 'r-get-known');
@@ -128,7 +128,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
       body: {
         name: 'created-via-rpc',
         trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
       },
     });
     const resp = findResponse(link, 'r-create-ok');
@@ -148,7 +148,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'patch-target',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({
       type: 'patch.jobs.request',
@@ -180,7 +180,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'patch-target-2',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({
       type: 'patch.jobs.request',
@@ -198,7 +198,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'patch-bad-cron',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({
       type: 'patch.jobs.request',
@@ -236,7 +236,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'delete-target',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({
       type: 'patch.jobs.request',
@@ -274,7 +274,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
       name: 'enable-target',
       trigger: { type: 'cron', expression: '0 9 * * *' },
       enabled: false,
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({
       type: 'patch.jobs.request',
@@ -310,7 +310,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'disable-target',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     link.emit({
       type: 'patch.jobs.request',
@@ -347,7 +347,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'runs-target',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     logs.appendRun({ ts: 1, jobId: job.id, status: 'ok', trigger: 'cron' });
     logs.appendRun({ ts: 2, jobId: job.id, status: 'ok', trigger: 'cron' });
@@ -367,7 +367,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'runs-default-limit',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     logs.appendRun({ ts: 1, jobId: job.id, status: 'ok', trigger: 'cron' });
     link.emit({
@@ -404,7 +404,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'webhooks-target',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     logs.appendWebhook({
       ts: 1,
@@ -430,7 +430,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     const job = jobs.create({
       name: 'webhooks-default-limit',
       trigger: { type: 'cron', expression: '0 9 * * *' },
-      action: { type: 'spawn', daemonId: 'd1', folder: '/x', prompt: 'x' },
+      action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
     });
     logs.appendWebhook({
       ts: 1,
@@ -482,7 +482,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     // A dedicated link/bridge — reusing the shared `link` from beforeEach
     // would double-answer the same requestId (the real, non-throwing bridge
     // is still attached to it too).
-    const throwingLink = new InProcessDaemonLink();
+    const throwingLink = new InProcessHostLink();
     const throwingUnsub = attachJobsRpcBridge({
       link: throwingLink,
       jobs: throwingJobs,
@@ -500,19 +500,19 @@ describe('attachJobsRpcBridge — every op branch', () => {
     }
   });
 
-  // TA3-14a. `patch.jobs.response` carries neither `daemonId` nor `chatId`, so
+  // TA3-14a. `patch.jobs.response` carries neither `hostId` nor `chatId`, so
   // the routing `send()` fell through to `routeOf()`'s last resort — the
   // account's HOME machine. Every request originating anywhere else was
   // answered to the wrong host and hung until the caller's 10s timeout. The
   // reply must be addressed to the requester.
   it('replies to the REQUESTING machine, not the account home machine', () => {
     // The link's own (home) machine is `d1`; the request comes from `d2`.
-    expect(link.daemonId()).toBe('d1');
+    expect(link.hostId()).toBe('d1');
     link.emit({ type: 'patch.jobs.request', requestId: 'r-from-d2', op: 'list' }, 'd2');
     const reply = link.sent.find(
       (s) => s.event.type === 'patch.jobs.response' && s.event.requestId === 'r-from-d2',
     );
-    expect(reply?.daemonId).toBe('d2');
+    expect(reply?.hostId).toBe('d2');
   });
 
   it('replies to each requester independently when two machines ask at once', () => {
@@ -520,12 +520,12 @@ describe('attachJobsRpcBridge — every op branch', () => {
     link.emit({ type: 'patch.jobs.request', requestId: 'r-b', op: 'list' }, 'host-b');
     const byId = (id: string) =>
       link.sent.find((s) => s.event.type === 'patch.jobs.response' && s.event.requestId === id);
-    expect(byId('r-a')?.daemonId).toBe('host-a');
-    expect(byId('r-b')?.daemonId).toBe('host-b');
+    expect(byId('r-a')?.hostId).toBe('host-a');
+    expect(byId('r-b')?.hostId).toBe('host-b');
   });
 
   it('drops a request with no originating machine — a reply could not be routed', () => {
-    link.setDaemonId(null);
+    link.setHostId(null);
     link.emit({ type: 'patch.jobs.request', requestId: 'r-orphan', op: 'list' }, undefined);
     expect(
       link.sent.filter(

@@ -7,8 +7,8 @@
 // delta sent as-is would drift by however long the request spends in flight,
 // so "5 minutes" would mean something different at each end.
 //
-// There is no Custom entry on the phone — the surface has no date/time field
-// to pick one in, so the ladder is the whole menu (spec/15 § Row tools).
+// Custom is typed as `YYYY-MM-DD HH:mm` (parseCustomSnooze) — no native date
+// picker, which would need a new APK (spec/15 § Row tools).
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -39,6 +39,14 @@ function resolveTomorrowAt(hour: number): number {
   return at.getTime();
 }
 
+/** The coming Monday at 8am local time — a Monday today means the one a week out. */
+function resolveNextMondayAt(hour: number): number {
+  const at = new Date(Date.now());
+  at.setDate(at.getDate() + ((8 - at.getDay()) % 7 || 7));
+  at.setHours(hour, 0, 0, 0);
+  return at.getTime();
+}
+
 export const SNOOZE_PRESETS: readonly SnoozePreset[] = [
   { id: '2-minutes', label: '2 minutes', resolve: () => Date.now() + 2 * MINUTE },
   { id: '5-minutes', label: '5 minutes', resolve: () => Date.now() + 5 * MINUTE },
@@ -47,8 +55,21 @@ export const SNOOZE_PRESETS: readonly SnoozePreset[] = [
   { id: '5pm', label: '5pm', resolve: () => resolveTodayAt(17) },
   { id: 'tomorrow-8am', label: 'Tomorrow 8am', resolve: () => resolveTomorrowAt(8) },
   { id: '1-day', label: '1 day', resolve: () => Date.now() + DAY },
-  { id: 'next-week', label: 'Next week', resolve: () => Date.now() + 7 * DAY },
+  { id: 'next-monday', label: 'Next Monday', resolve: () => resolveNextMondayAt(8) },
 ];
+
+/** Parses a typed local `YYYY-MM-DD HH:mm`; throws on malformed or past input (no fallback). */
+export function parseCustomSnooze(text: string, now: number = Date.now()): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})$/.exec(text.trim());
+  if (!m) throw new Error('snooze: enter a date and time as YYYY-MM-DD HH:mm');
+  const [y, mo, d, h, mi] = m.slice(1).map(Number) as [number, number, number, number, number];
+  const at = new Date(y, mo - 1, d, h, mi, 0, 0);
+  if (at.getMonth() !== mo - 1 || at.getDate() !== d || h > 23 || mi > 59) {
+    throw new Error('snooze: that date or time does not exist');
+  }
+  if (at.getTime() <= now) throw new Error('snooze: pick a time in the future');
+  return at.getTime();
+}
 
 /** Resolves a preset to the absolute ms-epoch `snoozedUntil` the host stores. */
 export function resolvePreset(preset: SnoozePreset): number {

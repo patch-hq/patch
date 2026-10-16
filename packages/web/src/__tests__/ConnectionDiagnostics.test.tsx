@@ -54,7 +54,7 @@ beforeEach(() => {
   saveCredential(CRED);
   usePresenceStore.setState({
     connection: 'offline',
-    daemonOnline: false,
+    hostOnline: false,
     wsUrl: 'ws://test/ws',
     everConnected: false,
     failedAttempts: 0,
@@ -444,7 +444,7 @@ describe('ConnectionDiagnosticsGate', () => {
   it('never blocks a surface that HAS connected — a daemon-offline surface stays navigable', () => {
     usePresenceStore.setState({
       connection: 'connected',
-      daemonOnline: false,
+      hostOnline: false,
       everConnected: true,
       failedAttempts: 5,
     });
@@ -456,7 +456,7 @@ describe('ConnectionDiagnosticsGate', () => {
     stubFetch(HEALTHY);
     usePresenceStore.setState({
       connection: 'connected',
-      daemonOnline: false,
+      hostOnline: false,
       everConnected: true,
     });
     useUiStore.setState({ diagnosticsOpen: true });

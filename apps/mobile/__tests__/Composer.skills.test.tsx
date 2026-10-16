@@ -43,7 +43,7 @@ let submitSpy: ReturnType<typeof vi.spyOn>;
 // Every renderer this file creates, unmounted in `afterEach` — otherwise a
 // prior test's instance stays mounted and keeps subscribing to the (shared,
 // module-level) chat store. That was harmless before the skill fetch read
-// `row.daemonId`: no effect in this component depended on chat-store state.
+// `row.hostId`: no effect in this component depended on chat-store state.
 // Now it does, so a lingering instance re-renders on the NEXT test's own
 // `hydrate()` call and can fire an extra `api.skills` through the SAME
 // `skillsSpy` mock the new test is asserting against. A test that already
@@ -71,11 +71,11 @@ beforeEach(() => {
   });
   useChatStore.getState()._reset();
   // Skills are per-host (Todoist 6hfrrmrhG6GM3V36) — the fetch needs `c1`'s
-  // (and `c2`'s, for the per-folder test below) row to carry a daemonId.
+  // (and `c2`'s, for the per-folder test below) row to carry a hostId.
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       name: 'Chat',
       folder: 'work',
       activity: 'idle',
@@ -87,7 +87,7 @@ beforeEach(() => {
     },
     {
       chatId: 'c2',
-      daemonId: 'd1',
+      hostId: 'd1',
       name: 'Chat',
       folder: 'elsewhere',
       activity: 'idle',
@@ -113,6 +113,9 @@ afterEach(() => {
     renderers.pop()?.unmount();
   }
 });
+
+// Built-in slash commands follow the folder's skills in the list (lib/slashCommands.ts).
+const BUILTINS = ['clear', 'goal', 'remind', 'loop', 'model'].map((c) => `skill-option-${c}`);
 
 describe('Composer — skill menu triggering', () => {
   it('a plain (non-slash) draft never fetches skills or shows the menu', () => {
@@ -152,9 +155,14 @@ describe('Composer — skill menu triggering', () => {
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
-    // Fetched + cached, but the menu never shows (filteredSkills is empty).
+    // Fetched + cached; no skills, so the menu offers only the built-in commands.
     expect(skillsSpy).toHaveBeenCalledTimes(1);
-    expect(() => findHost(r.root, byTestId('skill-menu'))).toThrow();
+    const names = findAllHost(r.root, (n) =>
+      String(n.props['testID'] ?? '').startsWith('skill-option-'),
+    ).map((n) => String(n.props['testID']));
+    expect(names).toEqual(
+      ['clear', 'goal', 'remind', 'loop', 'model'].map((c) => `skill-option-${c}`),
+    );
   });
 
   it('narrowing the query to no matches hides the menu even though slash-active', async () => {
@@ -326,6 +334,7 @@ describe('Composer — defaults to the last used skill', () => {
       'skill-option-deploy',
       'skill-option-plant',
       'skill-option-plan-travel',
+      ...BUILTINS,
     ]);
   });
 
@@ -349,7 +358,7 @@ describe('Composer — defaults to the last used skill', () => {
     const order = findAllHost(other.root, (n) =>
       String(n.props['testID'] ?? '').startsWith('skill-option-'),
     ).map((n) => String(n.props['testID']));
-    expect(order).toEqual(['skill-option-plant', 'skill-option-deploy']);
+    expect(order).toEqual(['skill-option-plant', 'skill-option-deploy', ...BUILTINS]);
   });
 });
 

@@ -31,7 +31,7 @@ function seed(): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
-      daemonId: 'd1',
+      hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       name: 'doorbell',
       folder: 'foo',
@@ -64,7 +64,7 @@ const JOB = {
   name: 'Doorbell watch',
   enabled: true,
   trigger: { type: 'cron', expression: '0,30 8-20 * * *', timezone: 'Europe/London' },
-  action: { type: 'spawn', daemonId: 'd1', folder: '/home/x', prompt: 'watch' },
+  action: { type: 'spawn', hostId: 'd1', folder: '/home/x', prompt: 'watch' },
 };
 
 function emitCreate(result: unknown): void {

@@ -67,4 +67,16 @@ test.describe('send to new chat', () => {
     await page.getByTestId('msg-context-menu-send-to-new-chat').click();
     await expect(page.getByTestId('composer-input')).toHaveValue('> alpha beta gamma\n\n');
   });
+
+  test("Quote adds the whole message to this chat's composer and focuses it", async ({ page }) => {
+    const msg = page.getByTestId('msg').filter({ hasText: 'alpha beta gamma' });
+    await msg.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await msg.locator('.content').click({ button: 'right' });
+    await page.getByTestId('msg-context-menu-quote').click();
+    const input = page.getByTestId('composer-input');
+    await expect(input).toHaveValue('> alpha beta gamma\n\n');
+    await expect(input).toBeFocused();
+    expect(page.url()).toContain('chat=chat_bus');
+  });
 });

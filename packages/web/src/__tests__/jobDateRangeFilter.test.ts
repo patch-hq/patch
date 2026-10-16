@@ -82,8 +82,17 @@ describe('parseDateRangeFromFilter', () => {
     });
   });
 
-  it('a nested group is not decomposed', () => {
+  it('a nested group with no `now` in it is the remainder', () => {
     const filter = `now >= "${START}" and (payload.a = 1 or payload.b = 2)`;
+    expect(parseDateRangeFromFilter(filter)).toEqual({
+      start: START,
+      stop: null,
+      remainder: 'payload.a = 1 or payload.b = 2',
+    });
+  });
+
+  it('a nested group with a `now` in it is not decomposed', () => {
+    const filter = `payload.a = 1 and (now >= "${START}" or payload.b = 2)`;
     expect(parseDateRangeFromFilter(filter)).toEqual({
       start: null,
       stop: null,
@@ -139,6 +148,11 @@ describe('buildFilterFromDateRange', () => {
     );
   });
 
+  it('parenthesises a remainder that ORs, so the date range still binds every branch', () => {
+    const built = buildFilterFromDateRange(START, null, 'payload.a = 1 or payload.b = 2');
+    expect(built).toBe(`now >= "${START}" and (payload.a = 1 or payload.b = 2)`);
+  });
+
   it('an empty-string remainder is treated as none', () => {
     expect(buildFilterFromDateRange(START, null, '   ')).toBe(`now >= "${START}"`);
   });
@@ -178,6 +192,12 @@ describe('round trip', () => {
     expect(parsed.start).toBe(START);
     expect(parsed.stop).toBe(STOP);
     expect(parsed.remainder).toBe('payload.foo = "bar"');
+  });
+
+  it('build then parse recovers a remainder that ORs (and so was parenthesised)', () => {
+    const remainder = 'payload.a = "x" or payload.b = "y"';
+    const parsed = parseDateRangeFromFilter(buildFilterFromDateRange(START, null, remainder));
+    expect(parsed).toEqual({ start: START, stop: null, remainder });
   });
 
   it('what the widget writes, the live evaluator (server-side JSONata) can actually run', async () => {

@@ -3,7 +3,7 @@
 // first time:
 //
 //   surface HTTP  GET /api/chats/:id/files?path=…&content=1
-//       → server chat-routes → REAL InboundDaemonLink send over the REAL
+//       → server chat-routes → REAL InboundHostLink send over the REAL
 //         serverLink WebSocket
 //       → host handleFilesRequest (reads the chat folder off disk)
 //       → patch.files.response back over the link
@@ -30,7 +30,7 @@ async function spawnChat(harness: E2EHarness, jwt: string, folder: string): Prom
     method: 'POST',
     url: '/api/chats',
     headers: { authorization: `Bearer ${jwt}` },
-    payload: { daemonId: harness.daemonId, folder },
+    payload: { hostId: harness.hostId, folder },
   });
   expect(res.statusCode).toBe(202);
   const chatId = (res.json() as { chatId: string }).chatId;

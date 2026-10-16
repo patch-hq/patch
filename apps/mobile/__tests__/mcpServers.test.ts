@@ -138,8 +138,15 @@ describe('applyMcpDraft', () => {
       ok: false,
       message: expect.stringMatching(/Unclosed/),
     });
-    expect(applyMcpDraft([], null, { name: 'a', commandLine: 'x', envText: 'bad' })).toMatchObject(
-      { ok: false, message: expect.stringMatching(/not KEY=VALUE/) },
-    );
+    expect(applyMcpDraft([], null, { name: 'a', commandLine: 'x', envText: 'bad' })).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/not KEY=VALUE/),
+    });
+  });
+});
+
+describe('parseEnvText prototype names', () => {
+  it('accepts a key named like an Object.prototype member', () => {
+    expect(parseEnvText('constructor=1\ntoString=x')).toEqual({ constructor: '1', toString: 'x' });
   });
 });

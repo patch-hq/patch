@@ -3,6 +3,7 @@
 // React Query's error path) can show a red banner.
 
 import type {
+  SnoozeRecord,
   AccountStrategy,
   AttachmentRef,
   AuthOkHost,
@@ -15,6 +16,9 @@ import type {
   SettingsChangedEvent,
   SharedSettings,
   TodoItem,
+  ToolLogEntry,
+  UsageSample,
+  ChatTokenUsage,
   WatchTaskRow,
 } from '@patch/wire';
 import type { Hook, HookCreateBody, HookPatchBody, HookCheckResponse } from '@patch/wire/hooks';
@@ -40,7 +44,7 @@ export interface ChatSummaryRow {
   /** The chat's task list (spec/02 § Task list); empty until the agent writes one. */
   todos: TodoItem[];
   /** The host this chat lives on (spec/04 § Chat model). */
-  daemonId: string;
+  hostId: string;
   folder: string;
   activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
   permissionMode: PermissionMode;
@@ -74,6 +78,12 @@ export interface ChatSummaryRow {
    * older server does not send it; absent keeps whatever the store knows.
    */
   hidden?: boolean;
+  /** What each snooze was and what happened in it (spec/04 § Snooze). */
+  snoozeRecords?: SnoozeRecord[];
+  /** ms epoch the current run began, or null. */
+  runningSince?: number | null;
+  /** ms epoch snoozed until, or null. */
+  snoozedUntil?: number | null;
 }
 
 export class ApiError extends Error {
@@ -117,6 +127,8 @@ function pageParams(opts: LifecyclePageOpts): string {
 }
 
 const HOOK_CHECK_TIMEOUT_MS = 20_000;
+/** Whole-request ceiling for one attachment upload (body transfer + host store). */
+const ATTACHMENT_UPLOAD_TIMEOUT_MS = 60_000;
 
 async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -164,6 +176,15 @@ export type AccountPreferences = SharedSettings;
 
 /** What a settings write answers with: the committed shared state. */
 export type SharedState = Omit<SettingsChangedEvent, 'type'>;
+
+export interface WebBotAuthStatus {
+  ready: boolean;
+  issue: string | null;
+  origin: string;
+  agentUrl: string;
+  directoryUrl: string;
+  keyId: string;
+}
 
 export type VoiceBackend = 'local' | 'gemini' | 'openai';
 export type VoiceLayer = 'direct' | 'light' | 'heavy';
@@ -222,7 +243,21 @@ export interface PadCreateBody {
   from?: { padId: string; screenId: string }[];
 }
 
+export type ComputerUseHost = {
+  hostId: string;
+  name: string | null;
+  active?: boolean;
+  actionLabel?: string;
+  since?: number;
+  tabs?: number;
+  lastStoppedAt?: number;
+  closed?: number;
+  /** Present when the machine did not answer. */
+  error?: string;
+};
+
 export const api = {
+  webBotAuthStatus: () => request<WebBotAuthStatus>('/api/web-bot-auth'),
   listPads: () => request<{ pads: PadView[] }>('/api/pads'),
   padLibrary: () =>
     request<{ apps: { app: string; screens: PadLibraryScreen[] }[] }>('/api/pads/library'),
@@ -268,7 +303,7 @@ export const api = {
      * two different directories, so a spawn without a host has nowhere correct
      * to go (spec/04 § Spawn).
      */
-    daemonId: string;
+    hostId: string;
     folder: string;
     prompt?: string;
     name?: string;
@@ -342,7 +377,7 @@ export const api = {
   // `listChats()`, which excludes archived; and O(folders), so it stays small
   // however many archived chats pile up.
   listChatFolders: () =>
-    request<{ folders: Array<{ folder: string; daemonId: string; lastUpdated: number }> }>(
+    request<{ folders: Array<{ folder: string; hostId: string; lastUpdated: number }> }>(
       '/api/chats/folders',
     ),
   // spec/14 § Sidebar — Automations: every spawn-fired chat, wherever else it
@@ -369,6 +404,31 @@ export const api = {
   patchJob: (id: string, body: unknown) =>
     request<unknown>(`/api/jobs/${id}`, { method: 'PATCH', body }),
   deleteJob: (id: string) => request<unknown>(`/api/jobs/${id}`, { method: 'DELETE' }),
+  /** Settings → Computer use: is an agent driving each machine's browser. */
+  computerUse: () => request<{ hosts: ComputerUseHost[] }>('/api/browser-use'),
+  stopComputerUse: (hostId: string) =>
+    request<ComputerUseHost>(`/api/browser-use/${encodeURIComponent(hostId)}/stop`, {
+      method: 'POST',
+    }),
+  /** Settings → Activity — "things agents did" (spec/06 § Cross-chat toolset). */
+  toolLog: (params: { since: number; until: number; cursor?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    qs.set('since', String(params.since));
+    qs.set('until', String(params.until));
+    if (params.cursor !== undefined) qs.set('cursor', String(params.cursor));
+    if (params.limit !== undefined) qs.set('limit', String(params.limit));
+    return request<{
+      entries: (ToolLogEntry & { hostId: string })[];
+      truncated: boolean;
+      nextCursor?: number;
+    }>(`/api/tool-log?${qs.toString()}`);
+  },
+  /** Settings → Usage: probe history and per-chat token totals for a window. */
+  usageReport: (params: { since: number; until: number }) =>
+    request<{
+      samples: (UsageSample & { hostId: string })[];
+      chats: (ChatTokenUsage & { hostId: string })[];
+    }>(`/api/usage-report?since=${params.since}&until=${params.until}`),
   listHooks: () => request<{ hooks: Hook[] }>('/api/hooks'),
   getHook: (id: string) => request<Hook>(`/api/hooks/${id}`),
   createHook: (body: HookCreateBody) => request<Hook>('/api/hooks', { method: 'POST', body }),
@@ -392,6 +452,16 @@ export const api = {
         { hookId: 'hook-check', hookName: 'Hook check', status: 'failed', error, durationMs: 0 },
       ],
     });
+    // Nothing enabled to check against: skip the image re-encode and the
+    // check round trip entirely (spec/20-hooks.md: no hooks pays no latency).
+    try {
+      const { hooks } = await request<{ hooks: Hook[] }>('/api/hooks');
+      if (!hooks.some((h) => h.enabled && h.when === 'user_message')) {
+        return { decision: 'pass', results: [] };
+      }
+    } catch (err) {
+      return unchecked((err as Error).message);
+    }
     let prepared;
     try {
       prepared = await hookImages(files);
@@ -444,7 +514,7 @@ export const api = {
           // error is the gate broken.
           | 'gate-held'
           | 'gate-error';
-        trigger: 'cron' | 'recurrence' | 'webhook' | 'todoist' | 'manual';
+        trigger: 'cron' | 'recurrence' | 'follows' | 'webhook' | 'todoist' | 'manual';
         error?: string;
         action?: {
           type: 'spawn' | 'message' | 'continue' | 'script';
@@ -469,18 +539,18 @@ export const api = {
         chatId: string;
         localId: string;
         startedAt: number;
-        trigger: 'cron' | 'recurrence' | 'webhook' | 'todoist' | 'manual';
+        trigger: 'cron' | 'recurrence' | 'follows' | 'webhook' | 'todoist' | 'manual';
         actionType: 'spawn' | 'message' | 'continue';
-        daemonId: string | null;
+        hostId: string | null;
         folder?: string;
       }>;
       queued: Array<{
         fireId: string;
         queuedAt: number;
         chatId: string;
-        trigger: 'cron' | 'recurrence' | 'webhook' | 'todoist' | 'manual';
+        trigger: 'cron' | 'recurrence' | 'follows' | 'webhook' | 'todoist' | 'manual';
         actionType: 'spawn' | 'message' | 'continue';
-        daemonId: string | null;
+        hostId: string | null;
         folder?: string;
       }>;
     }>(`/api/jobs/${id}/queue`),
@@ -499,17 +569,22 @@ export const api = {
   // host's one-shot Claude call; the server has already re-validated the
   // rrule and re-described it before this ever resolves, so `description`
   // is safe to show as the confirmation preview verbatim.
-  translateRecurrenceRule: (daemonId: string, phrase: string) =>
+  translateRecurrenceRule: (hostId: string, phrase: string) =>
     request<{ rrule: string; description: string }>('/api/jobs/recurrence/translate', {
       method: 'POST',
-      body: { daemonId, phrase },
+      body: { hostId, phrase },
     }),
   // spec/04 § Moving a chat to another host — resolves once the chat is running
   // there; every refusal is an ApiError whose body carries the reason.
-  moveChat: (chatId: string, daemonId: string, folder: string) =>
-    request<{ ok: true; chatId: string; daemonId: string; folder: string }>(
+  moveChat: (
+    chatId: string,
+    hostId: string,
+    folder: string,
+    opts: { fromServerCopy?: boolean } = {},
+  ) =>
+    request<{ ok: true; chatId: string; hostId: string; folder: string }>(
       `/api/chats/${chatId}/move`,
-      { method: 'POST', body: { daemonId, folder } },
+      { method: 'POST', body: { hostId, folder, ...opts } },
     ),
   archiveChat: (chatId: string, archived: boolean) =>
     request<unknown>(`/api/chats/${chatId}/archive`, {
@@ -529,11 +604,16 @@ export const api = {
     request<{ ok: true }>(`/api/chats/${chatId}/rotate`, { method: 'POST' }),
   // spec/04 § Snooze — `snoozedUntil` is an ABSOLUTE ms epoch (the preset is
   // resolved here so a slow request can't drift the wake time); null unsnoozes.
-  snoozeChat: (chatId: string, snoozedUntil: number | null) =>
+  // `setId` names the user action — a project snooze sends one id for every
+  // chat — so the host can clear the Back state of the whole set at once.
+  snoozeChat: (chatId: string, snoozedUntil: number | null, setId?: string) =>
     request<unknown>(`/api/chats/${chatId}/snooze`, {
       method: 'POST',
-      body: { snoozedUntil },
+      body: setId === undefined ? { snoozedUntil } : { snoozedUntil, setId },
     }),
+  // spec/04 § Snooze → Back — the chat was opened; the host clears its whole set.
+  clearSnoozeBack: (chatId: string) =>
+    request<unknown>(`/api/chats/${chatId}/snooze/back-clear`, { method: 'POST' }),
   // spec/04 § Hidden — `hidden: false` is Show: the chat moves into the active
   // list without anything being sent to it.
   hideChat: (chatId: string, hidden: boolean) =>
@@ -591,7 +671,10 @@ export const api = {
   // seconds), the same grammar `patch_wake_me`'s `in` accepts.
   setLoop: (
     chatId: string,
-    loop: { message: string; every: string | number; notAfter?: string } | null,
+    loop:
+      | { message: string; every: string | number; notAfter?: string }
+      | { message: string; at: string }
+      | null,
   ) =>
     request<unknown>(`/api/chats/${chatId}/loop`, {
       method: 'POST',
@@ -737,10 +820,10 @@ export const api = {
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}`, {
       method: 'DELETE',
     }),
-  adoptProviderKey: (keyId: ProviderKeyId, daemonId: string) =>
+  adoptProviderKey: (keyId: ProviderKeyId, hostId: string) =>
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}/adopt`, {
       method: 'POST',
-      body: { daemonId },
+      body: { hostId },
     }),
   addAccount: (
     backendId: SharedBackendId,
@@ -773,23 +856,23 @@ export const api = {
       method: 'PUT',
       body: { strategy },
     }),
-  adoptAccount: (backendId: SharedBackendId, daemonId: string) =>
+  adoptAccount: (backendId: SharedBackendId, hostId: string) =>
     request<SharedState>(`/api/accounts/${backendId}/adopt`, {
       method: 'POST',
-      body: { daemonId },
+      body: { hostId },
     }),
-  adoptClaudeSettings: (daemonId: string, target: 'shared' | 'darwin' | 'linux') =>
+  adoptClaudeSettings: (hostId: string, target: 'shared' | 'darwin' | 'linux') =>
     request<SharedState>('/api/settings/claude/adopt', {
       method: 'POST',
-      body: { daemonId, target },
+      body: { hostId, target },
     }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every
   // connected surface (this one included) is also sent `host.removed
-  // {daemonId}` and should drop the host from its list; the answer carries the
+  // {hostId}` and should drop the host from its list; the answer carries the
   // remaining roster. 404 `unknown_host` for an id the account does not hold.
-  removeHost: (daemonId: string) =>
-    request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(daemonId)}`, {
+  removeHost: (hostId: string) =>
+    request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(hostId)}`, {
       method: 'DELETE',
     }),
   // The account's secrets (spec/15 § Settings tab — Secrets). The host owns
@@ -833,7 +916,7 @@ export const api = {
     }),
   // spec/14 `/settings` add-daemon QR: mint a genuine, single-use,
   // server-issued daemon-registration nonce for the QR the host scans.
-  daemonPairStart: () =>
+  hostPairStart: () =>
     request<{ nonce: string; expiresAt: number }>('/api/auth/daemon/pair/start', {
       method: 'POST',
     }),
@@ -986,9 +1069,9 @@ export const api = {
   // Per MACHINE: the server requires the machine whose catalogue is read and
   // rejects a call naming none — the same folder path on two machines is two
   // different directories, and their model lists differ too.
-  models: (daemonId: string) =>
+  models: (hostId: string) =>
     request<{ models: { id: string; label: string }[]; fetchedAt?: string }>(
-      `/api/models?daemonId=${encodeURIComponent(daemonId)}`,
+      `/api/models?hostId=${encodeURIComponent(hostId)}`,
     ),
   // Skills available in a folder's `.claude/skills` (job-editor Skill picker,
   // the chat transcript's Skill tool-call link/tooltip, and the composer's `/`
@@ -1005,13 +1088,13 @@ export const api = {
   // machine), so the caller must say which — omitting it let the request
   // fall through to "whichever host last attached" and come back missing a
   // skill that is real on the caller's actual host.
-  skills: (folder: string, daemonId: string) =>
+  skills: (folder: string, hostId: string) =>
     request<{
       skills: string[];
       paths?: Record<string, string>;
       descriptions?: Record<string, string>;
       frontmatter?: Record<string, Record<string, string>>;
-    }>(`/api/skills?folder=${encodeURIComponent(folder)}&daemonId=${encodeURIComponent(daemonId)}`),
+    }>(`/api/skills?folder=${encodeURIComponent(folder)}&hostId=${encodeURIComponent(hostId)}`),
   // spec/14 § Composer — upload one composer attachment (image or file) for a
   // chat. Multipart (the shared `request` helper is JSON-only), so it builds the
   // FormData itself. The server stores the file, hands a copy to the host (so
@@ -1032,12 +1115,30 @@ export const api = {
     const form = new FormData();
     form.append('file', file);
     if (model) form.append('model', model);
-    const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/attachment`, {
-      method: 'POST',
-      headers,
-      body: form,
-    });
-    const text = await res.text();
+    // Bounded: an unanswered request must fail the turn visibly (Retry / ×),
+    // not leave it on "Uploading" forever. The server's own host wait is 30s.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ATTACHMENT_UPLOAD_TIMEOUT_MS);
+    let text: string;
+    let res: Response;
+    try {
+      res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/attachment`, {
+        method: 'POST',
+        headers,
+        body: form,
+        signal: ctrl.signal,
+      });
+      text = await res.text();
+    } catch (e) {
+      if (ctrl.signal.aborted) {
+        throw new Error(
+          `attachment upload timed out after ${ATTACHMENT_UPLOAD_TIMEOUT_MS / 1000}s (${file.name}, ${file.size} bytes)`,
+        );
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     let parsed: unknown = null;
     if (text.length > 0) {
       try {
@@ -1063,20 +1164,20 @@ export const api = {
    * flat union would make two machines' identical paths indistinguishable.
    */
   folders: () =>
-    request<{ hosts: Array<{ daemonId: string; roots: string[]; recent: string[] }> }>(
+    request<{ hosts: Array<{ hostId: string; roots: string[]; recent: string[] }> }>(
       '/api/folders',
     ),
   // Folder BROWSER (spec/04 § Browsing): list a directory's child directories
   // (or, with no `dir`, the host's browsable roots). Confined to the host's
   // project roots server/host-side — a dir escaping them 404s (NO FALLBACK).
-  browseFolders: (daemonId: string, dir?: string) =>
+  browseFolders: (hostId: string, dir?: string) =>
     request<{
-      daemonId: string;
+      hostId: string;
       dir: string | null;
       parent: string | null;
       entries: Array<{ name: string; path: string }>;
     }>(
-      `/api/folders/browse?daemonId=${encodeURIComponent(daemonId)}${
+      `/api/folders/browse?hostId=${encodeURIComponent(hostId)}${
         dir ? `&dir=${encodeURIComponent(dir)}` : ''
       }`,
     ),
@@ -1091,9 +1192,9 @@ export const api = {
    * host: offering an operating system with no build only produces a refusal
    * after the fact.
    */
-  daemonManifest: () =>
-    request<{ version: string; artifacts: { target: string }[] }>('/api/daemon/daemon-latest.json'),
-  daemonInstallCommand: (os: 'macos' | 'linux') =>
+  hostManifest: () =>
+    request<{ version: string; artifacts: { target: string }[] }>('/api/daemon/host-latest.json'),
+  hostInstallCommand: (os: 'macos' | 'linux') =>
     request<{ os: string; version: string; targets: string[]; command: string }>(
       `/api/daemon/install-command?os=${encodeURIComponent(os)}`,
     ),

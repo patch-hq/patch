@@ -134,7 +134,8 @@ export function bearerToken(): string {
   const exp = payload['exp'];
   if (typeof exp === 'number') {
     const nowSec = Math.floor(Date.now() / 1000);
-    if (exp < nowSec) {
+    // `<=`, as jose on the server judges it: a token is dead AT its exp second.
+    if (exp <= nowSec) {
       throw new CredentialExpiredError(new Date(exp * 1000).toISOString());
     }
   }

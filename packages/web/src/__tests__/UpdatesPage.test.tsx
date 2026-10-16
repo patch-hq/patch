@@ -8,7 +8,7 @@
 // that cannot self-update says why, and a failed check never reads as fine.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { VersionReport } from '@patch/wire';
@@ -58,7 +58,7 @@ const REPORT: VersionReport = {
   clients: [],
   hosts: [
     {
-      daemonId: 'host-a',
+      hostId: 'host-a',
       hostName: 'host-a',
       online: true,
       version: '0.1.300',
@@ -95,6 +95,7 @@ function shellState(over: Partial<DesktopUpdaterState> = {}): DesktopUpdaterStat
     lastCheckedAt: '2026-07-28T11:55:00.000Z',
     lastResult: 'up-to-date',
     lastError: null,
+    lastErrorKind: null,
     availableVersion: null,
     downloaded: false,
     checking: false,
@@ -120,6 +121,7 @@ function stubFetch(report: Partial<VersionReport> | null, status = 200): ReturnT
         : json({ error: 'unauthenticated' }, status);
     }
     if (u.includes('/api/settings')) return json(SETTINGS_PAYLOAD);
+    if (u.includes('/api/usage-report')) return json({ samples: [], chats: [] });
     if (u.includes('/api/secrets')) return json({ secrets: [] });
     return json({ ok: true });
   });
@@ -184,7 +186,7 @@ describe('UpdatesPage', () => {
 
   it('shows server, hosts, feed and APK directly — no Details toggle', async () => {
     stubFetch(null);
-    reportHost('host-a', { hostName: 'laptop', daemonVersion: '0.1.300' });
+    reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300' });
     renderPage();
     await loaded();
     expect(screen.queryByTestId('version-details-toggle')).toBeNull();
@@ -203,7 +205,7 @@ describe('UpdatesPage', () => {
   it('gives every layer its version and sha', async () => {
     // Kept because this is what exposed a stale deploy.
     stubFetch(null);
-    reportHost('host-a', { hostName: 'laptop', daemonVersion: '0.1.300' });
+    reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300' });
     renderPage();
     await loaded();
     expect(screen.getByTestId('version-detail-server')).toHaveTextContent('0.1.317 · 9b8635f');
@@ -362,7 +364,7 @@ describe('UpdatesPage', () => {
   describe('a host with a newer host waiting', () => {
     it('is listed under Behind with its version and an Update button', async () => {
       stubFetch(null);
-      reportHost('host-a', { hostName: 'laptop', daemonVersion: '0.1.300', updateAvailable: true });
+      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
       usePresenceStore.getState().setHostOnline('host-a', true);
       reportHost('host-b', { hostName: 'mac', updateAvailable: false });
       renderPage();
@@ -380,11 +382,11 @@ describe('UpdatesPage', () => {
       const fetchMock = stubFetch(null);
       const inner = fetchMock.getMockImplementation()!;
       fetchMock.mockImplementation(async (url: string | URL) =>
-        String(url).includes('/api/daemon/daemon-latest.json')
+        String(url).includes('/api/daemon/host-latest.json')
           ? json({ version: '0.1.310', artifacts: [] })
           : inner(url),
       );
-      reportHost('host-a', { hostName: 'laptop', daemonVersion: '0.1.300', updateAvailable: true });
+      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
       usePresenceStore.getState().setHostOnline('host-a', true);
       renderPage();
       await loaded();
@@ -402,14 +404,14 @@ describe('UpdatesPage', () => {
       await loaded();
       fireEvent.click(screen.getByTestId('host-host-a-update'));
       expect(ws.send).toHaveBeenCalledTimes(1);
-      expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', daemonId: 'host-a' });
+      expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a' });
       expect(screen.queryByTestId('error-toasts')).toBeNull();
     });
 
     it('an offline host is marked offline, and Update refuses, naming it', async () => {
       stubFetch(null);
       const ws = fakeWs();
-      reportHost('host-a', { hostName: 'laptop', daemonVersion: '0.1.300', updateAvailable: true });
+      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
       usePresenceStore.getState().setHostOnline('host-a', false);
       renderPage();
       await loaded();
@@ -478,6 +480,47 @@ describe('UpdatesPage', () => {
       expect(row).toHaveTextContent('0.1.317');
       expect(row).toHaveTextContent('up to date');
       expect(within(screen.getByTestId('version-rows')).getByTestId('version-shell')).toBe(row);
+    });
+
+    it('names an install failure as such, not as a failed check', async () => {
+      stubFetch(null);
+      installBridge(
+        shellState({ lastResult: 'error', lastErrorKind: 'install', lastError: 'refused: adhoc' }),
+      );
+      renderPage();
+      const err = await screen.findByTestId('version-shell-error');
+      expect(err).toHaveTextContent('Last update install failed');
+      expect(err).toHaveTextContent('refused: adhoc');
+    });
+
+    it('says when the shell last checked, so "up to date" is dated', async () => {
+      stubFetch(null);
+      const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+      installBridge(shellState({ lastCheckedAt: ago(5 * 60_000) }));
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
+      expect(screen.getByTestId('version-shell')).toHaveTextContent('up to date · checked 5m ago');
+    });
+
+    it('dates a failed check too, and says nothing about a check that never happened', async () => {
+      stubFetch(null);
+      installBridge(
+        shellState({
+          lastResult: 'error',
+          lastError: 'ENOTFOUND feed',
+          lastCheckedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+        }),
+      );
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
+      expect(screen.getByTestId('version-shell')).toHaveTextContent(
+        'check failed · checked 3h ago',
+      );
+      cleanup();
+      installBridge(shellState({ lastResult: null, lastCheckedAt: null }));
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
+      expect(screen.getByTestId('version-shell')).not.toHaveTextContent('checked never');
     });
 
     it('reports a staged update as ready, not as installing', async () => {

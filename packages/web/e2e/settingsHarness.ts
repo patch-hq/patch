@@ -106,6 +106,7 @@ export async function stubSettingsApi(
     payload?: Record<string, unknown>;
     preferences?: Record<string, unknown>;
     secrets?: Partial<Secrets>;
+    webBotAuthStatus?: Record<string, unknown>;
     answer?: (
       write: { method: string; path: string; body: unknown },
       server: SettingsServer,
@@ -161,7 +162,22 @@ export async function stubSettingsApi(
   await page.route('**/api/healthz', (r) =>
     r.fulfill(json({ ok: true, version: '0.0.0', gitSha: 'abc1234' })),
   );
+  await page.route('**/api/web-bot-auth', (r) =>
+    r.fulfill(
+      json(
+        opts.webBotAuthStatus ?? {
+          ready: true,
+          issue: null,
+          origin: 'https://patch.example',
+          agentUrl: 'https://patch.example/agent',
+          directoryUrl: 'https://patch.example/.well-known/http-message-signatures-directory',
+          keyId: 'key-123',
+        },
+      ),
+    ),
+  );
   await page.route('**/api/version', (r) => r.fulfill(json(VERSION_REPORT)));
+  await page.route('**/api/usage-report**', (r) => r.fulfill(json({ samples: [], chats: [] })));
   await page.route('**/api/secrets', (r) => r.fulfill(json({ secrets: [] })));
   return server;
 }
@@ -170,25 +186,25 @@ type Store = {
   getState(): {
     hosts: Record<string, { host: Record<string, unknown> | null }>;
     setHostReport(r: Record<string, unknown>): void;
-    setHostOnline(daemonId: string, online: boolean): void;
+    setHostOnline(hostId: string, online: boolean): void;
     setHostAccount(r: Record<string, unknown>): void;
-    setClaudeSettings(daemonId: string, drift: string | undefined, memories: unknown[]): void;
+    setClaudeSettings(hostId: string, drift: string | undefined, memories: unknown[]): void;
   };
 };
 
-/** Play a fresh `daemon.host` for `daemonId`: d1's report with `patch` applied. */
+/** Play a fresh `host.host` for `hostId`: d1's report with `patch` applied. */
 export async function reportHost(
   page: Page,
   patch: Record<string, unknown>,
-  daemonId = 'd1',
+  hostId = 'd1',
 ): Promise<void> {
   await page.evaluate(
     ({ p, id }) => {
       const store = (window as unknown as { __presenceStore: Store }).__presenceStore;
       const base = store.getState().hosts['d1']!.host!;
-      store.getState().setHostReport({ ...base, type: 'daemon.host', daemonId: id, ...p });
+      store.getState().setHostReport({ ...base, type: 'host.host', hostId: id, ...p });
     },
-    { p: patch, id: daemonId },
+    { p: patch, id: hostId },
   );
 }
 
@@ -209,14 +225,14 @@ export async function addSecondHost(
 export async function setClaudeSettings(
   page: Page,
   memories: unknown[] = [],
-  opts: { drift?: string; daemonId?: string } = {},
+  opts: { drift?: string; hostId?: string } = {},
 ): Promise<void> {
   await page.evaluate(
     ({ mems, drift, id }) =>
       (window as unknown as { __presenceStore: Store }).__presenceStore
         .getState()
         .setClaudeSettings(id, drift ?? undefined, mems),
-    { mems: memories, drift: opts.drift ?? null, id: opts.daemonId ?? 'd1' },
+    { mems: memories, drift: opts.drift ?? null, id: opts.hostId ?? 'd1' },
   );
 }
 
@@ -225,7 +241,7 @@ export async function setHostAccount(page: Page, report: Record<string, unknown>
     (r) =>
       (window as unknown as { __presenceStore: Store }).__presenceStore
         .getState()
-        .setHostAccount({ type: 'daemon.account', ...r }),
+        .setHostAccount({ type: 'host.account', ...r }),
     report,
   );
 }

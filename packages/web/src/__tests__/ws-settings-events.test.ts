@@ -63,7 +63,7 @@ beforeEach(() => {
   useChatStore.getState()._reset();
   usePresenceStore.setState({
     connection: 'offline',
-    daemonOnline: false,
+    hostOnline: false,
     wsUrl: null,
     everConnected: false,
     failedAttempts: 0,
@@ -86,15 +86,15 @@ describe('PatchWs dispatch — host.removed', () => {
     const { ws, fake } = await connectAndOpen();
     reportHost('host-a', { hostName: 'laptop' });
     reportHost('host-b', { hostName: 'beta', isHomeHost: false });
-    fake.receive({ type: 'daemon.online', daemonId: 'host-a' });
-    expect(usePresenceStore.getState().daemonOnline).toBe(true);
+    fake.receive({ type: 'host.online', hostId: 'host-a' });
+    expect(usePresenceStore.getState().hostOnline).toBe(true);
 
-    fake.receive({ type: 'host.removed', daemonId: 'host-a' });
+    fake.receive({ type: 'host.removed', hostId: 'host-a' });
 
-    const { hosts, daemonOnline } = usePresenceStore.getState();
+    const { hosts, hostOnline } = usePresenceStore.getState();
     expect(hosts['host-a']).toBeUndefined();
     expect(hosts['host-b']?.host?.hostName).toBe('beta');
-    expect(daemonOnline).toBe(false);
+    expect(hostOnline).toBe(false);
     expect(useUiStore.getState().errors).toHaveLength(0);
     ws.close();
   });
@@ -102,7 +102,7 @@ describe('PatchWs dispatch — host.removed', () => {
   it('for a host this surface never knew is a quiet no-op', async () => {
     const { ws, fake } = await connectAndOpen();
     reportHost('host-a', { hostName: 'laptop' });
-    fake.receive({ type: 'host.removed', daemonId: 'host-nope' });
+    fake.receive({ type: 'host.removed', hostId: 'host-nope' });
     expect(Object.keys(usePresenceStore.getState().hosts)).toEqual(['host-a']);
     expect(useUiStore.getState().errors).toHaveLength(0);
     ws.close();
