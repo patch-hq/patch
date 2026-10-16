@@ -24,6 +24,7 @@ import { deliveryTracker } from '../lib/deliveryTracker';
 import { useComposerDraftStore } from '../lib/composerDraft';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { mobileBuildInfo } from '../lib/buildInfo';
+import { refreshRoster } from '../lib/rosterRefresh';
 import { wsUrl } from '../config';
 
 /**
@@ -82,6 +83,8 @@ export class PatchWs {
    * never asks the same question twice.
    */
   private readonly lastReplayCursor = new Map<string, number>();
+  /** True once this client has been greeted; later greetings are reconnects. */
+  private greeted = false;
 
   constructor(url: string) {
     this.url = url;
@@ -227,6 +230,9 @@ export class PatchWs {
     }
     if (!this.ws || this.ws.readyState !== 1) return;
     if (next === 'active' && prev !== 'active') {
+      // The socket may have survived the background as a zombie, or live
+      // events may have been throttled: re-read the roster on every return.
+      void refreshRoster();
       this.safeSend({ type: 'surface.foregrounded' });
       this.startHeartbeat();
     } else if (next !== 'active' && prev === 'active') {
@@ -525,6 +531,12 @@ export class PatchWs {
       // (typed while offline, or a save that failed mid-flight) now that the
       // link is back.
       useComposerDraftStore.getState().resendPendingOnReconnect();
+      // A RE-connect missed whatever the server fanned out while the socket
+      // was down: replay only covers chats we hold a transcript for, so new,
+      // renamed, deleted and re-ordered chats need the roster again. The
+      // first greeting is covered by bootstrap's cold-start fetch.
+      if (this.greeted) void refreshRoster();
+      this.greeted = true;
       return;
     }
     if (event.type === 'auth.revoked') {

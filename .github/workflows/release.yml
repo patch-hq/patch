@@ -1,41 +1,34 @@
-# Builds Patch and publishes it as a GitHub Release.
+# Builds Patch and publishes it as a GitHub Release. This is the only way a
+# change reaches anyone, the developer included.
 #
-# Two channels from one workflow:
-#   dev      every build of main, published as a prerelease tagged dev-<version>
-#   stable   a pushed tag vX.Y.Z, published as a normal release
+#   dev      every push to main, published as a prerelease tagged dev-<version>
+#   stable   `node scripts/promote.mjs <version>` re-publishes a dev release,
+#            unchanged, as v<version>
 #
-# Clients pull from the release; nothing here depends on any one person's
-# machine being awake.
+# Servers follow a channel (`patch-server channel dev|stable`), mirror its
+# newest release and update themselves; hosts, the desktop app and the phone
+# update from their server. Nothing here depends on anyone's machine being
+# awake.
 #
-# Runs only in the project's public repository (every job is guarded below), so a
-# private fork or the development repo never spends minutes on it. Actions
-# minutes are free for public repos only.
+# Runs only in the project's public repository (every job is guarded below):
+# Actions minutes are free for public repositories.
 #
-# BUILT SO FAR: the server and web release (the part anyone self-hosting runs)
-# the Linux host artifacts (x64 and arm64), signed with the artifact key, and
-# the signed Android APK.
-# NOT YET: the macOS host and the signed, notarised desktop app (they need a
-# macOS runner, the signing certificate and Apple credentials as secrets). Each
-# becomes a job here that fails loudly if its inputs are missing.
-#
-# Secrets this workflow needs once it runs for real:
+# Secrets:
 #   PATCH_ARTIFACT_SIGNING_KEY       the ed25519 key hosts verify self-updates against
 #   PATCH_ANDROID_KEYSTORE_B64       the Android release keystore, base64
 #   PATCH_ANDROID_CREDENTIALS_JSON   its credentials.json (alias and passwords)
+#   PATCH_MAC_CERT_P12_B64           Developer ID Application certificate + key, base64 .p12
+#   PATCH_MAC_CERT_PASSWORD          its password
+#   APPLE_API_KEY_P8                 App Store Connect API key, for notarisation
+#   APPLE_API_KEY_ID, APPLE_API_ISSUER
+#   EXPO_TOKEN                       publishes the phone's over-the-air update
 
 name: release
 
 on:
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: dev or stable
-        type: choice
-        options: [dev, stable]
-        default: dev
   push:
     branches: [main]
-    tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -45,6 +38,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The full gate (scripts/verify.mjs), browser layer included: a runner is a
+  # clean machine of its own, so nothing here is skipped.
+  verify:
+    if: github.repository == 'tomchambers2/patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
+      - run: node scripts/verify.mjs
+        env:
+          PATCH_RUN_BROWSER_GATE: '1'
+
   server:
     if: github.repository == 'tomchambers2/patch'
     runs-on: ubuntu-latest
@@ -64,10 +76,6 @@ jobs:
         run: |
           echo "version=$(node scripts/version.mjs)" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Build the CLI the script tests drive
-        run: pnpm turbo build --filter=@patch/cli... --output-logs=errors-only
-      - name: Gate
-        run: node scripts/personal-check.mjs && node --test scripts/*.test.mjs
       - name: Build the server and web release
         run: pnpm run build:server
       - uses: actions/upload-artifact@v4
@@ -196,9 +204,135 @@ jobs:
             ${{ runner.temp }}/apk/*.apk
             ${{ runner.temp }}/apk/android-latest.json
 
+  # The macOS host and the desktop app, signed with the Developer ID
+  # certificate; the app is notarised. One job, because the app carries this
+  # very host build inside it.
+  mac:
+    if: github.repository == 'tomchambers2/patch'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Signing keychain and notarisation key
+        env:
+          P12_B64: ${{ secrets.PATCH_MAC_CERT_P12_B64 }}
+          P12_PASSWORD: ${{ secrets.PATCH_MAC_CERT_PASSWORD }}
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$P12_B64" ] || [ -z "$P12_PASSWORD" ] || [ -z "$API_KEY_P8" ]; then
+            echo "PATCH_MAC_CERT_P12_B64, PATCH_MAC_CERT_PASSWORD and APPLE_API_KEY_P8 must all be set" >&2
+            exit 1
+          fi
+          umask 077
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KC_PASSWORD=$(openssl rand -hex 24)
+          security create-keychain -p "$KC_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$P12_B64" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+          if [ -z "$IDENTITY" ]; then
+            echo "no Developer ID Application identity in the imported certificate" >&2
+            exit 1
+          fi
+          echo "IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          printf '%s' "$API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+      - name: Build the host's JavaScript
+        run: pnpm turbo build --filter=@patch/host... --output-logs=errors-only
+      - name: Fetch the pinned runtime, native addon and model
+        run: node scripts/fetch-vendor.mjs --out="$RUNNER_TEMP/vendor" --targets=darwin-arm64
+      - name: Build and sign the host artifact
+        env:
+          SIGNING_KEY: ${{ secrets.PATCH_ARTIFACT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "PATCH_ARTIFACT_SIGNING_KEY is not set: an unsigned host would be refused by every install" >&2
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/artifact-signing.key"
+          # Into dist/host, where the desktop build picks the host up.
+          PATCH_BUILD_VENDOR="$RUNNER_TEMP/vendor" \
+          PATCH_ARTIFACT_SIGNING_KEY="$RUNNER_TEMP/artifact-signing.key" \
+          PATCH_CODESIGN_IDENTITY="$IDENTITY" \
+          PATCH_BUILD_TARGETS=darwin-arm64 \
+          node scripts/build-host.mjs
+          rm -f "$RUNNER_TEMP/artifact-signing.key"
+          mkdir -p "$RUNNER_TEMP/out"
+          cp dist/host/*.tar.gz dist/host/*.tar.gz.sig "$RUNNER_TEMP/out/"
+          cp dist/host/host-latest.json "$RUNNER_TEMP/out/host-latest-darwin-arm64.json"
+      - name: Build, sign and notarise the desktop app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          export CSC_NAME="$IDENTITY" APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          pnpm --filter @patch/desktop build
+          pnpm --filter @patch/desktop dist
+      - name: Check the app is what it claims to be
+        run: |
+          set -euo pipefail
+          APP=packages/desktop/release/mac-arm64/Patch.app
+          codesign --verify --deep --strict "$APP"
+          codesign -dv "$APP" 2>&1 | grep -q 'Identifier=io.github.tomchambers2.patch'
+          # Notarised and stapled: Gatekeeper accepts it as a download.
+          spctl --assess --type execute -vv "$APP" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
+          PATCH_REAL_DESKTOP=1 PATCH_TEST_DESKTOP_BINARY="$PWD/$APP/Contents/MacOS/Patch" \
+            node --test packages/desktop/scripts/single-instance.test.cjs
+      - name: Collect the desktop release
+        run: |
+          set -euo pipefail
+          read -r VERSION SHA BUILT < <(node scripts/version.mjs --json | node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.version,v.gitSha,v.builtAt)')
+          REL=packages/desktop/release
+          ZIP="Patch-$VERSION-arm64-mac.zip"
+          cp "$REL/latest-mac.yml" "$REL/$ZIP" "$RUNNER_TEMP/out/"
+          if [ -f "$REL/$ZIP.blockmap" ]; then cp "$REL/$ZIP.blockmap" "$RUNNER_TEMP/out/"; fi
+          # electron-builder's yml has a version but no git sha; this traces the binary to a commit.
+          printf '{"version":"%s","gitSha":"%s","builtAt":"%s","file":"%s"}\n' "$VERSION" "$SHA" "$BUILT" "$ZIP" > "$RUNNER_TEMP/out/desktop-latest.json"
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          if-no-files-found: error
+          path: ${{ runner.temp }}/out/*
+
+  # The phone's JavaScript, as an over-the-air update for installed APKs. Phones
+  # fetch it straight from Expo, not through a server, so it goes out only once
+  # everything else has built.
+  ota:
+    if: github.repository == 'tomchambers2/patch'
+    needs: [verify, server, host, mac, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/publish-ota.mjs
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
   publish:
     if: github.repository == 'tomchambers2/patch'
-    needs: [server, host, android]
+    needs: [verify, server, host, mac, android, ota]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -209,24 +343,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.server.outputs.version }}
-          CHANNEL: ${{ inputs.channel || (startsWith(github.ref, 'refs/tags/v') && 'stable' || 'dev') }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [ "$CHANNEL" = stable ]; then
-            tag="$REF_NAME"
-            # The artifacts are stamped with the version this commit builds, so the
-            # tag has to say the same thing or a release would name one version
-            # and install another.
-            if [ "$tag" != "v$VERSION" ]; then
-              echo "this commit builds version $VERSION; tag it v$VERSION (got '$tag')" >&2
-              exit 1
-            fi
-            flags=(--generate-notes)
-          else
-            tag="dev-$VERSION"
-            flags=(--prerelease --notes "Development build $VERSION of ${GITHUB_SHA::8}. Not for general use.")
-          fi
+          tag="dev-$VERSION"
           gh release create "$tag" assets/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Patch $VERSION" "${flags[@]}"
+            --title "Patch $VERSION" --prerelease \
+            --notes "Development build $VERSION of ${GITHUB_SHA::8}."
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'

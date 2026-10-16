@@ -27,6 +27,7 @@ import { useTerminalStore } from '../src/stores/terminalStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
+import { api } from '../src/api/rest';
 import * as buildInfoModule from '../src/lib/buildInfo';
 
 beforeEach(() => {
@@ -668,6 +669,29 @@ describe('message dispatch', () => {
     );
     expect(usePresenceStore.getState().accountId).toBe('acc1');
     expect(usePresenceStore.getState().surfaceId).toBe('surf1');
+  });
+
+  it('re-reads the roster on a RE-connect greeting but not the first one', () => {
+    const list = vi.spyOn(api, 'listChats').mockResolvedValue({ chats: [] });
+    const greet = (): void =>
+      FakeWebSocket.last().emitMessage(
+        JSON.stringify({ type: 'auth.ok', hosts: [], accountId: 'acc1', surfaceId: 'surf1' }),
+      );
+    const ws = connectAndOpen();
+    greet();
+    expect(list).not.toHaveBeenCalled(); // bootstrap owns the cold-start fetch
+    ws.reconnectNow();
+    FakeWebSocket.last().emitOpen();
+    greet();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-reads the roster when the app returns to the foreground', () => {
+    const list = vi.spyOn(api, 'listChats').mockResolvedValue({ chats: [] });
+    connectAndOpen();
+    __emitAppStateChange('background');
+    __emitAppStateChange('active');
+    expect(list).toHaveBeenCalledTimes(1);
   });
 
   it('auth.revoked signs the surface out and says so — it is not a toast to dismiss', () => {

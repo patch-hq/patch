@@ -37,6 +37,7 @@ One class of event escapes the cursor: a replay also re-sends every permission r
 
 - Surface notices WS close and its link state becomes `reconnecting` at once. The "reconnecting..." banner waits for the disconnect grace (see Surface connection state model).
 - Surface tries to reconnect with exponential backoff (1s → 2s → 5s → 10s, max 30s).
+- Roster refresh. Replay only covers chats whose transcript the surface holds, so a surface that missed state fan-out (new, renamed, deleted or re-ordered chats) while its socket was down re-reads `GET /api/chats` and hydrates on every reconnect greeting after the first, and whenever the mobile app returns to the foreground. A failed refresh is shown as an error, not swallowed.
 - On reconnect: surface sends `hello` + `chat.replay {chatId, fromSeq}` for every chat whose transcript it already holds (the open chat and any chat with a rendered timeline), rather than the whole roster (see When a surface requests a replay).
 - Server relays replay request to the host. Host streams missed events.
 - Inbound from user while disconnected: surface queues in-memory. Emits on reconnect. If the surface is killed before reconnect, queued messages are lost — users get a "not sent" indicator.
