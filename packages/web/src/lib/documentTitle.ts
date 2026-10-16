@@ -22,7 +22,8 @@ const SPECIAL_THREAD_ID_SET: ReadonlySet<string> = new Set(Object.values(SPECIAL
 const BASE_TITLE = 'patch';
 
 /**
- * The title for the active chat's workspace, or the plain base title where
+ * `<chat name> — <folder> — patch` (the name is dropped when blank), so a
+ * window-title logger can tell which chat is open. The title for the active chat's workspace, or the plain base title where
  * there is no workspace to show: no active chat (empty state, Settings, Jobs,
  * …), a special thread (Manager/Speakers, which have no folder by
  * definition), or a chat whose folder resolves to nothing real. This is a
@@ -30,11 +31,17 @@ const BASE_TITLE = 'patch';
  * NO-FALLBACK about an unknown folder on a chat that should have one; a
  * special/absent chat never has one to begin with.
  */
-export function documentTitleFor(chatId: string | null, folder: string | undefined): string {
+export function documentTitleFor(
+  chatId: string | null,
+  folder: string | undefined,
+  name?: string,
+): string {
   if (chatId === null) return BASE_TITLE;
   if (SPECIAL_THREAD_ID_SET.has(chatId)) return BASE_TITLE;
   const label = folder === undefined ? null : folderLabel(folder);
-  return label === null ? BASE_TITLE : `${label} — ${BASE_TITLE}`;
+  if (label === null) return BASE_TITLE;
+  const chatName = name?.trim();
+  return chatName ? `${chatName} — ${label} — ${BASE_TITLE}` : `${label} — ${BASE_TITLE}`;
 }
 
 /**
@@ -48,7 +55,11 @@ export function useDocumentTitleSync(): void {
     s.activeChatId === null ? undefined : s.chats[s.activeChatId]?.folder,
   );
 
+  const activeName = useChatStore((s) =>
+    s.activeChatId === null ? undefined : s.chats[s.activeChatId]?.name,
+  );
+
   useEffect(() => {
-    document.title = documentTitleFor(activeChatId, activeFolder);
-  }, [activeChatId, activeFolder]);
+    document.title = documentTitleFor(activeChatId, activeFolder, activeName);
+  }, [activeChatId, activeFolder, activeName]);
 }

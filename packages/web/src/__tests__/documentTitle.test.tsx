@@ -49,8 +49,15 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
 }
 
 describe('documentTitleFor (pure derivation)', () => {
-  it('reads "<basename> — patch" for a chat with a real folder', () => {
+  it('reads "<basename> — patch" for a chat with a real folder and no name', () => {
     expect(documentTitleFor('c1', '/home/tom/projects/bus')).toBe('bus — patch');
+  });
+
+  it('puts the chat name first so a title logger can tell chats apart', () => {
+    expect(documentTitleFor('c1', '/home/tom/projects/bus', 'fix layout')).toBe(
+      'fix layout — bus — patch',
+    );
+    expect(documentTitleFor('c1', '/home/tom/projects/bus', '  ')).toBe('bus — patch');
   });
 
   it('falls back to plain "patch" when there is no active chat', () => {
@@ -94,31 +101,31 @@ describe('useDocumentTitleSync (live store wiring)', () => {
     useChatStore.getState().hydrate([row({ chatId: 'c1', folder: '/home/tom/projects/bus' })]);
     useChatStore.getState().setActiveChat('c1');
     render(<Probe />);
-    expect(document.title).toBe('bus — patch');
+    expect(document.title).toBe('fix layout — bus — patch');
   });
 
   it('follows client-side navigation between two chats, not just the initial load', () => {
     useChatStore
       .getState()
       .hydrate([
-        row({ chatId: 'c1', folder: '/home/tom/projects/bus' }),
-        row({ chatId: 'c2', folder: '/home/tom/projects/portfolio' }),
+        row({ chatId: 'c1', name: 'one', folder: '/home/tom/projects/bus' }),
+        row({ chatId: 'c2', name: 'two', folder: '/home/tom/projects/portfolio' }),
       ]);
     useChatStore.getState().setActiveChat('c1');
     render(<Probe />);
-    expect(document.title).toBe('bus — patch');
+    expect(document.title).toBe('one — bus — patch');
 
     act(() => {
       useChatStore.getState().setActiveChat('c2');
     });
-    expect(document.title).toBe('portfolio — patch');
+    expect(document.title).toBe('two — portfolio — patch');
   });
 
   it('falls back to "patch" leaving a chat for a route with none (Settings, Jobs, empty state)', () => {
     useChatStore.getState().hydrate([row({ chatId: 'c1', folder: '/home/tom/projects/bus' })]);
     useChatStore.getState().setActiveChat('c1');
     render(<Probe />);
-    expect(document.title).toBe('bus — patch');
+    expect(document.title).toBe('fix layout — bus — patch');
 
     act(() => {
       useChatStore.getState().setActiveChat(null);

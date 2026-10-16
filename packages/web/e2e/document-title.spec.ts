@@ -13,17 +13,19 @@ import { test, expect } from '@playwright/test';
 // `thread_manager` is a special thread, which has no folder by definition.
 
 test.describe('document title tracks the active workspace', () => {
-  test('reads "<folder> — patch" for a regular chat, updating on navigation', async ({ page }) => {
+  test('reads "<chat name> — <folder> — patch" for a regular chat, updating on navigation', async ({
+    page,
+  }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await expect(page).toHaveTitle('bus — patch');
+    await expect(page).toHaveTitle('bus-watch — bus — patch');
 
     await page.getByTestId('chat-row-chat_md').click();
-    await expect(page).toHaveTitle('portfolio — patch');
+    await expect(page).toHaveTitle('July Seasonal Food — portfolio — patch');
   });
 
   test('falls back to plain "patch" for a special thread', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await expect(page).toHaveTitle('bus — patch');
+    await expect(page).toHaveTitle('bus-watch — bus — patch');
 
     await page.getByTestId('chat-row-thread_manager').click();
     await expect(page).toHaveTitle('patch');
