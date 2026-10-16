@@ -137,7 +137,7 @@ describe('ManagerChatsList', () => {
   });
 
   it('a dropped link resolves the permission anyway and holds it for redelivery, with no error toast', () => {
-    // Tom, Todoist: "questions are timing out after I answer them" — a quick
+    // Todoist: "questions are timing out after I answer them" — a quick
     // approve from the Manager list is exposed to the same silently-dropped
     // send as the inline card. It now resolves like any other answer and
     // lets `permissionDeliveryTracker` redeliver once the link is good,

@@ -3792,7 +3792,7 @@ function fakeWhisper(overrides: Partial<WhisperBackend> = {}): WhisperBackend {
 }
 
 describe('src/index.ts main() — a voice surface on a provider with no key', () => {
-  // Tom's live config on 2026-09-24: dictation on gemini, the device on
+  // the user's live config on 2026-09-24: dictation on gemini, the device on
   // openai, hands-free + call local — and no GEMINI_* / OPENAI_* key in the
   // host's environment. That must NOT stop the host (every chat on the
   // host would go down over one voice setting): it boots, says so in the log,

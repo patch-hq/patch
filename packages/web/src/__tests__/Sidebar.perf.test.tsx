@@ -1,7 +1,7 @@
 // spec/14 ## Sidebar — "A commit that changes no row must not invalidate the
 // chat list".
 //
-// Tom, patch/todo.md — "Check app for performance". The transcript was already
+// the user, patch/todo.md — "Check app for performance". The transcript was already
 // made O(changed) ("Chat page slow"), but the *sidebar* was still paying full
 // price for every streamed token: `applyEvent` always commits a fresh `chats`
 // container (and a fresh row object for the streaming chat) even when no

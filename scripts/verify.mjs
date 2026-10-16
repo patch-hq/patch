@@ -22,7 +22,7 @@
 // Fails fast. A red step stops the run — there is no --continue, and no step is
 // skippable by env var, because a gate with an override is not a gate.
 //
-// TEMPORARY EXCEPTION, 2026-09-17, widened 2026-09-18 (Tom's explicit call,
+// TEMPORARY EXCEPTION, 2026-09-17, widened 2026-09-18 (the user's explicit call,
 // box-size workaround): the browser layer is skipped UNCONDITIONALLY by
 // default now — set PATCH_RUN_BROWSER_GATE=1 to run it for one invocation.
 // See that flag's own comment below. Remove both once the box is upgraded.
@@ -101,7 +101,7 @@ const changed = changedArg
   ? changedArg.slice('--changed='.length).split(',').filter(Boolean)
   : null;
 
-// TEMPORARY, widened 2026-09-18 (Tom's call): the box is too small to run the
+// TEMPORARY, widened 2026-09-18 (the user's call): the box is too small to run the
 // full Playwright suite at all right now — every attempt tonight either ran
 // 45-800s under real load and then failed on tests unrelated to whatever was
 // actually being shipped, or was killed outright by the OOM killer mid-run.

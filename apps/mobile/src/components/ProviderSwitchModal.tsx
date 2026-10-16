@@ -3,7 +3,7 @@
 // current one; a same-provider model change never reaches this. A small
 // centered Modal, not a bottom sheet (ChatLongPressSheet's shape) and not
 // `Alert.alert` (native alerts cannot carry the "don't show again" switch) —
-// deliberately its own component so Tom's exact copy has no room for
+// deliberately its own component so the user's exact copy has no room for
 // anything else: no token estimate, no other text.
 
 import React from 'react';

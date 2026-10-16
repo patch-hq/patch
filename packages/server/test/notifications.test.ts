@@ -296,7 +296,7 @@ describe('NotificationRouter — push channel', () => {
     expect(push.sent).toHaveLength(0);
   });
 
-  // Tom, 2026-09-28: a Patch window left open on the Mac held every push back
+  // the user, 2026-09-28: a Patch window left open on the Mac held every push back
   // while he was away from it. A visible window is not someone at the desk.
   it('a desktop window that is open but idle for over two minutes does not hold the push', async () => {
     const { dir, registry } = makeRegistryDir();

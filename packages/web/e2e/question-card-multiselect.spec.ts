@@ -2,11 +2,11 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 
 // spec/14 § Main chat panel — Question prompts.
 //
-// Tom, App Updates: "patch multi select for questions is not clear". A
+// App Updates: "patch multi select for questions is not clear". A
 // `multiSelect: true` question was drawn EXACTLY like a single-select one —
 // the same outlined rows, the same accent ring when picked — with the whole
 // difference living in `role` (checkbox vs radio) and in what a second click
-// did. A screen reader was told; a sighted user was not, so Tom picked one
+// did. A screen reader was told; a sighted user was not, so the user picked one
 // option and moved on from a question that wanted several.
 //
 // Each option now carries a real selection indicator: a square with a tick

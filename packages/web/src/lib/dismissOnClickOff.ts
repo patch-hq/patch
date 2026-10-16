@@ -1,7 +1,7 @@
 // Click-off dismissal for anchored, non-modal pop-ups (spec/14 § Dismissing
 // pop-ups (click-off)).
 //
-// Why this exists (Tom, `patch/todo.md` — "clicking off doesnt close the
+// Why this exists (the user, `patch/todo.md` — "clicking off doesnt close the
 // dropdowns"): the folder picker, the model picker and the composer's skill
 // autocomplete could only be closed by re-clicking their trigger, picking a
 // row, or pressing Esc. Clicking anywhere else — the empty chat body, the

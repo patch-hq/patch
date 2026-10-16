@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { WireEvent } from '@patch/wire';
 
-// The file editor's Save, as a button (Tom, App Updates: "patch save button is
+// The file editor's Save, as a button (App Updates: "patch save button is
 // not a real button").
 //
 // `.browse-actions` and `.diff-panel-actions` share their layout rule but only

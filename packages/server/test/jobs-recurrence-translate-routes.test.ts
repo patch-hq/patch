@@ -148,7 +148,7 @@ describe('POST /api/jobs/recurrence/translate', () => {
     const hostLink = new InProcessHostLink();
     // Valid RRULE (BYMONTHDAY is real RFC 5545), but outside the narrow shape
     // describeRecurrence confidently phrases — exactly the case that must
-    // fail loudly rather than confirm a rule Tom never actually saw in English.
+    // fail loudly rather than confirm a rule the user never actually saw in English.
     stubHostAnswer(hostLink, { rrule: 'FREQ=MONTHLY;BYMONTHDAY=15;BYHOUR=9;BYMINUTE=0' });
     const built = await buildAll({ logger: false, registry, hostLink });
     try {

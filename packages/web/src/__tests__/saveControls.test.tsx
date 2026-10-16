@@ -1,4 +1,4 @@
-// Save controls (Tom, App Updates: "patch save button is not a real button").
+// Save controls (App Updates: "patch save button is not a real button").
 //
 // The file editor's Save fell through to the preflight reset — no background,
 // no border, no padding, a default cursor — so it read as a run of body text

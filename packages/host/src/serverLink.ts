@@ -30,7 +30,7 @@
 // jobs RPCs gate on) stays true, so a request gets "sent" into a socket that
 // will never answer, and the CALLER's own timeout is the only thing that ever
 // notices - reported as a bare `artifact_publish_failed: timed out after
-// 15000ms` 502, with no reconnect in sight (2026-09-30, Tom's Mac:
+// 15000ms` 502, with no reconnect in sight (2026-09-30, the user's Mac:
 // `patch_artifact` failed twice in a row this way). Pinging every
 // `heartbeatIntervalMs` and terminating the socket if a pong hasn't landed
 // since the last ping turns that silent hang into a prompt, visible

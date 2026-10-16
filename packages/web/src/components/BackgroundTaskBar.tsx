@@ -15,7 +15,7 @@
 // `canUseTool` deny).
 //
 // Unlike the old bar, the user can act on a row here: a kill button (X) ends
-// the task outright (Tom's call — the prior "the agent owns the task, no kill
+// the task outright (the user's call — the prior "the agent owns the task, no kill
 // control" decision from spec/14-design-web.md is reversed). Each running row
 // also carries its own elapsed clock and a command preview that expands to
 // the full string on click.

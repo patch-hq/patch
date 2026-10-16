@@ -1116,7 +1116,7 @@ export function ChatRoute({
         // (the zombie-link window ws.ts's heartbeat exists to close) used to
         // be silently lost — the card still resolved optimistically below,
         // but the host never heard about it and its own expiry timer denied
-        // the request anyway (Tom, Todoist: "questions are timing out after I
+        // the request anyway (Todoist: "questions are timing out after I
         // answer them"). The tracker redelivers until it observes the
         // host's echo.
         permissionDeliveryTracker.send(
@@ -1177,7 +1177,7 @@ export function ChatRoute({
       .forEach((e) => handlePermission(e.requestId as string, true));
   }, [handlePermission]);
 
-  // Tom, Todoist: "what does approve all actually do in patch, need to be
+  // Todoist: "what does approve all actually do in patch, need to be
   // clearer" → the control only earns its place when there is genuinely more
   // than one request to sweep; on the ordinary single-approval card it just
   // duplicates Approve, and reading it as a mode ("approve everything from now
@@ -1708,9 +1708,9 @@ export function ChatRoute({
   //
   // spec/08 § Action — a job-spawned chat's first user turn is the trigger
   // prompt/payload the job service sent (a `spawn` action's rendered `prompt`
-  // or `/<skill>\n<payload>`), never something Tom typed. Only that ONE entry
+  // or `/<skill>\n<payload>`), never something the user typed. Only that ONE entry
   // is flagged: later turns in a persistent (`ensure`) job chat could be a
-  // later fire OR Tom chiming in, and there's no per-message signal to tell
+  // later fire OR the user chiming in, and there's no per-message signal to tell
   // those apart, so only the unambiguous first turn gets the quiet treatment.
   const firstUserSeq = row.jobId
     ? timeline.find((e) => e.kind === 'message' && e.role === 'user')?.seq
@@ -1828,7 +1828,7 @@ export function ChatRoute({
           continue;
         }
         // One call and its own result are ONE thing that happened, not two
-        // (Tom: "tool call appears twice"). A run of 2+ folds into a ToolGroup
+        // (User: "tool call appears twice"). A run of 2+ folds into a ToolGroup
         // above; a lone call folds its result into the same row here, so the
         // result never gets a second "Read →" line of its own.
         const paired = pairedResult(timeline, i, to);
@@ -2007,7 +2007,7 @@ export function ChatRoute({
           // composer's typed-but-unsent text is local `useState`, and
           // without this React reuses the same instance across a chatId
           // change (same type + position in the tree), leaking one chat's
-          // draft text into whatever chat is now open (Tom, Todoist —
+          // draft text into whatever chat is now open (Todoist —
           // "when archiving, the draft input text is not cleared... the
           // page itself should be isolated to avoid leaking"). This isolates
           // it for EVERY navigation path (archive, sidebar click, keyboard
@@ -2073,7 +2073,7 @@ export function ChatRoute({
 // keeps the object identity of every entry an event did NOT touch, so with
 // stable callbacks from ChatRoute a streaming delta (one per token) re-renders
 // exactly the one entry that changed instead of the whole conversation. Without
-// this the chat page gets slower the longer it runs — Tom's "Chat page slow".
+// this the chat page gets slower the longer it runs — the user's "Chat page slow".
 const TimelineEntry = memo(function TimelineEntry({
   entry,
   chatId,
@@ -2194,7 +2194,7 @@ const TimelineEntry = memo(function TimelineEntry({
   }
   // spec/14 § Job trigger turn — a job's trigger prompt/payload (spec/08 §
   // Action) is transcript furniture like a compaction boundary, not a message
-  // Tom wrote: one quiet line, click to expand, instead of a full user bubble.
+  // the user wrote: one quiet line, click to expand, instead of a full user bubble.
   // `isJobTrigger` catches only the chat's unambiguous FIRST turn (the
   // `spawn` action's own prompt, which carries no per-message signal of its
   // own — see `firstUserSeq` above); `entry.jobTrigger` catches every OTHER
@@ -2205,7 +2205,7 @@ const TimelineEntry = memo(function TimelineEntry({
   }
   // spec/20-hooks.md § On the agent's response, spec/14 § Agent-response
   // hooks — a `block` resubmit the host fired is transcript furniture like
-  // a job trigger turn, not a message Tom wrote. Unlike the job trigger's
+  // a job trigger turn, not a message the user wrote. Unlike the job trigger's
   // generic label, this one names the blocking hook(s) — the row's content
   // IS the hook's own analysis (spec/20-hooks.md: "no invisible injection"),
   // so showing it collapsed-by-default rather than as a full bubble is the
@@ -2587,14 +2587,14 @@ function MessageEntry({
     const hostId = useChatStore.getState().chats[chatId]?.hostId ?? '';
     return (st.hosts[hostId]?.host?.hostName ?? hostId).trim();
   });
-  // Tom: "< > to show the retries IF THERE IS FAILED CONTENT". A turn that went
+  // User: "< > to show the retries IF THERE IS FAILED CONTENT". A turn that went
   // round again with nothing to show for the earlier go gets the marker but no
   // pager — arrows onto an empty page are a control that does nothing.
   const pagedAttempts = attempts !== undefined && attemptPageable ? attempts : undefined;
   const attemptIdx = Math.min(attemptAt ?? attemptCount - 1, attemptCount - 1);
   const setAttemptAt = (idx: number): void => onAttemptAt?.(entry.seq, idx);
   const shownAttempt = pagedAttempts?.[attemptIdx];
-  // A voice note appears LIVE (Tom, patch/todo.md): its bubble renders the
+  // A voice note appears LIVE (the user, patch/todo.md): its bubble renders the
   // instant the user finishes speaking, before any transcript exists — so an
   // empty-content `transcribing` entry must NOT be dropped by the empty guard.
   if (text.length === 0 && !entry.streaming && !hasAttachments && !entry.transcribing) return <></>;
@@ -3221,7 +3221,7 @@ function SideThreadMarker({ chatId, branch }: { chatId: string; branch: ChatBran
 
 /**
  * spec/02 § System-reminder disclosure — every `<system-reminder>` block this
- * turn actually carried, collapsed by default (Tom: "hidden in a box, allow
+ * turn actually carried, collapsed by default (User: "hidden in a box, allow
  * user to see"). Quiet furniture like `CompactionLine`/`JobTriggerLine`, not a
  * banner: it sits at the turn it affected and says nothing unless clicked.
  * Usually one item; a turn can carry more than one (e.g. a todo-edit reminder
@@ -3283,7 +3283,7 @@ function ProviderContextPanel({
 
 /**
  * How many times this turn had to go round again, in words (spec/12 § A turn is
- * owed until it settles). Tom asked for it in exactly this register — "Retried
+ * owed until it settles). the user asked for it in exactly this register — "Retried
  * twice" — so one and two are words and anything beyond counts, which is where
  * words stop being quicker to read than a digit.
  */
@@ -3432,7 +3432,7 @@ function ToolCall({
   // The clock runs from when the call really started (`startedAt`, from the
   // wire), never from when this surface received it — reopening a chat must
   // not restart it. A call with no known start shows the spinner and no clock.
-  // A question is the agent waiting on Tom, not a tool doing work: no timer.
+  // A question is the agent waiting on the user, not a tool doing work: no timer.
   // Nor is a call still waiting on Approve/Deny: it has not started, so a
   // clock on it counts the user's own hesitation as the command's runtime.
   const awaitingApproval = useChatStore((s) => {
@@ -3738,7 +3738,7 @@ function pairedResult(
 //
 // spec/14 § Tool calls — an image content block (e.g. from `Read` loading a
 // screenshot) renders as the actual picture instead of recursing into its
-// `source.data` field and dumping a wall of base64 text (Tom: "is it trying
+// `source.data` field and dumping a wall of base64 text (User: "is it trying
 // to show an image?" — it wasn't; now it does).
 function ToolFields({ value }: { value: unknown }): JSX.Element {
   const chatId = useContext(BlobChatIdContext);
@@ -3752,7 +3752,7 @@ function ToolFields({ value }: { value: unknown }): JSX.Element {
   }
   // An array's positions are not field names. Labelling them printed a literal
   // "0:" / "1:" above every element — most visibly under a `Read` image result,
-  // whose payload is the two-element content array [text, image] (Tom: "0:
+  // whose payload is the two-element content array [text, image] (User: "0:
   // artifact"). Elements stack unlabelled; only real object keys get a <dt>.
   if (Array.isArray(value)) {
     if (value.length === 0) return <></>;
@@ -3840,7 +3840,7 @@ interface ToolImageSource {
 // A tool call/result's image content block, expanded inline: same
 // click-to-zoom in-app lightbox as a message's own image attachments
 // (`MessageAttachments`/`ImageLightbox`), so an image renders identically
-// whether Tom attached it or a tool call produced it.
+// whether the user attached it or a tool call produced it.
 function ToolImage({ src, width, height, mediaType }: ToolImageSource): JSX.Element {
   const [open, setOpen] = useState(false);
   // The intrinsic `width`/`height` below are what reserve the picture's box
@@ -4680,7 +4680,7 @@ function ToolRunning({ since }: { since: number | undefined }): JSX.Element {
   );
 }
 
-/** A question to Tom (`AskUserQuestion` / `patch_ask_human`) waits on him; it is not a tool at work. */
+/** A question to the user (`AskUserQuestion` / `patch_ask_human`) waits on them; it is not a tool at work. */
 function isQuestionTool(tool: string | undefined): boolean {
   return (
     tool === ASK_USER_QUESTION || (tool !== undefined && toolLabel(tool) === 'patch_ask_human')
@@ -4858,7 +4858,7 @@ function PermissionModeLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
 // spec/14 § Automations, spec/08 § Action — the trigger prompt/payload that
 // spawned this job-linked chat, as one quiet furniture line (same treatment
 // as `CompactionLine`) instead of a full user bubble, so a raw webhook
-// payload or mustached prompt never reads as if Tom typed it. Expanding
+// payload or mustached prompt never reads as if the user typed it. Expanding
 // shows the exact text the job service sent.
 function JobTriggerLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
   // A Pad delivery is written by Patch from what the user did in the Pad; its

@@ -209,7 +209,7 @@ describe('Host lifecycle (group 7)', () => {
 
   // A machine turn — a job tick, another agent's `patch_send_to` — un-archives
   // exactly like a user's own message. Scope was the open question on the
-  // Todoist task; Tom confirmed it should cover every sender, not just his own
+  // Todoist task; the user confirmed it should cover every sender, not just their own
   // typed messages.
   it('a machine-origin sendInput un-archives a chat too', async () => {
     const { daemon, sdk, folder } = setup();

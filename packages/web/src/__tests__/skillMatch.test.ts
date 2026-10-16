@@ -1,5 +1,5 @@
 // spec/14 § Skill autocomplete — the menu matches any part of a skill name, not
-// just its start (Tom, Patch Updates).
+// just its start (the user, Patch Updates).
 
 import { describe, it, expect } from 'vitest';
 import { matchTier, rankByQuery } from '../lib/skillMatch.js';

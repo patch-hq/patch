@@ -134,7 +134,7 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     await expect(page.getByTestId('account-claude-code-a1')).toContainText(/read .* on dev-host/i);
   });
 
-  // The bug Tom reported: his Default account was healthy — Anthropic said
+  // The bug the user reported: their Default account was healthy — Anthropic said
   // `allowed` overall, 5% of the 5-hour pool, 44% of the week — and Settings
   // drew the Extra usage line in red with "· blocked" and a sentence accusing
   // his organisation of switching something off. Extra usage is a paid add-on

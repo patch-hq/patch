@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// The app's top row, measured (Tom, App Updates: "move the <> buttons to the
+// The app's top row, measured (App Updates: "move the <> buttons to the
 // main page, left of top bar. patch in line with window controls. < has too
 // much padding on right side. put green dot like a superscript next to patch.
 // cluster external window and < closer.").

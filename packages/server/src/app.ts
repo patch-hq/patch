@@ -1828,7 +1828,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // ---- pads (spec/14 § Pads) ----
-  // Design spaces the agents start and Tom edits; `<dataDir>/pads` (override
+  // Design spaces the agents start and the user edits; `<dataDir>/pads` (override
   // with PATCH_PADS_DIR). Signed links share the artifacts' secret.
   registerPadRoutes(app, {
     logger: log.child({ component: 'pads' }),

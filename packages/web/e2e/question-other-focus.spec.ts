@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// spec/14 § Main chat panel — Question prompts. Tom, App Updates: "when
+// spec/14 § Main chat panel — Question prompts. App Updates: "when
 // answering a qusetion, clicking other must focus input".
 //
 // Choosing `Other` reveals the free-text box, and the click that reveals it is

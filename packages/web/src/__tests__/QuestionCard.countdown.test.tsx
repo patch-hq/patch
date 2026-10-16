@@ -1,6 +1,6 @@
 // spec/14 § Main chat panel — Question prompts: the countdown ring.
 //
-// Tom, App Updates: "patch should show a 1 minute timer on a question, slowly
+// App Updates: "patch should show a 1 minute timer on a question, slowly
 // going down, a circle pie chart thing. so the user knows when it expires."
 //
 // The ring counts down to the HOST's deadline, carried on the request, not to

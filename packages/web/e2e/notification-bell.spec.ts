@@ -139,7 +139,7 @@ test.describe('notifications bell', () => {
   // hit-testing by geometry, not DOM ancestry: the panel is portaled to <body>
   // but opens straight under the bell, over that row, so without an explicit
   // no-drag its header ("Mark all read") starts a window drag instead of
-  // clicking (Tom, Patch Updates: "mark all as read doesnt work").
+  // clicking (the user, Patch Updates: "mark all as read doesnt work").
   test('in the desktop shell the panel is no-drag so Mark all read can be clicked', async ({
     page,
   }) => {

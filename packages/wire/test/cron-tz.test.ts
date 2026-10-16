@@ -163,7 +163,7 @@ describe('assertValidCron', () => {
 });
 
 // The display half of the same rule: a schedule label is ambiguous unless the
-// reader can tell which zone it is in. Tom's pre-timezone jobs read "9am" and
+// reader can tell which zone it is in. the user's pre-timezone jobs read "9am" and
 // fired at 10:00 BST, which is the complaint this exists to answer.
 describe('cronZoneLabel', () => {
   test('says nothing when the job runs in the viewer\u2019s own zone', () => {

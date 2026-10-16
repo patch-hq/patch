@@ -90,7 +90,7 @@ describe('VoiceNoteOverlay', () => {
     expect(screen.getByTestId('voice-note-transcript')).toHaveTextContent('…');
   });
 
-  // Tom, patch/todo.md — "voice note … does not record". Web records the clip
+  // the user, patch/todo.md — "voice note … does not record". Web records the clip
   // and uploads it in one go, so no words come back until the note is committed:
   // a motionless `…` reads as a dead mic. Per spec/07 the placeholder tracks the
   // recorder's input level (bucketed) so the one line answers speech.

@@ -707,7 +707,7 @@ describe('chatStore reducer', () => {
     expect(card?.permissionResolved).toBe('approve');
   });
 
-  // Tom: approved a Bash call, then interrupted before it landed, and the card
+  // User: approved a Bash call, then interrupted before it landed, and the card
   // flipped to Denied. The host's deny echo (the interrupt cancelling the
   // request) must not relabel a card the user already approved.
   it('a deny echo after an approval keeps the card Approved and marks it cancelled', () => {
@@ -2554,7 +2554,7 @@ describe('chatStore — chat.stopped (a stopped or interrupted turn)', () => {
     expect(tl.find((e) => e.seq === 1)?.turnStopped).toBe(true);
   });
 
-  // Tom: "stop should stop the ai response. not cancel any pending messages.
+  // User: "stop should stop the ai response. not cancel any pending messages.
   // they go through". The host keeps the queue across a stop and drains it, so
   // the surface must keep showing the queued block exactly as it was — dropping
   // it here, or clearing its `queued` flag, would show him the cancellation he
@@ -2634,7 +2634,7 @@ describe('chatStore — chat.stopped (a stopped or interrupted turn)', () => {
   });
 });
 
-// Todo (Tom, patch/todo.md — "Voice message should appear live."): a committed
+// Todo (the user, patch/todo.md — "Voice message should appear live."): a committed
 // voice note must render its bubble the instant the user finishes speaking, in a
 // live "transcribing" state, and fill in when the transcript returns — rather
 // than the message only popping in after the upload + Whisper round-trip.

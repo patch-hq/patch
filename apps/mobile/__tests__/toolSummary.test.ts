@@ -235,7 +235,7 @@ describe('groupToolRuns', () => {
 
 // The bug this exists for: a lone tool call rendered as TWO rows — the call,
 // then a separate "↳ <tool> done" row — where web already folds a call and
-// its own result into one row (Tom, via screenshot: "tool call appears
+// its own result into one row (via screenshot: "tool call appears
 // twice", the same report that fixed web). Matched on callId, same as web's
 // `pairedResult`.
 describe('groupToolRuns — a lone call folds its own result into one row', () => {

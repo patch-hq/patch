@@ -3,7 +3,7 @@
 // current one (packages/wire's `harnessForModel`); a same-provider model
 // change never reaches this. Deliberately its own small modal rather than a
 // `uiStore.confirm()` call — that dialog has no room for the "don't show
-// again" checkbox, and this one's exact copy (Tom's own wording, verbatim)
+// again" checkbox, and this one's exact copy (the user's own wording, verbatim)
 // has no room for anything else: no token estimate, no other text.
 
 import { useState, type JSX } from 'react';

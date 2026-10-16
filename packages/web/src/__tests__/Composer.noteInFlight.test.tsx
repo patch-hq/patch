@@ -2,7 +2,7 @@
 // ## Voice-input modes — mode 1, "An in-flight note owns ⏎ and esc wherever
 // focus is").
 //
-// Tom, patch/todo.md — "voice note buggy, does not record, cannot be ended or
+// the user, patch/todo.md — "voice note buggy, does not record, cannot be ended or
 // cancelled". The new-chat mic starts a note and then NAVIGATES into the chat it
 // created, whose composer auto-focuses its textarea. From there:
 //   • esc did nothing   — the global handler bails when the target is a TEXTAREA

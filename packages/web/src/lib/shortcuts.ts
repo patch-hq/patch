@@ -225,7 +225,7 @@ export const SHORTCUT_TABLE: ShortcutEntry[] = [
     scope: other('Editable field with a save action'),
   },
   // The composer keys the user reaches for constantly. `↵` and `⇧↵` were both
-  // missing (Tom, `patch/todo.md` — "nothing tells you enter sends. placeholder
+  // missing (the user, `patch/todo.md` — "nothing tells you enter sends. placeholder
   // + cheatsheet both miss it") — the cheat-sheet listed only the ⌘ variant, so
   // the PRIMARY send key and the newline key appeared nowhere in the UI at all.
   { keys: '↵', action: 'Send composer (queues while running)', scope: other('Composer focused') },

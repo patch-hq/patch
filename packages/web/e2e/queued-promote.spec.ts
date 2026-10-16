@@ -77,7 +77,7 @@ test.describe('queued message promote (↑)', () => {
   });
 
   // spec/04 ## Message queueing — the queued block is the last thing in the
-  // stream. jsdom proves the DOM order; this proves what Tom actually sees:
+  // stream. jsdom proves the DOM order; this proves what the user actually sees:
   // the dots sit ABOVE the queued turns on screen.
   test('the queued block sits below the thinking indicator while the turn runs', async ({
     page,

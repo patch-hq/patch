@@ -57,7 +57,7 @@ test('a renderer crash ("white screen and needs refreshing") reloads the window,
   // did-fail-load only fires for a failed DOCUMENT LOAD. A renderer that dies
   // after the document already loaded (OOM, GPU fault) fires
   // render-process-gone instead, and nothing reloaded the window for that
-  // case — it sat blank until Tom refreshed it himself.
+  // case — it sat blank until the user refreshed it themself.
   const src = readFileSync(join(__dirname, 'main.ts'), 'utf8');
   assert.match(src, /win\.webContents\.on\('render-process-gone', \(_event, details\) => \{/);
   // A deliberate/clean exit isn't a crash — must not reload over it.

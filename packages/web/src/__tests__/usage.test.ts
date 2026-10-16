@@ -155,7 +155,7 @@ describe('blockingScope', () => {
   });
 });
 
-// Tom's Default account is a personal subscription. "Extra usage is switched
+// the user's Default account is a personal subscription. "Extra usage is switched
 // off for this organisation" was both untrue of it and read as an accusation
 // about an account that was perfectly healthy, so the wording is pinned: one
 // sentence and no organisation.

@@ -6,7 +6,7 @@
 // mobile job list + editor (`apps/mobile/src/lib/naturalCron.ts`,
 // `apps/mobile/src/lib/jobRow.ts`). There used to be three separate
 // implementations of this, which drifted: the list only understood a fixed
-// minute + hour and rendered nearly half of Tom's real jobs as raw cron, and
+// minute + hour and rendered nearly half of the user's real jobs as raw cron, and
 // the two editors disagreed with it on how to say a clock time.
 //
 // NO FALLBACK, and no guessing: a shape this cannot phrase EXACTLY returns ''

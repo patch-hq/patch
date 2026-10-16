@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 // spec/05 § Desktop packaging (Electron) → Window chrome. The desktop shell
 // opens its document windows with no native title bar, so the SPA runs to the
-// window's top edge (Tom, App Updates: "clean at top, no patch top bar. window
+// window's top edge (App Updates: "clean at top, no patch top bar. window
 // extends right to top of screen"). Everything that follows from that is the
 // renderer's job and is measurable in a real browser: the macOS traffic lights
 // now float over the app's top-left, and there is no bar left to drag by.
@@ -19,7 +19,7 @@ const LIGHTS_RIGHT_EDGE = 70;
 const INSET = 84;
 // TRAFFIC_LIGHT_POSITION.y (31) + TRAFFIC_LIGHT_DIAMETER (12): the lights'
 // bottom edge. A banner shorter than this cuts them at the seam with
-// whatever renders next (Tom, App Updates: "window controls are overlapped
+// whatever renders next (App Updates: "window controls are overlapped
 // by the green banner").
 const LIGHTS_BOTTOM_EDGE = 43;
 
@@ -116,7 +116,7 @@ test.describe('overlay title bar', () => {
     expect(left!.x).toBeGreaterThanOrEqual(expandBox!.x + expandBox!.width);
   });
 
-  // Tom, App Updates: "expand sidebar doesn't work". `.chat-head` drags the
+  // App Updates: "expand sidebar doesn't work". `.chat-head` drags the
   // window in overlay-titlebar mode (only its left/title/actions zones are
   // punched out, not its blank padding), and the collapsed expand chevron sits
   // — visually on top, but as an unrelated sibling — right inside that
@@ -248,7 +248,7 @@ test('a staged update banner clears the lights too, and its button still clicks'
 }) => {
   // The banner sits in flow at the very top of the shell, same as .sb-brand —
   // without the inset its coloured background draws straight under the
-  // lights (Tom, live screenshot: "banner is not clean, messes up").
+  // lights (live screenshot: "banner is not clean, messes up").
   await page.addInitScript(() => {
     (window as unknown as { patch: unknown }).patch = {
       overlayTitleBar: true,
@@ -302,7 +302,7 @@ test('a staged update banner clears the lights too, and its button still clicks'
 test('with a banner above it the sidebar brand row drops the lights inset', async ({ page }) => {
   // The banner already clears the lights, so the row below it sits clear of
   // them by position. Keeping the 84px inset there too pushed the wordmark
-  // off to the right under an empty strip (Tom, App Updates: "when update
+  // off to the right under an empty strip (App Updates: "when update
   // banner, looks messy").
   await page.addInitScript(() => {
     (window as unknown as { patch: unknown }).patch = {

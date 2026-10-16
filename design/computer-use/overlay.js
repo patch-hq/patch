@@ -258,7 +258,7 @@ if(s==='approve'){
   mount({host:'Mac',mode:'Background',app:'WhatsApp',appIc:'whatsapp',screen:whatsapp(),status:'Waiting for you',wait:true,cur:{kind:'agent paused',label:'Patch',ring:'wait',round:1,lp:'l'}});
 }
 
-/* ---------- 3. takeover: Tom signs in, the agent is not watching ---------- */
+/* ---------- 3. takeover: the user signs in, the agent is not watching ---------- */
 if(s==='takeover'){
   setChat('Spotify autoplay',['home','Mac']);
   msgs([

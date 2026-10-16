@@ -2,7 +2,7 @@
 //
 // The shell's document windows (the singleton main window and every child
 // window from spec/14 § New windows) draw the SPA all the way to the window's
-// top edge instead of hanging it under a native title bar: Tom, App Updates —
+// top edge instead of hanging it under a native title bar: App Updates —
 // "clean at top, no patch top bar. window extends right to top of screen".
 //
 // macOS ONLY, deliberately. `titleBarStyle: 'hidden'` there hides the bar but
@@ -14,7 +14,7 @@
 // not be closed, minimised or zoomed at all. Those platforms keep their frame.
 //
 // `frame: false` was the other option and is rejected for the same reason: it
-// takes the traffic lights with it, leaving Tom a window he cannot close.
+// takes the traffic lights with it, leaving the user a window they cannot close.
 
 /** BrowserWindow options that produce the overlay (hidden) title bar. */
 export type WindowChrome = {

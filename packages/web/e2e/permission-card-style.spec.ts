@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Tom, Patch Updates: "ugly" — screenshot of the approval card: a solid tan
+// the user, Patch Updates: "ugly" — screenshot of the approval card: a solid tan
 // slab with Deny and Approve & resume bypass both in the same brick red. The
 // card is now an outlined panel (the waiting hue survives as the border) and
 // only Approve is a filled button; Deny is a quiet outlined control.

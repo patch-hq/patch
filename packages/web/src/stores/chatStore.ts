@@ -398,7 +398,7 @@ interface ChatState {
   /**
    * Voice notes: render the message bubble the INSTANT the user finishes
    * speaking, in a live "Transcribing…" state, instead of only after the upload
-   * + Whisper round-trip lands (Tom, patch/todo.md — "Voice message should
+   * + Whisper round-trip lands (the user, patch/todo.md — "Voice message should
    * appear live."). Keyed by localId so the persisted `[voice • web]` echo folds
    * into it on replay.
    *   - `addTranscribingMessage` — seed the optimistic empty bubble (transcribing).
@@ -651,7 +651,7 @@ export interface ChatEventEntry {
   localId?: string;
   /**
    * spec/08 § Action, spec/14 § Job trigger turn — this user-role turn is a
-   * job's own fire into the chat, not something Tom typed, whichever turn of
+   * job's own fire into the chat, not something the user typed, whichever turn of
    * the chat it lands on (the `spawn` action's own first turn is flagged a
    * different way — see `isJobTrigger` in ChatRoute.tsx). Mirrors the wire
    * `ChatMessageEvent.jobTrigger` field untouched.
@@ -666,7 +666,7 @@ export interface ChatEventEntry {
   /**
    * spec/20-hooks.md § On the agent's response, spec/14 § Agent-response
    * hooks — this user-role turn is a `block` resubmit the host fired
-   * because a hook needed the agent to redo its answer, not something Tom
+   * because a hook needed the agent to redo its answer, not something the user
    * typed. Mirrors the wire `ChatMessageEvent.hookTrigger` field untouched;
    * the turn's own `content` is the hook's analysis/suggestion verbatim.
    */
@@ -674,7 +674,7 @@ export interface ChatEventEntry {
   /**
    * spec/04 § Goals — this user-role turn is a `not_met` resubmit the host
    * fired because the chat's goal evaluator judged the condition not yet
-   * satisfied, not something Tom typed. Mirrors the wire
+   * satisfied, not something the user typed. Mirrors the wire
    * `ChatMessageEvent.goalTrigger` field untouched; the turn's own `content`
    * is the evaluator's reason verbatim.
    */
@@ -719,7 +719,7 @@ export interface ChatEventEntry {
    * True while this OUTGOING voice-note user turn is being transcribed — the
    * bubble is rendered the instant the user finishes speaking (a live
    * "Transcribing…" placeholder) so the message appears immediately rather than
-   * only after the upload + Whisper round-trip (Tom, patch/todo.md — "Voice
+   * only after the upload + Whisper round-trip (the user, patch/todo.md — "Voice
    * message should appear live."). Cleared by `resolveTranscription` once the
    * recognised text arrives; the whole entry is removed by `cancelTranscription`
    * (failed upload) or an empty transcript. An empty-content entry with this set
@@ -1380,7 +1380,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Off the transcript is not the same as thrown away. The card was the
       // outcome of ONE attempt at the turn above it, so it is filed on that
       // attempt's record, where the `< >` pager can still reach it (spec/12 §
-      // A turn is owed until it settles). Tom asked for exactly this pair:
+      // A turn is owed until it settles). the user asked for exactly this pair:
       // "the error should be temporary, not there forever" AND "< > to show
       // the retries if there is failed content".
       if (last === undefined) return;
@@ -1416,7 +1416,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
      * The host re-sends an owed turn itself — on restart (`resumeInterruptedTurns`)
      * and on every rung of the SDK-error ladder — and each re-send is a real,
      * separately-persisted user message with its own seq. Rendered naively that
-     * is the same sentence on screen once per attempt, which is what Tom
+     * is the same sentence on screen once per attempt, which is what the user
      * photographed: one question, three identical bubbles, a red card between
      * the first two. So the copy folds in as an ATTEMPT of the turn already
      * drawn rather than as a message of its own.
@@ -2590,7 +2590,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             args: event.request.args,
             // Same deadline the timeline entry gets below — carried on the ROW
             // too so the sidebar badge's ring can drain in step with the
-            // question card's own countdown (spec/14 § Status badges; Tom:
+            // question card's own countdown (spec/14 § Status badges; User:
             // "this blue outer circle should go down along with the question
             // timer its waiting on").
             ...(event.expiry !== undefined ? { expiry: event.expiry } : {}),

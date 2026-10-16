@@ -619,7 +619,7 @@ describe('onScroll — follow-mode tracking', () => {
     expect(wasScrolledToNewest()).toBe(false);
   });
 
-  // The recurrence Tom re-filed on 2026-09-07, three weeks after the send
+  // The recurrence the user re-filed on 2026-09-07, three weeks after the send
   // re-pin first shipped. The re-pin itself was firing; a settle event for our
   // OWN animated scroll was cancelling it before the new row was measured.
   it('the sent turn still lands in view when our own momentum-end races the send', async () => {

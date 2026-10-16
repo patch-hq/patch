@@ -1,7 +1,7 @@
 // End-to-end: the "finished" notification says what the agent actually did
 // (spec/09 § What the message says).
 //
-// Tom: "patch notify needs to take specific text from the agent and use it. not
+// User: "patch notify needs to take specific text from the agent and use it. not
 // just the starting message". The fix has three halves that are only correct
 // together — the host stamps the turn's own closing words onto the frame that
 // settles it, the WIRE has to carry a field neither end validated before, and

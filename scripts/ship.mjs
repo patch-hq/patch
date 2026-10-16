@@ -143,11 +143,11 @@ const MOBILE_CREDS = `${process.env.HOME}/.patch-mobile-credentials`; // keystor
 // app). Expires 2027-07-28.
 const CSC_NAME = 'Patch Self-Signed Test';
 // A deploy is something an AGENT ran, and its progress belongs where that agent
-// (or the app's own job log) can read it — not on Tom's phone, which got a push
+// (or the app's own job log) can read it — not on the user's phone, which got a push
 // for every deploy of a thing that updates itself. Empty by default: set
 // PATCH_NTFY_URL to a topic to put deploy pushes back on a device.
 const NTFY = process.env['PATCH_NTFY_URL'] ?? '';
-// The ONE push that does go to Tom's phone: a new APK. Android cannot install it
+// The ONE push that does go to the user's phone: a new APK. Android cannot install it
 // by itself, so unlike every other deploy result it needs a human, and the phone
 // is where he installs it. Same topic bin/publish uses for every other app.
 const APK_NTFY =
@@ -251,7 +251,7 @@ function notify(title, message, priority = 'default') {
   }
 }
 
-/** Push a tappable link to Tom's phone. Loud on failure, never fatal: the APK is already published. */
+/** Push a tappable link to the user's phone. Loud on failure, never fatal: the APK is already published. */
 function notifyPhone(title, message, link) {
   if (
     !ok('curl', [
@@ -1169,7 +1169,7 @@ function buildTool(name) {
  * its JS bundle carries this build's version and sha. Then: a filename no
  * previous build has had (Android decides a download is new by its name),
  * `patch.apk` as the stable alias, `android-latest.json`, and proof over the
- * public URL that both are served. Last, Tom's phone is told, because a new APK
+ * public URL that both are served. Last, the user's phone is told, because a new APK
  * is the one thing a deploy produces that needs a human to install it.
  *
  * `stamps` is null for an EAS build: the cloud build does not see this

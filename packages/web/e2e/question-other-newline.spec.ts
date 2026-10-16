@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// spec/14 § Main chat panel — Question prompts. Tom, App Updates: "patch other
+// spec/14 § Main chat panel — Question prompts. App Updates: "patch other
 // input box, does nothing on enter. should add a new line. shift/cmd enter
 // should send it".
 //

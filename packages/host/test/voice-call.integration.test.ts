@@ -1,7 +1,7 @@
 // A whole voice call, end to end, with only Gemini and the agent's model faked:
 // the surface's audio socket, the real audio server, the real Gemini session,
 // the real chat host (history log, turn queue, spend bookkeeping) and the real
-// call-costing glue. What each test asserts is what Tom sees: the banner the
+// call-costing glue. What each test asserts is what the user sees: the banner the
 // call leaves in the chat and the cost on it.
 //
 // These exist because the cost on that banner was wrong ($4.33 for two

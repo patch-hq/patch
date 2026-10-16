@@ -36,7 +36,7 @@ export function loadReadState(): ReadState {
 }
 
 export function saveReadWatermark(chatId: string, lastReadSeq: number): void {
-  // A frame the Pad capture opened to photograph a screen is not Tom reading
+  // A frame the Pad capture opened to photograph a screen is not the user reading
   // the chat (spec/14 § Pads — Capturing a screen).
   if (new URLSearchParams(window.location.search).has('capture')) return;
   try {

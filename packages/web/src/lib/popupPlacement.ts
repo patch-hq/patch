@@ -1,6 +1,6 @@
 // Popup placement — keep an anchored pop-up inside the space it actually has.
 //
-// Why this exists (Tom, `patch/todo.md` — "folder picker gets cut off by the
+// Why this exists (the user, `patch/todo.md` — "folder picker gets cut off by the
 // composer, cant reach browse or type a path"): the new-chat setup row sits low
 // in the chat window, and its pop-ups (folder picker, model picker) dropped
 // DOWNWARD into the narrow gap above the composer. The composer paints over

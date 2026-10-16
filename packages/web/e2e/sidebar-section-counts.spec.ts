@@ -85,7 +85,7 @@ test.describe('Sidebar section counts, icon row', () => {
   });
 
   test('a four-digit count is exactly what the tooltip reports, however long', async ({ page }) => {
-    // The pathological case: Tom archives constantly, so Archived is the
+    // The pathological case: the user archives constantly, so Archived is the
     // number that grows without bound. Nothing on the row can overflow —
     // there's no text on the row to push out — but the tooltip must still be
     // exactly right.
@@ -120,7 +120,7 @@ test.describe('Sidebar section counts, icon row', () => {
 
   test('the count refreshes when a chat is archived, without a reload', async ({ page }) => {
     // Freshness is the point: a total fetched once at boot is wrong the moment
-    // Tom archives anything, and a stale tooltip is worse than none because it
+    // the user archives anything, and a stale tooltip is worse than none because it
     // is confidently wrong. The refetch is driven off the chat store, so it
     // covers both the optimistic local update and the server's WS echo.
     let served = 0;
@@ -164,7 +164,7 @@ test.describe('Sidebar section counts, icon row', () => {
     // NO FALLBACK: `0` is a real value here (it is a section's whole empty
     // state), so a request that failed must not be rendered as one. No count
     // segment reads as "not known yet"; a `0` would read as "nothing in
-    // there" and is exactly what would stop Tom opening a full section.
+    // there" and is exactly what would stop the user opening a full section.
     await page.route('**/api/chats/counts', (route) => route.fulfill({ status: 500, body: '{}' }));
     await page.goto(HARNESS);
     await expect(page.getByTestId('sidebar')).toBeVisible();

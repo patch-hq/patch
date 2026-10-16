@@ -202,7 +202,7 @@ describe('DeliveryTracker (spec/12 § Guaranteed input delivery)', () => {
     send.mockClear();
 
     // Tap retry on the LAST one — L1 and L2, queued before it, must go too,
-    // not just L3 (Tom, Todoist — "sending a queued message should send all
+    // not just L3 (Todoist — "sending a queued message should send all
     // the previous messages too").
     t.retry('c1', 'L3');
 

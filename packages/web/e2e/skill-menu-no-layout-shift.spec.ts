@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Tom, Todoist: "patch skill window is causing the new chat stuff to bounce
+// Todoist: "patch skill window is causing the new chat stuff to bounce
 // around". The `/` skill list opened in normal flow above the input, so on the
 // new-chat screen it grew the composer and shoved the centred heading and chips
 // upward — and again every time the list filtered to a different height. The

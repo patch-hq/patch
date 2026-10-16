@@ -2,7 +2,7 @@
 // delivery tracker (companion to deliveryTracker.test.ts). Drives
 // pending → ack / timeout-redelivery / reconnect with mock timers.
 //
-// Tom, Todoist: "questions are timing out after I answer them" — these cover
+// Todoist: "questions are timing out after I answer them" — these cover
 // the exact hole that produced it: a `chat.permission_response` sent down a
 // socket that silently drops it (readyState lags a dead link) stays pending
 // and gets resent, rather than being lost with no trace until the host's
@@ -136,7 +136,7 @@ describe('PermissionDeliveryTracker', () => {
     expect(t.size()).toBe(0);
   });
 
-  // The failure Tom actually hit: the card greys out as though answered, the
+  // The failure the user actually hit: the card greys out as though answered, the
   // tracker retries into the void, and NOTHING says the daemon never heard it.
   // An answer that does not land must not be indistinguishable from one that
   // did (CLAUDE.md: no fallback — if something doesn't work we need to know).

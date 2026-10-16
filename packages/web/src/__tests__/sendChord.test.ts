@@ -1,6 +1,6 @@
 // spec/14 § Main chat panel — Question prompts, § Discoverability.
 //
-// Tom, App Updates: "patch show CMD + enter (or windows version) on the answer
+// App Updates: "patch show CMD + enter (or windows version) on the answer
 // question button, since enter is newline". The chord the card advertises has to
 // be the one the KEYBOARD has, so both branches are pinned here — and so is the
 // rule that an unreadable probe resolves to the PC naming rather than to

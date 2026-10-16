@@ -56,7 +56,7 @@ describe('DESKTOP-REVIEW styles', () => {
   // It is a FLEX row, not a grid. Grid could not express it: with `1fr auto 1fr`
   // the `auto` centre track sizes to the title's max-content and claims free
   // space before the `fr` tracks, so a long chat name overflowed its column and
-  // printed over the folder crumb once the editor rail narrowed the panel (Tom,
+  // printed over the folder crumb once the editor rail narrowed the panel (the user,
   // `patch/todo.md` — "folder crumb and chat title crash into each other when
   // the editor is open"). `minmax(0, auto)` does not help — the zero only sets
   // the base size, the growth limit is still max-content. Flex shrinking is what

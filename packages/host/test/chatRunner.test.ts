@@ -1464,7 +1464,7 @@ describe('Host ChatRunner', () => {
       expect(daemon.chatState.get(chatId)?.name).toBe('Title 1');
     });
 
-    // Regression: Tom reported that after adding a new Claude account, a
+    // Regression: the user reported that after adding a new Claude account, a
     // chat's main turn correctly authenticated as the new account, but a
     // background summariser fired for that same chat used a stale/default
     // account instead. Root cause: `generateTitle`/`generateStatus` were
@@ -1744,7 +1744,7 @@ describe('Host ChatRunner', () => {
     });
   });
 
-  // spec/09 § What the message says. Tom: "patch notify needs to take specific
+  // spec/09 § What the message says. User: "patch notify needs to take specific
   // text from the agent and use it. not just the starting message". The
   // settling `chat.state` carries the agent's own last words, so the server's
   // doorbell has real text on the frame it fires on — `statusSummary` above is

@@ -461,7 +461,7 @@ export function createArtifactWait(cfg: {
  * `applyUpdate` starting while the first was still installing raced the SAME
  * installer against itself: the second run's `bootout` tore down the service
  * the first had only just bootstrapped, right as it was starting it
- * (2026-09-28, Tom's Mac — a `kickstart` that found no such service in the
+ * (2026-09-28, the user's Mac — a `kickstart` that found no such service in the
  * gui/501 domain). Returns a function with `applyUpdate`'s own signature, so
  * every caller uses it exactly as they used `applyUpdate` directly.
  */

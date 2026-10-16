@@ -540,7 +540,7 @@ describe('integration: stopping a turn with nothing queued marks it stopped and 
       } as WireEvent);
     });
 
-    // Tom hits Stop.
+    // the user hits Stop.
     fireEvent.click(await screen.findByTestId('stop-btn'));
     expect(fake.outbound().some((e) => e.type === 'chat.stop_request')).toBe(true);
 

@@ -74,7 +74,7 @@ export const VERSION_REPORT = {
 };
 
 /**
- * The Pixel 7 descriptor (Tom's phone class), minus `defaultBrowserType`, which
+ * The Pixel 7 descriptor (the user's phone class), minus `defaultBrowserType`, which
  * a describe-level `test.use` may not set.
  */
 const { defaultBrowserType: _browser, ...pixel7 } = devices['Pixel 7'];

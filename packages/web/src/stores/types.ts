@@ -320,7 +320,7 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   if (row.activity === 'awaiting-permission') return 'permission';
   // A declared QUESTION (`patch_ask_human`) is the same fact as a permission
   // request — the agent is blocked on the user — even though nothing native is
-  // pending. Tom: "same difference as needs you." One badge, one colour, for
+  // pending. User: "same difference as needs you." One badge, one colour, for
   // both ways a chat can be paused on a person rather than a process.
   //
   // Gated on `statusDeclared`: a GENERATED `question` guess is not the agent
@@ -343,7 +343,7 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   // important fact.
   if (row.activity === 'errored' || row.status === 'errored') return 'errored';
   if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0) return 'working';
-  // Unread beats a still-running background job or self-wake loop (Tom: "unread
+  // Unread beats a still-running background job or self-wake loop (User: "unread
   // beats background always"). The chat HAS something new to look at — that is
   // the strongest true claim available, and it does not stop being true just
   // because the same chat also has other work in flight. Ranked here, above

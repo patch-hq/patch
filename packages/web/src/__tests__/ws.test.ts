@@ -1307,7 +1307,7 @@ describe('PatchWs dispatch — incoming call + chime', () => {
       ]);
 
       // The loudness assertion proper: peak gain is 0.06 and nothing louder.
-      // Tom reported the old 0.2 as too loud; a future bump must fail here.
+      // the user reported the old 0.2 as too loud; a future bump must fail here.
       const rampedTo = exponentialRampToValueAtTime.mock.calls.map((c) => c[0] as number);
       const peak = Math.max(...rampedTo);
       expect(peak).toBe(0.06);

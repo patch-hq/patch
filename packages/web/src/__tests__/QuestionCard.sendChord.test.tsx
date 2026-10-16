@@ -1,6 +1,6 @@
 // spec/14 § Main chat panel — Question prompts.
 //
-// Tom, App Updates: "patch show CMD + enter (or windows version) on the answer
+// App Updates: "patch show CMD + enter (or windows version) on the answer
 // question button, since enter is newline". The `Other` box is the one field in
 // the app where `↵` does NOT send, and the button said only "Send answer" — so
 // the send key was unguessable from the card. These pin that the button names

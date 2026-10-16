@@ -1,6 +1,6 @@
 // DesktopUpdateBanner — the shell has a newer build staged, and is waiting to
 // be asked. Worded identically to WebUpdateBanner ("Patch has updated" /
-// "Update Patch") so Tom sees one prompt, not two kinds; only the action
+// "Update Patch") so the user sees one prompt, not two kinds; only the action
 // differs (restart into the new shell vs reload the bundle).
 //
 // This replaces the shell restarting itself the instant a download finished.

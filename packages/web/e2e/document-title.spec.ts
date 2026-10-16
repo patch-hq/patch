@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// App Updates: "should show which workspace I am in somewhere" — Tom runs
+// App Updates: "should show which workspace I am in somewhere" — the user runs
 // several Patch windows/tabs at once, each on a different chat in a different
 // folder, and switches between them at the OS level (Cmd+` / Mission Control
 // / the Dock / browser tabs) where the in-page folder crumb is invisible.

@@ -2,7 +2,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 
 // spec/14 § Main chat panel — Question prompts: the countdown ring.
 //
-// Tom, App Updates: "patch should show a 1 minute timer on a question, slowly
+// App Updates: "patch should show a 1 minute timer on a question, slowly
 // going down, a circle pie chart thing. so the user knows when it expires."
 //
 // Proved in a real browser because the thing asked for is a DRAWN shape that

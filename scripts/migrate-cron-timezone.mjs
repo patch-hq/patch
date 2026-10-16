@@ -1,4 +1,4 @@
-// One-shot migration: name the zone Tom's pre-timezone cron jobs were always
+// One-shot migration: name the zone the user's pre-timezone cron jobs were always
 // written in.
 //
 // A cron trigger is evaluated in `trigger.timezone` and an ABSENT one means

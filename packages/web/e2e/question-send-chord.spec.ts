@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// spec/14 § Main chat panel — Question prompts. Tom, App Updates: "patch show
+// spec/14 § Main chat panel — Question prompts. App Updates: "patch show
 // CMD + enter (or windows version) on the answer question button, since enter
 // is newline".
 //

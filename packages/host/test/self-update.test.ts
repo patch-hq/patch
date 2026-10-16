@@ -204,7 +204,7 @@ describe('runDetached: the installer outlives the service it restarts', () => {
 
 // The wire event and the local control command are two independent doors onto
 // the same action, and clicking a button that gave no feedback is exactly the
-// kind of thing that gets clicked twice — reproduces 2026-09-28 (Tom's Mac),
+// kind of thing that gets clicked twice — reproduces 2026-09-28 (the user's Mac),
 // where the second run's own installer raced the first's.
 describe('createUpdateGate: concurrent callers join one attempt', () => {
   it('a second call while the first is in flight gets the SAME promise, not a second run', async () => {

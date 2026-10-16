@@ -1,5 +1,5 @@
 // openPadBesideChat — open a Pad in the pane directly to the left of its owning
-// chat (spec/14 § Pads — "A Pad opens beside its chat"), so Tom edits the design
+// chat (spec/14 § Pads — "A Pad opens beside its chat"), so the user edits the design
 // with the conversation that will act on it in view. The chat is opened first if
 // it is not already in the layout; a Pad that is already open is only focused.
 

@@ -4,7 +4,7 @@
 //
 // The VALUE sent on `chat.settings` is still the agent SDK's own mode id
 // (spec/02 § Permission mode) — only the words on screen are friendlier, as
-// Tom asked for on the phone. Each name says what the mode does to the next
+// the user asked for on the phone. Each name says what the mode does to the next
 // turn, so the list reads as a choice rather than a glossary.
 
 import { permissionModesFor, type PermissionMode } from '@patch/wire';

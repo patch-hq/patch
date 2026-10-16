@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
 
-// Tom, Todoist: "Patch new chat should only save if you type, empty chat
+// Todoist: "Patch new chat should only save if you type, empty chat
 // nothing". A new chat's header action (Editor) creates the chat before
 // anything is sent (spec/14 § Sidebar §8, create-then-act). Left without a
 // message sent or typed, that chat is deleted rather than staying in the list

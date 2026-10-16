@@ -464,7 +464,7 @@ describe('JobEditor — Model picker', () => {
 // The phone did not offer `script` at all, so opening a gate job on it — foreman,
 // photo-triage — showed the Recipient-chat picker and the command nowhere: the
 // bash that decides whether to spend a turn was unreadable and unchangeable from
-// the surface Tom has on him. spec/08 § Action — `script`.
+// the surface the user has on them. spec/08 § Action — `script`.
 describe('JobEditor — action type: script', () => {
   it('offers `run a command`, and choosing it shows Folder + Command, not Skill/Prompt', async () => {
     useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
@@ -564,7 +564,7 @@ describe('JobEditor — action type: script', () => {
 // spec/08 § Gate — a command asked before each fire that decides whether the
 // action runs. The phone must be able to read and change it: the gate holds the
 // hours a watcher keeps and the thresholds it uses, and those are exactly the
-// things Tom wants to adjust while away from the desk.
+// things the user wants to adjust while away from the desk.
 describe('JobEditor — the gate', () => {
   it('is off by default, and ticking it reveals the command and seeds from the action', async () => {
     useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });

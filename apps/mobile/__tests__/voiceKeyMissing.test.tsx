@@ -33,7 +33,7 @@ import { startVoiceNote } from '../src/lib/voiceNote';
 import { Composer } from '../src/components/Composer';
 import { useComposerDraftStore } from '../src/lib/composerDraft';
 
-// Tom's live config, 2026-09-24.
+// the user's live config, 2026-09-24.
 const TOMS_CONFIG: VoiceConfig = {
   dictation: { backend: 'gemini' },
   device: { backend: 'openai', layer: 'light', handoff: 'auto' },

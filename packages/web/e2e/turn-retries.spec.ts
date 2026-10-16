@@ -3,7 +3,7 @@ import type { WireEvent } from '@patch/wire';
 
 // spec/12 § A turn is owed until it settles.
 //
-// Tom's screenshot: ONE question drawn as three identical bubbles with a red
+// the user's screenshot: ONE question drawn as three identical bubbles with a red
 // "Connection to the host was lost" card between the first two, while the
 // chat underneath was still thinking. "this is a mess. the error should be
 // temporary, not there forever. subtle marker on hover below chat with the rest

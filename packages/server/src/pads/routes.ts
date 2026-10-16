@@ -17,7 +17,7 @@
 //
 // The editor and the design run same-origin with Patch: the editor reaches
 // into the design's document to edit it, which an opaque origin forbids. Pads
-// are authored by Tom's own agents, the same trust the standalone Pad had.
+// are authored by the user's own agents, the same trust the standalone Pad had.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import {

@@ -120,7 +120,7 @@ export function parseStoredAnswer(
  * request that becomes the card, the tool call once it is granted, and the
  * tool result echoing the answer back. Where the card was ANSWERED it already
  * shows the questions, the options, the selections and the outcome, so both
- * other rows are the same event told twice more — Tom: "askuserquestion shows
+ * other rows are the same event told twice more — User: "askuserquestion shows
  * as tool used and also the actual panel" (spec/14 § Main chat panel —
  * Question prompts).
  *

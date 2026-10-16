@@ -1,7 +1,7 @@
 // Mobile guaranteed permission/question-answer delivery tracker. Mirrors
 // packages/web/src/__tests__/permissionDeliveryTracker.test.ts.
 //
-// Tom, Todoist: "questions are timing out after I answer them" — a phone
+// Todoist: "questions are timing out after I answer them" — a phone
 // answering a question is the worst case for this: the tap usually happens
 // moments after the app is foregrounded from a push notification, exactly
 // when the socket is most likely to be mid-reconnect. These cover the exact

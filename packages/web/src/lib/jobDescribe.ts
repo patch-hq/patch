@@ -39,7 +39,7 @@ export function jobChatId(job: Job, latestRunChatId: string | undefined): string
 // The phrasing itself lives in `@patch/wire`'s `describeCron` — ONE describer,
 // shared with the web job editor and both mobile surfaces. There used to be
 // three of them and they had drifted: this one only understood a fixed minute
-// and hour, so 5 of the 16 distinct crons in Tom's live fleet (the 5-minute
+// and hour, so 5 of the 16 distinct crons in the user's live fleet (the 5-minute
 // tick, the every-4-hours deploy sweep, the 9am-10pm coach tick, the 7am-10pm
 // half-hourly watcher, the four-times-a-day catchup) rendered as raw cron.
 //

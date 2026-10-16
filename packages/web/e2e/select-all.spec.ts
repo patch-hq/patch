@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 // spec/14 § Reserved OS chords — ⌘A (⌃A on Linux/Windows) is select-all, and
-// the app must never take it over. Reported by Tom: "cmd + a does not select
+// the app must never take it over. Reported by User: "cmd + a does not select
 // all text" — the global shortcut hook was calling preventDefault() and
 // archiving the chat instead, so the transcript could not be selected/copied.
 //

@@ -224,7 +224,7 @@ export function runtimeTimeZone(): string {
  * when there is nothing worth saying.
  *
  * A schedule label like "weekdays at 9am" is a lie the moment the job's zone
- * and the reader's zone disagree — Tom's pre-timezone jobs read "9am" and
+ * and the reader's zone disagree — the user's pre-timezone jobs read "9am" and
  * fired at 10:00 BST. So the effective zone (`jobTimezone ?? 'UTC'`, the
  * server's own default per spec/08 § Cron) is named whenever it differs from
  * the viewer's, and omitted when it matches: a Europe/London job read from

@@ -4,7 +4,7 @@ import type { WireEvent } from '@patch/wire';
 
 // Real-browser e2e (dev harness, real ChatHeader + real CSS, no backend) for
 // the provider-switch confirmation (spec/04 § History): picking a model from
-// a different provider than the chat's current one shows a modal with Tom's
+// a different provider than the chat's current one shows a modal with the user's
 // exact copy before `chat.model_request` goes out. A same-provider change
 // never shows it. "Don't show again" persists as an account setting that
 // must survive across surfaces, so it round-trips through `/api/settings`.

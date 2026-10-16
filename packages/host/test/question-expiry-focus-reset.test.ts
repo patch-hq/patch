@@ -1,5 +1,5 @@
 // spec/02 § Questions are not approvals — a pending question's deadline is
-// reset by `chat.focus_change` (Tom, Todoist: "the question timer should
+// reset by `chat.focus_change` (Todoist: "the question timer should
 // reset when you view the chat, and then start again when unfocused"): every
 // edge that touches its chat, gained or lost, gives it a fresh full window.
 
@@ -73,7 +73,7 @@ describe('a question timer resets on chat.focus_change', () => {
       await vi.advanceTimersByTimeAsync(WINDOW_MS - 10_000);
       expect(response(events)).toBeUndefined();
 
-      // Tom opens the chat.
+      // the user opens the chat.
       daemon.noteChatFocus('surface-1', chatId);
 
       const updates = expiryUpdates(events);

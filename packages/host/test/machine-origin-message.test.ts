@@ -77,7 +77,7 @@ describe('machine-origin turn (spec/09 § Whose turn it was)', () => {
     const chatId = await daemon.spawnChat({ folder });
     await tick();
 
-    // Turn 1: Tom's own message — the chat is not fresh.
+    // Turn 1: the user's own message — the chat is not fresh.
     await daemon.sendInput({ chatId, message: 'watch this for me', localId: 'u1' });
     await tick();
     // Turn 2: the host firing into the SAME chat on its own behalf — exactly

@@ -680,7 +680,7 @@ describe('Settings → Voice', () => {
       usePreferencesStore.setState({
         preferences: {
           ...usePreferencesStore.getState().preferences,
-          // Tom's live config, 2026-09-24.
+          // the user's live config, 2026-09-24.
           voiceConfig: {
             dictation: { backend: 'gemini' },
             device: { backend: 'openai', layer: 'light', handoff: 'auto' },

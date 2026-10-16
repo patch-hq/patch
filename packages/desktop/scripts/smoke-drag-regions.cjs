@@ -13,7 +13,7 @@
 // A `no-drag` control that sits EARLIER in the DOM than a `drag` row painted
 // over the same pixels is therefore swallowed by it, whatever its z-index and
 // whatever `elementFromPoint` says. That is how the collapsed sidebar's expand
-// chevron went dead while every browser test of it passed (Tom, Todoist:
+// chevron went dead while every browser test of it passed (Todoist:
 // "patch expand sidebar doesnt work").
 //
 // So this opens the web dev harness in a frameless window — the Linux

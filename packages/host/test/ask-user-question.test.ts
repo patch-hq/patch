@@ -346,7 +346,7 @@ describe('AskUserQuestion: an unusable answer denies loudly, it never approves e
 
 describe('AskUserQuestion: an unanswered question expires', () => {
   it('expires the question instead of holding the turn open forever', async () => {
-    // Tom: "ask user question should have a timeout instead of just waiting
+    // User: "ask user question should have a timeout instead of just waiting
     // forever". A question is the one permission the user cannot leave — the
     // turn cannot proceed without it — so one asked while the phone is in a
     // pocket parks the chat indefinitely.

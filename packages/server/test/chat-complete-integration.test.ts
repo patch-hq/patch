@@ -77,7 +77,7 @@ describe('chat completion — real server, real desktop socket', () => {
       label: "Tom's Mac (desktop)",
       issuedAt: Math.floor(now / 1000),
     });
-    // A second desktop surface — e.g. Tom's other machine, or a second window —
+    // A second desktop surface — e.g. the user's other machine, or a second window —
     // used by the focused-chat suppression tests to prove the toast is withheld
     // from the ONE surface that has the chat open, not every desktop surface.
     registry.upsertSurface({
@@ -145,7 +145,7 @@ describe('chat completion — real server, real desktop socket', () => {
   /** Connect the desktop surface and wait until the server has greeted it. */
   /**
    * Connect the Mac's desktop surface. `idleMs` is the `surface.input` it
-   * reports — how long since Tom last touched the machine — or null for a
+   * reports — how long since the user last touched the machine — or null for a
    * shell that has reported nothing yet.
    */
   async function connectDesktop(
@@ -232,7 +232,7 @@ describe('chat completion — real server, real desktop socket', () => {
     expect(notify.chatId).toBe('c1');
     expect(notify.message).toBe('bed planner finished: planted the beds');
 
-    // The Mac reported input a moment ago, so Tom is at the computer and the
+    // The Mac reported input a moment ago, so the user is at the computer and the
     // phone is left alone.
     expect(pushed).toHaveLength(0);
   });
@@ -268,7 +268,7 @@ describe('chat completion — real server, real desktop socket', () => {
     expect(pushed[0]?.payload.body).toBe('bed planner finished: planted the beds');
   });
 
-  // spec/09 § What the message says — Tom: "patch notify needs to take specific
+  // spec/09 § What the message says — User: "patch notify needs to take specific
   // text from the agent and use it. not just the starting message". The whole
   // path, through the real router: the agent's own closing words on the
   // settling frame reach both the desktop toast and the phone's push body,

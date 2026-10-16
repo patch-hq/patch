@@ -1,6 +1,6 @@
 // spec/05 § Desktop packaging (Electron) → Window chrome. The main window and
 // every child window drop the native title bar so the SPA reaches the top edge
-// (Tom, App Updates: "clean at top, no patch top bar"), and the renderer keeps
+// (App Updates: "clean at top, no patch top bar"), and the renderer keeps
 // the traffic lights' strip clear.
 
 import { test } from 'node:test';
@@ -88,7 +88,7 @@ test("the window controls sit on the brand row's centre-line, not above it", () 
 test('the stylesheet knows where the lights end, not just where they centre', () => {
   // A banner sized only against the centre-line can still fall short of the
   // lights' BOTTOM edge and cut them at the seam with whatever renders next
-  // (Tom, App Updates: "window controls are overlapped by the green banner").
+  // (App Updates: "window controls are overlapped by the green banner").
   // This is the number that guards against that regression.
   const css = readCss();
   const declared = /--overlay-titlebar-lights-bottom:\s*(\d+)px/.exec(css);

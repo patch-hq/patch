@@ -1,7 +1,7 @@
 // Pads — the host half (spec/14 § Pads).
 //
 // The agent's `patch_pad_*` tools run here, where the design's files are. The
-// server owns the Pad (its screens, Tom's changes, the pictures), so a create or
+// server owns the Pad (its screens, the user's changes, the pictures), so a create or
 // an update ships the folder's files over `patch.pad.request` and parks the
 // promise until `patch.pad.response` comes back — same shape as
 // `ArtifactPublisher`. NO FALLBACK: a path outside the chat folder, an empty

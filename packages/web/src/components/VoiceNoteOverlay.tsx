@@ -30,7 +30,7 @@ export function VoiceNoteOverlay(): JSX.Element | null {
   if (!note) return null;
   // Web records the whole clip and uploads it on commit, so no words arrive
   // while the user is still speaking: an unchanging `…` is indistinguishable
-  // from a dead mic (Tom — "voice note … does not record"). Until there IS a
+  // from a dead mic (the user — "voice note … does not record"). Until there IS a
   // transcript, the same single line tracks the mic level instead (spec/07).
   const level = note.transcript ? 0 : levelBucket(note.level);
   return (

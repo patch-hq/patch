@@ -72,7 +72,7 @@ const state = (chatId: string, over: Record<string, unknown>): WireEvent =>
     ...over,
   }) as WireEvent;
 
-/** Every way a chat can try to reach Tom, in the order a host emits them. */
+/** Every way a chat can try to reach the user, in the order a host emits them. */
 function everything(link: InProcessHostLink, chatId: string, over: Record<string, unknown>): void {
   // Permission block.
   link.emit(state(chatId, { activity: 'running', ...over }));

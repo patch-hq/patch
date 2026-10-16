@@ -1,6 +1,6 @@
 // spec/14 § Main chat panel — Question prompts.
 //
-// Tom, App Updates: "patch multi select for questions is not clear". A
+// App Updates: "patch multi select for questions is not clear". A
 // `multiSelect: true` question drew exactly like a single-select one — the same
 // outlined rows, the difference carried only by `role` and by what clicking a
 // second option did. A screen reader was told; a sighted user was not, so the

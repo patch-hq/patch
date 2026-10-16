@@ -1,6 +1,6 @@
 // Right-click menu on a sidebar chat row (spec/14 § Row context menu).
 //
-// Tom: "patch add a right click context menu on a sidebar chat, for things like
+// User: "patch add a right click context menu on a sidebar chat, for things like
 // archive". Archiving already worked from the hover tool — what was missing was
 // the affordance, so these tests assert the menu reaches the SAME actions the
 // row and the chat header already have, and that it opens, closes and is

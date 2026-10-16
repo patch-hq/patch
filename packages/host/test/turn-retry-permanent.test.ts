@@ -6,7 +6,7 @@
 // ladder re-enters `sendInput` on 10s/30s/90s. Both go through `runQuery`, which
 // emits a fresh user `chat.message` at a fresh seq — so before this, one
 // question that recovered twice reached the surfaces as three identical user
-// messages. Tom photographed exactly that: "the human message shouldnt be
+// messages. the user photographed exactly that: "the human message shouldnt be
 // repeated."
 //
 // `retryOfSeq` carries the ORIGINAL user message's seq on every attempt, so a

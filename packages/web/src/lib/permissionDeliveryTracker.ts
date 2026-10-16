@@ -2,7 +2,7 @@
 // deliveryTracker.ts's guaranteed input delivery (spec/12), for the OTHER
 // direction of traffic that used to be fire-and-forget.
 //
-// Tom, Todoist: "questions are timing out after I answer them". A
+// Todoist: "questions are timing out after I answer them". A
 // `chat.permission_response` sent down a socket whose `readyState` still
 // reports OPEN but is actually dead (the zombie-link window ws.ts's heartbeat
 // exists to close — up to 30s before it forces a reconnect) is simply lost:
@@ -23,7 +23,7 @@
 // no announcement. But silence was the whole failure mode when it does NOT
 // land — the card greys out as though answered, the tracker retries into the
 // void forever, and nothing on screen or in any log distinguishes an answer
-// the daemon acted on from one it never received. Tom: "it submits, goes grey,
+// the daemon acted on from one it never received. User: "it submits, goes grey,
 // then nothing." A pending response that stays unacked past
 // `PERMISSION_DELIVERY_WARN_AFTER_MS` therefore says so, with a retry, and
 // says so again when it finally gets through — otherwise the optimistic
@@ -33,7 +33,7 @@
 // breaks it. Forensics on chat 01M4AWWG59CJCE8DTBK903WCX7: a question was
 // asked at 10:04:52 and the patch SERVER — the relay between surface and
 // daemon — was redeployed at 10:12:19 (0.1.1507) and restarted again at
-// 10:30:46, both inside the window Tom answered in. The desktop app loads its
+// 10:30:46, both inside the window the user answered in. The desktop app loads its
 // bundle from that server, so a deploy drops the link and reloads the
 // renderer; the pending map went with it, and the answer was gone with no
 // trace on any machine, no retry possible, and nothing to warn about because

@@ -1,4 +1,4 @@
-// spec/02 § Permission mode — the label is the id, made readable. Tom, Patch
+// spec/02 § Permission mode — the label is the id, made readable. the user, Patch
 // Updates: "have nice names for bypassPermissions, like Bypass permissions etc".
 
 import { describe, it, expect } from 'vitest';

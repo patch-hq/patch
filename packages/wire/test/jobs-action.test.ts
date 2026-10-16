@@ -20,7 +20,7 @@ import { PermissionMode } from '../src/events.js';
  * `ContinueAction` EXACTLY as it stood before `startHidden` was added to it — i.e. what
  * a host still running the previous host build parses job payloads with.
  * Hosts OTA their host separately from the server, so that host is live for
- * as long as it takes Tom's machine to update, and it is `.strict()`: an unknown
+ * as long as it takes the user's machine to update, and it is `.strict()`: an unknown
  * key is a 400, not a warning. Frozen here on purpose — do NOT re-derive it from
  * the current schema, which would make the test assert nothing.
  */
@@ -206,7 +206,7 @@ describe('JobAction.startHidden', () => {
   });
 
   // WIRE COMPATIBILITY. Both actions are `.strict()`, and a host OTAs its
-  // host separately from the server it talks to — so for a while Tom's host
+  // host separately from the server it talks to — so for a while the user's host
   // parses job payloads with an `ContinueAction` that has never heard of
   // `hidden`, and a strict schema 400s on an unknown key. An untouched job must
   // therefore serialise EXACTLY as it did before this field existed: the field

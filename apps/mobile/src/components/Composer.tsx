@@ -58,7 +58,7 @@
 // failure (`Not uploaded`, Retry / ×) and all — lives in lib/sendQueue.ts, not
 // here, so it survives this composer unmounting.
 //
-// The action row, left to right (spec/15 § Composer — Tom's layout):
+// The action row, left to right (spec/15 § Composer — the user's layout):
 //   [camera][image][file][mic] … [model pill][padlock][Send | Stop]
 // The model pill names the model the NEXT message runs on and changes it with
 // the same `chat.model_request` web's header crumb sends. The padlock is the
@@ -1446,7 +1446,7 @@ export function Composer({
           // While a dictation is running the input is painted over by the
           // mirror above, and the placeholder — drawn by the TextInput, in the
           // same box — renders THROUGH it on an empty draft, so the two
-          // strings sit on top of each other (Tom, Todoist 6hVPGMcWfgcW6256:
+          // strings sit on top of each other (Todoist 6hVPGMcWfgcW6256:
           // "when voice note is recording, placeholder should disappear, its
           // writing on top"). Nothing about an empty input needs naming while
           // the user is talking into it.

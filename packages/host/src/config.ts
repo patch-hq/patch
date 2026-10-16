@@ -27,7 +27,7 @@ function bundledVadModelPath(): string | undefined {
  * What a new machine is called until someone renames it (spec/02 § Host
  * identity). A Mac's network hostname is a mangled, numbered copy of its name
  * (`Toms-MacBook-Pro-7.local`), so a Mac reports the name its owner gave it in
- * Sharing settings ("Tom's MacBook Pro"). Anywhere else it is the hostname
+ * Sharing settings ("the user's MacBook Pro"). Anywhere else it is the hostname
  * without a domain.
  */
 export function defaultHostName(

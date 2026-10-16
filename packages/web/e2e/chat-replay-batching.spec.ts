@@ -1,4 +1,4 @@
-// Tom: "the way that conversations load — it loads the first message and loads
+// User: "the way that conversations load — it loads the first message and loads
 // them one [at a time] which results in an incredibly irritating way of looking
 // at it and it's very slow as well ... [it should] load from the last message
 // up so that there's no visual glitch and not load one message at a time which
@@ -13,7 +13,7 @@
 //
 // The coalescing itself is unit-tested (a burst of frames becomes ONE store
 // commit — src/__tests__/ws.test.ts, and applyEvents in chatStore.test.ts).
-// What only a real browser can show is the consequence Tom actually sees: a
+// What only a real browser can show is the consequence the user actually sees: a
 // cold-opened chat is anchored at its NEWEST message and stays there while the
 // rest of the transcript lands, rather than stranding at the top of history.
 //

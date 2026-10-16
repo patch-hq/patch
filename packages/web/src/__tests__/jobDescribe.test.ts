@@ -32,7 +32,7 @@ describe('describeCron', () => {
     expect(describeCron('0 12 * * *')).toBe('every day at 12pm');
   });
   // These used to be the list's whole blind spot — 5 of the 16 distinct crons
-  // in Tom's live fleet rendered as `cron · <expr>` because the local describer
+  // in the user's live fleet rendered as `cron · <expr>` because the local describer
   // only understood a fixed minute + hour. They are phrased now.
   it('renders the interval and windowed shapes that used to fall back', () => {
     expect(describeCron('*/5 * * * *')).toBe('every 5 minutes');
@@ -172,7 +172,7 @@ describe('action verb + target', () => {
 });
 
 // spec/14 § Jobs view — the schedule label names the zone it runs in whenever
-// that is not the reader's own. Tom's jobs read "9am" on the row and fired at
+// that is not the reader's own. the user's jobs read "9am" on the row and fired at
 // 10:00 BST; a bare cron field rendering cannot say which of the two it means.
 describe('describeTrigger — cron zone', () => {
   it('adds nothing when the job runs in the viewer\u2019s own zone', () => {

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Todoist: "delete button has wrong z index." What Tom saw was the header's
+// Todoist: "delete button has wrong z index." What the user saw was the header's
 // own bottom border (and the chat behind it) painting straight through the
 // `⋯` overflow menu and the snooze menu — both used the CSS custom property
 // `--bg`, which isn't a token this app defines (`--bg-app` / `--bg-panel` /

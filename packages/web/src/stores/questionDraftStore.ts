@@ -10,7 +10,7 @@
 // Every one of those silently emptied the form. Worse than losing a selection,
 // it loses the SUBMIT: "Submit is disabled until every question has an answer"
 // (spec/14), so a card that reset itself sits there looking answerable with a
-// dead Send answer button, and the agent is still waiting (Tom: "i answer and
+// dead Send answer button, and the agent is still waiting (User: "i answer and
 // it never gets to the chat. on returning, the form is reset").
 //
 // LOCAL ONLY, unlike `composerDraftStore.ts` which is server-owned. A composer

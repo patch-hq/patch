@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { PIXEL_7, stubSettingsApi } from './settingsHarness.js';
 
-// Tom, Todoist: "patch job back page only goes back to jobs instead of where
+// Todoist: "patch job back page only goes back to jobs instead of where
 // you actually were. check all back buttons". A page's own Back control steps
 // back through the history the user actually took, and only goes to the page's
 // parent when there is nothing earlier to return to (spec/14 § Layout —

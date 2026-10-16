@@ -6,7 +6,7 @@
 // becomes "Bypass permissions", not "YOLO": an invented word would mean the
 // user picks one thing and the model is told another, which is why the earlier
 // friendly names were removed (ab57424). This is the readable middle ground
-// Tom asked for ("have nice names for bypassPermissions, like Bypass
+// the user asked for ("have nice names for bypassPermissions, like Bypass
 // permissions etc") — nothing here renames a mode, it just stops shouting
 // camelCase at him.
 

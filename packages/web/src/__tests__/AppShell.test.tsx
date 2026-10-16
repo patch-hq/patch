@@ -738,7 +738,7 @@ describe('AppShell', () => {
     document.body.removeChild(input);
   });
 
-  // Tom, patch/todo.md — "voice note … cannot be ended or cancelled". The
+  // the user, patch/todo.md — "voice note … cannot be ended or cancelled". The
   // overlay has no controls of its own, so ⏎/esc are the ONLY way out; bailing
   // on a focused field (the new-chat flow lands the caret in the composer) left
   // the note stuck on screen forever. spec/07: an in-flight note owns both keys
@@ -853,7 +853,7 @@ describe('AppShell', () => {
     expect(useUiStore.getState().sidebarCollapsed).toBe(true);
   });
 
-  // Tom, Todoist: "patch expand sidebar doesnt work". On the desktop overlay
+  // Todoist: "patch expand sidebar doesnt work". On the desktop overlay
   // title bar the chevron is a no-drag hole inside `.chat-head`'s drag region,
   // and Electron folds app regions in DOCUMENT order — a hole earlier in the
   // document than the drag rect over it is swallowed (spec/05 § Window chrome).
@@ -1263,7 +1263,7 @@ describe('AppShell', () => {
     });
   });
 
-  // REGRESSION (Tom — "⌘; errors with transcription failed, stops immediately"):
+  // REGRESSION (the user — "⌘; errors with transcription failed, stops immediately"):
   // the release used to commit unconditionally, so a chord held for a few
   // milliseconds uploaded a clip no longer than the keypress and the note died
   // on a failed transcription. The release now carries how long the key was
@@ -1414,7 +1414,7 @@ describe('AppShell', () => {
   });
 
   it('FileEditorTab send: a permission ws.send failure is held for redelivery, not surfaced as an error', async () => {
-    // Tom, Todoist: "questions are timing out after I answer them" — see
+    // Todoist: "questions are timing out after I answer them" — see
     // permissionDeliveryTracker.ts. A file tab's Approve/Deny is exposed to
     // the same silently-dropped send as the inline card and the voice banner.
     await renderShell('/chats/c-sendfail', [makeRow('c-sendfail')]);
@@ -1579,7 +1579,7 @@ describe('AppShell', () => {
   });
 
   it('a voice-permission ws.send failure still resolves the card and holds the response for redelivery', async () => {
-    // Tom, Todoist: "questions are timing out after I answer them" — a send
+    // Todoist: "questions are timing out after I answer them" — a send
     // that fails at the moment of the tap used to block resolution and
     // surface an error the user could do nothing useful with. It now
     // resolves like any other answer and lets `permissionDeliveryTracker`

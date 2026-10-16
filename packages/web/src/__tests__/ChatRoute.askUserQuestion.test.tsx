@@ -287,7 +287,7 @@ describe('AskUserQuestion card', () => {
     expect(sentFrames(send)[0]?.['editedNewString']).toBe(JSON.stringify({ [LIB_Q]: 'Other' }));
   });
 
-  // Tom, App Updates: "patch other input box, does nothing on enter. should add
+  // App Updates: "patch other input box, does nothing on enter. should add
   // a new line. shift/cmd enter should send it". The Other box is the one place
   // in the app a LONGER free-text answer gets typed, so its Enter mapping is the
   // deliberate INVERSE of the composer's (spec/14 § Main chat panel — Question
@@ -427,7 +427,7 @@ describe('AskUserQuestion card', () => {
     );
   });
 
-  // Tom, App Updates: "when answering a qusetion, clicking other must focus
+  // App Updates: "when answering a qusetion, clicking other must focus
   // input". Choosing `Other` used to reveal the box and leave the cursor on the
   // button, so typing an answer cost a second click. The box is mounted BY the
   // click that reveals it, so mount-time focus is the whole fix — and it is
@@ -713,7 +713,7 @@ describe('AskUserQuestion card', () => {
   // timeline key does the same. Selections lived only in the component, so an
   // open card came back blank; and because Send answer is disabled until every
   // question has an answer (spec/14), a card that emptied itself could not be
-  // submitted AT ALL (Tom: "i answer and it never gets to the chat. on
+  // submitted AT ALL (User: "i answer and it never gets to the chat. on
   // returning, the form is reset").
   describe('an unanswered card keeps what was picked across a remount', () => {
     /** What leaving the chat and coming back does: a fresh component instance
@@ -917,7 +917,7 @@ describe('AskUserQuestion tool rows', () => {
   afterEach(() => cleanup());
 
   it('renders the card alone — the call and result would repeat it', () => {
-    // Tom: "askuserquestion shows as tool used and also the actual panel".
+    // User: "askuserquestion shows as tool used and also the actual panel".
     seedChat('c-q-rows', [
       { ...questionEntry('req-rows', libraryArgs), permissionResolved: 'approve' },
       { seq: 2, kind: 'tool_call', tool: 'AskUserQuestion', callId: 'x1', at: 0 },

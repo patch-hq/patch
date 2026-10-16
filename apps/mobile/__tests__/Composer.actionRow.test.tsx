@@ -1,4 +1,4 @@
-// The composer action row Tom settled on (spec/15 § Composer):
+// The composer action row the user settled on (spec/15 § Composer):
 //   [camera][image][file][mic] … [model pill][padlock][Send | Stop]
 // Pins:
 //   - the order, with the flexible spacer between the mic and the model pill

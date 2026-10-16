@@ -257,7 +257,7 @@ describe('message queueing (spec/04)', () => {
   it('announces the stop BEFORE the promoted turn is announced as running', async () => {
     // spec/14 § Running-turn controls. `chat.stopped` carries no localId, so the
     // surface pins it on the newest user turn that is no longer queued. Emitted
-    // after `chat.dequeued{running}`, that is the turn which just STARTED — Tom
+    // after `chat.dequeued{running}`, that is the turn which just STARTED — the user
     // saw his own live message stamped `Cancelled — turn stopped`, while the
     // turn actually interrupted got no label. Ordering is the whole fix, so it
     // is what this asserts.
@@ -589,7 +589,7 @@ describe('message queueing (spec/04)', () => {
     expect((settled('L3')[0] as { reason: string }).reason).toBe('cancelled');
   });
 
-  // Tom: "sending a completion notification when a turn is ended via
+  // User: "sending a completion notification when a turn is ended via
   // interruption of a new message instead of actually getting to the end".
   // A promote is a stop the queue DOES resolve — `promoteInput` interrupts the
   // in-flight turn precisely BECAUSE there is a queued turn waiting to run, and
@@ -693,7 +693,7 @@ describe('message queueing (spec/04)', () => {
   });
 
   // Preserved behaviour: a BARE stop — the user pressed stop with nothing queued
-  // behind it — still settles the chat to idle immediately. Tom's report is
+  // behind it — still settles the chat to idle immediately. the user's report is
   // specifically about interruption-by-new-message; a stop with an empty queue
   // has no turn to hand `running` on to, and the composer must reopen.
   it('a user stop still settles the chat to idle', async () => {
@@ -744,7 +744,7 @@ describe('message queueing (spec/04)', () => {
 });
 
 // ===========================================================================
-// Tom, Todoist 6hRRvVhx8v6wVvwc: "stop should stop the ai response. not cancel
+// Todoist 6hRRvVhx8v6wVvwc: "stop should stop the ai response. not cancel
 // any pending messages. they go through".
 //
 // The drain has always behaved: `stopChat` aborts only the in-flight turn's

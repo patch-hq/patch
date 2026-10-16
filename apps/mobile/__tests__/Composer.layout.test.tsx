@@ -149,7 +149,7 @@ describe('Composer — two-row layout', () => {
     expect(contains(actionsRow, send)).toBe(true);
   });
 
-  // Tom, 9 Oct 2026 (Todoist 6hj4XqwVpJGJWHH6): the row read as crowded — the
+  // the user, 9 Oct 2026 (Todoist 6hj4XqwVpJGJWHH6): the row read as crowded — the
   // model pill and the account label touched. Same controls, more air.
   it('spaces the actions row so the controls do not touch', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
@@ -198,7 +198,7 @@ describe('Composer — the input grows with its content', () => {
       maxHeight: COMPOSER_MAX_HEIGHT,
     });
     // The cap has to be worth having: 120 stopped the field at about four
-    // lines of 16px type, which is where Tom's messages were being hidden
+    // lines of 16px type, which is where the user's messages were being hidden
     // ("need to be able to expand text box upwards if its long").
     expect(COMPOSER_MAX_HEIGHT).toBeGreaterThanOrEqual(200);
     // ...and it must still be a cap, so a long paste cannot take the screen.

@@ -256,7 +256,7 @@ describe('Voice (per-surface config matrix)', () => {
   });
 
   it('a hosted cell names each host with no key for it as not configured there', () => {
-    // Tom's live config, 2026-09-24, on a host holding neither key.
+    // the user's live config, 2026-09-24, on a host holding neither key.
     reportHost('hetzner', { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } });
     reportHost('home', {
       hostName: 'laptop',

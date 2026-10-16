@@ -42,7 +42,7 @@ export function StatusBadge({
   const title = BADGE_TITLE[badge];
   if (badge === 'read') {
     // B4 (DESKTOP-REVIEW): a drawn tick, not the blunt `✓` text character.
-    // Tom: "tick is fine, just a nicer one" — a circled check reads as more
+    // User: "tick is fine, just a nicer one" — a circled check reads as more
     // finished/polished at sidebar size than the bare double-line glyph did.
     return (
       <span className="badge badge-read" data-testid="badge-read" aria-label="read" title={title}>
@@ -59,7 +59,7 @@ export function StatusBadge({
     // fight for the same attention, which is the opposite of what a calm,
     // easy-to-ignore-until-it-matters status needs. Grey, like `read`, but a
     // distinct shape so it never reads as "nothing to do here". A terminal
-    // glyph, not a cog: Tom — "cog isn't right either, that's settings";
+    // glyph, not a cog: the user — "cog isn't right either, that's settings";
     // this is a command/process actually running, not configuration, and
     // not the agent reasoning (no AI/sparkle imagery) — just a mechanical
     // process turning over.
@@ -80,13 +80,13 @@ export function StatusBadge({
     // own. Distinct from `background` (an actual process running) even though
     // both are grey and static.
     //
-    // A plain Clock, not WakeBar's `AlarmClock` — Tom: "alarm is for wake, we
+    // A plain Clock, not WakeBar's `AlarmClock` — User: "alarm is for wake, we
     // had another one that was better for monitor." The two glyphs now split
     // by what they're attached to, not by a blanket consistency rule: WakeBar
     // is the ACTIVE countdown bar (an alarm about to go off), this badge is
     // the calm at-rest sidebar signal that one is armed somewhere. The hover
     // title still mirrors WakeBar's live countdown text ("wakes in 3m") rather
-    // than the static "Monitoring" label every other state gets, per Tom —
+    // than the static "Monitoring" label every other state gets, per the user —
     // "hover to see how long until wake".
     return <MonitoringBadge title={title} pendingWake={pendingWake} />;
   }

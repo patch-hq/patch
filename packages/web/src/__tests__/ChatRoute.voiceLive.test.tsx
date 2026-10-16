@@ -1,4 +1,4 @@
-// Todo (Tom, patch/todo.md — "Voice message should appear live."): when a voice
+// Todo (the user, patch/todo.md — "Voice message should appear live."): when a voice
 // note is committed, its bubble must appear in the chat timeline the INSTANT the
 // user finishes speaking — in a live "Transcribing…" state — instead of only
 // popping in after the upload + Whisper round-trip completes (a long dead gap on

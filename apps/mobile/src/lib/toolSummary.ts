@@ -276,7 +276,7 @@ export function pairedResult(timeline: ChatEventEntry[], i: number): ChatEventEn
  * Fold each maximal consecutive run of groupable tool entries making MORE than
  * one call into a single row. Keys carry the entry's real index so they stay
  * unique when two entries share a seq (an optimistic entry and its echo). A
- * run of exactly one call folds its own result into the same row instead (Tom,
+ * run of exactly one call folds its own result into the same row instead (the user,
  * via screenshot: a lone call still rendered as two rows — "tool call appears
  * twice", the bug web already fixed) rather than leaving that result to be
  * emitted as its own row on the next iteration.

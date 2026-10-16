@@ -902,7 +902,7 @@ describe('serverLink', () => {
     });
   });
 
-  // 2026-09-30, Tom's Mac: `patch_artifact` failed twice in a row with
+  // 2026-09-30, the user's Mac: `patch_artifact` failed twice in a row with
   // `artifact publish timed out after 15000ms` — the host's `linkOnline`
   // flag read true while the actual socket had gone half-open (laptop sleep/
   // network switch), so every RPC sent into it just hung until its OWN

@@ -252,7 +252,7 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   // The hold still ends when you REPLY, not only when you navigate away.
   // Waiting for `activeChatId` to change meant the last chat in the queue
   // could never leave it: you answered it, it went back to `working`, and it
-  // sat there as the only row with nothing to replace it (Tom, Patch
+  // sat there as the only row with nothing to replace it (the user, Patch
   // Updates — "it should auto hide the current chat if you send a message
   // and it no longer passes filter. otherwise its stuck there as last
   // chat"). A send puts the chat into `running` (badge `working`), which is
@@ -999,7 +999,7 @@ function RegularSidebar({
 function BottomNav(): JSX.Element {
   const location = useLocation();
   const onPads = location.pathname.startsWith('/pads');
-  // Changes Tom has made on Pads and not yet sent — what the row's count shows.
+  // Changes the user has made on Pads and not yet sent — what the row's count shows.
   const pads = usePadsStore((s) => s.pads);
   useEffect(() => startPadsPolling(15_000), []);
   const pending = (pads ?? []).reduce((n, p) => n + p.pending, 0);

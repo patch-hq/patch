@@ -68,7 +68,7 @@ describe('deriveBadge — an idle chat with background work is not a finished on
 
   it('unread beats background, always — there is something new to look at regardless', () => {
     expect(deriveBadge(row({ lastSeq: 9, lastReadSeq: 1 }))).toBe('done');
-    // Tom: "unread > background always" — a background job still running does
+    // User: "unread > background always" — a background job still running does
     // not make the unread output any less unread.
     expect(deriveBadge(row({ lastSeq: 9, lastReadSeq: 1, backgroundTasks: 2 }))).toBe('done');
   });

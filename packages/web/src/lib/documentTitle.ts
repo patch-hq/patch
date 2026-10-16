@@ -1,6 +1,6 @@
 // documentTitle — keep the OS-level window/tab title in sync with the active
 // chat's workspace (App Updates: "should show which workspace I am in
-// somewhere"). Tom regularly has several Patch windows/tabs open at once, each
+// somewhere"). the user regularly has several Patch windows/tabs open at once, each
 // on a different chat in a different folder, and switches between them via
 // Cmd+` / Mission Control / the Dock / browser tabs — none of which show the
 // small mono folder crumb ChatHeader draws inside the page. `document.title`

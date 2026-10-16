@@ -4,7 +4,7 @@
 // A long chat is the normal case and an assistant turn streams in one
 // `chat.message_delta` per token. If a delta re-renders every entry in the
 // transcript, the page gets progressively slower the longer the chat is —
-// Tom's "Chat page slow" (patch/todo.md).
+// the user's "Chat page slow" (patch/todo.md).
 //
 // The probe: `Markdown` is mocked with a counting stub, so each call is one
 // transcript-entry render. Applying a delta that touches exactly ONE entry

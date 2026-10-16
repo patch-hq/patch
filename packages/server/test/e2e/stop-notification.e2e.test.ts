@@ -10,7 +10,7 @@
 //
 // Unit tests cover each half against a hand-built frame stream, so a host that
 // stopped stamping the field (or a server reading the wrong one) would leave
-// both suites green and put the push back on Tom's phone. This drives the REAL
+// both suites green and put the push back on the user's phone. This drives the REAL
 // server + REAL host over the REAL WebSocket link and watches what the
 // notification router is actually asked to send.
 
@@ -63,7 +63,7 @@ describe('e2e: a stopped chat is silent, the turn after it is not', () => {
       states.filter((e) => e.type === 'chat.state' && e.chatId === chatId && e.activity === 'idle')
         .length;
 
-    // ---- Tom sends a turn, then stops it.
+    // ---- the user sends a turn, then stops it.
     client.sendInput({ chatId, message: 'a long turn', localId: 'L1' });
     await until(
       () =>
@@ -90,7 +90,7 @@ describe('e2e: a stopped chat is silent, the turn after it is not', () => {
     expect((settled.at(-1) as { turnStopped?: boolean }).turnStopped).toBe(true);
     expect(raised.filter((n) => n.chatId === chatId)).toEqual([]);
 
-    // ---- Tom sends another turn and lets it finish. The chat is not silenced.
+    // ---- the user sends another turn and lets it finish. The chat is not silenced.
     const idlesAfterStop = idles();
     client.sendInput({ chatId, message: 'and now finish', localId: 'L2' });
     await until(() => idles() > idlesAfterStop, 8000, 'the second turn settled');

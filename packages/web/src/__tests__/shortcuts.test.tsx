@@ -371,7 +371,7 @@ describe('useShortcuts — chat-view scope', () => {
 
   // The job editor's prompt field is a plain `<textarea>` on a non-chat
   // route — doubly excluded (wrong view AND a text field) — but the concrete
-  // case Tom hit is enough on its own: ⌘↑ there must move the caret, not step
+  // case the user hit is enough on its own: ⌘↑ there must move the caret, not step
   // chats.
   it('⌘↑ in a job-editor-shaped prompt field moves the caret and does not navigate (not a chat view)', () => {
     renderWithScope(false);

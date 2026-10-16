@@ -551,7 +551,7 @@ export function foregroundPackage(dump) {
  *
  * A physical device is never a candidate, even when it is the only thing
  * attached: this harness uninstalls the app, reinstalls it and taps its way
- * through it, and the phone on the other end of that cable is the one Tom
+ * through it, and the phone on the other end of that cable is the one the user
  * carries. It is not a fallback — it is the thing we are avoiding.
  */
 async function device(avd) {

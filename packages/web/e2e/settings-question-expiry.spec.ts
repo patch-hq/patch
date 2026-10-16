@@ -5,7 +5,7 @@ import { settingsUrl, stubSettingsApi, wsSent } from './settingsHarness.js';
 // details, spec/02 § Questions are not approvals): whether an unanswered
 // question on a host expires, and the window it gets.
 //
-// Tom, App Updates: "settings should have the configured time + whether feature
+// App Updates: "settings should have the configured time + whether feature
 // is on to auto expire questions".
 //
 // Measured on computed style and geometry as well as on behaviour, deliberately.

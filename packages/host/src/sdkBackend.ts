@@ -1018,7 +1018,7 @@ function buildSdkEnv(opts: SdkRunOptions): {
   delete env['ANTHROPIC_API_KEY'];
   env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
   // The chat's own shell commands learn which chat they are in (e.g. `pad
-  // publish` sends Tom's edits back here). Only this run's id: never one
+  // publish` sends the user's edits back here). Only this run's id: never one
   // inherited from whatever launched the host.
   delete env['PATCH_CHAT_ID'];
   if (opts.chatId !== undefined) env['PATCH_CHAT_ID'] = opts.chatId;
@@ -1092,7 +1092,7 @@ function buildSdkEnv(opts: SdkRunOptions): {
  * spawns the command directly, holds a real pid, and re-attaches across a
  * restart.
  *
- * `PushNotification` delivers to Claude's own companion app, which Tom does
+ * `PushNotification` delivers to Claude's own companion app, which the user does
  * not use — never to the user's actual phone. `patch_notify` is the
  * equivalent that reaches him.
  *

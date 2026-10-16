@@ -5,7 +5,7 @@
 // turn STOPS — the agent hit a permission decision or asked an
 // `AskUserQuestion`, and the chat is parked in `awaiting-permission` until a
 // human answers. That state never reaches `idle`, so chat-completion never
-// fires for it: before this existed, an agent could sit waiting on Tom
+// fires for it: before this existed, an agent could sit waiting on the user
 // indefinitely while he was away from the machine and nothing told him.
 //
 // Both cases — a tool approval and a question — arrive as the same thing. The

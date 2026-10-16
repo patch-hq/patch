@@ -475,7 +475,7 @@ describe('AppState-driven heartbeat', () => {
   });
 });
 
-// Tom: "Shows reconnecting every time you open the app". Android drops the
+// User: "Shows reconnecting every time you open the app". Android drops the
 // socket while the app is backgrounded, so every open used to flash the amber
 // banner for the second the reconnect took. The banner (`outageVisible`) is
 // for a link down DISCONNECT_GRACE_MS with the app on screen; `connection`

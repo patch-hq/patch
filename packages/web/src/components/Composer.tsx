@@ -9,7 +9,7 @@
 // action button shares ONE icon size (spec/14 § Composer). The mic (and ⌘⇧D, via
 // lib/composerMic.ts) dictates into the input: grey live words while talking,
 // a second press keeps them, send sends them. On the new-chat screen it starts
-// a voice note instead. Call (moved here from the chat header, Tom, 30 Sep
+// a voice note instead. Call (moved here from the chat header, the user, 30 Sep
 // 2026) starts a sustained voice call on this chat; on a not-yet-spawned chat
 // it creates the chat first via `resolveChatId`, the same create-then-act path
 // an attachment with no chat yet already uses.
@@ -796,7 +796,7 @@ export const Composer = forwardRef(function Composer(
       .map((s) => ({ name: s, isBuiltin: false, description: skillDescriptions[s] })),
   ];
   // The menu is open whenever `/` is active — an EMPTY result is a state the
-  // user is shown, not silence (Tom, `patch/todo.md` — "typing / in a folder
+  // user is shown, not silence (the user, `patch/todo.md` — "typing / in a folder
   // with no skills shows nothing at all"). Rendering nothing made "this project
   // has no skills" and "the feature is broken" look identical, which is the
   // same no-fallback trap the fetch error already avoids. It stays closed only
@@ -1085,7 +1085,7 @@ export const Composer = forwardRef(function Composer(
   // mirror sits exactly on top of the textarea, and a note's overlay owns the
   // input's ⏎/esc. The placeholder is painted by the textarea itself, in the
   // same box, so on an EMPTY input it renders THROUGH the preview and the two
-  // strings sit on top of each other (Tom, Todoist 6hVPGMcWfgcW6256: "when voice
+  // strings sit on top of each other (Todoist 6hVPGMcWfgcW6256: "when voice
   // note is recording, placeholder should disappear, its writing on top").
   // Nothing about an empty input needs naming while the user is talking into it.
   const suppressPlaceholder = showLivePreview || noteActive || micState !== 'idle';
@@ -1897,7 +1897,7 @@ export const Composer = forwardRef(function Composer(
               // overlay has no controls of its own and the global window handler
               // stands down inside a text field, so without this a note started
               // from the new-chat mic — which navigates into a chat whose composer
-              // auto-focuses — could be neither committed nor cancelled (Tom,
+              // auto-focuses — could be neither committed nor cancelled (the user,
               // patch/todo.md: "cannot be ended or cancelled"). The typed text is
               // left untouched: ⏎ commits the NOTE, not the half-written message.
               if (noteActive && (e.key === 'Escape' || e.key === 'Enter')) {

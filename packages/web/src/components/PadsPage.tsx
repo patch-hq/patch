@@ -1,4 +1,4 @@
-// PadsPage — where Pads live (spec/14 § Pads). Every design space Tom has, grouped
+// PadsPage — where Pads live (spec/14 § Pads). Every design space the user has, grouped
 // by the app it designs for: a card with a picture of its first screen, the chat
 // that owns it, whether the agent is working on a batch he sent or how many
 // changes he has pending, and when it last moved. Click one to open it beside

@@ -6,7 +6,7 @@ function annotate({ others, cur, n }) {
       return null;
     }
   };
-  // Tom's other edits on this screen, as the editor shows them.
+  // the user's other edits on this screen, as the editor shows them.
   // In the order they were made: a duplicate inserts an element that later
   // selectors already count.
   let copyOfCur = null;
@@ -59,7 +59,7 @@ function annotate({ others, cur, n }) {
       top = Math.min(...ys); bottom = Math.max(...ys);
     } else if (cur.kind === 'note') {
       const ny = rect.top + cur.offset.y;
-      // Pinned to something as big as the page (Tom tapped empty space): the
+      // Pinned to something as big as the page (the user tapped empty space): the
       // note is the point, so frame it, not the whole container.
       if (rect.height > innerHeight * 0.6) { top = ny - 80; bottom = ny + 140; }
       else { top = Math.min(top, ny); bottom = Math.max(bottom, ny + 60); }

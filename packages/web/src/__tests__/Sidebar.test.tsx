@@ -2255,7 +2255,7 @@ describe('Sidebar', () => {
     await waitFor(() => expect(row.className).toContain('is-read'));
   });
 
-  // Tom, Patch Updates: "in needs attention it should auto hide the current chat
+  // the user, Patch Updates: "in needs attention it should auto hide the current chat
   // if you send a message and it no longer passes filter. otherwise its stuck
   // there as last chat". Navigating away was the only release, so the LAST chat
   // in the queue could never leave it — you answered it and it sat there.

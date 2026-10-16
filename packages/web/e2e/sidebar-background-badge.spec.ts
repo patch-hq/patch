@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 // the chat settles `idle` with work still in flight and the sidebar drew the
 // finished tick over it. jsdom proves the derivation and the wiring; this
 // proves the row really paints a STATIC glyph with the real CSS, in the slot
-// the tick used to occupy. It used to spin — deliberately reverted (Tom: a
+// the tick used to occupy. It used to spin — deliberately reverted (User: a
 // spin is the strongest "happening right now" signal there is, which belongs
 // to `working` alone; a quiet background job competing for that same
 // attention was the opposite of what a calm, ignorable-until-it-matters

@@ -11,7 +11,7 @@
 // Attaches over CDP, patches AudioContext.createBufferSource IN THE APP'S OWN
 // RENDERER to count reply PCM actually scheduled to the speaker, navigates to
 // the target chat, clicks the real Call button, and passes only when ≥1s of
-// reply audio is scheduled. This is the app Tom uses, its own session,
+// reply audio is scheduled. This is the app the user uses, its own session,
 // credential, capture and playback code.
 import { createRequire } from 'node:module';
 import { resolve, dirname } from 'node:path';

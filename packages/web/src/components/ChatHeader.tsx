@@ -11,7 +11,7 @@
 // The action row also carries a SECOND rendering of the same actions, a
 // hamburger dropdown (`.head-hamburger`), which `index.css`'s `@container`
 // rule on `.chat-head-actions` swaps in for the icon rail once the row's own
-// width can't fit every icon cleanly (Tom, App Updates: icons should collapse
+// width can't fit every icon cleanly (App Updates: icons should collapse
 // into a menu rather than scroll/shrink). Both renderings call the exact same
 // handlers defined below — no logic is duplicated, only the JSX shape.
 

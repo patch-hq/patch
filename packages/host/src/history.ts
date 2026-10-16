@@ -540,7 +540,7 @@ const PROVIDER_CONTEXT_LABELS: Record<string, string> = {
   prompt_snapshot: 'System prompt snapshot',
   total_tokens_reminder: 'Tokens remaining',
   deferred_tools_record: 'Tool-call bookkeeping',
-  // A file the agent had read changed on disk outside it (Tom, an editor, a
+  // A file the agent had read changed on disk outside it (the user, an editor, a
   // linter, another chat) — Claude Code tells the agent so on its next turn.
   edited_text_file: 'File changed externally',
   edited_image_file: 'Image changed externally',

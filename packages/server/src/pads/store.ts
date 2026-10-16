@@ -1,13 +1,13 @@
 // Pads — the shared, always-editable design spaces (spec/14 § Pads).
 //
 // A Pad is a set of screens (static HTML + assets the server stores) and the
-// list of changes Tom has made on them: moves, resizes, text edits, deletions,
+// list of changes the user has made on them: moves, resizes, text edits, deletions,
 // notes, drawings. Every device reads the same state, so pending changes are
 // shared. Each change is also appended to a journal so a stray delete never
 // loses anything. Persisted as JSON under `<dataDir>/pads/<id>/`.
 //
 // The primary store: a corrupt `pad.json` throws loudly rather than reading as
-// an empty Pad — Tom's changes are not recoverable otherwise.
+// an empty Pad — the user's changes are not recoverable otherwise.
 
 import {
   appendFileSync,
@@ -129,7 +129,7 @@ export class PadStore {
 
   /**
    * Append-only record of every change as it was added, edited or removed, so
-   * nothing Tom made can be lost to a stray delete.
+   * nothing the user made can be lost to a stray delete.
    */
   journal(id: string, op: 'add' | 'update' | 'remove', change: Change): void {
     appendFileSync(
@@ -321,7 +321,7 @@ export class PadStore {
 
   /**
    * Mark the batch sent. Reloads the Pad first: pictures take seconds to draw,
-   * and Tom may have added or removed changes meanwhile — only the changes the
+   * and the user may have added or removed changes meanwhile — only the changes the
    * batch was opened with are marked, nothing else is overwritten.
    */
   commitBatch(id: string, batch: Batch): Batch {

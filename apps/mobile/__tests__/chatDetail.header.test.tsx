@@ -167,7 +167,7 @@ describe('chat-detail header', () => {
     expect(hasText(r.root, 'Refactor the deploy script')).toBe(true);
   });
 
-  // Tom: "Manager chat says Manager twice" — a special thread's folder crumb is
+  // User: "Manager chat says Manager twice" — a special thread's folder crumb is
   // the same word as its fixed title, so the crumb is not drawn at all.
   it('a special thread shows its title with NO folder crumb above it', () => {
     for (const id of [SPECIAL_THREAD_IDS.manager, SPECIAL_THREAD_IDS.speakers]) {

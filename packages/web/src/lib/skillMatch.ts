@@ -2,7 +2,7 @@
 //
 // The menu used to be prefix-only, so `/timesheet` could not be reached by
 // typing `time` when the skill is called `weekly-timesheet`, and nothing at all
-// found `deploy-pending` from `pending` (Tom, Patch Updates — "should match
+// found `deploy-pending` from `pending` (the user, Patch Updates — "should match
 // skills fuzzy search and any part, not just start of skill name"). Skill names
 // are kebab-cased compounds, so the distinguishing word is very often NOT the
 // first one.

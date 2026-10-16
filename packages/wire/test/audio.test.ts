@@ -292,7 +292,7 @@ describe('voiceCellFor / modesShareVoiceEngine (spec/07 § Voice — a config ma
 });
 
 describe('a voice surface whose backend has no key on the host', () => {
-  // Tom's live config, 2026-09-24.
+  // the user's live config, 2026-09-24.
   const config = {
     dictation: { backend: 'gemini' as const },
     device: { backend: 'openai' as const, layer: 'light' as const, handoff: 'auto' as const },

@@ -2657,7 +2657,7 @@ const TimelineItem = React.memo(function TimelineItem({
             // exactly when the socket is most likely to be mid-reconnect. A
             // send lost there used to be silent: the card still resolved
             // optimistically below, but the host never heard it and its own
-            // expiry timer denied the request anyway (Tom, Todoist: "questions
+            // expiry timer denied the request anyway (Todoist: "questions
             // are timing out after I answer them"). The tracker redelivers
             // until it observes the host's echo.
             permissionDeliveryTracker.send({

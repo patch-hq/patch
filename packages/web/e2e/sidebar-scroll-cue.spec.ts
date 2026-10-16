@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { openReportedState } from './sidebarBand.js';
 
 // spec/14 § Sidebar → Scroll regions: when the chat-list band overflows it says
-// so, with the app's own scrollbar. Tom's report — "clips overflow with no
+// so, with the app's own scrollbar. the user's report — "clips overflow with no
 // scrollbar or fade" — is a PAINT question, so this is the one spec that has to
 // look at pixels.
 //

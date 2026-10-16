@@ -195,7 +195,7 @@ export async function sendVoiceNote(): Promise<void> {
     useVoiceStore.getState().endNote();
     return;
   }
-  // APPEAR LIVE (Tom, patch/todo.md): drop the message bubble into the timeline
+  // APPEAR LIVE (the user, patch/todo.md): drop the message bubble into the timeline
   // the INSTANT the user finishes speaking, in a live "Transcribing…" state, so
   // it shows immediately rather than only after the upload + Whisper round-trip
   // (a long dead gap on slow/train internet). The same bubble (keyed by localId)
@@ -222,7 +222,7 @@ export async function sendVoiceNote(): Promise<void> {
     // The typed text rode along as the note's prefix and the turn never landed,
     // so it is owed back to the composer. Without this, a failed upload silently
     // eats a half-written message — the exact loss this change exists to stop
-    // (Tom, Todoist: "erases the current content of text when you start a voice
+    // (Todoist: "erases the current content of text when you start a voice
     // note"). It is handed back BEFORE `endNote` in the `finally` below, which
     // deliberately does not clear it.
     useVoiceStore.getState().restoreComposerText(chatId, note.prefix);

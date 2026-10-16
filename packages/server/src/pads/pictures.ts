@@ -1,7 +1,7 @@
 // A picture of every change, for the chat that receives the batch.
 //
 // Text can name an element but not show what it sits among, so each change is
-// drawn on its own screen: the Pad is opened at that screen, at the size Tom
+// drawn on its own screen: the Pad is opened at that screen, at the size the user
 // was looking at it, with his other pending edits on that screen applied; the
 // page is scrolled to the element and the change is marked on it and numbered
 // to match the message. A move shows where the element came from, a deletion

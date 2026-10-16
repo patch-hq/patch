@@ -117,7 +117,7 @@ describe('Composer', () => {
   });
 
   // spec/04 ## Message queueing — sending never interrupts a running turn.
-  // 2026-09-29: every message Tom sent into a running turn killed it 1-2s
+  // 2026-09-29: every message the user sent into a running turn killed it 1-2s
   // later, via ⌘↵'s send-and-promote or a second ↵ in the emptied composer
   // promoting the message just sent. Only Stop, Esc and a queued ↑ interrupt.
   describe('sending while a turn runs only queues', () => {
@@ -369,7 +369,7 @@ describe('Composer', () => {
 
   // spec/14 § Copy — no helper text: the placeholder is the empty field's
   // prompt, not a teaching surface. It used to trail the send convention
-  // ("— Enter to send, Shift+Enter for a new line"); Tom asked for that back
+  // ("— Enter to send, Shift+Enter for a new line"); the user asked for that back
   // out, so this locks the bare string against it creeping in again.
   it('shows a bare placeholder with no helper text', () => {
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
@@ -893,7 +893,7 @@ describe('Composer', () => {
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: '/x' } });
       await new Promise((r) => setTimeout(r, 0));
-      // An empty result is a STATE the user is shown, not silence (Tom,
+      // An empty result is a STATE the user is shown, not silence (the user,
       // `patch/todo.md` — "typing / in a folder with no skills shows nothing at
       // all"). Rendering nothing made "this project has no skills" and "the
       // feature is broken" indistinguishable — the same trap the fetch-error
@@ -2671,7 +2671,7 @@ describe('Composer', () => {
 
   // spec/14 § Composer — Call moved here from the chat header, sitting beside
   // attach and dictate: "attachment, dictate, call, side by side, same icon
-  // size" (Tom, 30 Sep 2026).
+  // size" (the user, 30 Sep 2026).
   describe('Call button', () => {
     beforeEach(async () => {
       const { startVoiceCall } = await import('../lib/voiceController.js');

@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 
 // spec/14 § Main chat panel — Question prompts / § Permission prompts.
 //
-// Tom, Patch Updates: "the ask a question background is garish. just structure
+// the user, Patch Updates: "the ask a question background is garish. just structure
 // it with outlines instaed of horrible orange". The question card carried no
 // background of its own, so it inherited `.permission`'s edge-to-edge
 // `--waiting-tint` fill and became a solid orange slab — and every outlined
@@ -73,7 +73,7 @@ async function assertOutlinedNotFilled(page: Page): Promise<void> {
   //    fix's scope: `.permission` is shared, and washing the orange out of it
   //    would have taken the approval card's deliberate colour with it.
   await expect(page.locator(PENDING_APPROVAL).first()).toBeVisible();
-  // (Superseded: Tom called the slab "ugly" — the approval card is now an
+  // (Superseded: the user called the slab "ugly" — the approval card is now an
   // outlined panel too, see permission-card-style.spec.ts. It must still
   // keep the waiting hue as its border.)
   expect((await borderOf(page, PENDING_APPROVAL)).color).toBe(waiting);

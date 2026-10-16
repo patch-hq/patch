@@ -152,7 +152,7 @@ test.describe('chat header hamburger menu at phone width', () => {
 });
 
 // `hasTouch` is what makes `@media (hover: none)` apply, which is what keeps the
-// pencil permanently visible — the state Tom actually looks at on a phone.
+// pencil permanently visible — the state the user actually looks at on a phone.
 test.describe('edit pencil on a user turn at phone width', () => {
   test.use({ viewport: PHONE, hasTouch: true });
 

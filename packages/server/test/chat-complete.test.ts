@@ -115,7 +115,7 @@ describe('ChatCompletionNotifier', () => {
     expect(routed.every((r) => r.event.chatId === 'c1')).toBe(true);
   });
 
-  // Tom: "shouldn't give finished notification when it's just processing the
+  // User: "shouldn't give finished notification when it's just processing the
   // next message in the queue, otherwise I look for no reason". The host holds
   // `running` across a queue drain (spec/04 § Message queueing), so the stream
   // this sees has no idle edge until the chat has actually finished.
@@ -130,7 +130,7 @@ describe('ChatCompletionNotifier', () => {
     expect(channels()).toEqual(['desktop', 'push']);
   });
 
-  // Tom: "sending a completion notification when a turn is ended via
+  // User: "sending a completion notification when a turn is ended via
   // interruption of a new message instead of actually getting to the end".
   // Sending a second message while a turn runs queues it, and the promote (the
   // up-arrow, or the head-of-queue auto-interrupt) STOPS the running turn so it
@@ -154,7 +154,7 @@ describe('ChatCompletionNotifier', () => {
     expect(channels()).toEqual(['desktop', 'push']);
   });
 
-  // Tom: "stop a chat shouldnt give finished notification". A bare stop — the
+  // User: "stop a chat shouldnt give finished notification". A bare stop — the
   // stop button, `patch stop`, the `patch_stop` tool — aborts the turn with
   // nothing queued behind it, so the host settles the chat straight to `idle`
   // and that edge is shaped exactly like a real finish. What tells them apart is
@@ -183,7 +183,7 @@ describe('ChatCompletionNotifier', () => {
       feed(stopped('c1'));
       expect(routed).toEqual([]);
 
-      // Tom types again. The host clears the flag as the turn goes running.
+      // the user types again. The host clears the flag as the turn goes running.
       feed(state('c1', { activity: 'running', turnStopped: false }));
       feed(state('c1', { activity: 'idle', turnStopped: false }));
       expect(channels()).toEqual(['desktop', 'push']);
@@ -241,7 +241,7 @@ describe('ChatCompletionNotifier', () => {
     expect(routed[0]?.event.message).toBe('bed planner finished');
   });
 
-  // spec/09 § What the message says. Tom: "patch notify needs to take specific
+  // spec/09 § What the message says. User: "patch notify needs to take specific
   // text from the agent and use it. not just the starting message". The chat's
   // own closing words are what the turn actually produced; `statusSummary` is a
   // model's after-the-fact reading of the transcript, and it arrives on a LATER
@@ -392,7 +392,7 @@ describe('ChatCompletionNotifier', () => {
   });
 
   // spec/09 § Whose turn it was — only a turn the user started rings the
-  // doorbell. These are the loops Tom flagged: a watcher that wakes itself
+  // doorbell. These are the loops the user flagged: a watcher that wakes itself
   // every few minutes must not push on every tick.
   test('a machine-started turn settling is silent', () => {
     seedRunning('c1');
@@ -413,7 +413,7 @@ describe('ChatCompletionNotifier', () => {
   });
 
   // Origin is a property of the TURN, not of the chat: a chat that has been
-  // looping silently all day must still notify the moment Tom types into it.
+  // looping silently all day must still notify the moment the user types into it.
   test('a user turn in a chat that has been looping silently still notifies', () => {
     seedRunning('c1');
     feed(state('c1', { activity: 'idle', turnOrigin: 'machine' }));
@@ -725,7 +725,7 @@ describe('ChatCompletionNotifier', () => {
     });
   });
 
-  // Tom: "patch notifications are firing early before a chat has finished". A
+  // User: "patch notifications are firing early before a chat has finished". A
   // turn can settle idle while the chat still owes work — a backgrounded task
   // or sub-agent in flight, or an unmet goal. The follow-up turns are machine
   // turns, so the ring is deferred to the real finish rather than dropped.

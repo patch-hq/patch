@@ -165,7 +165,7 @@ describe('resuming turns a host restart interrupted', () => {
     expect(pendingOf(metaStore, chatId)).toEqual([]);
   });
 
-  // Tom, live: a restart sometimes seemed to reprompt a conversation that had
+  // live: a restart sometimes seemed to reprompt a conversation that had
   // already finished. The log's own `turn.end` is fsynced durably the moment
   // the turn settles, but `persistPendingTurns` — the meta.json rewrite that
   // would clear the now-stale head entry — is a SEPARATE write straight after
@@ -206,7 +206,7 @@ describe('resuming turns a host restart interrupted', () => {
     expect(pendingOf(second.metaStore, chatId)).toEqual([]);
   });
 
-  // Tom, live (2026-10-15, "Mac Host Offline Issues", stuck 68 minutes): the
+  // live (2026-10-15, "Mac Host Offline Issues", stuck 68 minutes): the
   // check above — drop `recorded[0]` whenever the log shows the last turn
   // `completed`/`stopped` — has the SAME log/meta.json shape for a second,
   // DIFFERENT race: a turn settles cleanly (meta.json's rewrite WINS this

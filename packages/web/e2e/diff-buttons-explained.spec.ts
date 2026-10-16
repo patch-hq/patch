@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 // pane the plain editor occupies (the tree stays on screen) instead of
 // navigating to a separate diff screen, and are GREYED OUT rather than
 // clickable-through to a "nothing changed" notice when there is nothing to
-// diff — Tom's own example: "SKILL.md is unchanged since HEAD — instead just
+// diff — the user's own example: "SKILL.md is unchanged since HEAD — instead just
 // grey out that button if there's no diff, instead of allowing to open it."
 const HARNESS = '/app/dev-harness.html?chat=chat_bus&editor=browse';
 

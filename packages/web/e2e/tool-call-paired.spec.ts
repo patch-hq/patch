@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 // spec/14 § Tool calls — "A call and its own result are ONE row, not two".
 // A lone call whose result is the next entry folds into a single disclosure
-// (Tom: "tool call appears twice — once as the invocation and once as the
+// (User: "tool call appears twice — once as the invocation and once as the
 // result"). The run-collapsing rule already covered 2+ calls; this is the
 // ungrouped case that fell through it.
 const PAIRED_CHAT = '/app/dev-harness.html?chat=chat_tool_paired';

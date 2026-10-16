@@ -2,7 +2,7 @@
 // personal-check — keeps one person's setup out of a public product.
 //
 // Patch is distributed to anyone. A hostname, account name or app id that only
-// means something on Tom's machines does not belong in product code: it belongs
+// means something on the user's machines does not belong in product code: it belongs
 // in configuration, or in the private overlay that deploys his own setup.
 //
 // This is a ratchet, not a purge. `personal-check.baseline.json` records how
@@ -29,7 +29,7 @@ import { isMain } from './lib/is-main.mjs';
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const BASELINE = join(ROOT, 'scripts', 'personal-check.baseline.json');
 
-// Strings that mean "this is Tom's setup". Case-insensitive.
+// Strings that mean "this is the user's setup". Case-insensitive.
 export const PERSONAL = /tomchambers|tomsownclaw|tom\.chambers|netcup|hetzner|claude-dev/gi;
 
 const SKIP_PATH = /^(spec|design|docs|testing|\.cadence|\.claude)\//;

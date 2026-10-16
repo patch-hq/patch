@@ -11,7 +11,7 @@ import { useUiStore } from '../stores/uiStore.js';
 //
 // Portalled to <body>: `.chat-main` carries `contain: layout`, which makes it
 // the containing block for `position: fixed` descendants, so an in-tree overlay
-// is clipped to the chat panel instead of covering the window (Tom,
+// is clipped to the chat panel instead of covering the window (the user,
 // `patch/todo.md` — "viewing the image should be full screen. currently its
 // trapped in the window").
 /** `image.<ext>` from a media type or data: URI; anything else is `image.png`. */

@@ -9,7 +9,7 @@
 //
 // It is the test that fails on the code as it was before this feature: a turn
 // that stops to ask never reaches `idle`, so chat completion never fired for it
-// and an agent could wait on Tom for ever while his phone said nothing.
+// and an agent could wait on the user for ever while their phone said nothing.
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
@@ -51,7 +51,7 @@ async function harness() {
   const registry = Registry.load(dir);
   registry.bootstrapAccount({ keypair: ACCOUNT });
   // A phone that has registered for push, and nothing foregrounded on a
-  // computer — Tom walked away from the machine, which is the whole case.
+  // computer — the user walked away from the machine, which is the whole case.
   registry.registerPushToken({
     surfaceId: 'srf-phone',
     accountId: ACCOUNT.publicKey,

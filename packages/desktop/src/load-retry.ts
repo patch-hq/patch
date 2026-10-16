@@ -4,7 +4,7 @@
 // and everything after that is the page. So the one failure the SPA cannot heal
 // is the failure to load the SPA — a dead document load leaves Chromium's own
 // "This site can't be reached" in the window, and nothing in Electron retries
-// it. The window sits on that error until Tom quits and reopens the app.
+// it. The window sits on that error until the user quits and reopens the app.
 //
 // That is not hypothetical. Every `patch-server` restart takes the upstream
 // down for a second or two, and Caddy answers `GET /` and `GET /ws` with a 502

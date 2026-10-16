@@ -140,7 +140,7 @@ describe.skipIf(!BROWSER_LAYER)('pads in the app', () => {
         id: string;
       }
     ).id;
-    // Tom has a pending change, so the list and the sidebar show a count.
+    // the user has a pending change, so the list and the sidebar show a count.
     const { frameUrl } = (await api(`/api/pads/${padId}`)).body;
     await fetch(`${base}${frameUrl}api/changes`, {
       method: 'POST',

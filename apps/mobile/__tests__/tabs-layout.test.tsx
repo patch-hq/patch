@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 
 describe('TabLayout — screen options', () => {
-  // Tom's order: New chat is the raised button in the true centre (index 2 of
+  // the user's order: New chat is the raised button in the true centre (index 2 of
   // 5), with Voice as a plain tab to its right.
   it('renders the five tab screens in order (chats, jobs, new-chat, voice, settings)', () => {
     const r = renderRN(<TabLayout />);

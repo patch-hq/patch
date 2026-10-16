@@ -463,7 +463,7 @@ export function createMainWindow(): BrowserWindow {
     title: 'Patch',
     show: true,
     // No native title bar — the SPA runs to the window's top edge and the
-    // traffic lights float over its top-left (spec/05 § Window chrome; Tom,
+    // traffic lights float over its top-left (spec/05 § Window chrome; the user,
     // App Updates: "clean at top, no patch top bar"). The renderer reserves
     // the strip they land in; see `--overlay-titlebar-inset` in index.css.
     ...windowChrome(process.platform),
@@ -707,7 +707,7 @@ function createVoiceOverlay(): BrowserWindow {
  * reloads a window on its own in either case, which is what "Patch keeps
  * crashing to a white screen and needs refreshing on desktop" actually was —
  * a renderer crash (OOM, GPU fault, native asserts) with no listener to
- * recover it, so it sat blank until Tom did the reload himself.
+ * recover it, so it sat blank until the user did the reload themself.
  *
  * A `patch-server` restart makes Caddy 502 for a second or two, which is
  * exactly long enough to catch a shell that happens to be loading; a renderer
@@ -1322,7 +1322,7 @@ function setupAutoUpdater(): void {
   // updater is functional — that's how the disabledReason reaches the user.
   ipcMain.handle('patch:updater:get-state', () => updaterState);
   // spec/09 § Presence heuristic — how long since ANY input on this Mac, in any
-  // app. The server reads it to decide whether Tom is at the computer.
+  // app. The server reads it to decide whether the user is at the computer.
   ipcMain.handle('patch:system-idle-ms', () => powerMonitor.getSystemIdleTime() * 1000);
   // Meeting mode: start/stop the system-audio tap and stream its PCM to the
   // renderer that asked. A tap left running by a renderer that reloaded is

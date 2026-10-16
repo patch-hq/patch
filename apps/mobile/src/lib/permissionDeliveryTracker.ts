@@ -3,7 +3,7 @@
 // direction of traffic that used to be fire-and-forget. Mirrors
 // packages/web/src/lib/permissionDeliveryTracker.ts.
 //
-// Tom, Todoist: "questions are timing out after I answer them". A phone
+// Todoist: "questions are timing out after I answer them". A phone
 // answering a question is the worst case for this: the tap usually happens
 // moments after the app is foregrounded from a push notification, exactly
 // when the socket is most likely to be mid-reconnect or still reporting a

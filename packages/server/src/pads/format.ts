@@ -2,7 +2,7 @@
 //
 // The receiving agent has only this text to go on, so each line names the
 // element the way it can find it in source (label = tag, test id / id / class,
-// and its own text) and says what Tom did in plain terms. The agent translates
+// and its own text) and says what the user did in plain terms. The agent translates
 // intent into code; the pixel numbers are evidence, not instructions.
 
 import type { Change, PadRecord } from './store.js';

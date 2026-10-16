@@ -67,7 +67,7 @@ test.describe('Settings rows — label and value are distinct, bordered fields',
       expect(box.overflows).toBe(false);
       // spec/14 § Legibility: no control is smaller than --tap-min (44px) on
       // either axis. Was ~36px (padding: 6px 10px, no min-height) — cramped
-      // enough that Tom filed "input boxes are too small".
+      // enough that the user filed "input boxes are too small".
       expect(box.height).toBeGreaterThanOrEqual(44);
     });
   }

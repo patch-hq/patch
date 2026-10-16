@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Tom: "patch job page font size too small". The app-wide floor (--text-min,
+// User: "patch job page font size too small". The app-wide floor (--text-min,
 // 13px) was met everywhere on the job pages, but 13px is still small for the
 // pages he reads most, so they carry their own higher floor.
 const JOB_PAGE_MIN_PX = 15;

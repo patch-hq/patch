@@ -69,7 +69,7 @@ const SCRIPT_EDITOR_HEIGHT_EXPANDED = 640;
  * `command` is not a one-liner: it is handed to `bash -lc` whole, so the RIGHT
  * place for a gate's logic is here, in the job, where the app that runs it can
  * show it (see `ScriptAction`). A gate kept in a file on the host instead is
- * invisible from every surface — which is how Tom ended up unable to see when
+ * invisible from every surface — which is how the user ended up unable to see when
  * photo-triage and foreman decide to spend money, or to change the hours they
  * keep, without going and reading bash over ssh.
  *
@@ -2392,7 +2392,7 @@ const RUNS_MAX = 200;
  * A fire the job's own filter turned away. On a Todoist-triggered job these are
  * almost all of them — every unrelated task edit in the account is a fire — so
  * five rows of `filter-rejected` was the whole panel, and the run you came to
- * look at was never on screen (Tom, Patch Updates — "recent runs should filter
+ * look at was never on screen (the user, Patch Updates — "recent runs should filter
  * out rejected by default (add toggle). it should show everything (paginated if
  * necessary)").
  *
@@ -2553,7 +2553,7 @@ function dateInstant(inputValue: string, loadedIso: string | null): string | nul
  * tight cron, decide whether there is work, and mostly decide there is not —
  * so an honest run of held fires and a gate that broke three days ago produce
  * the same row, `ok` after `ok` after `ok`, and "why has nothing happened?"
- * has no answer anywhere in the app (Tom — "i cant actually dig into when the
+ * has no answer anywhere in the app (the user — "i cant actually dig into when the
  * job gets launched because its in code"). The exit code and output tail were
  * already being recorded; they were simply never rendered.
  *

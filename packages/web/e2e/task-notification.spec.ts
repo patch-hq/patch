@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 // a turn the user typed and not something they need to read. It renders as one
 // quiet badged line with the block a chevron away.
 // `chat_task_notification` is seeded in the harness with a real captured block
-// as a user turn, between a genuine Tom-authored turn and the assistant's reply.
+// as a user turn, between a genuine the user-authored turn and the assistant's reply.
 const NOTIFICATION_CHAT = '/app/dev-harness.html?chat=chat_task_notification';
 
 test.describe('raw task-notification turn', () => {
@@ -28,7 +28,7 @@ test.describe('raw task-notification turn', () => {
     await expect(line).not.toContainText('baiw888mq');
     await expect(line.locator('.tool-detail')).toHaveCount(0);
 
-    // No user bubble for it — the only `.msg-user` is Tom's genuine turn.
+    // No user bubble for it — the only `.msg-user` is the user's genuine turn.
     await expect(page.locator('.msg-user')).toHaveCount(1);
     await expect(page.locator('.msg-user')).toContainText('run the build in the background');
 

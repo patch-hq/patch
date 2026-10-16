@@ -1343,7 +1343,7 @@ body {
   min-width: 0;
   display: inline-flex;
   align-items: flex-start;
-  /* Tom (spec/14 § Status badges, live review): "margin on current check is
+  /* the user (spec/14 § Status badges, live review): "margin on current check is
      too much on left, and maybe too big" — tightened from 5px alongside the
      icon's own size drop below (13px -> 11px, Check instead of CircleCheck). */
   gap: 3px;
@@ -2637,7 +2637,7 @@ a.ch-row:hover {
      container, where height instead comes from cross-axis `align-items:
      stretch`), so one rule covers both parents. */
   min-height: 0;
-  /* Right/content panel is white (spec/14 § Palette — Tom's UX pass). */
+  /* Right/content panel is white (spec/14 § Palette — the user's UX pass). */
   background: var(--bg-elevated);
   /* Contain internal layout so the message list doesn't re-lay-out the sidebar
      (and vice-versa) on every window-resize frame. */
@@ -4062,7 +4062,7 @@ a.ch-row:hover {
   white-space: nowrap;
 }
 
-/* Live voice-note placeholder (Tom, patch/todo.md — "Voice message should
+/* Live voice-note placeholder (the user, patch/todo.md — "Voice message should
    appear live."): the user's message bubble is up the instant they finish
    speaking, showing an animated mic + "Transcribing…" until the recognised text
    replaces it in place. Sits in the same accent bubble as a normal user turn. */
@@ -7684,7 +7684,7 @@ a.ch-row:hover {
   /* --on-accent, not #fff: dark mode's lighter accent left white at 2.7:1. */
   color: var(--on-accent);
 }
-/* ONE scroll region for the whole inventory (Tom, `patch/todo.md` — "tools
+/* ONE scroll region for the whole inventory (the user, `patch/todo.md` — "tools
    dialog scrolls in three places and only shows a few tools"). Each category
    section used to scroll independently INSIDE a card that also scrolled, so of
    15 tools roughly 5 were reachable at a time, which one moved depended on
@@ -9420,7 +9420,7 @@ button.set-row-open:focus-visible {
   margin: 0 var(--sb-inset-right) 0 var(--sb-inset);
   padding: 8px 14px;
 }
-/* Needs-attention's empty state (Tom: "'Nothing needs attention' has no
+/* Needs-attention's empty state (User: "'Nothing needs attention' has no
    spacing") sits directly in `.sb-scroll` under the "Needs attention" toggle
    rather than among rows, so it adds the vertical breathing room the toggle
    above it needs on top of the shared inset. Horizontal padding comes

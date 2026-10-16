@@ -1,5 +1,5 @@
 // spec/04 § History — the provider-switch confirmation (mobile). A
-// cross-provider model change (Claude <-> Codex) shows a modal with Tom's
+// cross-provider model change (Claude <-> Codex) shows a modal with the user's
 // exact copy before `chat.model_request` goes out; a same-provider change
 // never shows it. "Don't show again" persists as an account setting
 // (packages/server's `suppressProviderSwitchWarning`), so it must survive on

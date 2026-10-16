@@ -54,7 +54,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /**
  * The question's remaining time, as a ring that empties (spec/14 § Main chat
- * panel — Question prompts; Tom, App Updates: "patch should show a 1 minute
+ * panel — Question prompts; App Updates: "patch should show a 1 minute
  * timer on a question, slowly going down, a circle pie chart thing. so the
  * user knows when it expires").
  *
@@ -133,7 +133,7 @@ function QuestionCountdown({
 }
 
 /**
- * The wordless answer to "how many of these may I pick?" (Tom, App Updates:
+ * The wordless answer to "how many of these may I pick?" (App Updates:
  * "patch multi select for questions is not clear").
  *
  * A `multiSelect` question used to render identically to a single-select one —
@@ -219,7 +219,7 @@ function Footer({
   return (
     <div className="permission-buttons">
       {submit ? (
-        /* The button STATES the send chord (Tom, App Updates: "patch show CMD +
+        /* The button STATES the send chord (App Updates: "patch show CMD +
            enter (or windows version) on the answer question button, since enter
            is newline"). The `Other` box above it is the one field in the app
            where `↵` inserts a newline instead of sending, and nothing on screen
@@ -426,7 +426,7 @@ function QuestionForm({
   }
 
   function toggleOther(question: string, multiSelect: boolean): void {
-    // Single-select: `Other` is another radio (Tom, App Updates: "patch other
+    // Single-select: `Other` is another radio (App Updates: "patch other
     // should be another radio button... select option 1, then other and it
     // deselects anything else"), so turning it on clears the pick; the text
     // is an optional comment. Multi-select: an addition that toggles on its own.

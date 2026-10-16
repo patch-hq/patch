@@ -90,7 +90,7 @@ describe('synthetic assistant messages', () => {
     expect(assistantTexts(events)).not.toContain('No response requested.');
   });
 
-  // Hidden from the agent's voice, not from Tom: the gap is shown as a muted
+  // Hidden from the agent's voice, not from User: the gap is shown as a muted
   // Claude Code line, so a turn that produced nothing is still visible.
   it('shows the CLI-generated reply as a system line flagged synthetic', async () => {
     const { daemon, sdk, events, folder } = setup();

@@ -7,7 +7,7 @@ import type { Page } from '@playwright/test';
 
 export const HARNESS = '/app/dev-harness.html?chat=chat_bus';
 
-/** The roster from Tom's report: the fixed special threads plus ONE chat. */
+/** The roster from the user's report: the fixed special threads plus ONE chat. */
 export const SHORT_ROSTER = [
   {
     chatId: 'thread_manager',
@@ -74,12 +74,12 @@ export async function seedDrafts(page: Page): Promise<void> {
 }
 
 /**
- * Load the harness in Tom's reported state: two drafts + one chat, short
+ * Load the harness in the user's reported state: two drafts + one chat, short
  * enough to overflow the band. 740px, not the original 800px: App Updates'
  * cold-storage icon row (spec/14 § Sidebar item 6) shrank the fixed chrome
  * enough that this same roster no longer overflows at 800 — the band gained
  * back exactly the height five stacked text rows used to cost it. Shrinking
- * the window is truer to the report than padding the roster would be: Tom's
+ * the window is truer to the report than padding the roster would be: the user's
  * bug was "this ordinary amount of content clips silently", not "some
  * specific dataset clips".
  * `hydrate` REPLACES the chat map, so the whole roster goes in one call.

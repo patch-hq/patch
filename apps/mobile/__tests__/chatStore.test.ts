@@ -1398,7 +1398,7 @@ describe('a resolved daemon_unavailable notice clears itself', () => {
 // turn, however many goes it took. The host re-sends an owed turn itself
 // (restart resume, error ladder), and each re-send is a real, separately
 // persisted user message, so without the fold the phone draws the same sentence
-// once per attempt — the duplication Tom photographed on the desktop.
+// once per attempt — the duplication the user photographed on the desktop.
 describe('a re-sent turn folds onto the bubble it already has', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();

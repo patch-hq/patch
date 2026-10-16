@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 // spec/08 § Cron + spec/14 § Jobs view — a cron row reads as English.
 //
 // The bug this pins: the Jobs list had its own describer that only understood
-// a fixed minute + hour, so 5 of the 16 distinct crons in Tom's live fleet
+// a fixed minute + hour, so 5 of the 16 distinct crons in the user's live fleet
 // rendered as raw cron ("cron · 0,30 7-22 * * *"). Every expression below is
 // one of his live ones, read from `patch jobs list --json` on 15 Sep 2026.
 // Tested in a real browser because the list cell is what he reads — a unit

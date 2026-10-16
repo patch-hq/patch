@@ -72,7 +72,7 @@ test('the band is taller than the chrome used to leave it', async ({ page }) => 
     const el = document.querySelector('.sb-scroll') as HTMLElement;
     return { clientHeight: el.clientHeight, scrollHeight: el.scrollHeight };
   });
-  // Tom's reported state — two drafts and four chats, short enough to
+  // the user's reported state — two drafts and four chats, short enough to
   // overflow (`openReportedState`) — measured a 211px band against 329px of
   // content at the original 800px window. The chrome's stacked margins were
   // 10px of that deficit, and the band takes every pixel the chrome gives back

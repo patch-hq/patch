@@ -1,6 +1,6 @@
 // spec/08 § Cron — the ONE natural-language renderer for a cron expression.
 //
-// Tom's Jobs list rendered nearly half his real jobs as raw cron ("0,30 7-22
+// the user's Jobs list rendered nearly half their real jobs as raw cron ("0,30 7-22
 // * * *"), because the list's own describer only understood a fixed minute +
 // hour. These tests pin the unified describer every surface now reads through:
 // the phrasing table, and — first, because they are what the change is for —

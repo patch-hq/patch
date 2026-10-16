@@ -8544,7 +8544,7 @@ export class Daemon {
         // of asking every surface for one of its own.
         ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
         ...(systemContext.length > 0 ? { systemContext } : {}),
-        // spec/08 § Action, spec/14 § Job trigger turn — a job's fire, not Tom
+        // spec/08 § Action, spec/14 § Job trigger turn — a job's fire, not the user
         // typing, whichever turn of the chat this is.
         ...(jobTrigger ? { jobTrigger } : {}),
         // spec/20-hooks.md § On the agent's response — this turn IS a hook
@@ -11194,7 +11194,7 @@ export class Daemon {
 
   /**
    * Expire an unanswered permission request instead of holding the turn open
-   * forever (Tom: "ask user question should have a timeout instead of just
+   * forever (User: "ask user question should have a timeout instead of just
    * waiting forever").
    *
    * Every request is armed, questions and tool approvals alike, because BOTH
@@ -11335,7 +11335,7 @@ export class Daemon {
    * A surface named which chat it has open (`chat.focus_change`, forwarded by
    * the server with `forSurfaceId` stamped on — spec/03). Resets a pending
    * question's countdown on every edge that touches THIS chat, gained or
-   * lost, so the clock is never quietly running through the moment Tom
+   * lost, so the clock is never quietly running through the moment the user
    * starts looking at the question or the moment right after he stops
    * (`resetQuestionExpiry`, spec/02 § Questions are not approvals). A repeat
    * of the same value — a heartbeat, a replayed frame — is not an edge and

@@ -1,6 +1,6 @@
 // Starting a voice note must APPEND to the message, never erase it.
 //
-// Tom, Todoist 6hW5QcMPmf6gWhwc — "patch starting a voice note deletes all
+// Todoist 6hW5QcMPmf6gWhwc — "patch starting a voice note deletes all
 // current content!" — and 6hVhq54fM2mFf8c6 — "patch erases the current content
 // of text when you start a voice note. should append."
 //

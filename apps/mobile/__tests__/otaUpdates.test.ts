@@ -42,7 +42,7 @@ describe('checkForOtaUpdate', () => {
   });
 
   // This assertion is deliberately the inverse of what it used to be: the old
-  // code reloaded here, and that reload IS the white flash + second load Tom
+  // code reloaded here, and that reload IS the white flash + second load the user
   // reported. Fetch only; the fetched bundle launches on the next cold start.
   it('fetches an available update but does NOT reload into it', async () => {
     const Updates = await import('./stubs/expo-updates');
@@ -111,7 +111,7 @@ describe('startOtaUpdatePolling', () => {
     expect(reloadSpy).not.toHaveBeenCalled();
   });
 
-  // Returning to the app is exactly when a reload was most destructive: Tom
+  // Returning to the app is exactly when a reload was most destructive: the user
   // would swipe back in and watch it flash and start over.
   it('re-checks on background -> foreground and fetches without reloading', async () => {
     const Updates = await import('./stubs/expo-updates');

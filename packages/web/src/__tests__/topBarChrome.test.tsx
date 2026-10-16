@@ -1,4 +1,4 @@
-// The app's top row (Tom, App Updates: "move the <> buttons to the main page,
+// The app's top row (App Updates: "move the <> buttons to the main page,
 // left of top bar. patch in line with window controls. < has too much padding on
 // right side. put green dot like a superscript next to patch. cluster external
 // window and < closer.").
@@ -200,7 +200,7 @@ describe('the top row stylesheet', () => {
   });
 
   it('makes the Jobs / Settings / editor page head drag the window, with its controls punched out', () => {
-    // A window opened onto one of these pages (Tom, Todoist: "patch cant move a
+    // A window opened onto one of these pages (Todoist: "patch cant move a
     // new window, cant drag it") has no title bar, and `.route-head` is its top
     // row — without a drag region there is nothing to grab.
     const drag =

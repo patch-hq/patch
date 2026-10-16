@@ -1,6 +1,6 @@
 // spec/12 § A turn is owed until it settles.
 //
-// Tom photographed one question rendered as THREE identical bubbles with a red
+// the user photographed one question rendered as THREE identical bubbles with a red
 // "Connection to the host was lost" card wedged between the first two, while
 // the chat underneath carried on thinking. Every artefact of a recovery was in
 // the transcript and none of it ever went away: "this is a mess. the error

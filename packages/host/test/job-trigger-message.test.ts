@@ -1,6 +1,6 @@
 // spec/08 § Action, spec/14 § Job trigger turn — a job's fire into an EXISTING
 // chat (a `continue`/`message` action's later fire, as opposed to `spawn`'s own
-// first prompt) is not something Tom typed. The server's job dispatcher tells
+// first prompt) is not something the user typed. The server's job dispatcher tells
 // the host this via `chat.input.source.kind === 'job'` (index.ts), which
 // becomes `SendInputOptions.jobTrigger` here; this suite drives `sendInput`
 // the way index.ts does and reads the persisted `chat.message` back off the
@@ -79,7 +79,7 @@ describe('job trigger turn (spec/08 § Action, spec/14 § Job trigger turn)', ()
     const chatId = await daemon.spawnChat({ folder });
     await tick();
 
-    // Turn 1: Tom's own message — the chat is not fresh.
+    // Turn 1: the user's own message — the chat is not fresh.
     await daemon.sendInput({ chatId, message: 'watch this bus route for me', localId: 'u1' });
     await tick();
     // Turn 2: the job dispatcher's `continue` action firing a later tick into

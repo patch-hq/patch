@@ -2036,9 +2036,9 @@ useChatStore.setState((s) => ({
       },
     ],
     // spec/08 § Action — the job's raw trigger payload as the first turn,
-    // then a normal assistant reply and a genuine Tom-authored follow-up
+    // then a normal assistant reply and a genuine the user-authored follow-up
     // (which must NOT get the furniture treatment — only the first turn is
-    // unambiguously the job's, not Tom's).
+    // unambiguously the job's, not the user's).
     chat_job_trigger: [
       {
         seq: 0,
@@ -2062,7 +2062,7 @@ useChatStore.setState((s) => ({
         at: 2,
       },
     ],
-    // spec/14 § Job trigger turn — the first turn is a genuine Tom-authored
+    // spec/14 § Job trigger turn — the first turn is a genuine the user-authored
     // message (no `jobId` on this chat at all), then a `continue` action's
     // LATER fire into it carries its own `jobTrigger` flag and still gets the
     // quiet furniture treatment.
@@ -2112,7 +2112,7 @@ useChatStore.setState((s) => ({
     ],
     // spec/14 § Background task completions — a real captured notification
     // block, delivered as a user turn the way replay delivers it, plus a
-    // one-summary-less block and a genuine Tom-authored turn either side.
+    // one-summary-less block and a genuine the user-authored turn either side.
     chat_task_notification: [
       {
         seq: 0,

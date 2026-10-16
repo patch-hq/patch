@@ -200,7 +200,7 @@
   function pendingOn(s) {
     return state.changes.filter(function (c) { return c.status === 'pending' && c.screen === s.id; }).length;
   }
-  // Screens added since Tom last opened the Pad carry a dot until he visits them.
+  // Screens added since the user last opened the Pad carry a dot until they visit them.
   function seenIds() {
     try { var raw = localStorage.getItem('pad.seen.' + slug); return raw === null ? null : JSON.parse(raw); } catch (e) { return null; }
   }
@@ -859,7 +859,7 @@
   function post(change) {
     if (!screen) { fail(new Error('Pick a screen before editing')); return Promise.resolve(); }
     change.screen = screen.id;
-    // The size Tom was looking at, so the chat's picture is drawn the same.
+    // The size the user was looking at, so the chat's picture is drawn the same.
     change.viewport = { w: layer.clientWidth, h: layer.clientHeight };
     ownPending = true;
     return api('POST', '/changes', change).then(function () { return refresh(); }).catch(fail);
@@ -988,7 +988,7 @@
   // ---------- boot ----------
   var savedDevice = null, savedPanel = null;
   try { savedDevice = localStorage.getItem('pad.device.' + slug); savedPanel = localStorage.getItem('pad.panel'); } catch (e) { /* ignore */ }
-  // The Pad says how it opens (Desktop or Phone); a device Tom picked for this Pad wins.
+  // The Pad says how it opens (Desktop or Phone); a device the user picked for this Pad wins.
   setDevice(savedDevice || 'desktop');
   panel.hidden = narrow.matches ? true : savedPanel === '0';
   var savedMode = null;

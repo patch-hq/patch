@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 // spec/14 § Jobs view — a cron row names the zone it runs in whenever that is
 // not the reader's own.
 //
-// The bug this pins: Tom's jobs carried no `timezone`, so they evaluated as
+// The bug this pins: the user's jobs carried no `timezone`, so they evaluated as
 // UTC (spec/08 § Cron) while the row read "weekdays at 9am" — and they fired
 // at 10:00 BST. The row has to be unambiguous about which 9am it means, while
 // staying silent for the ordinary case where the job runs where you are.
@@ -75,7 +75,7 @@ async function stubJobs(page: import('@playwright/test').Page): Promise<void> {
   );
 }
 
-// The reader is in London — the zone Tom's jobs were authored in.
+// The reader is in London — the zone the user's jobs were authored in.
 test.describe('jobs list — cron zone labelling, read from Europe/London', () => {
   test.use({ timezoneId: 'Europe/London' });
 

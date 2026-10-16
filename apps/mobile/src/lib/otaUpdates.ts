@@ -8,7 +8,7 @@
 // That is deliberate, not a fallback. This used to call `Updates.reloadAsync()`
 // as soon as a fetch completed, which meant the first launch after any publish
 // painted the OLD bundle, tore the whole JS context down and started again —
-// the white flash and second load Tom reported. On an already-open app it was
+// the white flash and second load the user reported. On an already-open app it was
 // worse: the 30-minute timer and every background -> foreground transition
 // could restart the app under him mid-use.
 //
@@ -17,7 +17,7 @@
 // 0`; AndroidManifest `EXPO_UPDATES_CHECK_ON_LAUNCH=ALWAYS`,
 // `EXPO_UPDATES_LAUNCH_WAIT_MS=0`), so a fetched update costs the user nothing
 // and applies at the next natural start. The only reload left in the app is the
-// one Tom presses himself — Settings -> Version -> "Restart to update", which
+// one the user presses themself — Settings -> Version -> "Restart to update", which
 // also names the pending update so a downloaded-but-not-running bundle is never
 // invisible.
 //

@@ -975,7 +975,7 @@ export type ChatToolResultContentBlock =
  * An image block whose bytes live in the blob store instead of inline base64
  * (spec/04 § History — blobs). The host swaps every `base64` source for one
  * of these when it logs a tool result, and replay never sends anything else:
- * 1,507 inline images across Tom's logs account for 317 MB of base64, which is
+ * 1,507 inline images across the user's logs account for 317 MB of base64, which is
  * most of what made opening a long chat slow.
  *
  * The surface renders `<img src="/api/chats/:chatId/blob/:$blob">`, so the
@@ -7404,9 +7404,9 @@ export type PatchArtifactPublishResponseEvent = z.infer<typeof PatchArtifactPubl
 // Pads (spec/14 § Pads) — design spaces the agent starts and keeps modifying.
 //
 // The agent's `patch_pad_*` tools run on the host, which holds the design's
-// files; the server owns the Pad (its screens, Tom's changes, the pictures).
+// files; the server owns the Pad (its screens, the user's changes, the pictures).
 // The host asks over this request/response pair: `create`/`update` ship a
-// folder of files, `reply` answers a batch of Tom's changes, `list` reads
+// folder of files, `reply` answers a batch of the user's changes, `list` reads
 // what exists. NO FALLBACK: every failure comes back as `ok: false` with why.
 export const PadFileEntry = z
   .object({

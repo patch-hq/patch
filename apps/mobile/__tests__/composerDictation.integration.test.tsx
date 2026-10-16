@@ -135,7 +135,7 @@ describe('composer dictation (real session) — a tap session end to end', () =>
   });
 
   it('drops the placeholder while dictating, so it cannot paint under the live text', async () => {
-    // Tom, Todoist 6hVPGMcWfgcW6256: "when voice note is recording, placeholder
+    // Todoist 6hVPGMcWfgcW6256: "when voice note is recording, placeholder
     // should disappear, its writing on top in patch". The preview mirror sits
     // exactly on top of the TextInput, so on an empty draft the placeholder
     // renders THROUGH it and the two strings overlap.

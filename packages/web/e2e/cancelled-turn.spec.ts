@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 // spec/14 § Running-turn controls — a turn the user stopped, with nothing
-// queued behind it, says so and offers Continue (Tom: "cancelled message
+// queued behind it, says so and offers Continue (User: "cancelled message
 // should show status, and allow retry" — refined so the agent that already
 // saw the message gets nudged onward rather than re-sent a duplicate).
 //

@@ -50,7 +50,7 @@ async function harness() {
   const registry = Registry.load(dir);
   registry.bootstrapAccount({ keypair: ACCOUNT });
   // A phone that has registered for push, and nothing foregrounded on a
-  // computer — Tom walked away from the machine, which is the whole case.
+  // computer — the user walked away from the machine, which is the whole case.
   registry.registerPushToken({
     surfaceId: 'srf-phone',
     accountId: ACCOUNT.publicKey,
@@ -134,7 +134,7 @@ describe('turn-end push, end to end (spec/09 § Chat completion)', () => {
     }
   });
 
-  // Tom's parenthetical, proven at the level that actually reaches his phone.
+  // the user's parenthetical, proven at the level that actually reaches their phone.
   it('stays silent for a machine turn — the watcher loop does not ring', async () => {
     const { app, link, push } = await harness();
     try {

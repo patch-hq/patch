@@ -94,7 +94,7 @@ app.whenReady().then(async () => {
   // exposes no getter for either option. What CAN be checked here, and cannot
   // be checked by a unit test, is that the options the module emits are ones
   // THIS Electron build actually accepts: a renamed or dropped option would
-  // throw (or be silently ignored) at construction, on Tom's Mac only.
+  // throw (or be silently ignored) at construction, on the user's Mac only.
   check('window-chrome-options-accepted-by-electron', () => {
     const { windowChrome } = require('../dist/window-chrome.js');
     const chrome = windowChrome('darwin');

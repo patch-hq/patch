@@ -701,7 +701,7 @@ describe('ChatRoute regression', () => {
   });
 
   // An Anthropic image content block in a tool result renders as an actual
-  // picture, not a dumped base64 string (Tom: "is it trying to show an
+  // picture, not a dumped base64 string (User: "is it trying to show an
   // image?" — spec/14 § Tool calls).
   it('renders an image content block in a tool result as a picture, not raw base64', () => {
     seedChat('c-tool-image-result', [
@@ -1171,7 +1171,7 @@ describe('ChatRoute regression', () => {
     ]);
   });
 
-  // Tom, Todoist: "what does approve all actually do in patch, need to be
+  // Todoist: "what does approve all actually do in patch, need to be
   // clearer" → on a lone approval the sweep is indistinguishable from Approve,
   // and its old name read like a mode. It is not drawn at all here.
   it('hides the approve-all sweep while only one request is outstanding (spec/14)', () => {
@@ -1453,7 +1453,7 @@ describe('ChatRoute regression', () => {
   });
 
   it('a permission approve whose ws.send throws still resolves optimistically and is held for redelivery', () => {
-    // Tom, Todoist: "questions are timing out after I answer them" — a send
+    // Todoist: "questions are timing out after I answer them" — a send
     // that fails at the moment of the tap (a zombie link, a mid-reconnect
     // socket) used to block the card AND surface an error the user could do
     // nothing useful with. It now resolves the card like any other answer and
@@ -1756,7 +1756,7 @@ describe('ChatRoute regression', () => {
   });
 
   // spec/04 ## Message queueing — sending never interrupts. 2026-09-29: every
-  // message Tom sent into a running turn killed it 1-2s later, via ⌘↵'s
+  // message the user sent into a running turn killed it 1-2s later, via ⌘↵'s
   // send-and-promote or a second ↵ in the emptied composer promoting the
   // message just sent. Only Stop, Esc and a queued message's ↑ interrupt.
   // `dev-harness.tsx` renders ChatRoute with `ws={null}`, so the frames are
@@ -2435,7 +2435,7 @@ describe('ChatRoute regression', () => {
     expect(img.style.transform).toContain('translate(0px, 0px)');
   });
 
-  // A call and its own result are ONE event, not two rows (Tom: "tool call
+  // A call and its own result are ONE event, not two rows (User: "tool call
   // appears twice — once as the invocation and once as the result").
   it('folds a tool call and its own result into a single row (spec/14)', () => {
     seedChat('c-tool-paired', [
@@ -2490,7 +2490,7 @@ describe('ChatRoute regression', () => {
 
   // An array's positions are not field names. Labelling them printed a literal
   // "0:" above every element — most visibly under a Read image result, whose
-  // payload is the two-element content array [text, image] (Tom: "0: artifact").
+  // payload is the two-element content array [text, image] (User: "0: artifact").
   it("does not label a content array's elements with their indices", () => {
     seedChat('c-tool-noindex', [
       {
@@ -2980,7 +2980,7 @@ describe('ChatRoute regression', () => {
   });
 
   // spec/08 § Action, spec/14 § Automations — a job's raw trigger prompt/
-  // payload is the first user turn of a job-spawned chat, not something Tom
+  // payload is the first user turn of a job-spawned chat, not something the user
   // typed. It should read like transcript furniture (same disclosure as a
   // compaction boundary), not a plain user bubble.
   describe('job trigger turn (spec/08 § Action)', () => {
@@ -3138,7 +3138,7 @@ describe('ChatRoute regression', () => {
 
   // spec/20-hooks.md § On the agent's response, spec/14 § Agent-response
   // hooks — a `block` resubmit the host fired is transcript furniture
-  // naming the blocking hook(s), not a message Tom wrote.
+  // naming the blocking hook(s), not a message the user wrote.
   describe('hook trigger turn (spec/20-hooks.md § On the agent’s response)', () => {
     it('renders a block resubmit as a collapsed disclosure naming the hook, not a message bubble', () => {
       seedChat('c-hook-trigger', [
@@ -3435,7 +3435,7 @@ describe('ChatRoute regression', () => {
 
   // spec/14 § Background task completions — replay (and any host on a host
   // predating the host-side lifting) hands the surface the WHOLE raw
-  // `<task-notification>` block as a user turn. It is not something Tom typed
+  // `<task-notification>` block as a user turn. It is not something the user typed
   // and he does not need to read it, so it renders as one quiet line with the
   // block a chevron away — never a user bubble.
   describe('raw task-notification user turn (spec/14 § Background task completions)', () => {
@@ -4390,7 +4390,7 @@ describe('ChatRoute regression', () => {
 });
 
 // spec/02 § System-reminder disclosure — a turn's captured `<system-reminder>`
-// blocks render as a collapsed, click-to-expand box at that turn (Tom:
+// blocks render as a collapsed, click-to-expand box at that turn (User:
 // "hidden in a box, allow user to see"), never inlined into the bubble text
 // and never open by default.
 describe('ChatRoute — system-reminder disclosure (spec/02)', () => {

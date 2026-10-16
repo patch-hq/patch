@@ -128,7 +128,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     expect(settledOrigins(events, chatId)).toEqual(['user']);
   });
 
-  // Tom's own example: "some things are silent, like a loop to check something".
+  // the user's own example: "some things are silent, like a loop to check something".
   it('a self-wake turn settles as a machine turn', async () => {
     const b = recordingBackend();
     const { daemon, folder, events } = setup(b.backend);
@@ -181,7 +181,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     await daemon.sendInput({ chatId, message: 'do my chores', localId: 'u1' });
     await tick(200);
 
-    // One request from Tom, three turns — he hears about it once, not per item.
+    // One request from the user, three turns — they hear about it once, not per item.
     expect(settledOrigins(events, chatId)).toEqual(['user', 'machine', 'machine']);
   });
 
@@ -321,7 +321,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     expect(settledOrigins(events, chatId)).toEqual(['machine']);
   });
 
-  // Tom: "sending a completion notification when a turn is ended via
+  // User: "sending a completion notification when a turn is ended via
   // interruption of a new message instead of actually getting to the end". A
   // promote (the up-arrow, or the head-of-queue 30-second auto-interrupt) stops
   // the in-flight turn so the queued turn runs NOW. That stop is part of the
@@ -359,7 +359,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       };
     };
 
-    // Tom's report: his own turn running, his second message queued behind it.
+    // the user's report: their own turn running, their second message queued behind it.
     {
       const g = abortableGated();
       const { daemon, folder, events } = setup(g.backend);
@@ -420,7 +420,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
 
     // A host that dies mid-wake-turn leaves the turn in meta.json's
     // pendingTurns; the next host re-sends it. It must not come back as a
-    // user turn and ring the doorbell for a loop Tom never asked about.
+    // user turn and ring the doorbell for a loop the user never asked about.
     const events: WireEvent[] = [];
     // The first turn settles (so the chat has a Claude session to resume, as a
     // real chat would); the second hangs — the "host killed mid-turn" shape.

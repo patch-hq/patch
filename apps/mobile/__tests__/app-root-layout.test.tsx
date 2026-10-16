@@ -218,7 +218,7 @@ describe('RootLayout — fonts never block first paint', () => {
 // THE regression this file exists to guard. A push tapped while the app is
 // KILLED delivers its response before the NavigationContainer has marked itself
 // ready, so expo-router throws from router.* rather than queueing. Navigating
-// eagerly therefore lost Tom's destination and dropped him on the default
+// eagerly therefore lost the user's destination and dropped them on the default
 // screen; the warm path always worked, which is why it went unnoticed.
 describe('RootLayout — cold start (no navigator yet)', () => {
   function notificationResponse(id: string, data: Record<string, unknown>): unknown {

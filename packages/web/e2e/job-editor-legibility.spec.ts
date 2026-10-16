@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Tom, on the Patch Updates job's editor: "i dont have the toggle to hide chats
+// the user, on the Patch Updates job's editor: "i dont have the toggle to hide chats
 // for pathc updates job. the fonts are too small on that page (enforce minimum
 // siae font whole app). back button too small. not enough margin between back
 // and title".
@@ -143,7 +143,7 @@ test.describe('job editor — Hide chat on a continue job', () => {
     await page.getByTestId('job-save').click();
     await expect.poll(() => saved.length).toBe(1);
     const action = saved[0].action as Record<string, unknown>;
-    // WIRE COMPATIBILITY: `ContinueAction` is `.strict()` and Tom's host OTAs
+    // WIRE COMPATIBILITY: `ContinueAction` is `.strict()` and the user's host OTAs
     // separately from the server, so an untouched job must still serialise to
     // exactly what a host that predates this field accepts.
     expect('hidden' in action).toBe(false);

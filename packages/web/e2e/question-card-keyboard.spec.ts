@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// spec/14 § Main chat panel — Question prompts. Tom, App Updates: "patch ask a
+// spec/14 § Main chat panel — Question prompts. App Updates: "patch ask a
 // question tab should go between questions with arrow keys within the answers".
 //
 // Proved in a real browser because the whole feature IS the browser's own

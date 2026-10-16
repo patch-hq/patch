@@ -72,7 +72,7 @@ test.describe('Automations sidebar section', () => {
     await expect(working).toBeVisible();
     await expect(done).toBeVisible();
 
-    // "working/done" — the exact statuses Tom asked to see at a glance.
+    // "working/done" — the exact statuses the user asked to see at a glance.
     await expect(working.getByTestId('badge-working')).toBeVisible();
     await expect(done.getByTestId('badge-done')).toBeVisible();
   });

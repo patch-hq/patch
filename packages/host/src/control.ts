@@ -3076,7 +3076,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return { ok: true, artifactId, url, title: resolvedTitle, path: relPath };
   });
 
-  // patch_pad_* — design spaces Tom edits (spec/14 § Pads). The host reads the
+  // patch_pad_* — design spaces the user edits (spec/14 § Pads). The host reads the
   // folder (Claude runs here) and the server owns the Pad. Create, update and
   // reply also stamp a Pad card into the chat (a `chat.artifact` whose id is
   // `pad-<padId>`), so the chat always carries a way into the Pad.
@@ -3150,7 +3150,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   // view_file — put a file on the USER's screen (spec/14 § Tool calls).
   //
   // The distinction from Read is who the bytes are for: Read feeds Claude,
-  // this feeds Tom. So the file is published as a page (same server-side store
+  // this feeds the user. So the file is published as a page (same server-side store
   // and sandboxed origin as an artifact) and the tool hands back only a small
   // ack naming where it went — the image never enters the model's context.
   // Unlike patch_artifact it does NOT stamp a chat.artifact card: the point is

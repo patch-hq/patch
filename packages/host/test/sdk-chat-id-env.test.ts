@@ -1,5 +1,5 @@
 // A chat's own shell commands need to know which chat they are in: tools like
-// `pad publish` deliver Tom's edits back into that chat. PATCH_CHAT_ID used
+// `pad publish` deliver the user's edits back into that chat. PATCH_CHAT_ID used
 // to reach only the patch MCP child, never the Bash tool's environment.
 
 import { describe, expect, it, vi } from 'vitest';

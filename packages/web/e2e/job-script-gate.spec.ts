@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 // Its HISTORY said nothing. Every held fire recorded `ok`, exit 0, so a gate
 // that quietly broke three days ago looked identical to one correctly holding.
 // The exit code and output tail were already in the run log; nothing rendered
-// them. Tom: "i cant actually dig into when the job gets launched because its in
+// them. User: "i cant actually dig into when the job gets launched because its in
 // code. and control hidden etc".
 //
 // And its COMMAND is a script — a whole gate, handed to `bash -lc` — which a
@@ -282,7 +282,7 @@ test.describe('script job — the gate and its decisions', () => {
   });
 });
 
-// spec/08 § Gate. The shape Tom asked for: "script could be a gate that gets
+// spec/08 § Gate. The shape the user asked for: "script could be a gate that gets
 // true/false, exit, error that kind of thing" — the command decides, the job's
 // own action does the work, so the chat it makes is the job's chat with all the
 // machinery attached.

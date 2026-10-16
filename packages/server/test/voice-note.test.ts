@@ -189,7 +189,7 @@ describe('POST /api/voice/note', () => {
 
   // --- the typed composer text rides along as `prefix` (spec/07 § 1. Voice note)
   //
-  // Tom, Todoist 6hW5QcMPmf6gWhwc / 6hVhq54fM2mFf8c6: "patch starting a voice
+  // Todoist 6hW5QcMPmf6gWhwc / 6hVhq54fM2mFf8c6: "patch starting a voice
   // note deletes all current content!" / "should append". A note commits its OWN
   // turn, so before this the half-written message sitting in the composer was
   // simply thrown away. It now leads the turn and the transcript follows it.

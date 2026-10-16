@@ -1,7 +1,7 @@
 // The schedule subtitle a job row shows (spec/15 § Settings tab — Jobs).
 //
 // A cron job's label is ambiguous unless the reader can tell which zone it is
-// in: Tom's pre-timezone jobs read "9am" on the row and fired at 10:00 BST.
+// in: the user's pre-timezone jobs read "9am" on the row and fired at 10:00 BST.
 
 import { describe, it, expect } from 'vitest';
 import { cronRowSubtitle } from '../src/lib/jobRow';

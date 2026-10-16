@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 // spec/14 § Composer — opening a chat puts the cursor in the composer, so you
-// can start typing straight away without clicking the field (Tom, Todoist:
+// can start typing straight away without clicking the field (Todoist:
 // "opening a chat should focus the type a message box").
 //
 // Real-browser only. jsdom has no competition for the cursor: here the sidebar

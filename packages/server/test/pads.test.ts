@@ -1,6 +1,6 @@
 // Pads — the real round trip (spec/14 § Pads): an agent's patch.pad.request
 // creates a Pad over the host link → the editor and the design's files are
-// served from the signed URL → Tom's changes land in the shared store → Send
+// served from the signed URL → the user's changes land in the shared store → Send
 // draws a real picture of each change in a real browser and delivers the batch
 // into the owning chat as a `chat.input` → the agent's reply closes it.
 

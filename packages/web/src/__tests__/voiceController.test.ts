@@ -247,7 +247,7 @@ describe('voiceController', () => {
   });
 
   it('APPEARS LIVE: the voice message shows a transcribing bubble the instant sending begins, then fills in when the upload returns', async () => {
-    // The point of "appear live" (Tom, patch/todo.md): the bubble must show the
+    // The point of "appear live" (the user, patch/todo.md): the bubble must show the
     // moment the user finishes speaking — NOT only after the (slow, on train
     // wifi) upload + Whisper round-trip. We hold the upload open to prove the
     // bubble is already in the timeline while it is still in flight.

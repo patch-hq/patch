@@ -1,7 +1,7 @@
 // spec/14 ## Startup cost — "the entry graph carries only what first paint
 // needs".
 //
-// Tom, patch/todo.md — "Check app for performance". `main.tsx` statically
+// the user, patch/todo.md — "Check app for performance". `main.tsx` statically
 // imported `lib/monaco-loader.js`, which pulls `monaco-editor/esm/vs/editor/
 // editor.main.js` — the whole editor, every monarch tokenizer and the rich
 // JSON/CSS/HTML/TS language services. Static import means it is in the ENTRY

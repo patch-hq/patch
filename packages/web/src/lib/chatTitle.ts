@@ -9,7 +9,7 @@
 //
 // The folder basename used to sit between the two, so a brand-new chat was
 // titled `portfolio` — indistinguishable from every other chat in that folder,
-// and read as a real name rather than as "this hasn't been named yet" (Tom,
+// and read as a real name rather than as "this hasn't been named yet" (the user,
 // Patch Updates — "chats should be New chat before they have a name instead of
 // folder name"). The folder is still on the row, as the crumb; it is no longer
 // pretending to be a title.

@@ -70,7 +70,7 @@ await page.evaluate(() => {
 });
 
 // The ear lives on the Manager row in the sidebar (hands-free session on
-// thread_manager) — the SAME control Tom presses.
+// thread_manager) — the SAME control the user presses.
 const ear = page.locator('.sb-row.special [aria-label="start working session"]').first();
 await ear.click({ timeout: 15_000 });
 log('ear clicked — working session opening (fake mic track is rolling)');

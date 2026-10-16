@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 // spec/14 § New windows + § Layout (desktop) — the sidebar detached into its
 // own window (`/sidebar-window`) fills that window and is never drawn narrower
-// with no ceiling (Tom: "page is too narrow") — the 600px cap only applies to
+// with no ceiling (User: "page is too narrow") — the 600px cap only applies to
 // the docked sidebar's drag handle.
 //
 // Only a real browser can see any of this — jsdom computes no layout at all,

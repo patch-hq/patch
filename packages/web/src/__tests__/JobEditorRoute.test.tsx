@@ -682,7 +682,7 @@ describe('JobEditorRoute (single-page form)', () => {
 
     // WIRE COMPATIBILITY, and the one thing here that can break production:
     // `ContinueAction` is `.strict()` and a host OTAs its host separately from
-    // the server, so for a while Tom's host parses jobs with a schema that
+    // the server, so for a while the user's host parses jobs with a schema that
     // has never heard of `hidden`. An unticked job must therefore post NO
     // `hidden` key — not `false`, not `undefined`.
     it('unticked posts no hidden key at all, so the payload is what it always was', async () => {
@@ -794,7 +794,7 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderEdit();
       await screen.findByTestId('job-name');
-      // The stored flag shows as ticked — that is the bug Tom reported: there
+      // The stored flag shows as ticked — that is the bug the user reported: there
       // was no control here at all, so its state was unreadable and unsettable.
       await waitFor(() =>
         expect((screen.getByTestId('job-spawn-hidden') as HTMLInputElement).checked).toBe(true),
@@ -1249,7 +1249,7 @@ describe('JobEditorRoute (single-page form)', () => {
       expect(label?.querySelector('.toggle-label')?.textContent).toBe('Notify when job complete');
     });
 
-    // spec/14 § Copy — no helper text. Tom's house style: the label names the
+    // spec/14 § Copy — no helper text. the user's house style: the label names the
     // setting and nothing explains it.
     it('carries no explainer caption', () => {
       renderNew();
@@ -2594,7 +2594,7 @@ describe('JobEditorRoute (single-page form)', () => {
   });
 
   // A gate job (`script`) fires on a tight cron and mostly decides there is no
-  // work, so its history was a wall of identical `ok` rows: Tom — "i cant
+  // work, so its history was a wall of identical `ok` rows: the user — "i cant
   // actually dig into when the job gets launched because its in code. and
   // control hidden etc". The exit code and output tail were already recorded by
   // the dispatcher; nothing rendered them.
@@ -2757,7 +2757,7 @@ describe('JobEditorRoute (single-page form)', () => {
     });
   });
 
-  // Tom, Patch Updates: "recent runs should filter out rejected by default (add
+  // the user, Patch Updates: "recent runs should filter out rejected by default (add
   // toggle). it should show everything (paginated if necessary)". On a
   // Todoist-triggered job nearly every fire is `filter-rejected` — every
   // unrelated task edit in the account — so the run you came to look at was

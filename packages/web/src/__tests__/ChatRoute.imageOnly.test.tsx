@@ -1,4 +1,4 @@
-// Regression (Tom, "pasted an image but its not there"): an image-only user
+// Regression (the user, "pasted an image but its not there"): an image-only user
 // message — a pasted/attached image with NO typed text — must still render its
 // attachment. The transcript previously dropped any settled message whose text
 // was empty, which took the image down with it (ChatRoute § empty-message

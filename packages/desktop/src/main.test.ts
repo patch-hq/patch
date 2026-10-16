@@ -41,7 +41,7 @@ test('createMainWindow registers the module singleton (no duplicate/orphaned mai
 });
 
 test('both document windows drop the native title bar (spec/05 § Window chrome)', () => {
-  // Tom, App Updates: "clean at top, no patch top bar. window extends right to
+  // App Updates: "clean at top, no patch top bar. window extends right to
   // top of screen." The decision itself lives in window-chrome.ts and is tested
   // there; what this pins is that BOTH document-window factories actually apply
   // it — a child window that kept its native bar would still show the bar he
@@ -483,7 +483,7 @@ test('preload.ts exposes the updater bridge for the version panel', () => {
 });
 
 // spec/09 § Presence heuristic — the server routes notifications by whether
-// Tom is at the computer, which only the main process can see (any app's input).
+// the user is at the computer, which only the main process can see (any app's input).
 test('the system idle time reaches the renderer over one IPC channel', () => {
   const main = readFileSync(join(here, 'main.ts'), 'utf8');
   const preload = readFileSync(join(here, 'preload.ts'), 'utf8');
@@ -664,7 +664,7 @@ test('every BrowserWindow disables backgroundThrottling (hidden windows must sti
   // popover, so the main window sits hidden/unfocused most of the time. That
   // throttling delayed the WS reconnect backoff (api/ws.ts) driving
   // liveUpdate.ts's post-deploy auto-reload, leaving a hidden window on a
-  // stale bundle indefinitely — reported by Tom needing a manual Cmd+R after
+  // stale bundle indefinitely — reported by the user needing a manual Cmd+R after
   // a deploy. Every window that loads the web SPA must opt out.
   const src = readFileSync(join(here, 'main.ts'), 'utf8');
   const factories = [
@@ -693,7 +693,7 @@ test('every BrowserWindow disables backgroundThrottling (hidden windows must sti
 // ── Surviving a deploy ────────────────────────────────────────────────────────
 // A deploy used to run `install-to-applications.cjs` as a `postdist` hook: it
 // quit Patch, replaced /Applications/Patch.app and never relaunched it, so
-// every deploy left the desktop dead until Tom started it by hand. The shell
+// every deploy left the desktop dead until the user started it by hand. The shell
 // now follows a deploy the same way any other machine would — over the update
 // feed, which relaunches on install.
 
