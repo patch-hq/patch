@@ -3741,6 +3741,8 @@ export const ChatHideRequestEvent = z
     type: z.literal('chat.hide_request'),
     chatId: z.string().min(1),
     hidden: z.boolean(),
+    /** With `hidden: true`: the chat comes back on its own when its running work completes. */
+    untilComplete: z.boolean().optional(),
   })
   .strict();
 export type ChatHideRequestEvent = z.infer<typeof ChatHideRequestEvent>;

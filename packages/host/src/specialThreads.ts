@@ -185,6 +185,7 @@ export function ensureSpecialThreads(opts: EnsureSpecialThreadsOptions): void {
         snoozeRecords: [],
         // ...nor hidden (spec/04 § Hidden).
         hidden: false,
+        hideUntilComplete: false,
         createdAt: meta.createdAt,
         lastUserActivity: meta.lastUserActivity ?? meta.createdAt,
         lastError: null,

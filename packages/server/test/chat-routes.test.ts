@@ -1367,6 +1367,28 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats/:id/hide forwards untilComplete, and rejects it without hidden', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
+      const post = (payload: object) =>
+        built.app.inject({
+          method: 'POST',
+          url: '/api/chats/c1/hide',
+          headers: { authorization: `Bearer ${jwt}` },
+          payload,
+        });
+      expect((await post({ hidden: true, untilComplete: true })).statusCode).toBe(200);
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.hide_request');
+      expect(sent?.event).toMatchObject({ hidden: true, untilComplete: true });
+      expect((await post({ hidden: false, untilComplete: true })).statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats/:id/pin forwards chat.pin_request', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();

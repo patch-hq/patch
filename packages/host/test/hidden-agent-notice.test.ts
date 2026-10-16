@@ -83,3 +83,62 @@ describe('the agent is told its chat was hidden or shown', () => {
     expect(prompts[0]).not.toContain('hidden mode');
   });
 });
+
+describe('hide until complete (spec/04 § Hidden)', () => {
+  function gated() {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const backend: SdkBackend = {
+      run: async function* () {
+        await gate;
+        yield { type: 'assistant', content: 'done', sessionId: 'sess-1' };
+        yield { type: 'result', sessionId: 'sess-1' };
+      },
+    };
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-huc-folder-')));
+    const states: Array<{ hidden?: boolean }> = [];
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(mkdtempSync(join(tmpdir(), 'patch-huc-'))),
+      sdkBackend: backend,
+      oauthAccessToken: 'fake-token',
+      emit: (e) => {
+        if (e.type === 'chat.state') states.push(e as { hidden?: boolean });
+      },
+      logger: pino({ level: 'silent' }),
+      now: () => 1_700_000_000_000,
+      generateChatId: () => 'chat-1',
+    });
+    return { daemon, folder, release, states };
+  }
+
+  it('stays hidden while the turn runs, then comes into the list when it completes', async () => {
+    const { daemon, folder, release } = gated();
+    const chatId = await daemon.spawnChat({ folder });
+    void daemon.sendInput({ chatId, message: 'go', localId: 'L1', origin: 'user' });
+    await tick();
+    await daemon.setHidden(chatId, true, true);
+    await tick();
+    expect(daemon.currentStateEvent(chatId)?.hidden).toBe(true);
+    release();
+    await tick(100);
+    expect(daemon.currentStateEvent(chatId)?.hidden).toBe(false);
+  });
+
+  it('a plain hide stays hidden after the turn completes', async () => {
+    const { daemon, folder, release } = gated();
+    const chatId = await daemon.spawnChat({ folder });
+    void daemon.sendInput({ chatId, message: 'go', localId: 'L1', origin: 'user' });
+    await tick();
+    await daemon.setHidden(chatId, true);
+    release();
+    await tick(100);
+    expect(daemon.currentStateEvent(chatId)?.hidden).toBe(true);
+  });
+
+  it('is refused when nothing is running', async () => {
+    const { daemon, folder } = gated();
+    const chatId = await daemon.spawnChat({ folder });
+    await expect(daemon.setHidden(chatId, true, true)).rejects.toThrow(/no running work/);
+  });
+});

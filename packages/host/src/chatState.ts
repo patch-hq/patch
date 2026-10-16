@@ -329,6 +329,8 @@ export interface ChatState {
    * machine message starting the chat again puts it back where it was.
    */
   hidden: boolean;
+  /** Hidden only until the running work completes (spec/04 § Hidden). */
+  hideUntilComplete: boolean;
   createdAt: number;
   /**
    * ms epoch of the user's own last activity on this chat (spec/14 § Sidebar
@@ -437,6 +439,7 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     snoozedUntil: meta.snoozedUntil ?? null,
     snoozeRecords: meta.snoozeRecords ?? [],
     hidden: meta.hidden ?? false,
+    hideUntilComplete: (meta.hidden ?? false) && (meta.hideUntilComplete ?? false),
     createdAt: meta.createdAt,
     lastUserActivity: meta.lastUserActivity ?? meta.createdAt,
     // Rehydrate the persisted error detail so an errored chat that survived a

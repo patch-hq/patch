@@ -344,6 +344,11 @@ export const ChatMeta = z
      */
     hidden: z.boolean().optional(),
     /**
+     * Hidden only until the running work completes (spec/04 § Hidden → Hide until
+     * complete). Meaningful only while `hidden`; cleared with it. Absent ⇒ false.
+     */
+    hideUntilComplete: z.boolean().optional(),
+    /**
      * ms epoch the chat is snoozed until (spec/04 § Snooze), or `null`/absent
      * when it is not snoozed. Persisted so a snooze survives a host restart —
      * on hydrate a future value re-arms its wake timer and a lapsed one clears.

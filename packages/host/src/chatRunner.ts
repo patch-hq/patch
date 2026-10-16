@@ -3970,6 +3970,7 @@ export class Daemon {
       snoozedUntil: null,
       snoozeRecords: [],
       hidden,
+      hideUntilComplete: false,
       createdAt: now,
       lastUserActivity: now,
       lastError: null,
@@ -4612,7 +4613,7 @@ export class Daemon {
    * chat is stopped, and hidden is a state of running (NO FALLBACK: the caller
    * is told, not quietly given something else).
    */
-  async setHidden(chatId: string, hidden: boolean): Promise<void> {
+  async setHidden(chatId: string, hidden: boolean, untilComplete = false): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
     if (hidden && isReservedSpecialThread(chatId)) {
@@ -4623,12 +4624,28 @@ export class Daemon {
         `setHidden: only an active chat can be hidden (${chatId} is ${state.status})`,
       );
     }
+    if (untilComplete) {
+      if (!hidden) throw new Error('setHidden: untilComplete needs hidden: true');
+      // Nothing running means nothing to wait for (NO FALLBACK: say so).
+      if (this.aggregateActivity(chatId) !== 'running') {
+        throw new Error(`setHidden: ${chatId} has no running work to hide until complete`);
+      }
+    }
     this.rehideOnExpiry.delete(chatId);
     if (state.hidden === hidden) {
+      if (state.hideUntilComplete !== untilComplete) {
+        state.hideUntilComplete = untilComplete;
+        this.opts.metaStore.update(chatId, (m) => ({
+          ...m,
+          hideUntilComplete: untilComplete,
+          updatedAt: m.updatedAt,
+        }));
+      }
       this.emitState(chatId);
       return;
     }
     state.hidden = hidden;
+    state.hideUntilComplete = untilComplete;
     // spec/04 § Hidden — the agent is told on its next turn. Undoing a change
     // the agent was never told about cancels it instead of announcing a no-op.
     const notice = hidden ? 'hidden' : 'shown';
@@ -4636,7 +4653,12 @@ export class Daemon {
       state.hiddenNotice !== null && state.hiddenNotice !== notice ? null : notice;
     // Like snooze, moving between sections is not activity: `updatedAt` and
     // `lastUpdated` stay as they were, so the chat keeps its place by recency.
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, hidden, updatedAt: m.updatedAt }));
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      hidden,
+      hideUntilComplete: untilComplete,
+      updatedAt: m.updatedAt,
+    }));
     this.emitState(chatId);
   }
 
@@ -13952,8 +13974,24 @@ export class Daemon {
     return this.buildStateEvent(chatId);
   }
 
+  /**
+   * "Hide until complete" (spec/04 § Hidden): once the running work is no
+   * longer running — it finished, or stopped on an error — the chat comes into
+   * the list. Waiting on a permission is handled by the usual Hidden exit.
+   */
+  private unhideIfComplete(chatId: string): void {
+    const state = this.chatState.get(chatId);
+    if (!state || !state.hidden || !state.hideUntilComplete) return;
+    const activity = this.aggregateActivity(chatId);
+    if (activity !== 'idle' && activity !== 'errored') return;
+    void this.setHidden(chatId, false).catch((err: unknown) => {
+      this.opts.logger.error({ chatId, err }, 'failed to unhide a chat that completed');
+    });
+  }
+
   private emitState(chatId: string): void {
     this.trackSnoozeOutcome(chatId);
+    this.unhideIfComplete(chatId);
     if (this.aggregateActivity(chatId) === 'running') {
       if (!this.runningSince.has(chatId)) this.runningSince.set(chatId, this.opts.now());
     } else {

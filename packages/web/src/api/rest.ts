@@ -616,10 +616,10 @@ export const api = {
     request<unknown>(`/api/chats/${chatId}/snooze/back-clear`, { method: 'POST' }),
   // spec/04 § Hidden — `hidden: false` is Show: the chat moves into the active
   // list without anything being sent to it.
-  hideChat: (chatId: string, hidden: boolean) =>
+  hideChat: (chatId: string, hidden: boolean, untilComplete = false) =>
     request<unknown>(`/api/chats/${chatId}/hide`, {
       method: 'POST',
-      body: { hidden },
+      body: untilComplete ? { hidden, untilComplete } : { hidden },
     }),
   pinChat: (chatId: string, pinned: boolean) =>
     request<unknown>(`/api/chats/${chatId}/pin`, {

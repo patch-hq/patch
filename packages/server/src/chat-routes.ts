@@ -2091,7 +2091,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // spec/04 § Hidden. `hidden: false` is the Hidden section's Show. The host
   // owns the rules (special threads and archived chats are refused there), so
   // this only validates the shape and that the chat exists.
-  const HideBody = z.object({ hidden: z.boolean() }).strict();
+  const HideBody = z
+    .object({ hidden: z.boolean(), untilComplete: z.boolean().optional() })
+    .strict()
+    .refine((b) => b.untilComplete !== true || b.hidden, {
+      message: 'untilComplete needs hidden: true',
+    });
   app.post<{ Params: { id: string } }>('/api/chats/:id/hide', async (req, reply) => {
     let auth;
     try {
@@ -2121,6 +2126,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       type: 'chat.hide_request',
       chatId: req.params.id,
       hidden: parsed.data.hidden,
+      ...(parsed.data.untilComplete === true ? { untilComplete: true } : {}),
     });
     return reply.code(200).send({ ok: true });
   });

@@ -6078,7 +6078,7 @@ export async function handleServerEvent(
       }
       case 'chat.hide_request': {
         // spec/04 § Hidden — `false` is the Hidden section's Show.
-        await daemon.setHidden(event.chatId, event.hidden);
+        await daemon.setHidden(event.chatId, event.hidden, event.untilComplete === true);
         return;
       }
       case 'chat.delete_request': {

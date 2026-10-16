@@ -90,9 +90,26 @@ describe('ChatHeader — hide', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-hide'));
-    await waitFor(() => expect(api.hideChat).toHaveBeenCalledWith('c1', true));
+    await waitFor(() => expect(api.hideChat).toHaveBeenCalledWith('c1', true, false));
     expect(useChatStore.getState().chats['c1']?.hidden).toBe(true);
     expect(screen.queryByTestId('action-hide')).toBeNull();
+  });
+
+  it('hide until complete: offered only while running, posts untilComplete', async () => {
+    const idle = row();
+    seed(idle);
+    render(<ChatHeader row={idle} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    expect(screen.queryByTestId('action-hide-until-complete')).toBeNull();
+    cleanup();
+
+    const r = row({ activity: 'running' });
+    seed(r);
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-hide-until-complete'));
+    await waitFor(() => expect(api.hideChat).toHaveBeenCalledWith('c1', true, true));
+    expect(useChatStore.getState().chats['c1']?.hidden).toBe(true);
   });
 
   it('reverts and toasts when the host refuses', async () => {

@@ -221,16 +221,18 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   // Hide (spec/04 § Hidden) — move a running chat out of the list. The chat
   // keeps running and the host tells the agent it is now in hidden mode.
   // Optimistic flip, reverting + toasting on failure (NO FALLBACK).
-  async function hide(): Promise<void> {
+  async function hide(untilComplete = false): Promise<void> {
     setHidden(row.chatId, true);
     try {
-      await api.hideChat(row.chatId, true);
+      await api.hideChat(row.chatId, true, untilComplete);
     } catch (err) {
       setHidden(row.chatId, false);
       pushError(failed('hide'), undefined, (err as Error).message);
     }
   }
   const canHide = !isSpecial && row.status === 'active' && !isHidden(row);
+  // Hide until complete: only a chat with running work has something to wait for.
+  const canHideUntilComplete = canHide && row.activity === 'running';
 
   // Disable / enable (spec/06 § Disabled) — the special-thread "off" switch,
   // since `toggleArchive` above is refused for them server-side. Same
@@ -546,6 +548,21 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                           Hide
                         </button>
                       ) : null}
+                      {canHideUntilComplete ? (
+                        <button
+                          type="button"
+                          className="head-menu-item"
+                          data-testid="action-hide-until-complete"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void hide(true);
+                          }}
+                        >
+                          <EyeOff size={14} aria-hidden />
+                          Hide until complete
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="head-menu-item"
@@ -727,6 +744,21 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                   >
                     <EyeOff size={14} aria-hidden />
                     Hide
+                  </button>
+                ) : null}
+                {canHideUntilComplete ? (
+                  <button
+                    type="button"
+                    className="head-menu-item"
+                    data-testid="hamburger-hide-until-complete"
+                    role="menuitem"
+                    onClick={() => {
+                      setHamburgerOpen(false);
+                      void hide(true);
+                    }}
+                  >
+                    <EyeOff size={14} aria-hidden />
+                    Hide until complete
                   </button>
                 ) : null}
                 {isSpecial ? (
