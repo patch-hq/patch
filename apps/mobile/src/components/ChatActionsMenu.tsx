@@ -11,7 +11,6 @@
 // - Tools pushes the full-screen per-chat tools page (app/chats/[chatId]/tools).
 // - Documents pushes the chat-folder document browser (app/chats/[chatId]/docs).
 // - Add tasks (only while the chat has no list) summons the task bar, open.
-// - Design a change to Chat opens New Pad on this chat with Patch preselected.
 // - Move to… pushes the Move page (app/chats/[chatId]/move): another machine,
 //   and the folder the chat will run in there.
 // - Show / Pin / Snooze / Archive call the very functions the Chats-tab row
@@ -35,7 +34,6 @@ import {
 } from './ChatLongPressSheet';
 import { chatKebabItems } from '../lib/chatActions';
 import { docsRoute } from '../lib/docEditor';
-import { newPadHref, PATCH_APP } from '../lib/newPad';
 import { clearContext, toggleDisabled } from '../lib/chatMeta';
 import { startVoiceCall } from '../lib/voiceCall';
 import { api } from '../api/rest';
@@ -104,9 +102,6 @@ export function ChatActionsMenu({
         return;
       case 'Add tasks':
         useUiStore.getState().setTaskAddChatId(chatId);
-        return;
-      case 'Design a change to Chat':
-        router.push(newPadHref({ chatId, app: PATCH_APP }));
         return;
       case 'Move to…':
         router.push(`/chats/${chatId}/move`);

@@ -34,7 +34,6 @@ import {
   Menu,
   ExternalLink,
   Wrench,
-  Frame,
   GitFork,
   Power,
   ArrowRightLeft,
@@ -55,8 +54,6 @@ import { MoveChatModal } from './MoveChatModal.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { shortcutTitle } from '../lib/shortcuts.js';
 import { failed } from '../lib/errorCopy.js';
-import { captureDocument } from '../lib/padCapture.js';
-import { openPadBesideChat } from '../lib/openPad.js';
 import { isPlainEnter } from '../lib/submitChord.js';
 
 // Manager / Speakers occupy fixed slots and cannot be pinned or
@@ -192,29 +189,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
       setName(row.chatId, previous);
       pushError(failed('rename'), undefined, err.message);
     });
-  }
-
-  // "Design a change to Chat" (spec/14 § Pads — Starting a Pad, way (a)):
-  // photograph this screen as it looks right now and open a Pad on that capture
-  // beside this chat. The menu closes first and the frame repaints, so the
-  // picture is the screen, not the menu on top of it.
-  async function designChange(): Promise<void> {
-    setMenuOpen(false);
-    setHamburgerOpen(false);
-    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-    try {
-      const html = await captureDocument();
-      const pad = await api.createPad({
-        name: deriveChatTitle(row.name),
-        app: 'Patch',
-        device: window.innerWidth < 760 ? 'phone' : 'desktop',
-        chatId: row.chatId,
-        screens: [{ name: 'Chat', html, width: window.innerWidth }],
-      });
-      openPadBesideChat(pad.id, row.chatId);
-    } catch (err) {
-      pushError('Could not start a Pad from this screen.', undefined, (err as Error).message);
-    }
   }
 
   // Editor (spec/14 § Chat panel header): opens this chat's Files tab, or
@@ -507,16 +481,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                       Add tasks
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="head-menu-item"
-                    data-testid="action-design"
-                    role="menuitem"
-                    onClick={() => void designChange()}
-                  >
-                    <Frame size={14} aria-hidden />
-                    Design a change to Chat
-                  </button>
                   {isSpecial ? (
                     <>
                       {/* Disable (spec/06 § Disabled) — the special-thread "off"
@@ -702,16 +666,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                     Add tasks
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className="head-menu-item"
-                  data-testid="hamburger-design"
-                  role="menuitem"
-                  onClick={() => void designChange()}
-                >
-                  <Frame size={14} aria-hidden />
-                  Design a change to Chat
-                </button>
                 {sideThreadBranches.length > 0 ? (
                   <button
                     type="button"

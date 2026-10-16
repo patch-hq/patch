@@ -385,7 +385,7 @@ Tapping a job row opens a working editor with parity to the web one (`14-design-
 
 A row opens the Pad (`/pads/<padId>`): a header with the name (tap to rename inline; an empty or unchanged name is ignored), the app, chat and badge, a way to the owning chat and Delete (confirmed). Below it the Pad's editor — the page the server serves from the Pad's signed URL — fills a WebView, so View/Edit, Select/Note/Draw, the screen list, the numbered changes and Send are the web editor, unchanged. The screen re-reads the Pad every 5 seconds so the badge follows edits. A Pad whose screens cannot be read says why instead of drawing a frame.
 
-The editor is a live page that reaches into the design's document, so it needs the server's own origin. Over a relay (`10-auth.md` § Relay) there is none for a WebView to load, and the screen says the editor needs a direct connection rather than showing a blank frame. Creating a Pad (New Pad, Design a change to Chat) photographs a live Patch page and is done on web or by an agent (`patch_pad_create`); a Pad created either way appears here and as a card in its chat.
+The editor is a live page that reaches into the design's document, so it needs the server's own origin. Over a relay (`10-auth.md` § Relay) there is none for a WebView to load, and the screen says the editor needs a direct connection rather than showing a blank frame. Creating a Pad (New Pad) photographs a live Patch page and is done on web or by an agent (`patch_pad_create`); a Pad created either way appears here and as a card in its chat.
 
 ## Host files and terminal
 
@@ -588,7 +588,7 @@ On the phone only: Secrets (`## Settings tab`), the launcher shortcuts and persi
 
 Differences in how the phone does them:
 
-- Creating a Pad (`14-design-web.md` § Pads — Starting a Pad): Pads list → New, or Design a change to Chat in a chat's ⋯ menu (opens New Pad on that chat with Patch preselected). Name, Based on (Blank or an app), Earlier captures, Desktop or Phone, the owning chat. The phone cannot photograph a live Patch screen, so it starts from earlier captures only.
+- Creating a Pad (`14-design-web.md` § Pads — Starting a Pad): Pads list → New. Name, Based on (Blank or an app), Earlier captures, Desktop or Phone, the owning chat. The phone cannot photograph a live Patch screen, so it starts from earlier captures only.
 - Image annotator: a pencil on an image chip in the composer opens a full-screen markup page (box, arrow, freehand, text, five colours, undo) drawn on a canvas in a WebView; Done replaces the attachment with a flattened `<name>-annotated.png`.
 - Link previews: an eye beside an http(s) link in a message expands title, description and image; the open icon sends the link to the browser.
 - Document editor: Documents in a chat's ⋯ menu browses the chat folder; a `.md` opens in a plain text editor (verbatim, explicit Save) with mode, Suggestions, Comments and History panels, Ask about this, Comment and export. A `.docx` is converted first. Save goes over the chat's `file.write` and is confirmed by reading the file back. Export is written to a folder the user picks.

@@ -1,8 +1,8 @@
 // Pads — the whole product in a real browser (spec/14 § Pads): the real SPA
 // served by the real server, a real credential, a real Pad. Covers what only the
 // assembled app can show: the Pads entry and its pending count, the Pads page,
-// a Pad opening beside its chat, "Design a change to Chat" photographing the
-// live screen into a Pad, and New Pad starting from a live-captured screen.
+// a Pad opening beside its chat, the chat menu carrying no "Design a change"
+// item, and New Pad starting from a live-captured screen.
 //
 // Needs the SPA built: `pnpm --filter @patch/web build` (or PATCH_WEB_DIST).
 // A missing OR STALE build fails loudly — it is never a skip. Staleness is
@@ -178,34 +178,13 @@ describe.skipIf(!BROWSER_LAYER)('pads in the app', () => {
     await ctx.close();
   }, 90_000);
 
-  it('"Design a change to Chat" photographs the live screen into a Pad and opens it beside the chat', async () => {
+  it('the chat menu has no "Design a change to Chat" item', async () => {
     const { ctx, page, errors } = await openApp('/app/chats/c1');
     await page.getByTestId('action-more').waitFor();
     await page.getByTestId('action-more').click();
-    await page.getByTestId('action-design').click();
-    await page.getByTestId('pad-pane').waitFor({ timeout: 30_000 });
-    const pads = (await api('/api/pads')).body.pads as {
-      id: string;
-      app: string;
-      screens: { name: string }[];
-      chatId: string;
-    }[];
-    const made = pads.find((p) => p.app === 'Patch');
-    expect(made).toMatchObject({ chatId: 'c1', screens: [{ name: 'Chat', width: 1400 }] });
-    // The editor holds the design at that width instead of letting it reflow.
-    const design = page.frameLocator('[data-testid=pad-frame]');
-    await design.locator('#frame').waitFor();
-    await expect
-      .poll(() => design.locator('#wrap').evaluate((e) => (e as HTMLElement).style.minWidth))
-      .toBe('1400px');
-    // The capture is the real Patch UI, styled, with no scripts.
-    const { frameUrl } = (await api(`/api/pads/${made!.id}`)).body;
-    const html = await (await fetch(`${base}${frameUrl}f/cap-chat.html`)).text();
-    expect(html).toContain('data-testid="chat-title"');
-    expect(html).not.toMatch(/<script/i);
-    expect(html).toMatch(/<style>[^<]*\.three-col/);
-    expect(html).toMatch(/url\(["']?data:/); // a font or image was inlined
-    expect(html).not.toContain('data-testid="head-menu"'); // the menu we clicked is not in the picture
+    await page.getByTestId('head-menu').waitFor();
+    expect(await page.getByTestId('action-design').count()).toBe(0);
+    expect(await page.getByText('Design a change to Chat').count()).toBe(0);
     expect(errors).toEqual([]);
     await ctx.close();
   }, 90_000);

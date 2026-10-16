@@ -1,5 +1,5 @@
 // The chat-detail ⋯ menu (spec/15 ## Chat detail) — desktop parity: New chat,
-// Call, Tools, Documents, Design, Pin, Snooze, Archive, Disable, Clear context, Delete last, each
+// Call, Tools, Documents, Pin, Snooze, Archive, Disable, Clear context, Delete last, each
 // only where it applies. The raw wire event log is NOT reachable from the
 // chat view.
 
@@ -15,14 +15,13 @@ describe('chatKebabItems', () => {
     expect(chatKebabItems('01HXREGULARCHATID', PLAIN)).not.toContain('Add tasks');
   });
 
-  it('a regular chat: New chat, Call, Tools, Documents, Design, Pin, Snooze, Archive, Delete — Delete last', () => {
+  it('a regular chat: New chat, Call, Tools, Documents, Pin, Snooze, Archive, Delete — Delete last', () => {
     const items = chatKebabItems('01HXREGULARCHATID', PLAIN);
     expect(items).toEqual([
       'New chat',
       'Call',
       'Tools',
       'Documents',
-      'Design a change to Chat',
       'Pin chat',
       'Snooze chat',
       'Archive chat',
@@ -45,7 +44,6 @@ describe('chatKebabItems', () => {
       'Call',
       'Tools',
       'Documents',
-      'Design a change to Chat',
       'Unpin chat',
       'Unsnooze chat',
       'Unarchive chat',
@@ -60,7 +58,6 @@ describe('chatKebabItems', () => {
       'Call',
       'Tools',
       'Documents',
-      'Design a change to Chat',
       'Show chat',
       'Pin chat',
       'Snooze chat',
@@ -76,7 +73,6 @@ describe('chatKebabItems', () => {
       'Call',
       'Tools',
       'Documents',
-      'Design a change to Chat',
       'Disable',
       'Clear context',
     ]);
@@ -88,7 +84,6 @@ describe('chatKebabItems', () => {
       'Call',
       'Tools',
       'Documents',
-      'Design a change to Chat',
       'Enable',
       'Clear context',
     ]);
@@ -96,12 +91,17 @@ describe('chatKebabItems', () => {
 
   it('read-only mirror (Speakers) drops Call, Tools and Documents too', () => {
     for (const id of [SPECIAL_THREAD_IDS.speakers]) {
-      expect(chatKebabItems(id, PLAIN)).toEqual([
-        'New chat',
-        'Design a change to Chat',
-        'Disable',
-        'Clear context',
-      ]);
+      expect(chatKebabItems(id, PLAIN)).toEqual(['New chat', 'Disable', 'Clear context']);
+    }
+  });
+
+  it('never offers "Design a change to Chat" for any chat', () => {
+    for (const id of [
+      '01HXREGULARCHATID',
+      SPECIAL_THREAD_IDS.manager,
+      SPECIAL_THREAD_IDS.speakers,
+    ]) {
+      expect(chatKebabItems(id, PLAIN)).not.toContain('Design a change to Chat');
     }
   });
 

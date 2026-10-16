@@ -432,7 +432,6 @@ describe('chat-detail — kebab menu', () => {
       'Tools',
       'Documents',
       'Add tasks',
-      'Design a change to Chat',
       'Pin chat',
       'Snooze chat',
       'Archive chat',
@@ -477,18 +476,6 @@ describe('chat-detail — kebab menu', () => {
     expect(apiMocks.createChat).not.toHaveBeenCalled();
     const { useUiStore } = await import('../src/stores/uiStore');
     expect(useUiStore.getState().errors.at(-1)?.message).toMatch(/machine isn't known/);
-  });
-
-  it('Design a change to Chat opens New Pad on THIS chat with Patch preselected', () => {
-    seedChat('c1');
-    __setLocalSearchParams({ chatId: 'c1' });
-    const r = renderRN(<ChatDetailScreen />);
-    findHost(r.root, byLabel('More')).props.onPress();
-    tapItem(r.root, 'Design a change to Chat');
-    expect(routerMock.push).toHaveBeenCalledWith({
-      pathname: '/pads/new',
-      params: { chatId: 'c1', app: 'Patch' },
-    });
   });
 
   it('Call in the menu starts the same voice call as the header button', () => {
@@ -564,7 +551,6 @@ describe('chat-detail — kebab menu', () => {
       'Tools',
       'Documents',
       'Add tasks',
-      'Design a change to Chat',
       'Pin chat',
       'Snooze chat',
       'Unarchive chat',
@@ -588,7 +574,6 @@ describe('chat-detail — kebab menu', () => {
       'Tools',
       'Documents',
       'Add tasks',
-      'Design a change to Chat',
       'Disable',
       'Clear context',
     ]);
