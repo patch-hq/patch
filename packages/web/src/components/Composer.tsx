@@ -530,6 +530,15 @@ export const Composer = forwardRef(function Composer(
   // new value — set here and consumed by the layout effect below, right
   // after `value` commits.
   const pendingCursorRef = useRef<number | null>(null);
+  // The textarea is driven from `body` by hand rather than via React's `value`
+  // prop: a controlled textarea has React rewrite `defaultValue` (a childList
+  // mutation) after every keystroke, which makes Chromium end the undo group,
+  // so ⌘Z stepped back one character at a time. Only assign when the DOM
+  // differs, so typing never touches the value and the undo stack survives.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (el && el.value !== body) el.value = body;
+  }, [body]);
   useLayoutEffect(() => {
     const pos = pendingCursorRef.current;
     if (pos === null) return;
@@ -1863,7 +1872,6 @@ export const Composer = forwardRef(function Composer(
             placeholder={
               suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : 'Type a message'
             }
-            value={body}
             onChange={(e) => {
               setValue(joinQuotes(quotes, e.target.value));
               // Any edit re-opens a menu the user had Esc-dismissed.
