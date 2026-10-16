@@ -57,7 +57,8 @@
     "node": ">=20"
   },
   "simple-git-hooks": {
-    "pre-commit": "pnpm exec lint-staged"
+    "pre-commit": "pnpm exec lint-staged",
+    "pre-push": "node scripts/push-guard.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
