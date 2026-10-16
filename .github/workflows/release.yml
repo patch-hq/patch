@@ -57,7 +57,8 @@ jobs:
       # tests keep credentials in the native keyring (Secret Service over D-Bus).
       - run: sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11
       # Some suites run against built output (the server serves the web build).
-      - run: pnpm turbo build --output-logs=errors-only
+      # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
+      - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
       - name: The gate
         env:
           PATCH_RUN_BROWSER_GATE: '1'
