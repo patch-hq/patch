@@ -80,7 +80,6 @@ import { hostLabel, sortHosts } from '../routes/settings/hostScope.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
-import { formatWakeAt } from '../lib/snoozePresets.js';
 import { snoozedRowsForStore } from '../lib/snoozedRows.js';
 import { folderBackPill, rowBack } from '../lib/snoozeBack.js';
 import { SNOOZE_PRESETS } from '../lib/snoozePresets.js';
@@ -288,7 +287,6 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
               .map(({ folder, rows }) => ({
                 folder,
                 rows: rows.filter((c) => matchesStateFilter(c, stateFilter)),
-                snoozed: [],
               }))
               .filter((f) => f.rows.length > 0),
           };
@@ -299,7 +297,6 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       .map(({ folder, rows }) => ({
         folder,
         rows: sortAttentionQueue(rows.filter(matches)),
-        snoozed: [],
       }))
       .filter((f) => f.rows.length > 0);
     return { ...stateFiltered, pinned, folders };
@@ -627,7 +624,7 @@ function RegularSidebar({
           those rows are still listed (hiding a chat is worse), just unheaded
           until the folder is known. */}
             {!showSidebarSkeleton &&
-              view.folders.map(({ folder, rows, snoozed }) => {
+              view.folders.map(({ folder, rows }) => {
                 const collapsed = collapsedFolders.includes(folder);
                 const backPill = folderBackPill(rows);
                 return folderBasename(folder) === '' ? (
@@ -722,23 +719,6 @@ function RegularSidebar({
                       : rows.map((c) => (
                           <ChatRowView key={c.chatId} row={c} active={activeChatId} />
                         ))}
-                    {collapsed || snoozed.length === 0 ? null : (
-                      <button
-                        type="button"
-                        className="snooze-away"
-                        data-testid={`folder-snoozed-${folder}`}
-                        onClick={() => setSnoozedOpen(true)}
-                      >
-                        <Clock size={14} aria-hidden />
-                        <span className="snooze-away-count">{snoozed.length} snoozed</span>
-                        <span className="snooze-away-back">
-                          back{' '}
-                          {formatWakeAt(
-                            Math.min(...snoozed.map((c) => c.snoozedUntil ?? Infinity)),
-                          )}
-                        </span>
-                      </button>
-                    )}
                   </section>
                 );
               })}
@@ -891,11 +871,6 @@ function RegularSidebar({
               onClick={() => setSnoozedOpen(!snoozedOpen)}
             >
               <Clock size={18} aria-hidden className="arch-icon" />
-              {grouped.snoozed.length > 0 ? (
-                <span className="arch-pip" data-testid="snoozed-pip">
-                  {grouped.snoozed.length}
-                </span>
-              ) : null}
             </button>
 
             {/* Deleted (soft-delete, spec/04 § Lifecycle → E5). Collapsed by

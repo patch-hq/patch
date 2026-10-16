@@ -100,21 +100,17 @@ describe('groupChats: snoozed chats stay in their project', () => {
     return { ...useChatStore.getState().chats[id]!, ...over };
   }
 
-  it('puts snoozed chats beside the active rows, and a snoozed-only project keeps its place', () => {
+  it('leaves snoozed chats and snoozed-only projects out of the project list', () => {
     const future = Date.now() + 3_600_000;
     const a = row('a', '/p/work');
     const b = row('b', '/p/work', { snoozedUntil: future });
     const c = row('c', '/p/home', { snoozedUntil: future });
     const g = groupChats([a, b, c]);
-    const work = g.folders.find((f) => f.folder === '/p/work')!;
-    const home = g.folders.find((f) => f.folder === '/p/home')!;
-    expect(work.rows.map((r) => r.chatId)).toEqual(['a']);
-    expect(work.snoozed.map((r) => r.chatId)).toEqual(['b']);
-    expect(home.rows).toEqual([]);
-    expect(home.snoozed.map((r) => r.chatId)).toEqual(['c']);
+    expect(g.folders.map((f) => f.folder)).toEqual(['/p/work']);
+    expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a']);
     // Still in the Snoozed view.
     expect(g.snoozed.map((r) => r.chatId).sort()).toEqual(['b', 'c']);
-    // And not offered again as a "recent folder".
+    // And not offered as a "recent folder" either.
     expect(g.recentFolders).not.toContain('/p/home');
   });
 });

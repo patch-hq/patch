@@ -19,7 +19,7 @@ import {
   Search,
   X,
 } from 'lucide-react-native';
-import { SPECIAL_THREAD_IDS, folderBackPill, formatWakeAt } from '@patch/wire';
+import { SPECIAL_THREAD_IDS, folderBackPill } from '@patch/wire';
 import { showSnoozeSheet } from '../../src/components/SnoozeSheet';
 import type { ChatSearchHit, ChatSearchHostResult } from '@patch/wire';
 import { useChatStore } from '../../src/stores/chatStore';
@@ -262,49 +262,6 @@ function folderName(folder: string): string {
   return folder.split('/').filter(Boolean).pop() ?? folder;
 }
 
-// A project's snoozed chats as ONE dashed line inside the project (spec/04 §
-// Snooze): "<N> snoozed" and the earliest wake time. No dots, status or
-// progress. Tapping it opens the Snoozed section.
-function FolderSnoozedLine({
-  folder,
-  rows,
-  onPress,
-}: {
-  folder: string;
-  rows: ChatRow[];
-  onPress: () => void;
-}): React.ReactElement {
-  const colors = useTheme();
-  const earliest = Math.min(...rows.map((r) => r.snoozedUntil ?? Infinity));
-  return (
-    <Pressable
-      testID={`folder-snoozed-${folder}`}
-      accessibilityRole="button"
-      accessibilityLabel={`${rows.length} snoozed, back ${formatWakeAt(earliest)}`}
-      onPress={onPress}
-      style={{
-        marginHorizontal: space.lg,
-        marginBottom: space.sm,
-        paddingHorizontal: space.md,
-        paddingVertical: space.md,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: space.sm,
-        borderWidth: 1,
-        borderStyle: 'dashed',
-        borderColor: colors.divider,
-        borderRadius: radii.md,
-      }}
-    >
-      <AlarmClock size={14} color={colors.ink3} />
-      <Text style={{ ...typography.rowTitle, color: colors.ink }}>{rows.length} snoozed</Text>
-      <Text style={{ ...typography.meta, marginLeft: 'auto', color: colors.ink3 }}>
-        back {formatWakeAt(earliest)}
-      </Text>
-    </Pressable>
-  );
-}
-
 // The Chats tab's slim header (spec/15 ## Chats tab § Header): the wordmark with
 // its connection dot on the left, the search button on the right; searching
 // swaps the row's content for the search field and a close button. Fixed at
@@ -462,7 +419,6 @@ interface Section {
     | 'channels-empty'
     | 'hidden-row'
     | 'snoozed-section'
-    | 'folder-snoozed'
     | 'archived-row'
     | 'attention-empty'
     | 'chats-empty'
@@ -570,16 +526,6 @@ function buildSections(
     folders.set(c.folder, list);
   }
 
-  // Each project's snoozed chats, folded into one line inside the project
-  // (spec/04 § Snooze) — pinned ones too, since a pinned chat's project is its folder.
-  const snoozedByFolder = new Map<string, ChatRow[]>();
-  for (const c of snoozed) {
-    if (!c.folder) continue;
-    const list = snoozedByFolder.get(c.folder) ?? [];
-    list.push(c);
-    snoozedByFolder.set(c.folder, list);
-  }
-
   const out: Section[] = [];
   // No section header over Manager: the row is itself named "Manager".
   if (manager && match([manager]).length > 0) out.push({ kind: 'manager', row: manager });
@@ -609,22 +555,14 @@ function buildSections(
     for (const r of pinnedShown) out.push({ kind: 'pinned-row', row: r });
   }
   let folderRows = 0;
-  // A project with only snoozed chats keeps its header and shows just the line —
-  // but only in the plain list: a search or a state filter is a narrower question.
-  const lineShown = !searching && stateFilter === 'all';
-  const folderPaths = new Set([...folders.keys(), ...(lineShown ? snoozedByFolder.keys() : [])]);
-  const folderEntries: Array<[string, ChatRow[]]> = [...folderPaths].map((f) => [
-    f,
-    folders.get(f) ?? [],
-  ]);
+  const folderEntries: Array<[string, ChatRow[]]> = [...folders.entries()];
   for (const [folder, rows] of folderEntries.sort(byFolderPath)) {
     // spec/14 § Sidebar ordering — sorts by the user's own last activity
     // (when they last sent a message, or chat creation), never `lastUpdated`:
     // an agent reply, a status change, a job tick or a finished turn must
     // not move a row.
     const shown = matchPinnedOrFolder(rows.sort((a, b) => b.lastUserActivity - a.lastUserActivity));
-    const snoozedHere = lineShown ? (snoozedByFolder.get(folder) ?? []) : [];
-    if (shown.length === 0 && snoozedHere.length === 0) continue;
+    if (shown.length === 0) continue;
     folderRows += shown.length;
     out.push({
       kind: 'header',
@@ -633,8 +571,6 @@ function buildSections(
       pill: folderBackPill(shown),
     });
     for (const r of shown) out.push({ kind: 'folder-row', row: r });
-    if (snoozedHere.length > 0)
-      out.push({ kind: 'folder-snoozed', label: folder, rows: snoozedHere });
   }
   // The section headers below always draw, so the list is never empty and the
   // FlatList's own empty component never shows: say it here (spec/15 § Empty
@@ -923,11 +859,6 @@ export default function ChatsScreen(): React.ReactElement {
     [chats, open, counts, query, attentionMatches, stateFilter],
   );
 
-  // The project's snoozed line opens the Snoozed section (and leaves it open).
-  const openSection = (section: ChatsTabSection): void => {
-    setSectionOpen(section, true);
-    setOpen({ ...open, [section]: true });
-  };
   const toggle = (section: ChatsTabSection): void => {
     const next = !open[section];
     setSectionOpen(section, next);
@@ -967,7 +898,6 @@ export default function ChatsScreen(): React.ReactElement {
               : item.kind === 'search-empty' ||
                   item.kind === 'channels-empty' ||
                   item.kind === 'snoozed-section' ||
-                  item.kind === 'folder-snoozed' ||
                   item.kind === 'chats-empty' ||
                   item.kind === 'attention-empty'
                 ? `${item.kind}-${idx}`
@@ -1053,15 +983,6 @@ export default function ChatsScreen(): React.ReactElement {
             }
             if (item.kind === 'snoozed-section') {
               return <SnoozedSection rows={item.rows ?? []} />;
-            }
-            if (item.kind === 'folder-snoozed') {
-              return (
-                <FolderSnoozedLine
-                  folder={item.label ?? ''}
-                  rows={item.rows ?? []}
-                  onPress={() => openSection('snoozed')}
-                />
-              );
             }
             if (item.kind === 'channels-empty') {
               return (

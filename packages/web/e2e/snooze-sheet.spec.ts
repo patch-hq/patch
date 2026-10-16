@@ -196,19 +196,15 @@ test.describe('snooze sheet', () => {
     expect(setIds.size).toBe(1);
     expect(typeof calls[0]!.body['snoozedUntil']).toBe('number');
 
-    const line = page.getByTestId(`folder-snoozed-${FOLDER}`);
-    await expect(line).toBeVisible();
-    await expect(line).toContainText('3 snoozed');
-    await expect(line).toContainText(/back .+/);
+    await expect(page.getByTestId(`folder-snoozed-${FOLDER}`)).toHaveCount(0);
     await expect(page.getByTestId('chat-row-w2')).toHaveCount(0);
-    await expect(page.getByTestId('snoozed-pip')).toHaveText('3');
+    await expect(page.getByTestId('snoozed-pip')).toHaveCount(0);
 
     const toast = page.getByTestId('snooze-toast');
     await expect(toast).toContainText('work snoozed until');
     await expect(toast).toContainText('2 chats running in background');
 
     await page.getByTestId('snooze-toast-undo').click();
-    await expect(page.getByTestId(`folder-snoozed-${FOLDER}`)).toHaveCount(0);
     await expect(page.getByTestId('chat-row-w2')).toBeVisible();
     await expect.poll(() => calls.length).toBe(6);
     expect(calls.slice(3).every((c) => c.body['snoozedUntil'] === null)).toBe(true);
@@ -228,17 +224,12 @@ test.describe('snooze sheet', () => {
     await expect(toast).toContainText('Running in background');
   });
 
-  test('a folder with only snoozed chats keeps its header with just the line', async ({ page }) => {
+  test('a folder with only snoozed chats is not shown', async ({ page }) => {
     await seed(page, [
       row('chat_md', 'Elsewhere', { folder: '/home/tom/projects/other' }),
       row('w2', 'Fix flaky checkout', { snoozedUntil: Date.now() + 2 * HOUR }),
     ]);
-    const section = page.locator('.sb-folder', {
-      has: page.getByTestId(`folder-snoozed-${FOLDER}`),
-    });
-    await expect(section.locator('.folder-head-label')).toHaveText('work');
-    await expect(section.getByTestId(`folder-snoozed-${FOLDER}`)).toContainText('1 snoozed');
-    await expect(section.locator('.sb-row')).toHaveCount(0);
+    await expect(page.locator('.folder-head-label', { hasText: /^work$/ })).toHaveCount(0);
   });
 });
 

@@ -253,7 +253,7 @@ describe('the Snooze sheet', () => {
 });
 
 describe('the Chats tab', () => {
-  it('folds snoozed chats into one line inside their project; a snoozed-only project keeps its header', () => {
+  it('leaves snoozed chats and snoozed-only projects out of the project list', () => {
     useChatStore
       .getState()
       .hydrate([
@@ -262,12 +262,8 @@ describe('the Chats tab', () => {
         row('z', { folder: '/home/tom/projects/other', snoozedUntil: NOW + 7_200_000 }),
       ]);
     const r = renderRN(<ChatsScreen />);
-    const line = findHost(r.root, byTestId(`folder-snoozed-${FOLDER}`));
-    expect(hasText(line, '1 snoozed')).toBe(true);
-    expect(hasText(line, 'back 17:05')).toBe(true);
-    const other = findHost(r.root, byTestId('folder-snoozed-/home/tom/projects/other'));
-    expect(hasText(other, 'back 18:05')).toBe(true);
-    expect(hasText(r.root, '/home/tom/projects/other')).toBe(true);
+    expect(hasText(r.root, '/home/tom/projects/other')).toBe(false);
+    expect(hasText(r.root, 'snoozed')).toBe(false);
   });
 
   it('the project header carries a clock that opens the project sheet', () => {
