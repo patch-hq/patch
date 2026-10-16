@@ -1,0 +1,72 @@
+/* Snooze that keeps running — layered over a snapshot of the real Patch UI, using its own tokens */
+.pip-flex{flex:1}
+.sb-row.active{background:var(--accent-tint)}
+.sz-pressed{background:var(--bg-soft)}
+
+/* header ⋯ menu with the snooze submenu beside it */
+.sz-menu{min-width:170px}
+.sz-menu .sz-on{background:var(--accent-tint);color:var(--accent-strong)}
+.sz-sub{top:34px;right:calc(100% + 6px)}
+
+/* B: hand-off sheet */
+.sz-hl{background:var(--accent-tint);border-radius:var(--radius-sm)}
+.sz-scrim{position:fixed;inset:0;background:rgba(20,18,12,.28);z-index:50}
+.sz-sheet{position:fixed;z-index:51;left:50%;top:50%;transform:translate(-50%,-50%);width:540px;display:flex;flex-direction:column;gap:16px;padding:22px 24px 18px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 18px 48px rgba(0,0,0,.18)}
+.sz-sheet h2{margin:0;font-size:22px}
+.sz-old-when{display:flex;gap:6px;flex-wrap:wrap}
+.sz-old-when button{padding:6px 12px;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--bg-elevated);color:var(--ink);font:inherit;cursor:pointer}
+.sz-old-when button.on{background:var(--ink);border-color:var(--ink);color:var(--bg-elevated)}
+.sz-group{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--line-soft);border-radius:var(--radius);background:var(--bg-soft)}
+.sz-group-h{display:flex;align-items:center;gap:8px;font-size:var(--text-min);font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);padding-bottom:4px}
+.sz-group-h span{margin-left:auto;font-weight:600}
+.sz-item{display:flex;align-items:center;gap:10px;padding:6px 0}
+.sz-item .badge{flex:none}
+.sz-item div{flex:1;min-width:0;display:flex;flex-direction:column}
+.sz-item b{font-weight:500}
+.sz-item div span{font-size:var(--text-min);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sz-run{flex:none;font-size:var(--text-min);color:var(--ink-faint);font-variant-numeric:tabular-nums}
+.sz-quiet{background:transparent}
+.sz-names{color:var(--ink-3);font-size:13px}
+.sz-rule{font-size:13px;color:var(--ink-3)}
+.sz-actions{display:flex;align-items:center;gap:8px}
+.sz-ghost{padding:0 14px;min-height:40px;border:0;background:transparent;color:var(--ink-3);font:inherit;cursor:pointer}
+.sz-primary{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 16px;border:0;border-radius:var(--radius);background:var(--ink);color:var(--bg-elevated);font:inherit;font-weight:500;cursor:pointer}
+
+/* C: away line + toast */
+.sz-away{display:flex;align-items:center;gap:10px;width:calc(100% - 16px);margin:6px 8px 10px;padding:10px 12px;border:1px dashed var(--line);border-radius:var(--radius);background:transparent;color:var(--ink-3);font:inherit;text-align:left;cursor:pointer}
+.sz-away-t{color:var(--ink);font-weight:500}
+.sz-away-m{margin-left:auto;font-size:var(--text-min);font-variant-numeric:tabular-nums}
+.sz-away-n{min-width:20px;padding:0 6px;border-radius:var(--radius-pill);background:var(--bg-soft);font-size:var(--text-min);font-weight:600;text-align:center}
+.sz-moon{position:relative;color:var(--ink)}
+.sz-pip{position:absolute;top:-2px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--ink);color:var(--bg-elevated);font-size:10px;font-weight:700;line-height:16px;text-align:center}
+.chat-main{position:relative}
+.sz-toast{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;padding:12px 14px 12px 16px;min-width:380px;background:var(--ink);color:var(--bg-elevated);border-radius:var(--radius);box-shadow:0 12px 32px rgba(0,0,0,.22);z-index:30}
+.sz-toast div{flex:1;display:flex;flex-direction:column;gap:1px}
+.sz-toast b{font-weight:600}
+.sz-toast span{font-size:13px;opacity:.75}
+.sz-toast button{padding:6px 10px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--bg-elevated);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+
+/* D: back, inside its project */
+.sz-backrow{height:auto;min-height:40px;padding-top:6px;padding-bottom:6px}
+.sz-backrow .name{display:flex;flex-direction:column;min-width:0}
+.sz-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sz-out{font-size:var(--text-min);color:var(--ink-3);white-space:nowrap;font-weight:400}
+.sz-out.sz-ok{color:var(--accent-strong)}
+.sz-out.sz-ask{color:var(--ink);font-weight:600}
+.sz-divider{display:flex;align-items:center;gap:12px;margin:22px 0 14px;color:var(--ink-3);font-size:13px}
+.sz-divider:before,.sz-divider:after{content:"";flex:1;border-top:1px solid var(--line)}
+.sz-divider span{display:inline-flex;align-items:center;gap:6px}
+
+.sz-sheet-h{display:flex;flex-direction:column;gap:2px}
+.sz-sheet-h span{color:var(--ink-3);font-size:13px}
+.sz-pre{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sz-p{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--ink);font:inherit;cursor:pointer;text-align:left}
+.sz-p:hover{background:var(--accent-tint)}
+.sz-p.on{background:var(--ink);border-color:var(--ink);color:var(--bg-elevated)}
+.sz-p.on .sz-at{color:var(--bg-elevated);opacity:.75}
+.sz-others{padding-top:4px;font-size:13px;color:var(--ink-3)}
+.sz-away{width:calc(100% - 16px);margin:2px 8px 6px;padding:8px 12px}
+.folder-head:has(.sz-tag) .folder-head-toggle{flex:none}
+.sz-tag{display:inline-flex;align-items:center;gap:4px;margin:0 auto 0 8px;padding-right:9px;text-transform:none;letter-spacing:0;padding:1px 4px 1px 9px;border-radius:var(--radius-pill);background:var(--accent-tint);color:var(--accent-strong);font-size:var(--text-min);font-weight:600;white-space:nowrap}
+.sz-tag button{display:inline-flex;padding:3px;border:0;background:transparent;color:inherit;cursor:pointer}
+.sz-backrow{box-shadow:inset 3px 0 0 var(--accent-tint)}

@@ -35,7 +35,14 @@ export class SignInNeededNotifier {
       for (const channel of ['desktop', 'push'] as const) {
         void this.deps.router
           .route(
-            { type: 'notify', chatId: SIGN_IN_CHAT_ID, channel, message, priority: 'urgent' },
+            {
+              type: 'notify',
+              chatId: SIGN_IN_CHAT_ID,
+              channel,
+              message,
+              priority: 'urgent',
+              kind: 'sign-in',
+            },
             channel === 'push' ? { suppressOn: 'computer' } : {},
           )
           .catch((err: unknown) => {

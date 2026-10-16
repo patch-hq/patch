@@ -217,6 +217,9 @@ export default function RootLayout(): React.ReactElement | null {
     } else if (action.type === 'chats') {
       // Handover push (spec/09 § Handing over to the phone) — the chat list.
       navigateWhenReady('/(tabs)/chats');
+    } else if (action.type === 'settings') {
+      // Account sign-in expired — the accounts live in Settings.
+      navigateWhenReady('/(tabs)/settings');
     } else if (action.type === 'batch') {
       // Batch notification (spec/15 § Batch view) — land on the Batch tab,
       // not a chat; setting the mode is what BatchView reads to draw itself.

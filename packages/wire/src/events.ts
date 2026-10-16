@@ -7557,9 +7557,11 @@ export type PatchSecretsResponseEvent = z.infer<typeof PatchSecretsResponseEvent
  * call-style ring (group 11) or a batch check-in (spec/09 § Batch check-in).
  * `'ask'` is a `patch_ask_human` push: the agent is blocked until the user acts,
  * so it is never held back for presence the way an ordinary push is.
+ * `'sign-in'` is an AI account whose sign-in expired: it has no chat, and a
+ * tap opens the accounts settings.
  * Default (omitted) is treated as `'message'`.
  */
-export const NotifyKind = z.enum(['message', 'call', 'batch', 'ask']);
+export const NotifyKind = z.enum(['message', 'call', 'batch', 'ask', 'sign-in']);
 export type NotifyKind = z.infer<typeof NotifyKind>;
 
 /**

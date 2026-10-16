@@ -18,6 +18,7 @@
 // NO FALLBACK: if the configured server URL is missing in production we
 // fail loudly at boot; if a global hotkey fails to register we throw.
 
+import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
 import { spawnSync } from 'node:child_process';
 import {
@@ -944,7 +945,7 @@ function showNativeNotification(opts: {
   body: string;
   chatId?: string;
   priority?: NotifyPriority;
-  kind?: 'message' | 'call' | 'batch' | 'ask';
+  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
   actions?: NotifyActionsPayload;
   /** Set when this toast IS a "Not sent — tap to retry" state: a click retries the same thing instead of opening the chat. */
   retry?: { chatId: string; actions?: NotifyActionsPayload; index?: number; replyText?: string };
@@ -976,11 +977,8 @@ function showNativeNotification(opts: {
     mainWindow.focus();
     // spec/09 § Batch check-in — lands on the batch view, never a chat; the
     // renderer's `useDesktopNavigation` special-cases this path.
-    if (opts.kind === 'batch') {
-      sendWhenReady(mainWindow, 'patch:navigate', { path: '/batch' });
-    } else if (opts.chatId) {
-      sendWhenReady(mainWindow, 'patch:navigate', { path: `/chats/${opts.chatId}` });
-    }
+    const path = notificationClickPath(opts.kind, opts.chatId);
+    if (path) sendWhenReady(mainWindow, 'patch:navigate', { path });
   });
   if (opts.actions) {
     n.on('reply', (_e: unknown, replyText: string) => {
@@ -1124,7 +1122,7 @@ function registerIpc(): void {
         body: string;
         chatId?: string;
         priority?: NotifyPriority;
-        kind?: 'message' | 'call' | 'batch' | 'ask';
+        kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
         actions?: NotifyActionsPayload;
       },
     ) => {

@@ -36,7 +36,10 @@ export type NotificationAction =
   /** A handover push (`09-notifications.md` § Handing over to the phone) naming
    *  several chats — `kind: 'handover'` and no `chatId`. Tapping it lands on the
    *  chat list. */
-  | { type: 'chats' };
+  | { type: 'chats' }
+  /** An expired AI-account sign-in — `kind: 'sign-in'` with a placeholder
+   *  chatId. Tapping it lands on Settings, never a chat. */
+  | { type: 'settings' };
 
 export type DeepLinkRejectionReason =
   /** The URI yielded no word distinctive enough to look for in the text. */
@@ -155,6 +158,7 @@ export function resolveNotificationAction(
   // A batch check-in push carries no chatId and always means "open the Batch
   // tab" — there is no source chat to fall back to and no deepLink to consider.
   if (data['kind'] === 'batch') return { action: { type: 'batch' } };
+  if (data['kind'] === 'sign-in') return { action: { type: 'settings' } };
   if (data['kind'] === 'handover') return { action: { type: 'chats' } };
   const deepLink = data['deepLink'];
   if (typeof deepLink === 'string' && deepLink.length > 0) {

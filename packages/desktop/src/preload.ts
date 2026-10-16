@@ -42,7 +42,7 @@ interface NotifyPayload {
   priority?: 'silent' | 'normal' | 'urgent';
   /** spec/09 § Batch check-in — `'batch'` means the click lands on the batch
    *  view, not a chat (`chatId` is a reserved non-chat sentinel on that one). */
-  kind?: 'message' | 'call' | 'batch' | 'ask';
+  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
   actions?: NotifyActionsPayload;
 }
 

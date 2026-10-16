@@ -371,6 +371,10 @@ While a chat is snoozed (`snoozedUntil > now`, `04-chats-and-folders.md` § Snoo
 
 A running batch's check-in (`14-design-web.md` § Batch mode) fires exactly one notification, `Batch ready: N done, M still running`, on the time elapsing or (for `When all done`) every member finishing — whichever comes first. Delivery is the same desktop/push split as § Chat completion, and it opens the batch view rather than a chat. Pressing `Check in now` reaches the same checked-in state without firing it — the user is already looking at the view.
 
+## Account sign-in expired
+
+When a host pauses an AI account because its sign-in expired, the server notifies once (`kind: 'sign-in'`, urgent, desktop and push). It has no chat: a tap opens Settings → Usage on desktop and the Settings tab on the phone, never a chat lookup.
+
 ## Presence heuristic
 
 Implemented in the server (see `01-server.md`). The question is whether the user is at a computer, and only evidence from that computer answers it: a Patch window can be open on a desk nobody is sitting at.

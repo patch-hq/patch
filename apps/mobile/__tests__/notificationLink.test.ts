@@ -49,6 +49,12 @@ describe('resolveNotificationAction — chat routing', () => {
     });
   });
 
+  it('resolves a sign-in notification to settings, never the placeholder chat', () => {
+    expect(
+      resolveNotificationAction({ kind: 'sign-in', chatId: 'account-sign-in' }, NO_TEXT),
+    ).toEqual({ action: { type: 'settings' } });
+  });
+
   it('returns no action when there is no chatId or deepLink', () => {
     expect(resolveNotificationAction({ message: 'orphan' }, NO_TEXT)).toEqual({ action: null });
   });

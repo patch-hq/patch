@@ -31,6 +31,8 @@ describe('SignInNeededNotifier', () => {
   test('notifies once however often the host repeats the state', () => {
     for (let i = 0; i < 5; i++) notifier.observe(report(true));
     expect(routed.map((e) => e.channel).sort()).toEqual(['desktop', 'push']);
+    // Tapping must open settings, not look up the placeholder chat id.
+    expect(routed.every((e) => e.kind === 'sign-in')).toBe(true);
     expect(routed[0]!.message).toMatch(/ChatGPT Sub.*sign/i);
   });
 

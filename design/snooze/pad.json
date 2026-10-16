@@ -1,0 +1,34 @@
+{
+ "screens": [
+  {
+   "id": "today",
+   "name": "Today",
+   "path": "index.html#today"
+  },
+  {
+   "id": "chat",
+   "name": "Snooze a chat",
+   "path": "index.html#chat"
+  },
+  {
+   "id": "project",
+   "name": "Snooze a project",
+   "path": "index.html#project"
+  },
+  {
+   "id": "away",
+   "name": "While snoozed",
+   "path": "index.html#away"
+  },
+  {
+   "id": "back",
+   "name": "Back",
+   "path": "index.html#back"
+  },
+  {
+   "id": "opened",
+   "name": "Back \u00b7 one opened",
+   "path": "index.html#opened"
+  }
+ ]
+}

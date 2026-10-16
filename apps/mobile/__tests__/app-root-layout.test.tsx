@@ -517,6 +517,14 @@ describe('RootLayout — notification tap deep-link (spec/15 § Push notificatio
     expect(useBatchStore.getState().mode).toBe('batch');
     expect(routerMock.navigate).toHaveBeenCalledWith('/(tabs)/chats');
   });
+
+  it('tapping a sign-in notification lands on Settings, not a chat', () => {
+    __setLastNotificationResponse(
+      notificationResponse('n-signin', { kind: 'sign-in', chatId: 'account-sign-in' }),
+    );
+    renderRN(<RootLayout />);
+    expect(routerMock.navigate).toHaveBeenCalledWith('/(tabs)/settings');
+  });
 });
 
 // The diagnostics takeover draws over the WHOLE app from the root layout, so
