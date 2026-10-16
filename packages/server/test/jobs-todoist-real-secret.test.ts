@@ -1,34 +1,26 @@
-// D2-int-2 — REAL signed Todoist webhook fires a Todoist-trigger job
-// end-to-end through the live server, verified against the REAL
-// TODOIST_WEBHOOK_SECRET from the deployment .env.
-//
-// Anti-cheat (TD2 D2-int-2): verification MUST use the real
-// TODOIST_WEBHOOK_SECRET; a disabled signature check or a mock Todoist client
-// does NOT count. This test:
-//   - reads the real TODOIST_WEBHOOK_SECRET out of projects/patch/.env,
+// D2-int-2 — a signed Todoist webhook fires a Todoist-trigger job end-to-end
+// through the server, with nothing about verification faked:
 //   - boots the SAME `buildAll` server used in production (real Fastify, real
 //     todoist webhook route, real createHmac signature verification),
-//   - creates a real Todoist-trigger job whose clientSecret IS that real
-//     secret (this is how the secret is wired per-job in deployment),
-//   - signs a genuine Todoist `item:added` payload with Todoist's real HMAC
-//     scheme (HMAC-SHA256 of the raw body, base64, in X-Todoist-Hmac-SHA256),
+//   - creates a Todoist-trigger job whose clientSecret is a fresh random secret
+//     (this is how the secret is wired per-job in deployment),
+//   - signs a genuine Todoist `item:added` payload with Todoist's HMAC scheme
+//     (HMAC-SHA256 of the raw body, base64, in X-Todoist-Hmac-SHA256),
 //   - POSTs it to /api/webhooks/todoist/<jobId> and asserts the signature
-//     check passes for real, the matching task fires the job, a run is logged,
-//     and the spawned action receives the task as its first turn.
+//     check passes, the matching task fires the job, a run is logged, and the
+//     spawned action receives the task as its first turn.
 //
-// The ONE thing this test cannot do locally is have Todoist's own servers
-// ORIGINATE the push (Todoist can only deliver to a public HTTPS URL, not
-// localhost). That is an external-service-delivery limitation, not a code
-// gap: the byte-for-byte payload + the real HMAC scheme + the real secret are
-// all exercised here, which is exactly the server-side contract D2-int-2
-// gates. If the real secret is absent the test fails loudly (NO skip, NO
-// mock fallback) so a missing credential surfaces rather than silently passing.
+// It used to read one deployment's real TODOIST_WEBHOOK_SECRET from deploy/.env.
+// The HMAC check is the same code whatever the key, so that proved nothing more
+// and meant the test could only run on that one machine. What it cannot do is
+// have Todoist's servers originate the push (they deliver only to a public
+// HTTPS URL); the payload, the scheme and the check are all real.
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { generateUserKeypair, mintSurfaceCredential, type UserKeypair } from '@patch/auth';
 import { buildAll, type BuiltApp } from '../src/app.js';
@@ -81,30 +73,9 @@ async function startServer(dir: string): Promise<Harness> {
   };
 }
 
-/**
- * Read TODOIST_WEBHOOK_SECRET out of the deployment env.
- *
- * That env is `deploy/.env` — the file `deploy/docker-compose.yml` names in its
- * `env_file:` and the one the running patch-server container is started from.
- * This pointed at a repo-ROOT `.env` instead, which nothing deploys from and
- * which does not exist on the deployment host, so the test failed there
- * permanently and got written down as a known-unfixable ("don't chase this").
- * It was a wrong path, not a missing secret.
- */
-function readRealTodoistSecret(): string {
-  // packages/server/test -> repo root is three levels up.
-  const envPath = join(__dirname, '..', '..', '..', 'deploy', '.env');
-  if (!existsSync(envPath)) {
-    throw new Error(`D2-int-2 requires ${envPath} with TODOIST_WEBHOOK_SECRET (not present)`);
-  }
-  const raw = readFileSync(envPath, 'utf8');
-  for (const line of raw.split('\n')) {
-    const m = /^\s*TODOIST_WEBHOOK_SECRET\s*=\s*(.+?)\s*$/.exec(line);
-    if (m && m[1]) {
-      return m[1].replace(/^['"]|['"]$/g, '');
-    }
-  }
-  throw new Error('D2-int-2 requires TODOIST_WEBHOOK_SECRET in .env (key not found)');
+/** A webhook secret of the shape Todoist issues. */
+function freshSecret(): string {
+  return randomBytes(24).toString('hex');
 }
 
 let dir: string;
@@ -112,7 +83,7 @@ let h: Harness;
 let realSecret: string;
 
 beforeAll(() => {
-  realSecret = readRealTodoistSecret();
+  realSecret = freshSecret();
 });
 
 beforeEach(async () => {
