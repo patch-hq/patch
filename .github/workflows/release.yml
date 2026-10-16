@@ -38,10 +38,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The gate (scripts/verify.mjs).
+  # The gate (scripts/verify.mjs), four runners wide. Every runner runs the
+  # cheap layers (lint, types, unit/contract/integration); the browser layer is
+  # split between them with Playwright's --shard, because the whole suite on one
+  # runner took about an hour. Each shard is a required check: `ota` and
+  # `publish` need the whole matrix.
   verify:
     if: github.repository == 'tomchambers2/patch'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/4', '2/4', '3/4', '4/4']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,10 +66,13 @@ jobs:
       # Some suites run against built output (the server serves the web build).
       # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
       - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
-      # The browser layer stays off here as on the box (verify.mjs explains):
-      # it has failing specs to fix before it can gate a release.
+      # The browser layer is on here. It is off by default on the dev box, which
+      # is too small for it (verify.mjs explains); a runner is not.
       - name: The gate
         timeout-minutes: 60
+        env:
+          PATCH_RUN_BROWSER_GATE: '1'
+          PATCH_BROWSER_SHARD: ${{ matrix.shard }}
         run: |
           dbus-run-session -- bash -euo pipefail -c '
             printf "ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
@@ -302,7 +313,9 @@ jobs:
           codesign --verify --deep --strict "$APP"
           codesign -dv "$APP" 2>&1 | grep -q 'Identifier=io.github.tomchambers2.patch'
           # Notarised and stapled: Gatekeeper accepts it as a download.
-          spctl --assess --type execute -vv "$APP" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
+          ASSESS=$(spctl --assess --type execute -vv "$APP" 2>&1)
+          echo "$ASSESS"
+          grep -q 'source=Notarized Developer ID' <<<"$ASSESS"
           PATCH_REAL_DESKTOP=1 PATCH_TEST_DESKTOP_BINARY="$PWD/$APP/Contents/MacOS/Patch" \
             node --test packages/desktop/scripts/single-instance.test.cjs
       - name: Collect the desktop release
