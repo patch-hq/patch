@@ -288,7 +288,8 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -euo pipefail
-          export CSC_NAME="$IDENTITY" APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          # electron-builder wants the name without its "Developer ID Application: " prefix.
+          export CSC_NAME="${IDENTITY#Developer ID Application: }" APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
           pnpm turbo build --filter=@patch/desktop... --output-logs=errors-only
           pnpm --filter @patch/desktop dist
       - name: Check the app is what it claims to be
