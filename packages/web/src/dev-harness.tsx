@@ -28,7 +28,7 @@ import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { IndexRedirect } from './routes/IndexRedirect.js';
 import { ToolsPanel } from './components/ToolsPanel.js';
-import { SideThreadsPanel } from './components/SideThreadsPanel.js';
+import { SideThreadsPanel, SideThreadsReconciler } from './components/SideThreadsPanel.js';
 import { useSideThreadsStore } from './stores/sideThreadsStore.js';
 import { ConfirmModal } from './components/ConfirmModal.js';
 import { PromptModal } from './components/PromptModal.js';
@@ -3410,7 +3410,8 @@ function Harness(): JSX.Element {
             in after `.chat-head`'s drag region (spec/05 § Window chrome). */}
         <SidebarExpandButton />
         <ToolsPanel />
-        <SideThreadsPanel />
+        <SideThreadsReconciler />
+        <SideThreadsPanel floating />
         <ConfirmModal />
         <PromptModal />
         {/* Mirrors AppShell: the toast queue is the app's ONE error surface

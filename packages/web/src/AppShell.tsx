@@ -19,7 +19,7 @@ import { MiniSidebar } from './components/MiniSidebar.js';
 import { SidebarExpandButton } from './components/SidebarExpandButton.js';
 import { SidebarBackdrop } from './components/SidebarBackdrop.js';
 import { ToolsPanel } from './components/ToolsPanel.js';
-import { SideThreadsPanel } from './components/SideThreadsPanel.js';
+import { SideThreadsPanel, SideThreadsReconciler } from './components/SideThreadsPanel.js';
 import { ColumnDivider } from './components/ColumnDivider.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
 import { HostOfflineBanner } from './components/HostOfflineBanner.js';
@@ -659,10 +659,11 @@ export function AppShell(): JSX.Element {
         {/* The Tools sidebar's own column. It renders null unless a chat has
             it open, so it costs nothing the rest of the time. */}
         <ToolsPanel />
-        {/* spec/14 § Side threads panel — its own resizable column, right of
-            the chat like the Tools/editor columns. Renders null unless the
-            chat on screen has a side thread open. */}
-        <SideThreadsPanel />
+        {/* spec/14 § Side threads panel — docked panels live inside their
+            chat's tab (PaneArea); this arms new-thread opening and hosts the
+            popped-out floating window. */}
+        <SideThreadsReconciler />
+        <SideThreadsPanel floating />
       </div>
       {/* The web panel is a native Electron view outside this DOM (spec/14 §
           Links and the web panel), so its divider can't be a flex sibling like

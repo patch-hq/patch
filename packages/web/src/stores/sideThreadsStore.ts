@@ -56,6 +56,9 @@ interface SideThreadsState {
   openDraft(chatId: string, draft: SideThreadDraft): void;
   closeDraft(chatId: string): void;
   closePanel(): void;
+  /** Popped out: a floating window that stays while the user changes chats. */
+  poppedOut: boolean;
+  setPoppedOut(v: boolean): void;
   setActiveTab(chatId: string, branchId: string): void;
   /** Hide a tab. The thread (branch) itself is untouched. */
   closeTab(chatId: string, branchId: string): void;
@@ -64,6 +67,10 @@ interface SideThreadsState {
 
 export const useSideThreadsStore = create<SideThreadsState>((set) => ({
   panelChatId: null,
+  poppedOut: false,
+  setPoppedOut(v) {
+    set({ poppedOut: v });
+  },
   activeTabByChatId: {},
   closedTabsByChatId: {},
   tabOrderByChatId: {},

@@ -22,10 +22,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { GitFork } from 'lucide-react';
+import { ExternalLink, GitFork, PanelRight } from 'lucide-react';
 import type { ChatBranch } from '@patch/wire';
 import { useUiStore } from '../stores/uiStore.js';
-import { activeChatOf, resolvePane, useLayoutStore } from '../stores/layoutStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import type { PendingPermission } from '../stores/types.js';
 import {
@@ -92,31 +91,16 @@ function StatusDot({ status }: { status: 'running' | 'needs-you' | 'idle' }): JS
   );
 }
 
-export function SideThreadsPanel(): JSX.Element | null {
+/**
+ * Opens the panel for a new side thread. Always mounted (AppShell), because the
+ * docked panel unmounts with its chat tab and the floating one may not exist
+ * yet — the trigger arms `pendingNewTab` and this is what consumes it.
+ */
+export function SideThreadsReconciler(): null {
   const chatId = useSideThreadsStore((s) => s.panelChatId);
-  const closePanel = useSideThreadsStore((s) => s.closePanel);
-  const activeTabByChatId = useSideThreadsStore((s) => s.activeTabByChatId);
-  const closedTabsByChatId = useSideThreadsStore((s) => s.closedTabsByChatId);
-  const tabOrderByChatId = useSideThreadsStore((s) => s.tabOrderByChatId);
   const pendingNewTab = useSideThreadsStore((s) => s.pendingNewTab);
-  const draftByChatId = useSideThreadsStore((s) => s.draftByChatId);
-  const setActiveTab = useSideThreadsStore((s) => s.setActiveTab);
-  const closeTab = useSideThreadsStore((s) => s.closeTab);
-  const reorderTabs = useSideThreadsStore((s) => s.reorderTabs);
   const openThread = useSideThreadsStore((s) => s.openThread);
-  const closeDraft = useSideThreadsStore((s) => s.closeDraft);
-
-  const width = useUiStore((s) => s.threadsPanelWidth);
-  const setWidth = useUiStore((s) => s.setThreadsPanelWidth);
-
   const branchGraph = useChatStore((s) => (chatId ? s.branchGraphs[chatId] : undefined));
-  const sideThreadPermissions = useChatStore((s) => s.sideThreadPermissions);
-  // The chat in the focused pane's active tab — what the panel docks beside.
-  // Not the address bar: switching tabs or panes never moves the URL (spec/14
-  // § Panes and tabs), so the URL names whichever chat was opened last, not
-  // the one on screen.
-  const focusedChatId = useLayoutStore((s) => activeChatOf(resolvePane(s.root, s.activePaneId)));
-
   // spec/14 § Side threads panel TRIGGER — the host mints the new branch's
   // id, so the trigger can only ARM an expectation (`pendingNewTab`); this
   // reconciler is what actually opens the panel once `chat.branches` reports
@@ -133,10 +117,43 @@ export function SideThreadsPanel(): JSX.Element | null {
     const newId = sideIds.find((id) => !seen.has(id));
     if (newId) openThread(chatId, newId);
   }, [chatId, branchGraph, pendingNewTab, openThread]);
+  return null;
+}
 
-  // Another chat having focus hides the panel rather than closing it: its
-  // tabs and drafts are still there when the user comes back to this chat.
-  if (chatId === null || chatId !== focusedChatId) return null;
+/**
+ * The Threads panel. Docked (default) it lives INSIDE its chat's tab, so it
+ * goes away with that tab and the chat's width never changes under another
+ * chat. Floating (popped out) it is a window over the app that stays put
+ * while the user moves between chats.
+ */
+export function SideThreadsPanel({
+  hostChatId,
+  floating = false,
+}: {
+  /** The chat whose tab this docked panel sits in. Unused when floating. */
+  hostChatId?: string;
+  floating?: boolean;
+}): JSX.Element | null {
+  const chatId = useSideThreadsStore((s) => s.panelChatId);
+  const poppedOut = useSideThreadsStore((s) => s.poppedOut);
+  const setPoppedOut = useSideThreadsStore((s) => s.setPoppedOut);
+  const closePanel = useSideThreadsStore((s) => s.closePanel);
+  const activeTabByChatId = useSideThreadsStore((s) => s.activeTabByChatId);
+  const closedTabsByChatId = useSideThreadsStore((s) => s.closedTabsByChatId);
+  const tabOrderByChatId = useSideThreadsStore((s) => s.tabOrderByChatId);
+  const draftByChatId = useSideThreadsStore((s) => s.draftByChatId);
+  const setActiveTab = useSideThreadsStore((s) => s.setActiveTab);
+  const closeTab = useSideThreadsStore((s) => s.closeTab);
+  const reorderTabs = useSideThreadsStore((s) => s.reorderTabs);
+  const closeDraft = useSideThreadsStore((s) => s.closeDraft);
+
+  const width = useUiStore((s) => s.threadsPanelWidth);
+  const setWidth = useUiStore((s) => s.setThreadsPanelWidth);
+
+  const branchGraph = useChatStore((s) => (chatId ? s.branchGraphs[chatId] : undefined));
+  const sideThreadPermissions = useChatStore((s) => s.sideThreadPermissions);
+  if (chatId === null) return null;
+  if (floating ? !poppedOut : poppedOut || chatId !== hostChatId) return null;
 
   const draft = draftByChatId[chatId];
   const sideBranches = (branchGraph?.branches ?? []).filter((b) => b.sideThread);
@@ -158,8 +175,20 @@ export function SideThreadsPanel(): JSX.Element | null {
 
   return (
     <>
-      <ColumnDivider side="right" width={width} onResize={setWidth} testId="side-threads-divider" />
-      <section className="side-threads-panel" data-testid="side-threads-panel" style={{ width }}>
+      {floating ? null : (
+        <ColumnDivider
+          side="right"
+          width={width}
+          onResize={setWidth}
+          testId="side-threads-divider"
+        />
+      )}
+      <section
+        className={`side-threads-panel${floating ? ' side-threads-floating' : ''}`}
+        data-testid="side-threads-panel"
+        data-mode={floating ? 'floating' : 'docked'}
+        style={{ width }}
+      >
         <div
           className="pane-tab-bar stp-tabs"
           role="tablist"
@@ -248,6 +277,16 @@ export function SideThreadsPanel(): JSX.Element | null {
             );
           })}
           <div className="pane-tab-bar-fill" />
+          <button
+            type="button"
+            className="stp-panel-close"
+            aria-label={floating ? 'Dock Threads panel into chat' : 'Pop out Threads panel'}
+            title={floating ? 'Dock into chat' : 'Pop out'}
+            data-testid="stp-pop-toggle"
+            onClick={() => setPoppedOut(!floating)}
+          >
+            {floating ? <PanelRight size={14} /> : <ExternalLink size={14} />}
+          </button>
           <button
             type="button"
             className="stp-panel-close"

@@ -40,6 +40,7 @@ import { openTabInNewWindow } from '../lib/newWindow.js';
 import { CloseIcon } from './icons.js';
 import { shortcutTitle } from '../lib/shortcuts.js';
 import { ChatRoute } from '../routes/ChatRoute.js';
+import { SideThreadsPanel } from './SideThreadsPanel.js';
 import { FileEditorTab } from './FileEditorTab.js';
 import { FilesPage } from './FilesPage.js';
 import { JobsRoute } from '../routes/JobsRoute.js';
@@ -326,13 +327,16 @@ function TabContent({
   switch (d.kind) {
     case 'chat':
       return (
-        <ChatRoute
-          ws={ws}
-          chatId={d.chatId}
-          focused={focused}
-          initialSeq={tab.pendingSeq ?? null}
-          onSeqConsumed={() => clearPendingSeq(tab.id)}
-        />
+        <div className="chat-tab-host">
+          <ChatRoute
+            ws={ws}
+            chatId={d.chatId}
+            focused={focused}
+            initialSeq={tab.pendingSeq ?? null}
+            onSeqConsumed={() => clearPendingSeq(tab.id)}
+          />
+          <SideThreadsPanel hostChatId={d.chatId} />
+        </div>
       );
     case 'terminal': {
       const folder = useChatStore.getState().chats[d.chatId]?.folder ?? '';

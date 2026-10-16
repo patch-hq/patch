@@ -7,7 +7,7 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-libra
 import { MemoryRouter } from 'react-router-dom';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SideThreadsPanel } from '../components/SideThreadsPanel.js';
+import { SideThreadsPanel, SideThreadsReconciler } from '../components/SideThreadsPanel.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSideThreadsStore, DRAFT_TAB_ID } from '../stores/sideThreadsStore.js';
 import { openSideThreadDraft, openExistingSideThread } from '../lib/sideThreadActions.js';
@@ -24,14 +24,14 @@ function fakeWs(): { send: ReturnType<typeof vi.fn> } {
   return { send: vi.fn() };
 }
 
-function renderPanel(chatId: string) {
-  // The panel follows the chat in the focused pane, not the address bar.
+function renderPanel(chatId: string, opts: { floating?: boolean } = {}) {
   useLayoutStore.getState().openTab({ kind: 'chat', chatId });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/jobs']}>
-        <SideThreadsPanel />
+        <SideThreadsReconciler />
+        {opts.floating ? <SideThreadsPanel floating /> : <SideThreadsPanel hostChatId={chatId} />}
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -65,6 +65,7 @@ beforeEach(() => {
     tabOrderByChatId: {},
     pendingNewTab: {},
     draftByChatId: {},
+    poppedOut: false,
   });
   setActiveWs(null);
   vi.mocked(api.getChatHistory).mockResolvedValue({ events: [] });
@@ -371,24 +372,34 @@ describe('SideThreadsPanel', () => {
 });
 
 describe('SideThreadsPanel — alongside tabs', () => {
-  it('hides while another chat has focus and comes back, state intact, when its tab does', () => {
+  it('docked, it belongs to its own chat: a panel hosted by another chat renders nothing', () => {
+    seedBranches('c1');
+    openSideThreadDraft('c1', 4, 'the original message');
+    const { unmount } = renderPanel('c1');
+    expect(screen.getByTestId('side-threads-panel').getAttribute('data-mode')).toBe('docked');
+    unmount();
+    renderPanel('c2');
+    expect(screen.queryByTestId('side-threads-panel')).toBeNull();
+  });
+
+  it('popped out, it is a floating window that does not depend on the focused chat', () => {
     seedBranches('c1');
     seedBranches('c2');
     openSideThreadDraft('c1', 4, 'the original message');
-    renderPanel('c1');
-    expect(screen.getByTestId('side-threads-panel')).toBeTruthy();
-
-    act(() => {
-      useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'tab' });
-    });
+    const docked = renderPanel('c1');
+    fireEvent.click(screen.getByTestId('stp-pop-toggle'));
+    expect(useSideThreadsStore.getState().poppedOut).toBe(true);
+    // The docked copy is gone; the floating one shows the same state.
     expect(screen.queryByTestId('side-threads-panel')).toBeNull();
-
-    act(() => {
-      const l = useLayoutStore.getState();
-      const pane = l.root as import('../stores/layoutStore.js').LeafPane;
-      l.setActiveTab(pane.id, pane.tabs.find((t) => t.id.includes('c1'))!.id);
-    });
+    docked.unmount();
+    renderPanel('c2', { floating: true });
+    const panel = screen.getByTestId('side-threads-panel');
+    expect(panel.getAttribute('data-mode')).toBe('floating');
     expect(screen.getByTestId('stp-draft').textContent).toContain('the original message');
+    // Docking it again hands it back to its chat.
+    fireEvent.click(screen.getByTestId('stp-pop-toggle'));
+    expect(useSideThreadsStore.getState().poppedOut).toBe(false);
+    expect(screen.queryByTestId('side-threads-panel')).toBeNull();
   });
 
   it('a draft tab can be closed like any other tab', () => {

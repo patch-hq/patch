@@ -49,19 +49,31 @@ test('sending a message in a tab stays on that tab', async ({ page }) => {
   await expect(page).toHaveURL(/chat=chat_forked/);
 });
 
-test('the panel follows the chat in the focused tab, hiding for others and returning with it', async ({
+test('docked, the panel sits inside its chat and goes with it; popped out, it stays', async ({
   page,
 }) => {
   const panel = page.getByTestId('side-threads-panel');
-  await expect(panel).toBeVisible();
+  await expect(panel).toHaveAttribute('data-mode', 'docked');
+  // Inside the chat's own tab, not a sibling of the whole app.
+  await expect(page.locator('.chat-tab-host [data-testid="side-threads-panel"]')).toHaveCount(1);
+
+  // Switching chats hides the docked panel.
   await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
   await expect(page.locator('.pane-tab')).toHaveCount(2);
   await expect(panel).toHaveCount(0);
-
-  // Splitting the only pane must not break the render either.
-  await page.keyboard.press('Meta+\\');
-  await expect(page.locator('.pane')).toHaveCount(2);
   await page.locator('.pane-tab', { hasText: 'forked-fixture' }).click();
   await expect(panel).toBeVisible();
+
+  // Pop out, then change chats: it stays, same width.
+  const dockedWidth = (await panel.boundingBox())!.width;
+  await page.getByTestId('stp-pop-toggle').click();
+  await expect(panel).toHaveAttribute('data-mode', 'floating');
+  expect((await panel.boundingBox())!.width).toBeCloseTo(dockedWidth, 0);
+  await page.locator('.pane-tab').filter({ hasNotText: 'forked-fixture' }).first().click();
+  await expect(panel).toBeVisible();
   await expect(page.getByTestId('stp-tab-chat_forked-b2')).toBeVisible();
+
+  // Dock it back.
+  await page.getByTestId('stp-pop-toggle').click();
+  await expect(panel).toHaveCount(0);
 });
