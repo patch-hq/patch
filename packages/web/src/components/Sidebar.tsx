@@ -82,7 +82,6 @@ import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
 import { snoozedRowsForStore } from '../lib/snoozedRows.js';
 import { folderBackPill, rowBack } from '../lib/snoozeBack.js';
-import { SNOOZE_PRESETS } from '../lib/snoozePresets.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { useAmbiguousHostLabel } from '../lib/hostLabel.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
@@ -1950,16 +1949,6 @@ function ChatRowView({
     });
   }
 
-  function applySnoozeUntil(snoozedUntil: number): void {
-    const was = row.snoozedUntil;
-    navigateAfterArchive(navigate, [row.chatId]);
-    useChatStore.getState().setSnoozed(row.chatId, snoozedUntil);
-    void api.snoozeChat(row.chatId, snoozedUntil).catch((err) => {
-      useChatStore.getState().setSnoozed(row.chatId, was);
-      useUiStore.getState().pushError(failed('snooze'), undefined, (err as Error).message);
-    });
-  }
-
   function handleUnsnooze(e: ReactMouseEvent): void {
     e.preventDefault();
     e.stopPropagation();
@@ -2111,13 +2100,8 @@ function ChatRowView({
               id: 'snooze',
               label: 'Snooze',
               icon: <Clock size={14} aria-hidden />,
-              run: () => undefined,
-              submenu: SNOOZE_PRESETS.map((p) => ({
-                id: `snooze-${p.id}`,
-                label: p.label,
-                icon: <Clock size={14} aria-hidden />,
-                run: () => applySnoozeUntil(p.resolve()),
-              })),
+              run: () =>
+                useUiStore.getState().openSnoozeSheet({ kind: 'chat', chatId: row.chatId }),
             },
           ]),
       ...(hidden
@@ -2677,24 +2661,7 @@ function bulkContextItems(chatIds: string[], navigate: (to: string) => void): Co
       id: 'snooze',
       label: 'Snooze',
       icon: <Clock size={14} aria-hidden />,
-      run: () => undefined,
-      submenu: SNOOZE_PRESETS.map((p) => ({
-        id: `snooze-${p.id}`,
-        label: p.label,
-        icon: <Clock size={14} aria-hidden />,
-        run: () => {
-          const until = p.resolve();
-          navigateAfterArchive(navigate, chatIds);
-          each((chatId) => {
-            const was = useChatStore.getState().chats[chatId]?.snoozedUntil ?? null;
-            useChatStore.getState().setSnoozed(chatId, until);
-            void api.snoozeChat(chatId, until).catch((err) => {
-              useChatStore.getState().setSnoozed(chatId, was);
-              useUiStore.getState().pushError(failed('snooze'), undefined, (err as Error).message);
-            });
-          })();
-        },
-      })),
+      run: () => useUiStore.getState().openSnoozeSheet({ kind: 'chats', chatIds }),
     },
     {
       id: 'hide',

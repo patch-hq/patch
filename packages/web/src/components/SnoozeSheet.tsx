@@ -12,6 +12,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../stores/chatStore.js';
+import { useSelectionStore } from '../stores/selectionStore.js';
 import { useUiStore, type SnoozeSheetTarget } from '../stores/uiStore.js';
 import { ModalOverlay } from './ModalOverlay.js';
 import { chatsInProject } from '../lib/chatGroups.js';
@@ -49,15 +50,24 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   const [selected, setSelected] = useState<string | null>(null);
   const [customValue, setCustomValue] = useState('');
 
-  const isProject = target.kind === 'project';
-  const targets: ChatRow[] = isProject
-    ? chatsInProject(Object.values(chats), target.folder)
-    : chats[target.chatId]
-      ? [chats[target.chatId]!]
-      : [];
+  // A project and a multi-selection are both "several chats"; only the title differs.
+  const isProject = target.kind !== 'chat';
+  const targets: ChatRow[] =
+    target.kind === 'project'
+      ? chatsInProject(Object.values(chats), target.folder)
+      : target.kind === 'chats'
+        ? target.chatIds.flatMap((id) => (chats[id] ? [chats[id]!] : []))
+        : chats[target.chatId]
+          ? [chats[target.chatId]!]
+          : [];
   const running = targets.filter((c) => c.activity === 'running');
   const notRunning = targets.length - running.length;
-  const name = isProject ? target.name : stripMarkdown(deriveChatTitle(targets[0]?.name ?? null));
+  const name =
+    target.kind === 'project'
+      ? target.name
+      : target.kind === 'chats'
+        ? `${targets.length} chats`
+        : stripMarkdown(deriveChatTitle(targets[0]?.name ?? null));
   const wake = wakeFor(selected, customValue);
   const canConfirm = selected !== null && targets.length > 0;
 
@@ -83,6 +93,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
       at = wakeFor(selected, '')!;
     }
     close();
+    if (target.kind === 'chats') useSelectionStore.getState().clear();
     applySnooze({ targets, until: at, name, isProject, navigate });
   }
 
@@ -120,14 +131,14 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
         className="snooze-sheet"
         role="dialog"
         aria-modal="true"
-        aria-label={isProject ? `Snooze ${name}` : 'Snooze'}
+        aria-label={target.kind === 'project' ? `Snooze ${name}` : 'Snooze'}
         data-testid="snooze-sheet"
         tabIndex={-1}
         ref={rootRef}
       >
         <div className="snooze-sheet-head">
           <h2 className="display" data-testid="snooze-sheet-title">
-            {isProject ? `Snooze ${name}` : 'Snooze'}
+            {target.kind === 'project' ? `Snooze ${name}` : 'Snooze'}
           </h2>
           <span data-testid="snooze-sheet-subtitle">
             {isProject ? `${targets.length} ${targets.length === 1 ? 'chat' : 'chats'}` : name}

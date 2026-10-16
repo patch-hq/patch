@@ -11,6 +11,7 @@ import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-libra
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
+import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { PromptModal } from '../components/PromptModal.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -53,6 +54,7 @@ function renderSidebar(): void {
       <Sidebar />
       <ConfirmModal />
       <PromptModal />
+      <SnoozeSheet />
     </MemoryRouter>,
   );
 }
@@ -149,25 +151,29 @@ describe('sidebar row context menu', () => {
     expect(screen.queryByTestId(MENU)).toBeNull();
   });
 
-  it('snoozes from a preset list under Snooze, through the row’s snooze path, and closes', async () => {
+  it('Snooze opens the same Snooze sheet as the header, applying nothing until confirmed', async () => {
     useChatStore.getState().hydrate([rowFixture()]);
     const snooze = vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
     renderSidebar();
 
     rightClick(screen.getByTestId('chat-row-c1'));
     expect(screen.queryByTestId(`${MENU}-snooze-1-hour`)).toBeNull();
-    fireEvent.click(screen.getByTestId(`${MENU}-snooze`));
-    // Expanding keeps the menu open and lists the shared presets.
-    expect(screen.getByTestId(MENU)).toBeTruthy();
-    const before = Date.now();
     await act(async () => {
-      fireEvent.click(screen.getByTestId(`${MENU}-snooze-1-hour`));
+      fireEvent.click(screen.getByTestId(`${MENU}-snooze`));
     });
+    expect(screen.queryByTestId(MENU)).toBeNull();
+    expect(useUiStore.getState().snoozeSheet).toEqual({ kind: 'chat', chatId: 'c1' });
+    expect(screen.getByTestId('snooze-sheet')).toBeTruthy();
+    expect(snooze).not.toHaveBeenCalled();
 
+    const before = Date.now();
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-1-hour'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+    });
     const until = useChatStore.getState().chats['c1']?.snoozedUntil as number;
     expect(until).toBeGreaterThanOrEqual(before + 3_600_000);
-    expect(snooze).toHaveBeenCalledWith('c1', until);
-    expect(screen.queryByTestId(MENU)).toBeNull();
+    expect(snooze).toHaveBeenCalledWith('c1', until, expect.any(String));
   });
 
   it('pins through the row’s own pin action', async () => {
@@ -420,6 +426,25 @@ describe('sidebar row context menu over a multi-selection', () => {
     expect(pin).toHaveBeenCalledWith(a, true);
     expect(pin).toHaveBeenCalledWith(b, true);
     expect(useChatStore.getState().chats['c3']?.pinned).toBe(false);
+  });
+
+  it('Snooze over a selection opens the sheet for every selected chat, then clears the selection', async () => {
+    selectTwo();
+    const [a, b] = useSelectionStore.getState().selected as [string, string];
+    const snooze = vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
+    rightClick(screen.getByTestId(`chat-row-${a}`));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(`chat-context-menu-${a}-snooze`));
+    });
+    expect(screen.getByTestId('snooze-sheet-subtitle').textContent).toBe('2 chats');
+    expect(snooze).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-1-hour'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+    });
+    expect(snooze).toHaveBeenCalledTimes(2);
+    expect(snooze.mock.calls.map((c) => c[0]).sort()).toEqual([a, b].sort());
+    expect(useSelectionStore.getState().selected.length).toBe(0);
   });
 
   it('archives every selected chat after one confirm', async () => {
