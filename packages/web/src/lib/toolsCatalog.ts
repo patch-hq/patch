@@ -408,7 +408,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     description:
       'Creates a recurring or triggered job (cron / webhook / todoist) that spawns work over time.',
     params:
-      'trigger: object, action: object, filter?: string, gate?: object, name?: string, concurrency?: number, queueing?: object, window?: object, oneOff?: boolean, group?: string, autonomyPrompt?: string',
+      'trigger: object, action: object, filter?: string, gate?: object, name?: string, concurrency?: number, queueing?: object, window?: object, oneOff?: boolean, group?: string, autonomyPrompt?: string, wakeHost?: boolean',
   },
   {
     name: patchToolId('patch_job_update'),
@@ -416,7 +416,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description: 'Patches fields of an existing job.',
     params:
-      'jobId: string, trigger?: object, action?: object, filter?: string, gate?: object, name?: string, enabled?: boolean, concurrency?: number, queueing?: object, window?: object, oneOff?: boolean, archived?: boolean, group?: string, autonomyPrompt?: string',
+      'jobId: string, trigger?: object, action?: object, filter?: string, gate?: object, name?: string, enabled?: boolean, concurrency?: number, queueing?: object, window?: object, oneOff?: boolean, archived?: boolean, group?: string, autonomyPrompt?: string, wakeHost?: boolean',
   },
   {
     name: patchToolId('patch_job_delete'),

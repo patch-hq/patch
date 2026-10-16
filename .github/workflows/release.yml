@@ -53,9 +53,17 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
-      - run: node scripts/verify.mjs
+      # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
+      # tests keep credentials in the native keyring (Secret Service over D-Bus).
+      - run: sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11
+      - name: The gate
         env:
           PATCH_RUN_BROWSER_GATE: '1'
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            node scripts/verify.mjs
+          '
 
   server:
     if: github.repository == 'tomchambers2/patch'
