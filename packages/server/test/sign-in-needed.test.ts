@@ -34,6 +34,8 @@ describe('SignInNeededNotifier', () => {
     // Tapping must open settings, not look up the placeholder chat id.
     expect(routed.every((e) => e.kind === 'sign-in')).toBe(true);
     expect(routed[0]!.message).toMatch(/ChatGPT Sub.*sign/i);
+    // An expired sign-in is a chore, not an emergency: no urgent sound.
+    expect(routed.every((e) => e.priority === 'normal')).toBe(true);
   });
 
   test('notifies again after the account was signed in and expired again', () => {

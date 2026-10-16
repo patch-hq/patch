@@ -40,7 +40,7 @@ export class SignInNeededNotifier {
               chatId: SIGN_IN_CHAT_ID,
               channel,
               message,
-              priority: 'urgent',
+              priority: 'normal',
               kind: 'sign-in',
             },
             channel === 'push' ? { suppressOn: 'computer' } : {},
