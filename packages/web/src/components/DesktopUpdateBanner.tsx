@@ -108,6 +108,34 @@ export function DesktopUpdateBanner(): JSX.Element | null {
     return () => window.clearInterval(id);
   }, []);
 
+  // macOS refused the update (it is signed differently from this app), so it
+  // can never install itself: say why, and offer the download. Shown at once,
+  // whatever the urgency — there is nothing for waiting to fix.
+  if (state?.manualInstall) {
+    return (
+      <div
+        className="desktop-update-banner overdue"
+        data-testid="desktop-update-banner"
+        data-urgency="overdue"
+        role="status"
+      >
+        <span className="dot" aria-hidden />
+        <span className="desktop-update-text" data-testid="desktop-update-error">
+          {state.lastError}
+        </span>
+        <a
+          className="desktop-update-restart"
+          data-testid="desktop-update-download"
+          href={state.manualInstall.url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Download Patch {state.manualInstall.version}
+        </a>
+      </div>
+    );
+  }
+
   // Nothing staged means nothing to offer. `downloaded` is the honest gate:
   // an update that is merely AVAILABLE cannot be installed by pressing a
   // button, so offering Restart would be a lie until the bytes are on disk.

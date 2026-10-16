@@ -4645,7 +4645,8 @@ a.ch-row:hover {
 .tool-call.trigger {
   background: transparent;
   color: var(--ink-3);
-  font-size: var(--text-min);
+  /* Quieter than the reply, but above the legibility floor (--text-min). */
+  font-size: 15px;
   margin: 4px 0;
 }
 .tool-call.compaction .tool-summary,
@@ -7235,6 +7236,8 @@ a.ch-row:hover {
 }
 .desktop-update-restart {
   flex: none;
+  /* Also a link: the download offered when an update cannot install itself. */
+  text-decoration: none;
   border: 1px solid currentColor;
   background: transparent;
   color: inherit;
@@ -8055,6 +8058,11 @@ a.ch-row:hover {
 }
 .job-row .job-name {
   font-size: 16px;
+}
+/* The job defaults card reuses the settings row classes, whose text sits at
+   the app-wide floor; the jobs page carries its own higher one. */
+.jobs-route :is(.set-row-title, .set-sub, .set-sub code, .set-btn) {
+  font-size: 15px;
 }
 .job-row .job-trigger {
   font-size: 15px;

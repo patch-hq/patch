@@ -264,4 +264,36 @@ describe('DesktopUpdateBanner', () => {
     expect(screen.getByTestId('desktop-update-error')).toBeInTheDocument();
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
   });
+
+  it('an update macOS refused says why and offers the download, not a Restart that cannot work', async () => {
+    const message =
+      "Patch 1.1.37 is signed differently from the app you have, so it can't install itself. " +
+      'Download it and replace this app once; after that, updates install themselves.';
+    const installUpdate = installBridge(
+      state({
+        downloaded: false,
+        lastResult: 'error',
+        lastErrorKind: 'install',
+        lastError: message,
+        availableVersion: '1.1.37',
+        // Fell behind a minute ago: still shown, there is nothing to wait for.
+        staleSince: new Date(Date.now() - 60_000).toISOString(),
+        manualInstall: {
+          version: '1.1.37',
+          url: 'https://patch.example/api/desktop/Patch-1.1.37-arm64-mac.zip',
+        },
+      }),
+    );
+    render(<DesktopUpdateBanner />);
+    expect(await screen.findByTestId('desktop-update-error')).toHaveTextContent(message);
+    const link = screen.getByTestId('desktop-update-download');
+    expect(link).toHaveTextContent('Download Patch 1.1.37');
+    expect(link).toHaveAttribute(
+      'href',
+      'https://patch.example/api/desktop/Patch-1.1.37-arm64-mac.zip',
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.queryByTestId('desktop-update-restart')).toBeNull();
+    expect(installUpdate).not.toHaveBeenCalled();
+  });
 });

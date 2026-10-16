@@ -197,6 +197,8 @@ export interface DesktopUpdaterState {
   lastErrorKind: 'check' | 'install' | null;
   availableVersion: string | null;
   downloaded: boolean;
+  /** Set when macOS refused the update (signed differently): download it instead. */
+  manualInstall?: { version: string; url: string } | null;
   checking: boolean;
   /** When this shell first fell behind the feed — what the banner escalates on. */
   staleSince: string | null;

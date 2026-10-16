@@ -12,6 +12,8 @@ import {
   diagnoseUpdater,
   createInstaller,
   installDownloaded,
+  isSignatureRefusal,
+  refusedCopy,
   shouldPollFeed,
   emptyPersisted,
   initialUpdaterState,
@@ -852,4 +854,54 @@ test('a persisted error comes back as a check error — an install failure did n
   });
   assert.equal(s.lastErrorKind, 'check');
   assert.equal(state().lastErrorKind, null);
+});
+
+// --- an update macOS refuses: signed by a different identity -----------------
+
+const REFUSAL =
+  'Code signature at URL file:///Users/x/Library/Caches/io.github.tomchambers2.patch.ShipIt/update.abc/Patch.app/ ' +
+  'did not pass validation: code failed to satisfy specified code requirement(s)';
+
+test('Squirrel refusing a differently-signed update is recognised; a network error is not', () => {
+  assert.equal(isSignatureRefusal(REFUSAL), true);
+  assert.equal(isSignatureRefusal('net::ERR_INTERNET_DISCONNECTED'), false);
+});
+
+test('a refused update is not installable, says why, and offers the download', () => {
+  const url = 'https://patch.tomchambers.me/api/desktop/Patch-1.1.37-arm64-mac.zip';
+  const downloaded = reduceUpdater(state(), { type: 'downloaded', version: '1.1.37', at: AT });
+  const s = reduceUpdater(downloaded, { type: 'refused', version: '1.1.37', url, at: AT });
+  assert.equal(s.downloaded, false);
+  assert.equal(s.lastResult, 'error');
+  assert.equal(s.lastErrorKind, 'install');
+  assert.equal(s.lastError, refusedCopy('1.1.37'));
+  assert.deepEqual(s.manualInstall, { version: '1.1.37', url });
+  // Still behind, and the clock that escalates the banner keeps running.
+  assert.equal(s.staleSince, AT);
+  // Being current again clears it.
+  assert.equal(reduceUpdater(s, { type: 'up-to-date', at: AT }).manualInstall, null);
+});
+
+test('Restart on a refused update repeats why, instead of waiting for an install that cannot come', () => {
+  const app = { isQuitting: false };
+  const calls: string[] = [];
+  const errors: Error[] = [];
+  const refused = reduceUpdater(state(), {
+    type: 'refused',
+    version: '1.1.37',
+    url: 'https://patch.tomchambers.me/api/desktop/Patch-1.1.37-arm64-mac.zip',
+    at: AT,
+  });
+  installDownloaded(refused, {
+    app,
+    autoUpdater: { quitAndInstall: () => calls.push('quitAndInstall') },
+    onError: (e) => errors.push(e),
+    setTimer: () => {
+      calls.push('timer');
+      return {};
+    },
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(app.isQuitting, false);
+  assert.equal(errors[0]?.message, refusedCopy('1.1.37'));
 });
