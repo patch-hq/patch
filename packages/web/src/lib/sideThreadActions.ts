@@ -84,3 +84,18 @@ export function stopBranch(ws: PatchWs | null, chatId: string, branchId: string)
 export function sendBackToChat(ws: PatchWs | null, chatId: string, branchId: string): void {
   ws?.send({ type: 'chat.send_back_request', chatId, branchId });
 }
+
+/**
+ * A side thread's track is its own records PLUS every ancestor message up to
+ * the fork point (spec/04 § Side threads), so the history read carries the
+ * whole parent conversation. The thread's own transcript is what follows the
+ * fork point.
+ */
+export function ownThreadEvents<T extends { seq: number }>(
+  events: readonly T[],
+  forkFromSeq: number | null | undefined,
+): T[] {
+  return forkFromSeq === null || forkFromSeq === undefined
+    ? [...events]
+    : events.filter((e) => e.seq > forkFromSeq);
+}

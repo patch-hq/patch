@@ -104,7 +104,11 @@ import { ArtifactBar } from '../components/ArtifactBar.js';
 import type { ChatEventEntry, DelegateUpdateInfo, LocalAttachment } from '../stores/chatStore.js';
 import { Markdown, useStreamingMarkdownText } from '../components/Markdown.js';
 import { ContextMenu, useContextMenu } from '../components/ContextMenu.js';
-import { openSideThreadDraft, openExistingSideThread } from '../lib/sideThreadActions.js';
+import {
+  openSideThreadDraft,
+  openExistingSideThread,
+  ownThreadEvents,
+} from '../lib/sideThreadActions.js';
 import { openDiffForFile } from '../lib/openDiff.js';
 import { openArtifact } from '../lib/openArtifact.js';
 import { closeArtifactPanel, notePanelInset, showArtifactFor } from '../lib/artifactPanel.js';
@@ -3195,7 +3199,10 @@ function SideThreadMarker({ chatId, branch }: { chatId: string; branch: ChatBran
     queryFn: () => api.getChatHistory(chatId, { branchId: branch.branchId }),
     refetchInterval: branch.running ? 2000 : false,
   });
-  const count = data?.events.length ?? 0;
+  const count = ownThreadEvents(
+    (data?.events ?? []) as Array<{ seq: number }>,
+    branch.forkFromSeq,
+  ).length;
   const status = needsYou ? 'needs you' : branch.running ? 'running' : null;
   const dotClass = needsYou ? 'stp-dot-needs-you' : branch.running ? 'stp-dot-running' : '';
   return (

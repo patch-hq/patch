@@ -313,6 +313,34 @@ describe('SideThreadsPanel', () => {
     expect(useChatStore.getState().sideThreadPermissions['c1::c1-b1']).toHaveLength(0);
   });
 
+  it("shows only the thread's own messages, not the parent messages the track inherits", async () => {
+    vi.mocked(api.getChatHistory).mockResolvedValue({
+      events: [
+        { seq: 2, role: 'user', content: 'inherited user text' },
+        { seq: 3, role: 'assistant', content: 'inherited assistant text' },
+        { seq: 4, role: 'assistant', content: 'the forked message' },
+        { seq: 10, role: 'user', content: 'side question' },
+      ],
+    });
+    seedBranches('c1', [
+      {
+        branchId: 'c1-b1',
+        parentBranchId: 'c1-b0',
+        forkFromSeq: 4,
+        label: 'side 1',
+        createdAt: 1,
+        sideThread: true,
+      },
+    ]);
+    openExistingSideThread('c1', 'c1-b1');
+    renderPanel('c1');
+
+    await screen.findByText('side question');
+    expect(screen.getAllByTestId('stp-msg')).toHaveLength(1);
+    expect(screen.queryByText('inherited user text')).toBeNull();
+    expect(screen.queryByText('the forked message')).toBeNull();
+  });
+
   it('branching again from a message inside a tab opens a draft with fromBranchId set to that tab', async () => {
     vi.mocked(api.getChatHistory).mockResolvedValue({
       events: [{ seq: 10, role: 'assistant', content: 'the answer' }],

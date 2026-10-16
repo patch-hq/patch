@@ -40,6 +40,7 @@ import {
   stopBranch,
   sendBackToChat,
   openSideThreadDraft,
+  ownThreadEvents,
 } from '../lib/sideThreadActions.js';
 import { getActiveWs } from '../api/ws.js';
 import { api } from '../api/rest.js';
@@ -325,7 +326,10 @@ function SideThreadTab({ chatId, branch }: { chatId: string; branch: ChatBranch 
     refetchInterval: branch.running ? 2000 : false,
     placeholderData: keepPreviousData,
   });
-  const events = (data?.events ?? []) as unknown as BranchHistoryEvent[];
+  const events = ownThreadEvents(
+    (data?.events ?? []) as unknown as BranchHistoryEvent[],
+    branch.forkFromSeq,
+  );
 
   const quoted = (() => {
     if (branch.forkFromSeq === null) return null;

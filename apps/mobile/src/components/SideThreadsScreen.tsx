@@ -28,6 +28,7 @@ import {
   sendBackToChat,
   openSideThreadDraft,
   offQuoteLabel,
+  ownThreadEvents,
 } from '../lib/sideThreadActions';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { api } from '../api/rest';
@@ -45,6 +46,7 @@ function useBranchHistory(
   chatId: string,
   branchId: string,
   running: boolean,
+  forkFromSeq: number | null,
 ): BranchHistoryEvent[] {
   const [events, setEvents] = React.useState<BranchHistoryEvent[]>([]);
   React.useEffect(() => {
@@ -65,7 +67,7 @@ function useBranchHistory(
       clearInterval(t);
     };
   }, [chatId, branchId, running]);
-  return events;
+  return React.useMemo(() => ownThreadEvents(events, forkFromSeq), [events, forkFromSeq]);
 }
 
 function StatusDot({ color }: { color: string }): React.ReactElement {
@@ -300,7 +302,7 @@ function ThreadPane({
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const branchId = branch.branchId;
-  const events = useBranchHistory(chatId, branchId, branch.running === true);
+  const events = useBranchHistory(chatId, branchId, branch.running === true, branch.forkFromSeq);
   const mainTimeline = useChatStore((s) => s.timelines[chatId]);
   const branchGraph = useChatStore((s) => s.branchGraphs[chatId]);
   const permissions = useChatStore(
