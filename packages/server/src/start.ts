@@ -7,6 +7,7 @@ import type { ServerConfig } from './config.js';
 import { RelayService } from './relay-service.js';
 import { startReleaseMirror } from './release-mirror.js';
 import { RELEASE_REPO, readChannel } from './release-channel.js';
+import { createSelfUpdater } from './self-update.js';
 
 export async function startServer(
   config: ServerConfig,
@@ -36,11 +37,26 @@ export async function startServer(
   }
   // Follows the project's releases unless the operator turned that off
   // (`patch-server channel off`); the channel file is read on every check.
+  // A server installed by its installer (PATCH_SERVER_HOME set) also installs the
+  // releases it mirrors (self-update.ts).
+  const downloadsDir = process.env.PATCH_DOWNLOADS_DIR ?? '/app/downloads';
+  const home = process.env.PATCH_SERVER_HOME;
+  const running = process.env.PATCH_VERSION;
   stopMirror = startReleaseMirror({
     repo: RELEASE_REPO,
     channel: () => readChannel(config.dataDir),
-    downloadsDir: process.env.PATCH_DOWNLOADS_DIR ?? '/app/downloads',
+    downloadsDir,
     log: (msg) => app.log.info(msg),
+    ...(home && running
+      ? {
+          afterCheck: createSelfUpdater({
+            home,
+            downloadsDir,
+            running,
+            log: (msg) => app.log.info(msg),
+          }),
+        }
+      : {}),
   });
   return { app, ...(relay ? { relay } : {}), port };
 }

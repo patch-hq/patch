@@ -7,9 +7,9 @@
 // `android-latest.json`; what changes is where this server gets them from: a
 // published release instead of a deploy someone ran by hand.
 //
-// Off unless `PATCH_RELEASE_REPO` (owner/repo) is set, so a server that is
-// deployed some other way is untouched. `PATCH_RELEASE_CHANNEL` is `stable`
-// (the default: the newest non-prerelease) or `dev` (the newest of anything).
+// The repository is the project's (release-channel.ts); the channel is the
+// operator's one choice, `patch-server channel stable|dev|off`. A server that
+// installed itself also installs the server release it mirrors (self-update.ts).
 //
 // NO FALLBACK: a release that is incomplete, a checksum that does not match, two
 // host manifests that disagree about the build, or a GitHub that will not answer
@@ -269,22 +269,34 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
 }
 
 /**
- * Check now and then hourly. The channel is asked for on every check, so an
- * operator changing it is followed without a restart; `off` skips the check.
- * Errors are logged and retried, never fatal.
+ * Check now and then every two minutes: one unauthenticated GitHub call per
+ * check, half the 60 an hour GitHub allows an address. The channel is asked for
+ * on every check, so an operator changing it is followed without a restart;
+ * `off` skips the check. `afterCheck` runs after every check that was not
+ * skipped (the server's self-update). Errors are logged and retried, never fatal.
  */
 export function startReleaseMirror(
-  opts: Omit<MirrorOptions, 'channel'> & { channel: () => Channel | 'off' },
-  everyMs = 60 * 60 * 1000,
+  opts: Omit<MirrorOptions, 'channel'> & {
+    channel: () => Channel | 'off';
+    afterCheck?: () => void;
+  },
+  everyMs = 2 * 60 * 1000,
 ): () => void {
   const log = opts.log ?? (() => {});
   const tick = async () => {
+    let channel: Channel | 'off';
     try {
-      const channel = opts.channel();
+      channel = opts.channel();
       if (channel === 'off') return;
       await mirrorOnce({ ...opts, channel });
     } catch (err: unknown) {
       log(`release mirror FAILED: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    try {
+      opts.afterCheck?.();
+    } catch (err: unknown) {
+      log(`self-update FAILED: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
   void tick();
