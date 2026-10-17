@@ -5770,7 +5770,7 @@ a.ch-row:hover {
      auto-grow effect flips this to `auto` only once content exceeds the cap
      (spec/14 § Composer — the input never shows a scrollbar under the cap). */
   overflow-y: hidden;
-  max-height: 200px;
+  max-height: 50vh;
   /* Was bg-elevated (#fdfaf2) — nearly identical to the cream page, so the
      field vanished. Pure white + a defined border reads unambiguously as an
      input against the warm panel. */

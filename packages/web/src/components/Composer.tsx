@@ -117,12 +117,13 @@ import { failed } from '../lib/errorCopy.js';
  *  the mic/send are optically centred against their siblings (spec/14 § Composer). */
 const ICON_SIZE = 18;
 
-/** Height cap (px) for the auto-growing composer input — MUST match the CSS
- *  `max-height` on `.composer-input`. Under this the field expands/contracts to
- *  fit with NO scrollbar; only once content exceeds the cap does it scroll
- *  internally, so a long paste can't push the chat off-screen (spec/14 §
- *  Composer — "the input should never show a scrollbar; expand/contract"). */
-const MAX_INPUT_HEIGHT = 200;
+/** Height cap for the auto-growing composer input, as a fraction of the window
+ *  height — MUST match the CSS `max-height` (50vh) on `.composer-input`. Under
+ *  this the field expands/contracts to fit with NO scrollbar; only once content
+ *  exceeds the cap does it scroll internally, so a long paste can't push the
+ *  chat off-screen (spec/14 § Composer). */
+const MAX_INPUT_HEIGHT_FRACTION = 0.5;
+const maxInputHeight = (): number => Math.round(window.innerHeight * MAX_INPUT_HEIGHT_FRACTION);
 
 /**
  * The modes spec/02 § Permission mode names, in the order they are shown.
@@ -628,8 +629,9 @@ export const Composer = forwardRef(function Composer(
     // scrollbar contributes to it).
     const border = el.offsetHeight - el.clientHeight;
     const contentHeight = el.scrollHeight + border;
-    el.style.height = `${Math.min(contentHeight, MAX_INPUT_HEIGHT)}px`;
-    el.style.overflowY = contentHeight > MAX_INPUT_HEIGHT ? 'auto' : 'hidden';
+    const cap = maxInputHeight();
+    el.style.height = `${Math.min(contentHeight, cap)}px`;
+    el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
   }, [value]);
   const pushError = useUiStore((s) => s.pushError);
   const dictateChord = useUiStore((s) => s.dictateChord);

@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 // move as the field grows, and the transcript must give up the space.
 
 const HARNESS = '/app/dev-harness.html?chat=chat_bus';
-const CAP = 200; // `.composer-input` max-height / MAX_INPUT_HEIGHT
+const CAP = 0.5; // fraction of window height: `.composer-input` max-height (50vh)
 
 /** A paste comfortably past the cap. */
 const LONG = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of a long message`).join('\n');
@@ -87,7 +87,8 @@ test.describe('composer grows upwards', () => {
         clientHeight: t.clientHeight,
       };
     });
-    expect(field.height).toBeLessThanOrEqual(CAP + 1);
+    const cap = await page.evaluate((f) => window.innerHeight * f, CAP);
+    expect(field.height).toBeLessThanOrEqual(cap + 1);
     expect(field.overflowY).toBe('auto');
     // Genuinely scrollable — the rest of the message is reachable, not lost.
     expect(field.scrollHeight).toBeGreaterThan(field.clientHeight);

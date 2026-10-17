@@ -69,7 +69,7 @@ test.describe('composer + transcript layout', () => {
     const input = page.locator('.composer-input');
     await input.click();
 
-    // Far more lines than fit in the 200px cap: the field must stop growing at
+    // Far more lines than fit in the cap: the field must stop growing at
     // the cap and scroll internally (never push the chat off-screen).
     const many = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n');
     await input.fill(many);
@@ -82,11 +82,28 @@ test.describe('composer + transcript layout', () => {
         scrollHeight: t.scrollHeight,
       };
     });
-    // Height is clamped at the 200px cap (allow a small border/padding delta).
-    expect(over.height).toBeLessThanOrEqual(202);
+    // Height is clamped at the cap: half the window (allow a small delta).
+    const cap = await page.evaluate(() => window.innerHeight * 0.5);
+    expect(over.height).toBeLessThanOrEqual(cap + 2);
     // Past the cap the content genuinely overflows, so a scrollbar is allowed.
     expect(over.overflowY).toBe('auto');
     expect(over.scrollHeight).toBeGreaterThan(over.height);
+  });
+
+  test('a long multi-line message expands the input well past eight lines', async ({ page }) => {
+    await page.goto(HARNESS);
+    const input = page.locator('.composer-input');
+    await input.click();
+    await input.fill(Array.from({ length: 14 }, (_, i) => `line ${i}`).join('\n'));
+    await page.waitForTimeout(50);
+    const m = await input.evaluate((el) => {
+      const t = el as HTMLTextAreaElement;
+      return { overflowY: getComputedStyle(t).overflowY, h: t.clientHeight, sh: t.scrollHeight };
+    });
+    // 14 lines is ~250px: past the old 200px cap, so it must show whole, unscrolled.
+    expect(m.h).toBeGreaterThan(230);
+    expect(m.overflowY).toBe('hidden');
+    expect(m.sh).toBeLessThanOrEqual(m.h + 1);
   });
 
   test('markdown paragraphs use tight spacing, not the browser default ~16px', async ({ page }) => {
