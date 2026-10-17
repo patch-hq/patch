@@ -100,6 +100,8 @@ describe('artifacts', () => {
         'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox',
       );
       expect(unshimmed(get.body)).toBe(PAGE);
+      // Plain links would navigate the frame itself; the shim routes them to a new tab.
+      expect(get.body).toContain("window.open(a.href,'_blank','noopener')");
     } finally {
       await built.app.close();
     }
