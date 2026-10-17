@@ -373,7 +373,7 @@ A running batch's check-in (`14-design-web.md` § Batch mode) fires exactly one 
 
 ## Account sign-in expired
 
-When a host pauses an AI account because its sign-in expired, the server notifies once (`kind: 'sign-in'`, urgent, desktop and push). It has no chat: a tap opens Settings → Usage on desktop and the Settings tab on the phone, never a chat lookup.
+When a host pauses an AI account because its sign-in expired, the server notifies once (`kind: 'sign-in'`, normal, desktop and push). It has no chat: a tap opens Settings → Usage on desktop and the Settings tab on the phone, never a chat lookup.
 
 ## Presence heuristic
 

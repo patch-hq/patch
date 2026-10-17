@@ -31,7 +31,7 @@ export class SignInNeededNotifier {
       }
       if (this.notified.has(key)) continue;
       this.notified.add(key);
-      const message = `${account.label} needs signing in again — its sign-in expired. Open Settings > Accounts.`;
+      const message = `${account.label} needs signing in again — its sign-in expired. Open Settings > Usage.`;
       for (const channel of ['desktop', 'push'] as const) {
         void this.deps.router
           .route(
