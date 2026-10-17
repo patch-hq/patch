@@ -23,7 +23,7 @@ test.describe('tool call summaries', () => {
     await expect(calls.nth(1)).toContainText('Reading poll.ts');
     await expect(calls.nth(1)).not.toContainText('src/poll.ts');
     // Nothing nameable: a plain phrase for the kind of work.
-    await expect(calls.nth(2)).toContainText('Updating the todo list');
+    await expect(calls.nth(2)).toContainText('Loading tools');
 
     // None of them is grouped — this is the ungrouped row's own summary.
     await expect(page.locator('[data-testid="tool-group"]')).toHaveCount(0);

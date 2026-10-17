@@ -97,10 +97,15 @@ test.describe('job editor — Hide chat is a toggle, laid out inline', () => {
     });
     await page.locator(CONTROL).click();
     await expect(input).toBeChecked();
-    const trackOn = await page.locator(`${CONTROL} .toggle-track`).evaluate((el) => {
-      return getComputedStyle(el).backgroundColor;
-    });
-    expect(trackOn).not.toBe(trackOff);
+    // Polled: the track's colour transitions, so a single read right after the
+    // click can still see the off colour on a slow runner.
+    await expect
+      .poll(() =>
+        page
+          .locator(`${CONTROL} .toggle-track`)
+          .evaluate((el) => getComputedStyle(el).backgroundColor),
+      )
+      .not.toBe(trackOff);
   });
 
   test('no bare native checkbox is left anywhere in the job editor', async ({ page }) => {

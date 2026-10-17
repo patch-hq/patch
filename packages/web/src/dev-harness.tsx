@@ -1437,13 +1437,14 @@ const singleToolEntries: ChatEventEntry[] = [
     at: 6,
   },
   { seq: 7, kind: 'message', role: 'assistant', content: 'It polls every 30s.', at: 7 },
-  { seq: 8, kind: 'message', role: 'user', content: 'plan it out', at: 8 },
+  { seq: 8, kind: 'message', role: 'user', content: 'fetch the changelog', at: 8 },
+  // Not TodoWrite: that now renders as a checklist card, not a tool row.
   {
     seq: 9,
     kind: 'tool_call',
-    tool: 'TodoWrite',
-    toolArgs: { todos: [{ content: 'rebuild the index', status: 'pending' }] },
-    callId: 'call-single-todo',
+    tool: 'ToolSearch',
+    toolArgs: { query: 'select:WebFetch', max_results: 1 },
+    callId: 'call-single-toolsearch',
     at: 9,
   },
 ];
