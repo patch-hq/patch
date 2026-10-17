@@ -30,7 +30,10 @@ test.describe('view_file', () => {
     // stored credential.
     const frame = page.getByTestId('view-file-frame');
     await expect(frame).toHaveAttribute('src', '/api/chats/chat_view_file/artifact/deadbeef');
-    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+    await expect(frame).toHaveAttribute(
+      'sandbox',
+      'allow-scripts allow-popups allow-popups-to-escape-sandbox',
+    );
 
     // The filename labels it, and there is a direct open-in-new-tab route.
     await expect(page.getByTestId('view-file-expand')).toContainText('plants.html');

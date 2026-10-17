@@ -661,9 +661,11 @@ header, so the URL the server returns at publish (and which the card carries)
 ends `?sig=<HMAC>` — a signature over (chat, artifact) under a server-held
 secret, so knowing or guessing the ids is not enough. A missing, wrong or
 tampered signature is a 401, never a fallback to open access. It is served
-with `Content-Security-Policy: sandbox allow-scripts` — the page runs in an
+with `Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox` — the page runs in an
 opaque origin, so agent-authored script can neither read the SPA's stored
-credential nor make same-origin API calls with it. An unknown id is a 404;
+credential nor make same-origin API calls with it. Popups are allowed and
+escape the sandbox, so a `target=_blank` link opens a working page; without
+them Chromium blocks every such link silently. An unknown id is a 404;
 nothing is generated on the fly. A card published before signing existed
 carries an unsigned URL and 401s until the file is republished.
 
@@ -771,7 +773,7 @@ browser's PDF viewer will not start inside a sandboxed frame, so a wrapped PDF
 renders as a grey box). An HTML page is instead
 wrapped as a page and stored and served exactly like an artifact (§
 Artifacts) — same store, same signed URL, same
-`Content-Security-Policy: sandbox allow-scripts` opaque origin. Either way the
+`Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox` opaque origin. Either way the
 `viewId` is namespaced apart from the `artifactId` for the same path, so
 viewing a page never overwrites the artifact card published from it.
 
@@ -779,7 +781,7 @@ In the chat, a `view_file` call renders as the file itself: the tool's row IS
 the picture or the page, with the filename above it. An image renders as an
 actual `<img>`, click-to-open in the same full-screen lightbox as any other
 inline image (§ Attachments); an HTML page renders in a
-`sandbox="allow-scripts"` iframe (no `allow-same-origin` — the credential is
+`sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"` iframe (no `allow-same-origin` — the credential is
 unreachable from both sides of the boundary), and a PDF in an iframe with no
 `sandbox` attribute (it is raw PDF bytes, not agent-authored markup, and the
 PDF viewer needs the unsandboxed frame), each with an expand control above it

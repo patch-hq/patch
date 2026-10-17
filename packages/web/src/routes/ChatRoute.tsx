@@ -4353,7 +4353,7 @@ function DelegateTranscript({
 
 /**
  * A `view_file` result, rendered where it happened. The page is served from
- * the artifact origin with `Content-Security-Policy: sandbox allow-scripts`,
+ * the artifact origin with `Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox`,
  * and mounted in a `sandbox`ed iframe on top of that — an agent-named file
  * cannot reach the SPA's credential from either side of the boundary.
  *
@@ -4422,7 +4422,9 @@ function ViewFileCard({ view }: { view: ViewFileView }): JSX.Element {
           title={view.name}
           // A PDF is raw application/pdf, not agent-authored markup, and the
           // browser's PDF viewer will not start inside a sandboxed frame.
-          {...(view.kind === 'pdf' ? {} : { sandbox: 'allow-scripts' })}
+          {...(view.kind === 'pdf'
+            ? {}
+            : { sandbox: 'allow-scripts allow-popups allow-popups-to-escape-sandbox' })}
           loading="lazy"
         />
       )}

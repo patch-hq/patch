@@ -2575,7 +2575,9 @@ describe('ChatRoute regression', () => {
     expect(frame.getAttribute('src')).toBe('/api/chats/c-view-file/artifact/abc123');
     // Sandboxed WITHOUT allow-same-origin: agent-named content can never reach
     // the SPA's stored credential.
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.getAttribute('sandbox')).toBe(
+      'allow-scripts allow-popups allow-popups-to-escape-sandbox',
+    );
     // Expands to a bigger frame rather than opening a lightbox.
     expect(card.getAttribute('data-expanded')).toBe('false');
     fireEvent.click(screen.getByTestId('view-file-expand'));

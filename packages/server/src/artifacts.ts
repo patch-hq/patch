@@ -13,7 +13,7 @@
 //      header, so the URL handed back at publish carries an HMAC signature
 //      (server secret, never guessable from the ids). `POST .../share` mints a
 //      separate EXPIRING signed link for handing to someone else, and
-//      `DELETE .../share` revokes every share link for that artifact. Served with `Content-Security-Policy: sandbox allow-scripts` so
+//      `DELETE .../share` revokes every share link for that artifact. Served with `Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox` so
 //      agent-authored script runs in an OPAQUE origin and can never read the
 //      SPA's stored credential or call the API as the user.
 //   3. Per-artifact key-value storage. An opaque origin makes `localStorage`
@@ -39,8 +39,10 @@ const ID_RE = /^[0-9a-f]{2,64}$/;
 const MAX_ARTIFACT_BYTES = 3 * 1024 * 1024;
 /** Raw (image) bodies are base64 of up to 7 MB of source, so they get their own ceiling. */
 const MAX_RAW_ARTIFACT_BYTES = 10 * 1024 * 1024;
-/** Opaque origin: agent-authored script cannot touch the SPA's origin. */
-export const ARTIFACT_CSP = 'sandbox allow-scripts';
+/** Opaque origin: agent-authored script cannot touch the SPA's origin.
+ * Popups are allowed, and escape the sandbox, so a `target=_blank` link opens
+ * a working page; the artifact itself stays opaque either way. */
+export const ARTIFACT_CSP = 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox';
 
 /** A `raw`-published artifact's sidecar: what content-type to serve `<id>.bin`
  * back with. Its mere presence (checked before `<id>.html`) is what tells the
@@ -97,6 +99,7 @@ var ss=make({},function(){});
 addEventListener('pagehide',function(){if(timer!==null){clearTimeout(timer);flush()}});
 Object.defineProperty(window,'localStorage',{value:ls,configurable:true});
 Object.defineProperty(window,'sessionStorage',{value:ss,configurable:true});
+addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented)return;var h=a.getAttribute('href');if(!h||h.charAt(0)==='#'||!/^(https?:|mailto:|tel:)/i.test(a.href))return;e.preventDefault();window.open(a.href,'_blank','noopener')});
 })();</script>`;
 }
 

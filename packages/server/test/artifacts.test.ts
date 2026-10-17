@@ -96,7 +96,9 @@ describe('artifacts', () => {
       const get = await built.app.inject({ method: 'GET', url: res.url! });
       expect(get.statusCode).toBe(200);
       expect(get.headers['content-type']).toContain('text/html');
-      expect(get.headers['content-security-policy']).toBe('sandbox allow-scripts');
+      expect(get.headers['content-security-policy']).toBe(
+        'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox',
+      );
       expect(unshimmed(get.body)).toBe(PAGE);
     } finally {
       await built.app.close();
