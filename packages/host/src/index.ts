@@ -13,6 +13,7 @@ import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { acquireHomeLock, type HomeLock } from './homeLock.js';
+import { SHUTDOWN_DEADLINE_MS, shutdownThenExit } from './shutdownDeadline.js';
 import { linkLegacySocket } from './legacySocket.js';
 import { mkdirSync, existsSync, unlinkSync, statSync, chmodSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -4696,9 +4697,18 @@ async function startHost(
     tcp.close();
   };
   // Wire the control-IPC POST /stop endpoint to graceful shutdown.
-  shutdownHook = () => void shutdown().then(() => process.exit(0));
-  process.once('SIGINT', () => void shutdown().then(() => process.exit(0)));
-  process.once('SIGTERM', () => void shutdown().then(() => process.exit(0)));
+  const stop = (): void =>
+    shutdownThenExit(shutdown, {
+      exit: (code) => process.exit(code),
+      onDeadline: () =>
+        logger.error(
+          { deadlineMs: SHUTDOWN_DEADLINE_MS },
+          'patch-daemon: graceful shutdown overran its deadline — exiting anyway',
+        ),
+    });
+  shutdownHook = stop;
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
   testHooks?.onReady?.({
     shutdown,
     daemon,
