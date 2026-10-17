@@ -10,7 +10,7 @@
 // a pure function here because the mobile transcript is a FlatList and needs
 // its rows as data.
 
-import { folderName, isGroupableToolCall, type SnoozeRecord } from '@patch/wire';
+import { folderName, isGroupableToolCall, todoCardItems, type SnoozeRecord } from '@patch/wire';
 
 import type { ChatEventEntry } from '../stores/chatStore';
 
@@ -202,7 +202,12 @@ function toolActivity(tool: string): [string, (n: number) => string] {
 }
 
 function isViewFileCall(entry: ChatEventEntry): boolean {
-  return entry.tool === 'view_file' || entry.tool === 'mcp__patch__view_file';
+  return (
+    entry.tool === 'view_file' ||
+    entry.tool === 'mcp__patch__view_file' ||
+    // A plan card takes its own result too, so the result is not a second row.
+    (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null)
+  );
 }
 
 /** A transcript row: either one timeline entry, or a folded run of tool entries. */

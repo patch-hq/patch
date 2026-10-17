@@ -14975,3 +14975,47 @@ select.new-chat-account:focus-visible {
 .pairing-alt summary {
   cursor: pointer;
 }
+
+/* The agent's plan (TodoWrite): a bordered checklist card, one marker per
+   step — dashed ring pending, solid ring in progress, filled tick done. */
+.todo-card {
+  list-style: none;
+  margin: 0 0 var(--space-sm, 8px);
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-elevated);
+  font-family: 'Figtree Variable', 'Inter Variable', -apple-system, system-ui, sans-serif;
+  font-size: 15px;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.todo-card-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.todo-card-mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1.5px dashed var(--ink-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.todo-card-item[data-status='in_progress'] .todo-card-mark {
+  border: 1.5px solid var(--ink-2);
+}
+.todo-card-item[data-status='completed'] .todo-card-mark {
+  border: 1.5px solid var(--ink-3);
+  background: var(--ink-3);
+  color: var(--bg-elevated);
+}
+.todo-card-item[data-status='completed'] .todo-card-text {
+  color: var(--ink-3);
+}

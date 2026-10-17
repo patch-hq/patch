@@ -27,6 +27,8 @@ import {
   hasTaskNotification,
   isEditToolCall as isEditToolCallWire,
   isGroupableToolCall,
+  todoCardItems,
+  type TodoCardItem,
   parseBackgroundTaskNotice,
   parseGoalOutcome,
   taskNotificationSummary,
@@ -149,6 +151,7 @@ import {
   CircleAlert,
   Clock,
   CloudOff,
+  Check,
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
@@ -3402,6 +3405,21 @@ function MessageAttachments({
   );
 }
 
+function TodoCard({ items }: { items: TodoCardItem[] }): JSX.Element {
+  return (
+    <ul className="todo-card" data-testid="todo-card" aria-label="Plan">
+      {items.map((t, i) => (
+        <li key={i} className="todo-card-item" data-testid="todo-card-item" data-status={t.status}>
+          <span className="todo-card-mark" aria-hidden>
+            {t.status === 'completed' ? <Check size={12} strokeWidth={3} /> : null}
+          </span>
+          <span className="todo-card-text">{t.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // Tool calls render COLLAPSED by default (spec/14 ## Main chat panel: "Tool
 // calls: collapsed by default with one-line summary; click to expand full args
 // + result"). File-edit tools expand to a read-only unified diff (spec/14
@@ -3475,6 +3493,12 @@ function ToolCall({
     : entry.tool === 'TaskStop'
       ? `Stopping task ${String(args['task_id'] ?? args['taskId'] ?? '')}`
       : (aiLabel ?? toolCallSummary(entry.tool, entry.toolArgs));
+
+  // spec/14 ## Main chat panel — the agent's plan is a checklist card with a
+  // marker per step, not a "Updating the todo list" row. Args that are not a
+  // todo list fall through to the ordinary row.
+  const todoItems = entry.tool === 'TodoWrite' ? todoCardItems(entry.toolArgs) : null;
+  if (todoItems) return <TodoCard items={todoItems} />;
 
   // spec/09 § `### push`, spec/14 ## Main chat panel — every `patch_notify`
   // call renders as a green box carrying the message, so the transcript shows
@@ -4546,12 +4570,18 @@ function isGroupableToolEntry(entry: ChatEventEntry): boolean {
   return isGroupableToolCall(entry.tool, entry.toolArgs);
 }
 
-/** A `view_file` call, however the stream spelled the tool's name. */
+/**
+ * A call whose own row is the thing shown — a `view_file`, a notification, a
+ * plan card — however the stream spelled the tool's name. Its result is drawn
+ * inside that row, never as a second one.
+ */
 function isViewFileCall(entry: ChatEventEntry): boolean {
   return (
     entry.kind === 'tool_call' &&
     !!entry.tool &&
-    (toolLabel(entry.tool) === 'view_file' || toolLabel(entry.tool) === 'patch_notify')
+    (toolLabel(entry.tool) === 'view_file' ||
+      toolLabel(entry.tool) === 'patch_notify' ||
+      (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null))
   );
 }
 

@@ -16,7 +16,34 @@ export function isGroupableToolCall(tool: string | undefined, args: unknown): bo
   if (tool === 'view_file' || tool === 'mcp__patch__view_file') return false;
   // A notification is a message to the user: it stays in the transcript.
   if (tool === 'patch_notify' || tool === 'mcp__patch__patch_notify') return false;
+  // The agent's plan is a checklist card in the transcript, not a command.
+  if (tool === 'TodoWrite') return false;
   return !isEditToolCall(tool, args);
+}
+
+export interface TodoCardItem {
+  text: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+/**
+ * The checklist a `TodoWrite` call carries, for surfaces to draw as a card.
+ * Null when the args are not a non-empty list of `{ content, status }` — the
+ * call then renders as an ordinary row rather than an empty or guessed card.
+ */
+export function todoCardItems(args: unknown): TodoCardItem[] | null {
+  const todos = (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>;
+  const list = todos['todos'];
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const items: TodoCardItem[] = [];
+  for (const t of list) {
+    if (typeof t !== 'object' || t === null) return null;
+    const { content, status } = t as Record<string, unknown>;
+    if (typeof content !== 'string' || content === '') return null;
+    if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') return null;
+    items.push({ text: content, status });
+  }
+  return items;
 }
 
 /** A file-edit call, which renders its own row with an inline diff. */

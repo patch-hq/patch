@@ -440,6 +440,20 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A plan between two command runs — drives the todo card e2e.
+  {
+    chatId: 'chat_plan',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'plan-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A run of tools whose AI summary failed — drives the failed-summary marker e2e.
   {
     chatId: 'chat_tools_failed',
@@ -1317,6 +1331,33 @@ const toolRhythmEntries: ChatEventEntry[] = [
 ];
 
 // A two-command run with call ids, so a test can attach a tool-run summary to it.
+const planEntries: ChatEventEntry[] = [
+  { seq: 0, kind: 'message', role: 'user', content: 'fix the host', at: 0 },
+  {
+    seq: 1,
+    kind: 'tool_call',
+    tool: 'Bash',
+    toolArgs: { command: 'ls' },
+    callId: 'plan-b1',
+    at: 1,
+  },
+  { seq: 2, kind: 'tool_result', toolResult: 'a', callId: 'plan-b1', at: 2 },
+  {
+    seq: 3,
+    kind: 'tool_call',
+    tool: 'TodoWrite',
+    toolArgs: {
+      todos: [
+        { content: 'Diagnose host offline', status: 'completed', activeForm: 'Diagnosing' },
+        { content: 'Fix the Mac host', status: 'in_progress', activeForm: 'Fixing' },
+        { content: 'Verify both are working', status: 'pending', activeForm: 'Verifying' },
+      ],
+    },
+    callId: 'plan-t1',
+    at: 3,
+  },
+  { seq: 4, kind: 'tool_result', toolResult: 'ok', callId: 'plan-t1', at: 4 },
+];
 const toolRunFailedEntries: ChatEventEntry[] = [
   { seq: 1, kind: 'message', role: 'user', content: 'run the checks', at: 1 },
   { seq: 2, kind: 'tool_call', tool: 'Bash', callId: 'f1', toolArgs: { command: 'ls' }, at: 2 },
@@ -1677,6 +1718,7 @@ useChatStore.setState((s) => ({
     chat_perm_mode_auto: permissionModeAutomaticEntries,
     chat_tools: toolRunEntries,
     chat_tools_failed: toolRunFailedEntries,
+    chat_plan: planEntries,
     chat_tool_rhythm: toolRhythmEntries,
     chat_voice: [
       {

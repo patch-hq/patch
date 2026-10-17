@@ -41,7 +41,7 @@ import {
   Clock,
   CloudOff,
 } from 'lucide-react-native';
-import { ArrowUp, ChevronDown, ChevronRight, Copy } from 'lucide-react-native';
+import { ArrowUp, Check, ChevronDown, ChevronRight, Copy } from 'lucide-react-native';
 import {
   SPECIAL_THREAD_IDS,
   folderName,
@@ -75,7 +75,13 @@ import {
   queueRelease,
   type QueueRelease,
 } from '../../src/lib/queueLabel';
-import { backRecord, parseAgentReturn, type AgentReturn } from '@patch/wire';
+import {
+  backRecord,
+  parseAgentReturn,
+  todoCardItems,
+  type AgentReturn,
+  type TodoCardItem,
+} from '@patch/wire';
 import { SnoozeDivider } from '../../src/components/SnoozeDivider';
 import { editQueuedMessage, promoteMessage, unqueueMessage } from '../../src/lib/queuedActions';
 import { getComposerDraft, setComposerDraft } from '../../src/lib/composerDraft';
@@ -1374,6 +1380,10 @@ function ToolCallItem({
       ? viewFilePayload(result.toolResult)
       : null;
   if (viewFile) return <ViewFileCard view={viewFile} />;
+  // The agent's plan is a checklist card; args that are not a todo list fall
+  // through to the ordinary row. Stable per entry, like the branches above.
+  const todoItems = entry.tool === 'TodoWrite' ? todoCardItems(entry.toolArgs) : null;
+  if (todoItems) return <TodoCard items={todoItems} />;
   const colors = useTheme();
   const [expanded, setExpanded] = React.useState(false);
   const diff = diffFromToolCall(entry.tool, entry.toolArgs);
@@ -1631,6 +1641,69 @@ function ServedImage({
 >): React.ReactElement | null {
   const { uri } = useLocalUri(url);
   return uri ? <Image source={{ uri }} {...image} /> : null;
+}
+
+const TODO_STATUS_LABEL: Record<TodoCardItem['status'], string> = {
+  pending: 'pending',
+  in_progress: 'in progress',
+  completed: 'completed',
+};
+
+// A marker per step: dashed ring pending, solid ring in progress, filled tick done.
+function TodoCard({ items }: { items: TodoCardItem[] }): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <View
+      testID="todo-card"
+      style={{
+        backgroundColor: colors.paperRaised,
+        borderColor: colors.lineSoft,
+        borderWidth: 1,
+        borderRadius: radii.lg,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm,
+        marginBottom: space.sm,
+        gap: space.sm,
+      }}
+    >
+      {items.map((t, i) => (
+        <View
+          key={i}
+          testID="todo-card-item"
+          accessible
+          accessibilityLabel={`${t.text}, ${TODO_STATUS_LABEL[t.status]}`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}
+        >
+          <View
+            style={{
+              width: 16,
+              height: 16,
+              borderRadius: 8,
+              borderWidth: 1.5,
+              borderStyle: t.status === 'pending' ? 'dashed' : 'solid',
+              borderColor: t.status === 'pending' ? colors.ink3 : colors.ink2,
+              backgroundColor: t.status === 'completed' ? colors.ink3 : 'transparent',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {t.status === 'completed' ? (
+              <Check size={10} strokeWidth={3} color={colors.paperRaised} />
+            ) : null}
+          </View>
+          <Text
+            style={{
+              ...typography.body,
+              color: t.status === 'completed' ? colors.ink3 : colors.ink,
+              flexShrink: 1,
+            }}
+          >
+            {t.text}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 // An image shows inline; a pdf/html file is a card. Either opens the in-app
