@@ -667,6 +667,17 @@ credential nor make same-origin API calls with it. An unknown id is a 404;
 nothing is generated on the fly. A card published before signing existed
 carries an unsigned URL and 401s until the file is republished.
 
+Storage. The opaque origin makes `localStorage` throw, so the server injects a
+shim at the top of every served HTML artifact that replaces `localStorage` with
+a synchronous key-value map (and `sessionStorage` with an in-memory one). The
+map is seeded from the artifact's stored state, inlined at serve time, and
+written back (debounced, and on `pagehide`) with `PUT
+/api/chats/:chatId/artifact/:artifactId/storage` using the same `?sig=` /
+`?exp=&sig=` query the page was opened with. State is per artifact (shared by
+every link to it), a JSON object of strings capped at 512 KB; a failed save is
+logged to the console and fires a `storage-error` event on `window`, never
+swallowed. `GET` on the same path returns the state.
+
 Sharing. The in-app link is for the signed-in user's own surfaces; to give
 someone else access, an authenticated surface calls
 `POST /api/chats/:chatId/artifact/:artifactId/share { ttlSeconds? }` (default

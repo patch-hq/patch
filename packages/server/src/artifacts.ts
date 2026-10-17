@@ -16,6 +16,11 @@
 //      `DELETE .../share` revokes every share link for that artifact. Served with `Content-Security-Policy: sandbox allow-scripts` so
 //      agent-authored script runs in an OPAQUE origin and can never read the
 //      SPA's stored credential or call the API as the user.
+//   3. Per-artifact key-value storage. An opaque origin makes `localStorage`
+//      throw, so the served page gets a shim (`storageShim`) that replaces
+//      `localStorage` with a synchronous in-page map, hydrated from the state
+//      the server inlines at serve time and written back through
+//      `PUT .../storage` (same `?sig=` the page was opened with).
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -72,6 +77,37 @@ export function loadLinkSecret(artifactsDir: string): Buffer {
   return secret;
 }
 
+/** Ceiling on one artifact's stored key-value state (serialised JSON). */
+const MAX_STORAGE_BYTES = 512 * 1024;
+
+/** Replaces `window.localStorage` (which throws in the sandbox's opaque origin)
+ * with a synchronous map seeded from `state`, flushed to the server on change.
+ * A failed flush is logged loudly and surfaced as a `storage-error` event on
+ * `window` — never swallowed. `sessionStorage` is likewise unavailable, so it
+ * becomes a plain in-memory map (it does not survive a reload by definition). */
+function storageShim(state: Record<string, string>, storageUrl: string): string {
+  const json = JSON.stringify(state).replace(/</g, '\\u003c');
+  return `<script>(function(){
+var data=${json};var url=${JSON.stringify(storageUrl)}+location.search;var timer=null;
+function flush(){timer=null;fetch(url,{method:'PUT',headers:{'content-type':'text/plain'},body:JSON.stringify(data),keepalive:true}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status)}).catch(function(e){console.error('artifact storage save failed',e);window.dispatchEvent(new CustomEvent('storage-error',{detail:String(e)}))})}
+function make(map,persist){var api={getItem:function(k){k=String(k);return Object.prototype.hasOwnProperty.call(map,k)?map[k]:null},setItem:function(k,v){map[String(k)]=String(v);persist()},removeItem:function(k){delete map[String(k)];persist()},clear:function(){for(var k in map)delete map[k];persist()},key:function(i){var ks=Object.keys(map);return i<ks.length?ks[i]:null}};
+return new Proxy(api,{get:function(t,p){if(p==='length')return Object.keys(map).length;if(p in t)return t[p];return api.getItem(p)},set:function(t,p,v){api.setItem(p,v);return true},deleteProperty:function(t,p){api.removeItem(p);return true},has:function(t,p){return p in t||Object.prototype.hasOwnProperty.call(map,p)},ownKeys:function(){return Object.keys(map)},getOwnPropertyDescriptor:function(t,p){return Object.prototype.hasOwnProperty.call(map,p)?{value:map[p],enumerable:true,configurable:true,writable:true}:undefined}})}
+var ls=make(data,function(){if(timer===null)timer=setTimeout(flush,100)});
+var ss=make({},function(){});
+addEventListener('pagehide',function(){if(timer!==null){clearTimeout(timer);flush()}});
+Object.defineProperty(window,'localStorage',{value:ls,configurable:true});
+Object.defineProperty(window,'sessionStorage',{value:ss,configurable:true});
+})();</script>`;
+}
+
+function injectShim(html: string, shim: string): string {
+  const at =
+    /<head[^>]*>/i.exec(html) ?? /<html[^>]*>/i.exec(html) ?? /^\s*<!doctype[^>]*>/i.exec(html);
+  if (!at) return shim + html;
+  const i = at.index + at[0].length;
+  return html.slice(0, i) + shim + html.slice(i);
+}
+
 function safeChatId(chatId: string): boolean {
   return chatId.length > 0 && !chatId.includes('/') && !chatId.includes('..');
 }
@@ -113,6 +149,35 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       return 'invalid';
     }
   }
+
+  /** Bearer, app-signed link, or unexpired share link. */
+  async function authorised(
+    req: FastifyRequest<{ Querystring: { sig?: string; exp?: string } }>,
+    chatId: string,
+    artifactId: string,
+  ): Promise<boolean> {
+    const bearer = await hasBearer(req);
+    if (bearer === true) return true;
+    if (bearer !== false) return false;
+    const { sig, exp } = req.query;
+    if (typeof sig !== 'string') return false;
+    if (exp === undefined) return same(sig, appSig(chatId, artifactId));
+    const expMs = Number(exp);
+    return (
+      Number.isInteger(expMs) &&
+      expMs > Date.now() &&
+      same(sig, shareSig(chatId, artifactId, expMs))
+    );
+  }
+
+  const storageFile = (chatId: string, artifactId: string): string =>
+    join(deps.artifactsDir, chatId, `${artifactId}.storage.json`);
+  /** A malformed store is a loud failure, not an empty page: serving `{}` would
+   * let the next write overwrite the user's saved state. */
+  const readStorage = (chatId: string, artifactId: string): Record<string, string> => {
+    const f = storageFile(chatId, artifactId);
+    return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as Record<string, string>) : {};
+  };
 
   const artifactExists = (chatId: string, artifactId: string): boolean =>
     existsSync(join(deps.artifactsDir, chatId, `${artifactId}.html`)) ||
@@ -247,22 +312,8 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     if (!safeChatId(chatId) || !ID_RE.test(artifactId)) {
       return reply.code(404).send({ error: 'artifact not found' });
     }
-    const bearer = await hasBearer(req);
-    if (bearer !== true) {
-      const { sig, exp } = req.query;
-      let ok = false;
-      if (bearer === false && typeof sig === 'string') {
-        if (exp === undefined) {
-          ok = same(sig, appSig(chatId, artifactId));
-        } else {
-          const expMs = Number(exp);
-          ok =
-            Number.isInteger(expMs) &&
-            expMs > Date.now() &&
-            same(sig, shareSig(chatId, artifactId, expMs));
-        }
-      }
-      if (!ok) return reply.code(401).send({ error: 'unauthenticated' });
+    if (!(await authorised(req, chatId, artifactId))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
     }
     const dir = join(deps.artifactsDir, chatId);
     // A `raw` publish (an image `view_file` result) leaves a sidecar next to
@@ -282,12 +333,85 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     if (!existsSync(file)) {
       return reply.code(404).send({ error: 'artifact not found' });
     }
+    const shim = storageShim(
+      readStorage(chatId, artifactId),
+      `/api/chats/${chatId}/artifact/${artifactId}/storage`,
+    );
     return reply
       .code(200)
       .header('content-type', 'text/html; charset=utf-8')
       .header('content-security-policy', ARTIFACT_CSP)
-      .send(readFileSync(file, 'utf8'));
+      .send(injectShim(readFileSync(file, 'utf8'), shim));
   });
+
+  // The page runs in an opaque origin, so its fetches are cross-origin: answer
+  // the (unauthenticated-by-origin, signed-by-query) calls with open CORS.
+  const storageCors = (reply: { header: (k: string, v: string) => unknown }): void => {
+    reply.header('access-control-allow-origin', '*');
+    reply.header('access-control-allow-methods', 'GET, PUT, OPTIONS');
+    reply.header('access-control-allow-headers', 'content-type');
+  };
+  const storagePath = '/api/chats/:chatId/artifact/:artifactId/storage';
+  type StorageReq = FastifyRequest<{
+    Params: { chatId: string; artifactId: string };
+    Querystring: { sig?: string; exp?: string };
+  }>;
+  app.options(storagePath, { logLevel: 'warn' }, async (_req, reply) => {
+    storageCors(reply);
+    return reply.code(204).send();
+  });
+  app.get(storagePath, { logLevel: 'warn' }, async (req: StorageReq, reply) => {
+    storageCors(reply);
+    const { chatId, artifactId } = req.params;
+    if (!safeChatId(chatId) || !ID_RE.test(artifactId) || !artifactExists(chatId, artifactId)) {
+      return reply.code(404).send({ error: 'artifact not found' });
+    }
+    if (!(await authorised(req, chatId, artifactId))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    return reply.code(200).send(readStorage(chatId, artifactId));
+  });
+  // Body is the whole key-value map as JSON. `text/plain` keeps the page's
+  // PUT free of a preflight; Fastify gets it as a string.
+  app.addContentTypeParser('text/plain', { parseAs: 'string' }, (_req, body, done) => {
+    done(null, body);
+  });
+  app.put(
+    storagePath,
+    { logLevel: 'warn', bodyLimit: MAX_STORAGE_BYTES + 1024 },
+    async (req: StorageReq, reply) => {
+      storageCors(reply);
+      const { chatId, artifactId } = req.params;
+      if (!safeChatId(chatId) || !ID_RE.test(artifactId) || !artifactExists(chatId, artifactId)) {
+        return reply.code(404).send({ error: 'artifact not found' });
+      }
+      if (!(await authorised(req, chatId, artifactId))) {
+        return reply.code(401).send({ error: 'unauthenticated' });
+      }
+      const raw = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return reply.code(400).send({ error: 'body must be a JSON object of strings' });
+      }
+      if (
+        typeof parsed !== 'object' ||
+        parsed === null ||
+        Array.isArray(parsed) ||
+        !Object.values(parsed).every((v) => typeof v === 'string')
+      ) {
+        return reply.code(400).send({ error: 'body must be a JSON object of strings' });
+      }
+      if (Buffer.byteLength(raw, 'utf8') > MAX_STORAGE_BYTES) {
+        return reply.code(413).send({ error: 'artifact storage too large' });
+      }
+      const file = storageFile(chatId, artifactId);
+      writeFileSync(`${file}.tmp`, raw, 'utf8');
+      renameSync(`${file}.tmp`, file);
+      return reply.code(204).send();
+    },
+  );
 
   return unsub;
 }

@@ -22,6 +22,10 @@ import { InProcessHostLink } from '../src/host-link.js';
 
 const PAGE = '<!doctype html><html><body><h1>hello artifact</h1></body></html>';
 
+/** The served page minus the injected localStorage shim. */
+const unshimmed = (html: string): string =>
+  html.replace(/<script>\(function\(\)\{[\s\S]*?\}\)\(\);<\/script>/, '');
+
 function publishRequest(
   over: Partial<Extract<WireEvent, { type: 'patch.artifact.publish_request' }>> = {},
 ): Extract<WireEvent, { type: 'patch.artifact.publish_request' }> {
@@ -93,7 +97,7 @@ describe('artifacts', () => {
       expect(get.statusCode).toBe(200);
       expect(get.headers['content-type']).toContain('text/html');
       expect(get.headers['content-security-policy']).toBe('sandbox allow-scripts');
-      expect(get.body).toBe(PAGE);
+      expect(unshimmed(get.body)).toBe(PAGE);
     } finally {
       await built.app.close();
     }
@@ -109,7 +113,7 @@ describe('artifacts', () => {
       );
       expect(second.url).toBe(first.url);
       const get = await built.app.inject({ method: 'GET', url: second.url! });
-      expect(get.body).toBe('<p>v2</p>');
+      expect(unshimmed(get.body)).toBe('<p>v2</p>');
     } finally {
       await built.app.close();
     }
@@ -389,7 +393,7 @@ describe('artifacts', () => {
           headers: { authorization: `Bearer ${await bearerFor(user)}` },
         });
         expect(get.statusCode).toBe(200);
-        expect(get.body).toBe(PAGE);
+        expect(unshimmed(get.body)).toBe(PAGE);
       } finally {
         await built.app.close();
       }
@@ -431,7 +435,7 @@ describe('artifacts', () => {
         expect(expiresAt).toBeGreaterThan(Date.now());
         const get = await built.app.inject({ method: 'GET', url });
         expect(get.statusCode).toBe(200);
-        expect(get.body).toBe(PAGE);
+        expect(unshimmed(get.body)).toBe(PAGE);
         // Extending the expiry by hand invalidates the signature.
         const forged = url.replace(/exp=\d+/, `exp=${expiresAt + 1000}`);
         expect((await built.app.inject({ method: 'GET', url: forged })).statusCode).toBe(401);
@@ -509,6 +513,91 @@ describe('artifacts', () => {
           headers: { authorization: `Bearer ${await bearerFor(user)}` },
         });
         expect(res.statusCode).toBe(404);
+      } finally {
+        await built.app.close();
+      }
+    });
+  });
+
+  describe('per-artifact storage', () => {
+    const put = (built: Awaited<ReturnType<typeof makeApp>>['built'], url: string, body: string) =>
+      built.app.inject({
+        method: 'PUT',
+        url,
+        headers: { 'content-type': 'text/plain' },
+        payload: body,
+      });
+
+    it('persists written state, inlines it into the served page, and shims localStorage', async () => {
+      const { built, hostLink } = await makeApp();
+      try {
+        const res = await publish(hostLink, publishRequest());
+        const sig = new URL(res.url!, 'http://x').search;
+        const store = `/api/chats/c1/artifact/a1/storage${sig}`;
+        const w = await put(built, store, JSON.stringify({ tick: '1', '</script>': 'x' }));
+        expect(w.statusCode).toBe(204);
+        expect(w.headers['access-control-allow-origin']).toBe('*');
+        const r = await built.app.inject({ method: 'GET', url: store });
+        expect(JSON.parse(r.body)).toEqual({ tick: '1', '</script>': 'x' });
+        const page = await built.app.inject({ method: 'GET', url: res.url! });
+        expect(page.body).toContain("Object.defineProperty(window,'localStorage'");
+        expect(page.body).toContain('"tick":"1"');
+        expect(page.body).not.toContain('</script>":');
+        expect(page.body).toContain('hello artifact');
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('refuses unsigned, wrong-artifact, malformed and oversized writes', async () => {
+      const { built, hostLink } = await makeApp();
+      try {
+        const res = await publish(hostLink, publishRequest());
+        const sig = new URL(res.url!, 'http://x').search;
+        const base = '/api/chats/c1/artifact/a1/storage';
+        expect((await put(built, base, '{}')).statusCode).toBe(401);
+        expect((await built.app.inject({ method: 'GET', url: base })).statusCode).toBe(401);
+        expect((await put(built, `${base}${sig}`, '[1]')).statusCode).toBe(400);
+        expect((await put(built, `${base}${sig}`, '{"a":1}')).statusCode).toBe(400);
+        expect((await put(built, `${base}${sig}`, 'nope')).statusCode).toBe(400);
+        const big = JSON.stringify({ k: 'x'.repeat(600 * 1024) });
+        expect((await put(built, `${base}${sig}`, big)).statusCode).toBe(413);
+        expect((await put(built, `/api/chats/c1/artifact/ff/storage${sig}`, '{}')).statusCode).toBe(
+          404,
+        );
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('lets a real sandboxed page save in localStorage and read it back after reload', async () => {
+      const { built, hostLink } = await makeApp();
+      try {
+        const page =
+          '<!doctype html><html><head><title>t</title></head><body><div id="o"></div><script>' +
+          "var n=Number(localStorage.getItem('n')||0)+1;localStorage.setItem('n',String(n));" +
+          "document.getElementById('o').textContent='n='+n+' len='+localStorage.length;" +
+          '</script></body></html>';
+        const res = await publish(hostLink, publishRequest({ html: page }));
+        await built.app.listen({ port: 0, host: '127.0.0.1' });
+        const port = (built.app.server.address() as AddressInfo).port;
+        const pw = await import('playwright');
+        const browser = await pw.chromium.launch();
+        try {
+          const pg = await browser.newPage();
+          const errors: string[] = [];
+          pg.on('pageerror', (e) => errors.push(e.message));
+          await pg.goto(`http://127.0.0.1:${port}${res.url}`);
+          expect(await pg.textContent('#o')).toBe('n=1 len=1');
+          await pg.waitForResponse(
+            (r) => r.url().includes('/storage') && r.request().method() === 'PUT',
+          );
+          await pg.reload();
+          expect(await pg.textContent('#o')).toBe('n=2 len=1');
+          expect(errors).toEqual([]);
+        } finally {
+          await browser.close();
+        }
       } finally {
         await built.app.close();
       }
