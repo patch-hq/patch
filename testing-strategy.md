@@ -12,7 +12,7 @@ Read by `/e2e-test-run patch` (and any other test-loop tooling). Defines how eac
 | Browser     | `packages/web/e2e/*.spec.ts`                                                     | `pnpm --filter @patch/web test:ui`                |
 | Surface     | this file's per-surface sections, plus `testing/`                                | by hand, on a machine with the emulator or device |
 
-`pnpm verify` runs every layer above except Surface, and `pnpm deploy` runs `pnpm verify` first. Nothing else is a gate.
+`pnpm verify` runs every layer above except Surface, and the release workflow runs `pnpm verify` first. Nothing else is a gate.
 
 Environment facts about the browser layer; the first and last look like a broken app when you hit them:
 

@@ -1,9 +1,8 @@
 # patch-server image — NOT USED IN PRODUCTION.
 #
 # The server now runs as a native systemd user service (patch-server.service)
-# on the Hetzner host. The canonical deploy path is:
-#   cd /srv/patch && pnpm run deploy
-# which builds packages/server via tsc and restarts the systemd service.
+# on the Hetzner host. Releases are built and published by GitHub Actions
+# (.github/workflows/release.yml) and installed by the server itself.
 #
 # This Dockerfile is retained for reference and local experimentation only.
 

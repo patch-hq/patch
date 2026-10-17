@@ -790,7 +790,7 @@ async function startHost(
   // go idle, and a request made mid-turn is answered as deferred at once.
   const runningChats = (): string[] => daemon.runningChatIds();
   // A deploy publishes this machine's artifact a minute or two after the
-  // version bump (ship.mjs hostMac). Wait that out quietly; only a build that
+  // version bump. Wait that out quietly; only a build that
   // is STILL missing after the window is shown to the user.
   const artifactWait = createArtifactWait({
     onPendingChange: (pending) => {

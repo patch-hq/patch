@@ -1115,7 +1115,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Public server install channel (spec/11 § Server installation): what
   // `curl <url>/install.sh | sudo sh` fetches — the installer, the release tarball
   // under a stable name, and its checksum. Unauthenticated: the box running it has
-  // nothing yet. `pnpm run deploy` publishes them into downloads/server-release/.
+  // nothing yet. The release mirror publishes them into downloads/server-release/.
   // Whitelisted to those three names so `:name` cannot leave the directory.
   app.get<{ Params: { name: string } }>(
     '/api/server-release/:name',

@@ -3,15 +3,9 @@
 //
 //   node scripts/build-apk-local.mjs --version <v> --sha <gitSha> --built-at <iso> [--box]
 //
-// Run by `pnpm run deploy --only=apk --apk-local` on the Mac, over ssh, inside a
-// worktree pinned to the shipped commit (scripts/build-tree.mjs) — the same way
-// the desktop and smoke lanes run there. Releases are built on the Mac, not the
-// box: an uncapped React Native build takes the box, and
-// everything it serves, off the network.
+// Run by the GitHub release workflow (.github/workflows/release.yml).
 //
-// `--apk-here` is the one exception, and only when asked: the deploy runs this
-// same script on the box, in the pinned build tree, wrapped in `boxBuildCommand`
-// below — a systemd scope with a memory and CPU ceiling, at nice 19 / idle IO,
+// `boxBuildCommand` below wraps it for a capped local run: a systemd scope with a memory and CPU ceiling, at nice 19 / idle IO,
 // with gradle held to a 3g heap and two workers (the caps bin/publish uses on
 // Hetzner). `--box` makes gradle run without a daemon, so the build cannot be
 // handed to an already-running daemon OUTSIDE that scope, where no cap applies.
@@ -32,7 +26,7 @@
 //     fresh worktree does not have.
 //
 // Prints `##apk <absolute path>` as its last line; the box copies that file back
-// and publishes it (ship.mjs publishApk). It publishes nothing itself.
+// It publishes nothing itself.
 
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';

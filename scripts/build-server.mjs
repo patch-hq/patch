@@ -18,10 +18,8 @@
 // installed by every server from its release (src/self-update.ts), so self-hosting and production are one path.
 //
 // `--reuse-server=<release dir>` assembles a release around an EXISTING server
-// build — its `server/` and its server identity — with a freshly built SPA. A
-// web-only deploy uses it so a UI change does not ship a new server version,
-// which would have to move every host in lockstep with it
-// (deploy-scope.mjs § LOCKSTEP).
+// build — its `server/` and its server identity — with a freshly built SPA, so
+// a UI change does not ship a new server version.
 //
 // NO FALLBACK: a missing entry bundle, a failed build or a reused release that
 // is not stamped aborts.

@@ -1,5 +1,4 @@
-// The server and every host run one version (scripts/deploy-scope.mjs §
-// LOCKSTEP). A deploy ships both, but a machine that was asleep, off or cut off
+// The server and every host run one version. A release ships both, but a machine that was asleep, off or cut off
 // at the time comes back on the old build — and on 2026-09-30 an old host that
 // could not read the new server's greeting sat wedged until it was updated by
 // hand. So the server checks every host as it connects and, when the host is

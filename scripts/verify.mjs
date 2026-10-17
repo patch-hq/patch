@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // THE gate (spec/19-testing.md § Verification) — every test layer that runs
-// unattended, in one command. `pnpm run deploy` runs this first and refuses to
-// ship if it fails.
+// unattended, in one command. The release workflow runs this first and refuses to
+// publish if it fails.
 //
 // Ordered cheapest-first so a typo fails in seconds rather than after the
 // browser layer.
@@ -102,10 +102,10 @@ const ALL_STEPS = [
 ];
 
 /**
- * Paths this run may skip the browser layer for, passed by ship.mjs as
- * `--changed=a,b,c` (the diff against what is already live).
+ * Paths this run may skip the browser layer for, passed as
+ * `--changed=a,b,c`.
  *
- * Absent — a hand-run `node scripts/verify.mjs`, or a deploy that could not
+ * Absent — a hand-run `node scripts/verify.mjs`, or a caller that could not
  * attribute its diff — means run EVERYTHING. The flag can only ever narrow the
  * gate when someone has positively established what changed; not knowing is
  * never grounds for skipping.

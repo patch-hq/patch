@@ -9,7 +9,7 @@
 #
 # This file previously also carried a `patch.tomchambers.me` block, reachable
 # only through deploy/docker-compose.yml + scripts/deploy.mjs — an orphaned
-# deploy path nothing invoked (`pnpm run deploy` runs scripts/ship.mjs). Because
+# deploy path nothing invoked (releases come from GitHub Actions). Because
 # it listed a NARROWER set of proxied paths than prod actually serves, reading it
 # as production routing produced a wrong diagnosis of the Google OAuth
 # redirect_uri_mismatch. It is gone, along with that dead path.
