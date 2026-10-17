@@ -1811,6 +1811,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       registry,
       chatRegistry,
       internalToken: opts.internalToken,
+      isHostOnline: (hostId) => hostLink.isOnline(hostId),
       recordSessionHost: (sessionId, hostId) => audioSessionRouter.record(sessionId, hostId),
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });

@@ -20,6 +20,7 @@ import {
   decodeAudio,
   encodeAudio,
   validateDeviceIdCoupling,
+  draftDictationHostId,
   deriveVoiceSurface,
   voiceCellFor,
   modesShareVoiceEngine,
@@ -621,7 +622,10 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         // session_start time, BEFORE any audio/STT runs, with a specific
         // session_not_found — not a late generic sdk_error after Whisper has
         // transcribed a full utterance.
-        if (!opts.chatExists(start.chatId)) {
+        // A `draft:<hostId>` dictation preview (new-chat screen) has no chat yet.
+        const isDraftDictation =
+          start.role === 'voice-note' && draftDictationHostId(start.chatId) !== null;
+        if (!isDraftDictation && !opts.chatExists(start.chatId)) {
           rejectConn(ws, 'session_not_found', `chat not found: ${start.chatId}`);
           return;
         }

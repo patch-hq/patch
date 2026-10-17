@@ -602,3 +602,21 @@ export function decodeAudio(raw: string | Buffer | ArrayBuffer | Uint8Array): Au
   const parsed: unknown = JSON.parse(text);
   return AudioEvent.parse(parsed);
 }
+
+/**
+ * Dictation preview before a chat exists (the new-chat screen): the voice
+ * session is scoped to a HOST, named `draft:<hostId>` in place of a chatId.
+ * Only the `voice-note` role may use it — it carries no chat context.
+ */
+export const DRAFT_DICTATION_PREFIX = 'draft:';
+
+export function draftDictationChatId(hostId: string): string {
+  return `${DRAFT_DICTATION_PREFIX}${hostId}`;
+}
+
+/** The host a `draft:<hostId>` pseudo-chat id names, or null for a real chat id. */
+export function draftDictationHostId(chatId: string): string | null {
+  return chatId.startsWith(DRAFT_DICTATION_PREFIX) && chatId.length > DRAFT_DICTATION_PREFIX.length
+    ? chatId.slice(DRAFT_DICTATION_PREFIX.length)
+    : null;
+}

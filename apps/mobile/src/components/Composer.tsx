@@ -178,6 +178,11 @@ interface Props {
    * attachments stay put for a retry.
    */
   sendTarget?(): Promise<string | null>;
+  /**
+   * Chat id the live dictation preview binds to when `chatId` is only a draft
+   * key (new-chat screen): `draftDictationChatId(hostId)`. `null`: no host yet.
+   */
+  dictationChatId?: string | null;
   /** A send into `chatId` went out (echoed; delivery follows its uploads). */
   onSent?(chatId: string): void;
 }
@@ -241,6 +246,7 @@ const newKey = newAttachmentKey;
 
 export function Composer({
   chatId,
+  dictationChatId,
   folder,
   dictationFactory,
   dictationModeFactory,
@@ -675,7 +681,7 @@ export function Composer({
     setMicState('recording');
     const factory = dictationFactory ?? startDictation;
     dictationRef.current = factory(
-      chatId,
+      dictationChatId ?? chatId,
       (text: string): void => {
         if (discardedRef.current) return;
         setLivePartial(text);

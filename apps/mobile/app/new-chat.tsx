@@ -33,6 +33,7 @@ import { ChevronDown, ChevronLeft, Folder } from 'lucide-react-native';
 import { folderName, type PermissionMode } from '@patch/wire';
 import { api, ApiError } from '../src/api/rest';
 import { FolderPickerSheet } from '../src/components/FolderPickerSheet';
+import { draftDictationChatId } from '@patch/wire/audio';
 import { Composer, permissionModeIcon } from '../src/components/Composer';
 import { AccountUsageStrip } from '../src/components/AccountUsageStrip';
 import { ModelPicker } from '../src/components/ModelPicker';
@@ -392,6 +393,7 @@ export default function NewChat(): React.ReactElement {
 
         <Composer
           chatId={NEW_CHAT_DRAFT_KEY}
+          dictationChatId={hostId ? draftDictationChatId(hostId) : undefined}
           folder={folder ?? undefined}
           sendTarget={sendTarget}
           onSent={onSent}

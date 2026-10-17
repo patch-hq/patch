@@ -237,6 +237,29 @@ describe('POST /api/voice/token', () => {
     }
   });
 
+  // Todoist 6hmpWfjFjxmJqmvF: the New chat screen dictates before any chat exists.
+  it('mints a voice-note token for draft:<hostId> when that host is online; refuses otherwise', async () => {
+    const { built, credential } = await makeApp();
+    try {
+      const mint = (chatId: string, role: string) =>
+        built.app.inject({
+          method: 'POST',
+          url: '/api/voice/token',
+          headers: { authorization: `Bearer ${credential}` },
+          payload: { chatId, role, surfaceKind: 'mobile' },
+        });
+      expect((await mint('draft:zz', 'voice-note')).statusCode).toBe(404);
+      const ok = await mint('draft:d1', 'voice-note');
+      expect(ok.statusCode).toBe(200);
+      const body = ok.json() as { token: string };
+      expect(verifyVoiceToken({ secret: SECRET, token: body.token }).chatId).toBe('draft:d1');
+      expect((await mint('draft:d1', 'voice-call')).statusCode).toBe(404);
+      expect((await mint('new', 'voice-note')).statusCode).toBe(404);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('rejects missing bearer with 401', async () => {
     const { built } = await makeApp();
     try {
@@ -375,6 +398,7 @@ describe('POST /api/voice/token', () => {
       registry: stubRegistry,
       chatRegistry: new ChatRegistry(),
       internalToken: SECRET,
+      isHostOnline: () => true,
       recordSessionHost: () => undefined,
     });
     try {
@@ -412,6 +436,7 @@ describe('POST /api/voice/token', () => {
       registry,
       chatRegistry,
       internalToken: SECRET,
+      isHostOnline: () => true,
       recordSessionHost: () => undefined,
       sessionIdFactory: () => 'fixed-session-id',
       jtiFactory: () => 'fixed-jti',

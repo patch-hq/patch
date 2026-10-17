@@ -19,6 +19,7 @@ import { verifySurfaceCredential } from '@patch/auth';
 import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
 import { z } from 'zod';
+import { draftDictationHostId } from '@patch/wire/audio';
 
 export const VOICE_TOKEN_TTL_MS = 5 * 60_000;
 
@@ -155,6 +156,8 @@ export interface VoiceTokenRouteOpts {
    */
   chatRegistry: ChatRegistry;
   internalToken: string;
+  /** Whether a host is connected — scopes a `draft:<hostId>` dictation preview (no chat yet). */
+  isHostOnline: (hostId: string) => boolean;
   /**
    * Records which host this session belongs to, so the `/audio/:sessionId`
    * relay (`audio-relay.ts`) knows where to send it — the chat's OWN host,
@@ -227,7 +230,15 @@ export function registerVoiceTokenRoute(app: FastifyInstance, opts: VoiceTokenRo
     // chats; an unknown chatId means there is nothing to bind a voice session
     // to. NO FALLBACK — reject with a specific code rather than handing out a
     // usable token for a garbage id.
-    const chat = opts.chatRegistry.get(parsed.data.chatId);
+    // A new-chat dictation preview has no chat yet: `draft:<hostId>`, voice-note
+    // only, and the host must be connected (still no token for a garbage id).
+    const draftHostId = draftDictationHostId(parsed.data.chatId);
+    const chat =
+      draftHostId !== null
+        ? parsed.data.role === 'voice-note' && opts.isHostOnline(draftHostId)
+          ? { hostId: draftHostId }
+          : undefined
+        : opts.chatRegistry.get(parsed.data.chatId);
     if (!chat) {
       opts.logger.warn(
         { chatId: parsed.data.chatId, surfaceId: identity.surfaceId },

@@ -119,6 +119,22 @@ afterEach(() => {
 });
 
 describe('Composer — dictation mic (tap-toggle)', () => {
+  it('dictationChatId (new-chat screen) is the id the live preview binds to, not the draft key', async () => {
+    const { factory } = makeDictationFactory();
+    const r = renderRN(
+      <Composer chatId="new" dictationChatId="draft:h1" folder="work" dictationFactory={factory} />,
+    );
+    await actAsync(() => {
+      findHost(r.root, byLabel('Dictate into message')).props['onPress']();
+    });
+    expect(factory).toHaveBeenCalledWith(
+      'draft:h1',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
   it('a tap starts a session; a second tap commits: transcript lands in the draft, nothing is sent', async () => {
     const { factory, sessions } = makeDictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);

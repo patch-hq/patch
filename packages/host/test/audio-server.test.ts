@@ -5,7 +5,7 @@
 //   - Smoke: a session that sends speech frames receives a transcript +
 //            a TTS chunk back.
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
 import { connect as netConnect } from 'node:net';
@@ -856,6 +856,43 @@ describe('audio WSS server', () => {
     if (msg.type === 'audio.error') expect(msg.code).toBe('session_not_found');
     expect(server.activeCount()).toBe(0);
     ws.close();
+  });
+
+  // Todoist 6hmpWfjFjxmJqmvF: dictation preview on the New chat screen has no chat yet.
+  test('accepts a voice-note session on a draft:<hostId> pseudo-chat; refuses it for a call', async () => {
+    await server.close();
+    server = await startServer({ chatExists: () => false });
+    const open = async (sid: string, role: 'voice-note' | 'voice-call') => {
+      const ws = await openSocket(server.port, sid);
+      const token = mintToken({
+        accountId: 'a',
+        surfaceId: 's-dr',
+        sessionId: sid,
+        chatId: 'draft:h1',
+      });
+      ws.send(
+        encodeAudio({
+          type: 'audio.session_start',
+          sessionId: sid,
+          accountId: 'a',
+          surfaceId: 's-dr',
+          surfaceKind: 'mobile',
+          chatId: 'draft:h1',
+          role,
+          token,
+          surfaceHasAec: true,
+        }),
+      );
+      return ws;
+    };
+    const call = await open('sess-draft-call', 'voice-call');
+    const msg = await recvOne(call);
+    expect(msg.type).toBe('audio.error');
+    if (msg.type === 'audio.error') expect(msg.code).toBe('session_not_found');
+    call.close();
+    const note = await open('sess-draft-note', 'voice-note');
+    await vi.waitFor(() => expect(server.activeCount()).toBe(1));
+    note.close();
   });
 
   // E1-d4: rejected connections close with an explicit WS close code + reason
