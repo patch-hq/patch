@@ -393,6 +393,7 @@ function QuestionForm({
               {q.header}
             </Text>
             <Text
+              selectable
               style={{
                 ...typography.body,
                 color: resolved ? colors.ink2 : colors.ink,
@@ -432,9 +433,14 @@ function QuestionForm({
                       />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...typography.label, color: colors.ink }}>{o.label}</Text>
+                      <Text selectable style={{ ...typography.label, color: colors.ink }}>
+                        {o.label}
+                      </Text>
                       {o.description ? (
-                        <Text style={{ ...typography.meta, color: colors.ink3, marginTop: 2 }}>
+                        <Text
+                          selectable
+                          style={{ ...typography.meta, color: colors.ink3, marginTop: 2 }}
+                        >
                           {o.description}
                         </Text>
                       ) : null}

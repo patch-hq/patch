@@ -36,7 +36,7 @@ async function token(page: Page, name: string): Promise<string> {
 
 /** One question's answer rows (its options, then `Other`), on the pending card. */
 function rows(page: Page, question: string): Locator {
-  return page.locator(`.question-options[aria-label="${question}"] button.question-option`);
+  return page.locator(`.question-options[aria-label="${question}"] .question-option`);
 }
 
 type Mark = {

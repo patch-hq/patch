@@ -133,7 +133,7 @@ describe('the question card counts down to the host deadline', () => {
     // …and the options are still answerable, because the resolution has not
     // landed yet.
     for (const opt of screen.getAllByTestId('question-option')) {
-      expect(opt).not.toBeDisabled();
+      expect(opt).not.toHaveAttribute('aria-disabled', 'true');
     }
   });
 

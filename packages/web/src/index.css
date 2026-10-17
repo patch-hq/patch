@@ -5105,13 +5105,18 @@ a.ch-row:hover {
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   cursor: pointer;
+  /* A div, not a button, so the label and trade-off can be drag-selected. */
+  user-select: text;
+}
+.question-option[aria-disabled='true'] {
+  cursor: default;
 }
 /* Hover borrows the card's own hue, so the amber stays meaningful — it marks
    the row you are about to answer with. Explicitly NOT the picked row: a
    pseudo-class outranks a plain class, so without `:not(.selected)` hovering
    your own answer repaints the accent ring amber and the selection appears to
    come undone under the cursor. */
-.question-option:hover:not(:disabled):not(.selected) {
+.question-option:hover:not([aria-disabled='true']):not(.selected) {
   border-color: var(--waiting);
 }
 .question-option.selected {

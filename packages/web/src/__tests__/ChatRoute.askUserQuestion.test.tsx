@@ -621,7 +621,7 @@ describe('AskUserQuestion card', () => {
     ]);
     renderChat('c-q-resolved', send);
 
-    expect((optionButton('date-fns') as HTMLButtonElement).disabled).toBe(true);
+    expect(optionButton('date-fns').getAttribute('aria-disabled')).toBe('true');
     expect(screen.queryByTestId('question-submit')).toBeNull();
     expect(screen.queryByTestId('question-cancel')).toBeNull();
     expect(send).not.toHaveBeenCalled();

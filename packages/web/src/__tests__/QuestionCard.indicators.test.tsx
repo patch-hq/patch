@@ -58,7 +58,7 @@ function rowsOf(questionText: string): HTMLElement[] {
     `.question-options[aria-label="${questionText}"]`,
   );
   expect(group).not.toBeNull();
-  return Array.from((group as HTMLElement).querySelectorAll<HTMLElement>('button.question-option'));
+  return Array.from((group as HTMLElement).querySelectorAll<HTMLElement>('.question-option'));
 }
 
 /** The decorative indicator a row draws, as its kind and its drawn state. */

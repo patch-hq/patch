@@ -161,6 +161,32 @@ function OptionIndicator({ multiSelect, on }: { multiSelect: boolean; on: boolea
   );
 }
 
+/**
+ * Click/keyboard handlers for an option row. The row is a `div` with a radio or
+ * checkbox role, not a `<button>`, because no browser lets you drag-select text
+ * inside a button — and the label and its trade-off are text worth copying. So
+ * `↵`/`Space` activate it by hand, and a click that ends a drag (a selection
+ * exists) selects text instead of choosing.
+ */
+function optionActivation(
+  disabled: boolean,
+  choose: () => void,
+): Pick<React.HTMLAttributes<HTMLElement>, 'onClick' | 'onKeyDown'> {
+  return {
+    onClick: () => {
+      if (disabled) return;
+      if (!(window.getSelection()?.isCollapsed ?? true)) return;
+      choose();
+    },
+    onKeyDown: (e) => {
+      if (disabled || e.target !== e.currentTarget) return;
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      choose();
+    },
+  };
+}
+
 export function QuestionCard({
   entry,
   onAnswer,
@@ -326,7 +352,7 @@ function QuestionForm({
     // Land ON the first option rather than on the card, so ↑/↓ answer the
     // question immediately instead of needing a Tab first. The card itself is
     // only the fallback for a shape with no option buttons at all.
-    const first = cardRef.current?.querySelector<HTMLButtonElement>('button.question-option');
+    const first = cardRef.current?.querySelector<HTMLElement>('.question-option');
     (first ?? cardRef.current)?.focus();
   }, [resolved, requestId]);
 
@@ -370,10 +396,8 @@ function QuestionForm({
   function onOptionsKeyDown(e: ReactKeyboardEvent<HTMLDivElement>, question: string): void {
     // ⌘↑/⌘↓ step the sidebar's chat rows — a chord is never option navigation.
     if (!OPTION_NAV_KEYS.has(e.key) || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    const options = Array.from(
-      e.currentTarget.querySelectorAll<HTMLButtonElement>('button.question-option'),
-    );
-    const from = options.indexOf(document.activeElement as HTMLButtonElement);
+    const options = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('.question-option'));
+    const from = options.indexOf(document.activeElement as HTMLElement);
     if (from < 0) return;
     e.preventDefault();
     const last = options.length - 1;
@@ -482,8 +506,7 @@ function QuestionForm({
               {q.options.map((o, i) => {
                 const on = selected.includes(o.label);
                 return (
-                  <button
-                    type="button"
+                  <div
                     key={o.label}
                     className={`question-option${on ? ' selected' : ''}`}
                     data-testid="question-option"
@@ -491,10 +514,12 @@ function QuestionForm({
                     data-selected={on ? 'true' : 'false'}
                     role={q.multiSelect ? 'checkbox' : 'radio'}
                     aria-checked={on}
-                    disabled={resolved !== undefined}
-                    tabIndex={optionTabIndex(q.question, i)}
+                    aria-disabled={resolved !== undefined}
+                    tabIndex={resolved !== undefined ? -1 : optionTabIndex(q.question, i)}
                     onFocus={() => rememberFocus(q.question, i)}
-                    onClick={() => toggle(q.question, o.label, q.multiSelect)}
+                    {...optionActivation(resolved !== undefined, () =>
+                      toggle(q.question, o.label, q.multiSelect),
+                    )}
                   >
                     <OptionIndicator multiSelect={q.multiSelect} on={on} />
                     <span className="question-option-body">
@@ -503,26 +528,29 @@ function QuestionForm({
                         <span className="question-option-desc">{o.description}</span>
                       ) : null}
                     </span>
-                  </button>
+                  </div>
                 );
               })}
-              <button
-                type="button"
+              <div
                 className={`question-option question-other${otherActive ? ' selected' : ''}`}
                 data-testid="question-other"
                 data-selected={otherActive ? 'true' : 'false'}
                 role={q.multiSelect ? 'checkbox' : 'radio'}
                 aria-checked={otherActive}
-                disabled={resolved !== undefined}
-                tabIndex={optionTabIndex(q.question, q.options.length)}
+                aria-disabled={resolved !== undefined}
+                tabIndex={
+                  resolved !== undefined ? -1 : optionTabIndex(q.question, q.options.length)
+                }
                 onFocus={() => rememberFocus(q.question, q.options.length)}
-                onClick={() => toggleOther(q.question, q.multiSelect)}
+                {...optionActivation(resolved !== undefined, () =>
+                  toggleOther(q.question, q.multiSelect),
+                )}
               >
                 <OptionIndicator multiSelect={q.multiSelect} on={otherActive} />
                 <span className="question-option-body">
                   <span className="question-option-label">{OTHER}</span>
                 </span>
-              </button>
+              </div>
             </div>
             {otherActive && !resolved ? (
               /* A TEXTAREA, not an input: this is the one box in the app where a

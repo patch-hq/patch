@@ -72,7 +72,7 @@ function answersOf(questionText: string): HTMLElement[] {
     `.question-options[aria-label="${questionText}"]`,
   );
   expect(group).not.toBeNull();
-  return Array.from((group as HTMLElement).querySelectorAll<HTMLElement>('button.question-option'));
+  return Array.from((group as HTMLElement).querySelectorAll<HTMLElement>('.question-option'));
 }
 
 /** The index of the option carrying this question's single Tab stop. */
@@ -247,7 +247,7 @@ describe('answering a question card from the keyboard', () => {
   it('a resolved card is inert: nothing focusable, and no cursor grab', () => {
     renderCard([libraryQuestion], 'approve');
 
-    for (const b of answersOf(LIB_Q)) expect(b).toBeDisabled();
+    for (const b of answersOf(LIB_Q)) expect(b).toHaveAttribute('aria-disabled', 'true');
     expect(document.activeElement).toBe(document.body);
   });
 });
