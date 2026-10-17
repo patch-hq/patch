@@ -11,6 +11,7 @@
 import React from 'react';
 import { Pressable as RNPressable } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { usePermissionGate, answerExplainer } from '../src/lib/permissionGate';
 import {
   findHost,
   findAllHost,
@@ -233,7 +234,16 @@ describe('Composer — camera (take a photo)', () => {
   });
 
   it('a denied camera permission surfaces a loud error (NO FALLBACK) and never opens the camera', async () => {
-    requestCameraPermSpy.mockResolvedValue({ granted: false });
+    const { Camera } = await import('expo-camera');
+    vi.spyOn(Camera, 'getCameraPermissionsAsync').mockResolvedValueOnce({
+      granted: false,
+    } as never);
+    vi.spyOn(Camera, 'requestCameraPermissionsAsync').mockResolvedValueOnce({
+      granted: false,
+    } as never);
+    const unsub = usePermissionGate.subscribe((st) => {
+      if (st.pending) queueMicrotask(() => answerExplainer(true));
+    });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
       findHost(r.root, byLabel('Take photo')).props['onPress']();
@@ -241,6 +251,7 @@ describe('Composer — camera (take a photo)', () => {
     });
     expect(launchCameraSpy).not.toHaveBeenCalled();
     const errors = useUiStore.getState().errors.map((e) => e.message);
+    unsub();
     expect(errors.some((m) => /take photo failed: camera permission denied/.test(m))).toBe(true);
   });
 

@@ -6,6 +6,9 @@ export const AndroidImportance = { MIN: 1, LOW: 2, DEFAULT: 3, HIGH: 4, MAX: 5 }
 export async function requestPermissionsAsync(): Promise<{ granted: boolean }> {
   return _permission;
 }
+export async function getPermissionsAsync(): Promise<{ granted: boolean }> {
+  return _permission;
+}
 let _permission = { granted: true };
 export function __setPermission(p: { granted: boolean }): void {
   _permission = p;

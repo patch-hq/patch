@@ -37,6 +37,7 @@ import {
   noteUserInput,
 } from '../src/components/ViewPositionSync';
 import { ErrorToasts } from '../src/components/ErrorToasts';
+import { PermissionExplainerModal } from '../src/components/PermissionExplainerModal';
 import { fonts, useTheme } from '../src/lib/theme';
 import { useUiStore } from '../src/stores/uiStore';
 import { useVoiceStore } from '../src/stores/voiceStore';
@@ -336,6 +337,7 @@ export default function RootLayout(): React.ReactElement | null {
             this the app pushes errors nowhere and a failure reads as a dead
             control (NO SILENT FAILURE). Mounted last so it draws on top. */}
           <ErrorToasts />
+          <PermissionExplainerModal />
         </SafeAreaView>
       </View>
     </SafeAreaProvider>

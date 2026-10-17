@@ -1,5 +1,6 @@
-// Expo push registration. NO FALLBACK: a denied permission or empty token
-// rejects; we surface the failure rather than silently running without push.
+// Expo push registration. NO FALLBACK: an empty token rejects; we surface the
+// failure rather than silently running without push. The notification
+// permission is asked for at first use, not at install (spec/15).
 //
 // Notifications:
 //   - kind: 'message' → standard system notification, tap → focus chat.
@@ -14,6 +15,7 @@ import Constants from 'expo-constants';
 import { AppState } from 'react-native';
 import { api } from '../api/rest';
 import { useUiStore } from '../stores/uiStore';
+import { ensurePermission } from './permissionGate';
 import { showIncomingCall } from './callkeep';
 import { parseActionsPayload } from './notificationActions';
 import {
@@ -23,6 +25,7 @@ import {
 } from './notificationResponses';
 
 let _registered = false;
+let _declined = false;
 /** Every listener `initPush` added, so a retry or a re-pair can take them off again. */
 let _subs: { remove(): void }[] = [];
 
@@ -39,6 +42,7 @@ function dropSubscriptions(): void {
 export function resetPush(): void {
   dropSubscriptions();
   _registered = false;
+  _declined = false;
 }
 
 /** The EAS project id `eas init` writes to `app.config.ts`'s `extra.eas.projectId` — required to mint an Expo push token. */
@@ -60,6 +64,34 @@ export async function initPush(): Promise<void> {
     dropSubscriptions();
     throw e;
   }
+}
+
+/** Mint the Expo push token and hand it to the server (spec/09). */
+async function registerToken(): Promise<void> {
+  // Expo push token — the server posts to Expo's push API with this
+  // (spec/09), never touching FCM directly. google-services.json stays in
+  // the build only so the one-time FCM V1 credentials uploaded to the EAS
+  // project can actually deliver to this app.
+  const tok = await Notifications.getExpoPushTokenAsync({ projectId: easProjectId() });
+  if (!tok.data) {
+    throw new Error('initPush: empty Expo push token');
+  }
+  await api.pushRegister(tok.data);
+}
+
+/**
+ * Explain, then ask for the notification permission, then register the push
+ * token. Called when the user first starts a chat — the moment a reply they
+ * may not be watching for becomes possible. Resolves false if they decline.
+ */
+export async function enablePushNotifications(): Promise<boolean> {
+  if (_declined) return false;
+  if (!(await ensurePermission('notifications'))) {
+    _declined = true; // do not re-ask on every send this session
+    return false;
+  }
+  await registerToken();
+  return true;
 }
 
 async function register(): Promise<void> {
@@ -118,19 +150,10 @@ async function register(): Promise<void> {
   await initNotificationCategories();
   _subs.push(registerNotificationResponseListener());
 
-  const perm = await Notifications.requestPermissionsAsync();
-  if (!perm.granted) {
-    throw new Error('initPush: notification permission denied');
-  }
-  // Expo push token — the server posts to Expo's push API with this
-  // (spec/09), never touching FCM directly. google-services.json stays in
-  // the build only so the one-time FCM V1 credentials uploaded to the EAS
-  // project can actually deliver to this app.
-  const tok = await Notifications.getExpoPushTokenAsync({ projectId: easProjectId() });
-  if (!tok.data) {
-    throw new Error('initPush: empty Expo push token');
-  }
-  await api.pushRegister(tok.data);
+  // Permission is NOT requested here: it is asked for, with an explanation,
+  // when the user first starts a chat (`enablePushNotifications`). Already
+  // granted (a previous run, or granted in system settings) registers now.
+  if ((await Notifications.getPermissionsAsync()).granted) await registerToken();
 
   _subs.push(
     Notifications.addNotificationReceivedListener((n) => {

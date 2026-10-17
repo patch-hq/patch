@@ -14,6 +14,7 @@
 // produced a usable clip, rejects rather than silently returning nothing.
 
 import { Audio } from 'expo-av';
+import { ensurePermission } from './permissionGate';
 
 /** A live recording. The caller stops (→ clip uri) or cancels (→ discard). */
 export interface Recording {
@@ -28,8 +29,7 @@ export interface Recording {
  * mic-permission denial or a recording-prepare failure.
  */
 export async function startRecording(): Promise<Recording> {
-  const perm = await Audio.requestPermissionsAsync();
-  if (!perm.granted) throw new Error('mic permission denied');
+  if (!(await ensurePermission('microphone'))) throw new Error('mic permission denied');
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: true,
     playsInSilentModeIOS: true,

@@ -11,7 +11,6 @@ import { saveCredential, loadCredential } from './credential';
 import { getRoute, setRoute } from '../config';
 import { getWs, resetWs } from '../api/ws';
 import { initPush, resetPush } from './push';
-import { runPermissionPriming } from './permissionPriming';
 import { useUiStore } from '../stores/uiStore';
 import { useChatStore } from '../stores/chatStore';
 import { useFolderStore } from '../stores/folderStore';
@@ -68,15 +67,6 @@ export async function bootstrap(): Promise<void> {
   // instantly, instead of only after the user taps through the first-launch
   // permission dialogs (spec/12 § connection state). connect() is non-blocking.
   getWs().connect();
-
-  // First-launch permission priming (spec/15 § First-launch permission
-  // priming): request microphone + notifications + camera UP FRONT, once, so
-  // no feature ever hits a cold permission prompt mid-use. Gated on a local
-  // "primed" flag so it does not re-nag on later launches. A priming failure
-  // is surfaced but must not abort bootstrap.
-  await runPermissionPriming().catch((e: Error) => {
-    useUiStore.getState().pushError(`permission priming failed: ${e.message}`);
-  });
 
   // CallKeep + push set up the native notification/incoming-call path.
   // Their failure is surfaced LOUDLY as a UI banner (no silent fallback),

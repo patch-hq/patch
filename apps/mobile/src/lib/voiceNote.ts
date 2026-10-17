@@ -31,6 +31,7 @@ import { api } from '../api/rest';
 import { useVoiceStore, type VoiceNoteMode } from '../stores/voiceStore';
 import { useUiStore } from '../stores/uiStore';
 import { useChatStore } from '../stores/chatStore';
+import { ensurePermission } from './permissionGate';
 import { voiceKeyRefusal } from './voiceKeys';
 
 let _recording: Audio.Recording | null = null;
@@ -68,8 +69,7 @@ export function startVoiceNote(chatId: string, mode: VoiceNoteMode = 'tap'): voi
 
   // 2) Prepare + start recording in the background.
   _prepare = (async () => {
-    const perm = await Audio.requestPermissionsAsync();
-    if (!perm.granted) throw new Error('mic permission denied');
+    if (!(await ensurePermission('microphone'))) throw new Error('mic permission denied');
     if (gen !== _noteGen) return; // released/replaced during permission prompt
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,

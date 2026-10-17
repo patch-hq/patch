@@ -54,6 +54,7 @@
 // session."
 
 import { Audio } from 'expo-av';
+import { ensurePermission } from './permissionGate';
 import * as FileSystem from 'expo-file-system';
 import { decodeAudio, type AudioEvent } from '@patch/wire/audio';
 import { api } from '../api/rest';
@@ -128,8 +129,7 @@ function prepareAudio(): Promise<void> {
   if (audioReady) return Promise.resolve();
   if (audioReadyInFlight) return audioReadyInFlight;
   const run = (async (): Promise<void> => {
-    const perm = await Audio.requestPermissionsAsync();
-    if (!perm.granted) throw new Error('mic permission denied');
+    if (!(await ensurePermission('microphone'))) throw new Error('mic permission denied');
     await Audio.setAudioModeAsync(AUDIO_MODE);
     audioReady = true;
   })();

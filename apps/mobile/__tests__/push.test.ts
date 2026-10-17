@@ -83,11 +83,33 @@ describe('initPush — re-pairing and retries', () => {
 });
 
 describe('initPush — NO FALLBACK throws', () => {
-  it('throws when notification permission is denied', async () => {
+  it('does not ask for notification permission at init, and registers no token without it', async () => {
     const Notifications = await import('./stubs/expo-notifications');
     Notifications.__setPermission({ granted: false });
     const { initPush } = await import('../src/lib/push');
-    await expect(initPush()).rejects.toThrow(/permission denied/);
+    const { api } = await import('../src/api/rest');
+    (api.pushRegister as ReturnType<typeof vi.fn>).mockClear();
+    await initPush();
+    expect(api.pushRegister).not.toHaveBeenCalled();
+  });
+
+  it('enablePushNotifications explains first, registers the token on Continue, nothing on Not now', async () => {
+    const Notifications = await import('./stubs/expo-notifications');
+    Notifications.__setPermission({ granted: false });
+    const { enablePushNotifications } = await import('../src/lib/push');
+    const { usePermissionGate, answerExplainer } = await import('../src/lib/permissionGate');
+    const { api } = await import('../src/api/rest');
+    (api.pushRegister as ReturnType<typeof vi.fn>).mockClear();
+    const declined = enablePushNotifications();
+    await vi.waitFor(() =>
+      expect(usePermissionGate.getState().pending?.kind).toBe('notifications'),
+    );
+    answerExplainer(false);
+    expect(await declined).toBe(false);
+    expect(api.pushRegister).not.toHaveBeenCalled();
+    // declined once: not re-asked this session
+    expect(await enablePushNotifications()).toBe(false);
+    expect(usePermissionGate.getState().pending).toBeNull();
   });
 
   it('throws when the Expo push token is empty', async () => {

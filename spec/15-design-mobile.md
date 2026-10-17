@@ -440,7 +440,7 @@ Mobile equivalent of the desktop overlay, but at the OS level:
 ## Push notifications
 
 - Expo's push API (Android only).
-- Notification permission is requested up front in the first-launch priming flow (see § First-launch permission priming), not lazily on the first notification. Expo push token registered after the grant; re-registered on app update or token rotation.
+- Notification permission is requested when the user first sends a message (see § Permissions on first use), not at install. Expo push token registered after the grant; re-registered on app update or token rotation.
 - Payload: `{chatId, message, channel, priority, deepLink?, actions?}`.
 - Tap notification → deep-link into chat, unless the payload carries a `deepLink` the notification's own text names, in which case the tap opens that URI instead via the OS (`09-notifications.md` § `### push`).
 - Notification actions (`09-notifications.md` § Notification actions): Reply, Approve/Deny, a question's options, and `patch_notify`'s quickReplies are Android notification actions — RemoteInput for Reply, plain buttons otherwise. Approve opens the app (so Android requires the device unlocked to complete it); every other action runs without opening the app, including from the lock screen. A reply/action is sent over its own short-lived connection rather than the app's live one, since the action may fire with the app merely backgrounded — the same mechanism the Ready List widget's Approve/Deny already uses (§ Android home-screen widgets). A delivered action updates the notification to "Sent"; a failed one updates it to "Not sent — tap to retry" and keeps the typed text for the retry, which a further tap performs.
@@ -451,14 +451,14 @@ Mobile equivalent of the desktop overlay, but at the OS level:
 - Presence rule: phone push suppressed if any surface has a heartbeat in the last 30s, unless `priority: 'silent'` or a call ring (`09-notifications.md` § push). `urgent` is suppressed like `normal`; it differs only in its sound, played by the `patch_urgent_alert` channel.
 - A batch check-in notification (§ Batch view, `09-notifications.md` § Batch check-in) carries `kind: 'batch'` instead of a `chatId`, and a tap lands on the `Batch` tab rather than a chat — held the same way a killed-app tap is if the navigator isn't up yet.
 
-## First-launch permission priming
+## Permissions on first use
 
-On first launch (after pairing) the app requests all the OS permissions it will need up front, so no feature ever hits a cold permission prompt mid-use:
+No permission is requested at install or first launch. Each is requested at the moment a feature needs it, and always explained first:
 
-- A brief priming screen explains why each permission is needed, then the app requests them together: microphone (voice notes + calls), notifications (Manager calls, chat activity), camera (taking a photo to attach to a message; scanning device-pairing QR codes), and the phone-call permission needed for Manager incoming calls. Each request states its purpose before the OS dialog appears.
-- Requesting up front is correct — the mechanism must be the right one. Each permission is requested through its standard runtime permission dialog (the Allow/Deny prompt). The priming flow keeps the user out of unrelated system settings pages — in particular the Android "Calling accounts" / phone-account screen (the SIM/calling-account configuration UI) is not a permission prompt and must not be opened as part of priming. Registering a Telecom phone account (via `ConnectionService`/CallKeep) is a separate, lazy step tied to actually placing/receiving a call; if a self-managed connection is used it does not require sending the user to that settings screen at all. Priming asks for the runtime grant only.
-- Priming is the default path; the older in-context requests remain only as a fallback for a user who declined at priming (the feature explains it needs the permission and links to system settings). A declined permission reports why the feature is unavailable.
-- The flow runs once — gated on a "primed" flag in local storage — and does not re-nag on subsequent launches.
+- An explainer modal (title, one sentence on why, **Not now** / **Continue**) appears before the OS dialog. **Continue** shows the standard runtime Allow/Deny prompt; **Not now** never reaches the OS and the feature reports it is unavailable because the permission was declined (no silent no-op).
+- Microphone: first voice note, dictation or voice call. Camera: first tap of the composer's camera button. Notifications: first message sent (the push token is registered once granted; a decline is not re-asked for the rest of the session).
+- A permission already granted shows nothing. Concurrent requests for the same permission share one modal and one OS dialog.
+- The Android phone-account / "Calling accounts" settings screen is never opened for this; Telecom registration stays a lazy step tied to placing or receiving a call.
 
 ## Mobile equivalent of the menu bar
 

@@ -64,7 +64,7 @@ import {
 } from '../src/lib/voiceCall';
 import { onVoiceServiceAction, startVoiceAudioService } from '../src/lib/voiceAudioService';
 
-async function flush(n = 8): Promise<void> {
+async function flush(n = 16): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
 }
 

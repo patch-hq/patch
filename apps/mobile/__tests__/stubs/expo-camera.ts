@@ -1,6 +1,9 @@
 // Minimal expo-camera stub for unit tests. Only the surface the tested
 // modules touch is provided.
 export const Camera = {
+  async getCameraPermissionsAsync(): Promise<{ granted: boolean }> {
+    return { granted: true };
+  },
   async requestCameraPermissionsAsync(): Promise<{ granted: boolean }> {
     return { granted: true };
   },

@@ -68,6 +68,7 @@ import { startMicCapture, stopMicCapture } from './voiceMic';
 import { addressWordOrNull, voiceConfigOrNull } from './preferences';
 import { callEngineLabel, describeVoiceError, modeSwitchNeedsNewSession } from './voiceEngine';
 import { startTtsPlayback, writeTtsPcm, flushTtsPlayback, stopTtsPlayback } from './voiceTts';
+import { ensurePermission } from './permissionGate';
 
 export class VoiceAudioConnectError extends Error {
   override readonly name = 'VoiceAudioConnectError';
@@ -167,8 +168,7 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
       console.log(
         `[patch-voice] call token minted sessionId=${tok.sessionId} audioUrl=${tok.audioUrl}`,
       );
-      const perm = await Audio.requestPermissionsAsync();
-      if (!perm.granted) {
+      if (!(await ensurePermission('microphone'))) {
         throw new Error('mic permission denied');
       }
       if (gen !== _callGen) return;

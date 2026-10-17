@@ -152,6 +152,8 @@ const BUILTIN_COMMAND_NAMES: string[] = SLASH_COMMANDS.map((c) => c.name);
 import type { HookRunResult } from '@patch/wire/hooks';
 import { formatElapsed } from '../lib/callStatus';
 import { StatusDot, useNow } from './CallParts';
+import { ensurePermission } from '../lib/permissionGate';
+import { enablePushNotifications } from '../lib/push';
 import {
   NO_ATTACHMENTS,
   attachmentKindForMime,
@@ -885,8 +887,7 @@ export function Composer({
   // surfaces an error rather than silently doing nothing.
   const takePhoto = async (): Promise<void> => {
     try {
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!perm.granted) throw new Error('camera permission denied');
+      if (!(await ensurePermission('camera'))) throw new Error('camera permission denied');
       const res = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 1,
@@ -998,6 +999,11 @@ export function Composer({
     draftAtSend?: string,
   ): void => {
     const localId = sendMessage(target, text, pending);
+    // First message is when a reply you might not be watching for becomes
+    // possible: explain + ask for notifications now (once per session).
+    void enablePushNotifications().catch((e: Error) =>
+      useUiStore.getState().pushError(`push registration failed: ${e.message}`),
+    );
     const notes = adviseNotes(hookResults);
     if (notes.length > 0) {
       useChatStore.getState().patchLocalMessage(target, localId, { hookAdvise: notes });

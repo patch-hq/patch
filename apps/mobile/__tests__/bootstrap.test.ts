@@ -1,6 +1,6 @@
 // lib/bootstrap.ts — app-wide bootstrap (spec/11/12/15). NO FALLBACK: a
 // missing credential short-circuits (the auth gate redirects to /pair);
-// permission-priming / push / callkeep failures are surfaced as banners but
+// push / callkeep failures are surfaced as banners but
 // must not abort bootstrap; the cold-start chat/folder fetches are
 // independently best-effort.
 //
@@ -101,7 +101,7 @@ describe('bootstrap()', () => {
     expect(wsMock.connect).not.toHaveBeenCalled();
   });
 
-  it('connects the WS, primes permissions, hydrates chats + folders when credentialed', async () => {
+  it('connects the WS, hydrates chats + folders when credentialed', async () => {
     const { saveCredential } = await import('../src/lib/credential');
     saveCredential('a.b.c');
     apiMocks.listChats.mockResolvedValue({
@@ -139,23 +139,6 @@ describe('bootstrap()', () => {
     await bootstrap();
     await bootstrap();
     expect(wsMock.connect).toHaveBeenCalledTimes(1);
-  });
-
-  it('surfaces a permission-priming failure as a banner but still boots', async () => {
-    const { saveCredential } = await import('../src/lib/credential');
-    saveCredential('a.b.c');
-    vi.doMock('../src/lib/permissionPriming', () => ({
-      runPermissionPriming: vi.fn(async () => {
-        throw new Error('priming boom');
-      }),
-    }));
-    const { bootstrap } = await import('../src/lib/bootstrap');
-    const { useUiStore } = await import('../src/stores/uiStore');
-    await bootstrap();
-    expect(
-      useUiStore.getState().errors.some((e) => e.message.includes('permission priming failed')),
-    ).toBe(true);
-    expect(wsMock.connect).toHaveBeenCalled();
   });
 
   it('surfaces a push-init failure as a banner but still boots', async () => {

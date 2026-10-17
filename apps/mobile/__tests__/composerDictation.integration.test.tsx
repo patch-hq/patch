@@ -15,6 +15,7 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { micNeedsPrompt } from './testUtils/permissionPrompt';
 import { encodeAudio } from '@patch/wire/audio';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
 import { findHost, byLabel, byType, renderRN, actAsync, flush } from './testUtils/render';
@@ -284,6 +285,7 @@ describe('composer dictation (real session) — the press path does no permissio
   it('mounting warms the audio plane, so the gesture itself makes no permission/audio-mode round trip', async () => {
     const { Audio } = await import('expo-av');
     const r = await mountWarm();
+    micNeedsPrompt();
     const requestSpy = vi.spyOn(Audio, 'requestPermissionsAsync');
     const modeSpy = vi.spyOn(Audio, 'setAudioModeAsync');
 
@@ -302,6 +304,7 @@ describe('composer dictation (real session) — the press path does no permissio
   it('a denied permission still reaches the user (warming is not a bypass)', async () => {
     const { Audio } = await import('expo-av');
     vi.spyOn(Audio, 'getPermissionsAsync').mockResolvedValue({ granted: false });
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockResolvedValue({ granted: false });
     const r = await mountWarm();
     await actAsync(() => {

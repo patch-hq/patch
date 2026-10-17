@@ -9,6 +9,7 @@
 // correctly).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { micNeedsPrompt } from './testUtils/permissionPrompt';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
@@ -70,7 +71,7 @@ vi.mock('../src/lib/voiceTts', () => ({
   stopTtsPlayback: stopTtsPlaybackMock,
 }));
 
-async function flush(n = 6): Promise<void> {
+async function flush(n = 14): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
 }
 
@@ -244,6 +245,7 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
 
   it('a denied mic permission surfaces an error and tears down TTS/mic/audio-service', async () => {
     const { Audio } = await import('expo-av');
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockResolvedValueOnce({ granted: false });
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
@@ -306,6 +308,7 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
   it('a call ended during the mic-permission wait bails before touching audio setup', async () => {
     let resolvePerm!: (p: { granted: boolean }) => void;
     const { Audio } = await import('expo-av');
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockReturnValueOnce(
       new Promise((r) => {
         resolvePerm = r;

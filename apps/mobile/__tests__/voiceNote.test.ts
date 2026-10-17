@@ -12,6 +12,7 @@
 // prepare/start/stop all succeed and `getURI()` returns a fixed file:// uri.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { micNeedsPrompt } from './testUtils/permissionPrompt';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { useChatStore } from '../src/stores/chatStore';
@@ -238,6 +239,7 @@ describe('voice note — released before the mic was ready', () => {
 
 describe('startVoiceNote — background prepare chain', () => {
   it('a denied mic permission surfaces an error and clears the overlay', async () => {
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockResolvedValueOnce({ granted: false });
     startVoiceNote('c1', 'hold');
     await vi.waitFor(() =>
@@ -252,6 +254,7 @@ describe('startVoiceNote — background prepare chain', () => {
 
   it('a note superseded (new gesture) while the permission prompt is open bails silently — no error, no clobber of the new note', async () => {
     let resolvePerm!: (p: { granted: boolean }) => void;
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockReturnValueOnce(
       new Promise((r) => {
         resolvePerm = r;
@@ -273,6 +276,7 @@ describe('startVoiceNote — background prepare chain', () => {
     // the `.catch()` handler's gen-check must still swallow it silently
     // rather than clobbering the newer note's state with a stale error.
     let resolvePerm!: (p: { granted: boolean }) => void;
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockReturnValueOnce(
       new Promise((r) => {
         resolvePerm = r;
@@ -283,8 +287,11 @@ describe('startVoiceNote — background prepare chain', () => {
     startVoiceNote('c2', 'tap'); // gen 2 — supersedes gen 1
     resolvePerm({ granted: false }); // gen 1 rejects (mic permission denied), now stale
     await new Promise((r) => setTimeout(r, 0));
-    expect(useUiStore.getState().errors).toHaveLength(0);
-    expect(useVoiceStore.getState().voiceNoteChatId).toBe('c2');
+    // The two notes share one permission request, so the denial is real for
+    // the current note (gen 2): exactly ONE error — gen 1's stale rejection
+    // adds none.
+    expect(useUiStore.getState().errors).toHaveLength(1);
+    expect(useVoiceStore.getState().voiceNoteChatId).toBeNull();
   });
 
   it('a note superseded after the audio mode is set (but before the recorder starts) also bails silently', async () => {

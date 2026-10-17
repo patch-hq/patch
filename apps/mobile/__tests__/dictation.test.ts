@@ -9,6 +9,7 @@
 // test.ts uses.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { micNeedsPrompt } from './testUtils/permissionPrompt';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
 import { encodeAudio } from '@patch/wire/audio';
 
@@ -284,6 +285,7 @@ describe('startDictation — live preview (best-effort, never affects the final 
 
   it('mic permission denied surfaces onError and never starts capture', async () => {
     const { Audio } = await import('expo-av');
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockResolvedValueOnce({ granted: false });
     const { startDictation } = await import('../src/lib/dictation');
     const onError = vi.fn();
@@ -367,6 +369,7 @@ describe('startDictation — the audio plane is warmed AHEAD of the gesture', ()
   it('warmDictation never shows a permission dialog — it reads the current grant and stays cold if it is not granted', async () => {
     const { Audio } = await import('expo-av');
     vi.spyOn(Audio, 'getPermissionsAsync').mockResolvedValueOnce({ granted: false });
+    micNeedsPrompt();
     const requestSpy = vi.spyOn(Audio, 'requestPermissionsAsync');
     const { warmDictation, startDictation } = await import('../src/lib/dictation');
 
@@ -386,6 +389,7 @@ describe('startDictation — the audio plane is warmed AHEAD of the gesture', ()
   it('a gesture that ends while the permission dialog is still up never starts the mic', async () => {
     const { Audio } = await import('expo-av');
     let grant!: (v: { granted: boolean }) => void;
+    micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockReturnValueOnce(
       new Promise((r) => {
         grant = r;
