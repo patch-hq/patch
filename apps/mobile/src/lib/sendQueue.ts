@@ -82,7 +82,7 @@ export function sendMessage(chatId: string, text: string, files: PendingAttachme
 /**
  * The user turn Retry re-runs for `entry`: the row itself when it is a user
  * message, or the nearest user message before it when it is an assistant
- * reply. Null when there is none to resend.
+ * reply. Null when there is none to resend, or `entry` is not in the timeline.
  */
 export function retrySource(
   chatId: string,
@@ -90,10 +90,8 @@ export function retrySource(
 ): { content: string; seq: number } | null {
   const tl = useChatStore.getState().timelines[chatId] ?? [];
   const at = tl.findIndex((e) => e.seq === entry.seq && e.role === entry.role);
-  const upto =
-    entry.role === 'user'
-      ? tl.slice(at < 0 ? 0 : at, at + 1)
-      : tl.slice(0, at < 0 ? 0 : at).reverse();
+  if (at < 0) return null;
+  const upto = entry.role === 'user' ? tl.slice(at, at + 1) : tl.slice(0, at).reverse();
   const hit = upto.find(
     (e) =>
       e.kind === 'message' &&

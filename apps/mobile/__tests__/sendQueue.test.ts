@@ -19,6 +19,7 @@ import { deliveryTracker } from '../src/lib/deliveryTracker';
 import {
   _resetSendQueue,
   discardUpload,
+  retrySource,
   retryTurn,
   retryUpload,
   sendMessage,
@@ -187,6 +188,18 @@ describe('retryTurn', () => {
     );
     expect(useChatStore.getState().timelines['c1']!.map((e) => e.seq)).toEqual([1, 2]);
   });
+
+  it.each(['user', 'assistant'] as const)(
+    'a %s entry absent from the timeline retries nothing: error, no fork, transcript kept',
+    (role) => {
+      seed();
+      retryTurn('c1', { role, seq: 99 });
+      expect(retrySource('c1', { role, seq: 99 })).toBeNull();
+      expect(wsSend).not.toHaveBeenCalled();
+      expect(useChatStore.getState().timelines['c1']!.length).toBe(5);
+      expect(useUiStore.getState().errors.length).toBe(1);
+    },
+  );
 
   it('a send that throws says so and keeps the transcript', () => {
     seed();
