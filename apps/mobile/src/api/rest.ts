@@ -94,6 +94,19 @@ async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
   return parsed as T;
 }
 
+/** A crash the phone caught — mirrors the server's client-crash-routes schema. */
+export interface CrashReport {
+  source: 'boundary' | 'global' | 'native';
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  chatId?: string;
+  route?: string;
+  fatal?: boolean;
+  build?: string;
+  occurredAt: number;
+}
+
 export interface ChatListEntry {
   chatId: string;
   name: string | null;
@@ -635,6 +648,9 @@ export const api = {
     }
     return parsed as { ok: true; ref: UploadedAttachment };
   },
+  /** Report a caught crash to the server (`POST /api/client-crashes`). */
+  reportCrash: (report: CrashReport) =>
+    request<{ ok: true }>('/api/client-crashes', { method: 'POST', body: report }),
   pushRegister: (token: string) =>
     request<unknown>('/api/auth/push/register', {
       method: 'POST',

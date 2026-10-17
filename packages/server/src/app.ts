@@ -75,6 +75,7 @@ const MANAGER_SWEEP_TICK_MS = 10_000;
 // less frequent tick than the watch loop's is enough.
 const THREAD_ROTATION_TICK_MS = 30_000;
 import { registerLinkPreviewRoutes } from './link-preview-routes.js';
+import { registerClientCrashRoutes } from './client-crash-routes.js';
 import { SecretsRegistry } from './secrets-registry.js';
 import { registerSecretsRoutes } from './secrets-routes.js';
 import { registerWebBotAuthRoutes } from './web-bot-auth-routes.js';
@@ -1750,6 +1751,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerLinkPreviewRoutes(app, {
     logger: log.child({ component: 'link-preview-routes' }),
     registry,
+  });
+
+  // ---- client crash reports (phone error boundary / native crash) ----
+  registerClientCrashRoutes(app, {
+    logger: log.child({ component: 'client-crash-routes' }),
+    registry,
+    dataDir: registry.dataDir,
   });
 
   // ---- secrets REST routes (spec/15 § Secrets) ----

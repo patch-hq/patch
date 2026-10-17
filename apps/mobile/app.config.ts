@@ -13,7 +13,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.1.3',
+  version: '0.1.4',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -48,7 +48,11 @@ const config: ExpoConfig = {
   // Bumped to 0.1.3 for PatchPaste (plugins/withImagePaste.js): the composer
   // asks that module to take image paste / keyboard image insertion and throws
   // when it is missing (NO FALLBACK), so this JS must not reach a 0.1.2 APK.
-  runtimeVersion: '0.1.3',
+  //
+  // Bumped to 0.1.4 for PatchCrash (plugins/withCrashCapture.js): startup asks
+  // that module for the last native crash and throws when it is missing (NO
+  // FALLBACK), so this JS must not reach a 0.1.3 APK.
+  runtimeVersion: '0.1.4',
   updates: {
     url: `https://u.expo.dev/${EAS_PROJECT_ID}`,
     // Check on launch and download in the background; the update is LAUNCHED
@@ -142,6 +146,7 @@ const config: ExpoConfig = {
     './plugins/withConnectionService',
     './plugins/withShareIntent',
     './plugins/withImagePaste',
+    './plugins/withCrashCapture',
     [
       'expo-splash-screen',
       {

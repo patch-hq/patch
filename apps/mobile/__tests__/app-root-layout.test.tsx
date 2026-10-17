@@ -64,6 +64,8 @@ const {
     initShareIntentSpy: vi.fn(),
   };
 });
+const startCrashCaptureSpy = vi.hoisted(() => vi.fn());
+vi.mock('../src/lib/crashReport', () => ({ startCrashCapture: startCrashCaptureSpy }));
 vi.mock('../src/lib/bootstrap', () => ({ bootstrap: bootstrapSpy }));
 vi.mock('../src/lib/otaUpdates', () => ({
   checkForOtaUpdate: checkForOtaUpdateSpy,
@@ -106,6 +108,7 @@ describe('RootLayout — bootstrap', () => {
     renderRN(<RootLayout />);
     expect(checkForOtaUpdateSpy).toHaveBeenCalledTimes(1);
     expect(bootstrapSpy).toHaveBeenCalledTimes(1);
+    expect(startCrashCaptureSpy).toHaveBeenCalledTimes(1);
   });
 
   // A launch-only check leaves a long-lived app on old JS indefinitely, so the

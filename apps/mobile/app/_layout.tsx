@@ -17,6 +17,7 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-goog
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono';
 import { installRelayTransport } from '../src/lib/relayTransport';
 import { bootstrap } from '../src/lib/bootstrap';
+import { startCrashCapture } from '../src/lib/crashReport';
 import { checkForOtaUpdate, startOtaUpdatePolling } from '../src/lib/otaUpdates';
 import { resolveNotificationAction } from '../src/lib/notificationLink';
 import { resolveDeepLink } from '../src/lib/deepLink';
@@ -90,6 +91,7 @@ export default function RootLayout(): React.ReactElement | null {
     // Fetch any OTA JS update in the background (no-op in dev / Expo Go). It is
     // only DOWNLOADED — it launches at the next cold start, so startup is never
     // interrupted by a reload (spec/11 § Mobile OTA "NO automatic reload").
+    startCrashCapture();
     void checkForOtaUpdate();
     void bootstrap();
     // Android share-sheet entry point (spec/15 ## Mobile equivalent of the

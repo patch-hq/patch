@@ -27,6 +27,7 @@ import { useUiStore } from '../src/stores/uiStore';
 
 const { bootstrapSpy } = vi.hoisted(() => ({ bootstrapSpy: vi.fn(async () => undefined) }));
 vi.mock('../src/lib/bootstrap', () => ({ bootstrap: bootstrapSpy }));
+vi.mock('../src/lib/crashReport', () => ({ startCrashCapture: vi.fn() }));
 
 import RootLayout from '../app/_layout';
 

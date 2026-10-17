@@ -26,6 +26,7 @@ import {
 } from 'react-native';
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
 import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
+import { ChatErrorBoundary } from '../../src/components/ChatErrorBoundary';
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import {
   ChevronLeft,
@@ -217,8 +218,14 @@ const SETTLE_MAX_MS = 500;
 // takes the app down and it restart-loops, so an unpaired device never reaches
 // the body — it goes to pairing.
 export default function ChatDetailScreen(): React.ReactElement {
+  const router = useRouter();
+  const { chatId } = useLocalSearchParams<{ chatId: string }>();
   if (getRoute() === null) return <Redirect href="/pair" />;
-  return <ChatDetailBody />;
+  return (
+    <ChatErrorBoundary key={chatId} chatId={chatId} onBack={() => router.replace('/(tabs)/chats')}>
+      <ChatDetailBody />
+    </ChatErrorBoundary>
+  );
 }
 
 const SWIPE_MIN_DX = 80;
