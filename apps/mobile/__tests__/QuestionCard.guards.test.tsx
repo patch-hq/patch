@@ -93,3 +93,11 @@ describe('the countdown ring', () => {
     expect(Number.isFinite(offset)).toBe(true);
   });
 });
+
+describe('touch handling', () => {
+  it('no text is selectable, so a drag on an option scrolls the list instead of grabbing text', () => {
+    const r = renderRN(<QuestionCard entry={entry()} onAnswer={vi.fn()} onCancel={vi.fn()} />);
+    const selectable = findAllHost(r.root, (n) => n.props?.selectable === true);
+    expect(selectable).toHaveLength(0);
+  });
+});
