@@ -39,7 +39,7 @@ test.describe('move a chat to another host', () => {
 
     await page.getByTestId('move-chat-confirm').click();
     await expect(modal).toHaveCount(0);
-    expect(posted).toEqual({ hostId: 'd2', folder: '/Users/dev/portfolio' });
+    await expect.poll(() => posted).toEqual({ hostId: 'd2', folder: '/Users/dev/portfolio' });
   });
 
   test('a refusal keeps the dialog open with the reason', async ({ page }) => {

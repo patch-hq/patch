@@ -107,11 +107,11 @@ export class HookStore implements HooksInterface {
   }
 
   private startWatcher(): void {
+    // Native, not polling — see JobStore.startWatcher: a polling watcher can
+    // lose a file written just after `ready`.
     this.watcher = chokidar.watch(this.hooksDir, {
       ignoreInitial: true,
       depth: 0,
-      usePolling: true,
-      interval: 50,
       awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
       followSymlinks: false,
     });

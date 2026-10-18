@@ -454,15 +454,40 @@ test.describe('new chat header', () => {
     );
     await page.goto(NEW);
     const composer = page.getByTestId('composer-input');
-    await composer.fill('hello from a brand new chat');
+    const TEXT = 'hello from a brand new chat';
+    await composer.fill(TEXT);
+    // Sample every painted frame from here on: where are the words?
+    await page.evaluate((text) => {
+      const frames: Array<{ inComposer: boolean; inTranscript: boolean }> = [];
+      (window as unknown as { __frames: typeof frames }).__frames = frames;
+      const sample = (): void => {
+        const box = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]');
+        frames.push({
+          inComposer: box?.value.includes(text) ?? false,
+          inTranscript: Array.from(document.querySelectorAll('.msg-user')).some((m) =>
+            (m.textContent ?? '').includes(text),
+          ),
+        });
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }, TEXT);
     await composer.press('Enter');
 
-    // The composer text is gone immediately (optimistic clear) — the message
-    // must reappear in the transcript just as fast, not after a gap.
+    // The composer clears at once (optimistic) and the message shows in the
+    // transcript — and never is there a painted frame with the words in
+    // neither place. Checked frame by frame rather than against a stopwatch:
+    // "within 1 s" was a statement about the machine, and a loaded runner
+    // broke it while the app did nothing wrong.
     await expect(composer).toHaveValue('');
-    await expect(page.locator('.msg-user')).toContainText('hello from a brand new chat', {
-      timeout: 1000,
-    });
+    await expect(page.locator('.msg-user')).toContainText(TEXT);
+    const frames = await page.evaluate(
+      () =>
+        (window as unknown as { __frames: Array<{ inComposer: boolean; inTranscript: boolean }> })
+          .__frames,
+    );
+    expect(frames.some((f) => f.inTranscript)).toBe(true);
+    expect(frames.filter((f) => !f.inComposer && !f.inTranscript)).toEqual([]);
     // Genuinely navigated into the live chat route, not still on /chats/new
     // with the message rendered nowhere.
     await expect(page.getByTestId('new-chat-main')).toHaveCount(0);

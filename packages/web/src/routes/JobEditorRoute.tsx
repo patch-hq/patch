@@ -5,6 +5,7 @@
 
 import { DateTimeField } from '../components/DateTimeField.js';
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -152,7 +153,11 @@ function ScriptCommandEditor({
               tabSize: 2,
               wordWrap: 'on',
             }}
-            onChange={(next) => onChange(next ?? '')}
+            // Monaco reports edits from outside React, so a plain state update
+            // is queued at default priority — and a click on Save (or any
+            // field) can then be handled against the render before it, saving
+            // the command short of its last keystrokes. Commit each edit now.
+            onChange={(next) => flushSync(() => onChange(next ?? ''))}
             loading={<div className="editor-loading">Loading editor…</div>}
           />
         </Suspense>
@@ -1071,7 +1076,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     setRecurrenceNlConfirmed(null);
     try {
       const result = await api.translateRecurrenceRule(hostId, phrase);
-      setForm({ ...form, recurrenceRule: result.rrule });
+      setForm((f) => ({ ...f, recurrenceRule: result.rrule }));
       setRecurrenceNlConfirmed(result.description);
       setShowRawRecurrence(true);
     } catch (err) {
@@ -1246,7 +1251,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
         Start on account
         <select
           value={value}
-          onChange={(e) => setForm({ ...form, spawnAccount: e.target.value })}
+          onChange={(e) => {
+            const next = e.target.value;
+            setForm((f) => ({ ...f, spawnAccount: next }));
+          }}
           data-testid="job-spawn-account"
         >
           <option value="">By strategy</option>
@@ -1279,13 +1287,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             const model = e.target.value;
             // A mode the new model cannot run is reset to `default` in view,
             // not left to be degraded silently when the job fires.
-            const keep =
-              model === '' || permissionModesFor(model).includes(form.spawnPermissionMode);
-            setForm({
-              ...form,
+            setForm((f) => ({
+              ...f,
               spawnModel: model,
-              spawnPermissionMode: keep ? form.spawnPermissionMode : 'default',
-            });
+              spawnPermissionMode:
+                model === '' || permissionModesFor(model).includes(f.spawnPermissionMode)
+                  ? f.spawnPermissionMode
+                  : 'default',
+            }));
           }}
           data-testid="job-spawn-model"
         >
@@ -1423,23 +1432,26 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           <Toggle
             checked={form.autonomyPromptCustom}
             onChange={(on) =>
-              setForm({
-                ...form,
+              setForm((f) => ({
+                ...f,
                 autonomyPromptCustom: on,
                 // Starting an override from the account prompt (rather than
                 // blank) makes this an EDIT of it — ticking back off and on
                 // keeps whatever was typed, same as `gateCommand`.
-                ...(on && form.autonomyPromptText === ''
+                ...(on && f.autonomyPromptText === ''
                   ? { autonomyPromptText: accountAutonomyPrompt }
                   : {}),
-              })
+              }))
             }
             label="Override autonomy prompt for this job"
             testid="job-autonomy-prompt-custom"
           />
           <textarea
             value={form.autonomyPromptCustom ? form.autonomyPromptText : accountAutonomyPrompt}
-            onChange={(e) => setForm({ ...form, autonomyPromptText: e.target.value })}
+            onChange={(e) => {
+              const next = e.target.value;
+              setForm((f) => ({ ...f, autonomyPromptText: next }));
+            }}
             disabled={!form.autonomyPromptCustom}
             data-testid="job-autonomy-prompt-text"
             rows={2}
@@ -1455,7 +1467,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 rather than a browser tooltip that bypasses our handler. */}
             <input
               value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((f) => ({ ...f, name: next }));
+              }}
               data-testid="job-name"
             />
           </label>
@@ -1469,10 +1484,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 const v = e.target.value;
                 if (v === NEW_GROUP) {
                   setGroupCustom(true);
-                  setForm({ ...form, group: '' });
+                  setForm((f) => ({ ...f, group: '' }));
                 } else {
                   setGroupCustom(false);
-                  setForm({ ...form, group: v });
+                  setForm((f) => ({ ...f, group: v }));
                 }
               }}
               data-testid="job-group"
@@ -1488,7 +1503,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             {groupIsAdHoc ? (
               <input
                 value={form.group}
-                onChange={(e) => setForm({ ...form, group: e.target.value })}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((f) => ({ ...f, group: next }));
+                }}
                 placeholder="e.g. Home, Finance, Watchers"
                 data-testid="job-group-custom"
                 aria-label="new group name"
@@ -1499,9 +1517,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             Trigger type
             <select
               value={form.triggerType}
-              onChange={(e) =>
-                setForm({ ...form, triggerType: e.target.value as JobTrigger['type'] })
-              }
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((f) => ({ ...f, triggerType: next as JobTrigger['type'] }));
+              }}
               data-testid="job-trigger-type"
             >
               <option value="cron">cron</option>
@@ -1520,7 +1539,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 Followed job id
                 <input
                   value={form.followsJobId}
-                  onChange={(e) => setForm({ ...form, followsJobId: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, followsJobId: next }));
+                  }}
                   data-testid="job-follows-id"
                 />
               </label>
@@ -1528,7 +1550,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <input
                   type="checkbox"
                   checked={form.followsAny}
-                  onChange={(e) => setForm({ ...form, followsAny: e.target.checked })}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setForm((f) => ({ ...f, followsAny: on }));
+                  }}
                   data-testid="job-follows-any"
                 />
                 Also after failures
@@ -1547,11 +1572,11 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   onChange={(e) => {
                     const scheduleText = e.target.value;
                     const cron = parseNaturalSchedule(scheduleText);
-                    setForm({
-                      ...form,
+                    setForm((f) => ({
+                      ...f,
                       scheduleText,
                       ...(cron ? { cronExpression: cron } : {}),
-                    });
+                    }));
                   }}
                 />
               </label>
@@ -1563,7 +1588,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <select
                   value={form.cronTimezone}
                   data-testid="job-cron-timezone"
-                  onChange={(e) => setForm({ ...form, cronTimezone: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, cronTimezone: next }));
+                  }}
                 >
                   {TIMEZONE_OPTIONS.map((zone) => (
                     <option key={zone} value={zone}>
@@ -1602,7 +1630,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   Cron expression
                   <input
                     value={form.cronExpression}
-                    onChange={(e) => setForm({ ...form, cronExpression: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, cronExpression: next }));
+                    }}
                     data-testid="job-cron"
                   />
                 </label>
@@ -1616,14 +1647,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <select
                   value={form.recurrenceFrequency}
                   data-testid="job-recurrence-frequency"
-                  onChange={(e) =>
-                    setForm(
-                      setRecurrenceFrequency(
-                        form,
-                        e.target.value as FormState['recurrenceFrequency'],
-                      ),
-                    )
-                  }
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) =>
+                      setRecurrenceFrequency(f, next as FormState['recurrenceFrequency']),
+                    );
+                  }}
                 >
                   <option value="WEEKLY">Weekly</option>
                   <option value="MONTHLY">Monthly</option>
@@ -1642,7 +1671,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                       key={d.code}
                       type="button"
                       aria-pressed={form.recurrenceWeekdays.includes(d.code)}
-                      onClick={() => setForm(toggleRecurrenceWeekday(form, d.code))}
+                      onClick={() => setForm((f) => toggleRecurrenceWeekday(f, d.code))}
                     >
                       {d.label}
                     </button>
@@ -1655,13 +1684,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <select
                     value={form.recurrenceNth}
                     data-testid="job-recurrence-nth"
-                    onChange={(e) =>
-                      setForm(
-                        withRecurrenceRule(form, {
-                          recurrenceNth: e.target.value as FormState['recurrenceNth'],
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) =>
+                        withRecurrenceRule(f, {
+                          recurrenceNth: next as FormState['recurrenceNth'],
                         }),
-                      )
-                    }
+                      );
+                    }}
                   >
                     {RECURRENCE_NTH_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -1688,7 +1718,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                         key={m.n}
                         type="button"
                         aria-pressed={form.recurrenceMonths.includes(m.n)}
-                        onClick={() => setForm(toggleRecurrenceMonth(form, m.n))}
+                        onClick={() => setForm((f) => toggleRecurrenceMonth(f, m.n))}
                       >
                         {m.label}
                       </button>
@@ -1702,9 +1732,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   type="time"
                   value={form.recurrenceTimeHHMM}
                   data-testid="job-recurrence-time"
-                  onChange={(e) =>
-                    setForm(withRecurrenceRule(form, { recurrenceTimeHHMM: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => withRecurrenceRule(f, { recurrenceTimeHHMM: next }));
+                  }}
                 />
               </label>
               {/* The zone the RRULE is evaluated in — required, unlike cron's
@@ -1715,7 +1746,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <select
                   value={form.recurrenceTimezone}
                   data-testid="job-recurrence-timezone"
-                  onChange={(e) => setForm({ ...form, recurrenceTimezone: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, recurrenceTimezone: next }));
+                  }}
                 >
                   {TIMEZONE_OPTIONS.map((zone) => (
                     <option key={zone} value={zone}>
@@ -1750,7 +1784,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   RRULE
                   <input
                     value={form.recurrenceRule}
-                    onChange={(e) => setForm({ ...form, recurrenceRule: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, recurrenceRule: next }));
+                    }}
                     data-testid="job-recurrence-rule"
                   />
                 </label>
@@ -1768,7 +1805,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     value={form.recurrenceNlText}
                     placeholder="e.g. every 3rd Sunday between May and August"
                     data-testid="job-recurrence-nl"
-                    onChange={(e) => setForm({ ...form, recurrenceNlText: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, recurrenceNlText: next }));
+                    }}
                     onKeyDown={(e) => {
                       if (isPlainEnter(e)) {
                         e.preventDefault();
@@ -1807,9 +1847,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <select
                   data-testid="job-webhook-scheme"
                   value={form.webhookScheme}
-                  onChange={(e) =>
-                    setForm({ ...form, webhookScheme: e.target.value as WebhookScheme })
-                  }
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, webhookScheme: next as WebhookScheme }));
+                  }}
                 >
                   <option value="none">none</option>
                   <option value="hmac-sha256">hmac-sha256</option>
@@ -1823,7 +1864,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <input
                   data-testid="job-webhook-secret"
                   value={form.webhookSecret}
-                  onChange={(e) => setForm({ ...form, webhookSecret: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, webhookSecret: next }));
+                  }}
                 />
               </label>
             </>
@@ -1842,13 +1886,13 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           <DateTimeField
             label="Starts"
             value={form.dateStart}
-            onChange={(v) => setForm({ ...form, dateStart: v })}
+            onChange={(v) => setForm((f) => ({ ...f, dateStart: v }))}
             testId="job-date-start"
           />
           <DateTimeField
             label="Stops"
             value={form.dateStop}
-            onChange={(v) => setForm({ ...form, dateStop: v })}
+            onChange={(v) => setForm((f) => ({ ...f, dateStop: v }))}
             testId="job-date-stop"
           />
         </section>
@@ -1865,7 +1909,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               JSONata filter on the trigger payload
               <textarea
                 value={form.filter}
-                onChange={(e) => setForm({ ...form, filter: e.target.value })}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((f) => ({ ...f, filter: next }));
+                }}
                 rows={3}
                 data-testid="job-filter"
               />
@@ -1885,14 +1932,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           <Toggle
             checked={form.gateOn}
             onChange={(on) =>
-              setForm({
-                ...form,
+              setForm((f) => ({
+                ...f,
                 gateOn: on,
                 // Seed the host and folder from the action, which is where the
                 // work happens and so almost always where the question belongs.
-                ...(on && form.gateHostId === '' ? { gateHostId: form.spawnHostId } : {}),
-                ...(on && form.gateFolder === '' ? { gateFolder: form.spawnFolder } : {}),
-              })
+                ...(on && f.gateHostId === '' ? { gateHostId: f.spawnHostId } : {}),
+                ...(on && f.gateFolder === '' ? { gateFolder: f.spawnFolder } : {}),
+              }))
             }
             label="Ask a command first, and only run the action if it says to"
             testid="job-gate-on"
@@ -1903,7 +1950,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 Host
                 <input
                   value={form.gateHostId}
-                  onChange={(e) => setForm({ ...form, gateHostId: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, gateHostId: next }));
+                  }}
                   data-testid="job-gate-daemon"
                 />
               </label>
@@ -1911,13 +1961,16 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 Folder
                 <input
                   value={form.gateFolder}
-                  onChange={(e) => setForm({ ...form, gateFolder: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, gateFolder: next }));
+                  }}
                   data-testid="job-gate-folder"
                 />
               </label>
               <ScriptCommandEditor
                 value={form.gateCommand}
-                onChange={(next) => setForm({ ...form, gateCommand: next })}
+                onChange={(next) => setForm((f) => ({ ...f, gateCommand: next }))}
                 reloadKey={loadedRevision}
                 name="gate"
                 heading="Gate command · run by `bash -lc` in the folder above"
@@ -1938,7 +1991,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <input
                   value={form.gateTimeoutMs}
                   placeholder="60000"
-                  onChange={(e) => setForm({ ...form, gateTimeoutMs: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, gateTimeoutMs: next }));
+                  }}
                   data-testid="job-gate-timeout"
                 />
               </label>
@@ -1952,7 +2008,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           </h2>
           <Toggle
             checked={form.windowOn}
-            onChange={(on) => setForm({ ...form, windowOn: on })}
+            onChange={(on) => setForm((f) => ({ ...f, windowOn: on }))}
             label="Only start fires between these hours; hold the rest until it opens"
             testid="job-window-on"
           />
@@ -1963,7 +2019,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <input
                   type="time"
                   value={form.windowStart}
-                  onChange={(e) => setForm({ ...form, windowStart: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, windowStart: next }));
+                  }}
                   data-testid="job-window-start"
                 />
               </label>
@@ -1972,7 +2031,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <input
                   type="time"
                   value={form.windowEnd}
-                  onChange={(e) => setForm({ ...form, windowEnd: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, windowEnd: next }));
+                  }}
                   data-testid="job-window-end"
                 />
               </label>
@@ -1981,7 +2043,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <select
                   value={form.windowTimezone}
                   data-testid="job-window-timezone"
-                  onChange={(e) => setForm({ ...form, windowTimezone: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, windowTimezone: next }));
+                  }}
                 >
                   {TIMEZONE_OPTIONS.map((zone) => (
                     <option key={zone} value={zone}>
@@ -2002,9 +2067,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               <select
                 value={form.actionType}
                 data-testid="job-action-type"
-                onChange={(e) =>
-                  setForm({ ...form, actionType: e.target.value as JobAction['type'] })
-                }
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((f) => ({ ...f, actionType: next as JobAction['type'] }));
+                }}
               >
                 <option value="spawn">spawn new chat (fresh each fire)</option>
                 <option value="continue">message a persistent chat (created once)</option>
@@ -2018,7 +2084,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   Host
                   <input
                     value={form.spawnHostId}
-                    onChange={(e) => setForm({ ...form, spawnHostId: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnHostId: next }));
+                    }}
                     data-testid="job-script-daemon"
                     required
                   />
@@ -2027,14 +2096,17 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   Folder
                   <input
                     value={form.spawnFolder}
-                    onChange={(e) => setForm({ ...form, spawnFolder: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnFolder: next }));
+                    }}
                     data-testid="job-script-folder"
                     required
                   />
                 </label>
                 <ScriptCommandEditor
                   value={form.scriptCommand}
-                  onChange={(next) => setForm({ ...form, scriptCommand: next })}
+                  onChange={(next) => setForm((f) => ({ ...f, scriptCommand: next }))}
                   reloadKey={loadedRevision}
                   name="script"
                 />
@@ -2043,7 +2115,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <input
                     value={form.scriptTimeoutMs}
                     placeholder="60000"
-                    onChange={(e) => setForm({ ...form, scriptTimeoutMs: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, scriptTimeoutMs: next }));
+                    }}
                     data-testid="job-script-timeout"
                   />
                 </label>
@@ -2069,14 +2144,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                       // (spec/14 § Jobs view, spec/08 § Action).
                       if (picked.folder === CUSTOM_FOLDER) {
                         setFolderCustom(true);
-                        setForm({ ...form, spawnHostId: picked.hostId, spawnFolder: '' });
+                        setForm((f) => ({ ...f, spawnHostId: picked.hostId, spawnFolder: '' }));
                       } else {
                         setFolderCustom(false);
-                        setForm({
-                          ...form,
+                        setForm((f) => ({
+                          ...f,
                           spawnHostId: picked.hostId,
                           spawnFolder: picked.folder,
-                        });
+                        }));
                       }
                     }}
                     data-testid="job-spawn-folder"
@@ -2109,7 +2184,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   {folderIsAdHoc ? (
                     <input
                       value={form.spawnFolder}
-                      onChange={(e) => setForm({ ...form, spawnFolder: e.target.value })}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setForm((f) => ({ ...f, spawnFolder: next }));
+                      }}
                       data-testid="job-spawn-folder-custom"
                       placeholder="/home/tom/projects/example"
                       aria-label="custom folder path"
@@ -2134,12 +2212,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 </p>
                 {skillField(
                   form.spawnSkill,
-                  (v) => setForm({ ...form, spawnSkill: v }),
+                  (v) => setForm((f) => ({ ...f, spawnSkill: v })),
                   'job-spawn-skill',
                 )}
                 <Toggle
                   checked={form.includePayload}
-                  onChange={(next) => setForm({ ...form, includePayload: next })}
+                  onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
                   label="Send agent trigger payload"
                   testid="job-include-payload"
                 />
@@ -2149,7 +2227,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     className="job-prompt"
                     rows={12}
                     value={form.spawnPrompt}
-                    onChange={(e) => setForm({ ...form, spawnPrompt: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnPrompt: next }));
+                    }}
                     data-testid="job-spawn-prompt"
                   />
                 </label>
@@ -2158,7 +2239,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <textarea
                     rows={2}
                     value={form.spawnGoal}
-                    onChange={(e) => setForm({ ...form, spawnGoal: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnGoal: next }));
+                    }}
                     data-testid="job-spawn-goal"
                   />
                 </label>
@@ -2167,7 +2251,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     Deduplication key
                     <input
                       value={form.ensureKey}
-                      onChange={(e) => setForm({ ...form, ensureKey: e.target.value })}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setForm((f) => ({ ...f, ensureKey: next }));
+                      }}
                       data-testid="job-ensure-key"
                       placeholder="{{payload.event_data.id}}"
                     />
@@ -2183,12 +2270,13 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     Permission mode
                     <select
                       value={form.spawnPermissionMode}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          spawnPermissionMode: e.target.value as PermissionMode,
-                        })
-                      }
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setForm((f) => ({
+                          ...f,
+                          spawnPermissionMode: next as PermissionMode,
+                        }));
+                      }}
                       data-testid="job-spawn-permission-mode"
                     >
                       {/* The SDK's own mode names (spec/02 § Permission
@@ -2208,13 +2296,13 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 ) : null}
                 <Toggle
                   checked={form.spawnHidden}
-                  onChange={(next) => setForm({ ...form, spawnHidden: next })}
+                  onChange={(next) => setForm((f) => ({ ...f, spawnHidden: next }))}
                   label="Hide chat from sidebar"
                   testid="job-spawn-hidden"
                 />
                 <Toggle
                   checked={form.spawnNotifyOnComplete}
-                  onChange={(next) => setForm({ ...form, spawnNotifyOnComplete: next })}
+                  onChange={(next) => setForm((f) => ({ ...f, spawnNotifyOnComplete: next }))}
                   label="Notify when job complete"
                   testid="job-spawn-notify-on-complete"
                 />
@@ -2225,7 +2313,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   Recipient chat
                   <select
                     value={form.messageChatId}
-                    onChange={(e) => setForm({ ...form, messageChatId: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, messageChatId: next }));
+                    }}
                     data-testid="job-message-chat"
                     required
                   >
@@ -2242,12 +2333,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 </p>
                 {skillField(
                   form.messageSkill,
-                  (v) => setForm({ ...form, messageSkill: v }),
+                  (v) => setForm((f) => ({ ...f, messageSkill: v })),
                   'job-message-skill',
                 )}
                 <Toggle
                   checked={form.includePayload}
-                  onChange={(next) => setForm({ ...form, includePayload: next })}
+                  onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
                   label="Send agent trigger payload"
                   testid="job-include-payload"
                 />
@@ -2257,7 +2348,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     className="job-prompt"
                     rows={12}
                     value={form.messagePrompt}
-                    onChange={(e) => setForm({ ...form, messagePrompt: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, messagePrompt: next }));
+                    }}
                     data-testid="job-message-prompt"
                   />
                 </label>

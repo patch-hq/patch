@@ -205,11 +205,18 @@ export class WireTestClient {
     };
   }
 
-  /** Wait for the next event of a given type (with optional predicate). */
+  /**
+   * Wait for the next event of a given type (with optional predicate).
+   *
+   * The default deadline is generous on purpose: 2 s was routinely beaten by a
+   * loaded CI runner bringing a host online, failing tests whose event did
+   * arrive. It stays under the suites' 10 s test timeout so an event that truly
+   * never comes is still reported here, by name.
+   */
   waitFor<T extends WireEventType>(
     eventType: T,
     predicate?: (event: EventForType<T>) => boolean,
-    timeoutMs = 2000,
+    timeoutMs = 8000,
   ): Promise<EventForType<T>> {
     return new Promise<EventForType<T>>((resolve, reject) => {
       const timer = setTimeout(() => {

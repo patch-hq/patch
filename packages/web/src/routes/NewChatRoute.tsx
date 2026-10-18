@@ -662,6 +662,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // The chatId once the chat has been created for THIS new-chat session. Caches
   // so a retry (e.g. after an attachment upload failed) reuses the same chat
   // instead of spawning a second one. Cleared implicitly by navigating away.
+  // The first message, shown while the chat it opens is being created.
+  const [pendingFirst, setPendingFirst] = useState<string | null>(null);
   const createdChatId = useRef<string | null>(null);
 
   // The roster may hydrate after first render (WS replay), so the MRU folder
@@ -762,8 +764,17 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     // `presetChatId` is set when the composer already created the chat (the
     // attachment path — its uploads need a real chat). Otherwise create it now
     // (text-only first message), reusing any chat already spun up this session.
+    // The composer clears the moment the user sends, but the chat — and so the
+    // transcript the message belongs in — only exists once the create request
+    // returns. Show the message here meanwhile, so it is never nowhere: that
+    // round trip was a blank frame (and on a slow link, a blank second).
+    // Committed in the same render as the composer's clear.
+    if (!presetChatId && !createdChatId.current) setPendingFirst(message);
     const chatId = presetChatId ?? createdChatId.current ?? (await createChatInFolder());
-    if (!chatId) return false; // composer restores the typed first message
+    if (!chatId) {
+      setPendingFirst(null);
+      return false; // composer restores the typed first message
+    }
     createdChatId.current = chatId;
 
     // A spawn rejection that has ALREADY landed (e.g. the host's chat.error
@@ -775,6 +786,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       // Clean up any partial chatStore state seeded by applyEvent for this id.
       useChatStore.getState().removeChat(chatId);
       createdChatId.current = null;
+      setPendingFirst(null);
       const human = humaniseError(immediateRejection, 'spawn');
       pushError(human.sentence, undefined, human.detail);
       setSubmitting(false);
@@ -1418,6 +1430,13 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             ) : null}
             {setupRow}
           </div>
+          {pendingFirst !== null ? (
+            <div className="msg msg-user sending" data-testid="new-chat-pending-message">
+              <div className="msg-content-row">
+                <div className="content md">{pendingFirst}</div>
+              </div>
+            </div>
+          ) : null}
         </section>
       )}
       {/* A new chat cannot run without a credential, so say so here too — this is

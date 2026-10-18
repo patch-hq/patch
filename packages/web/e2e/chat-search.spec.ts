@@ -171,23 +171,28 @@ test.describe('sidebar chat search', () => {
     await expect(page.getByTestId('chat-search-results')).toHaveCount(0);
 
     // Positioned in the middle of the stream, not left at the latest message.
-    const geo = await page.evaluate(() => {
-      const stream = document.querySelector('.chat-stream') as HTMLElement;
-      const el = stream.querySelector('[data-seq="5"]') as HTMLElement;
-      const s = stream.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      return {
-        top: r.top - s.top,
-        bottom: s.bottom - r.bottom,
-        height: s.height,
-        atBottom: stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 50,
-      };
-    });
-    expect(geo.atBottom).toBe(false);
-    expect(geo.top).toBeGreaterThan(0);
-    expect(geo.bottom).toBeGreaterThan(0);
-    // Roughly centred.
-    expect(Math.abs(geo.top - geo.bottom)).toBeLessThan(geo.height * 0.25);
+    // Polled: the jump lands over a few frames after the ring appears, and a
+    // single read on a slow runner caught it still at the bottom. The check
+    // below that it then STAYS put is what rules out a passing glimpse.
+    await expect(async () => {
+      const geo = await page.evaluate(() => {
+        const stream = document.querySelector('.chat-stream') as HTMLElement;
+        const el = stream.querySelector('[data-seq="5"]') as HTMLElement;
+        const s = stream.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return {
+          top: r.top - s.top,
+          bottom: s.bottom - r.bottom,
+          height: s.height,
+          atBottom: stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 50,
+        };
+      });
+      expect(geo.atBottom).toBe(false);
+      expect(geo.top).toBeGreaterThan(0);
+      expect(geo.bottom).toBeGreaterThan(0);
+      // Roughly centred.
+      expect(Math.abs(geo.top - geo.bottom)).toBeLessThan(geo.height * 0.25);
+    }).toPass();
 
     // It stays put (follow is off) and the ring fades.
     await expect(target).not.toHaveClass(/msg-jump-target/, { timeout: 5000 });

@@ -54,10 +54,11 @@ export interface ShortcutHandlers {
   onDiffViewer(): void;
   /** G3-8: ⌘⇧' opens the per-chat file browser. */
   onFileBrowser(): void;
-  onVoiceHoldStart(): void;
+  /** `at`: the keydown's `timeStamp`, the clock every hold is measured on. */
+  onVoiceHoldStart(at: number): void;
   /** `heldMs` is how long the chord was down — a tap and a press-and-hold are
    *  different gestures (spec/07 ## Voice-input modes — mode 1). */
-  onVoiceHoldEnd(heldMs: number): void;
+  onVoiceHoldEnd(heldMs: number, at: number): void;
   onGlobalVoiceStart(): void;
   onGlobalVoiceEnd(heldMs: number): void;
   onToggleSidebar(): void;
@@ -304,9 +305,12 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       if (matchesChord(e, dictate)) {
         e.preventDefault();
         if (dictateHeld.at !== null) return; // key repeat
-        dictateHeld.at = Date.now();
+        // The event's own time, not the handler's: a page busy opening the mic
+        // runs the keyup handler late, and timing from the handlers turned a
+        // quick tap into a hold. The browser stamps the event when it arrives.
+        dictateHeld.at = e.timeStamp;
         dictateHeld.code = dictate.code;
-        handlers.onVoiceHoldStart();
+        handlers.onVoiceHoldStart(e.timeStamp);
         return;
       }
       if (isMod(e) && e.key === '?') {
@@ -434,7 +438,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       }
       if (e.ctrlKey && e.code === 'Space' && ctrlSpaceHeld.at === null) {
         e.preventDefault();
-        ctrlSpaceHeld.at = Date.now();
+        ctrlSpaceHeld.at = e.timeStamp;
         handlers.onGlobalVoiceStart();
         return;
       }
@@ -480,12 +484,12 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       // otherwise a dictation is left recording with no release to commit it.
       const modUp = e.key === 'Meta' || e.key === 'Control';
       if ((e.code === dictateHeld.code || modUp) && dictateHeld.at !== null) {
-        const held = Date.now() - dictateHeld.at;
+        const held = e.timeStamp - dictateHeld.at;
         dictateHeld.at = null;
-        handlers.onVoiceHoldEnd(held);
+        handlers.onVoiceHoldEnd(held, e.timeStamp);
       }
       if ((e.code === 'Space' || modUp) && ctrlSpaceHeld.at !== null) {
-        const held = Date.now() - ctrlSpaceHeld.at;
+        const held = e.timeStamp - ctrlSpaceHeld.at;
         ctrlSpaceHeld.at = null;
         handlers.onGlobalVoiceEnd(held);
       }

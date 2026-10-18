@@ -22,6 +22,19 @@ function setHostOnline(page: Page, online: boolean): Promise<void> {
 }
 
 test.describe('host offline indicator', () => {
+  // The Jobs page fetches its list. Unanswered, that request went to a backend
+  // the harness does not have and the page swapped itself for "Failed to load
+  // jobs: HTTP 500" — whenever the request lost the race with these checks.
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/jobs**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ jobs: [] }),
+      }),
+    );
+  });
+
   test('the daemon-offline banner appears on a non-chat route (Jobs), not only inside an open chat', async ({
     page,
   }) => {

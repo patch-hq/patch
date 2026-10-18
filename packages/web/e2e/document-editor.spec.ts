@@ -55,6 +55,12 @@ async function openNotes(page: Page): Promise<void> {
   await page.getByTestId('tree-row-assets').click();
   await page.getByTestId('tree-row-assets/notes.md').click();
   await expect(page.getByTestId('document-editor')).toBeVisible(EDITOR_OPEN);
+  // The editor shows before the file's text arrives. On a slow machine a test
+  // reading it straight away got "", and built its expected write from nothing.
+  await expect(page.getByTestId('document-editor-content')).toHaveValue(
+    /# Garden notes/,
+    EDITOR_OPEN,
+  );
 }
 
 test.describe('document editor', () => {

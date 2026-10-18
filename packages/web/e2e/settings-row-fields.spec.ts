@@ -42,33 +42,39 @@ test.describe('Settings rows — label and value are distinct, bordered fields',
       page,
     }) => {
       await openPage(page, f.page);
-      const box = await page.getByTestId(f.testid).evaluate((el) => {
-        const cs = getComputedStyle(el);
-        return {
-          borderTopWidth: parseFloat(cs.borderTopWidth),
-          borderLeftWidth: parseFloat(cs.borderLeftWidth),
-          borderStyle: cs.borderTopStyle,
-          borderColor: cs.borderTopColor,
-          paddingLeft: parseFloat(cs.paddingLeft),
-          paddingTop: parseFloat(cs.paddingTop),
-          width: el.getBoundingClientRect().width,
-          height: el.getBoundingClientRect().height,
-          overflows: el.scrollWidth > el.clientWidth,
-        };
-      });
-      expect(box.borderTopWidth).toBeGreaterThanOrEqual(1);
-      expect(box.borderLeftWidth).toBeGreaterThanOrEqual(1);
-      expect(box.borderStyle).toBe('solid');
-      expect(box.borderColor).not.toBe('rgba(0, 0, 0, 0)');
-      expect(box.paddingLeft).toBeGreaterThanOrEqual(4);
-      expect(box.paddingTop).toBeGreaterThanOrEqual(2);
-      expect(box.width).toBeGreaterThanOrEqual(f.minWidth);
-      // What it holds fits inside it.
-      expect(box.overflows).toBe(false);
-      // spec/14 § Legibility: no control is smaller than --tap-min (44px) on
-      // either axis. Was ~36px (padding: 6px 10px, no min-height) — cramped
-      // enough that the user filed "input boxes are too small".
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      // Re-measured until it holds: the page draws its fields with defaults and
+      // re-renders them when the stubbed settings land, and a measurement taken
+      // in between read a detached node (every width NaN). A field that really
+      // lacks its chrome still fails, at the deadline.
+      await expect(async () => {
+        const box = await page.getByTestId(f.testid).evaluate((el) => {
+          const cs = getComputedStyle(el);
+          return {
+            borderTopWidth: parseFloat(cs.borderTopWidth),
+            borderLeftWidth: parseFloat(cs.borderLeftWidth),
+            borderStyle: cs.borderTopStyle,
+            borderColor: cs.borderTopColor,
+            paddingLeft: parseFloat(cs.paddingLeft),
+            paddingTop: parseFloat(cs.paddingTop),
+            width: el.getBoundingClientRect().width,
+            height: el.getBoundingClientRect().height,
+            overflows: el.scrollWidth > el.clientWidth,
+          };
+        });
+        expect(box.borderTopWidth).toBeGreaterThanOrEqual(1);
+        expect(box.borderLeftWidth).toBeGreaterThanOrEqual(1);
+        expect(box.borderStyle).toBe('solid');
+        expect(box.borderColor).not.toBe('rgba(0, 0, 0, 0)');
+        expect(box.paddingLeft).toBeGreaterThanOrEqual(4);
+        expect(box.paddingTop).toBeGreaterThanOrEqual(2);
+        expect(box.width).toBeGreaterThanOrEqual(f.minWidth);
+        // What it holds fits inside it.
+        expect(box.overflows).toBe(false);
+        // spec/14 § Legibility: no control is smaller than --tap-min (44px) on
+        // either axis. Was ~36px (padding: 6px 10px, no min-height) — cramped
+        // enough that the user filed "input boxes are too small".
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }).toPass();
     });
   }
 

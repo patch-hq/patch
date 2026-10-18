@@ -3245,14 +3245,14 @@ function recordingHandlers(): ShortcutHandlers {
       useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId });
     },
     // Recorded, and routed to the open composer exactly as AppShell does.
-    onVoiceHoldStart: () => {
+    onVoiceHoldStart: (at: number) => {
       record('voiceHoldStart')();
       const open = useChatStore.getState().activeChatId;
-      if (open) composerHotkeyDown(open);
+      if (open) composerHotkeyDown(open, at);
     },
-    onVoiceHoldEnd: () => {
+    onVoiceHoldEnd: (_held: number, at: number) => {
       record('voiceHoldEnd')();
-      composerHotkeyUp();
+      composerHotkeyUp(at);
     },
     onGlobalVoiceStart: record('globalVoiceStart'),
     onGlobalVoiceEnd: record('globalVoiceEnd'),

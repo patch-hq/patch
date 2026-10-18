@@ -214,8 +214,14 @@ describe('TerminalSessions', () => {
   it('SIGINT interrupts the running command without ending the session', async () => {
     sessions.handle({ type: 'patch.terminal.open', hostId: 'd1', sessionId: 's1', folder: dir });
     await sink.waitFor((e) => e.type === 'patch.terminal.ready', 'ready');
-    sessions.handle({ type: 'patch.terminal.input', sessionId: 's1', data: 'sleep 30\n' });
-    await new Promise((r) => setTimeout(r, 500));
+    // Signal once the command says it is running — a fixed wait raced the
+    // shell on a slow machine, and an interrupt with no child yet hit nothing.
+    sessions.handle({
+      type: 'patch.terminal.input',
+      sessionId: 's1',
+      data: "sh -c 'echo up-$((40+2)); exec sleep 30'\n",
+    });
+    await sink.waitFor(outputContains('s1', 'up-42'), 'command running');
     sessions.handle({ type: 'patch.terminal.signal', sessionId: 's1', signal: 'SIGINT' });
     // The session survives: a follow-up command still runs.
     sessions.handle({ type: 'patch.terminal.input', sessionId: 's1', data: 'echo alive\n' });

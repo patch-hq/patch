@@ -144,12 +144,17 @@ test.describe('scrolling up while a reply streams in', () => {
       await stream.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop),
     ).toBeGreaterThan(200);
 
-    // The reply finishes, and the user scrolls back down to the end themselves.
+    // The reply finishes, and the user scrolls back down to the end themselves —
+    // until they are there, as a person does. A fixed number of notches could
+    // stop short on a slow runner, where the last chunks were still being laid
+    // out below while the wheel came down (CI saw a 416px gap).
     await stopStreaming(page);
-    await scrollBy(page, 400, 12);
-    await expect
-      .poll(async () => stream.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
-      .toBeLessThan(5);
+    await expect(async () => {
+      await scrollBy(page, 400, 3);
+      expect(
+        await stream.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop),
+      ).toBeLessThan(5);
+    }).toPass();
 
     // Following again: the next reply keeps its newest chunk pinned in view.
     await startStreaming(page);

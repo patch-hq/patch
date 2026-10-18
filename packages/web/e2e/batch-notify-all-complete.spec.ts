@@ -34,7 +34,9 @@ test.describe('"When all done" and post-check-in ordering', () => {
 
     await page.getByTestId('batch-start-all-done').click();
 
-    expect(posted).toEqual({ checkIn: { type: 'all-done' } });
+    // Polled: the click only starts the request; reading straight after it
+    // raced the browser on a loaded runner and saw nothing posted yet.
+    await expect.poll(() => posted).toEqual({ checkIn: { type: 'all-done' } });
     await expect(page.getByTestId('batch-checkin-time')).toContainText('when all done');
   });
 

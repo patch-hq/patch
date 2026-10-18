@@ -56,7 +56,9 @@ function collector(): {
   return { frames, emit, waitFor, text };
 }
 
-describe('TerminalSessions — PTY sessions', () => {
+// A real shell on a real PTY: on a loaded CI runner starting one can take
+// seconds, so the test may run as long as its own `until` deadline allows.
+describe('TerminalSessions — PTY sessions', { timeout: 20_000 }, () => {
   let dir: string;
   let sessions: TerminalSessions;
   let sink: ReturnType<typeof collector>;
@@ -160,8 +162,17 @@ describe('TerminalSessions — PTY sessions', () => {
   it('Ctrl-C interrupts the foreground command and the shell carries on', async () => {
     open();
     await sink.waitFor((e) => e.type === 'patch.terminal.ready', 'ready');
-    sessions.handle({ type: 'patch.terminal.input', sessionId: 'p1', data: 'sleep 30\r' });
-    await until('sleep 30');
+    // The marker is printed BY the foreground job, just before it becomes
+    // `sleep`, so once it shows the job is running. Waiting for the typed
+    // command's echo instead raced the shell: on a slow machine the interrupt
+    // landed before `sleep` had started, hit the prompt, and `sleep 30` then
+    // ran out the test. `$((40+2))` keeps the echo itself from matching.
+    sessions.handle({
+      type: 'patch.terminal.input',
+      sessionId: 'p1',
+      data: "sh -c 'echo up-$((40+2)); exec sleep 30'\r",
+    });
+    await until('up-42');
     sessions.handle({ type: 'patch.terminal.signal', sessionId: 'p1', signal: 'SIGINT' });
     sessions.handle({
       type: 'patch.terminal.input',

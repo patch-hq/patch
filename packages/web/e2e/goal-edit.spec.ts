@@ -29,7 +29,7 @@ for (const [name, viewport] of [
       await page.getByTestId('goal-edit-save').click();
       await expect(page.getByTestId('goal-edit-modal')).toHaveCount(0);
       await expect(page.getByTestId('goal-banner-text')).toHaveText(LONG);
-      expect(posted).toEqual({ goal: LONG });
+      await expect.poll(() => posted).toEqual({ goal: LONG });
     });
 
     test('a long goal is clamped to two readable lines; full text in the title', async ({

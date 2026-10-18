@@ -20,6 +20,7 @@ const OWN_PORT = process.env['PATCH_PW_PORT'] !== undefined;
 
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: './e2e/global-setup.ts',
   // Budgets sized for the machine this ACTUALLY runs on, which is never idle.
   //
   // The box hosts every agent's chats, so a deploy's browser suite routinely runs

@@ -34,6 +34,13 @@ vi.mock('../lib/monaco-loader.js', () => ({
 // script, not a one-liner), and jsdom cannot host the real editor. Stand in a
 // textarea carrying the same testid the field has always had, so the tests
 // below drive the command exactly as they did when it WAS a textarea.
+/**
+ * Edit a command the way Monaco does: from its own event handler, outside any
+ * React event — so the update is queued, not committed, when the call returns.
+ * Keyed by the editor's model path.
+ */
+const externalEdit = vi.hoisted(() => ({}) as Record<string, (text: string) => void>);
+
 vi.mock('@monaco-editor/react', async () => {
   const { useState } = await import('react');
   const Editor = (props: {
@@ -51,6 +58,10 @@ vi.mock('@monaco-editor/react', async () => {
     // every render would hide exactly the keystroke-dropping bug the field is
     // written to avoid.
     const [text, setText] = useState(props.defaultValue ?? props.value ?? '');
+    externalEdit[props.path ?? 'job-script-command'] = (next: string) => {
+      setText(next);
+      props.onChange?.(next);
+    };
     return (
       <textarea
         data-testid={props.path ?? 'job-script-command'}
@@ -2295,6 +2306,27 @@ describe('JobEditorRoute (single-page form)', () => {
       expect(screen.getByTestId('job-gate-on')).toBeChecked();
       expect(screen.getByTestId('job-gate-folder')).toHaveValue('/work');
       expect(screen.getByTestId('job-gate-timeout')).toHaveValue('120000');
+    });
+
+    it('an edit that has not rendered yet is still what Save sends, even after another field changes', async () => {
+      // A slow machine saved "t" and "…|| exit " for a fully typed command: the
+      // editor's change was queued, then another field's handler and Save ran
+      // against the render before it.
+      const calls: Array<{ body: unknown }> = [];
+      vi.stubGlobal(
+        'fetch',
+        gatedRoutes((body) => calls.push({ body })),
+      );
+      renderEdit();
+      const cmd = (await screen.findByTestId('job-gate-command')) as HTMLTextAreaElement;
+      await waitFor(() => expect(cmd.value).toBe(GATED.gate.command));
+      externalEdit['job-gate-command']!('test -s queue || exit 1');
+      fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'Foreman 2' } });
+      fireEvent.click(screen.getByTestId('job-save'));
+      await waitFor(() => expect(calls.length).toBe(1));
+      const body = calls[0]?.body as { name: string; gate: { command: string } };
+      expect(body.gate.command).toBe('test -s queue || exit 1');
+      expect(body.name).toBe('Foreman 2');
     });
 
     it('unticking posts gate: null — an omitted key would leave the stored one', async () => {

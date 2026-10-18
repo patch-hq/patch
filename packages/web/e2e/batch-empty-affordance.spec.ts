@@ -59,7 +59,7 @@ test.describe('empty batch view', () => {
 
     await page.getByTestId('batch-start-20').click();
 
-    expect(posted).toEqual({ checkIn: { type: 'time', minutes: 20 } });
+    await expect.poll(() => posted).toEqual({ checkIn: { type: 'time', minutes: 20 } });
     await expect(page.getByTestId('batch-checkin-time')).toBeVisible();
     await expect(page.getByTestId('batch-empty')).toHaveCount(0);
   });

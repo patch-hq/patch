@@ -77,7 +77,7 @@ test.describe('⌘F focuses the page search field', () => {
 
     await page.keyboard.press(`${MOD}+f`);
 
-    expect(await focusedTestId(page)).toBe('jobs-search');
+    await expect.poll(() => focusedTestId(page)).toBe('jobs-search');
     const selected = await page.getByTestId('jobs-search').evaluate((el) => {
       const i = el as HTMLInputElement;
       return i.value.slice(i.selectionStart ?? 0, i.selectionEnd ?? 0);
@@ -95,8 +95,10 @@ test.describe('⌘F focuses the page search field', () => {
 
     await page.keyboard.press(`${MOD}+f`);
 
-    // The chat's own find bar takes it (spec/14 § Find in chat).
-    expect(await focusedTestId(page)).toBe('chat-find-input');
+    // The chat's own find bar takes it (spec/14 § Find in chat). Polled: the bar
+    // mounts and focuses its input a render after the key, which a slow runner
+    // had not reached yet when this was read once.
+    await expect.poll(() => focusedTestId(page)).toBe('chat-find-input');
   });
 
   test('over a chat, ⌘K lands on the sidebar chat search but ⌘F opens find-in-chat', async ({
@@ -112,14 +114,14 @@ test.describe('⌘F focuses the page search field', () => {
     await prose.click();
 
     await page.keyboard.press(`${MOD}+f`);
-    expect(await focusedTestId(page)).toBe('chat-find-input');
+    await expect.poll(() => focusedTestId(page)).toBe('chat-find-input');
     expect(await focusedTestId(page)).not.toBe('chat-search');
 
     // While the find bar is open it is the view's own field and ⌘K prefers it;
     // closed, ⌘K falls to the sidebar's global search.
     await page.keyboard.press('Escape');
     await page.keyboard.press(`${MOD}+k`);
-    expect(await focusedTestId(page)).toBe('chat-search');
+    await expect.poll(() => focusedTestId(page)).toBe('chat-search');
   });
 
   test('⌘K lands on the same field', async ({ page }) => {
@@ -130,6 +132,6 @@ test.describe('⌘F focuses the page search field', () => {
 
     await page.keyboard.press(`${MOD}+k`);
 
-    expect(await focusedTestId(page)).toBe('jobs-search');
+    await expect.poll(() => focusedTestId(page)).toBe('jobs-search');
   });
 });

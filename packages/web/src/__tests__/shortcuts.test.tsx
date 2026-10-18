@@ -510,7 +510,7 @@ describe('useShortcuts — quote / voice / editor chords', () => {
       press({ key: 'D', code: 'KeyD', metaKey: true, shiftKey: true });
       vi.advanceTimersByTime(900);
       window.dispatchEvent(new KeyboardEvent('keyup', { key: 'D', code: 'KeyD', bubbles: true }));
-      expect(handlers.onVoiceHoldEnd).toHaveBeenCalledWith(900);
+      expect(handlers.onVoiceHoldEnd).toHaveBeenCalledWith(900, expect.any(Number));
 
       window.dispatchEvent(
         new KeyboardEvent('keydown', { code: 'Space', ctrlKey: true, bubbles: true }),
@@ -518,6 +518,28 @@ describe('useShortcuts — quote / voice / editor chords', () => {
       vi.advanceTimersByTime(40);
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', bubbles: true }));
       expect(handlers.onGlobalVoiceEnd).toHaveBeenCalledWith(40);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('measures a hold between the key events themselves, not between when their handlers ran', () => {
+    // A page busy opening the mic ran the keyup handler late; timed by the
+    // handlers, a quick tap read as a hold and committed on release.
+    vi.useFakeTimers();
+    try {
+      const stamped = (type: string, init: KeyboardEventInit, at: number): KeyboardEvent => {
+        const e = new KeyboardEvent(type, { bubbles: true, ...init });
+        Object.defineProperty(e, 'timeStamp', { value: at });
+        return e;
+      };
+      window.dispatchEvent(
+        stamped('keydown', { key: 'D', code: 'KeyD', metaKey: true, shiftKey: true }, 1000),
+      );
+      expect(handlers.onVoiceHoldStart).toHaveBeenCalledWith(1000);
+      vi.advanceTimersByTime(900);
+      window.dispatchEvent(stamped('keyup', { key: 'D', code: 'KeyD' }, 1100));
+      expect(handlers.onVoiceHoldEnd).toHaveBeenCalledWith(100, 1100);
     } finally {
       vi.useRealTimers();
     }

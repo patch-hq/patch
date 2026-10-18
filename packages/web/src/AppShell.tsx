@@ -498,15 +498,15 @@ export function AppShell(): JSX.Element {
           })
           .catch((err) => pushError(`editor: ${(err as Error).message}`));
       },
-      onVoiceHoldStart: () => {
+      onVoiceHoldStart: (at) => {
         if (!activeChatId) return;
         // The dictate chord dictates into the open chat's composer, exactly like
         // its mic button (lib/composerMic.ts). Only with no such composer on
         // screen is it a press-and-hold voice note (mode 1, PTT gesture: release sends).
-        if (!composerHotkeyDown(activeChatId)) void startVoiceNote(activeChatId, 'ptt');
+        if (!composerHotkeyDown(activeChatId, at)) void startVoiceNote(activeChatId, 'ptt');
       },
-      onVoiceHoldEnd: (heldMs) => {
-        if (composerHotkeyUp()) return;
+      onVoiceHoldEnd: (heldMs, at) => {
+        if (composerHotkeyUp(at)) return;
         // A real press-and-hold commits on release; a chord tap opens a sustained
         // session instead (spec/07 ## Voice-input modes — mode 1).
         releaseVoiceNoteHold(heldMs);

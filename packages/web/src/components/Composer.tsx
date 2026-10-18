@@ -1308,7 +1308,7 @@ export const Composer = forwardRef(function Composer(
   // Leaving the chat (or unmounting) must release the microphone.
   useEffect(() => stopDictationMode, [chatId]);
 
-  function onMicDown(): void {
+  function onMicDown(at: number): void {
     if (dictModeRef.current) {
       stopDictationMode();
       return;
@@ -1332,13 +1332,13 @@ export const Composer = forwardRef(function Composer(
       void commitRecording();
       return;
     }
-    pressAt.current = Date.now();
+    pressAt.current = at;
     if (noteMode) beginNote('ptt');
     else void beginRecording();
   }
-  function onMicUp(): void {
+  function onMicUp(at: number): void {
     if (pressAt.current === null) return;
-    const held = Date.now() - pressAt.current;
+    const held = at - pressAt.current;
     pressAt.current = null;
     // A NOTE's gesture lives in the STORE, and the release rule is the same one
     // the ⌘⇧D / ⌃Space hotkeys use — a quick tap opens a sustained session (⏎
@@ -1386,8 +1386,8 @@ export const Composer = forwardRef(function Composer(
   useEffect(() => {
     if (noteMode) return;
     return registerComposerMic(chatId, {
-      down: () => micHandlersRef.current.down(),
-      up: () => micHandlersRef.current.up(),
+      down: (at) => micHandlersRef.current.down(at),
+      up: (at) => micHandlersRef.current.up(at),
     });
   }, [chatId, noteMode]);
 
@@ -2078,10 +2078,10 @@ export const Composer = forwardRef(function Composer(
             // menu (onContextMenu), and its own mousedown must not also start
             // a hold-to-talk recording.
             onMouseDown={(e) => {
-              if (e.button === 0) onMicDown();
+              if (e.button === 0) onMicDown(e.timeStamp);
             }}
             onMouseUp={(e) => {
-              if (e.button === 0) onMicUp();
+              if (e.button === 0) onMicUp(e.timeStamp);
             }}
             onContextMenu={(e) => {
               if (voiceDisabled || noteMode || noteActive || micState !== 'idle' || dictModeOn) {
@@ -2090,9 +2090,9 @@ export const Composer = forwardRef(function Composer(
               }
               micMenu.openAt(e);
             }}
-            onMouseLeave={() => {
+            onMouseLeave={(e) => {
               // Pointer left while holding: commit (release-sends / release-dictates).
-              if (pressAt.current !== null) onMicUp();
+              if (pressAt.current !== null) onMicUp(e.timeStamp);
             }}
             disabled={voiceDisabled || micState === 'transcribing'}
           >

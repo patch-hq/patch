@@ -2182,8 +2182,8 @@ describe('Composer', () => {
       const mic = composerMicFor('c1');
       expect(mic).toBeDefined();
       act(() => {
-        mic!.down();
-        mic!.up();
+        mic!.down(1000);
+        mic!.up(1050);
       });
       await waitFor(() => expect(preview.opened()).toBe(1));
       preview.emit('from the');
@@ -2191,8 +2191,8 @@ describe('Composer', () => {
         expect(screen.getByTestId('composer-live-partial').textContent).toBe('from the'),
       );
       act(() => {
-        mic!.down();
-        mic!.up();
+        mic!.down(1000);
+        mic!.up(1050);
       });
       await waitFor(() => expect(input().value).toBe('from the hotkey'));
       expect(onSend).not.toHaveBeenCalled();

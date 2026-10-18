@@ -37,6 +37,9 @@ const LONG_PAUSE_MS = 13_000;
  * is doing.
  */
 async function quickTap(mic: Locator): Promise<void> {
+  // A disabled button (the composer before its host reports in) gets no
+  // mousedown at all, so a tap dispatched straight after load did nothing.
+  await expect(mic).toBeEnabled();
   await mic.evaluate((el) => {
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));

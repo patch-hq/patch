@@ -411,22 +411,18 @@ describe('/chats/new', () => {
     const composer = screen.getByTestId('composer-input');
     fireEvent.change(composer, { target: { value: 'immediate message' } });
 
-    const start = Date.now();
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
 
-    // Well under the 800ms spawn-confirmation window the old code blocked on —
-    // this would time out on the pre-fix code, which never even called
-    // `addLocalMessage`/`navigate` until that window closed.
-    await waitFor(
-      () => {
-        expect(document.querySelector('.msg-user')).not.toBeNull();
-      },
-      { timeout: 400, interval: 10 },
+    // On screen in the very render that cleared the composer — before the
+    // create request has even returned, let alone the spawn been confirmed.
+    // Asserted with no clock: a stopwatch here ("under 400 ms") measured the
+    // machine as much as the app.
+    expect(screen.getByTestId('new-chat-pending-message').textContent).toContain(
+      'immediate message',
     );
-    expect(Date.now() - start).toBeLessThan(400);
+    // Then the new chat's route takes over, with the message in its transcript.
+    await waitFor(() => expect(screen.getByTestId('chat-main')).toBeInTheDocument());
     expect(document.querySelector('.msg-user')?.textContent).toContain('immediate message');
-    // The new chat's route is genuinely up, not a stale /chats/new render.
-    expect(screen.getByTestId('chat-main')).toBeInTheDocument();
   });
 
   // The other half of spec/14 §8 § New-chat setup row: once the first message

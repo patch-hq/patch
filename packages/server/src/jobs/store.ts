@@ -115,14 +115,15 @@ export class JobStore implements JobsInterface {
   }
 
   private startWatcher(): void {
-    // Watch the directory itself (depth 1). Polling is more reliable than
-    // FSEvents on macOS in test/CI environments where filesystem
-    // notifications can be lossy or delayed.
+    // Watch the directory itself, natively (inotify / fs.watch). NOT polling:
+    // a polling watcher takes its baseline stat of the directory only after it
+    // has said `ready`, so a file written in that gap is part of the baseline
+    // and is never reported at all — under load the gap grew long enough to
+    // lose an external edit for good. A native watcher is registered before
+    // `ready` and the kernel queues what happens after.
     this.watcher = chokidar.watch(this.jobsDir, {
       ignoreInitial: true,
       depth: 0,
-      usePolling: true,
-      interval: 50,
       awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
       // Security M1: refuse symlinks. /data/jobs is container-internal but
       // a stray symlink could redirect a watcher event toward /etc.

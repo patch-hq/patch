@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 
 // Real-browser e2e for the live dictation preview (spec/07 § Dictation into the
 // composer): while the mic runs, the host's interim transcript is painted
@@ -112,6 +112,45 @@ async function stubVoiceRoutes(page: import('@playwright/test').Page): Promise<v
   );
 }
 
+/**
+ * Tap the mic: down and up in one page-side call, so the press is unambiguously
+ * a tap. Waits for the button first — a disabled one (the composer before its
+ * host reports in) gets no mousedown at all, and a tap dispatched straight after
+ * load on a slow runner did nothing.
+ */
+async function tapMic(mic: Locator): Promise<void> {
+  await expect(mic).toBeEnabled();
+  await mic.evaluate((el) => {
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+}
+
+/**
+ * Tap a chord as a person does: down, then up 50 ms later BY THE EVENTS' OWN
+ * CLOCK. `keyboard.press` sends the keyup only once the page has handled the
+ * keydown, so on a loaded runner the two were seconds apart and the tap read
+ * as a hold (which commits on release). The app times a hold by the events'
+ * `timeStamp`, and this sets them.
+ */
+async function tapChord(
+  page: Page,
+  code: 'KeyD' | 'KeyM',
+  mods: { meta?: boolean; shift?: boolean; alt?: boolean },
+): Promise<void> {
+  // The chord reaches the composer's mic, which ignores it while disabled.
+  await expect(page.getByTestId('voice-note-btn')).toBeEnabled();
+  const cdp = await page.context().newCDPSession(page);
+  const modifiers = (mods.alt ? 1 : 0) | (mods.meta ? 4 : 0) | (mods.shift ? 8 : 0);
+  const letter = code.slice(3);
+  const key = mods.shift ? letter : letter.toLowerCase();
+  const base = { modifiers, key, code, windowsVirtualKeyCode: letter.charCodeAt(0) };
+  const at = Date.now() / 1000;
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base, timestamp: at });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base, timestamp: at + 0.05 });
+  await cdp.detach();
+}
+
 test.describe('composer dictation — live preview', () => {
   test('⌘⇧D dictates into the composer: grey while talking, ⌘⇧D again keeps it', async ({
     page,
@@ -129,29 +168,36 @@ test.describe('composer dictation — live preview', () => {
     await page.goto(`${CHAT}&ws=fake`);
     const input = page.getByTestId('composer-input');
     await input.click();
-    // Warm the mic path once (start, then Esc): a cold dev server can stall
-    // the first keydown past the 220 ms tap threshold, turning the tap into a
-    // hold that commits on release.
-    await page.keyboard.press('Meta+Shift+KeyD');
+    // Start and cancel once first, so the run below is not also the mic's
+    // first ever start.
+    await tapChord(page, 'KeyD', { meta: true, shift: true });
     await expect(page.getByTestId('voice-note-btn')).toHaveAttribute('aria-pressed', 'true');
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('voice-note-btn')).toHaveAttribute('aria-pressed', 'false');
     await expect(input).toHaveValue('');
 
-    await page.keyboard.press('Meta+Shift+KeyD');
+    await tapChord(page, 'KeyD', { meta: true, shift: true });
     await expect(page.getByTestId('composer-live-partial')).toHaveText(
       /^\s*remind me to water the$/,
     );
     // Not the voice-note overlay: the words are in the box, not above it.
     await expect(page.getByTestId('voice-note-overlay')).toHaveCount(0);
 
-    await page.keyboard.press('Meta+Shift+KeyD');
+    await tapChord(page, 'KeyD', { meta: true, shift: true });
     await expect(input).toHaveValue('water the ferns');
     await expect(page.getByTestId('composer-live-preview')).toHaveCount(0);
-    const sent = await page.evaluate(() =>
-      JSON.stringify((window as unknown as { __wsSent: unknown[] }).__wsSent),
+    // Nothing was SENT as a message. The draft sync (`composer_draft.set`)
+    // rightly carries the text to other surfaces — it is what is in the box —
+    // and under load its debounce fired before this read, so the check is on
+    // the frames that would post a turn, not on every frame.
+    const turns = await page.evaluate(() =>
+      JSON.stringify(
+        (window as unknown as { __wsSent: Array<{ type: string }> }).__wsSent.filter(
+          (f) => f.type === 'chat.input',
+        ),
+      ),
     );
-    expect(sent).not.toContain('water the ferns');
+    expect(turns).not.toContain('water the ferns');
   });
 
   test('a chord rebound in Settings drives dictation, and ⌘⇧D no longer does', async ({ page }) => {
@@ -166,9 +212,9 @@ test.describe('composer dictation — live preview', () => {
     await stubVoiceRoutes(page);
     await page.goto(`${CHAT}&ws=fake`);
     await page.getByTestId('composer-input').click();
-    await page.keyboard.press('Meta+Shift+KeyD');
+    await tapChord(page, 'KeyD', { meta: true, shift: true });
     await expect(page.getByTestId('voice-note-btn')).toHaveAttribute('aria-pressed', 'false');
-    await page.keyboard.press('Meta+Alt+KeyM');
+    await tapChord(page, 'KeyM', { meta: true, alt: true });
     await expect(page.getByTestId('voice-note-btn')).toHaveAttribute('aria-pressed', 'true');
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('voice-note-btn')).toHaveAttribute('aria-pressed', 'false');
@@ -191,10 +237,7 @@ test.describe('composer dictation — live preview', () => {
     const input = page.getByTestId('composer-input');
 
     await input.fill('please');
-    await mic.evaluate((el) => {
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    });
+    await tapMic(mic);
     await expect(page.getByTestId('composer-live-partial')).toHaveText(
       /^\s*remind me to water the$/,
     );
@@ -246,10 +289,7 @@ test.describe('composer dictation — live preview', () => {
 
     // Type first: the preview has to follow the user's own text, not replace it.
     await input.fill('note:');
-    await mic.evaluate((el) => {
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    });
+    await tapMic(mic);
 
     // The second pass REPLACES the first rather than appending to it — the
     // interim text is a fresh read of the whole prefix each time, and the
@@ -311,10 +351,7 @@ test.describe('composer dictation — live preview', () => {
         body: JSON.stringify({ transcript: 'water the plants' }),
       }),
     );
-    await mic.evaluate((el) => {
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    });
+    await tapMic(mic);
     await expect(page.getByTestId('composer-live-preview')).toHaveCount(0);
   });
 });

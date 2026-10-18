@@ -5,9 +5,13 @@
 // screen) does the chord fall back to a voice note. Each such
 // composer registers its mic here so AppShell can reach it.
 
+/**
+ * `at` is the gesture's event `timeStamp` (keyboard or pointer). A hold is
+ * measured between two of them, never from when a handler happened to run.
+ */
 export interface ComposerMic {
-  down(): void;
-  up(): void;
+  down(at: number): void;
+  up(at: number): void;
 }
 
 const mics = new Map<string, ComposerMic>();
@@ -28,16 +32,16 @@ export function composerMicFor(chatId: string): ComposerMic | undefined {
 let hotkeyMic: ComposerMic | null = null;
 
 /** Dictate chord pressed with `chatId` open. False when no composer took it (→ voice note). */
-export function composerHotkeyDown(chatId: string): boolean {
+export function composerHotkeyDown(chatId: string, at: number): boolean {
   hotkeyMic = mics.get(chatId) ?? null;
-  hotkeyMic?.down();
+  hotkeyMic?.down(at);
   return hotkeyMic !== null;
 }
 
 /** Dictate chord released. False when the press was not a composer's (→ voice note). */
-export function composerHotkeyUp(): boolean {
+export function composerHotkeyUp(at: number): boolean {
   const mic = hotkeyMic;
   hotkeyMic = null;
-  mic?.up();
+  mic?.up(at);
   return mic !== null;
 }
