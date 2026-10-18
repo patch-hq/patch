@@ -273,9 +273,19 @@ describe('the dark palette is muted, not brightened', () => {
   // push these back up without also having to change these numbers and say why.
   it('holds every other accent + state hue below the neon line', () => {
     for (const token of [...STATE_HUES, '--term-stderr', '--git-pending']) {
+      if (token === '--waiting') continue; // its own rule, below
       const s = saturation(dark(token));
       expect(s, `${token} is ${s.toFixed(1)}% saturated`).toBeLessThanOrEqual(50);
     }
+  });
+
+  // The working (responding) dot was deliberately made a TRUE orange in dark
+  // theme (3bb29ec2), which the cap above would mute. It is a dot, never a
+  // fill, so it may go past the line — but only so far.
+  it('lets the working dot be a true orange, short of neon', () => {
+    const s = saturation(dark('--waiting'));
+    expect(s, `--waiting is ${s.toFixed(1)}% saturated`).toBeGreaterThan(50);
+    expect(s, `--waiting is ${s.toFixed(1)}% saturated`).toBeLessThanOrEqual(85);
   });
 
   // ...but it is still colour, not grey. Muting to the point of neutrality
