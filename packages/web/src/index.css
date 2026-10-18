@@ -181,7 +181,7 @@
   --accent-tint: #252e1f;
 
   --running: #77a966;
-  --waiting: #c8ac6a;
+  --waiting: #e8873a;
   /* A dusty indigo — the light-mode #574fa6 goes muddy against the dark panel.
      The ONE cool hue in a warm palette, so it stays clearly blue-dominant at
      badge size however far the chroma comes down. 6.3:1 on `--bg-panel`. */
@@ -260,7 +260,7 @@
     --accent-tint: #252e1f;
 
     --running: #77a966;
-    --waiting: #c8ac6a;
+    --waiting: #e8873a;
     /* Dusty indigo — see the explicit dark block above. 6.3:1 on `--bg-panel`. */
     --permission: #a39ad0;
     --voice: #ca887d;
