@@ -43,6 +43,8 @@ export interface ContextMenuItem {
 export interface ContextMenuAnchor {
   x: number;
   y: number;
+  /** The element the menu was opened on; only scrolling IT away closes the menu. */
+  source?: Element;
 }
 
 /** Clear space kept between the menu and the window edges. */
@@ -72,10 +74,10 @@ export function useContextMenu(): {
     // the row it belongs to.
     if (e.clientX === 0 && e.clientY === 0) {
       const box = e.currentTarget.getBoundingClientRect();
-      setAnchor({ x: box.left, y: box.bottom });
+      setAnchor({ x: box.left, y: box.bottom, source: e.currentTarget });
       return;
     }
-    setAnchor({ x: e.clientX, y: e.clientY });
+    setAnchor({ x: e.clientX, y: e.clientY, source: e.currentTarget });
   }, []);
 
   const close = useCallback((): void => setAnchor(null), []);
@@ -182,7 +184,20 @@ export function ContextMenu({
     // it would leave it hanging over a different chat, still holding the first
     // one's actions. Capture, because the sidebar list scrolls in its own box
     // and that scroll event never reaches `window` by bubbling.
-    function onViewportChange(): void {
+    // Only a scroll that moves the opener counts: another pane scrolling (a
+    // reply streaming in and auto-scrolling its transcript) leaves the opener
+    // where it was, and closing then would yank the menu from under the user.
+    const source = anchor.source;
+    function onViewportChange(e: Event): void {
+      const scrolled = e.target;
+      if (
+        source !== undefined &&
+        scrolled instanceof Node &&
+        scrolled !== document &&
+        !scrolled.contains(source)
+      ) {
+        return;
+      }
       onClose();
     }
 

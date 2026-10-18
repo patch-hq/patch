@@ -368,6 +368,23 @@ describe('sidebar row context menu', () => {
     fireEvent.scroll(screen.getByTestId('chat-row-c1'));
     expect(screen.queryByTestId(MENU)).toBeNull();
   });
+
+  it('stays open when something else scrolls — a transcript auto-scrolling as a reply streams', () => {
+    useChatStore.getState().hydrate([rowFixture()]);
+    renderSidebar();
+    const transcript = document.createElement('div');
+    document.body.appendChild(transcript);
+    try {
+      rightClick(screen.getByTestId('chat-row-c1'));
+      fireEvent.scroll(transcript);
+      expect(screen.getByTestId(MENU)).toBeInTheDocument();
+      // The page itself scrolling still moves the row, so that still closes it.
+      fireEvent.scroll(document);
+      expect(screen.queryByTestId(MENU)).toBeNull();
+    } finally {
+      transcript.remove();
+    }
+  });
 });
 
 describe('sidebar row context menu over a multi-selection', () => {

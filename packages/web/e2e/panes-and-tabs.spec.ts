@@ -16,27 +16,21 @@ function paneTabs(page: Page): Locator {
 }
 
 /**
- * Right-click a sidebar row and wait for its context menu — retrying the
- * right-click itself (not the whole test) a few times first. This box runs
- * every agent's chats at once, and
- * a `contextmenu` landing in the same tick as this fixture's own live-updating
- * wake countdown can lose the race under that load; a stray right-click that
- * opens nothing is the symptom, not a product bug, and worth one retry rather
- * than a flaky spec.
+ * Right-click a sidebar row and wait for its context menu. The row is scrolled
+ * into view FIRST, and two frames allowed to pass: Playwright's own
+ * scroll-into-view inside `click` dispatches its `scroll` event a frame later —
+ * after the menu has opened — and the menu correctly closes when the list
+ * under it scrolls. Whether the row needs scrolling depends on the sidebar's
+ * time-based order, which is why this only failed on some machines.
  */
 async function openRowMenu(page: Page, testId: string): Promise<void> {
   const row = page.getByTestId(testId);
-  const menu = page.locator('[role="menu"]');
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await row.click({ button: 'right' });
-    try {
-      await menu.waitFor({ state: 'visible', timeout: 3000 });
-      return;
-    } catch {
-      /* retry */
-    }
-  }
-  await menu.waitFor({ state: 'visible' });
+  await row.scrollIntoViewIfNeeded();
+  await page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  );
+  await row.click({ button: 'right' });
+  await page.locator('[role="menu"]').waitFor({ state: 'visible' });
 }
 
 test.describe('panes and tabs — opening', () => {
