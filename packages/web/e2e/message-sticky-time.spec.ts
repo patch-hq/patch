@@ -59,11 +59,12 @@ test('the time stays on the right: at the message top, then pinned to the viewpo
   expect(p2.y).toBeLessThan(sbox.y + 40);
   expect(Math.abs(p2.x - p1.x)).toBeLessThan(1);
 
-  // Hover reveals it in the same column, a few pixels lower than at rest.
-  await expect(pill).toHaveCSS('opacity', '0');
+  // Already in its hover state without hovering; hovering changes nothing.
+  await expect(pill).toHaveCSS('opacity', '1');
+  await expect(pill).toHaveCSS('transform', 'none');
   await msg.hover({ position: { x: 100, y: 200 } });
   await expect(pill).toHaveCSS('opacity', '1');
-  await expect(pill).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+  await expect(pill).toHaveCSS('transform', 'none');
   const p3 = (await pill.boundingBox())!;
   expect(Math.abs(p3.x - p1.x)).toBeLessThan(1);
 });

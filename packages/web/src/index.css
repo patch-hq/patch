@@ -3925,8 +3925,8 @@ a.ch-row:hover {
    `sticky` for as long as any of the message is still in view (the rail is its
    containing block, so it never leaves the message). Sticky offsets are
    measured inside `.chat-stream`'s 32px top padding, so 8px below the visible
-   edge is 8px less that padding. Hover only fades it in and settles it down a
-   few pixels; it never changes side. */
+   edge is 8px less that padding. Always drawn as the hover state — hover
+   changes nothing; position is the only thing that moves. */
 .msg-time {
   position: sticky;
   top: -24px;
@@ -3938,22 +3938,6 @@ a.ch-row:hover {
   color: var(--ink-faint);
   font-size: var(--text-min);
   line-height: 1.3;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
-}
-.msg:hover .msg-time,
-.msg:focus-within .msg-time {
-  opacity: 1;
-  transform: translateY(0);
-}
-@media (hover: none) {
-  .msg-time {
-    opacity: 1;
-    transform: none;
-  }
 }
 .msg-meta {
   position: absolute;

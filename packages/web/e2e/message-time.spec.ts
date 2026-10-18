@@ -42,7 +42,7 @@ function assistantMessage(seq: number, createdAt?: number): WireEvent {
 }
 
 test.describe('hovering a message shows the real time it arrived', () => {
-  test('the time shows a clock time, hidden until hover', async ({ page }) => {
+  test('the time shows a clock time, always visible', async ({ page }) => {
     await page.goto(HARNESS);
     // "Now" is pinned to the same moment the message arrived, so this turn
     // reads as today regardless of the day this test actually runs.
@@ -58,10 +58,9 @@ test.describe('hovering a message shows the real time it arrived', () => {
     });
     await expect(time).toHaveText(expected);
 
-    // Subtle: present in the layout, invisible at rest, revealed on hover.
-    await expect(time).toHaveCSS('opacity', '0');
-    await page.locator('[data-testid="msg"][data-message-at]').hover();
+    // Always drawn as the hover state: no hover needed.
     await expect(time).toHaveCSS('opacity', '1');
+    await expect(time).toHaveCSS('transform', 'none');
   });
 
   test('the meta strip names the host and model', async ({ page }) => {
