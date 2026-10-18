@@ -36,8 +36,6 @@
 // live STT `audio.transcript_partial` frames feed the call bar's running
 // transcript. NO FALLBACK: if the sink can't init the call is torn down and the
 // error surfaced — never a live-looking call bar that plays no audio back.
-// (Related: full Android `AUDIOFOCUS_GAIN` vs expo-av's duck-only flag still
-// awaits a native audio-focus module.)
 //
 // VOICE ENGINE (spec/07 § Voice — a config matrix). Nothing in this file is
 // specific to the `local` pipeline. `gemini` (Gemini Live) and `openai` (OpenAI

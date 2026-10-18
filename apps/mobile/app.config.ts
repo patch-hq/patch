@@ -13,7 +13,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.1.4',
+  version: '0.1.5',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -52,7 +52,10 @@ const config: ExpoConfig = {
   // Bumped to 0.1.4 for PatchCrash (plugins/withCrashCapture.js): startup asks
   // that module for the last native crash and throws when it is missing (NO
   // FALLBACK), so this JS must not reach a 0.1.3 APK.
-  runtimeVersion: '0.1.4',
+  //
+  // Bumped to 0.1.5 for headset routing in VoiceAudioService (communication mode
+  // + setCommunicationDevice): native, so it needs a fresh APK.
+  runtimeVersion: '0.1.5',
   updates: {
     url: `https://u.expo.dev/${EAS_PROJECT_ID}`,
     // Check on launch and download in the background; the update is LAUNCHED

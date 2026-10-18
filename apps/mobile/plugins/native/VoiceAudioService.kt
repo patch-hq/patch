@@ -9,9 +9,11 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 /**
  * Foreground service that keeps the voice session (mic + audio focus) alive
@@ -64,6 +66,8 @@ class VoiceAudioService : Service() {
   }
 
   private var focusRequest: AudioFocusRequest? = null
+  private var previousMode: Int? = null
+  private var scoStarted = false
   private var chat: String? = null
   private var mode: String = "call"
   private var muted: Boolean = false
@@ -76,12 +80,14 @@ class VoiceAudioService : Service() {
         // A press on End call has to end the CALL, not just the service —
         // otherwise the app is left holding a session with no notification.
         actionListener?.invoke("stop")
+        releaseHeadsetRoute()
         abandonAudioFocus()
         stopForegroundCompat()
         stopSelf()
         return START_NOT_STICKY
       }
       ACTION_STOP -> {
+        releaseHeadsetRoute()
         abandonAudioFocus()
         stopForegroundCompat()
         stopSelf()
@@ -103,11 +109,13 @@ class VoiceAudioService : Service() {
     }
     ensureChannel()
     requestAudioFocus()
+    routeToHeadset()
     startForeground(NOTIFICATION_ID, buildNotification())
     return START_STICKY
   }
 
   override fun onDestroy() {
+    releaseHeadsetRoute()
     abandonAudioFocus()
     super.onDestroy()
   }
@@ -137,6 +145,53 @@ class VoiceAudioService : Service() {
       )
     }
   }
+
+  // VOICE_COMMUNICATION audio follows the call route, which only reaches a
+  // wired or Bluetooth headset once Android is in communication mode and that
+  // device is chosen. Without this the reply plays from the phone speaker.
+  private fun routeToHeadset() {
+    val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    if (previousMode == null) previousMode = manager.mode
+    manager.mode = AudioManager.MODE_IN_COMMUNICATION
+    val headset = headsetTypes
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val device = manager.availableCommunicationDevices.firstOrNull { it.type in headset }
+      if (device == null) {
+        Log.i("PatchVoiceAudio", "no headset connected; using the phone's own route")
+      } else if (!manager.setCommunicationDevice(device)) {
+        Log.w("PatchVoiceAudio", "setCommunicationDevice refused ${device.type}")
+      }
+    } else {
+      @Suppress("DEPRECATION")
+      if (manager.isWiredHeadsetOn) {
+        manager.isSpeakerphoneOn = false
+      } else if (manager.isBluetoothScoAvailableOffCall) {
+        manager.startBluetoothSco()
+        scoStarted = true
+      }
+    }
+  }
+
+  private fun releaseHeadsetRoute() {
+    val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      manager.clearCommunicationDevice()
+    } else if (scoStarted) {
+      @Suppress("DEPRECATION") manager.stopBluetoothSco()
+      scoStarted = false
+    }
+    previousMode?.let { manager.mode = it }
+    previousMode = null
+  }
+
+  private val headsetTypes =
+    setOf(
+      AudioDeviceInfo.TYPE_WIRED_HEADSET,
+      AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+      AudioDeviceInfo.TYPE_USB_HEADSET,
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      AudioDeviceInfo.TYPE_BLE_HEADSET,
+    )
 
   private fun abandonAudioFocus() {
     val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
