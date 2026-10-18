@@ -609,6 +609,35 @@ export const api = {
     return parsed as { ok: true; transcript: string };
   },
   /**
+   * spec/07 § Dictation mode — ask whether the speaker has finished: the host
+   * runs Smart Turn on the clip so far. Any non-2xx throws with its reason.
+   */
+  voiceTurnCheck: async (fileUri: string): Promise<{ ok: true; probability: number }> => {
+    const cred = loadCredential();
+    const headers = new Headers();
+    if (cred) headers.set('authorization', `Bearer ${cred}`);
+    const form = new FormData();
+    form.append('audio', { uri: fileUri, name: 'turn.wav', type: 'audio/wav' } as unknown as Blob);
+    const res = await fetch(apiUrl('/api/voice/turn-check'), {
+      method: 'POST',
+      headers,
+      body: form as unknown as BodyInit,
+    });
+    const text = await res.text();
+    let parsed: unknown = null;
+    if (text.length > 0) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+    }
+    if (!res.ok) {
+      throw new ApiError(res.status, errorMessageFrom(parsed, res.status), parsed);
+    }
+    return parsed as { ok: true; probability: number };
+  },
+  /**
    * spec/15 § Composer — upload one composer attachment (image or file) for a
    * chat to `POST /api/chats/:chatId/attachment`. Multipart, so it builds the
    * FormData itself (RN accepts a `{uri,name,type}` object as the file part, the

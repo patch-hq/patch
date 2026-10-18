@@ -13,6 +13,7 @@ import { useUiStore } from '../../stores/uiStore.js';
 import { chordFromEvent, chordGlyphs } from '../../lib/dictateChord.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
 import { PairVoiceDevice } from '../../components/PairVoiceDevice.js';
+import { Toggle } from '../../components/Toggle.js';
 import { patchShared } from './sharedWrite.js';
 import { DeviceRow, useDevices } from './DevicesPage.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
@@ -113,13 +114,25 @@ export function VoicePage(): JSX.Element {
   );
 }
 
-/** Dictation mode's pause: quiet this long sends what was said (spec/07 § Dictation mode). */
+/**
+ * Dictation mode (spec/07 § Dictation mode): whether Smart Turn decides when
+ * the speaker has finished, and the silence that sends regardless.
+ */
 function DictationGroup(): JSX.Element {
   const pause = usePreferencesStore((s) => s.preferences.dictationPauseSeconds);
+  const detect = usePreferencesStore((s) => s.preferences.dictationTurnDetection);
   const loaded = usePreferencesStore((s) => s.loaded);
   return (
     <Group label="Dictation mode" testid="settings-voice-dictation">
-      <Row title="Send after a pause of">
+      <Row title="Detect when I've finished" testid="dictation-turn-detection">
+        <Toggle
+          checked={detect}
+          disabled={!loaded}
+          onChange={(next) => void patchShared('turn detection', { dictationTurnDetection: next })}
+          testid="dictation-turn-detection-toggle"
+        />
+      </Row>
+      <Row title={detect ? 'Send anyway after a pause of' : 'Send after a pause of'}>
         <Pills
           label="Dictation pause"
           options={DICTATION_PAUSE_CHOICES}

@@ -14,6 +14,16 @@ import { fileURLToPath } from 'node:url';
  * the known location of a file the build put there. Returns undefined from a
  * source checkout, where the rig names VAD_MODEL_PATH explicitly.
  */
+/** Dictation mode's Smart Turn model, beside the bundled host like the VAD's. */
+function bundledTurnModelPath(): string | undefined {
+  try {
+    const candidate = join(dirname(fileURLToPath(import.meta.url)), 'smart_turn.onnx');
+    return existsSync(candidate) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function bundledVadModelPath(): string | undefined {
   try {
     const candidate = join(dirname(fileURLToPath(import.meta.url)), 'silero_vad.onnx');
@@ -152,6 +162,12 @@ export interface HostConfig {
     vadBackend: 'silero' | 'mock';
     /** Path to silero_vad.onnx (required for vadBackend='silero'). */
     vadModelPath: string | undefined;
+    /**
+     * Smart Turn model for dictation mode's end-of-turn check (TURN_MODEL_PATH,
+     * else the artifact's own copy). Undefined from a source checkout that names
+     * none: a turn check is then answered `model_unavailable`.
+     */
+    turnModelPath: string | undefined;
     /** Hard cap on concurrent voice sessions. Default 4 (Groq) / 3 (local). */
     maxConcurrentSessions: number;
     /**
@@ -340,6 +356,10 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
         env['VAD_MODEL_PATH'] !== undefined && env['VAD_MODEL_PATH'] !== ''
           ? env['VAD_MODEL_PATH']
           : bundledVadModelPath(),
+      turnModelPath:
+        env['TURN_MODEL_PATH'] !== undefined && env['TURN_MODEL_PATH'] !== ''
+          ? env['TURN_MODEL_PATH']
+          : bundledTurnModelPath(),
       maxConcurrentSessions,
       geminiApiKey: env['GEMINI_API_KEY'],
       geminiLiveModel: env['GEMINI_LIVE_MODEL'],

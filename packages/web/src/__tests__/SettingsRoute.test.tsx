@@ -877,9 +877,22 @@ describe('Settings → Voice', () => {
     loadShared();
     renderSettings('/settings/voice');
     const pills = await screen.findByTestId('dictation-pause');
-    expect(pills.querySelector('[aria-pressed="true"]')).toHaveTextContent('3s');
+    expect(pills.querySelector('[aria-pressed="true"]')).toHaveTextContent('10s');
     fireEvent.click(within(pills).getByText('5s'));
     await waitFor(() => expect(server.writes).toContainEqual({ dictationPauseSeconds: 5 }));
+  });
+
+  it('Dictation mode: turn detection is on by default and can be turned off', async () => {
+    const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    loadShared();
+    renderSettings('/settings/voice');
+    const toggle = await screen.findByTestId('dictation-turn-detection-toggle');
+    expect(screen.getByTestId('settings-voice-dictation')).toHaveTextContent(
+      'Send anyway after a pause of',
+    );
+    fireEvent.click(toggle);
+    await waitFor(() => expect(server.writes).toContainEqual({ dictationTurnDetection: false }));
   });
 
   describe('Speaking (shared by every host)', () => {

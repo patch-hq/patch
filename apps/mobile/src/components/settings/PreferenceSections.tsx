@@ -228,18 +228,36 @@ export function VoicePage(): React.ReactElement {
       <SettingsSection title="Dictation mode" testID="settings-voice-dictation">
         <WithSettings testID="voice-dictation">
           {(data) => (
-            <Row title="Send after a pause of" testID="dictation-pause-row" stack>
-              <Chips
-                options={DICTATION_PAUSE_CHOICES}
-                selected={String(data.preferences.dictationPauseSeconds) as DictationPauseChoice}
-                testIDPrefix="dictation-pause"
-                labelPrefix="Dictation pause"
-                labelOf={(c) => `${c}s`}
-                onSelect={(c) =>
-                  void patchShared('Dictation pause', { dictationPauseSeconds: Number(c) })
+            <>
+              <ToggleRow
+                label="Detect when I've finished"
+                testID="dictation-turn-detection"
+                value={data.preferences.dictationTurnDetection}
+                onChange={(next) =>
+                  void patchShared('Turn detection', { dictationTurnDetection: next })
                 }
               />
-            </Row>
+              <Row
+                title={
+                  data.preferences.dictationTurnDetection
+                    ? 'Send anyway after a pause of'
+                    : 'Send after a pause of'
+                }
+                testID="dictation-pause-row"
+                stack
+              >
+                <Chips
+                  options={DICTATION_PAUSE_CHOICES}
+                  selected={String(data.preferences.dictationPauseSeconds) as DictationPauseChoice}
+                  testIDPrefix="dictation-pause"
+                  labelPrefix="Dictation pause"
+                  labelOf={(c) => `${c}s`}
+                  onSelect={(c) =>
+                    void patchShared('Dictation pause', { dictationPauseSeconds: Number(c) })
+                  }
+                />
+              </Row>
+            </>
           )}
         </WithSettings>
       </SettingsSection>

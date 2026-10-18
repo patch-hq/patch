@@ -138,4 +138,81 @@ describe('dictation mode', () => {
   it('encodes a 16k mono wav', () => {
     expect(pcm16ToWavBlob(new Int16Array(100)).size).toBe(244);
   });
+
+  describe('turn detection', () => {
+    function withTurnCheck(answer: (n: number) => Promise<{ probability: number }>) {
+      const r = fakeRecorder();
+      const texts: string[] = [];
+      const errors: string[] = [];
+      const turnCheck = vi.fn(async (_c: Blob) => answer(turnCheck.mock.calls.length));
+      const transcribe = vi.fn(async () => ({
+        transcript: `said ${transcribe.mock.calls.length}`,
+      }));
+      const mode = startDictationMode(
+        { recorderFactory: r.factory, transcribe, turnCheck, segmenter: { silenceMs: 10_000 } },
+        { onText: (t) => texts.push(t), onBusy: () => {}, onError: (m) => errors.push(m) },
+      );
+      return { r, mode, texts, errors, turnCheck, transcribe };
+    }
+
+    it('sends at a short pause once the model says the turn is finished', async () => {
+      const t = withTurnCheck(async () => ({ probability: 0.9 }));
+      await t.mode.ready;
+      t.r.feed(speech, 800);
+      t.r.feed(quiet, 760);
+      await flush();
+      await flush();
+      expect(t.turnCheck).toHaveBeenCalledOnce();
+      expect(t.turnCheck.mock.calls[0]![0].type).toBe('audio/wav');
+      expect(t.texts).toEqual(['said 1']);
+    });
+
+    it('keeps listening through a pause the model calls unfinished, and sends the whole thing later', async () => {
+      const t = withTurnCheck(async (n) => ({ probability: n === 1 ? 0.1 : 0.95 }));
+      await t.mode.ready;
+      t.r.feed(speech, 800);
+      t.r.feed(quiet, 1500);
+      await flush();
+      expect(t.texts).toEqual([]);
+      t.r.feed(speech, 800);
+      t.r.feed(quiet, 760);
+      await flush();
+      await flush();
+      expect(t.turnCheck).toHaveBeenCalledTimes(2);
+      expect(t.transcribe).toHaveBeenCalledOnce();
+      expect(t.texts).toEqual(['said 1']);
+    });
+
+    it('a finished verdict that lands after speech resumed does not cut the sentence', async () => {
+      let release: (v: { probability: number }) => void = () => {};
+      const t = withTurnCheck((n) =>
+        n === 1
+          ? new Promise((r) => {
+              release = r;
+            })
+          : Promise.resolve({ probability: 0.2 }),
+      );
+      await t.mode.ready;
+      t.r.feed(speech, 800);
+      t.r.feed(quiet, 760);
+      t.r.feed(speech, 400);
+      release({ probability: 0.99 });
+      await flush();
+      expect(t.transcribe).not.toHaveBeenCalled();
+    });
+
+    it('a failed check is shown, and the long silence still sends', async () => {
+      const t = withTurnCheck(async () => {
+        throw new Error('the host did not answer the turn check');
+      });
+      await t.mode.ready;
+      t.r.feed(speech, 800);
+      t.r.feed(quiet, 760);
+      await flush();
+      expect(t.errors).toEqual(['voice turn check failed: the host did not answer the turn check']);
+      t.r.feed(quiet, 10_000);
+      await flush();
+      expect(t.texts).toEqual(['said 1']);
+    });
+  });
 });

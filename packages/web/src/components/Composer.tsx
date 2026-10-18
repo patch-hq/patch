@@ -1255,10 +1255,10 @@ export const Composer = forwardRef(function Composer(
     setMicState('idle');
   }
 
-  // Dictation mode (spec/07 § Dictation mode): right-click the mic and it stays
-  // open — each time the speaker goes quiet for a few seconds what they said is
-  // sent as its own message, and it keeps listening. Clicking the mic or Esc
-  // ends it. Not a call: nothing speaks back.
+  // Dictation mode (spec/07 § Dictation mode): right-click the mic → Keep
+  // dictating, and it stays open — each time the speaker finishes what they
+  // said is sent as its own message, and it keeps listening. Clicking the mic
+  // or Esc ends it. Not a call: nothing speaks back.
   const [dictModeOn, setDictModeOn] = useState(false);
   const [dictPending, setDictPending] = useState(0);
   const dictModeRef = useRef<DictationMode | null>(null);
@@ -1276,12 +1276,12 @@ export const Composer = forwardRef(function Composer(
       return;
     }
     const factory = dictationModeFactory ?? startDictationMode;
+    const prefs = usePreferencesStore.getState().preferences;
     const mode = factory(
       {
         transcribe: (c: Blob) => api.voiceTranscribe(c),
-        segmenter: {
-          silenceMs: usePreferencesStore.getState().preferences.dictationPauseSeconds * 1000,
-        },
+        ...(prefs.dictationTurnDetection ? { turnCheck: (c: Blob) => api.voiceTurnCheck(c) } : {}),
+        segmenter: { silenceMs: prefs.dictationPauseSeconds * 1000 },
       },
       {
         onText: (t: string) => {
@@ -1434,6 +1434,16 @@ export const Composer = forwardRef(function Composer(
   }, [running, offline]);
 
   const sendMenu = useContextMenu();
+  // Right-click the mic: the ways to dictate beyond a plain click.
+  const micMenu = useContextMenu();
+  const micMenuItems: ContextMenuItem[] = [
+    {
+      id: 'keep-dictating',
+      label: 'Keep dictating',
+      icon: <Mic size={14} aria-hidden />,
+      run: () => startDictMode(),
+    },
+  ];
   const [scheduling, setScheduling] = useState<{ at: string; error: string | null } | null>(null);
 
   /** Local `YYYY-MM-DDTHH:mm` for a datetime-local input, defaulting to an hour out. */
@@ -1823,7 +1833,7 @@ export const Composer = forwardRef(function Composer(
           data-state={dictPending > 0 ? 'transcribing' : 'recording'}
           role="status"
         >
-          {dictPending > 0 ? 'Dictating… sending' : 'Dictating… pause to send'}
+          {dictPending > 0 ? 'Dictating… sending' : 'Dictating…'}
         </div>
       ) : null}
       {micState !== 'idle' ? (
@@ -2064,8 +2074,8 @@ export const Composer = forwardRef(function Composer(
                     ? 'Transcribing…'
                     : shortcutTitle('Dictate', chordGlyphs(dictateChord))
             }
-            // Only the primary button dictates: a right-click is dictation
-            // mode (onContextMenu), and its own mousedown must not also start
+            // Only the primary button dictates: a right-click opens the mic
+            // menu (onContextMenu), and its own mousedown must not also start
             // a hold-to-talk recording.
             onMouseDown={(e) => {
               if (e.button === 0) onMicDown();
@@ -2074,8 +2084,11 @@ export const Composer = forwardRef(function Composer(
               if (e.button === 0) onMicUp();
             }}
             onContextMenu={(e) => {
-              e.preventDefault();
-              startDictMode();
+              if (voiceDisabled || noteMode || noteActive || micState !== 'idle' || dictModeOn) {
+                e.preventDefault();
+                return;
+              }
+              micMenu.openAt(e);
             }}
             onMouseLeave={() => {
               // Pointer left while holding: commit (release-sends / release-dictates).
@@ -2226,6 +2239,13 @@ export const Composer = forwardRef(function Composer(
           )}
         </div>
       </div>
+      <ContextMenu
+        anchor={micMenu.anchor}
+        items={micMenuItems}
+        onClose={micMenu.close}
+        label="Dictation"
+        testId="mic-menu"
+      />
       <ContextMenu
         anchor={sendMenu.anchor}
         items={sendMenuItems}

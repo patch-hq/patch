@@ -85,4 +85,65 @@ describe('utterance segmenter', () => {
     feed(seg, speech, 500);
     expect(feed(seg, quiet, 1200)).toHaveLength(1);
   });
+
+  describe('end-of-turn pauses', () => {
+    function withPauses() {
+      const pauses: { pcm: Int16Array; seq: number }[] = [];
+      const seg = createUtteranceSegmenter({
+        silenceMs: 10_000,
+        pauseMs: 600,
+        onPause: (pcm, seq) => pauses.push({ pcm, seq }),
+      });
+      return { seg, pauses };
+    }
+
+    it('reports a short pause once, with the utterance so far, and keeps listening', () => {
+      const { seg, pauses } = withPauses();
+      feed(seg, speech, 1000);
+      expect(feed(seg, quiet, 560)).toHaveLength(0);
+      expect(pauses).toHaveLength(0);
+      feed(seg, quiet, 40);
+      expect(pauses).toHaveLength(1);
+      expect(pauses[0]!.pcm.length).toBeGreaterThanOrEqual(1000 * 16);
+      feed(seg, quiet, 2000);
+      expect(pauses).toHaveLength(1);
+      expect(seg.speaking).toBe(true);
+    });
+
+    it('cut ends the utterance at that pause', () => {
+      const { seg, pauses } = withPauses();
+      feed(seg, speech, 1000);
+      feed(seg, quiet, 600);
+      const out = seg.cut(pauses[0]!.seq);
+      expect(out!.length).toBeGreaterThanOrEqual(1600 * 16);
+      expect(seg.speaking).toBe(false);
+      expect(seg.cut(pauses[0]!.seq)).toBeNull();
+    });
+
+    it('a cut that arrives after speech resumed does nothing, and the next pause is reported', () => {
+      const { seg, pauses } = withPauses();
+      feed(seg, speech, 1000);
+      feed(seg, quiet, 600);
+      feed(seg, speech, 400);
+      expect(seg.cut(pauses[0]!.seq)).toBeNull();
+      expect(seg.speaking).toBe(true);
+      feed(seg, quiet, 600);
+      expect(pauses).toHaveLength(2);
+      expect(pauses[1]!.pcm.length).toBeGreaterThan(pauses[0]!.pcm.length);
+      expect(seg.cut(pauses[1]!.seq)).not.toBeNull();
+    });
+
+    it('a blip too short to be speech is never reported as a pause', () => {
+      const { seg, pauses } = withPauses();
+      feed(seg, speech, 120);
+      feed(seg, quiet, 1000);
+      expect(pauses).toHaveLength(0);
+    });
+
+    it('the long silence still ends an utterance nobody cut', () => {
+      const { seg } = withPauses();
+      feed(seg, speech, 1000);
+      expect(feed(seg, quiet, 10_000)).toHaveLength(1);
+    });
+  });
 });

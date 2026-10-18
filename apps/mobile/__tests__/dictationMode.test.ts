@@ -5,7 +5,10 @@ const voiceTranscribeMock = vi.fn(async (_uri: string) => ({
   ok: true as const,
   transcript: ' hi ',
 }));
-vi.mock('../src/api/rest', () => ({ api: { voiceTranscribe: voiceTranscribeMock } }));
+const voiceTurnCheckMock = vi.fn(async (_uri: string) => ({ ok: true as const, probability: 0.9 }));
+vi.mock('../src/api/rest', () => ({
+  api: { voiceTranscribe: voiceTranscribeMock, voiceTurnCheck: voiceTurnCheckMock },
+}));
 
 let onFrame: ((pcm: Int16Array) => void) | undefined;
 let onMicError: ((m: string) => void) | undefined;
@@ -33,18 +36,22 @@ beforeEach(() => {
   onFrame = undefined;
   onMicError = undefined;
   voiceTranscribeMock.mockResolvedValue({ ok: true, transcript: ' hi ' });
+  voiceTurnCheckMock.mockResolvedValue({ ok: true, probability: 0.9 });
 });
 
-async function start() {
+async function start(options?: import('../src/lib/dictationMode').DictationModeOptions) {
   const { startDictationMode } = await import('../src/lib/dictationMode');
   const texts: string[] = [];
   const errors: string[] = [];
   const busy: number[] = [];
-  const h = startDictationMode({
-    onText: (t) => texts.push(t),
-    onError: (m) => errors.push(m),
-    onBusy: (n) => busy.push(n),
-  });
+  const h = startDictationMode(
+    {
+      onText: (t) => texts.push(t),
+      onError: (m) => errors.push(m),
+      onBusy: (n) => busy.push(n),
+    },
+    options,
+  );
   await flush();
   return { h, texts, errors, busy };
 }
@@ -115,5 +122,57 @@ describe('mobile dictation mode', () => {
     expect(texts).toEqual([]);
     await h.stop();
     expect(stopMicCaptureMock).toHaveBeenCalledOnce();
+  });
+
+  describe('turn detection', () => {
+    const detecting = { turnDetection: true, segmenter: { silenceMs: 10_000 } };
+
+    it('sends at a short pause once the host says the turn is finished', async () => {
+      const { texts } = await start(detecting);
+      feed(speech, 800);
+      feed(quiet, 760);
+      await flush();
+      expect(voiceTurnCheckMock).toHaveBeenCalledOnce();
+      expect(voiceTurnCheckMock.mock.calls[0]![0]).toMatch(/turn-check-.*\.wav$/);
+      expect(texts).toEqual(['hi']);
+    });
+
+    it('keeps listening through a pause called unfinished', async () => {
+      voiceTurnCheckMock.mockResolvedValueOnce({ ok: true, probability: 0.1 });
+      const { texts } = await start(detecting);
+      feed(speech, 800);
+      feed(quiet, 2000);
+      await flush();
+      expect(texts).toEqual([]);
+      feed(speech, 800);
+      feed(quiet, 760);
+      await flush();
+      expect(voiceTranscribeMock).toHaveBeenCalledOnce();
+      expect(texts).toEqual(['hi']);
+    });
+
+    it('shows a failed check and still sends at the long silence', async () => {
+      voiceTurnCheckMock.mockRejectedValueOnce(
+        new Error('daemon_timeout: the host may need updating'),
+      );
+      const { texts, errors } = await start(detecting);
+      feed(speech, 800);
+      feed(quiet, 760);
+      await flush();
+      expect(errors).toEqual([
+        'voice turn check failed: daemon_timeout: the host may need updating',
+      ]);
+      feed(quiet, 10_000);
+      await flush();
+      expect(texts).toEqual(['hi']);
+    });
+
+    it('never asks when turn detection is off', async () => {
+      await start({ segmenter: { silenceMs: 3000 } });
+      feed(speech, 800);
+      feed(quiet, 3200);
+      await flush();
+      expect(voiceTurnCheckMock).not.toHaveBeenCalled();
+    });
   });
 });

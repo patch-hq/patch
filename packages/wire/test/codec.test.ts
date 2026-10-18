@@ -1280,6 +1280,17 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     format: 'm4a',
     audioBase64: 'AAECAwQ=',
   },
+  'patch.voice.turn_check_request': {
+    type: 'patch.voice.turn_check_request',
+    requestId: 'tc-1',
+    audioBase64: 'UklGRg==',
+  },
+  'patch.voice.turn_check_response': {
+    type: 'patch.voice.turn_check_response',
+    requestId: 'tc-1',
+    ok: true,
+    probability: 0.93,
+  },
   'patch.voice_note.transcribe_response': {
     type: 'patch.voice_note.transcribe_response',
     requestId: 'vn1',

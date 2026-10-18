@@ -18,6 +18,14 @@ export interface UtteranceSegmenterOptions {
   preRollMs?: number;
   /** An utterance still running at this length is flushed anyway. */
   maxUtteranceMs?: number;
+  /**
+   * A shorter quiet after speech at which to ask whether the speaker has
+   * finished (dictation mode's end-of-turn check). Fires `onPause` once per
+   * quiet stretch with the utterance so far; the utterance carries on until
+   * `cut` ends it or `silenceMs` does.
+   */
+  pauseMs?: number;
+  onPause?: (pcm: Int16Array, seq: number) => void;
 }
 
 export const DEFAULT_SILENCE_MS = 3000;
@@ -27,6 +35,12 @@ export interface UtteranceSegmenter {
   push(pcm: Int16Array): Int16Array | null;
   /** True between the first loud frame and the end of the utterance. */
   readonly speaking: boolean;
+  /**
+   * End the utterance now and return it — but only if nothing loud has been
+   * heard since the pause numbered `seq`. A late "finished" verdict must not
+   * chop off speech that resumed while it was being worked out.
+   */
+  cut(seq: number): Int16Array | null;
 }
 
 export function frameRms(pcm: Int16Array): number {
@@ -59,6 +73,7 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
   const minSpeechSamples = (opts.minSpeechMs ?? 300) * perMs;
   const preRollSamples = (opts.preRollMs ?? 300) * perMs;
   const maxSamples = (opts.maxUtteranceMs ?? 120_000) * perMs;
+  const pauseSamples = opts.pauseMs === undefined ? Infinity : opts.pauseMs * perMs;
 
   let preRoll: Int16Array[] = [];
   let preRollLen = 0;
@@ -67,6 +82,9 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
   let loud = 0; // samples of loud frames in this utterance
   let quiet = 0; // trailing quiet samples
   let speaking = false;
+  // Counts loud frames across the session, so a pause can be named by it.
+  let heard = 0;
+  let paused = false;
 
   function finish(): Int16Array | null {
     const out = loud >= minSpeechSamples ? concat(chunks) : null;
@@ -75,12 +93,17 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
     loud = 0;
     quiet = 0;
     speaking = false;
+    paused = false;
     return out;
   }
 
   return {
     get speaking(): boolean {
       return speaking;
+    },
+    cut(seq: number): Int16Array | null {
+      if (!speaking || seq !== heard) return null;
+      return finish();
     },
     push(pcm: Int16Array): Int16Array | null {
       const isLoud = frameRms(pcm) >= speechRms;
@@ -104,10 +127,16 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
       if (isLoud) {
         loud += pcm.length;
         quiet = 0;
+        heard++;
+        paused = false;
       } else {
         quiet += pcm.length;
       }
       if (quiet >= silenceSamples || total >= maxSamples) return finish();
+      if (!paused && quiet >= pauseSamples && loud >= minSpeechSamples) {
+        paused = true;
+        opts.onPause?.(concat(chunks), heard);
+      }
       return null;
     },
   };

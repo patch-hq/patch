@@ -8,6 +8,8 @@
 //                                              dist/, and <target>/ = its napi-v6 prebuild
 //   <out>/models/silero_vad.onnx               snakers4/silero-vad at a pinned tag, checked
 //                                              against a pinned sha256
+//   <out>/models/smart_turn.onnx               pipecat-ai/smart-turn-v3 (v3.2, CPU) at a pinned
+//                                              commit, checked against a pinned sha256
 //
 // Run `pnpm install` first: the onnxruntime files come from the install, which
 // is what ties them to the version the host is built against.
@@ -43,6 +45,11 @@ export const NODE_PIN = '22.23.2';
 export const SILERO = {
   url: 'https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/src/silero_vad/data/silero_vad.onnx',
   sha256: '1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3',
+};
+/** Dictation mode's end-of-turn model (BSD-2), ~8.7 MB. */
+export const SMART_TURN = {
+  url: 'https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/smart-turn-v3.2-cpu.onnx',
+  sha256: '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f',
 };
 export const TARGETS = {
   'darwin-arm64': { platform: 'darwin', arch: 'arm64' },
@@ -128,6 +135,16 @@ async function fetchSilero(out) {
   console.log('silero_vad.onnx: v6.2.1');
 }
 
+async function fetchSmartTurn(out) {
+  const file = join(out, 'models', 'smart_turn.onnx');
+  if (existsSync(file) && sha256(readFileSync(file)) === SMART_TURN.sha256) return console.log('smart_turn.onnx: present');
+  const body = await download(SMART_TURN.url);
+  if (sha256(body) !== SMART_TURN.sha256) throw new Error('smart_turn.onnx does not match its pinned checksum');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, body);
+  console.log('smart_turn.onnx: v3.2-cpu');
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const val = (n) => args.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3);
@@ -140,6 +157,7 @@ async function main() {
   for (const t of targets) await fetchNode(resolve(out), t);
   fetchOnnx(resolve(out), targets);
   await fetchSilero(resolve(out));
+  await fetchSmartTurn(resolve(out));
   console.log(`vendor ready: ${resolve(out)}`);
 }
 

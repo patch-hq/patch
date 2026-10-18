@@ -21,6 +21,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   findHost,
   byLabel,
+  byTestId,
   byType,
   renderRN,
   update,
@@ -332,7 +333,9 @@ describe('Composer — send while dictating', () => {
 describe('Composer — dictation mode (long-press the mic)', () => {
   beforeEach(() => {
     useSettingsStore.setState({
-      data: { preferences: { dictationPauseSeconds: 5 } } as unknown as SettingsResponse,
+      data: {
+        preferences: { dictationPauseSeconds: 5, dictationTurnDetection: true },
+      } as unknown as SettingsResponse,
       error: null,
     });
   });
@@ -348,9 +351,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     });
     useSettingsStore.setState({ data: null, error: null, load });
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
+    await keepDictating(r);
     await flush();
     expect(load).toHaveBeenCalledOnce();
     expect(factory).not.toHaveBeenCalled();
@@ -362,10 +363,11 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   it('cuts utterances at the pause set in Settings', async () => {
     const { factory } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
+    await keepDictating(r);
+    expect(vi.mocked(factory).mock.calls[0]![1]).toEqual({
+      segmenter: { silenceMs: 5000 },
+      turnDetection: true,
     });
-    expect(vi.mocked(factory).mock.calls[0]![1]).toEqual({ silenceMs: 5000 });
   });
 
   const mic = (r: ReturnType<typeof renderRN>): Record<string, (e?: unknown) => void> =>
@@ -381,6 +383,26 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     // Retention has to be much wider than the button itself: it is what stops
     // Pressability declaring a LEAVE_PRESS_RECT during a long hold.
     expect(props['pressRetentionOffset']).toBeGreaterThanOrEqual(60);
+  });
+
+  /** Long-press the mic, then Keep dictating from its menu. */
+  async function keepDictating(r: ReturnType<typeof renderRN>): Promise<void> {
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
+    });
+    await actAsync(() => {
+      findHost(r.root, byTestId('mic-menu-keep-dictating')).props['onPress']();
+    });
+  }
+
+  it('long-press offers Keep dictating in a menu, and does not start it by itself', async () => {
+    const { factory } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
+    });
+    expect(factory).not.toHaveBeenCalled();
+    expect(findHost(r.root, byTestId('mic-menu-keep-dictating'))).toBeTruthy();
   });
 
   function makeModeFactory() {
@@ -410,9 +432,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   it('long-press opens dictation mode, and each utterance is sent as its own message', async () => {
     const { factory, calls } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
+    await keepDictating(r);
     expect(calls).toHaveLength(1);
     expect(r.root.findAllByProps({ testID: 'dictation-mode-status' }).length).toBeGreaterThan(0);
     await actAsync(() => {
@@ -433,9 +453,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   it('shows Sending… while a transcript is pending', async () => {
     const { factory, calls } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
+    await keepDictating(r);
     await actAsync(() => {
       calls[0]!.onBusy(1);
     });
@@ -445,9 +463,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   it('a tap on the mic ends dictation mode', async () => {
     const { factory, calls } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
+    await keepDictating(r);
     await actAsync(() => {
       mic(r)['onPress']!();
     });
@@ -458,9 +474,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   it('the stop control ends dictation mode', async () => {
     const { factory, calls } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
+    await keepDictating(r);
     await actAsync(() => {
       findHost(r.root, byLabel('Stop dictation mode')).props['onPress']();
     });
@@ -470,9 +484,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   it('surfaces a dictation-mode error', async () => {
     const { factory, calls } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
+    await keepDictating(r);
     await actAsync(() => {
       calls[0]!.onError('dictation setup failed: denied');
     });
@@ -484,9 +496,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   it('unmounting releases the mic', async () => {
     const { factory, calls } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await actAsync(() => {
-      mic(r)['onLongPress']!();
-    });
+    await keepDictating(r);
     await actAsync(() => {
       r.unmount();
     });

@@ -40,6 +40,7 @@ const SETTING_KEYS: Record<string, string> = {
   'sync-position': 'syncPosition',
   'kokoro-voice': 'kokoroVoice',
   'dictation-pause': 'dictationPauseSeconds',
+  'turn-detection': 'dictationTurnDetection',
   memory: 'harnessMemoryEnabled',
 };
 

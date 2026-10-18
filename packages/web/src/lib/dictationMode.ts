@@ -1,7 +1,8 @@
 // Dictation mode (spec/07 § Dictation mode): the composer's mic left open.
-// The user keeps talking; each time they go quiet for a few seconds what they
-// said is transcribed and handed to `onText` (the composer sends it), then the
-// mic carries on listening for the next thing. It is not a call — no agent
+// The user keeps talking; each time they finish — Smart Turn, asked at every
+// short pause, says so, or a long silence does — what they said is transcribed
+// and handed to `onText` (the composer sends it), then the mic carries on
+// listening for the next thing. It is not a call — no agent
 // speaks back — it is dictation that does not need a button press per message.
 //
 // One microphone capture for the whole session (`startRecording`), tapped via
@@ -20,8 +21,18 @@ const SAMPLE_RATE = 16000;
 export interface DictationModeDeps {
   recorderFactory?: () => Promise<VoiceRecording>;
   transcribe: (clip: Blob) => Promise<{ transcript: string }>;
+  /**
+   * Has the speaker finished? Asked at each short pause; without it only the
+   * segmenter's long silence ends an utterance.
+   */
+  turnCheck?: (clip: Blob) => Promise<{ probability: number }>;
   segmenter?: UtteranceSegmenterOptions;
 }
+
+/** Quiet this long after speech asks the turn check. */
+export const TURN_CHECK_PAUSE_MS = 700;
+/** Smart Turn's own decision threshold. */
+export const TURN_COMPLETE = 0.5;
 
 export interface DictationModeCallbacks {
   /** A finished utterance's text, non-empty and trimmed. */
@@ -66,7 +77,28 @@ export function startDictationMode(
   deps: DictationModeDeps,
   cb: DictationModeCallbacks,
 ): DictationMode {
-  const segmenter = createUtteranceSegmenter({ sampleRate: SAMPLE_RATE, ...deps.segmenter });
+  const turnCheck = deps.turnCheck;
+  const segmenter = createUtteranceSegmenter({
+    sampleRate: SAMPLE_RATE,
+    ...deps.segmenter,
+    ...(turnCheck
+      ? {
+          pauseMs: TURN_CHECK_PAUSE_MS,
+          onPause: (pcm: Int16Array, seq: number): void => {
+            turnCheck(pcm16ToWavBlob(pcm)).then(
+              ({ probability }) => {
+                if (stopped || probability < TURN_COMPLETE) return;
+                const utterance = segmenter.cut(seq);
+                if (utterance) enqueue(utterance);
+              },
+              (e: Error) => {
+                if (!stopped) cb.onError(`voice turn check failed: ${e.message}`);
+              },
+            );
+          },
+        }
+      : {}),
+  });
   let stopped = false;
   let rec: VoiceRecording | null = null;
   let pending = 0;

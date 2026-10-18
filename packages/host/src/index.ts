@@ -191,6 +191,7 @@ import {
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startAudioServer, type AudioServerHandle } from './audio/server.js';
 import { createVoiceReplyBridge } from './audio/replyBridge.js';
+import { createSmartTurnDetector, pcmFromWav, type TurnDetector } from './audio/smartTurn.js';
 import { createChatVoice } from './audio/chatVoice.js';
 import { createVoiceLedger } from './audio/voiceLedger.js';
 import {
@@ -1425,6 +1426,25 @@ async function startHost(
   // for (hosted-stt.ts). Assigned alongside `whisper` at step 8; the
   // transcribe RPC below picks from them by `voiceConfig.dictation.backend`.
   let dictationTranscribers: DictationTranscribers | undefined;
+  // Smart Turn loads on the first turn check, not at boot: most hosts never
+  // see dictation mode. A failed load is not remembered, so the next check
+  // tries again and reports its own error.
+  let turnDetector: Promise<TurnDetector> | null = null;
+  const loadTurnDetector = (): Promise<TurnDetector> => {
+    const path = config.audio.turnModelPath;
+    if (path === undefined) {
+      return Promise.reject(
+        new TurnModelUnavailableError(
+          'this host has no Smart Turn model (smart_turn.onnx); set TURN_MODEL_PATH',
+        ),
+      );
+    }
+    turnDetector ??= createSmartTurnDetector(path).catch((err: Error) => {
+      turnDetector = null;
+      throw new TurnModelUnavailableError(err.message);
+    });
+    return turnDetector;
+  };
   // Meeting mode (meeting.ts). Built once the Daemon exists; the link handler and
   // the preprocessInput hook below only run after full wiring.
   let meetings: MeetingManager | undefined;
@@ -2180,6 +2200,11 @@ async function startHost(
           resolveOAuth: resolveModelOAuth,
           logger,
         });
+        return;
+      }
+      if (event.type === 'patch.voice.turn_check_request') {
+        // spec/07 § Dictation mode — has the speaker finished? Smart Turn.
+        void handleTurnCheck(event, loadTurnDetector, sender, logger);
         return;
       }
       if (event.type === 'patch.voice_note.transcribe_request') {
@@ -5194,6 +5219,58 @@ export async function handleVoiceNoteTranscribe(
       ok: false,
       error: { code, message: (err as Error).message },
     });
+  }
+}
+
+export class TurnModelUnavailableError extends Error {}
+
+/**
+ * Dictation mode's end-of-turn check (spec/07 § Dictation mode): the clip so
+ * far → Smart Turn's probability that the speaker has finished. Every failure
+ * is answered with its reason; nothing is dropped.
+ */
+export async function handleTurnCheck(
+  event: import('@patch/wire').PatchVoiceTurnCheckRequestEvent,
+  loadDetector: () => Promise<TurnDetector>,
+  sender: (e: WireEvent) => void,
+  logger: Logger,
+): Promise<void> {
+  const fail = (
+    code: 'unsupported_format' | 'model_unavailable' | 'internal',
+    message: string,
+  ): void => {
+    logger.warn({ code, err: message }, 'patch.voice.turn_check_request: failed');
+    sender({
+      type: 'patch.voice.turn_check_response',
+      requestId: event.requestId,
+      ok: false,
+      error: { code, message },
+    });
+  };
+  let pcm: Int16Array;
+  try {
+    pcm = pcmFromWav(Buffer.from(event.audioBase64, 'base64'));
+  } catch (err) {
+    fail('unsupported_format', (err as Error).message);
+    return;
+  }
+  let detector: TurnDetector;
+  try {
+    detector = await loadDetector();
+  } catch (err) {
+    fail('model_unavailable', (err as Error).message);
+    return;
+  }
+  try {
+    const probability = Math.min(1, Math.max(0, await detector.probability(pcm)));
+    sender({
+      type: 'patch.voice.turn_check_response',
+      requestId: event.requestId,
+      ok: true,
+      probability,
+    });
+  } catch (err) {
+    fail('internal', (err as Error).message);
   }
 }
 

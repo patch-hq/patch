@@ -170,7 +170,7 @@ interface Props {
   folder?: string;
   /** Test seam: inject a dictation-session factory in place of `lib/dictation`. */
   dictationFactory?: typeof startDictation;
-  /** Test seam: inject a dictation-mode (long-press) session factory. */
+  /** Test seam: inject a dictation-mode (long-press → Keep dictating) session factory. */
   dictationModeFactory?: typeof startDictationMode;
   /**
    * The new-chat screen's composer (spec/15 § New chat flow): `chatId` is then
@@ -768,9 +768,9 @@ export function Composer({
     }
   }
 
-  // Dictation mode (spec/07 § Dictation mode): long-press the mic and it stays
-  // open — each time the speaker goes quiet for a few seconds what they said is
-  // sent as its own message and it keeps listening. Tapping the mic or the
+  // Dictation mode (spec/07 § Dictation mode): long-press the mic → Keep
+  // dictating, and it stays open — each time the speaker finishes what they
+  // said is sent as its own message and it keeps listening. Tapping the mic or the
   // clear control ends it. Not a call: nothing speaks back.
   const [dictModeOn, setDictModeOn] = React.useState(false);
   const [dictPending, setDictPending] = React.useState(0);
@@ -782,6 +782,8 @@ export function Composer({
     setDictPending(0);
     if (h) void h.stop();
   }
+  // Long-press the mic: the ways to dictate beyond a plain tap.
+  const [micMenuOpen, setMicMenuOpen] = React.useState(false);
   function startDictMode(): void {
     // The pause is a shared setting; the store is normally loaded at launch.
     if (useSettingsStore.getState().data === null) {
@@ -803,7 +805,7 @@ export function Composer({
       useUiStore.getState().pushError(`voice: ${refusal}`);
       return;
     }
-    const pauseSeconds = useSettingsStore.getState().data!.preferences.dictationPauseSeconds;
+    const prefs = useSettingsStore.getState().data!.preferences;
     Keyboard.dismiss();
     inputRef.current?.blur();
     setDictModeOn(true);
@@ -820,7 +822,10 @@ export function Composer({
           useUiStore.getState().pushError(`voice: ${message}`);
         },
       },
-      { silenceMs: pauseSeconds * 1000 },
+      {
+        segmenter: { silenceMs: prefs.dictationPauseSeconds * 1000 },
+        turnDetection: prefs.dictationTurnDetection,
+      },
     );
   }
   React.useEffect(() => stopDictationMode, [chatId]);
@@ -1693,7 +1698,7 @@ export function Composer({
           onLongPress={() => {
             if (disabled) return;
             if (dictModeOn) stopDictationMode();
-            else if (micState === 'idle') startDictMode();
+            else if (micState === 'idle') setMicMenuOpen(true);
           }}
           disabled={disabled || micState === 'transcribing'}
           delayLongPress={350}
@@ -1869,6 +1874,19 @@ export function Composer({
           </Pressable>
         )}
       </View>
+      <AnchoredMenu
+        visible={micMenuOpen}
+        items={[
+          { id: 'keep-dictating', label: 'Keep dictating', testID: 'mic-menu-keep-dictating' },
+        ]}
+        onSelect={(id) => {
+          setMicMenuOpen(false);
+          if (id === 'keep-dictating') startDictMode();
+        }}
+        onDismiss={() => setMicMenuOpen(false)}
+        placement="bottom"
+        nonModal
+      />
       <AnchoredMenu
         visible={modeMenuOpen}
         items={modeItems}

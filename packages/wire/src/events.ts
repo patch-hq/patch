@@ -1956,7 +1956,7 @@ export type ClaudeSettingsSetting = z.infer<typeof ClaudeSettingsSetting>;
 export const DICTATION_PAUSE_SECONDS_MIN = 1;
 export const DICTATION_PAUSE_SECONDS_MAX = 30;
 /** The pauses Settings offers; any value in range can be set through the CLI. */
-export const DICTATION_PAUSE_CHOICES = ['1', '2', '3', '5', '8'] as const;
+export const DICTATION_PAUSE_CHOICES = ['2', '3', '5', '8', '10', '15'] as const;
 
 export const SharedSettings = z
   .object({
@@ -2014,11 +2014,17 @@ export const SharedSettings = z
     jobAutonomyPrompt: z.string().min(1),
     // ---- applied on every host ----
     voiceConfig: VoiceConfigSetting,
-    /** Dictation mode: quiet this long after speech sends what was said (spec/07 § Dictation mode). */
+    /**
+     * Dictation mode: quiet this long after speech sends what was said, finished
+     * or not (spec/07 § Dictation mode). With turn detection on, this is the
+     * backstop for a turn the model never called finished.
+     */
     dictationPauseSeconds: z
       .number()
       .min(DICTATION_PAUSE_SECONDS_MIN)
       .max(DICTATION_PAUSE_SECONDS_MAX),
+    /** Dictation mode asks Smart Turn at each short pause whether the speaker has finished. */
+    dictationTurnDetection: z.boolean(),
     /** Absent until one is chosen: each host then uses its Kokoro default. */
     kokoroVoice: z.string().min(1).optional(),
     permissionModeDefault: PermissionMode,
@@ -2097,7 +2103,8 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },
   },
-  dictationPauseSeconds: 3,
+  dictationPauseSeconds: 10,
+  dictationTurnDetection: true,
   permissionModeDefault: 'auto',
   chatNameInterval: 0,
   titleGenerationEnabled: true,
@@ -7321,6 +7328,39 @@ export type PatchVoiceNoteTranscribeResponseEvent = z.infer<
   typeof PatchVoiceNoteTranscribeResponseEvent
 >;
 
+/**
+ * Dictation mode's end-of-turn check (spec/07 § Dictation mode): server → host
+ * with what has been said so far, at a short silence; the host answers with
+ * Smart Turn's probability that the speaker has finished.
+ */
+export const PatchVoiceTurnCheckRequestEvent = z
+  .object({
+    type: z.literal('patch.voice.turn_check_request'),
+    requestId: z.string().min(1),
+    /** 16 kHz mono PCM16 WAV, base64 — only its last 8 s are looked at. */
+    audioBase64: z.string().min(1),
+  })
+  .strict();
+export type PatchVoiceTurnCheckRequestEvent = z.infer<typeof PatchVoiceTurnCheckRequestEvent>;
+
+export const PatchVoiceTurnCheckResponseEvent = z
+  .object({
+    type: z.literal('patch.voice.turn_check_response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** In [0, 1], present when `ok`. */
+    probability: z.number().min(0).max(1).optional(),
+    error: z
+      .object({
+        code: z.enum(['unsupported_format', 'model_unavailable', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchVoiceTurnCheckResponseEvent = z.infer<typeof PatchVoiceTurnCheckResponseEvent>;
+
 // ---------------------------------------------------------------------------
 // Composer attachment store (spec/14 & spec/15 § Composer — "Attachments").
 //
@@ -8286,6 +8326,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   // Voice-note clip transcription
   PatchVoiceNoteTranscribeRequestEvent,
   PatchVoiceNoteTranscribeResponseEvent,
+  PatchVoiceTurnCheckRequestEvent,
+  PatchVoiceTurnCheckResponseEvent,
   // Composer attachment store
   PatchAttachmentStoreRequestEvent,
   PatchAttachmentStoreResponseEvent,
@@ -8553,6 +8595,8 @@ export const EVENT_SCHEMAS = {
   'hook.agent_response_outcome': HookAgentResponseOutcomeEvent,
   'patch.voice_note.transcribe_request': PatchVoiceNoteTranscribeRequestEvent,
   'patch.voice_note.transcribe_response': PatchVoiceNoteTranscribeResponseEvent,
+  'patch.voice.turn_check_request': PatchVoiceTurnCheckRequestEvent,
+  'patch.voice.turn_check_response': PatchVoiceTurnCheckResponseEvent,
   'patch.attachment.store_request': PatchAttachmentStoreRequestEvent,
   'patch.attachment.store_response': PatchAttachmentStoreResponseEvent,
   'patch.artifact.publish_request': PatchArtifactPublishRequestEvent,

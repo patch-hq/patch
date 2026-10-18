@@ -766,6 +766,36 @@ export const api = {
     }
     return parsed as { ok: true; transcript: string };
   },
+  // POST /api/voice/turn-check — dictation mode asks whether the speaker has
+  // finished (spec/07 § Dictation mode). The host's own sentence on failure.
+  voiceTurnCheck: async (clip: Blob): Promise<{ ok: true; probability: number }> => {
+    const cred = loadCredential();
+    const headers = new Headers();
+    if (cred) headers.set('authorization', `Bearer ${cred}`);
+    const form = new FormData();
+    form.append('audio', clip, 'turn.wav');
+    const res = await fetch('/api/voice/turn-check', { method: 'POST', headers, body: form });
+    const text = await res.text();
+    let parsed: unknown = null;
+    if (text.length > 0) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+    }
+    if (!res.ok) {
+      const body = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+      const errMsg =
+        typeof body['message'] === 'string'
+          ? body['message']
+          : typeof body['error'] === 'string'
+            ? body['error']
+            : `HTTP ${res.status}`;
+      throw new ApiError(res.status, errMsg, parsed);
+    }
+    return parsed as { ok: true; probability: number };
+  },
   pushRegister: (token: string, platform: string) =>
     request<unknown>('/api/auth/push/register', {
       method: 'POST',

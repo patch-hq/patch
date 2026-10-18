@@ -91,6 +91,7 @@ describe('Composer — starting a dictation puts the keyboard away', () => {
     const { factory } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onLongPress']!());
+    await actAsync(() => findHost(r.root, byTestId('mic-menu-keep-dictating')).props.onPress());
     expect(dismissSpy).toHaveBeenCalledTimes(1);
   });
 

@@ -31,6 +31,11 @@ import type { ChatRegistry } from '../chat-registry.js';
 import type { HostLink } from '../host-link.js';
 
 const TRANSCRIBE_REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * A turn check is asked at a pause in speech, so a slow answer is a pause the
+ * speaker notices. A host that predates the check never answers at all.
+ */
+const TURN_CHECK_TIMEOUT_MS = 10_000;
 /** Reject clips larger than this before spending a host round-trip on them. */
 const MAX_CLIP_BYTES = 25 * 1024 * 1024;
 
@@ -257,6 +262,77 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     // injected. The caller echoes `text`, so its local bubble matches the
     // persisted turn and reconciles against it instead of duplicating.
     return reply.code(200).send({ ok: true, transcript: result.transcript, text });
+  });
+
+  const pendingTurn = new Map<
+    string,
+    {
+      resolve: (ev: Extract<WireEvent, { type: 'patch.voice.turn_check_response' }>) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
+  deps.hostLink.onEvent((event: WireEvent) => {
+    if (event.type !== 'patch.voice.turn_check_response') return;
+    const w = pendingTurn.get(event.requestId);
+    if (!w) return;
+    pendingTurn.delete(event.requestId);
+    clearTimeout(w.timeout);
+    w.resolve(event);
+  });
+
+  // POST /api/voice/turn-check — dictation mode (spec/07 § Dictation mode)
+  // asks, at a short silence, whether the speaker has finished. The host runs
+  // Smart Turn on the clip so far and answers with a probability.
+  app.post('/api/voice/turn-check', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const parsed = await parseAudio(req);
+    if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
+    const { audio, format } = parsed;
+    if (!audio || audio.byteLength === 0) {
+      return reply.code(400).send({ error: 'audio file is required' });
+    }
+    if (format !== 'wav') return reply.code(400).send({ error: 'a turn check takes a WAV clip' });
+    /* v8 ignore next 3 -- same @fastify/multipart fileSize guard as /voice/note. */
+    if (audio.byteLength > MAX_CLIP_BYTES) {
+      return reply.code(413).send({ error: 'audio clip too large' });
+    }
+    const requestId = deps.idGenerator();
+    const result = await new Promise<
+      Extract<WireEvent, { type: 'patch.voice.turn_check_response' }> | 'timeout'
+    >((resolveP) => {
+      const timeout = setTimeout(() => {
+        pendingTurn.delete(requestId);
+        resolveP('timeout');
+      }, TURN_CHECK_TIMEOUT_MS);
+      pendingTurn.set(requestId, { resolve: resolveP, timeout });
+      deps.hostLink.send(auth.surfaceId, {
+        type: 'patch.voice.turn_check_request',
+        requestId,
+        audioBase64: audio.toString('base64'),
+      });
+    });
+    if (result === 'timeout') {
+      deps.logger.warn('voice: host turn check timed out');
+      return reply.code(504).send({
+        error: 'daemon_timeout',
+        message: 'the host did not answer the turn check — it may need updating',
+      });
+    }
+    if (!result.ok || result.probability === undefined) {
+      const code = result.error?.code ?? 'internal';
+      return reply.code(code === 'unsupported_format' ? 400 : 502).send({
+        error: code,
+        message: result.error?.message ?? 'turn check failed',
+      });
+    }
+    return reply.code(200).send({ ok: true, probability: result.probability });
   });
 
   // POST /api/voice/transcribe — transcribe ONLY (no chat injection). The

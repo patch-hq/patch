@@ -546,13 +546,28 @@ describe('Voice page: Dictation mode pause (shared)', () => {
   it('shows the current pause and writes the chosen one', async () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
-    expect(findHost(r.root, byTestId('dictation-pause-3')).props.accessibilityState).toMatchObject({
-      selected: true,
-    });
+    expect(findHost(r.root, byTestId('dictation-pause-10')).props.accessibilityState).toMatchObject(
+      {
+        selected: true,
+      },
+    );
     await actAsync(async () => {
       findHost(r.root, byTestId('dictation-pause-5')).props.onPress();
     });
     expect(api.setPreferences).toHaveBeenLastCalledWith({ dictationPauseSeconds: 5 });
+  });
+
+  it('turn detection is on by default and can be turned off', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    const section = findHost(r.root, byTestId('settings-voice-dictation'));
+    expect(textOf(section)).toContain('Send anyway after a pause of');
+    const toggle = findHost(r.root, byTestId('dictation-turn-detection'));
+    expect(toggle.props.value).toBe(true);
+    await actAsync(async () => {
+      toggle.props.onValueChange(false);
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({ dictationTurnDetection: false });
   });
 });
 

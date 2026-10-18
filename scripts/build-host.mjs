@@ -8,7 +8,8 @@
 //   host.mjs         the host and its pure-JS dependencies, one esbuild bundle
 //   bin/               the stdio MCP server every SDK query launches
 //   native/            the platform's prebuilt native addons (onnxruntime-node)
-//   silero_vad.onnx    the VAD model (~2 MB) — the one model weight in the artifact
+//   silero_vad.onnx    the VAD model (~2 MB)
+//   smart_turn.onnx    dictation mode's end-of-turn model (~8.7 MB)
 //   skill/patch-cli/   the CLI skill the install writes into the user's skills dir
 //   install            the installer (sh entry + its bundled program)
 //   install.mjs
@@ -74,7 +75,7 @@ function requireDir(path, what) {
 
 /**
  * The vendored build inputs: the pinned Node runtimes, the per-platform
- * onnxruntime-node prebuilds and silero_vad.onnx. Kept outside the repo (they
+ * onnxruntime-node prebuilds, silero_vad.onnx and smart_turn.onnx. Kept outside the repo (they
  * are ~500 MB of third-party binaries) and named explicitly, so a build either
  * has every input it needs or fails saying which one is missing.
  */
@@ -85,7 +86,8 @@ function vendorRoot() {
       'PATCH_BUILD_VENDOR is not set. It must point at a directory holding:\n' +
         `  node/node-v<version>-<target>/bin/node   (pinned Node, .nvmrc says ${NODE_VERSION})\n` +
         '  onnxruntime-node/{package.json,dist/,<platform>-<arch>/}\n' +
-        '  models/silero_vad.onnx',
+        '  models/silero_vad.onnx\n' +
+        '  models/smart_turn.onnx',
     );
   }
   return requireDir(resolve(dir), 'PATCH_BUILD_VENDOR');
@@ -390,10 +392,14 @@ async function buildTarget(t, ctx) {
   copyAgentSdk(outDir);
   copyPlaywrightCore(outDir);
 
-  // 4. the VAD model — the one model weight in the artifact
+  // 4. the VAD model
   const model = join(vendor, 'models', 'silero_vad.onnx');
   if (!existsSync(model)) die(`silero_vad.onnx not found at ${model}`);
   copyFileSync(model, join(outDir, 'silero_vad.onnx'));
+  // 4b. dictation mode's end-of-turn model (~8.7 MB)
+  const turnModel = join(vendor, 'models', 'smart_turn.onnx');
+  if (!existsSync(turnModel)) die(`smart_turn.onnx not found at ${turnModel}`);
+  copyFileSync(turnModel, join(outDir, 'smart_turn.onnx'));
 
   // 5. the patch CLI itself. The artifact shipped the patch-cli SKILL — which
   // tells every chat on the machine to run `patch chats list` and friends — but

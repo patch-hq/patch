@@ -1,5 +1,6 @@
-// Dictation mode (spec/07 § Dictation mode): right-click the composer mic and
-// it stays open; each quiet-gap utterance is sent as its own message.
+// Dictation mode (spec/07 § Dictation mode): right-click the composer mic →
+// Keep dictating, and it stays open; each finished utterance is sent as its
+// own message.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { Composer } from '../components/Composer.js';
@@ -40,12 +41,23 @@ describe('composer dictation mode', () => {
     return onSend;
   };
   const mic = () => screen.getByTestId('voice-note-btn');
+  const keepDictating = (): void => {
+    fireEvent.contextMenu(mic(), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByText('Keep dictating'));
+  };
 
-  it('right-click opens it and shows the status', () => {
+  it('right-click offers it in a menu, and does not start it by itself', () => {
     mount();
-    fireEvent.contextMenu(mic());
+    fireEvent.contextMenu(mic(), { clientX: 10, clientY: 10 });
+    expect(factory).not.toHaveBeenCalled();
+    expect(screen.getByTestId('mic-menu')).toBeInTheDocument();
+  });
+
+  it('Keep dictating opens it and shows the status', () => {
+    mount();
+    keepDictating();
     expect(factory).toHaveBeenCalledOnce();
-    expect(screen.getByTestId('dictation-mode-status').textContent).toContain('pause to send');
+    expect(screen.getByTestId('dictation-mode-status').textContent).toBe('Dictating…');
     expect(mic().getAttribute('aria-pressed')).toBe('true');
   });
 
@@ -55,14 +67,14 @@ describe('composer dictation mode', () => {
       loaded: true,
     });
     mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     expect(factory.mock.calls[0]![0].segmenter).toEqual({ silenceMs: 8000 });
     usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
   });
 
   it('sends each utterance and stays open', () => {
     const onSend = mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     act(() => cb.onText('first thing'));
     act(() => cb.onText('second thing'));
     expect(onSend).toHaveBeenCalledTimes(2);
@@ -74,7 +86,7 @@ describe('composer dictation mode', () => {
 
   it('shows sending while a transcript is pending', () => {
     mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     act(() => cb.onBusy(1));
     expect(screen.getByTestId('dictation-mode-status').getAttribute('data-state')).toBe(
       'transcribing',
@@ -83,7 +95,7 @@ describe('composer dictation mode', () => {
 
   it('a mic click ends it', () => {
     mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     fireEvent.mouseDown(mic());
     fireEvent.mouseUp(mic());
     expect(stop).toHaveBeenCalledOnce();
@@ -92,22 +104,38 @@ describe('composer dictation mode', () => {
 
   it('Esc ends it', () => {
     mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Escape' });
     expect(stop).toHaveBeenCalledOnce();
     expect(screen.queryByTestId('dictation-mode-status')).toBeNull();
   });
 
-  it('a second right-click ends it', () => {
+  it('right-click while it is open offers nothing more — the mic click ends it', () => {
     mount();
-    fireEvent.contextMenu(mic());
-    fireEvent.contextMenu(mic());
-    expect(stop).toHaveBeenCalledOnce();
+    keepDictating();
+    fireEvent.contextMenu(mic(), { clientX: 10, clientY: 10 });
+    expect(screen.queryByTestId('mic-menu')).toBeNull();
+    expect(factory).toHaveBeenCalledOnce();
+  });
+
+  it('asks the turn check when turn detection is on, and not when it is off', () => {
+    mount();
+    keepDictating();
+    expect(typeof factory.mock.calls[0]![0].turnCheck).toBe('function');
+    cleanupUnmount();
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, dictationTurnDetection: false },
+      loaded: true,
+    });
+    mount();
+    keepDictating();
+    expect(factory.mock.calls[1]![0].turnCheck).toBeUndefined();
+    usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
   });
 
   it('releases the mic on unmount', () => {
     mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     cleanupUnmount();
     expect(stop).toHaveBeenCalledOnce();
   });
@@ -116,7 +144,7 @@ describe('composer dictation mode', () => {
     ready = Promise.reject(new Error('denied'));
     ready.catch(() => {});
     mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     await act(async () => {
       await ready.catch(() => {});
     });
@@ -126,7 +154,7 @@ describe('composer dictation mode', () => {
 
   it('surfaces a transcription error', () => {
     mount();
-    fireEvent.contextMenu(mic());
+    keepDictating();
     act(() => cb.onError('voice transcription failed: boom'));
     expect(useUiStore.getState().errors.some((t) => t.message.includes('boom'))).toBe(true);
   });

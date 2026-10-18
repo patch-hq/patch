@@ -12,7 +12,7 @@
 // with the voice-app source; the auth gate; unknown-chat 404; and the host's
 // typed error mapping (unsupported_format → 400, other → 502).
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -951,6 +951,129 @@ describe('POST /api/voice/transcribe', () => {
       });
       expect(res.statusCode).toBe(502);
     } finally {
+      await built.app.close();
+    }
+  });
+});
+
+// POST /api/voice/turn-check — dictation mode asks the host whether the speaker
+// has finished (spec/07 § Dictation mode).
+class FakeTurnHost extends InProcessHostLink {
+  lastRequest: Extract<WireEvent, { type: 'patch.voice.turn_check_request' }> | null = null;
+  answer: 'ok' | 'missing' | 'silent' = 'ok';
+  probability = 0.87;
+
+  override send(surfaceId: string, event: WireEvent): void {
+    super.send(surfaceId, event);
+    if (event.type !== 'patch.voice.turn_check_request') return;
+    this.lastRequest = event;
+    if (this.answer === 'silent') return;
+    this.emit(
+      this.answer === 'ok'
+        ? {
+            type: 'patch.voice.turn_check_response',
+            requestId: event.requestId,
+            ok: true,
+            probability: this.probability,
+          }
+        : {
+            type: 'patch.voice.turn_check_response',
+            requestId: event.requestId,
+            ok: false,
+            error: { code: 'model_unavailable', message: 'no smart_turn.onnx' },
+          },
+    );
+  }
+}
+
+describe('POST /api/voice/turn-check', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-voice-turn-'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function makeApp() {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(42));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    registry.upsertSurface({
+      surfaceId: 'srf-web-1',
+      surfaceKind: 'web',
+      label: 'web',
+      issuedAt: 1,
+    });
+    const hostLink = new FakeTurnHost();
+    const built = await buildAll({ logger: false, registry, hostLink });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'srf-web-1',
+      surfaceKind: 'web',
+      label: 'web',
+    });
+    return { built, hostLink, jwt };
+  }
+  const post = (
+    built: Awaited<ReturnType<typeof makeApp>>['built'],
+    jwt: string | null,
+    audio: Buffer,
+    filename = 'turn.wav',
+  ) => {
+    const body = multipartBody({
+      audio,
+      filename,
+      mimetype: filename.endsWith('.wav') ? 'audio/wav' : 'audio/mp4',
+    });
+    return built.app.inject({
+      method: 'POST',
+      url: '/api/voice/turn-check',
+      headers: { ...(jwt ? { authorization: `Bearer ${jwt}` } : {}), ...body.headers },
+      payload: body.payload,
+    });
+  };
+
+  it('relays the clip to the host and returns its probability', async () => {
+    const { built, hostLink, jwt } = await makeApp();
+    try {
+      const res = await post(built, jwt, Buffer.from('RIFFwav'));
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, probability: 0.87 });
+      expect(Buffer.from(hostLink.lastRequest!.audioBase64, 'base64').toString()).toBe('RIFFwav');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('passes the host’s refusal through, and refuses a non-WAV clip or no auth', async () => {
+    const { built, hostLink, jwt } = await makeApp();
+    try {
+      hostLink.answer = 'missing';
+      const missing = await post(built, jwt, Buffer.from('RIFFwav'));
+      expect(missing.statusCode).toBe(502);
+      expect(missing.json()).toEqual({ error: 'model_unavailable', message: 'no smart_turn.onnx' });
+      expect((await post(built, jwt, Buffer.from('m4a'), 'clip.m4a')).statusCode).toBe(400);
+      expect((await post(built, null, Buffer.from('RIFFwav'))).statusCode).toBe(401);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('says the host may need updating when it never answers', async () => {
+    const { built, hostLink, jwt } = await makeApp();
+    hostLink.answer = 'silent';
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const pending = post(built, jwt, Buffer.from('RIFFwav'));
+      await vi.waitFor(() => expect(hostLink.lastRequest).not.toBeNull());
+      await vi.advanceTimersByTimeAsync(10_000);
+      const res = await pending;
+      expect(res.statusCode).toBe(504);
+      expect(res.json().message).toMatch(/may need updating/);
+    } finally {
+      vi.useRealTimers();
       await built.app.close();
     }
   });
