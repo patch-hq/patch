@@ -254,6 +254,12 @@ export class ManagerSweeper {
 
   private attemptFire(): boolean {
     if (this.pending.size === 0) return false; // NOTHING CHANGED = no model call
+    // Edges queued before Manager was disabled must not fire after it.
+    if (this.deps.chats.get(SPECIAL_THREAD_IDS.manager)?.disabled) {
+      this.pending.clear();
+      this.eventWakeArmed = false;
+      return false;
+    }
     const settings = this.deps.settings();
     if (!settings.sweepEnabled) return false;
     if (this.inFlightRunId !== undefined) {

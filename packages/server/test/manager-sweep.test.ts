@@ -302,6 +302,21 @@ describe('ManagerSweeper', () => {
     expect(sweeper.pendingEdges()).toEqual([]);
   });
 
+  test('disabling the Manager drops edges already queued — no sweep fires afterwards', () => {
+    emit(spawned('thread_manager', 'd1'));
+    emit(state('thread_manager'));
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running' }));
+    emit(state('c1', { activity: 'idle' }));
+    expect(sweeper.pendingEdges()).toHaveLength(1);
+    emit(state('thread_manager', { disabled: true }));
+    nowMs += 60 * 60_000;
+    expect(sweeper.tick()).toBe(false);
+    expect(sweeper.checkNow()).toBe(false);
+    expect(requested).toEqual([]);
+    expect(sweeper.pendingEdges()).toEqual([]);
+  });
+
   test('only one sweep runs at a time — a second fire is refused until the result comes back', () => {
     emit(spawned('c1'));
     emit(state('c1', { activity: 'running' }));
