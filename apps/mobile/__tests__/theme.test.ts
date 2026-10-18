@@ -123,3 +123,24 @@ describe('palette parity with web', () => {
     });
   }
 });
+
+describe('waiting colour (responding dot)', () => {
+  it('is orange in the dark palette', async () => {
+    const src = (await import('node:fs')).readFileSync(
+      (await import('node:path')).resolve(__dirname, '../src/lib/theme.ts'),
+      'utf8',
+    );
+    const values = [...src.matchAll(/\n\s*waiting: '#([0-9a-f]{6})'/gi)].map((m) => m[1]!);
+    expect(values).toHaveLength(2);
+    for (const hex of values) {
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [
+        number,
+        number,
+        number,
+      ];
+      const hue = 60 * ((g - b) / (Math.max(r, g, b) - Math.min(r, g, b)));
+      expect(hue).toBeGreaterThanOrEqual(20);
+      expect(hue).toBeLessThanOrEqual(35);
+    }
+  });
+});

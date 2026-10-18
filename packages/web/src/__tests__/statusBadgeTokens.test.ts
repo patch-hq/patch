@@ -90,3 +90,26 @@ describe('permission-coloured surfaces', () => {
     expect(working![0]).not.toContain('--permission');
   });
 });
+
+describe('waiting (responding dot) token', () => {
+  // The working dot must read as orange in every theme — the dark value was a
+  // tan (#c8ac6a, hue ~43°) that looked yellow-beige.
+  it('is orange (hue 20–35°, saturated) in all three theme blocks', () => {
+    const values = tokenValues('waiting');
+    expect(values).toHaveLength(THEME_BLOCKS);
+    for (const hex of values) {
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [
+        number,
+        number,
+        number,
+      ];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const hue = 60 * ((g - b) / (max - min));
+      expect(max).toBe(r);
+      expect(hue).toBeGreaterThanOrEqual(20);
+      expect(hue).toBeLessThanOrEqual(35);
+      expect((max - min) / max).toBeGreaterThan(0.6);
+    }
+  });
+});
