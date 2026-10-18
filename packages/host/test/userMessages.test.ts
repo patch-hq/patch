@@ -110,6 +110,22 @@ describe('readUserMessages', () => {
     ]);
   });
 
+  it("reports a restart-resume 'Carry on' as machine even though it keeps the turn's own origin", () => {
+    writeLog('c1', [
+      msg('c1', 'user', 'Carry on', 1000, {
+        retryOfSeq: 0,
+        systemContext: [{ source: 'patch', label: 'Turn interrupted by restart', text: 'x' }],
+      }),
+      msg('c1', 'user', 'typed', 2000, {
+        systemContext: [{ source: 'x', label: 'Other', text: 'y' }],
+      }),
+    ]);
+    expect(readUserMessages(root, 0, 9000, 10)).toEqual([
+      { chatId: 'c1', text: 'Carry on', ts: 1000, kind: 'machine' },
+      { chatId: 'c1', text: 'typed', ts: 2000 },
+    ]);
+  });
+
   it('a goal/hook resubmit that also carries origin: machine is reported by the more specific kind', () => {
     writeLog('c1', [
       msg('c1', 'user', 'goal resubmit', 1000, {

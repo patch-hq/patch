@@ -25,6 +25,25 @@ export interface UserMessageRow {
   kind?: ActivityMessageKind;
 }
 
+/**
+ * A cut-off turn re-sent after a host restart shows as a bare `Carry on` with
+ * the restart reminder as its system context (`interruptedTurnResend`). It keeps
+ * the original turn's `origin` (so a person's turn still rings the doorbell), so
+ * the reminder is the only marker that no person typed this text.
+ */
+function isRestartResume(systemContext: unknown): boolean {
+  return (
+    Array.isArray(systemContext) &&
+    systemContext.some(
+      (c) =>
+        typeof c === 'object' &&
+        c !== null &&
+        typeof (c as { label?: unknown }).label === 'string' &&
+        (c as { label: string }).label.startsWith('Turn interrupted by restart'),
+    )
+  );
+}
+
 const READ_CHUNK = 256 * 1024;
 
 /** Feed `onLine` every complete line of a file, without holding the whole file. */
@@ -99,7 +118,7 @@ export function readUserMessages(
             ? 'hook'
             : ev.goalTrigger !== undefined
               ? 'goal'
-              : ev.origin === 'machine'
+              : ev.origin === 'machine' || isRestartResume(ev.systemContext)
                 ? 'machine'
                 : undefined;
       rows.push({ chatId, text, ts, ...(kind !== undefined ? { kind } : {}) });

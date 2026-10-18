@@ -1172,6 +1172,7 @@ describe('chat REST routes', () => {
         expect(sent.event.chatId).toBe('c1');
         expect(sent.event.message).toBe('hello');
         expect(sent.event.localId).toBe('local-1');
+        expect(sent.event.origin).toBe('machine');
       }
     } finally {
       await built.app.close();

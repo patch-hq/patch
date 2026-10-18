@@ -3000,6 +3000,12 @@ export const ChatInputEvent = z
      * on an idle chat.
      */
     afterTurn: z.boolean().optional(),
+    /**
+     * The host-started/agent-driven origin of this turn (spec/09 § Whose turn it
+     * was). Set by the server's agent-facing `send-to` route (the CLI) so
+     * `patch_activity` reports the turn as `kind: 'machine'`; surfaces never set it.
+     */
+    origin: z.literal('machine').optional(),
   })
   .strict();
 export type ChatInputEvent = z.infer<typeof ChatInputEvent>;

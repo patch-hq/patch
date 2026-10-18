@@ -775,6 +775,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       chatId: req.params.id,
       message,
       localId,
+      // Only the CLI calls this route, and a CLI send-to is an agent's, not a
+      // person's — so patch_activity must not report it as typed.
+      origin: 'machine',
     });
     return reply.code(200).send({ ok: true, queued: true, localId });
   });

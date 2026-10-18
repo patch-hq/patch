@@ -1379,6 +1379,7 @@ export function chatInputToSendOptions(event: ChatInputEvent): SendInputOptions 
     // started it, so it still counts as the user's activity.
     ...(event.source?.kind === 'job' || event.source?.kind === 'pad' ? { jobTrigger: true } : {}),
     ...(event.source?.kind === 'job' ? {} : { fromUser: true }),
+    ...(event.origin === 'machine' ? { origin: 'machine' as const } : {}),
     // spec/04 § Branching — address a specific branch; absent means the active one.
     ...(event.branchId !== undefined ? { branchId: event.branchId } : {}),
     // spec/12 § Retry in place — a person re-running a turn folds into its bubble.
