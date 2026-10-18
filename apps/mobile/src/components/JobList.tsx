@@ -132,8 +132,17 @@ export function JobList({ onOpen }: { onOpen: (jobId?: string) => void }): React
             }}
           >
             <View style={{ flex: 1 }}>
-              <Text style={{ ...typography.rowTitle, color: colors.ink }}>{j.name ?? j.id}</Text>
-              <Text style={{ ...typography.meta, color: colors.ink3 }}>{subtitle}</Text>
+              <Text
+                testID={`job-name-${j.id}`}
+                style={{ ...typography.rowTitle, color: j.enabled ? colors.ink : colors.ink3 }}
+              >
+                {j.name ?? j.id}
+              </Text>
+              <Text
+                style={{ ...typography.meta, color: j.enabled ? colors.ink3 : colors.inkFaint }}
+              >
+                {subtitle}
+              </Text>
               {j.triggerType === 'cron' && j.cron ? (
                 <Text style={{ color: colors.inkFaint, ...typography.meta }}>{j.cron}</Text>
               ) : null}

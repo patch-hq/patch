@@ -165,6 +165,18 @@ describe('JobList — job rows', () => {
     expect(findHost(r.root, byTestId('job-new'))).toBeDefined();
   });
 
+  it('mutes the name of a disabled row so it reads as off, not just the Switch', async () => {
+    vi.mocked(api.listJobs).mockResolvedValue({ jobs });
+    const r = renderRN(<JobList onOpen={() => {}} />);
+    await flush();
+    const colour = (id: string) => {
+      const style = findHost(r.root, byTestId(`job-name-${id}`)).props.style;
+      return [style].flat(Infinity).reduce((acc, x) => ({ ...acc, ...x }), {}).color;
+    };
+    expect(colour('job-1')).not.toBe(colour('job-4'));
+    expect(colour('job-1')).toBe(colour('job-3'));
+  });
+
   it('tapping a row calls onOpen with that job id', async () => {
     vi.mocked(api.listJobs).mockResolvedValue({ jobs });
     const onOpen = vi.fn();
