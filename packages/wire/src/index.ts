@@ -376,3 +376,4 @@ export function folderLabels(folders: string[]): string[] {
 export * from './pairing.js';
 export * from './ambiguous-titles.js';
 export * from './snooze-format.js';
+export * from './client-crash.js';

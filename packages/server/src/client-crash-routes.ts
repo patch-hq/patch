@@ -17,19 +17,20 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { z } from 'zod';
 import { verifySurfaceCredential } from '@patch/auth';
+import { CLIENT_CRASH_LIMITS as LIMIT } from '@patch/wire';
 import type { Registry } from './registry.js';
 
 const ClientCrashBody = z
   .object({
     /** Where it was caught: error boundary, global JS handler, or native. */
     source: z.enum(['boundary', 'global', 'native']),
-    message: z.string().max(4_000),
-    stack: z.string().max(32_000).optional(),
-    componentStack: z.string().max(32_000).optional(),
-    chatId: z.string().max(200).optional(),
-    route: z.string().max(500).optional(),
+    message: z.string().max(LIMIT.message),
+    stack: z.string().max(LIMIT.stack).optional(),
+    componentStack: z.string().max(LIMIT.componentStack).optional(),
+    chatId: z.string().max(LIMIT.chatId).optional(),
+    route: z.string().max(LIMIT.route).optional(),
     fatal: z.boolean().optional(),
-    build: z.string().max(200).optional(),
+    build: z.string().max(LIMIT.build).optional(),
     /** Epoch ms the crash happened on the device. */
     occurredAt: z.number().int().nonnegative(),
   })
@@ -92,7 +93,18 @@ export function registerClientCrashRoutes(app: FastifyInstance, deps: ClientCras
     const crashes = readFileSync(file, 'utf8')
       .split('\n')
       .filter((l) => l.length > 0)
-      .map((l) => JSON.parse(l) as StoredClientCrash);
+      .flatMap((l) => {
+        try {
+          return [JSON.parse(l) as StoredClientCrash];
+        } catch (err) {
+          // A crash mid-append leaves a truncated line; skip it, loudly.
+          deps.logger.error(
+            { err, line: l.slice(0, 200) },
+            'client-crashes.jsonl: unreadable line skipped',
+          );
+          return [];
+        }
+      });
     return { crashes };
   });
 }

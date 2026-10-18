@@ -11,10 +11,13 @@
 // `flushPendingCrashes` re-sends whatever a previous run could not deliver.
 //
 // NO FALLBACK: a report that cannot be delivered stays queued and is surfaced
-// through the error toasts; it is never dropped quietly.
+// through the error toasts; it is never dropped quietly. The one exception is a
+// 4xx: the server rejected the report itself, so resending can never succeed —
+// it is surfaced once and removed from the queue.
 
 import { NativeModules, Platform } from 'react-native';
-import { api, type CrashReport } from '../api/rest';
+import { CLIENT_CRASH_LIMITS } from '@patch/wire';
+import { api, ApiError, type CrashReport } from '../api/rest';
 import { store } from './credential';
 import { mobileBuildInfo } from './buildInfo';
 import { useUiStore } from '../stores/uiStore';
@@ -53,12 +56,25 @@ export function describeError(err: unknown): { message: string; stack?: string }
   return { message: String(err) };
 }
 
+/** Cut every field to the server's cap, keeping the head (the throw site). */
+export function fitToServerLimits(report: CrashReport): CrashReport {
+  const out: CrashReport = { ...report };
+  for (const key of Object.keys(CLIENT_CRASH_LIMITS) as (keyof typeof CLIENT_CRASH_LIMITS)[]) {
+    const value = out[key];
+    if (typeof value === 'string' && value.length > CLIENT_CRASH_LIMITS[key]) {
+      out[key] = value.slice(0, CLIENT_CRASH_LIMITS[key]);
+    }
+  }
+  return out;
+}
+
 async function send(report: CrashReport): Promise<void> {
   try {
-    await api.reportCrash(report);
+    await api.reportCrash(fitToServerLimits(report));
   } catch (err) {
     useUiStore.getState().pushError(`crash report not delivered: ${String(err)}`);
-    return;
+    // A 4xx will never succeed on retry; keep it queued only for 5xx/network.
+    if (!(err instanceof ApiError && err.status >= 400 && err.status < 500)) return;
   }
   writePending(
     readPending().filter((r) => r.occurredAt !== report.occurredAt || r.message !== report.message),

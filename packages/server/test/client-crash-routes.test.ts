@@ -2,7 +2,7 @@
 // can read them back.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
@@ -78,5 +78,19 @@ describe('/api/client-crashes', () => {
       payload: { source: 'nope' },
     });
     expect(bad.statusCode).toBe(400);
+  });
+
+  it('skips a truncated line in the store instead of failing the whole GET', async () => {
+    const { app, auth } = await boot();
+    await app.inject({
+      method: 'POST',
+      url: '/api/client-crashes',
+      headers: auth,
+      payload: report,
+    });
+    appendFileSync(join(dir, 'client-crashes.jsonl'), '{"source":"boundary","mess');
+    const get = await app.inject({ method: 'GET', url: '/api/client-crashes', headers: auth });
+    expect(get.statusCode).toBe(200);
+    expect(get.json().crashes).toHaveLength(1);
   });
 });

@@ -4,8 +4,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const { reportCrash } = vi.hoisted(() => ({ reportCrash: vi.fn() }));
-vi.mock('../src/api/rest', () => ({ api: { reportCrash } }));
+vi.mock('../src/api/rest', () => ({
+  api: { reportCrash },
+  ApiError: class ApiError extends Error {
+    constructor(
+      readonly status: number,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
+}));
 
+import { CLIENT_CRASH_LIMITS } from '@patch/wire';
+import { ApiError } from '../src/api/rest';
 import { store } from '../src/lib/credential';
 import {
   recordCrash,
@@ -52,6 +64,40 @@ describe('recordCrash', () => {
     await flushPendingCrashes();
     expect(reportCrash).toHaveBeenCalledTimes(2);
     expect(pending()).toEqual([]);
+  });
+});
+
+describe('server size caps', () => {
+  it('truncates an oversized message, stack and componentStack to the server limits', async () => {
+    reportCrash.mockResolvedValue({ ok: true });
+    await recordCrash({
+      source: 'boundary',
+      message: 'm'.repeat(CLIENT_CRASH_LIMITS.message + 500),
+      stack: 's'.repeat(CLIENT_CRASH_LIMITS.stack + 500),
+      componentStack: 'c'.repeat(CLIENT_CRASH_LIMITS.componentStack + 500),
+      route: 'r'.repeat(CLIENT_CRASH_LIMITS.route + 1),
+    });
+    const body = reportCrash.mock.calls[0]![0] as Record<string, string>;
+    expect(body['message']).toHaveLength(CLIENT_CRASH_LIMITS.message);
+    expect(body['stack']).toHaveLength(CLIENT_CRASH_LIMITS.stack);
+    expect(body['componentStack']).toHaveLength(CLIENT_CRASH_LIMITS.componentStack);
+    expect(body['route']).toHaveLength(CLIENT_CRASH_LIMITS.route);
+    expect(body['message']!.startsWith('mmm')).toBe(true);
+  });
+
+  it('surfaces a server 4xx once and drops the report instead of retrying forever', async () => {
+    reportCrash.mockRejectedValue(new ApiError(400, 'invalid crash report', null));
+    await recordCrash({ source: 'global', message: 'bad' });
+    expect(JSON.stringify(useUiStore.getState().errors)).toContain('crash report not delivered');
+    expect(pending()).toEqual([]);
+    await flushPendingCrashes();
+    expect(reportCrash).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a report queued on a 5xx', async () => {
+    reportCrash.mockRejectedValue(new ApiError(503, 'down', null));
+    await recordCrash({ source: 'global', message: 'x' });
+    expect(pending()).toHaveLength(1);
   });
 });
 
