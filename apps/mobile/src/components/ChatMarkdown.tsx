@@ -296,6 +296,16 @@ export function ChatMarkdown({
       borderRadius: radii.md,
       padding: space.md,
     },
+    // The library's default is a #F5F5F5 box: pale ink on near-white in dark.
+    blockquote: {
+      color,
+      backgroundColor: blockBg,
+      borderColor: colors.divider,
+      borderLeftWidth: 3,
+      borderRadius: radii.sm / 2,
+      paddingHorizontal: space.md,
+      marginLeft: 0,
+    },
     table: { borderWidth: 1, borderColor: colors.tableLine, borderRadius: radii.sm / 2 },
     thead: { backgroundColor: colors.tableHead },
     tr: { borderBottomWidth: 1, borderColor: colors.tableLine, flexDirection: 'row' as const },
