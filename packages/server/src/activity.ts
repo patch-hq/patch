@@ -24,8 +24,15 @@ import type { HostLink } from './host-link.js';
 export const ACTIVITY_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 export const ACTIVITY_DEFAULT_PAGE_SIZE = 200;
 export const ACTIVITY_MAX_PAGE_SIZE = 500;
-/** How long one machine has to scan its logs before the whole call fails. */
-export const ACTIVITY_READ_TIMEOUT_MS = 30_000;
+/** How long one machine has to answer one read attempt. */
+export const ACTIVITY_READ_TIMEOUT_MS = 15_000;
+/**
+ * Attempts per machine before the whole call fails. A request frame can be lost
+ * to a link flap (buffered, then answered for a requestId nobody waits on) and
+ * the host re-reads its log in well under a timeout, so one silent attempt is
+ * retried; a machine silent for every attempt still fails the call.
+ */
+export const ACTIVITY_READ_ATTEMPTS = 2;
 
 const READ_SURFACE_ID = 'activity-read';
 
@@ -53,7 +60,9 @@ export function createActivityReader(deps: {
   hostLink: HostLink;
   chatRegistry: ChatRegistry;
   now?: () => number;
+  readTimeoutMs?: number;
 }): ActivityReader {
+  const readTimeoutMs = deps.readTimeoutMs ?? ACTIVITY_READ_TIMEOUT_MS;
   const { hostLink, chatRegistry } = deps;
   const now = deps.now ?? Date.now;
   const waiting = new Map<
@@ -67,7 +76,7 @@ export function createActivityReader(deps: {
     if (w) w.resolve(event);
   });
 
-  const readHost = (
+  const readHostOnce = (
     hostId: string,
     since: number,
     until: number,
@@ -79,10 +88,10 @@ export function createActivityReader(deps: {
         waiting.delete(requestId);
         reject(
           new Error(
-            `patch_activity: machine ${hostId} did not answer within ${ACTIVITY_READ_TIMEOUT_MS / 1000}s`,
+            `patch_activity: machine ${hostId} did not answer within ${readTimeoutMs / 1000}s`,
           ),
         );
-      }, ACTIVITY_READ_TIMEOUT_MS);
+      }, readTimeoutMs);
       timer.unref();
       waiting.set(requestId, {
         resolve: (e) => {
@@ -104,6 +113,21 @@ export function createActivityReader(deps: {
         limit,
       });
     });
+
+  const readHost = async (
+    hostId: string,
+    since: number,
+    until: number,
+    limit: number,
+  ): Promise<PatchActivityReadResponseEvent> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await readHostOnce(hostId, since, until, limit);
+      } catch (err) {
+        if (attempt >= ACTIVITY_READ_ATTEMPTS || !String(err).includes('did not answer')) throw err;
+      }
+    }
+  };
 
   return {
     async query(q) {

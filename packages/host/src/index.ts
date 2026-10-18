@@ -1194,7 +1194,7 @@ async function startHost(
       const timer = setTimeout(() => {
         const idx = waiters.indexOf(onResolve);
         if (idx >= 0) waiters.splice(idx, 1);
-        reject(new Error('patch_list_chats: the server did not answer within 10s'));
+        reject(new Error('patch_list_chats: the server did not answer within 45s'));
       }, LIST_CHATS_TIMEOUT_MS);
       timer.unref();
       function onResolve(chats: Array<{ chatId: string; hostId: string }>): void {
@@ -1224,7 +1224,8 @@ async function startHost(
     if (waiters.length === 0) activityWaiters.delete(event.sourceChatId);
     next?.(event);
   };
-  const ACTIVITY_TIMEOUT_MS = 10_000;
+  // Must outlast the server's own per-machine retries (ACTIVITY_READ_ATTEMPTS x timeout).
+  const ACTIVITY_TIMEOUT_MS = 45_000;
   const requestActivity = async (
     sourceChatId: string,
     since: number,
@@ -1240,7 +1241,7 @@ async function startHost(
       const timer = setTimeout(() => {
         const idx = waiters.indexOf(onResolve);
         if (idx >= 0) waiters.splice(idx, 1);
-        reject(new Error('patch_activity: the server did not answer within 10s'));
+        reject(new Error('patch_activity: the server did not answer within 45s'));
       }, ACTIVITY_TIMEOUT_MS);
       timer.unref();
       function onResolve(event: PatchActivityResponseEvent): void {

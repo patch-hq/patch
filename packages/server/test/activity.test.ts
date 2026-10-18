@@ -298,3 +298,31 @@ describe('patch.activity.request (a host’s patch_activity)', () => {
     }
   });
 });
+
+describe('read retry', () => {
+  it('retries a machine that was silent for one attempt, and still fails if it stays silent', async () => {
+    const { createActivityReader } = await import('../src/activity.js');
+    const { ChatRegistry } = await import('../src/chat-registry.js');
+    const hostLink = new InProcessHostLink();
+    const reader = createActivityReader({
+      hostLink,
+      chatRegistry: new ChatRegistry(),
+      readTimeoutMs: 20,
+    });
+    const reqs = () => hostLink.sent.filter((s) => s.event.type === 'patch.activity.read.request');
+    const answerLatest = () =>
+      hostLink.injectHostEvent({
+        type: 'patch.activity.read.response',
+        requestId: (reqs().at(-1)!.event as PatchActivityReadRequestEvent).requestId,
+        messages: [],
+      } as WireEvent);
+    const ok = reader.query({ since: 0, until: 1000 });
+    await new Promise((r) => setTimeout(r, 40)); // first attempt times out unanswered
+    expect(reqs().length).toBe(2);
+    answerLatest();
+    await expect(ok).resolves.toMatchObject({ messagesTruncated: false });
+    const dead = reader.query({ since: 0, until: 1000 });
+    await expect(dead).rejects.toThrow(/did not answer/);
+    reader.close();
+  });
+});
