@@ -25,6 +25,8 @@ import { lightColors as colors } from '../src/lib/theme';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
+import { useSettingsStore } from '../src/stores/settingsStore';
+import { settingsFixture } from './testUtils/settingsFixtures';
 import { __clearAllMmkv } from './stubs/mmkv';
 import type { DictationHandle, DictationOutcome } from '../src/lib/dictation';
 import type * as dictationModule from '../src/lib/dictation';
@@ -52,6 +54,7 @@ function makeFactory(): {
 let dismissSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  useSettingsStore.setState({ data: settingsFixture(), error: null });
   vi.useFakeTimers();
   vi.setSystemTime(T0);
   __clearAllMmkv();

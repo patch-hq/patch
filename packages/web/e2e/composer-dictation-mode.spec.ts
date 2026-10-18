@@ -58,4 +58,39 @@ test.describe('composer dictation mode', () => {
     await expect(page.getByTestId('dictation-mode-status')).toHaveCount(0);
     await expect(mic).toHaveAttribute('aria-pressed', 'false');
   });
+
+  test('a shorter pause set in Settings sends sooner', async ({ page }) => {
+    test.setTimeout(30_000);
+    await page.addInitScript(TONE_THEN_SILENCE);
+    let transcribed = 0;
+    await page.route('**/api/voice/transcribe*', (r) => {
+      transcribed++;
+      return r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ transcript: 'quick one' }),
+      });
+    });
+
+    await page.goto('/app/dev-harness.html?chat=thread_manager');
+    await page.evaluate(() => {
+      const store = (
+        window as unknown as {
+          __preferencesStore: {
+            getState(): { preferences: Record<string, unknown> };
+            setState(s: unknown): void;
+          };
+        }
+      ).__preferencesStore;
+      store.setState({
+        preferences: { ...store.getState().preferences, dictationPauseSeconds: 1 },
+      });
+    });
+    const mic = page.getByTestId('voice-note-btn');
+    await mic.click({ button: 'right' });
+    await expect(page.getByTestId('dictation-mode-status')).toBeVisible();
+    // One second of tone, then one second of quiet. The three-second default
+    // could not cut before four seconds.
+    await expect.poll(() => transcribed, { timeout: 3_600 }).toBe(1);
+  });
 });

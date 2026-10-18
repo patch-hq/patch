@@ -1277,7 +1277,12 @@ export const Composer = forwardRef(function Composer(
     }
     const factory = dictationModeFactory ?? startDictationMode;
     const mode = factory(
-      { transcribe: (c: Blob) => api.voiceTranscribe(c) },
+      {
+        transcribe: (c: Blob) => api.voiceTranscribe(c),
+        segmenter: {
+          silenceMs: usePreferencesStore.getState().preferences.dictationPauseSeconds * 1000,
+        },
+      },
       {
         onText: (t: string) => {
           const cur = valueRef.current;

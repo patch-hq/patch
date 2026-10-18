@@ -5,6 +5,7 @@
 import type { JSX } from 'react';
 import { Fragment, useEffect, useState } from 'react';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
+import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
 import { type VoiceBackend, type VoiceHandoff, type VoiceLayer } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
@@ -104,10 +105,34 @@ export function VoicePage(): JSX.Element {
   return (
     <SettingsPage title="Voice" testid="settings-voice">
       <EngineGroup />
+      <DictationGroup />
       <ShortcutGroup />
       <SpeakingGroup />
       <VoiceDevicesGroup />
     </SettingsPage>
+  );
+}
+
+/** Dictation mode's pause: quiet this long sends what was said (spec/07 § Dictation mode). */
+function DictationGroup(): JSX.Element {
+  const pause = usePreferencesStore((s) => s.preferences.dictationPauseSeconds);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  return (
+    <Group label="Dictation mode" testid="settings-voice-dictation">
+      <Row title="Send after a pause of">
+        <Pills
+          label="Dictation pause"
+          options={DICTATION_PAUSE_CHOICES}
+          labels={Object.fromEntries(DICTATION_PAUSE_CHOICES.map((c) => [c, `${c}s`]))}
+          value={String(pause) as (typeof DICTATION_PAUSE_CHOICES)[number]}
+          disabled={!loaded}
+          testid="dictation-pause"
+          onChange={(next) =>
+            void patchShared('dictation pause', { dictationPauseSeconds: Number(next) })
+          }
+        />
+      </Row>
+    </Group>
   );
 }
 

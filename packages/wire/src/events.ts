@@ -1953,6 +1953,11 @@ export type ClaudeSettingsSetting = z.infer<typeof ClaudeSettingsSetting>;
  * Every setting that is not tied to one machine (spec/01 § Settings). The
  * server stores it, every host runs from the copy in the last snapshot.
  */
+export const DICTATION_PAUSE_SECONDS_MIN = 1;
+export const DICTATION_PAUSE_SECONDS_MAX = 30;
+/** The pauses Settings offers; any value in range can be set through the CLI. */
+export const DICTATION_PAUSE_CHOICES = ['1', '2', '3', '5', '8'] as const;
+
 export const SharedSettings = z
   .object({
     // ---- server-acted preferences ----
@@ -2009,6 +2014,11 @@ export const SharedSettings = z
     jobAutonomyPrompt: z.string().min(1),
     // ---- applied on every host ----
     voiceConfig: VoiceConfigSetting,
+    /** Dictation mode: quiet this long after speech sends what was said (spec/07 § Dictation mode). */
+    dictationPauseSeconds: z
+      .number()
+      .min(DICTATION_PAUSE_SECONDS_MIN)
+      .max(DICTATION_PAUSE_SECONDS_MAX),
     /** Absent until one is chosen: each host then uses its Kokoro default. */
     kokoroVoice: z.string().min(1).optional(),
     permissionModeDefault: PermissionMode,
@@ -2087,6 +2097,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },
   },
+  dictationPauseSeconds: 3,
   permissionModeDefault: 'auto',
   chatNameInterval: 0,
   titleGenerationEnabled: true,

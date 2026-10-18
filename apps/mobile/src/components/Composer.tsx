@@ -783,26 +783,45 @@ export function Composer({
     if (h) void h.stop();
   }
   function startDictMode(): void {
+    // The pause is a shared setting; the store is normally loaded at launch.
+    if (useSettingsStore.getState().data === null) {
+      void useSettingsStore
+        .getState()
+        .load()
+        .then(() => {
+          if (useSettingsStore.getState().data === null) {
+            const why = useSettingsStore.getState().error ?? 'unknown error';
+            useUiStore.getState().pushError(`voice: could not load settings: ${why}`);
+            return;
+          }
+          startDictMode();
+        });
+      return;
+    }
     const refusal = voiceKeyRefusal(chatId, 'dictation');
     if (refusal !== null) {
       useUiStore.getState().pushError(`voice: ${refusal}`);
       return;
     }
+    const pauseSeconds = useSettingsStore.getState().data!.preferences.dictationPauseSeconds;
     Keyboard.dismiss();
     inputRef.current?.blur();
     setDictModeOn(true);
     const factory = dictationModeFactory ?? startDictationMode;
-    dictModeRef.current = factory({
-      onText: (t: string): void => {
-        const cur = draftRef.current;
-        updateDraft(cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t);
-        submitRef.current();
+    dictModeRef.current = factory(
+      {
+        onText: (t: string): void => {
+          const cur = draftRef.current;
+          updateDraft(cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t);
+          submitRef.current();
+        },
+        onBusy: (n: number): void => setDictPending(n),
+        onError: (message: string): void => {
+          useUiStore.getState().pushError(`voice: ${message}`);
+        },
       },
-      onBusy: (n: number): void => setDictPending(n),
-      onError: (message: string): void => {
-        useUiStore.getState().pushError(`voice: ${message}`);
-      },
-    });
+      { silenceMs: pauseSeconds * 1000 },
+    );
   }
   React.useEffect(() => stopDictationMode, [chatId]);
 

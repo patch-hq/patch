@@ -1757,7 +1757,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerClientCrashRoutes(app, {
     logger: log.child({ component: 'client-crash-routes' }),
     registry,
-    dataDir: registry.dataDir,
+    dataDir: opts.dataDir ?? registry.dataDir,
   });
 
   // ---- secrets REST routes (spec/15 § Secrets) ----

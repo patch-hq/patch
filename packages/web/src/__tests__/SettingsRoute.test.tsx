@@ -871,6 +871,17 @@ describe('Settings → Voice', () => {
     expect(voiceCellStatus('dictation', 'openai')).toBeNull();
   });
 
+  it('Dictation mode: shows the pause and writes the chosen one', async () => {
+    const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    loadShared();
+    renderSettings('/settings/voice');
+    const pills = await screen.findByTestId('dictation-pause');
+    expect(pills.querySelector('[aria-pressed="true"]')).toHaveTextContent('3s');
+    fireEvent.click(within(pills).getByText('5s'));
+    await waitFor(() => expect(server.writes).toContainEqual({ dictationPauseSeconds: 5 }));
+  });
+
   describe('Speaking (shared by every host)', () => {
     it('writes the chosen Kokoro voice to the account', async () => {
       const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);

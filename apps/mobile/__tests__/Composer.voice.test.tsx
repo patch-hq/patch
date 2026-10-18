@@ -33,6 +33,8 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
+import { useSettingsStore } from '../src/stores/settingsStore';
+import type { SettingsResponse } from '../src/api/rest';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { __clearAllMmkv } from './stubs/mmkv';
@@ -328,6 +330,44 @@ describe('Composer — send while dictating', () => {
 // Long-press on the mic is DICTATION MODE (spec/07 § Dictation mode): the mic stays
 // open and each quiet-gap utterance is sent as its own message.
 describe('Composer — dictation mode (long-press the mic)', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      data: { preferences: { dictationPauseSeconds: 5 } } as unknown as SettingsResponse,
+      error: null,
+    });
+  });
+  const realLoad = useSettingsStore.getState().load;
+  afterEach(() => {
+    useSettingsStore.setState({ data: null, error: null, load: realLoad });
+  });
+
+  it('loads the settings first when they have not arrived yet, and says so if they cannot', async () => {
+    const { factory } = makeModeFactory();
+    const load = vi.fn(async () => {
+      useSettingsStore.setState({ error: 'offline' });
+    });
+    useSettingsStore.setState({ data: null, error: null, load });
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
+    });
+    await flush();
+    expect(load).toHaveBeenCalledOnce();
+    expect(factory).not.toHaveBeenCalled();
+    expect(JSON.stringify(useUiStore.getState().errors)).toContain(
+      'could not load settings: offline',
+    );
+  });
+
+  it('cuts utterances at the pause set in Settings', async () => {
+    const { factory } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
+    });
+    expect(vi.mocked(factory).mock.calls[0]![1]).toEqual({ silenceMs: 5000 });
+  });
+
   const mic = (r: ReturnType<typeof renderRN>): Record<string, (e?: unknown) => void> =>
     findHost(r.root, byLabel('Dictate into message')).props as Record<
       string,

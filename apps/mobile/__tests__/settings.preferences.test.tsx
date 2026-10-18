@@ -542,6 +542,20 @@ describe('Voice page: Speaking (shared, spec/01 § Settings)', () => {
   });
 });
 
+describe('Voice page: Dictation mode pause (shared)', () => {
+  it('shows the current pause and writes the chosen one', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    expect(findHost(r.root, byTestId('dictation-pause-3')).props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+    await actAsync(async () => {
+      findHost(r.root, byTestId('dictation-pause-5')).props.onPress();
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({ dictationPauseSeconds: 5 });
+  });
+});
+
 describe('Voice page: frame', () => {
   it('draws Engine, Speaking and Voice devices, with surfaces in the design’s order', () => {
     seedSettings();

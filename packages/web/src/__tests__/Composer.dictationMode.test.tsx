@@ -6,6 +6,7 @@ import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { reportAccount } from './presenceHelpers.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import type { startDictationMode, DictationModeCallbacks } from '../lib/dictationMode.js';
 
 describe('composer dictation mode', () => {
@@ -46,6 +47,17 @@ describe('composer dictation mode', () => {
     expect(factory).toHaveBeenCalledOnce();
     expect(screen.getByTestId('dictation-mode-status').textContent).toContain('pause to send');
     expect(mic().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('cuts utterances at the pause set in Settings', () => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, dictationPauseSeconds: 8 },
+      loaded: true,
+    });
+    mount();
+    fireEvent.contextMenu(mic());
+    expect(factory.mock.calls[0]![0].segmenter).toEqual({ silenceMs: 8000 });
+    usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
   });
 
   it('sends each utterance and stays open', () => {

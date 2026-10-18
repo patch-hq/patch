@@ -18,6 +18,8 @@ import { space, typography, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
+import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
+type DictationPauseChoice = (typeof DICTATION_PAUSE_CHOICES)[number];
 import { OptionPicker } from '../OptionPicker';
 import { SettingsSection } from '../SettingsSection';
 import { VoiceDevicesSection } from './DevicesSections';
@@ -222,6 +224,24 @@ export function VoicePage(): React.ReactElement {
     <SettingsPage title="Voice" testID="settings-page-voice">
       <SettingsSection title="Engine" testID="settings-voice-config">
         <VoiceEngine />
+      </SettingsSection>
+      <SettingsSection title="Dictation mode" testID="settings-voice-dictation">
+        <WithSettings testID="voice-dictation">
+          {(data) => (
+            <Row title="Send after a pause of" testID="dictation-pause-row" stack>
+              <Chips
+                options={DICTATION_PAUSE_CHOICES}
+                selected={String(data.preferences.dictationPauseSeconds) as DictationPauseChoice}
+                testIDPrefix="dictation-pause"
+                labelPrefix="Dictation pause"
+                labelOf={(c) => `${c}s`}
+                onSelect={(c) =>
+                  void patchShared('Dictation pause', { dictationPauseSeconds: Number(c) })
+                }
+              />
+            </Row>
+          )}
+        </WithSettings>
       </SettingsSection>
       <SettingsSection title="Speaking" testID="settings-voice-speaking">
         <WithSettings testID="voice-speaking">

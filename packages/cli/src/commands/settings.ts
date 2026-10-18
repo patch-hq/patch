@@ -39,6 +39,7 @@ const SETTING_KEYS: Record<string, string> = {
   'status-generation': 'statusGenerationEnabled',
   'sync-position': 'syncPosition',
   'kokoro-voice': 'kokoroVoice',
+  'dictation-pause': 'dictationPauseSeconds',
   memory: 'harnessMemoryEnabled',
 };
 
