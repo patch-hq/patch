@@ -337,14 +337,14 @@ export class WsHub {
    * The account's HOME machine (spec/06). Exactly one machine holds it: the
    * registry's explicit choice, else the first registered machine.
    */
-  private managerHostId(): string | null {
-    return this.deps.registry.managerHostId() ?? this.registeredHostIds()[0] ?? null;
+  private homeHostId(): string | null {
+    return this.deps.registry.homeHostId() ?? this.registeredHostIds()[0] ?? null;
   }
 
   /**
    * Apply the SERVER-owned fields to a machine's self-description before it
    * reaches a surface: the user-editable name (`host.rename` is surface →
-   * server) and the home flag (`host.set_manager`). The registry is the authority
+   * server) and the home flag (`host.set_home`). The registry is the authority
    * for both, so exactly one machine can claim home and a rename survives the
    * machine restarting.
    */
@@ -353,7 +353,7 @@ export class WsHub {
     return {
       ...event,
       ...(name !== undefined ? { hostName: name } : {}),
-      runsManager: this.managerHostId() === event.hostId,
+      isHomeHost: this.homeHostId() === event.hostId,
     };
   }
 
@@ -1437,6 +1437,25 @@ export class WsHub {
         this.republishHost(event.hostId);
         return;
       }
+      case 'host.set_home': {
+        try {
+          this.deps.registry.setHomeHostId(event.hostId);
+        } catch (err) {
+          this.sendControlError(conn, 'invalid_frame', (err as Error).message);
+          return;
+        }
+        slog.info({ hostId: event.hostId }, 'home machine changed');
+        // EVERY machine's flag moves: the new home gains it and the previous
+        // one loses it, so exactly one machine reports it.
+        for (const hostId of this.registeredHostIds()) {
+          this.deps.hostLink.sendTo(hostId, conn.surfaceId, {
+            type: 'host.set_home',
+            hostId: event.hostId,
+          });
+          this.republishHost(hostId);
+        }
+        return;
+      }
       // ---- host-scoped controls the MACHINE owns ----
       // Relayed to the machine the frame names (never to whichever machine
       // happens to be attached — the gate above already refused an id this
@@ -1580,8 +1599,7 @@ export class WsHub {
    * A replay for a chat whose host is offline cannot be answered by the host,
    * so answer it from the transcript the server holds. The same goes for a chat
    * the registry does not know yet: right after a server restart surfaces
-   * reconnect before any host has re-announced its chats, and without this
-   * their history stays empty until the host catches up. The request is still
+   * reconnect before any host has re-announced its chats. The request is still
    * sent on: the host answers it when it is back, and a surface drops the
    * events it already has.
    */
@@ -1702,7 +1720,7 @@ export class WsHub {
       this.lastHostReport.set(event.hostId, event);
       this.hostLastSeenAt.set(event.hostId, Date.now());
       // The name and the home flag are SERVER-owned (spec/03: `host.rename` and
-      // `host.set_manager` are surface → server). Overwrite what the machine
+      // `host.set_home` are surface → server). Overwrite what the machine
       // reported before any surface sees it, so a rename is not undone by the
       // machine's next self-description and two machines can never both claim
       // home.
