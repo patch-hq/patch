@@ -40,6 +40,7 @@ import type {
   WireEvent,
   RateLimitWindow,
   PatchActivityResponseEvent,
+  PatchSearchChatsResponseEvent,
 } from '@patch/wire';
 import {
   DEFAULT_SHARED_SETTINGS,
@@ -1163,14 +1164,9 @@ async function startHost(
    * The server owns the account-wide chat list: only it sees every machine's
    * chats, and each entry it returns names the machine that chat lives on.
    */
-  const listChatsWaiters = new Map<
-    string,
-    Array<(chats: Array<{ chatId: string; hostId: string }>) => void>
-  >();
-  const resolveListChats = (event: {
-    sourceChatId: string;
-    chats: Array<{ chatId: string; hostId: string }>;
-  }): void => {
+  type AccountChat = { chatId: string; hostId: string } & Record<string, unknown>;
+  const listChatsWaiters = new Map<string, Array<(chats: AccountChat[]) => void>>();
+  const resolveListChats = (event: { sourceChatId: string; chats: AccountChat[] }): void => {
     const waiters = listChatsWaiters.get(event.sourceChatId);
     if (!waiters || waiters.length === 0) return;
     const next = waiters.shift();
@@ -1186,7 +1182,7 @@ async function startHost(
   const requestAccountChats = async (
     sourceChatId: string,
     archived?: 'only' | 'include',
-  ): Promise<Array<{ chatId: string; hostId: string }>> => {
+  ): Promise<AccountChat[]> => {
     if (!linkOnline) {
       throw new Error('patch_list_chats: the server link is offline; cannot list other machines');
     }
@@ -1198,7 +1194,7 @@ async function startHost(
         reject(new Error('patch_list_chats: the server did not answer within 45s'));
       }, LIST_CHATS_TIMEOUT_MS);
       timer.unref();
-      function onResolve(chats: Array<{ chatId: string; hostId: string }>): void {
+      function onResolve(chats: AccountChat[]): void {
         clearTimeout(timer);
         resolve(chats);
       }
@@ -1208,6 +1204,39 @@ async function startHost(
         type: 'patch.list_chats.request',
         sourceChatId,
         ...(archived !== undefined ? { archived } : {}),
+      });
+    });
+  };
+  /** `patch_search_chats`: one account-wide ask of the server, same waiter shape as the listing. */
+  const searchWaiters = new Map<string, Array<(event: PatchSearchChatsResponseEvent) => void>>();
+  const SEARCH_TIMEOUT_MS = 30_000;
+  const requestSearch = async (
+    sourceChatId: string,
+    query: string,
+    limit?: number,
+  ): Promise<PatchSearchChatsResponseEvent> => {
+    if (!linkOnline) {
+      throw new Error('patch_search_chats: the server link is offline; cannot search chats');
+    }
+    return await new Promise((resolve, reject) => {
+      const waiters = searchWaiters.get(sourceChatId) ?? [];
+      const timer = setTimeout(() => {
+        const idx = waiters.indexOf(onResolve);
+        if (idx >= 0) waiters.splice(idx, 1);
+        reject(new Error('patch_search_chats: the server did not answer within 30s'));
+      }, SEARCH_TIMEOUT_MS);
+      timer.unref();
+      function onResolve(event: PatchSearchChatsResponseEvent): void {
+        clearTimeout(timer);
+        resolve(event);
+      }
+      waiters.push(onResolve);
+      searchWaiters.set(sourceChatId, waiters);
+      link.send({
+        type: 'patch.search_chats.request',
+        sourceChatId,
+        query,
+        ...(limit !== undefined ? { limit } : {}),
       });
     });
   };
@@ -2625,6 +2654,13 @@ async function startHost(
         // The server answered this machine's account-wide chat listing (only
         // the server sees every machine's chats).
         resolveListChats(event);
+        return;
+      }
+      if (event.type === 'patch.search_chats.response') {
+        const waiters = searchWaiters.get(event.sourceChatId);
+        const next = waiters?.shift();
+        if (waiters && waiters.length === 0) searchWaiters.delete(event.sourceChatId);
+        next?.(event);
         return;
       }
       if (event.type === 'patch.activity.response') {
@@ -4263,6 +4299,7 @@ async function startHost(
     spawnOnRemoteHost,
     // The account-wide chat list (every machine's chats, each naming its own).
     listAccountChats: (sourceChatId, archived) => requestAccountChats(sourceChatId, archived),
+    searchAccountChats: (sourceChatId, query, limit) => requestSearch(sourceChatId, query, limit),
     // `patch_activity` — the user's own messages, gathered by the server from every machine's chat logs.
     getActivity: (sourceChatId, since, until, messagesCursor, limit) =>
       requestActivity(sourceChatId, since, until, messagesCursor, limit),

@@ -4761,12 +4761,67 @@ export const PatchListChatsResponseEvent = z
         .object({
           chatId: z.string().min(1),
           ...hostIdField,
+          /**
+           * What the server's chat mirror knows about the chat, so a listing is
+           * the same whichever machine the chat lives on. Optional only so a
+           * server older than this field still validates.
+           */
+          name: z.string().nullable().optional(),
+          preview: z.string().nullable().optional(),
+          folder: z.string().optional(),
+          status: z.enum(['active', 'archived', 'errored', 'deleted']).optional(),
+          activity: z.enum(['idle', 'running', 'awaiting-permission', 'errored']).optional(),
+          pinned: z.boolean().optional(),
+          pinnedAt: z.number().nullable().optional(),
+          lastUpdated: z.number().optional(),
+          statusSummary: z.string().nullable().optional(),
         })
         .strict(),
     ),
   })
   .strict();
 export type PatchListChatsResponseEvent = z.infer<typeof PatchListChatsResponseEvent>;
+
+export const PatchSearchChatsRequestEvent = z
+  .object({
+    type: z.literal('patch.search_chats.request'),
+    sourceChatId: z.string().min(1),
+    query: z.string().min(1),
+    limit: z.number().int().positive().max(100).optional(),
+  })
+  .strict();
+export type PatchSearchChatsRequestEvent = z.infer<typeof PatchSearchChatsRequestEvent>;
+
+export const PatchSearchChatsResponseEvent = z
+  .object({
+    type: z.literal('patch.search_chats.response'),
+    sourceChatId: z.string().min(1),
+    query: z.string(),
+    /** Chats whose name/folder/summary or whose held messages matched, best first. */
+    results: z.array(
+      z
+        .object({
+          chatId: z.string().min(1),
+          ...hostIdField,
+          name: z.string().nullable(),
+          folder: z.string(),
+          status: z.enum(['active', 'archived', 'errored', 'deleted']),
+          lastUpdated: z.number(),
+          /** Which part of the chat matched. */
+          matchedIn: z.array(z.enum(['name', 'folder', 'summary', 'messages'])),
+          /** Up to three message excerpts around the match. */
+          excerpts: z.array(
+            z.object({ seq: z.number().int(), role: z.string(), text: z.string() }).strict(),
+          ),
+        })
+        .strict(),
+    ),
+    truncated: z.boolean(),
+    /** Chats the server holds no message log for, so only their metadata was searched. */
+    chatsWithoutLog: z.number().int().nonnegative(),
+  })
+  .strict();
+export type PatchSearchChatsResponseEvent = z.infer<typeof PatchSearchChatsResponseEvent>;
 
 export const PatchActivityRequestEvent = z
   .object({
@@ -8237,6 +8292,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchHistoryResponseEvent,
   PatchListChatsRequestEvent,
   PatchListChatsResponseEvent,
+  PatchSearchChatsRequestEvent,
+  PatchSearchChatsResponseEvent,
   PatchActivityRequestEvent,
   PatchActivityResponseEvent,
   PatchActivityReadRequestEvent,
@@ -8513,6 +8570,8 @@ export const EVENT_SCHEMAS = {
   'patch.history.response': PatchHistoryResponseEvent,
   'patch.list_chats.request': PatchListChatsRequestEvent,
   'patch.list_chats.response': PatchListChatsResponseEvent,
+  'patch.search_chats.request': PatchSearchChatsRequestEvent,
+  'patch.search_chats.response': PatchSearchChatsResponseEvent,
   'patch.activity.request': PatchActivityRequestEvent,
   'patch.activity.response': PatchActivityResponseEvent,
   'patch.activity.read.request': PatchActivityReadRequestEvent,

@@ -343,6 +343,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: "archived?: 'only' | 'include'",
   },
   {
+    name: patchToolId('patch_search_chats'),
+    label: 'patch_search_chats',
+    category: 'patch',
+    description:
+      'Searches every chat on the account, on any machine, by name, folder, summary and message text.',
+    params: 'query: string, limit?: number',
+  },
+  {
     name: patchToolId('patch_activity'),
     label: 'patch_activity',
     category: 'patch',

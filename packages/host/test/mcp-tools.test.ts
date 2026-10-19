@@ -147,6 +147,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_pad_update',
         'patch_peek',
         'patch_report',
+        'patch_search_chats',
         'patch_send_back',
         'patch_send_to',
         'patch_speak',
@@ -854,5 +855,77 @@ describe('patch_activity — full MCP round-trip with a configured getActivity',
         limit: undefined,
       },
     ]);
+  });
+});
+
+describe('patch_search_chats — full MCP round-trip with a configured searchAccountChats', () => {
+  const home = mkdtempSync(join(tmpdir(), 'patch-mcp-search-'));
+  const daemon = new Daemon({
+    hostId: 'd1',
+    metaStore: createMetaStore(home),
+    sdkBackend: createMockSdkBackend(),
+    oauthAccessToken: 'tok',
+    emit: () => undefined,
+    logger: silent,
+  });
+  const socketPath = join(home, 'daemon.sock');
+  const calls: unknown[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let app: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let client: any;
+
+  beforeAll(async () => {
+    app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs: new MemoryJobsStore(),
+      searchAccountChats: async (callerChatId, query, limit) => {
+        calls.push({ callerChatId, query, limit });
+        return {
+          results: [{ chatId: 'c9', hostId: 'other-host', name: 'Garden', matchedIn: ['name'] }],
+          truncated: false,
+          chatsWithoutLog: 2,
+        };
+      },
+    });
+    await app.listen({ path: socketPath });
+    const server = buildPatchToolsServer({
+      hostSocketPath: socketPath,
+      chatId: 'caller-search-1',
+      localKey: LOCAL_KEY,
+    });
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'test', version: '0.0.0' });
+    await Promise.all([server.connect(serverT), client.connect(clientT)]);
+  });
+
+  afterAll(async () => {
+    await client?.close();
+    await app?.close();
+  });
+
+  it('forwards the query and returns the server answer', async () => {
+    const res = (await client.callTool({
+      name: 'patch_search_chats',
+      arguments: { query: 'garden', limit: 5 },
+    })) as { content: { text: string }[]; isError?: boolean };
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0]!.text)).toMatchObject({
+      results: [{ chatId: 'c9', hostId: 'other-host' }],
+      chatsWithoutLog: 2,
+    });
+    expect(calls).toEqual([{ callerChatId: 'caller-search-1', query: 'garden', limit: 5 }]);
+  });
+
+  it('surfaces a server failure as an error, never an empty result', async () => {
+    const bare = await buildControl({ localKey: LOCAL_KEY, daemon, jobs: new MemoryJobsStore() });
+    const r = await bare.inject({
+      method: 'GET',
+      url: '/internal/search-chats?callerChatId=c&query=x',
+      headers: { authorization: `Bearer ${LOCAL_KEY}` },
+    });
+    expect(r.statusCode).toBe(503);
+    await bare.close();
   });
 });

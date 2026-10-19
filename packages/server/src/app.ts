@@ -834,6 +834,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     chatRegistry,
     registry,
     activity,
+    chatLogStore,
   });
 
   // spec/02 § Browser — Route through: relay a browsing host's SOCKS stream
@@ -1506,8 +1507,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     if (homeBefore === hostId && homeAfter !== null) {
       for (const id of registry.registeredHostIds()) {
         hostLink.sendTo(id, 'server', { type: 'host.set_home', hostId: homeAfter });
+        wsHub.sendToAll({ type: 'host.set_home', hostId: homeAfter });
       }
-      wsHub.sendToAll({ type: 'host.set_home', hostId: homeAfter });
       wsHub.republishAllHosts();
     }
     log.info(

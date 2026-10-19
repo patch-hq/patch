@@ -615,6 +615,31 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     sourceChatId: 'c1',
     chatCount: 3,
   },
+  'patch.search_chats.request': {
+    type: 'patch.search_chats.request',
+    sourceChatId: 'c1',
+    query: 'deploy',
+    limit: 10,
+  },
+  'patch.search_chats.response': {
+    type: 'patch.search_chats.response',
+    sourceChatId: 'c1',
+    query: 'deploy',
+    results: [
+      {
+        chatId: 'c2',
+        hostId: 'host-a',
+        name: 'Deploys',
+        folder: '/w',
+        status: 'active',
+        lastUpdated: 1,
+        matchedIn: ['name'],
+        excerpts: [{ seq: 3, role: 'user', text: 'deploy it' }],
+      },
+    ],
+    truncated: false,
+    chatsWithoutLog: 0,
+  },
   'patch.activity.request': {
     type: 'patch.activity.request',
     sourceChatId: 'c1',
