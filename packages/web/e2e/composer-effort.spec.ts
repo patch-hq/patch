@@ -15,8 +15,13 @@ test.describe('composer effort', () => {
 
     const model = (await page.getByTestId('chat-model').boundingBox())!;
     const effortBox = (await effort.boundingBox())!;
-    const send = (await page.getByTestId('send-btn').boundingBox())!;
-    // After the model control, before Send, on the row's one centre line.
+    // The row's end button: Send, or Stop while the chat is working — and
+    // chat_bus is working, so on this fixture it is Stop.
+    const send = (await page
+      .locator('[data-testid="send-btn"], [data-testid="stop-btn"]')
+      .first()
+      .boundingBox())!;
+    // After the model control, before the end button, on the row's one centre line.
     expect(effortBox.x).toBeGreaterThanOrEqual(model.x + model.width);
     expect(effortBox.x + effortBox.width).toBeLessThanOrEqual(send.x);
     expect(Math.abs(effortBox.y + effortBox.height / 2 - (send.y + send.height / 2))).toBeLessThan(
