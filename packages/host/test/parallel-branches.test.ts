@@ -97,20 +97,32 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 describe('spec/04 § Branching — parallel branches', () => {
   it('two side branches run genuinely concurrently, not serially', async () => {
-    const { daemon, events, folder } = setup({ turnDelayMs: 120 });
+    const { daemon, sdk, events, folder } = setup({ turnDelayMs: 120 });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     const firstTurn = userMessages(replay(daemon, chatId))[0]!;
 
-    const start = Date.now();
+    // Count the turns in flight at once, rather than timing them: "faster than
+    // two turns back to back" measured the machine as much as the daemon, and
+    // a loaded runner failed it with both turns running together. Concurrent
+    // means both were mid-turn at the same moment.
+    let inFlight = 0;
+    let peak = 0;
+    const run = sdk.run.bind(sdk);
+    sdk.run = (opts) =>
+      (async function* () {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        try {
+          yield* run(opts);
+        } finally {
+          inFlight--;
+        }
+      })();
     const a = daemon.sideChat({ chatId, seq: firstTurn.seq, message: 'side A', localId: 'a' });
     const b = daemon.sideChat({ chatId, seq: firstTurn.seq, message: 'side B', localId: 'b' });
     await Promise.all([a, b]);
-    const elapsed = Date.now() - start;
-
-    // Serial would be ~2×120ms; parallel is ~1×120ms. A generous ceiling
-    // (1.8×) absorbs scheduling noise without passing a serial run.
-    expect(elapsed).toBeLessThan(120 * 1.8);
+    expect(peak).toBe(2);
 
     const graph = lastBranches(events);
     expect(graph.branches).toHaveLength(3); // root + 2 side branches

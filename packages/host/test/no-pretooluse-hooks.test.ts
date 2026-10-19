@@ -4,9 +4,11 @@
 // barrier defaulted to deny, so it blocked port commands permanently and
 // false-positived on unrelated commands containing a launcher's name.
 //
-// It was the ONLY hook the host installed, so the correct end state is that
-// the SDK query is spawned with no `hooks` option at all — on BOTH spawn paths
-// (one-shot and the warm persistent session). These tests pin that.
+// It was the only hook that could REFUSE a tool call, and nothing may take its
+// place: on BOTH spawn paths (one-shot and the warm persistent session) the SDK
+// query carries no PreToolUse hook. Hooks that only observe — PostToolBatch,
+// which hands the agent skills added mid-turn — are a different thing and are
+// allowed; asserting "no hooks at all" stopped being the rule when one arrived.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,7 +35,7 @@ describe('host installs no PreToolUse hooks', () => {
     queryCalls.length = 0;
   });
 
-  it('spawns a one-shot query with no hooks option', async () => {
+  it('spawns a one-shot query with no PreToolUse hook', async () => {
     const { createRealSdkBackend } = await import('../src/sdkBackend.js');
     const backend = createRealSdkBackend();
     await drain(
@@ -46,11 +48,11 @@ describe('host installs no PreToolUse hooks', () => {
     );
 
     expect(queryCalls).toHaveLength(1);
-    expect(queryCalls[0]!.options.hooks).toBeUndefined();
-    expect(Object.keys(queryCalls[0]!.options)).not.toContain('hooks');
+    const hooks = queryCalls[0]!.options.hooks as Record<string, unknown> | undefined;
+    expect(hooks?.['PreToolUse']).toBeUndefined();
   });
 
-  it('spawns a persistent-session query with no hooks option', async () => {
+  it('spawns a persistent-session query with no PreToolUse hook', async () => {
     const { createRealSdkBackend } = await import('../src/sdkBackend.js');
     const backend = createRealSdkBackend();
     await drain(
@@ -64,7 +66,7 @@ describe('host installs no PreToolUse hooks', () => {
     );
 
     expect(queryCalls).toHaveLength(1);
-    expect(queryCalls[0]!.options.hooks).toBeUndefined();
-    expect(Object.keys(queryCalls[0]!.options)).not.toContain('hooks');
+    const hooks = queryCalls[0]!.options.hooks as Record<string, unknown> | undefined;
+    expect(hooks?.['PreToolUse']).toBeUndefined();
   });
 });
