@@ -12,6 +12,7 @@ import {
   AlarmClock,
   Bot,
   Ear,
+  FileText,
   Inbox,
   MessageCircle,
   Phone,
@@ -59,7 +60,7 @@ import {
 import { ChatSearchHitRow } from '../../src/components/ChatSearchHitRow';
 import { connectionDotColor } from '../../src/lib/connection';
 import { usePresenceStore } from '../../src/stores/presenceStore';
-import { fonts, radii, space, typography, useTheme } from '../../src/lib/theme';
+import { fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
 import { startVoiceNote, releaseVoiceNoteIfHeld } from '../../src/lib/voiceNote';
 import { startVoiceCall } from '../../src/lib/voiceCall';
 import type { ChatRow, DisplayBadge } from '../../src/stores/types';
@@ -67,6 +68,7 @@ import { deriveBadge, isHidden, isSnoozed } from '../../src/stores/types';
 import { badgeColor } from '../../src/lib/badge';
 import { getSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
 import type { CollapsibleSection } from '../../src/lib/sectionCollapse';
+import { hasDraftText, useNewChatDraftStore } from '../../src/stores/newChatDraftStore';
 
 /** This tab's own four collapsible sections — a narrower slice of the
  * shared `CollapsibleSection` key space (spec/15 §§ Chats tab, Jobs screen
@@ -284,10 +286,17 @@ function ChatsHeader({
   onCloseSearch: () => void;
 }): React.ReactElement {
   const colors = useTheme();
+  const router = useRouter();
   // The dot reflects the WS link ONLY (spec/15 § Offline / error states); the
   // host being down is its own app-level banner, never this dot.
   const conn = usePresenceStore((s) => s.connection);
   const dotColor = connectionDotColor(conn, colors);
+  // spec/14 § New chat drafts, spec/15 § New chat flow — the full Drafts list,
+  // same as desktop's sidebar section. A draft only counts here while it has
+  // text (`hasDraftText`), same rule as the sidebar's own list.
+  const draftCount = useNewChatDraftStore(
+    (s) => Object.values(s.drafts).filter((d) => hasDraftText(d.text)).length,
+  );
   const iconButton = {
     width: HEADER_HEIGHT,
     height: HEADER_HEIGHT,
@@ -354,6 +363,38 @@ function ChatsHeader({
             />
           )}
           <View style={{ flex: 1 }} />
+          {draftCount > 0 ? (
+            <Pressable
+              testID="chats-drafts-button"
+              onPress={() => router.push('/drafts')}
+              accessibilityRole="button"
+              accessibilityLabel={`Drafts (${draftCount})`}
+              style={{ ...iconButton, flexDirection: 'row' }}
+            >
+              <FileText size={20} color={colors.ink2} />
+              <View
+                testID="chats-drafts-badge"
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  paddingHorizontal: 3,
+                  backgroundColor: colors.leaf,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text
+                  style={{ color: colors.paper, fontSize: textMin, fontFamily: fonts.bodyBold }}
+                >
+                  {draftCount}
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={onOpenSearch}
             accessibilityRole="button"

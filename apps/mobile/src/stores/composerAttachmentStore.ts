@@ -1,5 +1,5 @@
 // Attachments waiting in a composer, keyed by the composer's draft key (a
-// chatId, or the new-chat key — see `NEW_CHAT_DRAFT_KEY` in lib/newChat.ts).
+// chatId, or a new-chat draft's own id — see `stores/newChatDraftStore.ts`).
 //
 // The composer used to hold these in component state, which left nothing
 // outside it able to put a file INTO a composer. The share sheet needs exactly

@@ -43,7 +43,8 @@ import { useChatStore } from '../src/stores/chatStore';
 import { useFolderStore } from '../src/stores/folderStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { defaultHostId, hostDefaultModel, usePresenceStore } from '../src/stores/presenceStore';
-import { NEW_CHAT_DRAFT_KEY, newChatRoute } from '../src/lib/newChat';
+import { newChatRoute } from '../src/lib/newChat';
+import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 import { buildRecentFolders } from '../src/lib/folderPicker';
 import { useModelCatalog } from '../src/lib/models';
 import { recentModelPicks } from '../src/lib/newChatSetup';
@@ -155,14 +156,41 @@ export default function NewChat(): React.ReactElement {
   // chat: "another one here") passes that host + folder, and the screen opens
   // on them instead of the most recent pair — still type-first, nothing is
   // created until the first send.
-  const here = useLocalSearchParams<{ hostId?: string; folder?: string }>();
+  const here = useLocalSearchParams<{ hostId?: string; folder?: string; draftId?: string }>();
   const hereHostId = typeof here.hostId === 'string' && here.hostId ? here.hostId : null;
   const hereFolder = typeof here.folder === 'string' && here.folder ? here.folder : null;
-  const [hostId, setHostId] = React.useState<string | null>(hereHostId ?? last?.hostId ?? null);
-  const [folder, setFolder] = React.useState<string | null>(
-    hereHostId ? hereFolder : (last?.folder ?? null),
+  const hereDraftId = typeof here.draftId === 'string' && here.draftId ? here.draftId : null;
+
+  // spec/14 § New chat drafts, spec/15 § New chat flow — the phone gets the
+  // full server-synced Drafts list like desktop: this screen always sits on
+  // ONE draft (an existing one opened from the Drafts list, or a fresh one),
+  // and everything picked here (folder/host/model/text) is that draft's
+  // fields. Resolved once, at mount, the same way web resolves `?draft=`.
+  const [draftId] = React.useState<string>(() => {
+    const st = useNewChatDraftStore.getState();
+    if (hereDraftId && st.get(hereDraftId)) return hereDraftId;
+    return st.create(hereFolder ?? undefined);
+  });
+  const [openedDraft] = React.useState(() => useNewChatDraftStore.getState().get(draftId));
+  const reopened = hereDraftId !== null && openedDraft !== undefined && openedDraft.text !== '';
+  React.useEffect(() => {
+    return () => {
+      // A blank draft opened and left untouched is not something the user
+      // kept (spec/14 § New chat drafts) — collect it on the way out, sparing
+      // it if it still has text.
+      useNewChatDraftStore.getState().pruneBlank();
+    };
+  }, []);
+
+  const [hostId, setHostId] = React.useState<string | null>(
+    reopened ? (openedDraft?.hostId ?? null) : (hereHostId ?? last?.hostId ?? null),
   );
-  const seededRef = React.useRef(hereHostId !== null || last !== null);
+  const [folder, setFolder] = React.useState<string | null>(
+    reopened ? openedDraft?.folder || null : hereHostId ? hereFolder : (last?.folder ?? null),
+  );
+  const seededRef = React.useRef(
+    reopened ? !!openedDraft?.hostId : hereHostId !== null || last !== null,
+  );
   React.useEffect(() => {
     if (seededRef.current || hostIds.length === 0) return;
     seededRef.current = true;
@@ -182,9 +210,20 @@ export default function NewChat(): React.ReactElement {
   // The explicit choice, or null while there is none — only an explicit
   // choice rides on the spawn, so this is never seeded from `hostModel`.
   const [model, setModel] = React.useState<string | null>(
-    hereHostId ? null : (last?.model ?? null),
+    reopened ? (openedDraft?.model ?? null) : hereHostId ? null : (last?.model ?? null),
   );
   const effectiveModel = model ?? hostModel;
+
+  // Sync host/folder/model picks into the draft (spec/14 § New chat drafts —
+  // every surface's Drafts list shows the same drafts, live). Text itself
+  // syncs through the Composer's own draft-store wiring (chatId=draftId).
+  React.useEffect(() => {
+    useNewChatDraftStore.getState().update(draftId, {
+      folder: folder ?? '',
+      ...(hostId !== null ? { hostId } : {}),
+      ...(model !== null ? { model } : {}),
+    });
+  }, [draftId, folder, hostId, model]);
   // The shared accounts a chat on this model could start on (spec/10 —
   // preferred account); null leaves it to the strategy.
   const [preferredAccountId, setPreferredAccountId] = React.useState<string | null>(null);
@@ -280,6 +319,9 @@ export default function NewChat(): React.ReactElement {
   };
 
   const onSent = (chatId: string): void => {
+    // The draft is now a real chat — consume it everywhere (spec/14 § New
+    // chat drafts — "consumed the moment its first message is sent").
+    useNewChatDraftStore.getState().remove(draftId);
     // Always the brand-new chat — never Manager (spec/15 item 16).
     router.replace(newChatRoute(chatId) as `/chats/${string}`);
   };
@@ -392,7 +434,7 @@ export default function NewChat(): React.ReactElement {
         </ScrollView>
 
         <Composer
-          chatId={NEW_CHAT_DRAFT_KEY}
+          chatId={draftId}
           dictationChatId={hostId ? draftDictationChatId(hostId) : undefined}
           folder={folder ?? undefined}
           sendTarget={sendTarget}

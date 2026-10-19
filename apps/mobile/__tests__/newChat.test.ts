@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
-import { newChatRoute, NEW_CHAT_DRAFT_KEY } from '../src/lib/newChat';
+import { newChatRoute } from '../src/lib/newChat';
 
 describe('newChatRoute', () => {
   it('routes to the new chat detail, flagged as just created', () => {
@@ -16,11 +16,5 @@ describe('newChatRoute', () => {
 
   it('refuses an empty chat id', () => {
     expect(() => newChatRoute('')).toThrow();
-  });
-});
-
-describe('NEW_CHAT_DRAFT_KEY', () => {
-  it('can never be a real chat id', () => {
-    expect(NEW_CHAT_DRAFT_KEY).not.toMatch(/^(chat|thread)_/);
   });
 });

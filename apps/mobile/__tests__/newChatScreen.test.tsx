@@ -38,9 +38,8 @@ import { useUiStore } from '../src/stores/uiStore';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { _resetSendQueue } from '../src/lib/sendQueue';
-import { NEW_CHAT_DRAFT_KEY } from '../src/lib/newChat';
 import { loadLastNewChat, saveLastNewChat } from '../src/lib/lastNewChat';
-import { getComposerDraft, setComposerDraft } from '../src/lib/composerDraft';
+import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { __clearAllMmkv } from './stubs/mmkv';
 import type { ChatRow } from '../src/stores/types';
@@ -111,6 +110,7 @@ beforeEach(() => {
   __clearAllMmkv();
   __resetRouterMock();
   __setLocalSearchParams({});
+  useNewChatDraftStore.getState()._reset();
   useChatStore.getState()._reset();
   _resetSendQueue();
   useFolderStore.getState()._reset();
@@ -141,6 +141,15 @@ beforeEach(() => {
 afterEach(() => {
   submitSpy.mockRestore();
 });
+
+/** Pre-create a draft (optionally with text) and point the screen at it via
+ * `?draftId=`, the way opening it from the phone's Drafts list would. */
+function seedDraft(text?: string): string {
+  const id = useNewChatDraftStore.getState().create();
+  if (text !== undefined) useNewChatDraftStore.getState().update(id, { text });
+  __setLocalSearchParams({ draftId: id });
+  return id;
+}
 
 async function renderReady(): Promise<ReturnType<typeof renderRN>> {
   let r!: ReturnType<typeof renderRN>;
@@ -646,7 +655,9 @@ describe('NewChat — the first send creates the chat', () => {
     expect(submitSpy.mock.calls[0]?.[1]).toBe('fix the build');
     expect(useChatStore.getState().timelines['chat_new']?.[0]?.content).toBe('fix the build');
     expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_new?justCreated=1');
-    expect(getComposerDraft(NEW_CHAT_DRAFT_KEY)).toBe('');
+    // Sending consumes the draft — nothing left in the store (spec/14 § New
+    // chat drafts).
+    expect(useNewChatDraftStore.getState().drafts).toEqual({});
   });
 
   it('carries an explicitly chosen model and permission mode', async () => {
@@ -692,6 +703,7 @@ describe('NewChat — the first send creates the chat', () => {
     api.createChat.mockRejectedValue(
       new ApiErrorClass(400, 'folder_not_found', { retractChatId: 'chat_ghost' }),
     );
+    const draftId = seedDraft();
     const r = await renderReady();
     typeText(r, 'hello');
     await send(r);
@@ -700,7 +712,7 @@ describe('NewChat — the first send creates the chat', () => {
     );
     expect(useChatStore.getState().chats['chat_ghost']).toBeUndefined();
     expect(routerMock.replace).not.toHaveBeenCalled();
-    expect(getComposerDraft(NEW_CHAT_DRAFT_KEY)).toBe('hello');
+    expect(useNewChatDraftStore.getState().drafts[draftId]?.text).toBe('hello');
   });
 
   it('a create that fails with a plain error still reports it', async () => {
@@ -712,7 +724,8 @@ describe('NewChat — the first send creates the chat', () => {
   });
 
   it('a shared file waiting in the new-chat composer uploads into the NEW chat', async () => {
-    useComposerAttachmentStore.getState().add(NEW_CHAT_DRAFT_KEY, [
+    const draftId = seedDraft();
+    useComposerAttachmentStore.getState().add(draftId, [
       {
         key: 'k1',
         uri: 'file:///c/doc.pdf',
@@ -732,13 +745,14 @@ describe('NewChat — the first send creates the chat', () => {
       mimeType: 'application/pdf',
     });
     expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_new?justCreated=1');
-    expect(useComposerAttachmentStore.getState().byKey[NEW_CHAT_DRAFT_KEY]).toBeUndefined();
+    expect(useComposerAttachmentStore.getState().byKey[draftId]).toBeUndefined();
   });
 
   it('an attachment send navigates into the new chat at once, the message pending there while it uploads', async () => {
+    const draftId = seedDraft();
     useComposerAttachmentStore
       .getState()
-      .add(NEW_CHAT_DRAFT_KEY, [
+      .add(draftId, [
         { key: 'k1', uri: 'file:///c/a.txt', name: 'a.txt', mimeType: 'text/plain', kind: 'file' },
       ]);
     let resolveUpload!: (v: unknown) => void;
@@ -750,8 +764,8 @@ describe('NewChat — the first send creates the chat', () => {
     // navigated, composer cleared, message in the new chat marked uploading.
     expect(api.createChat).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_new?justCreated=1');
-    expect(useComposerAttachmentStore.getState().byKey[NEW_CHAT_DRAFT_KEY]).toBeUndefined();
-    expect(getComposerDraft(NEW_CHAT_DRAFT_KEY)).toBe('');
+    expect(useComposerAttachmentStore.getState().byKey[draftId]).toBeUndefined();
+    expect(useNewChatDraftStore.getState().drafts[draftId]).toBeUndefined();
     const entry = useChatStore.getState().timelines['chat_new']?.[0];
     expect(entry?.content).toBe('with a file');
     expect(entry?.upload).toEqual({ done: 0, total: 1, failed: false });
@@ -768,9 +782,10 @@ describe('NewChat — the first send creates the chat', () => {
   });
 
   it('a failed upload after create stays in the new chat as Not uploaded; the chat is kept', async () => {
+    const draftId = seedDraft();
     useComposerAttachmentStore
       .getState()
-      .add(NEW_CHAT_DRAFT_KEY, [
+      .add(draftId, [
         { key: 'k1', uri: 'file:///c/a.txt', name: 'a.txt', mimeType: 'text/plain', kind: 'file' },
       ]);
     api.uploadAttachment.mockRejectedValue(new Error('413'));
@@ -791,6 +806,7 @@ describe('NewChat — the first send creates the chat', () => {
 
   it('leaving without sending creates nothing and deletes nothing', async () => {
     const r = await renderReady();
+    const draftId = Object.keys(useNewChatDraftStore.getState().drafts)[0]!;
     typeText(r, 'not yet');
     await actAsync(async () => {
       findHost(r.root, byLabel('Cancel')).props.onPress();
@@ -801,11 +817,11 @@ describe('NewChat — the first send creates the chat', () => {
     expect(api.createChat).not.toHaveBeenCalled();
     expect(api.deleteChat).not.toHaveBeenCalled();
     // The unsent text is kept for next time, as web keeps a new-chat draft.
-    expect(getComposerDraft(NEW_CHAT_DRAFT_KEY)).toBe('not yet');
+    expect(useNewChatDraftStore.getState().drafts[draftId]?.text).toBe('not yet');
   });
 
   it('text shared into a new chat is waiting in the composer', async () => {
-    setComposerDraft(NEW_CHAT_DRAFT_KEY, 'https://example.com');
+    seedDraft('https://example.com');
     const r = await renderReady();
     expect(findHost(r.root, byType('TextInput')).props.value).toBe('https://example.com');
   });

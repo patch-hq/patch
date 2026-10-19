@@ -131,6 +131,7 @@ import { SkillPreviewSheet } from './SkillPreviewSheet';
 import { getLastUsedSkill, setLastUsedSkill, orderSkillsByLastUsed } from '../lib/lastUsedSkill';
 import { joinQuotes, splitQuotes } from '../lib/composerQuotes';
 import { getComposerDraft, setComposerDraft, useComposerDraftStore } from '../lib/composerDraft';
+import { useNewChatDraftStore } from '../stores/newChatDraftStore';
 import { radii, space, textMin, typography, useTheme } from '../lib/theme';
 import { getWs } from '../api/ws';
 import { api } from '../api/rest';
@@ -272,9 +273,25 @@ export function Composer({
   edit,
 }: Props): React.ReactElement {
   const colors = useTheme();
+  // The new-chat screen's composer (`sendTarget` set) has no chat yet, so
+  // `chatId` is a new-chat DRAFT's own id, not a chatId — its text is synced
+  // through the new-chat-draft store (spec/14 § New chat drafts), which also
+  // carries the draft's folder/host/model, rather than the per-chat
+  // composer-draft store every other composer uses.
+  const isNewChatDraft = sendTarget !== undefined;
+  const getDraftText = (id: string): string =>
+    isNewChatDraft ? (useNewChatDraftStore.getState().get(id)?.text ?? '') : getComposerDraft(id);
+  const setDraftText = (id: string, text: string): void => {
+    if (isNewChatDraft) useNewChatDraftStore.getState().update(id, { text });
+    else setComposerDraft(id, text);
+  };
+  const setDraftFocused = (id: string, isFocused: boolean): string | undefined =>
+    isNewChatDraft
+      ? useNewChatDraftStore.getState().setFocused(id, isFocused)
+      : useComposerDraftStore.getState().setFocused(id, isFocused);
   // spec/15 § Composer — unsent text belongs to the chat it was typed in, so it
   // is seeded from that chat's stored draft and written back as it is typed.
-  const [draft, setDraft] = React.useState(() => (edit ? edit.initial : getComposerDraft(chatId)));
+  const [draft, setDraft] = React.useState(() => (edit ? edit.initial : getDraftText(chatId)));
   // An editor owns its text: nothing it types reaches the chat's unsent draft.
   const editRef = React.useRef(edit);
   editRef.current = edit;
@@ -292,7 +309,7 @@ export function Composer({
       draftRef.current = value;
       setDraft(value);
       if (editRef.current) editRef.current.onChange(value);
-      else setComposerDraft(chatId, value);
+      else setDraftText(chatId, value);
     },
     [chatId],
   );
@@ -300,7 +317,7 @@ export function Composer({
   // guaranteed to remount). Never writes, so it cannot cross-contaminate.
   React.useEffect(() => {
     if (editRef.current) return;
-    const stored = getComposerDraft(chatId);
+    const stored = getDraftText(chatId);
     draftRef.current = stored;
     setDraft(stored);
   }, [chatId]);
@@ -312,14 +329,21 @@ export function Composer({
   React.useEffect(() => {
     if (editRef.current) return;
     const apply = (): void => {
-      const stored = useComposerDraftStore.getState().drafts[chatId] ?? '';
+      const stored = isNewChatDraft
+        ? (useNewChatDraftStore.getState().drafts[chatId]?.text ?? '')
+        : (useComposerDraftStore.getState().drafts[chatId] ?? '');
       if (stored === draftRef.current) return;
-      if (useComposerDraftStore.getState().focused[chatId]) return;
+      const focused = isNewChatDraft
+        ? useNewChatDraftStore.getState().focused[chatId]
+        : useComposerDraftStore.getState().focused[chatId];
+      if (focused) return;
       draftRef.current = stored;
       setDraft(stored);
     };
     apply();
-    return useComposerDraftStore.subscribe(apply);
+    return isNewChatDraft
+      ? useNewChatDraftStore.subscribe(apply)
+      : useComposerDraftStore.subscribe(apply);
   }, [chatId]);
   // Held per draft key in a store rather than here, so the share sheet can
   // drop a shared file into this composer (spec/15 § Share into Patch).
@@ -1522,7 +1546,7 @@ export function Composer({
             pendingCursorRef.current = chip.start;
           }}
           onFocus={() => {
-            if (!edit) useComposerDraftStore.getState().setFocused(chatId, true);
+            if (!edit) setDraftFocused(chatId, true);
           }}
           onBlur={() => {
             // spec/14 § Composer — a draft that arrived from another surface
@@ -1530,7 +1554,7 @@ export function Composer({
             // overwriting text under the cursor; losing focus is what
             // resolves it, taking the newer text if there is one.
             if (edit) return;
-            const applied = useComposerDraftStore.getState().setFocused(chatId, false);
+            const applied = setDraftFocused(chatId, false);
             if (applied !== undefined) updateDraft(applied);
           }}
           // Typing stays possible while the link is down — only SENDING

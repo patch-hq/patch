@@ -18,7 +18,9 @@ import type { WireEvent } from '@patch/wire';
 import { store } from './credential';
 import { getWs } from '../api/ws';
 import { useUiStore } from '../stores/uiStore';
-import { NEW_CHAT_DRAFT_KEY } from './newChat';
+
+/** Where the new-chat screen's text lived before new-chat drafts were server-owned (`stores/newChatDraftStore.ts` migrates it). Not a chatId. */
+const LEGACY_NEW_CHAT_KEY = 'new';
 
 const COMPOSER_DRAFT_PREFIX = 'patch.composerDraft:';
 /** Set once the pre-server-drafts MMKV entries have been offered to the server. */
@@ -136,7 +138,7 @@ function loadAll(): { drafts: Record<string, string>; pending: string[] } {
     }
     if (typeof text === 'string' && hasDraftText(text)) {
       drafts[chatId] = text;
-      if (chatId !== NEW_CHAT_DRAFT_KEY && (!migrated || owed.includes(chatId))) {
+      if (chatId !== LEGACY_NEW_CHAT_KEY && (!migrated || owed.includes(chatId))) {
         pending.push(chatId);
       }
     }
@@ -240,8 +242,9 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
     localEditAt.set(chatId, Date.now());
     persistOne(chatId, text);
     set({ drafts: { ...get().drafts, [chatId]: text } });
-    // The new-chat key belongs to no chat: it stays on this device.
-    if (chatId === NEW_CHAT_DRAFT_KEY) return;
+    // The legacy new-chat key belongs to no chat: it stays on this device
+    // until the new-chat draft store migrates it.
+    if (chatId === LEGACY_NEW_CHAT_KEY) return;
     pendingOp.add(chatId);
     armSendTimer(chatId);
   },
@@ -261,7 +264,7 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
       delete pendingRemote[chatId];
       set({ pendingRemote });
     }
-    if (chatId === NEW_CHAT_DRAFT_KEY) return;
+    if (chatId === LEGACY_NEW_CHAT_KEY) return;
     pendingOp.add(chatId);
     flushPending(chatId);
   },
@@ -298,7 +301,7 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
     const pendingRemote = { ...get().pendingRemote };
     const focused = get().focused;
     for (const { chatId, text, updatedAt } of entries) {
-      if (chatId === NEW_CHAT_DRAFT_KEY) continue;
+      if (chatId === LEGACY_NEW_CHAT_KEY) continue;
       if (focused[chatId]) {
         pendingRemote[chatId] = { text, updatedAt };
         continue;
@@ -308,7 +311,7 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
       persistOne(chatId, text);
     }
     for (const chatId of Object.keys(drafts)) {
-      if (chatId === NEW_CHAT_DRAFT_KEY) continue;
+      if (chatId === LEGACY_NEW_CHAT_KEY) continue;
       if (incoming.has(chatId) || pendingOp.has(chatId) || focused[chatId]) continue;
       delete drafts[chatId];
       persistOne(chatId, '');
@@ -317,7 +320,7 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
   },
 
   applyDraftUpdated(chatId, text, updatedAt) {
-    if (chatId === NEW_CHAT_DRAFT_KEY) return;
+    if (chatId === LEGACY_NEW_CHAT_KEY) return;
     if (get().focused[chatId]) {
       // A keystroke made after this update was captured is still owed to the
       // server: the update may be the echo of our own earlier send.
@@ -331,7 +334,7 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
   },
 
   applyDraftCleared(chatId, updatedAt) {
-    if (chatId === NEW_CHAT_DRAFT_KEY) return;
+    if (chatId === LEGACY_NEW_CHAT_KEY) return;
     if (get().focused[chatId]) {
       // A keystroke made after this update was captured is still owed to the
       // server: the update may be the echo of our own earlier send.

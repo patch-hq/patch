@@ -30,7 +30,7 @@ import { useChatStore } from '../src/stores/chatStore';
 import { useShareStore } from '../src/stores/shareStore';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { getComposerDraft, clearComposerDraft, setComposerDraft } from '../src/lib/composerDraft';
-import { NEW_CHAT_DRAFT_KEY } from '../src/lib/newChat';
+import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 import type { ChatRow } from '../src/stores/types';
 
@@ -69,7 +69,7 @@ beforeEach(() => {
   useComposerAttachmentStore.getState()._reset();
   clearComposerDraft('chat_a');
   clearComposerDraft('chat_b');
-  clearComposerDraft(NEW_CHAT_DRAFT_KEY);
+  useNewChatDraftStore.getState()._reset();
   useChatStore.setState({
     chats: {
       chat_a: row({ chatId: 'chat_a', name: 'Recipe ideas', lastUpdated: 2 }),
@@ -127,11 +127,12 @@ describe('Share — shared text', () => {
     expect(findHost(r.root, byTestId('share-chat-option-chat_a'))).toBeTruthy();
   });
 
-  it('"Start a new chat" drafts the text into the new-chat composer and opens it', async () => {
+  it('"Start a new chat" drafts the text into a new draft and opens it by id', async () => {
     const r = await renderReady();
     await press(r, 'share-new-chat');
-    expect(getComposerDraft(NEW_CHAT_DRAFT_KEY)).toBe(TEXT);
-    expect(routerMock.replace).toHaveBeenCalledWith('/new-chat');
+    const draftId = Object.keys(useNewChatDraftStore.getState().drafts)[0]!;
+    expect(useNewChatDraftStore.getState().drafts[draftId]?.text).toBe(TEXT);
+    expect(routerMock.replace).toHaveBeenCalledWith(`/new-chat?draftId=${draftId}`);
     expect(useShareStore.getState().pending).toBeNull();
   });
 
@@ -198,11 +199,12 @@ describe('Share — shared images and files', () => {
     expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_b');
   });
 
-  it('into a new chat: the files wait in the new-chat composer', async () => {
+  it('into a new chat: the files wait in the new draft', async () => {
     const r = await renderReady();
     await press(r, 'share-new-chat');
-    expect(useComposerAttachmentStore.getState().byKey[NEW_CHAT_DRAFT_KEY]).toHaveLength(2);
-    expect(routerMock.replace).toHaveBeenCalledWith('/new-chat');
+    const draftId = Object.keys(useNewChatDraftStore.getState().drafts)[0]!;
+    expect(useComposerAttachmentStore.getState().byKey[draftId]).toHaveLength(2);
+    expect(routerMock.replace).toHaveBeenCalledWith(`/new-chat?draftId=${draftId}`);
   });
 });
 

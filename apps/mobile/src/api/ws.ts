@@ -23,6 +23,7 @@ import { speakInterrupt } from '../lib/speakInterrupt';
 import { useUiStore } from '../stores/uiStore';
 import { deliveryTracker } from '../lib/deliveryTracker';
 import { useComposerDraftStore } from '../lib/composerDraft';
+import { useNewChatDraftStore } from '../stores/newChatDraftStore';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { mobileBuildInfo } from '../lib/buildInfo';
 import { refreshRoster } from '../lib/rosterRefresh';
@@ -665,6 +666,24 @@ export class PatchWs {
     }
     if (event.type === 'composer_draft.cleared') {
       useComposerDraftStore.getState().applyDraftCleared(event.chatId, event.updatedAt);
+      return;
+    }
+    // spec/14 § New chat drafts — server-owned drafts. The cold-start
+    // snapshot, sent once right after auth.ok, and the live updates that
+    // follow.
+    if (event.type === 'new_chat_draft.list') {
+      useNewChatDraftStore.getState().applyDraftList(event.drafts);
+      return;
+    }
+    if (event.type === 'new_chat_draft.updated') {
+      useNewChatDraftStore.getState().applyDraftUpdated({
+        ...event.draft,
+        updatedAt: event.updatedAt,
+      });
+      return;
+    }
+    if (event.type === 'new_chat_draft.removed') {
+      useNewChatDraftStore.getState().applyDraftCleared(event.id, event.updatedAt);
       return;
     }
     if (

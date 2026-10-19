@@ -19,9 +19,13 @@ import { useRouter } from 'expo-router';
 import { ChevronLeft, FileText, MessageCirclePlus, Search } from 'lucide-react-native';
 import { useChatStore } from '../src/stores/chatStore';
 import { useShareStore } from '../src/stores/shareStore';
-import { handShareToComposer, shareableChats } from '../src/lib/sharePicker';
+import {
+  handShareToComposer,
+  handShareToNewChatDraft,
+  shareableChats,
+} from '../src/lib/sharePicker';
 import { filterChats } from '../src/lib/chatFilter';
-import { NEW_CHAT_DRAFT_KEY } from '../src/lib/newChat';
+import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 import { deriveChatTitle } from '../src/lib/labels';
 import { fonts, radii, space, textMin, typography, useTheme } from '../src/lib/theme';
 import type { ChatRow } from '../src/stores/types';
@@ -45,9 +49,12 @@ export default function Share(): React.ReactElement | null {
   };
 
   const sendToNewChat = (): void => {
-    handShareToComposer(NEW_CHAT_DRAFT_KEY, pending);
+    // A fresh draft, same as tapping + New chat (spec/14 § New chat drafts) —
+    // the share lands in ITS composer, then the screen opens on it by id.
+    const draftId = useNewChatDraftStore.getState().create();
+    handShareToNewChatDraft(draftId, pending);
     useShareStore.getState().clear();
-    router.replace('/new-chat');
+    router.replace(`/new-chat?draftId=${encodeURIComponent(draftId)}`);
   };
 
   const sendToChat = (chatId: string): void => {

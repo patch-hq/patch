@@ -23,14 +23,3 @@ export function newChatRoute(newChatId: string): string {
   }
   return `/chats/${newChatId}?justCreated=1`;
 }
-
-/**
- * The draft key the new-chat screen's composer types into (spec/15 § New chat
- * flow). Nothing exists server-side until the first send, so the unsent text
- * and attachments need a home that is not a chatId: this key, in the same
- * per-key stores every chat's composer uses (lib/composerDraft.ts,
- * stores/composerAttachmentStore.ts). It is also where the share sheet drops a
- * share bound for a new chat. Not a valid chatId (ids are `chat_…`/`thread_…`),
- * so it can never collide with a real chat's draft.
- */
-export const NEW_CHAT_DRAFT_KEY = 'new';
