@@ -233,3 +233,65 @@ it('asks again when an opened chat is still empty after its replay went unanswer
     timeout: 6000,
   });
 });
+
+// An old chat takes a while to come back from the host. Until the LAST chunk
+// of the replay lands the empty area says it is loading — "No messages yet"
+// on a chat that has history is a lie — and it says so again if the socket
+// that was carrying the answer drops.
+it('says Loading… until the replay finishes, then the empty state if nothing came', async () => {
+  const CHAT = 'c-loading';
+  const ws = new PatchWs('ws://test/ws');
+  ws.connect();
+  await Promise.resolve();
+  const fake = FakeWS.instances[FakeWS.instances.length - 1]!;
+  fake.open();
+  useChatStore.getState().hydrate([
+    {
+      chatId: CHAT,
+      hostId: 'd1',
+      permissionMode: 'bypassPermissions' as const,
+      name: 'Loading',
+      folder: 'portfolio',
+      activity: 'idle',
+      status: 'active',
+      pinned: false,
+      pinnedAt: null,
+      disabled: false,
+      lastUpdated: 0,
+    },
+  ]);
+  const view = render(
+    <MemoryRouter initialEntries={[`/chats/${CHAT}`]}>
+      <Routes>
+        <Route path="/chats/:chatId" element={<ChatRoute ws={ws} />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  await waitFor(() => expect(replayFramesFor(fake, CHAT)).toHaveLength(1));
+  const title = (): string | undefined =>
+    view.container.querySelector('.empty-chat-title')?.textContent ?? undefined;
+  expect(title()).toBe('Loading…');
+
+  const batch = (done: boolean): { data: string } => ({
+    data: JSON.stringify({ type: 'chat.replay_batch', chatId: CHAT, events: [], done }),
+  });
+  fake.emit('message', batch(false));
+  await waitFor(() => expect(useChatStore.getState().replaying[CHAT]).toBe(true));
+  expect(title()).toBe('Loading…');
+
+  fake.emit('message', batch(true));
+  await waitFor(() => expect(title()).toBe('No messages yet'));
+});
+
+it('stops saying Loading… when the socket carrying the replay drops', async () => {
+  const CHAT = 'c-loading-drop';
+  const ws = new PatchWs('ws://test/ws');
+  ws.connect();
+  await Promise.resolve();
+  const fake = FakeWS.instances[FakeWS.instances.length - 1]!;
+  fake.open();
+  ws.requestReplay(CHAT);
+  expect(useChatStore.getState().replaying[CHAT]).toBe(true);
+  fake.emit('close', { code: 1006, reason: '' });
+  expect(useChatStore.getState().replaying[CHAT]).toBeUndefined();
+});

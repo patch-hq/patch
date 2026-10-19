@@ -207,6 +207,7 @@ export class PatchWs {
     if (this.lastReplayCursor.get(chatId) === fromSeq) return;
     this.lastReplayCursor.set(chatId, fromSeq);
     this.ws.send(JSON.stringify({ type: 'chat.replay', chatId, fromSeq, batch: true }));
+    useChatStore.getState().setReplaying(chatId, true);
   }
 
   private handleAppState = (next: AppStateStatus): void => {
@@ -377,6 +378,7 @@ export class PatchWs {
       if (current) {
         this.ws = null;
         this.stopHeartbeat();
+        useChatStore.getState().clearReplaying();
       }
       // Record WHY, before the early return — a close during teardown is still
       // the last thing that happened to this socket (spec/12 § Connection
@@ -521,6 +523,11 @@ export class PatchWs {
   }
 
   private dispatch(event: WireEvent): void {
+    // A refused ask (unknown chat, host error) will never be followed by a last
+    // chunk, so the loading state ends here rather than sitting there forever.
+    if (event.type === 'chat.error' && typeof event.chatId === 'string') {
+      useChatStore.getState().setReplaying(event.chatId, false);
+    }
     if (event.type === 'auth.ok') {
       this.backoff = INITIAL_BACKOFF_MS;
       usePresenceStore.getState().setIdentity(event.accountId, event.surfaceId);
@@ -736,6 +743,9 @@ export class PatchWs {
       // the flush below commits them at once.
       for (const inner of event.events) this.dispatch(inner as WireEvent);
       this.flushStoreQueue();
+      // The loading state ends with the LAST chunk, not the first: until then
+      // the transcript may still be arriving, and an empty one is not yet empty.
+      if (event.done) useChatStore.getState().setReplaying(event.chatId, false);
       return;
     }
     this.queueForStore(event);

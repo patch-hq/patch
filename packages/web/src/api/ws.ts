@@ -458,6 +458,7 @@ export class PatchWs {
     // anything real re-lands within the same replay.
     useChatStore.getState().clearPendingPermissions(chatId);
     this.safeSend({ type: 'chat.replay', chatId, fromSeq, batch: true });
+    useChatStore.getState().setReplaying(chatId, true);
   }
 
   private openOnce(): void {
@@ -569,6 +570,7 @@ export class PatchWs {
       if (this.ws !== ws && !this.closed) return;
       this.ws = null;
       this.stopHeartbeat();
+      useChatStore.getState().clearReplaying();
       // Record WHY, before the early return — a close during teardown is still
       // the last thing that happened to this socket (spec/12 § Connection
       // diagnostics screen). A failed connect attempt fires 'close' too, which
@@ -655,6 +657,11 @@ export class PatchWs {
   }
 
   private dispatch(event: WireEvent): void {
+    // A refused ask (unknown chat, host error) will never be followed by a last
+    // chunk, so the loading state ends here rather than sitting there forever.
+    if (event.type === 'chat.error' && typeof event.chatId === 'string') {
+      useChatStore.getState().setReplaying(event.chatId, false);
+    }
     // Heartbeat pong (patch/todo.md train-internet resilience): the server acks
     // every surface.heartbeat. The first ack arms the zombie-socket watchdog;
     // `lastInboundAt` was already stamped by the message listener. Nothing else
@@ -1121,6 +1128,9 @@ export class PatchWs {
       // the flush below commits them at once.
       for (const inner of event.events) this.dispatch(inner as WireEvent);
       this.flushStoreQueue();
+      // The loading state ends with the LAST chunk, not the first: until then
+      // the transcript may still be arriving, and an empty one is not yet empty.
+      if (event.done) useChatStore.getState().setReplaying(event.chatId, false);
       return;
     }
     // Chat events go to chatStore — coalesced, see queueForStore.

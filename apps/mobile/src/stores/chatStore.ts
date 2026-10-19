@@ -388,6 +388,11 @@ interface ChatState {
   /** Drop an outgoing turn the user discarded (× on a `Not uploaded` turn). */
   /** Empty a chat's timeline, so it can be rebuilt from the host (spec/15 § Instant open — a cached track the host disagrees with). */
   clearTimeline(chatId: string): void;
+  /** Chats whose transcript has been asked for and not yet fully delivered. */
+  replaying: Record<string, true>;
+  setReplaying(chatId: string, on: boolean): void;
+  /** Nothing in flight any more — the socket that carried the asks is gone. */
+  clearReplaying(): void;
   removeLocalMessage(chatId: string, localId: string): void;
   /**
    * Optimistically drop a still-queued message when the user removes it (the
@@ -649,6 +654,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   toolRunSummaries: {},
   delegateUpdates: {},
   branchGraphs: {},
+  replaying: {},
   sideThreadPermissions: {},
   rosterGeneration: 0,
 
@@ -1746,6 +1752,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({ timelines: { ...s.timelines, [chatId]: [] } }));
   },
 
+  setReplaying(chatId, on) {
+    set((s) => {
+      if ((s.replaying[chatId] === true) === on) return s;
+      const next = { ...s.replaying };
+      if (on) next[chatId] = true;
+      else delete next[chatId];
+      return { replaying: next };
+    });
+  },
+
+  clearReplaying() {
+    set((s) => (Object.keys(s.replaying).length === 0 ? s : { replaying: {} }));
+  },
+
   removeQueued(chatId, localId) {
     const cur = get().timelines[chatId];
     if (!cur) return;
@@ -1804,6 +1824,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       toolRunSummaries: {},
       delegateUpdates: {},
       branchGraphs: {},
+      replaying: {},
       sideThreadPermissions: {},
     });
   },

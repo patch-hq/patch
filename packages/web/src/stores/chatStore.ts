@@ -486,6 +486,11 @@ interface ChatState {
    * screen would show a conversation that no longer exists.
    */
   clearTimeline(chatId: string): void;
+  /** Chats whose transcript has been asked for and not yet fully delivered. */
+  replaying: Record<string, true>;
+  setReplaying(chatId: string, on: boolean): void;
+  /** Nothing in flight any more — the socket that carried the asks is gone. */
+  clearReplaying(): void;
   /** Drop a chat row + its timeline (post-DELETE). */
   removeChat(chatId: string): void;
   /**
@@ -996,6 +1001,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   chats: {},
   hydrated: false,
   branchGraphs: {},
+  replaying: {},
   sideThreadPermissions: {},
   activeChatId: null,
   openKebabFor: null,
@@ -3160,6 +3166,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({ timelines: { ...s.timelines, [chatId]: [] } }));
   },
 
+  setReplaying(chatId, on) {
+    set((s) => {
+      if ((s.replaying[chatId] === true) === on) return s;
+      const next = { ...s.replaying };
+      if (on) next[chatId] = true;
+      else delete next[chatId];
+      return { replaying: next };
+    });
+  },
+
+  clearReplaying() {
+    set((s) => (Object.keys(s.replaying).length === 0 ? s : { replaying: {} }));
+  },
+
   _reset() {
     retractedChatIds.clear();
     rosteredChatIds.clear();
@@ -3168,6 +3188,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       chats: {},
       hydrated: false,
       branchGraphs: {},
+      replaying: {},
       sideThreadPermissions: {},
       activeChatId: null,
       openKebabFor: null,

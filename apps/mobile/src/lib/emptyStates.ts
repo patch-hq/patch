@@ -74,3 +74,6 @@ export const EMPTY_STATES = {
     body: 'There is nothing in this folder.',
   },
 } as const satisfies Record<string, EmptyStateCopy>;
+
+/** Title of a chat's empty area while its transcript is still on its way (not an empty state). */
+export const CHAT_LOADING_TITLE = 'Loading…';

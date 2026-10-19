@@ -537,6 +537,7 @@ export function ChatRoute({
   // history. While an opened chat is still empty, ask again with backoff.
   // Forced, because the cursor is exactly what the lost request carried.
   const timelineEmpty = useChatStore((s) => (s.timelines[chatId]?.length ?? 0) === 0);
+  const replaying = useChatStore((s) => s.replaying[chatId] === true);
   useEffect(() => {
     if (!ws || !timelineEmpty) return;
     let attempt = 0;
@@ -1977,7 +1978,7 @@ export function ChatRoute({
             >
               <div className="chat-stream-content" ref={contentRef}>
                 {timeline.length === 0 && !showThinking ? (
-                  <EmptyChat />
+                  <EmptyChat title={replaying ? 'Loading…' : undefined} />
                 ) : (
                   renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)
                 )}

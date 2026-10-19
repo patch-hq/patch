@@ -99,7 +99,7 @@ import { ContextDisclosure } from '../../src/components/ContextDisclosure';
 import { openArtifactTarget } from '../../src/lib/pads';
 import { ChatActionsMenu } from '../../src/components/ChatActionsMenu';
 import { EmptyState } from '../../src/components/EmptyState';
-import { EMPTY_STATES } from '../../src/lib/emptyStates';
+import { CHAT_LOADING_TITLE, EMPTY_STATES } from '../../src/lib/emptyStates';
 import { deriveChatTitle } from '../../src/lib/labels';
 import {
   toolCallSummary,
@@ -445,6 +445,7 @@ function ChatDetailBody(): React.ReactElement {
   // swallow every later ask, leaving "No messages yet" on a chat that has
   // history. While an opened chat is still empty, ask again with backoff.
   const timelineEmpty = useChatStore((s) => (s.timelines[chatId]?.length ?? 0) === 0);
+  const replaying = useChatStore((s) => s.replaying[chatId] === true);
   React.useEffect(() => {
     if (!timelineEmpty) return;
     let attempt = 0;
@@ -1240,7 +1241,7 @@ function ChatDetailBody(): React.ReactElement {
                     textAlign: 'center',
                   }}
                 >
-                  {EMPTY_STATES.chat.title}
+                  {replaying ? CHAT_LOADING_TITLE : EMPTY_STATES.chat.title}
                 </Text>
               </View>
             )
