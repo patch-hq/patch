@@ -5544,8 +5544,14 @@ a.ch-row:hover {
   display: flex;
   flex-direction: column;
   background: rgba(0, 0, 0, 0.86);
+  /* Drag regions are native hit-testing by geometry, not paint order: the chat
+     header's `drag` rectangle underneath would swallow every click on the
+     toolbar (Tom, App Updates: "cannot click on top buttons"). The backdrop is
+     last in <body>, so its opt-out is folded in after the header's region. */
+  -webkit-app-region: no-drag;
 }
 .annotator-toolbar {
+  -webkit-app-region: no-drag;
   flex: none;
   display: flex;
   align-items: center;
