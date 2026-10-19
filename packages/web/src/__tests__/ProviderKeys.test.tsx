@@ -81,6 +81,18 @@ describe('Settings → Keys → Provider keys', () => {
     expect(screen.getByTestId('provider-key-openai-edit')).toHaveTextContent('Add');
   });
 
+  it('marks each key with a status dot and names its environment variable', () => {
+    loadShared({ secrets: KEYS });
+    renderSection();
+    const gemini = screen.getByTestId('provider-key-gemini');
+    expect(gemini.querySelector('.set-dot:not(.off)')).not.toBeNull();
+    expect(gemini).toHaveTextContent('GEMINI_API_KEY');
+    const openai = screen.getByTestId('provider-key-openai');
+    expect(openai.querySelector('.set-dot.off')).not.toBeNull();
+    expect(screen.getByTestId('provider-key-openai-edit').className).toContain('primary');
+    expect(screen.getByTestId('provider-key-gemini-edit').className).not.toContain('primary');
+  });
+
   it('names the hosts whose environment supplies a key the account has not set, and adopts it', async () => {
     loadShared({ secrets: KEYS });
     reportHost('host-a', {

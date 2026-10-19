@@ -811,7 +811,7 @@ export function ProviderKeys(): React.ReactElement {
                   <SettingsButton
                     testID={`${row}-edit`}
                     label={k.set ? 'Replace' : 'Add'}
-                    variant="quiet"
+                    variant={k.set || env.length > 0 ? 'quiet' : 'primary'}
                     accessibilityLabel={`${k.set ? 'Replace' : 'Add'} ${label} key`}
                     disabled={!reachable || busy}
                     onPress={() => {

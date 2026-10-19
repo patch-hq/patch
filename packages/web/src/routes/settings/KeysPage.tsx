@@ -105,10 +105,14 @@ function ProviderKeys(): JSX.Element {
           >
             <div className="set-row-head">
               <div className="set-row-text">
-                <span className="set-row-title">{label}</span>
+                <span className="set-row-title">
+                  <span className={`set-dot${k.set || env.length > 0 ? '' : ' off'}`} aria-hidden />
+                  {label}
+                </span>
                 <span className="set-sub" data-testid={`${row}-status`}>
                   {status}
                 </span>
+                <span className="set-sub mono">{envVar}</span>
               </div>
               {editing === k.id ? null : (
                 <div className="set-row-ctrl">
@@ -127,7 +131,7 @@ function ProviderKeys(): JSX.Element {
                   ) : null}
                   <button
                     type="button"
-                    className="set-btn"
+                    className={`set-btn${k.set || env.length > 0 ? '' : ' primary'}`}
                     data-testid={`${row}-edit`}
                     disabled={!reachable || busy}
                     onClick={() => {
