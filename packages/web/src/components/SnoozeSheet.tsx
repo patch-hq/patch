@@ -18,7 +18,12 @@ import { ModalOverlay } from './ModalOverlay.js';
 import { chatsInProject } from '../lib/chatGroups.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
-import { SNOOZE_PRESETS, formatElapsed, formatWakeAt } from '../lib/snoozePresets.js';
+import {
+  SNOOZE_PRESETS,
+  UNTIL_COMPLETE_PRESET,
+  formatElapsed,
+  formatWakeAt,
+} from '../lib/snoozePresets.js';
 import { applySnooze } from '../lib/snoozeApply.js';
 import type { ChatRow } from '../stores/types.js';
 
@@ -33,7 +38,9 @@ function wakeFor(selected: string | null, customValue: string): number | null {
     const at = new Date(customValue).getTime();
     return customValue === '' || Number.isNaN(at) ? null : at;
   }
-  return SNOOZE_PRESETS.find((p) => p.id === selected)?.resolve() ?? null;
+  return (
+    [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET].find((p) => p.id === selected)?.resolve() ?? null
+  );
 }
 
 export function SnoozeSheet(): JSX.Element | null {
@@ -68,6 +75,10 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
       : target.kind === 'chats'
         ? `${targets.length} chats`
         : stripMarkdown(deriveChatTitle(targets[0]?.name ?? null));
+  // Offered only when every chat has work to wait for; the host refuses the rest.
+  const canUntilComplete =
+    targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
+  const presets = canUntilComplete ? [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET] : SNOOZE_PRESETS;
   const wake = wakeFor(selected, customValue);
   const canConfirm = selected !== null && targets.length > 0;
 
@@ -113,12 +124,14 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  const wakeText =
+    wake === null ? '' : selected === UNTIL_COMPLETE_PRESET.id ? 'complete' : formatWakeAt(wake);
   const primaryLabel =
     wake === null
       ? 'Snooze'
       : isProject
-        ? `Snooze ${targets.length} until ${formatWakeAt(wake)}`
-        : `Snooze until ${formatWakeAt(wake)}`;
+        ? `Snooze ${targets.length} until ${wakeText}`
+        : `Snooze until ${wakeText}`;
 
   return (
     <ModalOverlay testId="snooze-sheet-overlay">
@@ -146,7 +159,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
         </div>
 
         <div className="snooze-presets">
-          {SNOOZE_PRESETS.map((p) => (
+          {presets.map((p) => (
             <button
               key={p.id}
               type="button"

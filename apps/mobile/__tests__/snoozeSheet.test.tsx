@@ -118,6 +118,25 @@ const press = (r: ReturnType<typeof renderRN>, id: string): void =>
   actSync(() => findHost(r.root, byTestId(id)).props['onPress']());
 
 describe('the Snooze sheet', () => {
+  it('offers Until complete for a running chat and sends the sentinel', () => {
+    seedThree();
+    const r = renderRN(<SnoozeSheet />);
+    actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'a' }));
+    press(r, 'snooze-sheet-preset-until-complete');
+    expect(
+      hasText(findHost(r.root, byTestId('snooze-sheet-confirm')), 'Snooze until complete'),
+    ).toBe(true);
+    press(r, 'snooze-sheet-confirm');
+    expect(snoozeChatSpy).toHaveBeenCalledWith('a', 8_640_000_000_000_000, expect.any(String));
+  });
+
+  it('does not offer Until complete for an idle chat', () => {
+    seedThree();
+    const r = renderRN(<SnoozeSheet />);
+    actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
+    expect(findAllHost(r.root, byTestId('snooze-sheet-preset-until-complete'))).toHaveLength(0);
+  });
+
   it('a chat: title, name, presets with wake times, run box for a running chat, rule, disabled Snooze', () => {
     seedThree();
     const r = renderRN(<SnoozeSheet />);

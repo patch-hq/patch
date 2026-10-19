@@ -4,6 +4,7 @@
 
 import {
   backRecord,
+  isSnoozeUntilComplete,
   formatSnoozeDuration,
   type SnoozeOutcome,
   type SnoozeRecord,
@@ -42,6 +43,7 @@ function startOfDay(d: Date): number {
  * (spec/14 § Snooze sheet). Always 24-hour, whatever the locale.
  */
 export function formatWakeAt(at: number, now: number = Date.now()): string {
+  if (isSnoozeUntilComplete(at)) return 'when done';
   const d = new Date(at);
   const days = Math.round((startOfDay(d) - startOfDay(new Date(now))) / DAY);
   if (days === 0) return clockOf(d);
@@ -118,6 +120,9 @@ export function folderBackPill(
  * that is not on the wake day.
  */
 export function snoozeDividerText(record: SnoozeRecord): string {
+  if (record.endedAt === null && isSnoozeUntilComplete(record.until)) {
+    return `Snoozed ${clock(record.startedAt)} – until complete`;
+  }
   const end = record.endedAt ?? record.until;
   const range = `Snoozed ${formatSnoozeMoment(record.startedAt, end)} – ${clock(end)}`;
   const line =

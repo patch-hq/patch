@@ -43,6 +43,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'pino';
 import {
   MAX_SNOOZE_RECORDS,
+  SNOOZE_UNTIL_COMPLETE,
   backSetToClear,
   deriveSnoozeOutcome,
   openSnoozeRecord,
@@ -3038,8 +3039,10 @@ export class Daemon {
     for (const m of metas) {
       const state = this.chatState.get(m.chatId);
       if (!state || state.snoozedUntil === null) continue;
-      if (state.snoozedUntil <= this.opts.now()) this.wakeFromSnooze(m.chatId);
-      else this.armSnoozeTimer(m.chatId, state.snoozedUntil);
+      // A restart ends the run, so an until-complete snooze has nothing left to wait for.
+      if (state.snoozedUntil === SNOOZE_UNTIL_COMPLETE || state.snoozedUntil <= this.opts.now()) {
+        this.wakeFromSnooze(m.chatId);
+      } else this.armSnoozeTimer(m.chatId, state.snoozedUntil);
     }
     this.opts.logger.info({ count: metas.length }, 'chat_state hydrated from disk');
     // spec/02 § Self-wake: re-arm persisted self-wakes; fire any that came due
@@ -5129,6 +5132,10 @@ export class Daemon {
     if (snoozedUntil !== null && snoozedUntil <= now) {
       throw new Error(`setSnoozed: snoozedUntil ${snoozedUntil} is in the past (now ${now})`);
     }
+    if (snoozedUntil === SNOOZE_UNTIL_COMPLETE && !this.hasWorkToComplete(chatId)) {
+      // Nothing running means nothing to wait for (NO FALLBACK: say so).
+      throw new Error(`setSnoozed: ${chatId} has no running work to snooze until complete`);
+    }
     if (state.snoozedUntil === snoozedUntil) {
       this.emitState(chatId);
       return;
@@ -5168,6 +5175,28 @@ export class Daemon {
     }));
     this.armSnoozeTimer(chatId, snoozedUntil);
     this.emitState(chatId);
+  }
+
+  /** Running, or idle between turns with a goal still to be judged. */
+  private hasWorkToComplete(chatId: string): boolean {
+    const state = this.chatState.get(chatId);
+    return this.aggregateActivity(chatId) === 'running' || (state?.goal ?? null) !== null;
+  }
+
+  /**
+   * "Until complete" (spec/04 § Snooze): the snooze ends when the chat's work
+   * does — no turn running and no goal left to judge — or sooner if it stops
+   * for a person (a permission, a question, an error), since nothing more will
+   * happen without them.
+   */
+  private wakeIfSnoozeComplete(chatId: string): void {
+    const state = this.chatState.get(chatId);
+    if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) return;
+    const activity = this.aggregateActivity(chatId);
+    const needsPerson =
+      activity === 'awaiting-permission' || activity === 'errored' || this.isAskingQuestion(state);
+    if (!needsPerson && this.hasWorkToComplete(chatId)) return;
+    this.wakeFromSnooze(chatId);
   }
 
   private persistSnoozeRecords(chatId: string): void {
@@ -14087,6 +14116,7 @@ export class Daemon {
 
   private emitState(chatId: string): void {
     this.trackSnoozeOutcome(chatId);
+    this.wakeIfSnoozeComplete(chatId);
     this.unhideIfComplete(chatId);
     if (this.aggregateActivity(chatId) === 'running') {
       if (!this.runningSince.has(chatId)) this.runningSince.set(chatId, this.opts.now());

@@ -10,6 +10,8 @@
 // Custom is typed as `YYYY-MM-DD HH:mm` (parseCustomSnooze) — no native date
 // picker, which would need a new APK (spec/15 § Row tools).
 
+import { SNOOZE_UNTIL_COMPLETE } from '@patch/wire';
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -58,6 +60,13 @@ export const SNOOZE_PRESETS: readonly SnoozePreset[] = [
   { id: 'next-monday', label: 'Next Monday', resolve: () => resolveNextMondayAt(8) },
 ];
 
+/** "Until complete": wakes when the chat's work is done, not at a time. Offered only for a chat with work to wait for. */
+export const UNTIL_COMPLETE_PRESET: SnoozePreset = {
+  id: 'until-complete',
+  label: 'Until complete',
+  resolve: () => SNOOZE_UNTIL_COMPLETE,
+};
+
 /** Parses a typed local `YYYY-MM-DD HH:mm`; throws on malformed or past input (no fallback). */
 export function parseCustomSnooze(text: string, now: number = Date.now()): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})$/.exec(text.trim());
@@ -78,6 +87,7 @@ export function resolvePreset(preset: SnoozePreset): number {
 
 /** Wake time as a short local date+time, e.g. `09:30` today, `Tue 09:30` beyond. */
 export function formatWakeTime(at: number): string {
+  if (at === SNOOZE_UNTIL_COMPLETE) return 'when done';
   const d = new Date(at);
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   const sameDay = new Date().toDateString() === d.toDateString();
