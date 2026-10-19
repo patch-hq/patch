@@ -193,3 +193,43 @@ it('asks again from the same cursor after a reconnect', async () => {
 
   expect(replayFramesFor(second, CHAT)).toHaveLength(1);
 });
+
+// A replay request that never gets an answer (the host was restarting when it
+// was sent) used to leave the chat on "No messages yet" for good: the
+// same-cursor guard treated every later ask as a repeat. An opened chat that
+// is still empty asks again, with backoff, until something arrives.
+it('asks again when an opened chat is still empty after its replay went unanswered', async () => {
+  const CHAT = 'c-unanswered';
+  const ws = new PatchWs('ws://test/ws');
+  ws.connect();
+  await Promise.resolve();
+  const fake = FakeWS.instances[FakeWS.instances.length - 1]!;
+  fake.open();
+  useChatStore.getState().hydrate([
+    {
+      chatId: CHAT,
+      hostId: 'd1',
+      permissionMode: 'bypassPermissions' as const,
+      name: 'Unanswered',
+      folder: 'portfolio',
+      activity: 'idle',
+      status: 'active',
+      pinned: false,
+      pinnedAt: null,
+      disabled: false,
+      lastUpdated: 0,
+    },
+  ]);
+  render(
+    <MemoryRouter initialEntries={[`/chats/${CHAT}`]}>
+      <Routes>
+        <Route path="/chats/:chatId" element={<ChatRoute ws={ws} />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  await waitFor(() => expect(replayFramesFor(fake, CHAT)).toHaveLength(1));
+  // Nothing ever replies. The retry must go out on its own.
+  await waitFor(() => expect(replayFramesFor(fake, CHAT).length).toBeGreaterThanOrEqual(2), {
+    timeout: 6000,
+  });
+});

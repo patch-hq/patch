@@ -209,6 +209,8 @@ const NO_TIMELINE: ChatEventEntry[] = [];
 // a chat opened mid-stream never goes quiet on its own (new tokens keep
 // arriving), and without a ceiling that would hide the transcript, and the
 // typing indicator with it, for as long as the reply keeps generating.
+// Waits before re-asking for the transcript of an opened chat that is still empty.
+const EMPTY_RETRY_DELAYS_MS = [3000, 9000, 27000];
 const SETTLE_DEBOUNCE_MS = 80;
 const SETTLE_MAX_MS = 500;
 
@@ -437,6 +439,30 @@ function ChatDetailBody(): React.ReactElement {
     }
     getWs().requestReplay(chatId);
   }, [chatId]);
+
+  // A replay can be lost without anyone being told — the host was restarting
+  // when it went out — and the same-cursor guard in `requestReplay` would then
+  // swallow every later ask, leaving "No messages yet" on a chat that has
+  // history. While an opened chat is still empty, ask again with backoff.
+  const timelineEmpty = useChatStore((s) => (s.timelines[chatId]?.length ?? 0) === 0);
+  React.useEffect(() => {
+    if (!timelineEmpty) return;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = (): void => {
+      if (attempt >= EMPTY_RETRY_DELAYS_MS.length) return;
+      timer = setTimeout(() => {
+        console.warn(
+          `[patch] chat ${chatId} still empty after open — asking for its transcript again`,
+        );
+        getWs().requestReplay(chatId, { force: true });
+        attempt += 1;
+        schedule();
+      }, EMPTY_RETRY_DELAYS_MS[attempt]);
+    };
+    schedule();
+    return () => clearTimeout(timer);
+  }, [chatId, timelineEmpty]);
 
   // The host is the record, and this is where it says which track the chat is
   // on. A fork, an edit or a branch switch makes everything painted from the

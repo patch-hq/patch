@@ -281,6 +281,8 @@ const TOUCH_SCROLL_UP_SLOP = 2;
 // rest are mounted as the reader scrolls toward them. Mounting a whole long
 // transcript at once is what made a chat open slow and fill in from the top.
 const TAIL_ENTRIES = 60;
+/** Waits before re-asking for the transcript of an opened chat that is still empty. */
+const EMPTY_RETRY_DELAYS_MS = [3000, 9000, 27000];
 const TAIL_CHUNK = 60;
 // Scrolled within this many px of the top of what is mounted → mount an older chunk.
 const TAIL_NEAR_TOP_PX = 800;
@@ -528,6 +530,31 @@ export function ChatRoute({
       cancelled = true;
     };
   }, [chatId, ws]);
+
+  // A replay can be lost without anyone being told — the host was restarting
+  // when it went out — and the same-cursor guard in `requestReplay` would then
+  // swallow every later ask, leaving "No messages yet" on a chat that has
+  // history. While an opened chat is still empty, ask again with backoff.
+  // Forced, because the cursor is exactly what the lost request carried.
+  const timelineEmpty = useChatStore((s) => (s.timelines[chatId]?.length ?? 0) === 0);
+  useEffect(() => {
+    if (!ws || !timelineEmpty) return;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = (): void => {
+      if (attempt >= EMPTY_RETRY_DELAYS_MS.length) return;
+      timer = setTimeout(() => {
+        console.warn(
+          `[patch] chat ${chatId} still empty after open — asking for its transcript again`,
+        );
+        ws.requestReplay(chatId, { force: true });
+        attempt += 1;
+        schedule();
+      }, EMPTY_RETRY_DELAYS_MS[attempt]);
+    };
+    schedule();
+    return () => clearTimeout(timer);
+  }, [chatId, ws, timelineEmpty]);
 
   // The host is the record, and this is the moment it says which track the
   // chat is actually on. A fork, an edit or a branch switch makes everything
