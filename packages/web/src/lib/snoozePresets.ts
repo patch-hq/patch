@@ -5,6 +5,8 @@
 // clock at the moment of choosing into an absolute timestamp — the host
 // only ever stores that, so a slow request can't drift the wake time.
 
+import { SNOOZE_UNTIL_COMPLETE, isSnoozeUntilComplete } from '@patch/wire';
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -52,8 +54,16 @@ export const SNOOZE_PRESETS: ReadonlyArray<SnoozePreset> = [
   { id: 'next-monday', label: 'Next Monday', resolve: () => resolveNextMondayAt(8) },
 ];
 
+/** "Until complete": wakes when the chat's work is done, not at a time. Offered only for a chat with work to wait for. */
+export const UNTIL_COMPLETE_PRESET: SnoozePreset = {
+  id: 'until-complete',
+  label: 'Until complete',
+  resolve: () => SNOOZE_UNTIL_COMPLETE,
+};
+
 /** Wake time as a short local date+time, e.g. `Tue 09:30`. */
 export function formatWakeTime(at: number): string {
+  if (isSnoozeUntilComplete(at)) return 'when done';
   const d = new Date(at);
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   const sameDay = new Date().toDateString() === d.toDateString();

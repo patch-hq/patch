@@ -4,7 +4,7 @@
 // every chat's previous wake time back. Mirrors packages/web/src/lib/snoozeApply.ts.
 
 import { isReservedSpecialThread } from '@patch/wire';
-import { formatWakeAt } from '@patch/wire';
+import { SNOOZE_UNTIL_COMPLETE, formatWakeAt } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
@@ -60,7 +60,7 @@ export function applySnoozeSet(opts: {
   useUiStore
     .getState()
     .pushSnoozeToast(
-      `${name} snoozed until ${formatWakeAt(until)}`,
+      `${name} snoozed until ${until === SNOOZE_UNTIL_COMPLETE ? 'complete' : formatWakeAt(until)}`,
       runningToastLine(running, isProject),
       () => {
         for (const c of targets) {

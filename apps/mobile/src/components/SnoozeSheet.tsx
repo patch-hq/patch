@@ -16,7 +16,7 @@ import { formatElapsed, formatWakeAt } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
-import { SNOOZE_PRESETS, parseCustomSnooze } from '../lib/snooze';
+import { SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET, parseCustomSnooze } from '../lib/snooze';
 import { applySnoozeSet, chatsInFolder } from '../lib/snoozeApply';
 import { deriveChatTitle } from '../lib/labels';
 import { fonts, radii, space, textMin, typography, useTheme } from '../lib/theme';
@@ -53,7 +53,9 @@ function wakeFor(selected: string | null, customValue: string): number | null {
       return null;
     }
   }
-  return SNOOZE_PRESETS.find((p) => p.id === selected)?.resolve() ?? null;
+  return (
+    [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET].find((p) => p.id === selected)?.resolve() ?? null
+  );
 }
 
 export function SnoozeSheet(): React.ReactElement | null {
@@ -78,7 +80,13 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   const running = targets.filter((c) => c.activity === 'running');
   const notRunning = targets.length - running.length;
   const name = isProject ? target.name : deriveChatTitle(targets[0] ?? ({ name: null } as ChatRow));
+  // Offered only when every chat has work to wait for; the host refuses the rest.
+  const canUntilComplete =
+    targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
+  const presets = canUntilComplete ? [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET] : SNOOZE_PRESETS;
   const wake = wakeFor(selected, customValue);
+  const wakeText =
+    wake === null ? '' : selected === UNTIL_COMPLETE_PRESET.id ? 'complete' : formatWakeAt(wake);
   const canConfirm = selected !== null && targets.length > 0;
 
   const confirm = (): void => {
@@ -103,8 +111,8 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
     wake === null
       ? 'Snooze'
       : isProject
-        ? `Snooze ${targets.length} until ${formatWakeAt(wake)}`
-        : `Snooze until ${formatWakeAt(wake)}`;
+        ? `Snooze ${targets.length} until ${wakeText}`
+        : `Snooze until ${wakeText}`;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={close}>
@@ -142,7 +150,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
-              {[...SNOOZE_PRESETS, { id: CUSTOM, label: 'Custom…', resolve: () => 0 }].map((p) => {
+              {[...presets, { id: CUSTOM, label: 'Custom…', resolve: () => 0 }].map((p) => {
                 const on = selected === p.id;
                 return (
                   <Pressable
