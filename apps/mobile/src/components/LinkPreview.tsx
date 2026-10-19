@@ -1,13 +1,14 @@
-// LinkPreview — the small eye and open-in-browser icons beside a message link,
-// and the inline card the eye expands (spec/14 § Message links). Only http(s)
-// links get them: a mailto: or in-app link has nothing for the server to fetch.
+// LinkPreview — the small Summarise and open-in-browser icons beside a message
+// link, and the inline card the Summarise button expands with a model's
+// summary of the page (spec/14 § Message links). Only http(s) links get them:
+// a mailto: or in-app link has nothing for the server to fetch.
 
 import React from 'react';
-import { Image, Linking, Pressable, Text, View } from 'react-native';
-import { ExternalLink, Eye } from 'lucide-react-native';
-import type { LinkPreviewData } from '../api/rest';
-import { getLinkPreview, isHttpLink, previewImageSource } from '../lib/linkPreview';
+import { Linking, Pressable, Text, View } from 'react-native';
+import { ExternalLink, Sparkles } from 'lucide-react-native';
+import { getLinkSummary, isHttpLink } from '../lib/linkPreview';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
+import { useSettingsStore } from '../stores/settingsStore';
 
 export function LinkPreview({
   url,
@@ -22,15 +23,15 @@ export function LinkPreview({
   return (
     <>
       <Pressable
-        testID="link-preview-toggle"
+        testID="link-summary-toggle"
         accessibilityRole="button"
-        accessibilityLabel={open ? 'Hide link preview' : 'Preview link'}
+        accessibilityLabel={open ? 'Hide link summary' : 'Summarise link'}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen((v) => !v)}
         hitSlop={space.xs}
         style={{ paddingHorizontal: space.xs }}
       >
-        <Eye size={14} color={color} />
+        <Sparkles size={14} color={color} />
       </Pressable>
       <Pressable
         testID="link-preview-external"
@@ -42,7 +43,7 @@ export function LinkPreview({
       >
         <ExternalLink size={14} color={color} />
       </Pressable>
-      {open ? <LinkPreviewCard url={url} /> : null}
+      {open ? <LinkSummaryCard url={url} /> : null}
     </>
   );
 }
@@ -50,28 +51,28 @@ export function LinkPreview({
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; data: LinkPreviewData };
+  | { kind: 'done'; summary: string };
 
-function LinkPreviewCard({ url }: { url: string }): React.ReactElement {
+function LinkSummaryCard({ url }: { url: string }): React.ReactElement {
   const colors = useTheme();
+  const prompt = useSettingsStore((s) => s.data?.preferences.linkSummaryPrompt ?? '');
   const [state, setState] = React.useState<State>({ kind: 'loading' });
   React.useEffect(() => {
     let live = true;
     setState({ kind: 'loading' });
-    getLinkPreview(url).then(
-      (data) => live && setState({ kind: 'done', data }),
+    getLinkSummary(url, prompt).then(
+      (data) => live && setState({ kind: 'done', summary: data.summary }),
       (e: Error) => live && setState({ kind: 'error', message: e.message }),
     );
     return () => {
       live = false;
     };
-  }, [url]);
+  }, [url, prompt]);
 
   const text = { fontFamily: fonts.body, fontSize: textMin };
-  const data = state.kind === 'done' ? state.data : null;
   return (
     <View
-      testID="link-preview-card"
+      testID="link-summary-card"
       style={{
         marginTop: space.xs,
         padding: space.sm,
@@ -83,39 +84,16 @@ function LinkPreviewCard({ url }: { url: string }): React.ReactElement {
       }}
     >
       {state.kind === 'loading' ? (
-        <Text style={{ ...text, color: colors.ink3 }}>Loading preview…</Text>
+        <Text style={{ ...text, color: colors.ink3 }}>Summarising…</Text>
       ) : null}
       {state.kind === 'error' ? (
-        <Text style={{ ...text, color: colors.red }}>{state.message}</Text>
-      ) : null}
-      {data && !data.title && !data.description && !data.image && !data.excerpt ? (
-        <Text style={{ ...text, color: colors.ink3 }}>No preview available</Text>
-      ) : null}
-      {data?.image ? (
-        <Image
-          testID="link-preview-image"
-          source={previewImageSource(data.image)}
-          resizeMode="cover"
-          style={{ width: '100%', height: 140, borderRadius: radii.sm }}
-        />
-      ) : null}
-      {data?.title ? (
-        <Text style={{ ...text, fontFamily: fonts.bodyMedium, color: colors.ink }}>
-          {data.title}
+        <Text testID="link-summary-error" style={{ ...text, color: colors.red }}>
+          {state.message}
         </Text>
       ) : null}
-      {data?.description ? (
-        <Text numberOfLines={3} style={{ ...text, color: colors.ink2 }}>
-          {data.description}
-        </Text>
-      ) : null}
-      {data?.excerpt ? (
-        <Text
-          testID="link-preview-excerpt"
-          numberOfLines={10}
-          style={{ ...text, color: colors.ink2, lineHeight: 20 }}
-        >
-          {data.excerpt}
+      {state.kind === 'done' ? (
+        <Text testID="link-summary-text" style={{ ...text, color: colors.ink2, lineHeight: 20 }}>
+          {state.summary}
         </Text>
       ) : null}
       <Text style={{ ...text, color: colors.ink3 }}>{new URL(url).host}</Text>

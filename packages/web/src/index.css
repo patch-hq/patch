@@ -4798,8 +4798,8 @@ a.ch-row:hover {
   font-weight: 500;
 }
 
-/* spec/14 § Message links — the icon next to a link that expands an inline
-   mini-preview, and the card it opens. */
+/* spec/14 § Message links — the Summarise icon next to a link, and the card
+   its summary opens in. */
 .link-preview-wrap {
   /* Inline, not inline-block: the card inside is a block, and an inline-block
      lines the link up with the card's last line, leaving the icons above it. */
@@ -4855,35 +4855,9 @@ a.ch-row:hover {
 .link-preview-status {
   color: var(--ink-3);
 }
-.link-preview-image {
+.link-summary-text {
   display: block;
-  max-width: 100%;
-  max-height: 160px;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  margin-bottom: 6px;
-}
-.link-preview-text {
-  display: block;
-}
-.link-preview-title {
-  display: block;
-  font-weight: 600;
-  color: var(--ink-2);
-}
-.link-preview-description {
-  display: block;
-  margin-top: 2px;
-  color: var(--ink-3);
-}
-.link-preview-excerpt {
-  display: -webkit-box;
-  -webkit-line-clamp: 8;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--accent-soft, #cad9be);
+  white-space: pre-wrap;
   color: var(--ink-2);
   line-height: 1.4;
 }

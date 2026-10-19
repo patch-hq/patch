@@ -10,6 +10,7 @@ import {
   QUESTION_EXPIRY_SECONDS_MAX,
   QUESTION_EXPIRY_SECONDS_MIN,
   DEFAULT_PROVIDER_ID,
+  DEFAULT_LINK_SUMMARY_PROMPT,
   HARNESS_PERMISSION_MODES,
   PROVIDERS,
   type PermissionMode,
@@ -42,6 +43,7 @@ export function AgentPage(): JSX.Element {
       </Group>
       <QuestionsGroup />
       <ChatsGroup />
+      <LinkSummaryGroup />
       <LayersGroup />
     </SettingsPage>
   );
@@ -230,6 +232,35 @@ function QuestionsGroup(): JSX.Element {
         />
         <span className="set-unit">s</span>
       </Row>
+    </Group>
+  );
+}
+
+/** The prompt the Summarise button beside a message link runs with. */
+function LinkSummaryGroup(): JSX.Element {
+  const prompt = usePreferencesStore((s) => s.preferences.linkSummaryPrompt);
+  return (
+    <Group label="Link summary" testid="settings-link-summary">
+      <LayerEditor
+        title="Summarise prompt"
+        sub={
+          prompt === DEFAULT_LINK_SUMMARY_PROMPT
+            ? 'Built-in default'
+            : (prompt.split('\n')[0] ?? '')
+        }
+        initial={prompt}
+        testid="link-summary-prompt"
+        placeholder={DEFAULT_LINK_SUMMARY_PROMPT}
+        onSave={(text) => patchShared('link summary prompt', { linkSummaryPrompt: text })}
+        onReset={
+          prompt === DEFAULT_LINK_SUMMARY_PROMPT
+            ? undefined
+            : () =>
+                patchShared('link summary prompt', {
+                  linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
+                })
+        }
+      />
     </Group>
   );
 }
