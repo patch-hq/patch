@@ -635,6 +635,18 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       },
     ],
     messagesTruncated: false,
+    chatSessions: [
+      {
+        chatId: 'c2',
+        chatName: 'bus watch',
+        hostId: 'host-a',
+        folder: '/work/bus',
+        start: 1_000,
+        end: 5_000,
+        durationMs: 4_000,
+      },
+    ],
+    sessionsTruncated: false,
   },
   'patch.activity.read.request': {
     type: 'patch.activity.read.request',

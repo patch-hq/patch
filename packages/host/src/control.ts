@@ -186,10 +186,16 @@ export interface BuildOptions {
     until: number,
     messagesCursor?: number,
     limit?: number,
+    includeSessions?: boolean,
+    sessionsCursor?: number,
   ) => Promise<{
     messages: unknown[];
     messagesTruncated: boolean;
     nextMessagesCursor?: number;
+    /** Present only when sessions were asked for. */
+    chatSessions?: unknown[];
+    sessionsTruncated?: boolean;
+    nextSessionsCursor?: number;
   }>;
   /**
    * Read another chat's live state cross-host (spec/03 § Cross-chat tools):
@@ -815,6 +821,12 @@ const ActivityQuery = z
     since: z.coerce.number().int().nonnegative(),
     until: z.coerce.number().int().nonnegative(),
     messagesCursor: z.coerce.number().int().nonnegative().optional(),
+    /** Also return chat dwell sessions; a `sessionsCursor` implies it. */
+    includeSessions: z
+      .enum(['true', 'false', '1', '0'])
+      .transform((v) => v === 'true' || v === '1')
+      .optional(),
+    sessionsCursor: z.coerce.number().int().nonnegative().optional(),
     limit: z.coerce.number().int().positive().optional(),
     /** The calling chat — correlates the account-wide activity RPC to the server. */
     callerChatId: z.string().min(1),
@@ -2876,6 +2888,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         q.data.until,
         q.data.messagesCursor,
         q.data.limit,
+        q.data.includeSessions,
+        q.data.sessionsCursor,
       );
       toolLog({
         tool: 'patch_activity',

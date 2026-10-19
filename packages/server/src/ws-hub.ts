@@ -30,6 +30,7 @@ import {
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey, CredentialExpiredError } from '@patch/auth';
 import type { Registry } from './registry.js';
+import type { ActivityLog } from './activity-log.js';
 import type { PresenceTracker, ClientBuildInfo } from './presence.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
@@ -154,6 +155,14 @@ export interface WsHubDeps {
    * turn-completion event will never arrive from the now-gone host).
    */
   chatRegistry: ChatRegistry;
+  /**
+   * Chat dwell-session log (`activity-log.ts`) — `patch_activity`'s sessions
+   * (spec/06 § Cross-chat toolset). Recorded here, at the single point every
+   * surface's focus/visibility frames pass through regardless of which host a
+   * chat is on. Optional so the many unit tests that construct a bare hub
+   * needn't supply one; production (`app.ts`) always does.
+   */
+  activity?: ActivityLog;
   /**
    * How long a host must stay offline before its in-flight chats are forced to
    * `errored`. A link that drops and returns inside this window (a network
@@ -1304,13 +1313,17 @@ export class WsHub {
       }
       case 'surface.foregrounded':
       case 'surface.backgrounded': {
-        // Not persisted (we reuse heartbeat semantics so a surface that
-        // explicitly foregrounds doesn't fall stale).
+        // Not persisted for PRESENCE (we reuse heartbeat semantics so a surface
+        // that explicitly foregrounds doesn't fall stale) — but it IS the
+        // visibility half of `patch_activity`'s dwell-time reconstruction
+        // (activity-log.ts), which presence's current-state-only model can't answer.
         this.deps.presence.heartbeat(conn.accountId, conn.surfaceId);
+        this.deps.activity?.recordVisibility(conn.surfaceId, event.type === 'surface.foregrounded');
         return;
       }
       case 'chat.focus_change': {
         this.deps.presence.setFocus(conn.accountId, conn.surfaceId, event.chatId);
+        this.deps.activity?.recordFocus(conn.surfaceId, event.chatId);
         if (event.chatId !== null) this.deps.presenceHandover?.opened(event.chatId);
         if (event.chatId === null) {
           // Unsubscribe from everything.

@@ -347,8 +347,9 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_activity',
     category: 'patch',
     description:
-      'Reads the messages the user themselves sent in a time window, across every machine.',
-    params: 'since: number, until: number, messagesCursor?: number, limit?: number',
+      'Reads the messages the user themselves sent in a time window, across every machine, and optionally the chats they had open.',
+    params:
+      'since: number, until: number, messagesCursor?: number, includeSessions?: boolean, sessionsCursor?: number, limit?: number',
   },
   {
     name: patchToolId('patch_list_devices'),

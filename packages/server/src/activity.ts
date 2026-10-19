@@ -16,7 +16,12 @@
 // `ActivityMessageKind` for what each value means.
 
 import { randomUUID } from 'node:crypto';
-import type { ActivityMessage, PatchActivityReadResponseEvent } from '@patch/wire';
+import type {
+  ActivityChatSession,
+  ActivityMessage,
+  PatchActivityReadResponseEvent,
+} from '@patch/wire';
+import type { ActivityLog } from './activity-log.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { HostLink } from './host-link.js';
 
@@ -41,6 +46,14 @@ export interface ActivityQuery {
   until: number;
   /** Resume point from a previously truncated page. */
   messagesCursor?: number;
+  /**
+   * Also return the chat dwell sessions (recorded by the server, not read
+   * from a host). Opt-in so a caller that never asks gets the messages-only
+   * result it always did.
+   */
+  includeSessions?: boolean;
+  /** Resume point from a truncated sessions page; implies `includeSessions`. */
+  sessionsCursor?: number;
   limit?: number;
 }
 
@@ -48,6 +61,10 @@ export interface ActivityResult {
   messages: ActivityMessage[];
   messagesTruncated: boolean;
   nextMessagesCursor?: number;
+  /** Present only when sessions were asked for. */
+  chatSessions?: ActivityChatSession[];
+  sessionsTruncated?: boolean;
+  nextSessionsCursor?: number;
 }
 
 export interface ActivityReader {
@@ -59,11 +76,13 @@ export interface ActivityReader {
 export function createActivityReader(deps: {
   hostLink: HostLink;
   chatRegistry: ChatRegistry;
+  /** Where dwell sessions are recorded; without one, asking for them fails. */
+  log?: ActivityLog;
   now?: () => number;
   readTimeoutMs?: number;
 }): ActivityReader {
   const readTimeoutMs = deps.readTimeoutMs ?? ACTIVITY_READ_TIMEOUT_MS;
-  const { hostLink, chatRegistry } = deps;
+  const { hostLink, chatRegistry, log } = deps;
   const now = deps.now ?? Date.now;
   const waiting = new Map<
     string,
@@ -129,8 +148,43 @@ export function createActivityReader(deps: {
     }
   };
 
+  /** Dwell sessions joined against the chat mirror; a chat it no longer knows is dropped. */
+  const sessionsFor = (
+    q: ActivityQuery,
+  ): Pick<ActivityResult, 'chatSessions' | 'sessionsTruncated' | 'nextSessionsCursor'> => {
+    const r = log!.querySessions({
+      since: q.since,
+      until: q.until,
+      ...(q.sessionsCursor !== undefined ? { sessionsCursor: q.sessionsCursor } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    });
+    const chatSessions: ActivityChatSession[] = [];
+    for (const s of r.chatSessions) {
+      const chat = chatRegistry.get(s.chatId);
+      if (!chat) continue;
+      chatSessions.push({
+        chatId: s.chatId,
+        chatName: chat.name,
+        hostId: chat.hostId,
+        folder: chat.folder,
+        start: s.start,
+        end: s.end,
+        durationMs: s.durationMs,
+      });
+    }
+    return {
+      chatSessions,
+      sessionsTruncated: r.sessionsTruncated,
+      ...(r.nextSessionsCursor !== undefined ? { nextSessionsCursor: r.nextSessionsCursor } : {}),
+    };
+  };
+
   return {
     async query(q) {
+      const wantSessions = q.includeSessions === true || q.sessionsCursor !== undefined;
+      if (wantSessions && !log) {
+        throw new Error('patch_activity: chat sessions are not recorded on this server');
+      }
       const until = Math.min(q.until, now());
       let since = Math.min(q.since, until);
       if (until - since > ACTIVITY_MAX_WINDOW_MS) since = until - ACTIVITY_MAX_WINDOW_MS;
@@ -186,10 +240,12 @@ export function createActivityReader(deps: {
           ...(m.kind !== undefined ? { kind: m.kind } : {}),
         });
       }
+      const sessions = wantSessions ? sessionsFor(q) : undefined;
       return {
         messages,
         messagesTruncated: truncated,
         ...(nextMessagesCursor !== undefined ? { nextMessagesCursor } : {}),
+        ...(sessions ?? {}),
       };
     },
     close() {

@@ -1126,26 +1126,30 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_activity',
     {
       description:
-        "Read the USER'S OWN messages for a window — not agent output, which is already reachable via patch_peek/patch_history. Returns { messages, messagesTruncated, nextMessagesCursor? }. messages are role='user' turns, oldest first, across every host (chatId, chatName, hostId, folder, text, ts — ms-epoch, kind?). `kind` is absent when a person actually typed the message (composer, voice, a fork/side message); otherwise it names what the host fired on its own behalf instead: 'job' (a job's fire into an existing chat), 'hook' (an agent-response hook's resubmit), 'goal' (a goal evaluator's not-met resubmit), or 'machine' (a self-wake, a Manager-sweep nudge/wake, a patch_delegate relay, a `patch chats send-to` from the CLI, a cut-off turn re-sent as 'Carry on' after a host restart, or the todo list advancing — e.g. the 'Carry on'/'Checking in — still working?' lines a stalled chat gets nudged with). Filter on `kind` being absent to see only what a person wrote. `since`/`until` are ms-epoch and the window is capped server-side (30 days) regardless of what you ask for. If `messagesTruncated` is true, re-call with `nextMessagesCursor` as `messagesCursor` (same since/until) to continue. Read-only.",
+        "Read the USER'S OWN messages for a window — not agent output, which is already reachable via patch_peek/patch_history. Returns { messages, messagesTruncated, nextMessagesCursor? }. messages are role='user' turns, oldest first, across every host (chatId, chatName, hostId, folder, text, ts — ms-epoch, kind?). `kind` is absent when a person actually typed the message (composer, voice, a fork/side message); otherwise it names what the host fired on its own behalf instead: 'job' (a job's fire into an existing chat), 'hook' (an agent-response hook's resubmit), 'goal' (a goal evaluator's not-met resubmit), or 'machine' (a self-wake, a Manager-sweep nudge/wake, a patch_delegate relay, a `patch chats send-to` from the CLI, a cut-off turn re-sent as 'Carry on' after a host restart, or the todo list advancing — e.g. the 'Carry on'/'Checking in — still working?' lines a stalled chat gets nudged with). Filter on `kind` being absent to see only what a person wrote. `since`/`until` are ms-epoch and the window is capped server-side (30 days) regardless of what you ask for. If `messagesTruncated` is true, re-call with `nextMessagesCursor` as `messagesCursor` (same since/until) to continue. Pass includeSessions:true to ALSO get the user's chat dwell time: `chatSessions` (chatId, chatName, hostId, folder, start, end, durationMs — ms-epoch) are periods a chat was open on a FOCUSED, VISIBLE surface, with `sessionsTruncated` and `nextSessionsCursor?`; page it with `sessionsCursor` (independent of messagesCursor — a list that was not truncated is re-read from `since`). Without includeSessions the result has no session fields. Read-only.",
       inputSchema: {
         since: z.number().int().nonnegative(),
         until: z.number().int().nonnegative(),
         messagesCursor: z.number().int().nonnegative().optional(),
+        includeSessions: z.boolean().optional(),
+        sessionsCursor: z.number().int().nonnegative().optional(),
         limit: z
           .number()
           .int()
           .positive()
           .max(500)
           .optional()
-          .describe('Max messages per page, up to 500; page on with messagesCursor.'),
+          .describe('Max rows per list per page, up to 500; page on with messagesCursor.'),
       },
     },
-    async ({ since, until, messagesCursor, limit }) => {
+    async ({ since, until, messagesCursor, includeSessions, sessionsCursor, limit }) => {
       const params = new URLSearchParams();
       params.set('callerChatId', callerChatId);
       params.set('since', String(since));
       params.set('until', String(until));
       if (messagesCursor !== undefined) params.set('messagesCursor', String(messagesCursor));
+      if (includeSessions !== undefined) params.set('includeSessions', String(includeSessions));
+      if (sessionsCursor !== undefined) params.set('sessionsCursor', String(sessionsCursor));
       if (limit !== undefined) params.set('limit', String(limit));
       const res = await uds<unknown>({
         method: 'GET',

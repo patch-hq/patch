@@ -164,6 +164,28 @@ Every connected surface emits `surface.heartbeat` every 10s while foregrounded. 
 
 Foregrounded = tab visible (web), app in foreground (phone), desktop notifier running (desktop). When all surfaces are backgrounded/absent for 30s, push-to-phone becomes the active notification channel. See `09-notifications.md`.
 
+### What counts as a chat being "open" (`patch_activity`)
+
+The account-wide presence above answers "is the user at a surface at all?" — a
+separate, PER-CHAT question is "was this particular chat open?", which
+`patch_activity` (`06-threads-manager-speakers.md` § Cross-chat toolset, with
+`includeSessions`) answers from two existing signals, combined:
+
+- **Focused**: the surface's last `chat.focus_change` (`03-wire-protocol.md`)
+  named this chat.
+- **Visible**: the surface is foregrounded — its last `surface.foregrounded` /
+  `surface.backgrounded` said so.
+
+A chat is "open" only while BOTH hold on the same surface. Focused-but-backgrounded
+(switched tabs without navigating away) and visible-but-unfocused (the chat list,
+with no chat selected) don't count — a chat sitting unread in a background tab
+is not time spent looking at it. The server (not any one host) records every
+surface's `chat.focus_change` / `surface.foregrounded` / `surface.backgrounded`
+transition for this purpose, because it is the only place that sees every
+surface regardless of which host each chat happens to live on
+(`activity-log.ts`). Two surfaces open on the same chat at once are two separate
+open periods, not one — both really happened.
+
 ## QR-code linking
 
 A linked surface shows a single-use pairing nonce as a QR and a short code; the new surface takes it and receives a server-issued credential bound to the account. Any linked surface can link another. See `10-auth.md` § Surface linking (QR flow).

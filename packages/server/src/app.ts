@@ -26,6 +26,7 @@ import { buildVersionReport, readPublishedArtifact, readWebLayer } from './versi
 import { Registry } from './registry.js';
 import { PresenceTracker } from './presence.js';
 import { createActivityReader } from './activity.js';
+import { ActivityLog } from './activity-log.js';
 import { createBrowserUseReader, HostOfflineError } from './browser-use.js';
 import { createToolLogReader } from './tool-log.js';
 import { createUsageReader } from './usage-report.js';
@@ -519,7 +520,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // The user's own messages (`patch_activity`, spec/06 § Cross-chat toolset),
   // read through every machine's chat logs.
-  const activity = createActivityReader({ hostLink, chatRegistry });
+  // Chat dwell sessions are the one part no host keeps: the server records every
+  // surface's focus/visibility frames itself (ws-hub.ts) into this log.
+  const activityLog = new ActivityLog(opts.dataDir ?? registry.dataDir);
+  const activity = createActivityReader({ hostLink, chatRegistry, log: activityLog });
   app.addHook('onClose', async () => activity.close());
 
   // Settings → Computer use: is an agent driving a machine's browser, and Stop.
@@ -772,6 +776,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     presenceHandover: phoneHandover,
     hostLink,
     chatRegistry,
+    activity: activityLog,
     ...(opts.hostOfflineGraceMs !== undefined
       ? { hostOfflineGraceMs: opts.hostOfflineGraceMs }
       : {}),
@@ -1377,16 +1382,19 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     const until = q.until !== undefined ? Number(q.until) : now;
     const since = q.since !== undefined ? Number(q.since) : until - 24 * 60 * 60 * 1000;
     const messagesCursor = q.messagesCursor !== undefined ? Number(q.messagesCursor) : undefined;
+    const sessionsCursor = q.sessionsCursor !== undefined ? Number(q.sessionsCursor) : undefined;
+    const includeSessions = q.includeSessions === '1' || q.includeSessions === 'true';
     const limit = q.limit !== undefined ? Number(q.limit) : undefined;
     if (
       !Number.isFinite(since) ||
       !Number.isFinite(until) ||
       (messagesCursor !== undefined && !Number.isFinite(messagesCursor)) ||
+      (sessionsCursor !== undefined && !Number.isFinite(sessionsCursor)) ||
       (limit !== undefined && !Number.isFinite(limit))
     ) {
       return reply.code(400).send({
         error: 'invalid_input',
-        message: 'since/until/messagesCursor/limit must be numbers',
+        message: 'since/until/messagesCursor/sessionsCursor/limit must be numbers',
       });
     }
     try {
@@ -1394,6 +1402,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         since,
         until,
         ...(messagesCursor !== undefined ? { messagesCursor } : {}),
+        ...(includeSessions ? { includeSessions } : {}),
+        ...(sessionsCursor !== undefined ? { sessionsCursor } : {}),
         ...(limit !== undefined ? { limit } : {}),
       });
     } catch (err) {

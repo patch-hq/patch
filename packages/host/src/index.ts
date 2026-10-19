@@ -1233,6 +1233,8 @@ async function startHost(
     until: number,
     messagesCursor?: number,
     limit?: number,
+    includeSessions?: boolean,
+    sessionsCursor?: number,
   ): Promise<PatchActivityResponseEvent> => {
     if (!linkOnline) {
       throw new Error('patch_activity: the server link is offline; cannot read activity');
@@ -1257,6 +1259,8 @@ async function startHost(
         since,
         until,
         ...(messagesCursor !== undefined ? { messagesCursor } : {}),
+        ...(includeSessions ? { includeSessions } : {}),
+        ...(sessionsCursor !== undefined ? { sessionsCursor } : {}),
         ...(limit !== undefined ? { limit } : {}),
       });
     });
@@ -4263,9 +4267,25 @@ async function startHost(
     spawnOnRemoteHost,
     // The account-wide chat list (every machine's chats, each naming its own).
     listAccountChats: (sourceChatId, archived) => requestAccountChats(sourceChatId, archived),
-    // `patch_activity` — the user's own messages, gathered by the server from every machine's chat logs.
-    getActivity: (sourceChatId, since, until, messagesCursor, limit) =>
-      requestActivity(sourceChatId, since, until, messagesCursor, limit),
+    // `patch_activity` — the user's own messages (gathered by the server from every machine's chat logs) and, on request, chat dwell sessions.
+    getActivity: (
+      sourceChatId,
+      since,
+      until,
+      messagesCursor,
+      limit,
+      includeSessions,
+      sessionsCursor,
+    ) =>
+      requestActivity(
+        sourceChatId,
+        since,
+        until,
+        messagesCursor,
+        limit,
+        includeSessions,
+        sessionsCursor,
+      ),
     // spec/03 § Cross-chat tools — a chat not found among THIS machine's own
     // resolves on the OWNING machine's own answer, exactly like a cross-host
     // spawn, once the server's chat mirror says where it actually lives.

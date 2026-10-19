@@ -242,6 +242,10 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
           since: event.since,
           until: event.until,
           ...(event.messagesCursor !== undefined ? { messagesCursor: event.messagesCursor } : {}),
+          ...(event.includeSessions !== undefined
+            ? { includeSessions: event.includeSessions }
+            : {}),
+          ...(event.sessionsCursor !== undefined ? { sessionsCursor: event.sessionsCursor } : {}),
           ...(event.limit !== undefined ? { limit: event.limit } : {}),
         })
         .then((result) => {

@@ -4776,6 +4776,14 @@ export const PatchActivityRequestEvent = z
     until: z.number().int().nonnegative(),
     /** Resume cursor from a prior truncated response (spec/06). */
     messagesCursor: z.number().int().nonnegative().optional(),
+    /**
+     * Ask for the chat dwell sessions too. The response carries `chatSessions`
+     * only when this is set, so a host that predates dwell sessions (and
+     * parses the response strictly) never receives a field it doesn't know.
+     */
+    includeSessions: z.boolean().optional(),
+    /** Resume cursor for `chatSessions`, independent of `messagesCursor`. */
+    sessionsCursor: z.number().int().nonnegative().optional(),
     limit: z.number().int().positive().optional(),
   })
   .strict();
@@ -4811,11 +4819,27 @@ export const ActivityMessage = z
   .strict();
 export type ActivityMessage = z.infer<typeof ActivityMessage>;
 
+/** A period a chat sat open on a surface that was both focused and visible (spec/05). */
+export const ActivityChatSession = z
+  .object({
+    chatId: z.string().min(1),
+    chatName: z.string().nullable(),
+    ...hostIdField,
+    folder: z.string(),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+    durationMs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ActivityChatSession = z.infer<typeof ActivityChatSession>;
+
 /**
  * The server's answer to `patch_activity` (spec/06 § Cross-chat toolset) — the
- * user's OWN messages across every host, read through the chats' own logs.
- * Paged: a truncated response carries the resume cursor, used as
- * `messagesCursor` on the next request.
+ * user's OWN messages across every host, read through the chats' own logs, and
+ * (when the request set `includeSessions`) the chat dwell sessions the server
+ * recorded from every surface's focus/visibility frames.
+ * Paged: a truncated list carries its own resume cursor, used as
+ * `messagesCursor` / `sessionsCursor` on the next request.
  */
 export const PatchActivityResponseEvent = z
   .object({
@@ -4824,6 +4848,10 @@ export const PatchActivityResponseEvent = z
     messages: z.array(ActivityMessage),
     messagesTruncated: z.boolean(),
     nextMessagesCursor: z.number().int().nonnegative().optional(),
+    /** Present only when the request set `includeSessions`. */
+    chatSessions: z.array(ActivityChatSession).optional(),
+    sessionsTruncated: z.boolean().optional(),
+    nextSessionsCursor: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type PatchActivityResponseEvent = z.infer<typeof PatchActivityResponseEvent>;

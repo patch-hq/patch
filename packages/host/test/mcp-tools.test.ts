@@ -760,6 +760,7 @@ describe('patch_activity — full MCP round-trip with a configured getActivity',
   const socketPath = join(home, 'daemon.sock');
 
   const calls: unknown[] = [];
+  const sessionCalls: unknown[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let app: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -770,9 +771,35 @@ describe('patch_activity — full MCP round-trip with a configured getActivity',
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      getActivity: async (callerChatId, since, until, messagesCursor, limit) => {
+      getActivity: async (
+        callerChatId,
+        since,
+        until,
+        messagesCursor,
+        limit,
+        includeSessions,
+        sessionsCursor,
+      ) => {
         calls.push({ callerChatId, since, until, messagesCursor, limit });
+        sessionCalls.push({ includeSessions, sessionsCursor });
         return {
+          ...(includeSessions || sessionsCursor !== undefined
+            ? {
+                chatSessions: [
+                  {
+                    chatId: 'c2',
+                    chatName: 'bus watch',
+                    hostId: 'd1',
+                    folder: '/tmp/bus',
+                    start: 1_000,
+                    end: 2_000,
+                    durationMs: 1_000,
+                  },
+                ],
+                sessionsTruncated: true,
+                nextSessionsCursor: 1_001,
+              }
+            : {}),
           messages: [
             {
               chatId: 'c2',
@@ -854,5 +881,36 @@ describe('patch_activity — full MCP round-trip with a configured getActivity',
         limit: undefined,
       },
     ]);
+  });
+
+  it('forwards includeSessions/sessionsCursor and returns the session fields', async () => {
+    calls.length = 0;
+    sessionCalls.length = 0;
+    const res = (await client.callTool({
+      name: 'patch_activity',
+      arguments: { since: 0, until: 5_000, includeSessions: true, sessionsCursor: 900 },
+    })) as { content: { text: string }[]; isError?: boolean };
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse(res.content[0]!.text) as Record<string, unknown>;
+    expect(parsed.chatSessions).toEqual([
+      {
+        chatId: 'c2',
+        chatName: 'bus watch',
+        hostId: 'd1',
+        folder: '/tmp/bus',
+        start: 1_000,
+        end: 2_000,
+        durationMs: 1_000,
+      },
+    ]);
+    expect(parsed.sessionsTruncated).toBe(true);
+    expect(parsed.nextSessionsCursor).toBe(1_001);
+    expect(sessionCalls).toEqual([{ includeSessions: true, sessionsCursor: 900 }]);
+  });
+
+  it('asks for no sessions unless told to', async () => {
+    sessionCalls.length = 0;
+    await client.callTool({ name: 'patch_activity', arguments: { since: 0, until: 100 } });
+    expect(sessionCalls).toEqual([{ includeSessions: undefined, sessionsCursor: undefined }]);
   });
 });
