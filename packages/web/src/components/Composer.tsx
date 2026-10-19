@@ -125,11 +125,11 @@ import { failed } from '../lib/errorCopy.js';
 const ICON_SIZE = 18;
 
 /** Height cap for the auto-growing composer input, as a fraction of the window
- *  height — MUST match the CSS `max-height` (50vh) on `.composer-input`. Under
+ *  height — MUST match the CSS `max-height` (30vh) on `.composer-input`. Under
  *  this the field expands/contracts to fit with NO scrollbar; only once content
  *  exceeds the cap does it scroll internally, so a long paste can't push the
  *  chat off-screen (spec/14 § Composer). */
-const MAX_INPUT_HEIGHT_FRACTION = 0.5;
+const MAX_INPUT_HEIGHT_FRACTION = 0.3;
 const maxInputHeight = (): number => Math.round(window.innerHeight * MAX_INPUT_HEIGHT_FRACTION);
 
 /**

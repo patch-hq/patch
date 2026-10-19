@@ -82,7 +82,7 @@ describe('Composer', () => {
   it('keeps overflow hidden and grows to fit while content is under the cap', () => {
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
-    stubLayout(input, 80); // 80 + 2px border = 82px, well under the half-window cap
+    stubLayout(input, 80); // 80 + 2px border = 82px, well under the 30%-window cap
     fireEvent.change(input, { target: { value: 'a\nfew\nlines' } });
     expect(input.style.overflowY).toBe('hidden');
     expect(input.style.height).toBe('82px');
@@ -91,10 +91,10 @@ describe('Composer', () => {
   it('caps the height and reveals an internal scrollbar once content exceeds the cap', () => {
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
-    stubLayout(input, 500); // 500 + 2 = 502px, far over the half-window cap
+    stubLayout(input, 500); // 500 + 2 = 502px, far over the 30%-window cap
     fireEvent.change(input, { target: { value: 'lots\nand\nlots\nof\nlines' } });
     expect(input.style.overflowY).toBe('auto');
-    expect(input.style.height).toBe(`${Math.round(window.innerHeight * 0.5)}px`);
+    expect(input.style.height).toBe(`${Math.round(window.innerHeight * 0.3)}px`);
   });
 
   it('sends on form submit and clears the input', () => {
