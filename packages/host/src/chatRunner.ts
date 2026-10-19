@@ -3202,18 +3202,11 @@ export class Daemon {
         );
         continue;
       }
-      if (waitingHead === 'retry') {
-        this.opts.metaStore.update(m.chatId, (meta) => ({
-          ...meta,
-          pendingTurns: [],
-          updatedAt: this.opts.now(),
-        }));
-        this.opts.logger.info(
-          { chatId: m.chatId },
-          'resume: expired transient retry left failed; restart did not interrupt it',
-        );
-        continue;
-      }
+      // `waitingFor: 'retry'` falls through to the re-send below: the turn was
+      // parked for a 10s/30s/90s transient-error retry, and a host that went
+      // down inside that window (a reboot) owes it just as much as one cut off
+      // mid-query. Its failed attempt never produced a reply, so it goes back
+      // verbatim (`headIsInterrupted` below), not with the cut-off framing.
       // Hosts predating `waitingFor` persisted every parked attempt in the
       // same shape as a genuinely running turn. The chat log is the durable
       // discriminator: a process killed mid-query leaves `interrupted` (or no
@@ -3222,7 +3215,7 @@ export class Daemon {
       // manufacture a new attempt merely because the daemon came back up.
       // Clear the legacy owed marker; current hosts persist an explicit reason
       // and credit waits take the branch above.
-      if (lastTurnOutcomeByChatId.get(m.chatId) === 'failed') {
+      if (waitingHead === undefined && lastTurnOutcomeByChatId.get(m.chatId) === 'failed') {
         this.opts.metaStore.update(m.chatId, (meta) => ({
           ...meta,
           pendingTurns: [],
@@ -3295,7 +3288,7 @@ export class Daemon {
       // or it survived the drop because it is a genuinely different, queued
       // turn (the race `headAlreadySettled` now accounts for) — both go back
       // verbatim, not with the cut-off framing.
-      const headIsInterrupted = !settledTerminally;
+      const headIsInterrupted = !settledTerminally && waitingHead !== 'retry';
       for (const [i, turn] of pending.entries()) {
         const reminder =
           pendingDecisions.length > 0
