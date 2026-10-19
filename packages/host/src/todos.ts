@@ -88,10 +88,26 @@ export function buildTodoFireSystemReminder(text: string): string {
   );
 }
 
+/**
+ * Identifies one list item when texts may repeat: its text plus which
+ * occurrence of that text it is (0 = first), counting items of every status.
+ */
+export interface TodoRef {
+  text: string;
+  occurrence: number;
+}
+
 export type AdvanceDecision =
-  | { action: 'fire'; text: string; attachments?: AttachmentRef[] }
+  | { action: 'fire'; text: string; occurrence: number; attachments?: AttachmentRef[] }
   | { action: 'clear' }
-  | { action: 'stalled'; text: string };
+  | { action: 'stalled'; text: string; occurrence: number };
+
+/** How many items before `index` share its text. */
+function occurrenceAt(todos: TodoItem[], index: number): number {
+  let n = 0;
+  for (let i = 0; i < index; i++) if (todos[i]!.text === todos[index]!.text) n++;
+  return n;
+}
 
 /**
  * Decide what to do with a chat's todo list when its turn settles.
@@ -106,27 +122,30 @@ export type AdvanceDecision =
  * - Otherwise → `fire` the head incomplete item's text (progress was made, or
  *   nothing has been fired yet). `in_progress` counts as incomplete.
  */
-export function selectNextTodo(todos: TodoItem[], lastFired: string | null): AdvanceDecision {
-  const head = todos.find((t) => t.status !== 'completed');
-  if (!head) return { action: 'clear' };
-  if (head.text === lastFired) return { action: 'stalled', text: head.text };
+export function selectNextTodo(todos: TodoItem[], lastFired: TodoRef | null): AdvanceDecision {
+  const index = todos.findIndex((t) => t.status !== 'completed');
+  if (index === -1) return { action: 'clear' };
+  const head = todos[index]!;
+  const occurrence = occurrenceAt(todos, index);
+  if (lastFired && head.text === lastFired.text && occurrence === lastFired.occurrence) {
+    return { action: 'stalled', text: head.text, occurrence };
+  }
   return head.attachments && head.attachments.length > 0
-    ? { action: 'fire', text: head.text, attachments: head.attachments }
-    : { action: 'fire', text: head.text };
+    ? { action: 'fire', text: head.text, occurrence, attachments: head.attachments }
+    : { action: 'fire', text: head.text, occurrence };
 }
 
 /**
  * The agent's TodoWrite carries no attachments, so mirroring its list would
  * strip the files a user queued with an item. Carry them over from the previous
- * list onto items whose text still matches (each previous item used once).
+ * list onto the item with the same text and occurrence.
  */
 export function carryTodoAttachments(next: TodoItem[], prev: TodoItem[]): TodoItem[] {
-  const pool = prev.filter((t) => t.attachments && t.attachments.length > 0);
-  return next.map((t) => {
-    const i = pool.findIndex((p) => p.text === t.text);
-    if (i === -1) return t;
-    const [match] = pool.splice(i, 1);
-    return { ...t, attachments: match!.attachments };
+  return next.map((t, ni) => {
+    const occurrence = occurrenceAt(next, ni);
+    const match = prev.find((p, pi) => p.text === t.text && occurrenceAt(prev, pi) === occurrence);
+    if (!match?.attachments?.length) return t;
+    return { ...t, attachments: match.attachments };
   });
 }
 
@@ -137,9 +156,11 @@ export function carryTodoAttachments(next: TodoItem[], prev: TodoItem[]): TodoIt
  * direction: an item is never marked `completed` on the host's say-so; only
  * the agent or the user closes one out.
  */
-export function markTodoStarted(todos: TodoItem[], text: string): TodoItem[] | null {
-  const index = todos.findIndex((t) => t.text === text && t.status === 'pending');
-  if (index === -1) return null;
+export function markTodoStarted(todos: TodoItem[], ref: TodoRef): TodoItem[] | null {
+  const index = todos.findIndex(
+    (t, i) => t.text === ref.text && occurrenceAt(todos, i) === ref.occurrence,
+  );
+  if (index === -1 || todos[index]!.status !== 'pending') return null;
   return todos.map((t, i) => (i === index ? { ...t, status: 'in_progress' } : t));
 }
 

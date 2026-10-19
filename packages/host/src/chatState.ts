@@ -17,6 +17,7 @@ import type {
   TurnOrigin,
 } from '@patch/wire';
 import type { ChatMeta } from './meta.js';
+import type { TodoRef } from './todos.js';
 
 export const DEFAULT_LAST_MESSAGES = 20;
 
@@ -181,7 +182,7 @@ export interface ChatState {
    * Guards against re-firing a head item the agent left pending — see
    * `selectNextTodo`. In-memory only.
    */
-  lastFiredTodo: string | null;
+  lastFiredTodo: TodoRef | null;
   /**
    * Set when a surface rewrote the task list (spec/02 § Task list). The agent's
    * own TodoWrite state lives inside its session, so the host can only tell

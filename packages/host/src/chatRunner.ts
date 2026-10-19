@@ -9888,7 +9888,7 @@ export class Daemon {
       // (see above) and NEVER auto-completed — but it has demonstrably been
       // started, so leaving it reading `pending` on every surface is a lie.
       // Promote it to in progress; the agent's own next TodoWrite still wins.
-      const started = markTodoStarted(state.todos, decision.text);
+      const started = markTodoStarted(state.todos, decision);
       if (started === null) return;
       state.todos = started;
       state.lastUpdated = this.opts.now();
@@ -9899,7 +9899,7 @@ export class Daemon {
       );
       return;
     }
-    state.lastFiredTodo = decision.text;
+    state.lastFiredTodo = { text: decision.text, occurrence: decision.occurrence };
     void (async () => {
       try {
         await this.sendInput({

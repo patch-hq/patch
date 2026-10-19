@@ -56,12 +56,12 @@ describe('selectNextTodo', () => {
 
   it('fires the first incomplete todo when nothing has been fired yet', () => {
     const todos = [t('a', 'completed'), t('b', 'pending'), t('c', 'pending')];
-    expect(selectNextTodo(todos, null)).toEqual({ action: 'fire', text: 'b' });
+    expect(selectNextTodo(todos, null)).toEqual({ action: 'fire', text: 'b', occurrence: 0 });
   });
 
   it('treats in_progress as incomplete (the head that still needs doing)', () => {
     const todos = [t('a', 'completed'), t('b', 'in_progress'), t('c', 'pending')];
-    expect(selectNextTodo(todos, null)).toEqual({ action: 'fire', text: 'b' });
+    expect(selectNextTodo(todos, null)).toEqual({ action: 'fire', text: 'b', occurrence: 0 });
   });
 
   it('does NOT re-fire the same head todo it already fired (no nag loop)', () => {
@@ -70,22 +70,52 @@ describe('selectNextTodo', () => {
     // it for the user instead of firing "b" at the agent again, and name it so
     // the caller can show that a turn was spent on it.
     const todos = [t('a', 'completed'), t('b', 'pending'), t('c', 'pending')];
-    expect(selectNextTodo(todos, 'b')).toEqual({ action: 'stalled', text: 'b' });
+    expect(selectNextTodo(todos, { text: 'b', occurrence: 0 })).toEqual({
+      action: 'stalled',
+      text: 'b',
+      occurrence: 0,
+    });
   });
 
   it('reports a stalled head that is already in progress too (no re-fire)', () => {
     const todos = [t('a', 'completed'), t('b', 'in_progress'), t('c', 'pending')];
-    expect(selectNextTodo(todos, 'b')).toEqual({ action: 'stalled', text: 'b' });
+    expect(selectNextTodo(todos, { text: 'b', occurrence: 0 })).toEqual({
+      action: 'stalled',
+      text: 'b',
+      occurrence: 0,
+    });
   });
 
   it('advances to the next todo once the previously-fired one is completed', () => {
     const todos = [t('a', 'completed'), t('b', 'completed'), t('c', 'pending')];
-    expect(selectNextTodo(todos, 'b')).toEqual({ action: 'fire', text: 'c' });
+    expect(selectNextTodo(todos, { text: 'b', occurrence: 0 })).toEqual({
+      action: 'fire',
+      text: 'c',
+      occurrence: 0,
+    });
   });
 
   it('clears the fired marker when every todo is complete', () => {
     const todos = [t('a', 'completed'), t('b', 'completed')];
     expect(selectNextTodo(todos, 'b')).toEqual({ action: 'clear' });
+  });
+
+  it('fires the second of two items with identical text once the first is completed', () => {
+    const todos = [t('a', 'completed'), t('a', 'pending')];
+    expect(selectNextTodo(todos, { text: 'a', occurrence: 0 })).toEqual({
+      action: 'fire',
+      text: 'a',
+      occurrence: 1,
+    });
+  });
+
+  it('still reports the duplicate as stalled when that very occurrence was fired', () => {
+    const todos = [t('a', 'completed'), t('a', 'pending')];
+    expect(selectNextTodo(todos, { text: 'a', occurrence: 1 })).toEqual({
+      action: 'stalled',
+      text: 'a',
+      occurrence: 1,
+    });
   });
 
   it('does nothing for an empty list', () => {
@@ -101,7 +131,7 @@ describe('markTodoStarted', () => {
     // calls TodoWrite, so the surface goes on reading "b" as pending — i.e. not
     // started — for ever. `in_progress` is the honest reading of what happened.
     const todos = [t('a', 'completed'), t('b', 'pending'), t('c', 'pending')];
-    expect(markTodoStarted(todos, 'b')).toEqual([
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 0 })).toEqual([
       t('a', 'completed'),
       t('b', 'in_progress'),
       t('c', 'pending'),
@@ -111,7 +141,7 @@ describe('markTodoStarted', () => {
   it('never marks anything completed, and leaves the rest of the list alone', () => {
     // NO FALLBACK: a finished turn is not evidence the item is done.
     const todos = [t('b', 'pending'), t('c', 'pending')];
-    const out = markTodoStarted(todos, 'b');
+    const out = markTodoStarted(todos, { text: 'b', occurrence: 0 });
     expect(out?.some((i) => i.status === 'completed')).toBe(false);
     expect(out?.[1]).toEqual(t('c', 'pending'));
     expect(todos[0]).toEqual(t('b', 'pending')); // input not mutated
@@ -119,14 +149,26 @@ describe('markTodoStarted', () => {
 
   it('returns null when there is nothing to change', () => {
     const todos = [t('b', 'in_progress'), t('c', 'pending')];
-    expect(markTodoStarted(todos, 'b')).toBeNull(); // already in progress
-    expect(markTodoStarted(todos, 'gone')).toBeNull(); // item no longer on the list
-    expect(markTodoStarted([], 'b')).toBeNull();
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 0 })).toBeNull(); // already in progress
+    expect(markTodoStarted(todos, { text: 'gone', occurrence: 0 })).toBeNull(); // item no longer on the list
+    expect(markTodoStarted([], { text: 'b', occurrence: 0 })).toBeNull();
+  });
+
+  it('promotes the requested occurrence when a list repeats an item text', () => {
+    const todos = [t('b', 'completed'), t('b', 'pending')];
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 1 })).toEqual([
+      t('b', 'completed'),
+      t('b', 'in_progress'),
+    ]);
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 0 })).toBeNull();
   });
 
   it('promotes only the first match when a list repeats an item text', () => {
     const todos = [t('b', 'pending'), t('b', 'pending')];
-    expect(markTodoStarted(todos, 'b')).toEqual([t('b', 'in_progress'), t('b', 'pending')]);
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 0 })).toEqual([
+      t('b', 'in_progress'),
+      t('b', 'pending'),
+    ]);
   });
 });
 
@@ -157,8 +199,24 @@ describe('todo items with attachments', () => {
     expect(selectNextTodo(todos, null)).toEqual({
       action: 'fire',
       text: 'fix this',
+      occurrence: 0,
       attachments: [ref],
     });
+  });
+
+  it('carries attachments to the matching duplicate, not the first one', () => {
+    const prev: TodoItem[] = [
+      { text: 'x', status: 'completed' },
+      { text: 'x', status: 'pending', attachments: [ref] },
+    ];
+    const next: TodoItem[] = [
+      { text: 'x', status: 'completed' },
+      { text: 'x', status: 'in_progress' },
+    ];
+    expect(carryTodoAttachments(next, prev)).toEqual([
+      { text: 'x', status: 'completed' },
+      { text: 'x', status: 'in_progress', attachments: [ref] },
+    ]);
   });
 
   it('keeps attachments when the agent rewrites its list with TodoWrite', () => {
