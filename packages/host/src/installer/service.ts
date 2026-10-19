@@ -176,6 +176,7 @@ ExecStart=${def.nodePath} ${def.programPath}
 ${env}
 ${secrets}Restart=on-failure
 RestartSec=5
+OOMPolicy=continue
 StandardOutput=append:${logPath}
 StandardError=append:${logPath}
 

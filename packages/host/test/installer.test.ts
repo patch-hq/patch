@@ -194,6 +194,11 @@ describe('the service unit', () => {
     expect(unit).toContain('Environment="HOME=/home/u"');
   });
 
+  it('systemd: one child OOM-killed does not fail the unit, and the unit stays up', () => {
+    const unit = systemdUnit(def);
+    expect(unit).toContain('OOMPolicy=continue');
+  });
+
   it('systemd: Environment= values escape backslash, quote and the % specifier', () => {
     const unit = systemdUnit({ ...def, env: { A: 'a\\b', B: '50%', C: 'say "hi"' } });
     expect(unit).toContain('Environment="A=a\\\\b"');

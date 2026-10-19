@@ -20,6 +20,8 @@ describe('classifyFailure', () => {
     ['fetch failed', 'transient'],
     ['socket hang up', 'transient'],
     ['Claude Code process exited with code 143', 'transient'],
+    ['Claude Code process exited with code 137', 'permanent'],
+    ['Claude Code process terminated by signal SIGKILL', 'permanent'],
   ])('%s → %s', (msg, kind) => {
     expect(classifyFailure(msg).kind).toBe(kind);
     expect(classifyFailure(msg).reason).not.toBe('unclassified');
