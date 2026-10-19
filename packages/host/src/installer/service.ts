@@ -140,6 +140,7 @@ ${envEntries}
   <dict>
     <key>SuccessfulExit</key><false/>
   </dict>
+  <key>AbandonProcessGroup</key><true/>
   <key>StandardOutPath</key><string>${xmlEscape(join(logDir, 'daemon.log'))}</string>
   <key>StandardErrorPath</key><string>${xmlEscape(join(logDir, 'daemon.log'))}</string>
 </dict>
@@ -177,6 +178,7 @@ ${env}
 ${secrets}Restart=on-failure
 RestartSec=5
 OOMPolicy=continue
+KillMode=process
 StandardOutput=append:${logPath}
 StandardError=append:${logPath}
 

@@ -194,6 +194,14 @@ describe('the service unit', () => {
     expect(unit).toContain('Environment="HOME=/home/u"');
   });
 
+  it('systemd: a restart kills only the host, so patch_watch tasks (detached children) survive it', () => {
+    expect(systemdUnit(def)).toContain('KillMode=process');
+  });
+
+  it("launchd: a restart does not kill the host's detached children (patch_watch tasks)", () => {
+    expect(launchdPlist(def)).toContain('<key>AbandonProcessGroup</key><true/>');
+  });
+
   it('systemd: one child OOM-killed does not fail the unit, and the unit stays up', () => {
     const unit = systemdUnit(def);
     expect(unit).toContain('OOMPolicy=continue');
