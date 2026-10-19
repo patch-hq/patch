@@ -49,10 +49,8 @@ Versions are `<major>.<minor>.<commit count>` (`scripts/version.mjs`); bump
 
 ## Pushing
 
-Every push is public. The pre-push hook (`scripts/push-guard.mjs`) refuses a
-branch that still carries the archived private history and anything
-secret-shaped in the files a push changes. A branch begun before the move to
-this repository needs its own commits cherry-picked onto `origin/main`.
+Every push is public. The pre-push hook (`scripts/push-guard.mjs`) refuses
+anything secret-shaped in the files a push changes.
 
 ## Secrets
 

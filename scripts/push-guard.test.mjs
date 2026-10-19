@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ARCHIVED_ROOT, scanText } from './push-guard.mjs';
+import { scanText } from './push-guard.mjs';
 
 test('a clean file has no findings', () => {
   assert.deepEqual(scanText('src/a.ts', 'const x = 1; // nothing to see'), []);
@@ -25,8 +25,4 @@ test('a value from this machine settings is refused wherever it appears', () => 
   const secret = 'abcdef0123456789-SECRET-VALUE';
   assert.equal(scanText('docs/notes.md', `token is ${secret} ok`, [secret]).length, 1);
   assert.deepEqual(scanText('docs/notes.md', 'nothing here', [secret]), []);
-});
-
-test('the archived history is named by its full root commit', () => {
-  assert.match(ARCHIVED_ROOT, /^[0-9a-f]{40}$/);
 });
