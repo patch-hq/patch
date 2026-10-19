@@ -47,7 +47,19 @@ export interface MirrorState {
   tag: string;
   version: string;
   mirroredAt: string;
+  /** The `MIRROR_FORMAT` that mirrored it; absent before formats were recorded. */
+  format?: number;
 }
+
+/**
+ * Bump whenever the mirror starts copying something it did not before. A
+ * release is mirrored by the server that was running when it appeared — the
+ * OLD code — and that server then installs the release carrying the new code,
+ * which would otherwise see the tag as done and never fetch the new files
+ * (mobile-update.json was missed exactly this way). A record from an older
+ * format is mirrored again.
+ */
+export const MIRROR_FORMAT = 2;
 
 /** Host manifest as build-host writes it; only what the merge needs is typed. */
 interface HostManifest {
@@ -177,7 +189,8 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
     log(`release mirror: ${opts.repo} has no ${opts.channel} release yet`);
     return null;
   }
-  if (readMirrorState(opts.downloadsDir, log)?.tag === release.tag_name) return null;
+  const served = readMirrorState(opts.downloadsDir, log);
+  if (served?.tag === release.tag_name && (served.format ?? 1) >= MIRROR_FORMAT) return null;
 
   const assets = new Map(release.assets.map((a) => [a.name, a]));
   const fetchAsset = async (name: string): Promise<Buffer> => {
@@ -260,6 +273,7 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
       tag: release.tag_name,
       version,
       mirroredAt: new Date().toISOString(),
+      format: MIRROR_FORMAT,
     };
     // Temp + rename, so a crash mid-write cannot leave a truncated record.
     const stateFile = join(opts.downloadsDir, STATE_FILE);

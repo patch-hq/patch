@@ -8,6 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  MIRROR_FORMAT,
   mergeHostManifests,
   mirrorOnce,
   parseChecksum,
@@ -160,6 +161,22 @@ describe('mirrorOnce', () => {
     await mirrorOnce(opts(github(files).fetchImpl));
     expect(readFileSync(join(dir, 'mobile-update.json'), 'utf8')).toContain('0.1.6');
     expect(readdirSync(dir).some((n) => n.startsWith('mobile-update-'))).toBe(false);
+  });
+
+  it('mirrors a served release again when it was mirrored by code that copied less', async () => {
+    const files = { ...GOOD(), 'mobile-update.json': '{"runtimeVersion":"0.1.6"}' };
+    const { fetchImpl } = github(files);
+    await mirrorOnce(opts(fetchImpl));
+    // As an older server left it: same tag, no format, and without the new file.
+    writeFileSync(
+      join(dir, 'release-mirror.json'),
+      JSON.stringify({ tag: 'v1.2.3', version: '1.2.3', mirroredAt: '2026-10-01T00:00:00Z' }),
+    );
+    rmSync(join(dir, 'mobile-update.json'));
+    expect(await mirrorOnce(opts(fetchImpl))).toBe('v1.2.3');
+    expect(existsSync(join(dir, 'mobile-update.json'))).toBe(true);
+    expect(readMirrorState(dir)?.format).toBe(MIRROR_FORMAT);
+    expect(await mirrorOnce(opts(fetchImpl))).toBeNull();
   });
 
   it('does nothing when the release is already served', async () => {
