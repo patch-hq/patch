@@ -10,11 +10,12 @@
 
 import type { ChatStateFilter } from './stateFilter';
 
-export type SidebarView = 'all' | 'unread' | 'working' | 'waiting' | 'failed' | 'batch';
+export type SidebarView = 'all' | 'unread' | 'ready' | 'working' | 'waiting' | 'failed' | 'batch';
 
 export const SIDEBAR_VIEW_OPTIONS: ReadonlyArray<{ value: SidebarView; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'unread', label: 'Unread' },
+  { value: 'ready', label: 'Ready' },
   { value: 'working', label: 'Working' },
   { value: 'waiting', label: 'Waiting on you' },
   { value: 'failed', label: 'Failed' },
@@ -42,6 +43,7 @@ export function sidebarViewFrom(
 ): SidebarView {
   if (batchMode) return 'batch';
   if (attentionOnly) return 'unread';
+  if (stateFilter === 'done') return 'ready';
   if (stateFilter === 'working' || stateFilter === 'waiting' || stateFilter === 'failed') {
     return stateFilter;
   }
@@ -60,6 +62,10 @@ export function applySidebarView(view: SidebarView, actions: SidebarViewActions)
   actions.setBatchMode(view === 'batch');
   actions.setAttentionOnly(view === 'unread');
   actions.setStateFilter(
-    view === 'working' || view === 'waiting' || view === 'failed' ? view : 'all',
+    view === 'ready'
+      ? 'done'
+      : view === 'working' || view === 'waiting' || view === 'failed'
+        ? view
+        : 'all',
   );
 }

@@ -195,6 +195,17 @@ describe('SidebarViewMenu', () => {
     expect(useUiStore.getState().attentionOnly).toBe(false);
   });
 
+  it('Ready sets the done state filter and persists it', () => {
+    renderMenu();
+    choose('ready');
+    expect(useUiStore.getState().stateFilter).toBe('done');
+    expect(useUiStore.getState().attentionOnly).toBe(false);
+    expect(screen.getByTestId('sidebar-view-trigger').textContent).toContain('Ready');
+    cleanup();
+    renderMenu();
+    expect(screen.getByTestId('sidebar-view-trigger').textContent).toContain('Ready');
+  });
+
   it('persists the choice across a reload', () => {
     renderMenu();
     choose('failed');
