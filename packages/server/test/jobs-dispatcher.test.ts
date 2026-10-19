@@ -108,6 +108,31 @@ describe('JobDispatcher', () => {
     expect(JSON.parse(json)).toEqual(payload);
   });
 
+  // Escaping is a PER-RENDER choice, not a global one. `renderPrompt` used to
+  // set `Mustache.escape` on the shared module as a side effect, which meant the
+  // OTHER render in this file — the `continue` action's chat `key`, which
+  // decides which conversation a fire lands in — was only unescaped because a
+  // prompt happened to have been rendered first in the same process. A `&` in a
+  // key that escaped would silently fork a job's chat into a new one.
+  it('renders a prompt unescaped WITHOUT mutating the shared Mustache module', async () => {
+    const Mustache = (await import('mustache')).default;
+    const before = Mustache.escape;
+    const out = JobDispatcher.renderPrompt(
+      {
+        type: 'spawn',
+        hostId: 'd1',
+        folder: '/x',
+        prompt: 'subject: {{payload.title}}',
+      },
+      { payload: { title: 'Tom & Eleanor <3 "quotes"' } },
+    );
+    // The prompt is a user turn in a chat, not HTML — it must come through raw.
+    expect(out).toBe('subject: Tom & Eleanor <3 "quotes"');
+    // ...and the module everyone else shares is exactly as it was.
+    expect(Mustache.escape).toBe(before);
+    expect(Mustache.render('{{a}}', { a: '&' })).toBe('&amp;');
+  });
+
   it('skill action turns into /skill\\n\\n<json-payload>', () => {
     const out = JobDispatcher.renderPrompt(
       { type: 'spawn', hostId: 'd1', folder: '/x', skill: 'todoist-handler' },

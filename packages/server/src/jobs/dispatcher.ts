@@ -92,10 +92,11 @@ import { digestPayload, type JobLogs, type RunLogEntry } from './logs.js';
 import { evaluateFilter, filterContext } from './filter.js';
 import { jobFires, type Job, type JobAction, type JobsInterface } from './types.js';
 
-// Mustache without escaping: what it renders is delivered to a Claude chat as a
-// user turn or slugged into a chat key, never shown as HTML. Set at load, since
-// the key renders run before any prompt render does.
-Mustache.escape = (s): string => s;
+// Escaping is off for every render here, passed PER RENDER: nothing rendered is
+// HTML (a prompt is a user turn in a chat, a key is a chat-key slug). Assigning
+// `Mustache.escape` on the shared module would silently change escaping for any
+// other consumer of `mustache` in the server.
+const NO_ESCAPE = { escape: (s: string): string => s };
 
 const DEFAULT_PENDING_CAP_PER_JOB = 100;
 /**
@@ -1705,7 +1706,7 @@ export class JobDispatcher {
       (triggerType === 'todoist' || triggerType === 'webhook') && action.includePayload !== false;
     const eventJson = `Trigger event:\n\`\`\`json\n${JSON.stringify(view, null, 2)}\n\`\`\``;
     const renderedPrompt = hasPrompt
-      ? `${Mustache.render(action.prompt as string, view)}${appendEvent ? `\n\n${eventJson}` : ''}`
+      ? `${Mustache.render(action.prompt as string, view, {}, NO_ESCAPE)}${appendEvent ? `\n\n${eventJson}` : ''}`
       : undefined;
     if (hasSkill) {
       // Skill + prompt → invoke the skill with the user's prompt as its body.
@@ -1993,7 +1994,9 @@ export class JobDispatcher {
     const limit = queueing?.mode === 'queue' ? (queueing.concurrency ?? 1) : job.concurrency;
     let scope: string | undefined;
     if (queueing?.mode === 'queue' && queueing.key !== undefined) {
-      const slug = ensureChatKeySlug(Mustache.render(queueing.key, renderView(payload, gated)));
+      const slug = ensureChatKeySlug(
+        Mustache.render(queueing.key, renderView(payload, gated), {}, NO_ESCAPE),
+      );
       if (slug === null) {
         // NO FALLBACK: collapsing onto the job-wide queue would serialise
         // unrelated subjects behind each other, which is what the key is for.
@@ -2084,7 +2087,9 @@ export class JobDispatcher {
         // The same view the prompt renders against, so a gated `continue` can
         // name its subject from what the gate found (`renderView`) rather than
         // only from what the trigger happened to carry.
-        const slug = ensureChatKeySlug(Mustache.render(action.key, renderView(payload, gated)));
+        const slug = ensureChatKeySlug(
+          Mustache.render(action.key, renderView(payload, gated), {}, NO_ESCAPE),
+        );
         if (slug === null) {
           // NO FALLBACK (spec/08 ## Action). Collapsing onto the unkeyed chat
           // would merge unrelated subjects into one conversation — precisely
