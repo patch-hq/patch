@@ -24,6 +24,7 @@ import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from '../host-addressing.js'
 import { JobCreateBody, JobPatchBody, type JobsInterface } from './types.js';
 import { JobLogs } from './logs.js';
 import { JOB_ID_REGEX } from './logs.js';
+import type { JobAlerts } from './alerts.js';
 import { JobValidationError } from './validate.js';
 import type { JobDispatcher } from './dispatcher.js';
 
@@ -57,6 +58,8 @@ export interface JobRoutesDeps {
   chatRegistry?: ChatRegistry;
   /** Used by /api/jobs/:id/runs and /webhooks (DX-M4). */
   jobLogs?: JobLogs;
+  /** Failed runs awaiting dismissal; absent = the alert routes are not served. */
+  jobAlerts?: JobAlerts;
   /**
    * The concurrency gate's live counts for a job (spec/08 ## Concurrency).
    * Read on both the list and the single-job route so the Jobs view can
@@ -172,6 +175,34 @@ function validateActionChatId(
 
 export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): void {
   const rl = { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
+
+  // Failed dispatches and broken gates, shown in the sidebar until dismissed or
+  // the job next runs successfully (alerts.ts).
+  if (deps.jobAlerts) {
+    const alerts = deps.jobAlerts;
+    app.get('/api/job-alerts', async (req, reply) => {
+      try {
+        await requireAuth(req, deps.registry);
+      } catch (e) {
+        return reply
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: 'unauthenticated' });
+      }
+      return { alerts: alerts.list() };
+    });
+    app.delete<{ Params: { jobId: string } }>('/api/job-alerts/:jobId', async (req, reply) => {
+      try {
+        await requireAuth(req, deps.registry);
+      } catch (e) {
+        return reply
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: 'unauthenticated' });
+      }
+      if (!alerts.dismiss(req.params.jobId))
+        return reply.code(404).send({ error: 'no such alert' });
+      return { ok: true };
+    });
+  }
 
   app.get('/api/jobs', async (req, reply) => {
     try {

@@ -88,6 +88,7 @@ import { JobStore } from './jobs/store.js';
 import { JobDispatcher } from './jobs/dispatcher.js';
 import { JobChatLinks } from './jobs/chat-links.js';
 import { JobLogs } from './jobs/logs.js';
+import { JobAlerts } from './jobs/alerts.js';
 import { CronScheduler } from './jobs/cron.js';
 import { HostWaker } from './jobs/host-wake.js';
 import { RecurrenceScheduler } from './jobs/recurrence.js';
@@ -1975,11 +1976,17 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // subscription order mattered) reads the store through here.
   jobsForCompletionGate = jobs;
 
+  const jobAlerts = new JobAlerts(
+    jobsDataDir,
+    (jobId) => jobs.get(jobId)?.name ?? null,
+    log.child({ component: 'job-alerts' }),
+  );
   const jobLogs = new JobLogs(jobsDataDir, {
     // spec/06 § Sweep — a job run failure wakes a sweep early (debounced)
     // AND is itself a gate-changed condition, naming the chat it failed on
     // (a dispatch failure with no chat landed has nothing to flag).
     onRun: (entry) => {
+      jobAlerts.onRun(entry);
       if (isJobRunFailure(entry.status)) managerSweeper.jobRunFailed(entry.action?.chatId ?? null);
     },
   });
@@ -2142,6 +2149,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     jobs,
     chatRegistry,
     jobLogs,
+    jobAlerts,
     jobCounts: (jobId) => jobDispatcher.counts(jobId),
     dispatcher: jobDispatcher,
     hostLink,

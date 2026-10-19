@@ -517,6 +517,10 @@ A job that names a `skill` in a `spawn` action delivers `/<skill>\n<payload>` as
 }
 ```
 
+## Job alerts
+
+A run that ends `dispatch-error`, or `gate-error` (a gate FAULT), raises one alert for its job, shown as an error item in the web sidebar: the job's name, the reason in plain words and how to fix it (a host's `chatgpt_login_required` refusal reads "Sign in to ChatGPT in Settings → Hosts."). An alert stays until the person dismisses it or the job's next `ok` run clears it; other statuses (`gate-held`, `queued`, `filter-rejected`, `chat-error`) neither raise nor clear one. A newer failure replaces the older alert. `GET /api/job-alerts` lists them newest first; `DELETE /api/job-alerts/:jobId` dismisses. Stored in `<dataDir>/job-alerts.json` (a derived store: unreadable means logged and empty).
+
 ## CRUD
 
 - Web UI (`/jobs`) — primary inspect/manage surface. Data-forward: raw JSONata and payload examples visible (see `14-design-web.md` § Jobs view).

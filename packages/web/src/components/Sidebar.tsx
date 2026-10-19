@@ -114,6 +114,7 @@ import {
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { DevSourceBadge } from './DevSourceBadge.js';
 import { NotificationBell } from './NotificationBell.js';
+import { JobAlerts } from './JobAlerts.js';
 import { useChatHasUnread } from '../stores/notificationsStore.js';
 import { shortcutLabel, shortcutTitle } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
@@ -980,26 +981,29 @@ function BottomNav(): JSX.Element {
   const onJobs = location.pathname.startsWith('/jobs');
   const onSettings = location.pathname.startsWith('/settings');
   return (
-    <nav className="sb-bottom" data-testid="bottom-nav">
-      <Link to="/pads" className={`nav-row ${onPads ? 'active' : ''}`} data-testid="nav-pads">
-        <Layers size={16} aria-hidden className="nav-icon" /> Pads
-        {pending > 0 ? (
-          <span className="pads-navcount" data-testid="nav-pads-count">
-            {pending}
-          </span>
-        ) : null}
-      </Link>
-      <Link to="/jobs" className={`nav-row ${onJobs ? 'active' : ''}`} data-testid="nav-jobs">
-        <Calendar size={16} aria-hidden className="nav-icon" /> Jobs
-      </Link>
-      <Link
-        to="/settings"
-        className={`nav-row ${onSettings ? 'active' : ''}`}
-        data-testid="nav-settings"
-      >
-        <Settings size={16} aria-hidden className="nav-icon" /> Settings
-      </Link>
-    </nav>
+    <>
+      <JobAlerts />
+      <nav className="sb-bottom" data-testid="bottom-nav">
+        <Link to="/pads" className={`nav-row ${onPads ? 'active' : ''}`} data-testid="nav-pads">
+          <Layers size={16} aria-hidden className="nav-icon" /> Pads
+          {pending > 0 ? (
+            <span className="pads-navcount" data-testid="nav-pads-count">
+              {pending}
+            </span>
+          ) : null}
+        </Link>
+        <Link to="/jobs" className={`nav-row ${onJobs ? 'active' : ''}`} data-testid="nav-jobs">
+          <Calendar size={16} aria-hidden className="nav-icon" /> Jobs
+        </Link>
+        <Link
+          to="/settings"
+          className={`nav-row ${onSettings ? 'active' : ''}`}
+          data-testid="nav-settings"
+        >
+          <Settings size={16} aria-hidden className="nav-icon" /> Settings
+        </Link>
+      </nav>
+    </>
   );
 }
 
