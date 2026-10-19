@@ -1817,6 +1817,25 @@ interface LiveRun {
 const liveRuns = new Map<string, LiveRun>();
 
 /**
+ * Track a turn in flight for `chatId` so `setLiveRunPermissionMode` reaches it.
+ * For backends with no process to message (Codex): they read `live.mode` at each
+ * decision. Call `release` when the turn ends.
+ */
+export function trackLiveRun(
+  chatId: string,
+  mode: NonNullable<SdkRunOptions['permissionMode']>,
+): { live: { mode: NonNullable<SdkRunOptions['permissionMode']> }; release: () => void } {
+  const live: LiveRun = { mode };
+  liveRuns.set(chatId, live);
+  return {
+    live,
+    release: () => {
+      if (liveRuns.get(chatId) === live) liveRuns.delete(chatId);
+    },
+  };
+}
+
+/**
  * Put the chat's running Claude Code process on `mode` now. A process takes its
  * mode from the turn that spawned it, so without this a mode chosen mid-turn
  * (e.g. "Approve & resume bypass" on a plan-mode card) only changed what the

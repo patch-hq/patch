@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
-import { TurnFailedError } from './sdkBackend.js';
+import { TurnFailedError, trackLiveRun } from './sdkBackend.js';
 import { isAccountExhaustedError } from './accountFailover.js';
 import { persistedUserContent } from './history.js';
 import { CodexAccounts } from './codexAccounts.js';
@@ -159,6 +159,12 @@ export class CodexBackend implements SdkBackend {
         throw new CodexTurnError(error.message, true);
       });
     const client = await this.accounts.turnClient(accountId);
+    // Codex fixes its approval policy when the turn starts, so a mode chosen
+    // mid-turn is honoured here: bypass answers approval requests itself.
+    const tracked =
+      opts.chatId !== undefined
+        ? trackLiveRun(opts.chatId, opts.permissionMode ?? 'default')
+        : undefined;
     try {
       const prior = opts.resumeSessionId;
       // A non-Codex `prior` is only meaningful as a reconstruction source
@@ -386,12 +392,17 @@ export class CodexBackend implements SdkBackend {
           if (message.method === 'patch/processFailed') throw new Error(message.params.message);
           if (message.id !== undefined) {
             if (message.method.endsWith('/requestApproval')) {
-              const decision = await opts.onPermissionRequest?.({
-                tool: message.method.includes('fileChange') ? 'Edit' : 'Bash',
-                args: message.params,
-                description:
-                  message.params.reason ?? message.params.command ?? 'Codex requests approval',
-              });
+              const decision =
+                tracked?.live.mode === 'bypassPermissions'
+                  ? { approve: true }
+                  : await opts.onPermissionRequest?.({
+                      tool: message.method.includes('fileChange') ? 'Edit' : 'Bash',
+                      args: message.params,
+                      description:
+                        message.params.reason ??
+                        message.params.command ??
+                        'Codex requests approval',
+                    });
               client.respond(message.id, { decision: decision?.approve ? 'accept' : 'decline' });
             } else if (message.method === 'item/tool/requestUserInput') {
               const questions = message.params.questions as RpcObject[];
@@ -489,6 +500,7 @@ export class CodexBackend implements SdkBackend {
         opts.abortController.signal.removeEventListener('abort', interrupt);
       }
     } finally {
+      tracked?.release();
       await this.accounts.releaseTurnClient(client);
     }
   }
