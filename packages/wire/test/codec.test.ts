@@ -2349,3 +2349,18 @@ describe('assertValidPermissionResponse', () => {
     ).toThrowError(/requires editedNewString/);
   });
 });
+
+describe('chat.fork_request carries what an edited turn is sent with', () => {
+  test('attachments and disabledTools round-trip', () => {
+    const event: WireEvent = {
+      type: 'chat.fork_request',
+      chatId: 'c1',
+      seq: 4,
+      message: 'rephrased',
+      localId: 'L3',
+      attachments: [{ id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image' }],
+      disabledTools: ['WebSearch'],
+    };
+    expect(decode(encode(event))).toEqual(event);
+  });
+});

@@ -398,6 +398,13 @@ export interface ComposerProps {
    * disabled until there is text. Seed the text with `initialValue`.
    */
   edit?: { onSave(text: string): void; onCancel(): void; allowEmpty?: boolean };
+  /**
+   * spec/04 § Branching — this MAIN composer is carrying an earlier user turn
+   * back for re-sending (the transcript from that turn down is greyed). Unlike
+   * `edit`, every control stays: model, approval mode, attachments, dropdowns.
+   * Send forks from the turn via `onSend`; Cancel or Esc calls `onCancel`.
+   */
+  editingTurn?: { onCancel(): void };
 }
 
 /**
@@ -471,6 +478,7 @@ export const Composer = forwardRef(function Composer(
     checking = false,
     checkingHookNames,
     edit,
+    editingTurn,
   }: ComposerProps,
   ref: Ref<ComposerHandle>,
 ): JSX.Element {
@@ -1724,7 +1732,7 @@ export const Composer = forwardRef(function Composer(
   return (
     <form
       ref={formRef}
-      className={`composer${dragDepth > 0 ? ' composer-drag-active' : ''}${edit ? ' composer-editing' : ''}`}
+      className={`composer${dragDepth > 0 ? ' composer-drag-active' : ''}${edit ? ' composer-editing' : ''}${editingTurn ? ' composer-editing-turn' : ''}`}
       data-testid={edit ? 'msg-editor' : 'composer'}
       data-chat-id={chatId}
       onSubmit={(e) => {
@@ -1736,6 +1744,19 @@ export const Composer = forwardRef(function Composer(
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {editingTurn ? (
+        <div className="composer-edit-banner" data-testid="composer-edit-banner">
+          <span>Editing from this message</span>
+          <button
+            type="button"
+            className="msg-edit-cancel"
+            data-testid="composer-edit-cancel"
+            onClick={editingTurn.onCancel}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
       {dragDepth > 0 ? (
         <div className="composer-drop-hint" data-testid="composer-drop-hint" aria-hidden>
           {dropDisabled ? 'Can’t attach right now' : 'Drop to attach'}
@@ -2100,6 +2121,12 @@ export const Composer = forwardRef(function Composer(
                 cancelRecording();
                 return;
               }
+              if (e.key === 'Escape' && editingTurn) {
+                e.preventDefault();
+                e.stopPropagation();
+                editingTurn.onCancel();
+                return;
+              }
               if (e.key === 'Escape' && edit) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2378,7 +2405,13 @@ export const Composer = forwardRef(function Composer(
               aria-label="send message"
               /* `↵` is the primary key and `⌘↵` also works — name the primary one
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
-              title={running ? shortcutTitle('Queue', '↵') : shortcutTitle('Send', '↵')}
+              title={
+                editingTurn
+                  ? shortcutTitle('Save edit', '↵')
+                  : running
+                    ? shortcutTitle('Queue', '↵')
+                    : shortcutTitle('Send', '↵')
+              }
               disabled={sendBlocked || resolving || !hasContent}
               onContextMenu={sendMenu.openAt}
             >

@@ -6803,6 +6803,8 @@ export class Daemon {
     seq: number;
     message: string;
     localId: string;
+    attachments?: SendInputOptions['attachments'];
+    disabledTools?: SendInputOptions['disabledTools'];
   }): Promise<void> {
     const state = this.chatState.get(req.chatId);
     if (!state) throw new ChatNotFoundError(req.chatId);
@@ -6860,6 +6862,8 @@ export class Daemon {
       message: req.message,
       localId: req.localId,
       fork: { resumeAtUuid: point.resumeAtUuid },
+      ...(req.attachments !== undefined ? { attachments: req.attachments } : {}),
+      ...(req.disabledTools !== undefined ? { disabledTools: req.disabledTools } : {}),
       // A fork or side message is typed by a person (spec/04 § Hidden).
       fromUser: true,
     });

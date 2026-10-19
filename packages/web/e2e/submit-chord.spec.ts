@@ -25,85 +25,51 @@ async function asMacKeyboard(page: Page): Promise<void> {
   });
 }
 
-/** Open the second user turn's editor and return its field. */
+/** Carry the second user turn into the main composer and return its field. */
 async function openEditor(page: Page) {
   const turn = page.locator('.msg-user').nth(1);
   // The turn box spans the whole row; only the bubble itself takes the pointer.
   await turn.getByTestId('msg-content').hover();
   await turn.getByTestId('msg-edit').click();
-  const field = turn.getByTestId('msg-edit-input');
-  await expect(field).toBeVisible();
+  const field = page.getByTestId('composer-input');
+  await expect(page.getByTestId('composer-edit-banner')).toBeVisible();
   return { turn, field };
 }
 
-test.describe('⌘↵ saves an edited message', () => {
-  test('the chord forks the turn, with no trip to the mouse', async ({ page }) => {
+test.describe('editing a message in the main composer', () => {
+  test('everything below the edited turn is greyed, the turn itself is not', async ({ page }) => {
     await page.goto(FORKED);
-    const { turn, field } = await openEditor(page);
+    const { turn } = await openEditor(page);
+    await expect(turn).toHaveClass(/msg-edit-anchor/);
+    await expect(turn).toHaveCSS('opacity', '1');
+    const below = page.locator('.msg-edit-anchor ~ .msg').first();
+    await expect(below).toHaveCSS('opacity', '0.35');
+    const above = page.locator('.msg-user').first();
+    await expect(above).toHaveCSS('opacity', '1');
+    // Cancelling lifts it.
+    await page.getByTestId('composer-edit-cancel').click();
+    await expect(page.locator('.msg-edit-anchor')).toHaveCount(0);
+  });
 
+  test('Enter in the composer forks the turn with the new text', async ({ page }) => {
+    await page.goto(FORKED);
+    const { field } = await openEditor(page);
     await field.click();
     await page.keyboard.press('Control+a');
     await page.keyboard.type('rewritten by keyboard');
-    await page.keyboard.press('Control+Enter');
-
-    // Saved: the frame went out, and the editor closed behind it.
+    await page.keyboard.press('Enter');
     await expect
       .poll(async () => (await sent(page)).filter((e) => e.type === 'chat.fork_request').length)
       .toBe(1);
     const fork = (await sent(page)).find((e) => e.type === 'chat.fork_request')!;
     expect(fork.message).toBe('rewritten by keyboard');
-    await expect(turn.getByTestId('msg-edit-input')).toHaveCount(0);
+    await expect(page.getByTestId('composer-edit-banner')).toHaveCount(0);
   });
 
-  test('the chord the Save button advertises is the one that works', async ({ page }) => {
-    await page.goto(FORKED);
-    const { field } = await openEditor(page);
-    // What it promises…
-    await expect(page.getByTestId('msg-edit-save-chord').first()).toHaveText('Ctrl+Enter');
-    // …is what it does.
-    await field.click();
-    await page.keyboard.press('Control+Enter');
-    await expect
-      .poll(async () => (await sent(page)).filter((e) => e.type === 'chat.fork_request').length)
-      .toBe(1);
-  });
-
-  test('bare ↵ types a newline instead — a turn can be several lines', async ({ page }) => {
-    await page.goto(FORKED);
-    const { field } = await openEditor(page);
-    await field.click();
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type('first line');
-    await page.keyboard.press('Enter');
-    await page.keyboard.type('second line');
-
-    await expect(field).toHaveValue('first line\nsecond line');
-    expect((await sent(page)).filter((e) => e.type === 'chat.fork_request')).toEqual([]);
-  });
-
-  test('the chord tag sits inside the button, on the label’s own line', async ({ page }) => {
+  test('model and approval controls are still in the composer while editing', async ({ page }) => {
     await page.goto(FORKED);
     await openEditor(page);
-    const boxes = await page
-      .getByTestId('msg-edit-save')
-      .first()
-      .evaluate((btn) => {
-        const chord = btn.querySelector('[data-testid="msg-edit-save-chord"]');
-        if (!chord) throw new Error('no chord tag');
-        const b = btn.getBoundingClientRect();
-        const c = chord.getBoundingClientRect();
-        return {
-          btn: { top: b.top, bottom: b.bottom, left: b.left, right: b.right, height: b.height },
-          chord: { top: c.top, bottom: c.bottom, left: c.left, right: c.right, height: c.height },
-        };
-      });
-    expect(boxes.chord.height).toBeGreaterThan(6);
-    expect(boxes.chord.top).toBeGreaterThanOrEqual(boxes.btn.top - 0.5);
-    expect(boxes.chord.bottom).toBeLessThanOrEqual(boxes.btn.bottom + 0.5);
-    expect(boxes.chord.right).toBeLessThanOrEqual(boxes.btn.right + 0.5);
-    // Right OF the label, and one line only.
-    expect(boxes.chord.left).toBeGreaterThan(boxes.btn.left);
-    expect(boxes.btn.height).toBeLessThan(40);
+    await expect(page.getByTestId('attach-btn')).toBeVisible();
   });
 });
 

@@ -3338,6 +3338,10 @@ export const ChatForkRequestEvent = z
     seq: z.number().int().nonnegative(),
     message: z.string().min(1),
     localId: z.string().min(1),
+    /** Attachments for the replacement turn (same refs and limits as `chat.input`). */
+    attachments: z.array(AttachmentRef).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
+    /** The Tools panel's OFF set, as on `chat.input`. */
+    disabledTools: z.array(z.string().min(1)).optional(),
   })
   .strict();
 export type ChatForkRequestEvent = z.infer<typeof ChatForkRequestEvent>;

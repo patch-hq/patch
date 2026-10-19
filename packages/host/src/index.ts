@@ -6164,6 +6164,8 @@ export async function handleServerEvent(
           seq: event.seq,
           message: event.message,
           localId: event.localId,
+          ...(event.attachments !== undefined ? { attachments: event.attachments } : {}),
+          ...(event.disabledTools !== undefined ? { disabledTools: event.disabledTools } : {}),
         });
         return;
       }
