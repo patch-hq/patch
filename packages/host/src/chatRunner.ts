@@ -643,6 +643,12 @@ export interface HostOptions {
   /** How often the stall check runs. Defaults to {@link QUEUED_STALL_SWEEP_MS}. */
   queuedStallSweepMs?: number;
   /**
+   * How long a turn may sit silent after the provider reports a window
+   * `rejected` before it is failed as a hit limit. Defaults to
+   * `LIMIT_STALL_GRACE_MS`.
+   */
+  limitStallGraceMs?: number;
+  /**
    * Enable `agent_response` hooks (spec/20-hooks.md § On the agent's
    * response). When set, the host sends a `hook.agent_response_check_request`
    * to the server after EACH turn settles (special threads included — the
@@ -1242,6 +1248,7 @@ import { isCodexModel } from './codexAccounts.js';
 import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
+import { withLimitStall } from './limitStall.js';
 
 /**
  * Hard cap on events returned by a single `patch_history` page. A caller
@@ -9011,7 +9018,7 @@ export class Daemon {
     const run = (async (): Promise<boolean> => {
       try {
         for await (const env of untilAborted(
-          this.opts.sdkBackend.run(sdkOpts),
+          withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
           abortController.signal,
           (env) => env.type === 'tool_result',
         )) {
