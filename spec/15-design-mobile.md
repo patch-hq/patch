@@ -38,7 +38,7 @@ Bottom tabs (5), in order:
 - Voice — immediately right of New chat, direct into the Manager thread for tap-to-talk. A regular tab like its neighbours (icon + label), but its button still carries the hold-to-talk gesture: tap-and-hold sends a quick voice note, a plain tap opens the Manager thread.
 - Settings — the same sections as web's Settings page, plus Secrets (§ Settings tab).
 
-Jobs are reached from their own bottom tab, not from a row on the Settings page: a job is a top-level thing you check on, not a preference. Each row on the Jobs tab opens a full editor sub-screen (§ Job editor). The Settings page carries no Jobs row — a second door onto the same screen. Notifications are ephemeral (see `09-notifications.md` § Notifications are ephemeral).
+Jobs are reached from their own bottom tab, not from a row on the Settings page: a job is a top-level thing you check on, not a preference. Each row on the Jobs tab opens a full editor sub-screen (§ Job editor). The Settings page carries no Jobs row — a second door onto the same screen. Notifications history is the bell on the Chats header (§ Notifications drawer).
 
 A screen's own back arrow returns to the screen the user was on before it, wherever that was. When there is nothing beneath it — a launcher shortcut or `patch://` link opened on a cold start mounts its screen alone — the arrow goes to the screen's parent instead of doing nothing: the Chats tab for a chat or the new-chat screen, the Jobs tab for the job editor, the Settings tab for a settings page, the chat for its Tools page, the host's page for its files and terminal.
 
@@ -438,6 +438,10 @@ Mobile equivalent of the desktop overlay, but at the OS level:
 - Foreground service starts; `AUDIOFOCUS_GAIN` is requested so other media (Spotify, podcasts) duck or pause for the call.
 - Accept → opens the Manager chat with the call bar docked (§ Voice states).
 - Decline / 30s timeout → falls through to the in-app inbox; phone push suppressed if any surface has a heartbeat in the last 30s (see `09-notifications.md`).
+
+## Notifications drawer
+
+The Chats header carries a bell beside Search, the phone's door onto the agent-notification log (`09-notifications.md` § Notifications are a doorbell, with a bell to look back at). It shows no count; the unread total is only in its accessible label. Tapping it opens a bottom sheet listing entries newest first, each with its source chat's title, how long ago it was sent and the message as the agent wrote it; unread entries are visibly distinct (bold, outlined). Tapping an entry marks it read and opens its source chat; "Mark all read" clears the lot. Opening a chat also reads its unread entries. State is the server's, refreshed on `notifications.changed`. A failed load shows the error, never an empty list. An empty log reads "Nothing yet.".
 
 ## Push notifications
 

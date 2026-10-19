@@ -9,6 +9,7 @@ import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { saveCredential, loadCredential } from './credential';
 import { getRoute, setRoute } from '../config';
+import { useNotificationsStore } from '../stores/notificationsStore';
 import { getWs, resetWs } from '../api/ws';
 import { initPush, resetPush } from './push';
 import { useUiStore } from '../stores/uiStore';
@@ -113,6 +114,10 @@ export async function bootstrap(): Promise<void> {
     useUiStore.getState().pushError(`failed to fetch chats: ${(e as Error).message}`);
   }
 
+  // The agent-notification log behind the Chats header bell (spec/09 § bell).
+  // A failure lands in the store's `error` and shows in the drawer.
+  void useNotificationsStore.getState().load();
+
   // Cold-start the host-owned folder list (spec/04 § Folders) so the new-chat
   // + job-editor pickers are populated before the WS delivers live
   // `folders.list` / `folders.updated`. A failure is surfaced but must not
@@ -152,5 +157,6 @@ export function teardown(): void {
   // The Settings payload too: its "keep the newer version" rule would otherwise
   // hold the old account's preferences against the new account's lower version.
   useSettingsStore.getState()._reset();
+  useNotificationsStore.getState()._reset();
   _booted = false;
 }

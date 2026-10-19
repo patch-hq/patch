@@ -5,6 +5,7 @@
 // foregrounded. Spec/12: replay missed events with chat.replay on
 // reconnect. NO FALLBACK on auth — bad/missing JWT throws at hello-time.
 
+import { useNotificationsStore } from '../stores/notificationsStore';
 import { useViewPositionStore } from '../stores/viewPositionStore';
 import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import { CLOSE_AUTH_FAILED, decodeCompat, type WireEvent } from '@patch/wire';
@@ -623,6 +624,11 @@ export class PatchWs {
       // entries, sent whole on connect and after every edit, so Settings →
       // Hosts settles on what the machine actually holds.
       usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
+      return;
+    }
+    // spec/09 § bell — the agent-notification log changed; refetch.
+    if (event.type === 'notifications.changed') {
+      void useNotificationsStore.getState().load();
       return;
     }
     // spec/03 § Settings — the shared settings, in the greeting and after every change.
