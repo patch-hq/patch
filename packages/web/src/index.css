@@ -5748,6 +5748,9 @@ a.ch-row:hover {
      manual resize. */
   width: 100%;
   flex: 0 0 auto;
+  /* Block, not inline-block: the inline baseline gap made the wrapper taller
+     than the field, so the mirror (inset 0) was shorter-scrolling than it. */
+  display: block;
   /* Auto-grow with typed content (spec/14 § Composer — the field gets bigger as
      you type): `field-sizing: content` sizes the textarea to its text natively,
      bounded by min/max-height below; past the cap it scrolls internally so a
