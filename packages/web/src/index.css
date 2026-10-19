@@ -3910,34 +3910,6 @@ a.ch-row:hover {
    the transcript is for reading, and a line of metadata under every bubble is
    noise until you ask for it. Permanently visible where there is no hover to
    discover, so it exists on the phone. */
-.msg-time-rail {
-  position: absolute;
-  top: 0;
-  bottom: var(--msg-tail);
-  right: 0;
-  display: flex;
-  justify-content: flex-end;
-  pointer-events: none;
-}
-/* The message's time: always on the right, level with the top of the message,
-   or — once that top has scrolled out — held at the top of the viewport by
-   `sticky` for as long as any of the message is still in view (the rail is its
-   containing block, so it never leaves the message). Sticky offsets are
-   measured inside `.chat-stream`'s 32px top padding, so 8px below the visible
-   edge is 8px less that padding. Always drawn as the hover state — hover
-   changes nothing; position is the only thing that moves. */
-.msg-time {
-  position: sticky;
-  top: -24px;
-  align-self: flex-start;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  color: var(--ink-faint);
-  font-size: var(--text-min);
-  line-height: 1.3;
-}
 .msg-meta {
   position: absolute;
   bottom: 0;
