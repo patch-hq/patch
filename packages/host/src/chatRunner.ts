@@ -8704,7 +8704,7 @@ export class Daemon {
     // instead of starting a contextless session that only sees this prompt.
     const isNativeRebuild =
       !isProviderSwitch &&
-      isResume &&
+      (isResume || switchedClaudeAccount) &&
       !fork &&
       !state.claudeSessionId &&
       this.hasPriorTrack(chatId, userMessageSeq) &&
@@ -9206,6 +9206,9 @@ export class Daemon {
                 chatId,
                 message: prompt,
                 localId: `acct-failover-${chatId}-${this.opts.now()}`,
+                // The turn already has a bubble: name it rather than replay
+                // the message as a new one.
+                ...(userMessageSeq !== undefined ? { retryOfSeq: userMessageSeq } : {}),
                 ...(cur?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
               });
             }
