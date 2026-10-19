@@ -663,6 +663,21 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A `view_file` call handing over a Word document (spec/14 § Viewing files) —
+  // a download card, not a frame.
+  {
+    chatId: 'chat_view_file_docx',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'view-file-docx-fixture',
+    folder: '/home/tom/projects/portfolio',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A `view_file` call showing a PDF inline (spec/14 § Viewing files) — same
   // sandboxed-frame treatment as an HTML page, not the image/lightbox path.
   {
@@ -1965,6 +1980,37 @@ useChatStore.setState((s) => ({
           ],
         },
         callId: 'call-view-img-1',
+        at: 1,
+      },
+    ],
+    chat_view_file_docx: [
+      {
+        seq: 0,
+        kind: 'tool_call',
+        tool: 'view_file',
+        toolArgs: { file_path: 'Report Q3.docx' },
+        callId: 'call-view-docx-1',
+        at: 0,
+      },
+      {
+        seq: 1,
+        kind: 'tool_result',
+        tool: 'view_file',
+        toolResult: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                ok: true,
+                kind: 'file',
+                url: '/api/chats/chat_view_file_docx/artifact/doc001',
+                name: 'Report Q3.docx',
+                size: 48213,
+              }),
+            },
+          ],
+        },
+        callId: 'call-view-docx-1',
         at: 1,
       },
     ],

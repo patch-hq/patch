@@ -4558,6 +4558,21 @@ a.ch-row:hover {
   display: inline-flex;
   color: var(--ink-3);
 }
+.view-file-file .view-file-bar {
+  border-bottom: none;
+  padding: 8px 10px;
+  color: var(--ink-3);
+}
+.view-file-size {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.view-file-download {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--ink-2);
+}
 .view-file-frame {
   display: block;
   width: 100%;

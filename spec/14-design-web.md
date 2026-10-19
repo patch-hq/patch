@@ -758,19 +758,22 @@ cost a context window.
 
 - Images (`.png` `.jpg` `.jpeg` `.gif` `.webp` `.svg`) render as a picture;
   `.pdf` renders in the browser's own PDF viewer; `.html` renders as a live
-  page. Any other extension is an error naming `Read` as the thing that was
-  probably meant — text has no business here.
+  page. Documents and data files (`.doc` `.docx` `.xls` `.xlsx` `.ppt` `.pptx`
+  `.odt` `.ods` `.odp` `.rtf` `.epub` `.csv` `.tsv` `.txt` `.md` `.json` `.zip`)
+  show as a download card, so an agent hands over a file it made instead of
+  quoting a path the user has to find. Any other extension is an error naming
+  `Read` as the thing that was probably meant.
 - `file_path` may be absolute or chat-folder-relative, because the agent has
   usually just been handling absolute paths and demanding a relative one is
   friction. It must still resolve INSIDE the chat folder; containment is the
   boundary, not the spelling of the argument.
-- Size caps are on the SOURCE file: 1.4 MB for an image or a PDF, 2 MB for an
+- Size caps are on the SOURCE file: 7 MB for an image, a PDF or a downloadable file, 2 MB for an
   HTML page. A PDF is inlined as a base64 data URI, which costs 4/3 — capping
   the source is what stops the wrapped page exceeding the artifact ceiling and
   bouncing at the server. An image is served at its own URL instead, so its
   cap only has to clear that same ceiling once base64-encoded for transport
   over the host↔server link, with no wrapper overhead to leave room for.
-- The tool returns only `{ ok, kind, url, name, path }`, after the server holds
+- The tool returns only `{ ok, kind, url, name, path }` (plus `size` in bytes for a `file`), after the server holds
   the bytes. The file's contents are never in the return value: that is the
   entire point, and a returned URL always resolves.
 
@@ -780,7 +783,10 @@ which needs real image bytes to decode; an HTML document at that URL, however
 it wraps them, is a broken image icon. A PDF is stored and served raw like an
 image, with its own `application/pdf` content-type and no wrapper page (the
 browser's PDF viewer will not start inside a sandboxed frame, so a wrapped PDF
-renders as a grey box). An HTML page is instead
+renders as a grey box). A downloadable file is stored raw with its own
+content-type plus its filename, and served with
+`Content-Disposition: attachment` so following the link saves it under that
+name. An HTML page is instead
 wrapped as a page and stored and served exactly like an artifact (§
 Artifacts) — same store, same signed URL, same
 `Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox` opaque origin. Either way the
@@ -795,7 +801,9 @@ inline image (§ Attachments); an HTML page renders in a
 unreachable from both sides of the boundary), and a PDF in an iframe with no
 `sandbox` attribute (it is raw PDF bytes, not agent-authored markup, and the
 PDF viewer needs the unsandboxed frame), each with an expand control above it
-instead, since neither is a lightbox candidate. It deliberately does NOT stamp
+instead, since neither is a lightbox candidate. A `file` renders as a one-line
+card — filename, size, and a download link — with no frame, because no browser
+previews a Word document. It deliberately does NOT stamp
 a `chat.artifact` card,
 because it is not publishing a destination — it is showing something where the
 conversation is. A `view_file` whose result is not a valid ack (an error, say)

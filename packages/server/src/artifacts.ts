@@ -49,6 +49,8 @@ export const ARTIFACT_CSP = 'sandbox allow-scripts allow-popups allow-popups-to-
  * GET route which of the two this id is — see `registerArtifactRoutes` below. */
 interface RawArtifactSidecar {
   contentType: string;
+  /** Present for a downloadable file: served as an attachment under this name. */
+  filename?: string;
 }
 
 export interface ArtifactRoutesDeps {
@@ -243,7 +245,10 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         writeFileSync(join(dir, `${artifactId}.bin`), Buffer.from(raw.base64, 'base64'));
         writeFileSync(
           join(dir, `${artifactId}.meta.json`),
-          JSON.stringify({ contentType: raw.contentType } satisfies RawArtifactSidecar),
+          JSON.stringify({
+            contentType: raw.contentType,
+            ...(raw.filename !== undefined ? { filename: raw.filename } : {}),
+          } satisfies RawArtifactSidecar),
           'utf8',
         );
       } else {
@@ -330,7 +335,17 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         return reply.code(404).send({ error: 'artifact not found' });
       }
       const meta = JSON.parse(readFileSync(metaFile, 'utf8')) as RawArtifactSidecar;
-      return reply.code(200).header('content-type', meta.contentType).send(readFileSync(binFile));
+      reply.code(200).header('content-type', meta.contentType);
+      if (meta.filename !== undefined) {
+        // RFC 5987 form carries any unicode/quote safely; the plain `filename`
+        // is the ASCII-only fallback older clients read.
+        const ascii = meta.filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+        reply.header(
+          'content-disposition',
+          `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.filename)}`,
+        );
+      }
+      return reply.send(readFileSync(binFile));
     }
     const file = join(dir, `${artifactId}.html`);
     if (!existsSync(file)) {

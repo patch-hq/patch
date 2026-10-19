@@ -3237,7 +3237,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     let kind: ViewFileKind;
     let size: { width: number; height: number } | undefined;
     let html: string | undefined;
-    let raw: { contentType: string; base64: string } | undefined;
+    let raw: { contentType: string; base64: string; filename?: string } | undefined;
+    let fileBytes: number | undefined;
     try {
       const resolved = resolveViewFilePath(state.folder, filePath);
       relPath = resolved.relPath;
@@ -3275,6 +3276,20 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           contentType: resolved.mime,
           base64: readFileSync(resolved.absPath).toString('base64'),
         };
+      } else if (kind === 'file') {
+        if (stat.size > MAX_VIEW_PDF_BYTES) {
+          throw new ArtifactInputError(
+            `file is ${stat.size} bytes — the limit is ${MAX_VIEW_PDF_BYTES}`,
+          );
+        }
+        // Served byte-for-byte as an attachment under its own name: the chat
+        // shows a download card, not a frame.
+        raw = {
+          contentType: resolved.mime,
+          base64: readFileSync(resolved.absPath).toString('base64'),
+          filename: basename(resolved.relPath),
+        };
+        fileBytes = stat.size;
       } else {
         if (stat.size > MAX_ARTIFACT_BYTES) {
           throw new ArtifactInputError(
@@ -3333,7 +3348,16 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
 
     toolLog({ tool: 'view_file', callerChatId, durationMs: Date.now() - start, ok: true });
-    return { ok: true, shown: true, kind, url, name, path: relPath, ...(size ?? {}) };
+    return {
+      ok: true,
+      shown: true,
+      kind,
+      url,
+      name,
+      path: relPath,
+      ...(size ?? {}),
+      ...(fileBytes !== undefined ? { size: fileBytes } : {}),
+    };
   });
 
   // patch_notify.

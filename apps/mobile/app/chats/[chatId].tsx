@@ -1620,26 +1620,29 @@ function ToolResultBody({ chatId, value }: { chatId: string; value: unknown }): 
 }
 
 interface ViewFileView {
-  kind: 'image' | 'pdf' | 'html';
+  kind: 'image' | 'pdf' | 'html' | 'file';
   /** Server-relative URL of the wrapped page (`/api/chats/:id/artifact/:aid`). */
   url: string;
   name: string;
   /** An image's real pixel size, when the host could read its header. */
   width?: number | undefined;
   height?: number | undefined;
+  /** A downloadable file's size in bytes. */
+  size?: number | undefined;
 }
 
 function asViewFile(v: unknown): ViewFileView | null {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
   const { kind, url, name } = v as Record<string, unknown>;
-  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html') return null;
+  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html' && kind !== 'file') return null;
   if (typeof url !== 'string' || !url.startsWith('/api/')) return null;
   if (typeof name !== 'string' || name === '') return null;
-  const { width, height } = v as Record<string, unknown>;
+  const { width, height, size } = v as Record<string, unknown>;
   return {
     kind,
     url,
     name,
+    size: typeof size === 'number' ? size : undefined,
     width: typeof width === 'number' ? width : undefined,
     height: typeof height === 'number' ? height : undefined,
   };
@@ -1753,8 +1756,12 @@ function ViewFileCard({ view }: { view: ViewFileView }): React.ReactElement {
     <Pressable
       testID="view-file"
       accessibilityRole="button"
-      accessibilityLabel={`View ${view.name}`}
-      onPress={() => openArtifactViewer(url, view.name)}
+      accessibilityLabel={`${view.kind === 'file' ? 'Download' : 'View'} ${view.name}`}
+      // A downloadable file has no page to view: hand its attachment URL to
+      // the system, which saves it and offers to open it.
+      onPress={() =>
+        view.kind === 'file' ? void Linking.openURL(url) : openArtifactViewer(url, view.name)
+      }
       style={{
         backgroundColor: colors.paperRaised,
         borderColor: colors.lineSoft,
@@ -1765,7 +1772,7 @@ function ViewFileCard({ view }: { view: ViewFileView }): React.ReactElement {
       }}
     >
       <Text style={{ ...typography.meta, color: colors.ink3, marginBottom: space.xs }}>
-        {view.name}
+        {view.size !== undefined ? `${view.name} · ${formatBytes(view.size)}` : view.name}
       </Text>
       {view.kind === 'image' ? (
         <ServedImage
