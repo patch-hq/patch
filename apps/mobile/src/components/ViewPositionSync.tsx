@@ -82,22 +82,25 @@ export function ViewPositionSync(): null {
   const enabledRef = React.useRef(enabled);
   enabledRef.current = enabled;
 
-  const adopt = React.useCallback((): void => {
-    const st = useViewPositionStore.getState();
-    const r = st.remote;
-    if (!navReady || !r || !enabledRef.current) return;
-    if (r.surfaceId === usePresenceStore.getState().surfaceId || r.updatedAt <= st.handledAt)
-      return;
-    st.markHandled(r.updatedAt);
-    if (Date.now() - explicitNavAt < EXPLICIT_NAV_HOLD_MS) return;
-    router.navigate(routeFromPosition(r) as Href);
-  }, [navReady, router]);
+  const adopt = React.useCallback(
+    (allowOwn = false): void => {
+      const st = useViewPositionStore.getState();
+      const r = st.remote;
+      if (!navReady || !r || !enabledRef.current) return;
+      const own = r.surfaceId === usePresenceStore.getState().surfaceId;
+      if ((own && !allowOwn) || r.updatedAt <= st.handledAt) return;
+      st.markHandled(r.updatedAt);
+      if (Date.now() - explicitNavAt < EXPLICIT_NAV_HOLD_MS) return;
+      router.navigate(routeFromPosition(r) as Href);
+    },
+    [navReady, router],
+  );
 
   React.useEffect(() => {
     // A launch snapshot that lands before the navigator mounts waits for it.
     if (enabled && remote && navReady && launching && !active) {
       launching = false;
-      adopt();
+      adopt(true);
     }
   }, [remote, navReady, adopt, enabled]);
 

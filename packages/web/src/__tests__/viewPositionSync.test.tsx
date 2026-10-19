@@ -58,7 +58,7 @@ const remote = (over: Record<string, unknown> = {}) => ({
 describe('ViewPositionSync', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null });
+    useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null, received: false });
     usePresenceStore.setState({ surfaceId: 'desk' });
     usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES, loaded: true });
   });
@@ -73,10 +73,25 @@ describe('ViewPositionSync', () => {
     expect(where()).toBe('/chats/c9?seq=5');
   });
 
-  it("ignores its own surface's echo", () => {
-    mount('/jobs');
+  it('restores its own last position when the launch snapshot is its own (a restart)', () => {
+    mount('/');
     act(() => useViewPositionStore.getState().applyUpdated(remote({ surfaceId: 'desk' }), 'desk'));
-    expect(where()).toBe('/jobs');
+    expect(where()).toBe('/chats/c9?seq=5');
+  });
+
+  it("ignores its own surface's echo once the launch snapshot has arrived", () => {
+    mount('/jobs');
+    act(() => useViewPositionStore.getState().applyUpdated(remote({ updatedAt: 50 }), 'desk'));
+    expect(where()).toBe('/chats/c9?seq=5');
+    act(() =>
+      useViewPositionStore
+        .getState()
+        .applyUpdated(remote({ surfaceId: 'desk', id: 'c2', updatedAt: 200 }), 'desk'),
+    );
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(where()).toBe('/chats/c9?seq=5');
   });
 
   it('does not move a screen the user has already touched, until it returns to the foreground', () => {
