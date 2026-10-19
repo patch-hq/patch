@@ -41,23 +41,59 @@ export interface LinkPreviewRoutesDeps {
 
 const FETCH_TIMEOUT_MS = 5_000;
 
+/** The maximum redirect chain we will walk, each hop re-checked. */
+const MAX_REDIRECTS = 5;
+
 // Blocks the obvious SSRF targets (loopback/private/link-local) reachable from
 // the server's own network. Not exhaustive DNS-rebinding protection — this is
 // a single-user personal app previewing links the account owner pasted, not a
 // public-facing service.
 function isBlockedHost(hostname: string): boolean {
-  // URL.hostname keeps the brackets on an IPv6 literal: "[::1]".
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h.endsWith('.localhost') || h === '::1') return true;
+  const h = hostname.toLowerCase();
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  // An IPv6 literal keeps its brackets in `URL.hostname` (`'[::1]'`, not
+  // `'::1'`), so an equality check against the bare address never matched and
+  // every IPv6 spelling of loopback walked straight past this.
+  if (h.startsWith('[') && h.endsWith(']')) return isBlockedIpv6(h.slice(1, -1));
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (!m) return false;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
+  return isBlockedIpv4(Number(m[1]), Number(m[2]));
+}
+
+function isBlockedIpv4(a: number, b: number): boolean {
   if (a === 127 || a === 10 || a === 0) return true;
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   return false;
+}
+
+/**
+ * The IPv6 equivalents of the same set. `addr` is the bracket-stripped,
+ * lower-cased literal as `URL.hostname` normalised it.
+ *
+ * The ranges are tested on the NUMERIC value of the leading 16-bit group, not
+ * on a text prefix: `fd00::1` is unique-local but `fd::1` is 0x00fd and is not,
+ * and a prefix match cannot tell those apart — it would block a public address.
+ */
+function isBlockedIpv6(addr: string): boolean {
+  if (addr === '::1' || addr === '::') return true;
+  // IPv4-mapped (::ffff:a.b.c.d). Node compresses it to ::ffff:<hex>:<hex>,
+  // where the first group is octets a.b — which is all these ranges need.
+  const mapped = /^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/.exec(addr);
+  if (mapped) {
+    const hi = parseInt(mapped[1] as string, 16);
+    return isBlockedIpv4(hi >> 8, hi & 0xff);
+  }
+  // Dotted IPv4-mapped form, if a runtime ever hands it back unnormalised.
+  const dotted = /^::ffff:(\d{1,3})\.(\d{1,3})\./.exec(addr);
+  if (dotted) return isBlockedIpv4(Number(dotted[1]), Number(dotted[2]));
+  const first = addr.split(':')[0];
+  if (first === undefined || first === '' || !/^[0-9a-f]{1,4}$/.test(first)) return false;
+  const n = parseInt(first, 16);
+  // Unique-local fc00::/7 and link-local fe80::/10 — the v6 analogues of
+  // 10.0.0.0/8 and 169.254.0.0/16.
+  return (n & 0xfe00) === 0xfc00 || (n & 0xffc0) === 0xfe80;
 }
 
 // Matches the full <meta ...> tag first so `content` and `property`/`name`
@@ -165,7 +201,7 @@ export function registerLinkPreviewRoutes(app: FastifyInstance, deps: LinkPrevie
         .code(validated.status)
         .send({ error: validated.error, message: validated.message });
     }
-    const { target } = validated;
+    let target = validated.target;
     // The timer stays armed through the body read: headers arriving promptly
     // says nothing about whether the body ever finishes.
     const controller = new AbortController();
@@ -174,11 +210,49 @@ export function registerLinkPreviewRoutes(app: FastifyInstance, deps: LinkPrevie
       let res: Response;
       let html: string;
       try {
-        res = await fetch(target.toString(), {
-          signal: controller.signal,
-          redirect: 'follow',
-          headers: { accept: 'text/html', 'user-agent': 'Patch-LinkPreview/1.0' },
-        });
+        // Redirects are walked BY HAND so every hop goes through the same host
+        // check. With `redirect: 'follow'` the check only ever saw the URL the
+        // caller named, and a public page that 302s to 127.0.0.1 or to the cloud
+        // metadata address was fetched anyway.
+        let hop = 0;
+        for (;;) {
+          res = await fetch(target.toString(), {
+            signal: controller.signal,
+            redirect: 'manual',
+            headers: { accept: 'text/html', 'user-agent': 'Patch-LinkPreview/1.0' },
+          });
+          if (res.status < 300 || res.status > 399) break;
+          const location = res.headers.get('location');
+          if (location === null) break;
+          if (++hop > MAX_REDIRECTS) {
+            return reply
+              .code(502)
+              .send({ error: 'fetch_failed', message: `more than ${MAX_REDIRECTS} redirects` });
+          }
+          let next: URL;
+          try {
+            next = new URL(location, target);
+          } catch {
+            return reply
+              .code(502)
+              .send({ error: 'fetch_failed', message: 'upstream sent an unreadable Location' });
+          }
+          if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+            return reply
+              .code(400)
+              .send({ error: 'invalid_url', message: 'only http/https URLs are supported' });
+          }
+          if (isBlockedHost(next.hostname)) {
+            deps.logger.warn(
+              { from: target.toString(), to: next.toString() },
+              'link-preview: refused a redirect into a blocked host',
+            );
+            return reply
+              .code(400)
+              .send({ error: 'blocked_host', message: 'this host cannot be previewed' });
+          }
+          target = next;
+        }
         if (!res.ok) {
           return reply.code(502).send({ error: 'fetch_failed', message: `upstream ${res.status}` });
         }
