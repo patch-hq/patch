@@ -88,6 +88,21 @@ export function notePanelInset(chatId: string, width: number): void {
   byChat.delete(chatId);
 }
 
+/**
+ * The agent republished `url`'s artifact. If the panel is showing that very
+ * artifact (same path, signature aside), load it again so the page is current;
+ * main's `open` navigates to the URL, which re-fetches it.
+ */
+export function refreshArtifact(url: string): void {
+  const b = bridge();
+  if (!b || shownUrl === null) return;
+  const next = new URL(url, window.location.origin).toString();
+  if (new URL(next).pathname !== new URL(shownUrl).pathname) return;
+  selfOps++;
+  shownUrl = next;
+  b.openPanel(next);
+}
+
 /** Test seam — module-level state outlives a component tree. */
 export function _resetArtifactPanel(): void {
   byChat.clear();

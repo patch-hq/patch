@@ -70,7 +70,7 @@ import {
 } from './remote-spawn.js';
 import { createRemoteRelayCoordinator } from './remote-relay.js';
 import { buildPeekResult } from './peek.js';
-import { ArtifactPublisher } from './artifacts.js';
+import { ArtifactAutoRepublisher, ArtifactPublisher } from './artifacts.js';
 import { PadClient } from './pads.js';
 import { RemoteJobsStore } from './jobs-interface.js';
 import { QueuePullClient } from './queuePull.js';
@@ -3023,6 +3023,7 @@ async function startHost(
     logger,
     onCosted: () => publishHost(),
   });
+  let artifactAutoRepublisher: ArtifactAutoRepublisher | undefined;
   function emit(event: import('@patch/wire').WireEvent): void {
     forward(event);
     // spec/04 § Folders: a freshly-spawned chat may sit in a folder the
@@ -3037,6 +3038,8 @@ async function startHost(
    * chats for a minute on each reconnect — long enough to be dropped as silent.
    */
   function forward(event: import('@patch/wire').WireEvent): void {
+    // spec/14 § Artifacts — editing a published page's source republishes it.
+    artifactAutoRepublisher?.observe(event);
     // spec/02 § Native subagent dispatch — a `patch_delegate` subagent is never
     // on the wire. `Daemon.emit` withholds its own frames, but title, status,
     // permission and notify frames reach here by other routes, so gate every
@@ -3948,6 +3951,12 @@ async function startHost(
   const artifactPublisher = new ArtifactPublisher({
     emit,
     isLinkOnline: () => linkOnline,
+  });
+  artifactAutoRepublisher = new ArtifactAutoRepublisher({
+    folderOf: (chatId) => daemon.chatState.get(chatId)?.folder,
+    publish: artifactPublisher.publish,
+    emitArtifact: (chatId, a) => daemon.emitArtifact(chatId, a),
+    logger,
   });
   // patch_pad_* (spec/14 § Pads): the same round trip, for design spaces.
   const padClient = new PadClient({ emit, isLinkOnline: () => linkOnline });

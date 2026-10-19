@@ -16,16 +16,19 @@ import { WebView } from 'react-native-webview';
 import { ExternalLink, X } from 'lucide-react-native';
 import { create } from 'zustand';
 import { space, typography, useTheme } from '../lib/theme';
-import { isRelayed, useLocalUri } from '../lib/servedFile';
+import { forgetServed, isRelayed, useLocalUri } from '../lib/servedFile';
 
 interface ArtifactViewerState {
   artifact: { url: string; title: string } | null;
+  /** Bumped when the agent republishes the open artifact, to reload it. */
+  rev: number;
   open(url: string, title: string): void;
   close(): void;
 }
 
 const useArtifactViewerStore = create<ArtifactViewerState>((set) => ({
   artifact: null,
+  rev: 0,
   open(url, title) {
     set({ artifact: { url, title } });
   },
@@ -37,6 +40,16 @@ const useArtifactViewerStore = create<ArtifactViewerState>((set) => ({
 /** Open the full-screen artifact viewer for the artifact served at `url`. */
 export function openArtifactViewer(url: string, title: string): void {
   useArtifactViewerStore.getState().open(url, title);
+}
+
+/** The agent republished `url`'s artifact: reload the viewer if it is showing it. */
+export function refreshArtifactViewer(url: string): void {
+  const { artifact, rev } = useArtifactViewerStore.getState();
+  if (artifact === null) return;
+  const path = (u: string): string => u.split('?')[0] ?? u;
+  if (path(artifact.url) !== path(url)) return;
+  forgetServed(artifact.url);
+  useArtifactViewerStore.setState({ artifact: { ...artifact, url }, rev: rev + 1 });
 }
 
 /**
@@ -51,14 +64,15 @@ export function openServed(url: string, title: string): void {
 
 /** Test seam: back to closed. */
 export function __resetArtifactViewer(): void {
-  useArtifactViewerStore.setState({ artifact: null });
+  useArtifactViewerStore.setState({ artifact: null, rev: 0 });
 }
 
 export function ArtifactViewerHost(): React.ReactElement | null {
   const colors = useTheme();
   const artifact = useArtifactViewerStore((s) => s.artifact);
   const close = useArtifactViewerStore((s) => s.close);
-  const { uri: shown, error } = useLocalUri(artifact?.url ?? null);
+  const rev = useArtifactViewerStore((s) => s.rev);
+  const { uri: shown, error } = useLocalUri(artifact?.url ?? null, rev);
   if (artifact === null) return null;
 
   return (
@@ -110,6 +124,7 @@ export function ArtifactViewerHost(): React.ReactElement | null {
           </Text>
         ) : shown ? (
           <WebView
+            key={rev}
             testID="artifact-viewer-webview"
             source={{ uri: shown }}
             originWhitelist={['*']}

@@ -55,13 +55,21 @@ export function localUriFor(url: string): Promise<string> {
   return made;
 }
 
+/** Drop the fetched copy of `url` so the next open fetches it again. */
+export function forgetServed(url: string): void {
+  copies.delete(url);
+}
+
 /** Test seam: forget fetched copies. */
 export function __resetServedFiles(): void {
   copies.clear();
 }
 
 /** `localUriFor` as state: null until it is ready, `error` if it failed. */
-export function useLocalUri(url: string | null): { uri: string | null; error: string | null } {
+export function useLocalUri(
+  url: string | null,
+  rev = 0,
+): { uri: string | null; error: string | null } {
   const relayed = isRelayed();
   const [state, setState] = React.useState<{
     for: string | null;
@@ -82,7 +90,7 @@ export function useLocalUri(url: string | null): { uri: string | null; error: st
     return () => {
       live = false;
     };
-  }, [url, relayed]);
+  }, [url, relayed, rev]);
   if (!relayed) return { uri: url, error: null };
   return state.for === url ? { uri: state.uri, error: state.error } : { uri: null, error: null };
 }

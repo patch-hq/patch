@@ -340,11 +340,15 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       readStorage(chatId, artifactId),
       `/api/chats/${chatId}/artifact/${artifactId}/storage`,
     );
-    return reply
-      .code(200)
-      .header('content-type', 'text/html; charset=utf-8')
-      .header('content-security-policy', ARTIFACT_CSP)
-      .send(injectShim(readFileSync(file, 'utf8'), shim));
+    return (
+      reply
+        .code(200)
+        .header('content-type', 'text/html; charset=utf-8')
+        .header('content-security-policy', ARTIFACT_CSP)
+        // A republished page keeps its URL, so a reload must never be answered from cache.
+        .header('cache-control', 'no-store')
+        .send(injectShim(readFileSync(file, 'utf8'), shim))
+    );
   });
 
   // The page runs in an opaque origin, so its fetches are cross-origin: answer

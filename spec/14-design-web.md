@@ -689,6 +689,15 @@ its expiry, so extending it by hand invalidates it. `DELETE` on the same path
 revokes every share link already issued for that artifact (the in-app link is
 unaffected); links minted afterwards work again.
 
+A published page stays current on its own: when the file it was published from
+changes on disk (the agent's Edit or Write, or a save from the editor), the host
+republishes it after a short pause — same URL, same card — and a surface showing
+that artifact reloads it: the desktop panel and the phone's viewer, both only
+when they are showing that very artifact. The page is served `no-store` so the
+reload is never answered from cache. A failed republish is logged, not hidden.
+Tracking is held in memory, so after a host restart a page is tracked again from
+its next `patch_artifact` call.
+
 In the chat. A published artifact appears in the transcript as its own
 card — title, the source filename, and nothing else (§ Copy — no helper
 text). Clicking it opens the artifact in the web panel on desktop (that is

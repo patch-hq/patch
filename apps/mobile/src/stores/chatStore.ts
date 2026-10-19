@@ -20,6 +20,8 @@ import {
   type PendingPermission,
   type ProviderContextEntry,
 } from './types';
+import { apiUrl } from '../config';
+import { refreshArtifactViewer } from '../components/ArtifactViewer';
 import { loadCachedChatList, saveCachedChatList } from '../lib/chatListCache';
 import { loadVisited, saveVisited } from '../lib/visitedChats';
 
@@ -1267,8 +1269,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             artifactPath: event.path,
             at: Date.now(),
           };
-          if (existing >= 0) list[existing] = entry;
-          else pushTimeline(event.chatId, entry);
+          if (existing >= 0) {
+            list[existing] = entry;
+            // The agent edited a page it already published: reload it if the
+            // viewer is showing it.
+            refreshArtifactViewer(apiUrl(event.url));
+          } else pushTimeline(event.chatId, entry);
           break;
         }
         case 'chat.permission_request': {

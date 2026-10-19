@@ -120,6 +120,19 @@ describe('Artifact card', () => {
     expect(__getLinkingOpenedUrls()).toEqual([`${DEFAULT_SERVER_URL}/api/chats/c1/artifact/a1`]);
   });
 
+  it('republishing the artifact on show reloads the viewer; another artifact does not', () => {
+    useChatStore.getState().applyEvent(artifactEvent('a1', 'Bristol bus times', 1));
+    const r = renderRN(<ChatDetailScreen />);
+    actSync(() => findHost(r.root, byTestId('artifact-card')).props.onPress());
+    const before = findHost(r.root, byTestId('artifact-viewer-webview'));
+    actSync(() => useChatStore.getState().applyEvent(artifactEvent('a2', 'Other', 2)));
+    expect(findHost(r.root, byTestId('artifact-viewer-webview'))).toBe(before);
+    actSync(() => useChatStore.getState().applyEvent(artifactEvent('a1', 'Bristol bus times', 3)));
+    const after = findHost(r.root, byTestId('artifact-viewer-webview'));
+    expect(after).not.toBe(before);
+    expect(after.props.source.uri).toBe(`${DEFAULT_SERVER_URL}/api/chats/c1/artifact/a1`);
+  });
+
   it('a Pad card opens the Pad screen, from the card and from the artifact bar, never the viewer', () => {
     useChatStore.getState().applyEvent({
       ...artifactEvent('pad-p1', 'Settings pad', 1),

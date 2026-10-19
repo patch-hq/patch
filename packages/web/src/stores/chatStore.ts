@@ -31,6 +31,7 @@ import {
   type PendingPermission,
   type SectionCounts,
 } from './types.js';
+import { refreshArtifact } from '../lib/artifactPanel.js';
 import { loadReadState, saveReadWatermark } from '../lib/readState.js';
 import { clearComposerDraft } from './composerDraftStore.js';
 
@@ -2401,6 +2402,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const list = [...cur];
             list[existing] = entry;
             timelines[event.chatId] = list;
+            // The agent edited a page it already published: refresh it if the
+            // desktop panel is showing it.
+            refreshArtifact(event.url);
           } else {
             pushTimeline(event.chatId, entry);
           }
