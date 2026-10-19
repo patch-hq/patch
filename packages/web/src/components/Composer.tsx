@@ -1076,7 +1076,25 @@ export const Composer = forwardRef(function Composer(
     );
   }, [chipPreview]);
 
+  // Leaving the chip does not close the popover at once: the pointer has to be
+  // able to cross the gap to it (its Edit link is only reachable that way).
+  // Entering the popover cancels the close; leaving the popover restarts it.
+  const chipPreviewCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function cancelChipPreviewClose(): void {
+    if (chipPreviewCloseTimer.current) clearTimeout(chipPreviewCloseTimer.current);
+    chipPreviewCloseTimer.current = null;
+  }
+  function scheduleChipPreviewClose(name?: string): void {
+    cancelChipPreviewClose();
+    chipPreviewCloseTimer.current = setTimeout(() => {
+      chipPreviewCloseTimer.current = null;
+      setChipPreview((cur) => (name === undefined || cur?.name === name ? null : cur));
+    }, 250);
+  }
+  useEffect(() => cancelChipPreviewClose, []);
+
   function showChipPreview(name: string, target: HTMLElement): void {
+    cancelChipPreviewClose();
     setChipPreview({
       name,
       isBuiltin: BUILTIN_COMMANDS.some((c) => c.name === name),
@@ -1101,7 +1119,7 @@ export const Composer = forwardRef(function Composer(
           data-testid="composer-chip"
           data-skill={chip.name}
           onMouseEnter={(e) => showChipPreview(chip.name, e.currentTarget)}
-          onMouseLeave={() => setChipPreview((cur) => (cur?.name === chip.name ? null : cur))}
+          onMouseLeave={() => scheduleChipPreviewClose(chip.name)}
           onClick={(e) => {
             e.preventDefault();
             const target = e.currentTarget;
@@ -2396,6 +2414,8 @@ export const Composer = forwardRef(function Composer(
               ref={chipPreviewRef}
               className="composer-chip-preview-popover"
               data-testid="composer-chip-preview-popover"
+              onMouseEnter={cancelChipPreviewClose}
+              onMouseLeave={() => scheduleChipPreviewClose()}
               style={{
                 position: 'fixed',
                 top: chipPreviewPos?.top ?? 0,
