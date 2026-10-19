@@ -251,6 +251,11 @@ real deny — the tool does not run and the agent is told so — which is what
 `{[questionText]: string}` deny the call and raise a `chat.error`, rather than
 approving an empty answer.
 
+A question asked while a person's message is already queued on the chat is not
+raised at all: it is denied at once with the superseded message, because the
+message is the answer and the turn would otherwise park before the tool call
+that releases the queue.
+
 Cancelling is not the same act as stopping the turn (`04-chats-and-folders.md`
 § Message queueing), and the deny message the agent is handed says so. Left
 generic, a deny reads to the agent as the user refusing the plan behind the

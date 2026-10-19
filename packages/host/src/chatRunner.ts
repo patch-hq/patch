@@ -11216,6 +11216,24 @@ export class Daemon {
         'Bash escalated to a human permission ask',
       );
     }
+    // spec/02 § Questions are not approvals — a person's message already queued
+    // behind this turn IS the answer. Raising the card would park the turn here,
+    // before any tool call, so the message (queued "for the next tool call")
+    // would wait behind the very question it answers until Cancel or expiry.
+    // Refuse the question outright, as `sendInput` does for one already on screen.
+    if (
+      tool === ASK_USER_QUESTION &&
+      (this.turnQueues.get(chatId) ?? []).some(
+        (q) =>
+          q.origin !== 'machine' && !q.jobTrigger && !q.hookTrigger && !q.goalTrigger && !q.nudge,
+      )
+    ) {
+      this.opts.logger.info(
+        { chatId },
+        'AskUserQuestion not raised: the user already sent a message',
+      );
+      return Promise.resolve({ approve: false, denyMessage: QUESTION_SUPERSEDED_MESSAGE });
+    }
     const requestId = randomUUID();
     // Register the gate BEFORE announcing the request, not after.
     //

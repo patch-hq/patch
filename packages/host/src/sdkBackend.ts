@@ -725,6 +725,11 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
           ],
         };
         const callId = `mock-ask-${Math.random().toString(36).slice(2, 8)}`;
+        // `[[late-ask]]`: the agent works for a moment before it asks, so a message
+        // typed meanwhile is queued BEFORE the question is raised.
+        if (runOpts.prompt.includes('[[late-ask]]')) {
+          await abortableDelay(150, runOpts.abortController.signal);
+        }
         if (runOpts.onPermissionRequest) {
           const decision = await runOpts.onPermissionRequest({
             tool: 'AskUserQuestion',

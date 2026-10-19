@@ -127,6 +127,23 @@ describe('sending a message cancels the outstanding AskUserQuestion (spec/02)', 
     expect(daemon.getPendingPermissionForChat(chatId)).toBeUndefined();
   });
 
+  it('cancels a question raised AFTER the message was already queued', async () => {
+    // The mirror of the case above: the user types while the agent is still
+    // working, so the message queues "for the next tool call" — and then the
+    // agent asks. The question blocks the turn before any tool call happens, so
+    // the queued message waited behind the very question it answers.
+    const { daemon, events, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]][[late-ask]]' });
+    await tick(20);
+    await daemon.sendInput({ chatId, message: TYPED, localId: 'local-1' });
+    await tick(400);
+
+    expect(events.find((e) => e.type === 'chat.permission_request')).toBeUndefined();
+    expect(toolResult(events, 'AskUserQuestion')).toBe(QUESTION_SUPERSEDED_MESSAGE);
+    expect(assistantText(events)).toContain(`[mock] echo: ${TYPED}`);
+    expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
+  });
+
   it('does not queue the message behind an agent that keeps working after the question is cancelled', async () => {
     // A real agent carries on after a refusal (it writes a reply), so the typed
     // message used to sit QUEUED until that reply finished. A question is not a
