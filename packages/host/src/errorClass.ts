@@ -69,6 +69,13 @@ const RULES: readonly Rule[] = [
     kind: 'permanent',
     test: /claude code (executable|native binary) not found|spawn claude ENOENT/i,
   },
+  // The kernel OOM killer SIGKILLs the child (exit 137). Running the same turn
+  // again re-grows the same memory, so it settles errored at once, not laddered.
+  {
+    reason: 'out_of_memory',
+    kind: 'permanent',
+    test: /exited with code 137\b|terminated by signal SIGKILL|out of memory|\bENOMEM\b|\bOOM\b/i,
+  },
   // --- transient: the condition can clear on its own ---
   { reason: 'overloaded', kind: 'transient', test: /overloaded_error|api error: 529/i },
   {
