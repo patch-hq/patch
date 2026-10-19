@@ -147,7 +147,9 @@ When every account of a chat's provider on its host is out of credit, and the
 other provider (Claude ↔ ChatGPT) on that same host has a connected account that
 is not, the out-of-usage banner offers a **Switch to ChatGPT** / **Switch to
 Claude** button. It is the picker's cross-provider switch — the same
-confirmation, the same `chat.model_request` — onto the first model of the other
+confirmation, the same `chat.model_request` (with `retry`, so the turn that
+failed or is parked on the limit runs again on the new model straight away
+rather than waiting for the reader to resend it) — onto the first model of the other
 provider in that host's catalogue. No fallback: with nothing usable on the other
 provider, or no model for it in the catalogue, there is no button.
 

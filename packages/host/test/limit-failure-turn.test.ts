@@ -145,6 +145,27 @@ describe('a limit failure nobody parked', () => {
     daemon.shutdown();
   });
 
+  it('runs the owed turn on the new model when the model is changed with retry', async () => {
+    const { daemon, folder, runs } = setup({ err: statedLimit });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    await daemon.setChatModel(chatId, 'openai/gpt-5', { retry: true });
+    for (let i = 0; i < 20 && runs.n < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(runs.n).toBe(2);
+    expect(daemon.chatState.get(chatId)?.model).toBe('openai/gpt-5');
+    daemon.shutdown();
+  });
+
+  it('does not run the owed turn when the model is changed without retry', async () => {
+    const { daemon, folder, runs } = setup({ err: statedLimit });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    await daemon.setChatModel(chatId, 'openai/gpt-5');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(runs.n).toBe(1);
+    daemon.shutdown();
+  });
+
   it('says nothing structured about a chat that never hit a limit', () => {
     const { daemon } = setup({ err: statedLimit });
     expect(daemon.resumeRateLimitedNow('chat-nope')).toBe(false);
