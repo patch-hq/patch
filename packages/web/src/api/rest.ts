@@ -1273,9 +1273,13 @@ export const api = {
   // links). Fetched server-side because the target's CORS policy would
   // otherwise block the browser doing it directly.
   linkPreview: (url: string) =>
-    request<{ url: string; title?: string; description?: string; image?: string }>(
-      `/api/link-preview?url=${encodeURIComponent(url)}`,
-    ),
+    request<{
+      url: string;
+      title?: string;
+      description?: string;
+      image?: string;
+      excerpt?: string;
+    }>(`/api/link-preview?url=${encodeURIComponent(url)}`),
   // GET /api/link-preview/image — same reasoning as getFileRawBlob above: the
   // CSP locks img-src down to 'self'/data:/blob:, so a preview's og:image (an
   // arbitrary third-party URL) can't be a plain `<img src>` either way. Fetched

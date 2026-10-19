@@ -597,5 +597,5 @@ Differences in how the phone does them:
 
 - Creating a Pad (`14-design-web.md` § Pads — Starting a Pad): Pads list → New. Name, Based on (Blank or an app), Earlier captures, Desktop or Phone, the owning chat. The phone cannot photograph a live Patch screen, so it starts from earlier captures only.
 - Image annotator: a pencil on an image chip in the composer opens a full-screen markup page (box, arrow, freehand, text, five colours, undo) drawn on a canvas in a WebView; Done replaces the attachment with a flattened `<name>-annotated.png`.
-- Link previews: an eye beside an http(s) link in a message expands title, description and image; the open icon sends the link to the browser.
+- Link previews: an eye beside an http(s) link in a message expands title, description, image and an excerpt of the page's text; the open icon sends the link to the browser.
 - Document editor: Documents in a chat's ⋯ menu browses the chat folder; a `.md` opens in a plain text editor (verbatim, explicit Save) with mode, Suggestions, Comments and History panels, Ask about this, Comment and export. A `.docx` is converted first. Save goes over the chat's `file.write` and is confirmed by reading the file back. Export is written to a folder the user picks.

@@ -96,6 +96,55 @@ describe('GET /api/link-preview', () => {
     }
   });
 
+  it("returns an excerpt of the page's own readable text, skipping scripts, nav and styles", async () => {
+    const html = `<html><head><title>T</title><style>p{color:red}</style></head><body>
+      <nav><p>Home About Contact</p></nav>
+      <script>var secret = 1;</script>
+      <main><h1>Heading</h1><p>First paragraph &amp; more.</p><p>Second   paragraph.</p></main>
+      <footer><p>Copyright</p></footer></body></html>`;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }),
+      ),
+    );
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/link-preview?url=' + encodeURIComponent('https://example.com/a'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().excerpt).toBe('Heading First paragraph & more. Second paragraph.');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('caps the excerpt length', async () => {
+    const html = `<html><body><p>${'word '.repeat(2000)}</p></body></html>`;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }),
+      ),
+    );
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/link-preview?url=' + encodeURIComponent('https://example.com/a'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      const excerpt = res.json().excerpt as string;
+      expect(excerpt.length).toBeLessThanOrEqual(601);
+      expect(excerpt.endsWith('…')).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('keeps an apostrophe inside a double-quoted content attribute', async () => {
     const html = `<html><head><meta property="og:title" content="Tom's Blog"></head></html>`;
     vi.stubGlobal(

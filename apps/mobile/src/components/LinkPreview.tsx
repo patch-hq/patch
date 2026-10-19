@@ -88,7 +88,7 @@ function LinkPreviewCard({ url }: { url: string }): React.ReactElement {
       {state.kind === 'error' ? (
         <Text style={{ ...text, color: colors.red }}>{state.message}</Text>
       ) : null}
-      {data && !data.title && !data.description && !data.image ? (
+      {data && !data.title && !data.description && !data.image && !data.excerpt ? (
         <Text style={{ ...text, color: colors.ink3 }}>No preview available</Text>
       ) : null}
       {data?.image ? (
@@ -109,6 +109,16 @@ function LinkPreviewCard({ url }: { url: string }): React.ReactElement {
           {data.description}
         </Text>
       ) : null}
+      {data?.excerpt ? (
+        <Text
+          testID="link-preview-excerpt"
+          numberOfLines={10}
+          style={{ ...text, color: colors.ink2, lineHeight: 20 }}
+        >
+          {data.excerpt}
+        </Text>
+      ) : null}
+      <Text style={{ ...text, color: colors.ink3 }}>{new URL(url).host}</Text>
     </View>
   );
 }

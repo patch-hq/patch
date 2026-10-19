@@ -87,7 +87,7 @@ function LinkPreviewCard({ url }: { url: string }): JSX.Element {
           {error instanceof Error ? error.message : 'Preview failed'}
         </span>
       ) : null}
-      {data && !data.title && !data.description && !data.image ? (
+      {data && !data.title && !data.description && !data.image && !data.excerpt ? (
         <span className="link-preview-status">No preview available</span>
       ) : null}
       {imageUrl ? <img src={imageUrl} alt="" className="link-preview-image" /> : null}
@@ -99,6 +99,12 @@ function LinkPreviewCard({ url }: { url: string }): JSX.Element {
           ) : null}
         </span>
       ) : null}
+      {data?.excerpt ? (
+        <span className="link-preview-excerpt" data-testid="link-preview-excerpt">
+          {data.excerpt}
+        </span>
+      ) : null}
+      <span className="link-preview-host">{new URL(url).host}</span>
     </span>
   );
 }
