@@ -56,6 +56,61 @@ describe('assertValidJobBody', () => {
     }
   });
 
+  // node-cron expands a step of zero by walking a range that never advances.
+  // `cron.validate('*/0 * * * *')` burns ~5 SECONDS of blocking CPU before
+  // answering false — on the single-threaded Fastify event loop, so for those
+  // five seconds the server answers nothing at all: no surface, no webhook, no
+  // daemon frame. Job writes come from the REST route, the daemon UDS, direct
+  // file loads AND the in-chat `patch_job_create` bridge, so an agent inventing
+  // `*/0` freezes the box. The cheap structural check has to run first.
+  it('refuses a zero-step cron without handing it to node-cron to chew on', () => {
+    const started = Date.now();
+    try {
+      assertValidJobBody(baseBody({ trigger: { type: 'cron', expression: '*/0 * * * *' } }));
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(JobValidationError);
+      expect((err as JobValidationError).field).toBe('trigger.expression');
+      expect((err as JobValidationError).message).toContain('invalid cron expression');
+    }
+    // The structural check is microseconds. Anything near node-cron's ~5s means
+    // the expression reached it.
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it('refuses a zero step spelled `a/0`, which node-cron calls VALID', () => {
+    // `cron.validate('1/0 * * * *')` returns true, so this one was persisted and
+    // then registered with the live scheduler — a stored schedule that cannot
+    // mean anything.
+    try {
+      assertValidJobBody(baseBody({ trigger: { type: 'cron', expression: '1/0 * * * *' } }));
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(JobValidationError);
+      expect((err as JobValidationError).field).toBe('trigger.expression');
+      expect((err as JobValidationError).message).toContain('invalid cron expression');
+    }
+  });
+
+  it('still accepts every cron expression the live jobs actually use', () => {
+    // Tightening the gate must not orphan a stored job: validate.ts also runs on
+    // FILE LOAD, so a newly-refused expression stops an existing job dead.
+    for (const expression of [
+      '0 9 * * *',
+      '0 9 * * 5',
+      '17 7,11,15,19 * * *',
+      '0 */4 * * *',
+      '0,30 7-22 * * *',
+      '0 9-22 * * *',
+      '*/5 * * * *',
+      '15 8 * * 1',
+    ]) {
+      expect(() =>
+        assertValidJobBody(baseBody({ trigger: { type: 'cron', expression } })),
+      ).not.toThrow();
+    }
+  });
+
   it('accepts a valid recurrence trigger', () => {
     expect(() =>
       assertValidJobBody(
