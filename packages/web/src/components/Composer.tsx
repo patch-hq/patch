@@ -631,6 +631,23 @@ export const Composer = forwardRef(function Composer(
   }, [replaceNonce, replaceText]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // The dictation preview and chip mirror paint the text over a transparent
+  // textarea, so they must scroll with it and wrap at the same width: once the
+  // textarea scrolls past its cap it gains a scrollbar (narrower text column),
+  // and the mirrors, which never scroll, would clip the text and wrap it
+  // differently from the caret.
+  function syncMirrors(el: HTMLTextAreaElement): void {
+    const wrap = el.parentElement;
+    if (!wrap) return;
+    const bar = el.offsetWidth - el.clientWidth - 2; // 2 = left+right border
+    wrap
+      .querySelectorAll<HTMLElement>('.composer-live-preview, .composer-chip-mirror')
+      .forEach((m) => {
+        m.style.paddingRight = `${14 + Math.max(0, bar)}px`;
+        m.scrollTop = el.scrollTop;
+      });
+  }
+
   // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
   // unreliable in the desktop shell, so size it here: reset to `auto` (allows
   // shrinking), then to scrollHeight (clamped at the cap). Crucially, keep
@@ -1054,6 +1071,11 @@ export const Composer = forwardRef(function Composer(
   // — a chip typed while dictating simply isn't boxed until the dictation
   // preview ends, since both would otherwise fight over the same technique).
   const showChipMirror = !showLivePreview && chipTokens.length > 0;
+  // Layout effect: the mirror mounts and the textarea resizes in the same
+  // commit, and the mirror must be sized before the browser paints.
+  useLayoutEffect(() => {
+    if (inputRef.current) syncMirrors(inputRef.current);
+  }, [value, showLivePreview, showChipMirror]);
   const [chipPreview, setChipPreview] = useState<ChipPreviewState | null>(null);
   const chipPreviewRef = useRef<HTMLDivElement>(null);
   const [chipPreviewPos, setChipPreviewPos] = useState<TooltipPosition | null>(null);
@@ -1982,6 +2004,7 @@ export const Composer = forwardRef(function Composer(
             onKeyUp={(e) => syncCursor(e.currentTarget)}
             onSelect={(e) => syncCursor(e.currentTarget)}
             onPaste={onPaste}
+            onScroll={(e) => syncMirrors(e.currentTarget)}
             onFocus={() => {
               if (!edit) useComposerDraftStore.getState().setFocused(chatId, true);
             }}
