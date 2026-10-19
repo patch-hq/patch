@@ -60,7 +60,10 @@ export function keyForEvent(e: {
       .concat(name)
       .join('+');
   if (NAMED_KEYS.has(e.key)) return chord(e.key);
-  if ((e.ctrlKey || e.metaKey) && e.key.length === 1) return chord(e.key);
+  // Ctrl/Cmd+V is left to the browser: it fires a paste event carrying the user's
+  // clipboard, which the remote page's own (empty) clipboard could never supply.
+  if ((e.ctrlKey || e.metaKey) && e.key.length === 1 && e.key.toLowerCase() !== 'v')
+    return chord(e.key);
   return null;
 }
 

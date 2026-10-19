@@ -116,6 +116,13 @@ describe('BrowserHandoffPanel', () => {
     fireEvent.keyDown(keys, { key: 'Enter' });
     expect(sent.at(-1)).toMatchObject({ input: { kind: 'key', key: 'Enter' } });
 
+    // Pasting sends the local clipboard's text into the shared page.
+    const before = sent.length;
+    fireEvent.paste(keys, { clipboardData: { getData: () => 'pasted secret' } });
+    expect(sent.at(-1)).toMatchObject({ input: { kind: 'text', text: 'pasted secret' } });
+    fireEvent.paste(keys, { clipboardData: { getData: () => '' } });
+    expect(sent.length).toBe(before + 1);
+
     fireEvent.click(screen.getByTestId('browser-handoff-done'));
     expect(sent.at(-1)).toEqual({
       type: 'patch.browser_handoff.control',
@@ -270,6 +277,9 @@ describe('browser hand-off helpers', () => {
     expect(keyForEvent({ ...e, key: 'Backspace' })).toBe('Backspace');
     expect(keyForEvent({ ...e, key: 'Tab', shiftKey: true })).toBe('Shift+Tab');
     expect(keyForEvent({ ...e, key: 'a', ctrlKey: true })).toBe('Control+a');
+    // Paste is the local clipboard's job (a paste event), not a chord for the remote page.
+    expect(keyForEvent({ ...e, key: 'v', ctrlKey: true })).toBeNull();
+    expect(keyForEvent({ ...e, key: 'V', metaKey: true })).toBeNull();
   });
 
   it('labels what a chat is browsing and when there is something to stop', () => {
