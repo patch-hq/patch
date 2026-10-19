@@ -2962,8 +2962,8 @@ async function startHost(
         // spec/04 § Model — run this chat on another model from its NEXT turn.
         // Unlike `chat.settings` there is no "clear" reading: a chat is always
         // on some model, so the field is required and always means "switch".
-        const { chatId, model } = event;
-        void daemon.setChatModel(chatId, model).then(
+        const { chatId, model, retry } = event;
+        void daemon.setChatModel(chatId, model, retry ? { retry } : undefined).then(
           () => {
             // The acknowledgement is the `chat.state` setChatModel emits, which
             // carries the new model — that is also what makes every OTHER

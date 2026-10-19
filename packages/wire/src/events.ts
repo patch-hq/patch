@@ -3918,6 +3918,13 @@ export const ChatModelRequestEvent = z
     type: z.literal('chat.model_request'),
     chatId: z.string().min(1),
     model: z.string().min(1),
+    /**
+     * Also run the turn this chat owes (parked on a limit, or failed on it) on
+     * the new model, as soon as the change has landed. The out-of-usage
+     * banner's "Switch to ChatGPT" sets it: the switch was made to get the
+     * reply that did not come. Absent means change the model only.
+     */
+    retry: z.boolean().optional(),
   })
   .strict();
 export type ChatModelRequestEvent = z.infer<typeof ChatModelRequestEvent>;

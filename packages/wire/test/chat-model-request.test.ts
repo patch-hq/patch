@@ -18,6 +18,16 @@ describe('chat.model_request', () => {
     expect(decode(encode(ev))).toEqual(ev);
   });
 
+  it('carries an optional retry flag', () => {
+    const ev: ChatModelRequestEvent = {
+      type: 'chat.model_request',
+      chatId: 'c1',
+      model: 'openai/gpt-5',
+      retry: true,
+    };
+    expect(decode(encode(ev))).toEqual(ev);
+  });
+
   it('requires a model — there is no "clear the model" meaning', () => {
     // Unlike chat.settings' permissionMode, whose absence CLEARS the override,
     // a chat is always on some model, so a frame with none says nothing.

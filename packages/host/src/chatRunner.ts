@@ -13968,6 +13968,8 @@ export class Daemon {
        * this isn't actually a cross-provider switch, or the outgoing harness
        * has no digest generator configured for it. */
       compact?: boolean;
+      /** Once the model has changed, run the turn this chat owes on it. */
+      retry?: boolean;
     },
   ): Promise<void> {
     const s = this.chatState.get(chatId);
@@ -14017,6 +14019,8 @@ export class Daemon {
     const closest = closestPermissionModeForModel(current, model);
     if (closest !== current) this.recordAutomaticPermissionModeChange(chatId, closest);
     this.emitState(chatId);
+    // After the state is out, so the re-sent turn starts on the new model.
+    if (opts?.retry) this.resumeRateLimitedNow(chatId);
   }
 
   /**
