@@ -4,12 +4,14 @@
 // that triggered it reads as a dead no-op (an attachment upload that 502s just
 // blinked the send button and did nothing).
 //
-// Rendered once at the root layout, above every screen and overlay. Tap to
+// Rendered once at the root layout, above every screen and overlay. Pinned to
+// the top so a toast never covers the composer or the bottom controls. Tap to
 // dismiss; errors also auto-dismiss so a stale one doesn't sit over the UI
 // forever.
 
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlarmClock } from 'lucide-react-native';
 import { useUiStore } from '../stores/uiStore';
 import { fonts, radii, space, useTheme } from '../lib/theme';
@@ -19,6 +21,7 @@ export const TOAST_TTL_MS = 8000;
 
 export function ErrorToasts(): React.ReactElement | null {
   const colors = useTheme();
+  const insets = useSafeAreaInsets();
   const errors = useUiStore((s) => s.errors);
   const dismiss = useUiStore((s) => s.dismissError);
 
@@ -62,7 +65,7 @@ export function ErrorToasts(): React.ReactElement | null {
         position: 'absolute',
         left: 0,
         right: 0,
-        bottom: 0,
+        top: insets.top,
         padding: space.sm,
         gap: space.xs,
       }}
