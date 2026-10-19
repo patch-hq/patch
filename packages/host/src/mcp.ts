@@ -1105,7 +1105,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_list_chats',
     {
       description:
-        "List all chats the user has, ACROSS every machine on the account. Each entry names the machine it lives on (hostId). Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
+        "List all chats the user has, ACROSS every machine on the account, identically whichever machine a chat lives on. Each entry has chatId, hostId, name, folder, status, activity, pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
       inputSchema: { archived: z.enum(['only', 'include']).optional() },
     },
     async ({ archived }) => {
@@ -1116,6 +1116,30 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       const res = await uds<unknown>({
         method: 'GET',
         path: `/internal/chats${qs ? `?${qs}` : ''}`,
+      });
+      return toolResult(res);
+    },
+  );
+
+  // ---- patch_search_chats --------------------------------------------------
+  server.registerTool(
+    'patch_search_chats',
+    {
+      description:
+        'Search every chat on the account, on ANY machine, through the Patch server. Case-insensitive substring match on chat name, folder, status summary and message text. Returns { results, truncated, chatsWithoutLog }: results are best first (name matches outrank body matches, then most recent), each with chatId, hostId, name, folder, status, matchedIn and up to three message excerpts (seq, role, text). chatsWithoutLog counts chats the server holds no message log for — those were matched on metadata only, so a miss is not proof a chat never said it. Follow up with patch_history for the full chat. Read-only.',
+      inputSchema: {
+        query: z.string().min(1),
+        limit: z.number().int().positive().max(100).optional().describe('Max chats, default 20.'),
+      },
+    },
+    async ({ query, limit }) => {
+      const params = new URLSearchParams();
+      params.set('callerChatId', callerChatId);
+      params.set('query', query);
+      if (limit !== undefined) params.set('limit', String(limit));
+      const res = await uds<unknown>({
+        method: 'GET',
+        path: `/internal/search-chats?${params.toString()}`,
       });
       return toolResult(res);
     },

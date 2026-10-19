@@ -174,7 +174,20 @@ export interface BuildOptions {
   listAccountChats?: (
     sourceChatId: string,
     archived?: 'only' | 'include',
-  ) => Promise<Array<{ chatId: string; hostId: string }>>;
+  ) => Promise<Array<{ chatId: string; hostId: string } & Record<string, unknown>>>;
+  /**
+   * `patch_search_chats`: search every chat on the account, answered by the
+   * server from its chat mirror and the transcripts it holds.
+   */
+  searchAccountChats?: (
+    sourceChatId: string,
+    query: string,
+    limit?: number,
+  ) => Promise<{
+    results: unknown[];
+    truncated: boolean;
+    chatsWithoutLog: number;
+  }>;
   /**
    * `patch_activity` (spec/06 § Cross-chat toolset): the user's own messages
    * for `[since, until]`, gathered server-side from every machine's chat logs
@@ -804,6 +817,14 @@ const ListChatsQuery = z
     archived: z.enum(['only', 'include']).optional(),
     /** The calling chat — correlates the account-wide listing RPC to the server. */
     callerChatId: z.string().min(1).optional(),
+  })
+  .strict();
+
+const SearchChatsQuery = z
+  .object({
+    query: z.string().min(1),
+    limit: z.coerce.number().int().positive().max(100).optional(),
+    callerChatId: z.string().min(1),
   })
   .strict();
 
@@ -2865,6 +2886,41 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
     toolLog({ tool: 'patch_list_chats', durationMs: Date.now() - start, ok: true });
     return { chats: [...local.values()] };
+  });
+
+  // patch_search_chats — answered by the server for the whole account; no
+  // local fallback, a partial answer would read as "nothing else matches".
+  app.get('/internal/search-chats', async (req, reply) => {
+    const start = Date.now();
+    const q = SearchChatsQuery.safeParse(req.query);
+    if (!q.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: q.error.message });
+    }
+    if (!opts.searchAccountChats) {
+      return reply.code(503).send({ error: 'chat search not configured' });
+    }
+    try {
+      const result = await opts.searchAccountChats(q.data.callerChatId, q.data.query, q.data.limit);
+      toolLog({
+        tool: 'patch_search_chats',
+        callerChatId: q.data.callerChatId,
+        durationMs: Date.now() - start,
+        ok: true,
+      });
+      return result;
+    } catch (err) {
+      toolLog({
+        tool: 'patch_search_chats',
+        callerChatId: q.data.callerChatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: 'sdk_error',
+      });
+      return reply.code(502).send({
+        error: 'search_unavailable',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   // patch_activity — gathered server-side from every machine's chat logs
