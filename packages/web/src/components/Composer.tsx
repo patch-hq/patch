@@ -1671,6 +1671,10 @@ export const Composer = forwardRef(function Composer(
                   aria-selected={i === activeSkillIndex}
                   className={`composer-skill-option${i === activeSkillIndex ? ' active' : ''}${item.isBuiltin ? ' builtin' : ''}`}
                   data-testid={`composer-skill-option-${item.name}`}
+                  // Hover moves the selection (mousemove, not mouseenter, so a
+                  // keyboard-driven scroll under a still pointer doesn't steal
+                  // it): one highlighted row, not a hover row plus a keyboard row.
+                  onMouseMove={() => setSkillIndex(i)}
                   // Use mousedown so completion runs before the textarea blurs.
                   onMouseDown={(e) => {
                     e.preventDefault();

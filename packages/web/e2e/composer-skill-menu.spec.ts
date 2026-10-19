@@ -88,3 +88,23 @@ test.describe('composer skill menu — picks up skills added on the host', () =>
     await expect(page.getByTestId('composer-skill-option-brand-new')).toBeVisible();
   });
 });
+
+test('hovering a skill row leaves exactly one highlighted row', async ({ page }) => {
+  await page.route('**/api/skills*', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ skills: ['plant', 'plan-travel', 'deploy'] }),
+    }),
+  );
+  await page.goto(CHAT);
+  await page.getByTestId('composer-input').fill('/');
+  const deploy = page.getByTestId('composer-skill-option-deploy');
+  await deploy.hover();
+  await expect(deploy).toHaveAttribute('aria-selected', 'true');
+  const bg = await page
+    .locator('.composer-skill-option')
+    .evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+  const highlighted = bg.filter((c) => c !== 'rgba(0, 0, 0, 0)');
+  expect(highlighted).toHaveLength(1);
+});

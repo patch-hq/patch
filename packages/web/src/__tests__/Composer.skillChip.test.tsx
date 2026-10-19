@@ -76,6 +76,17 @@ describe('Composer — skill chips', () => {
     expect(await screen.findByTestId('composer-skill-option-plant')).toBeInTheDocument();
   });
 
+  it('hovering a row moves the highlight instead of adding a second one', async () => {
+    const input = renderComposer();
+    fireEvent.change(input, { target: { value: '/' } });
+    const plant = await screen.findByTestId('composer-skill-option-plant');
+    fireEvent.mouseMove(plant);
+    const selected = screen
+      .getAllByRole('option')
+      .filter((o) => o.getAttribute('aria-selected') === 'true');
+    expect(selected).toEqual([plant]);
+  });
+
   it('does not open when a slash does not begin a word', async () => {
     const input = renderComposer();
     fireEvent.change(input, { target: { value: 'a/pl' } });

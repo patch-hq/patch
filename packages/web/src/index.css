@@ -5403,7 +5403,6 @@ a.ch-row:hover {
   align-items: center;
   gap: 6px;
 }
-.composer-skill-option:hover,
 .composer-skill-option.active {
   background: var(--bg-soft);
 }
