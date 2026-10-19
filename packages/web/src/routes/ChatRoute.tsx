@@ -1302,7 +1302,12 @@ export function ChatRoute({
   const [composerReplace, setComposerReplace] = useState<{ text: string; nonce: number } | null>(
     null,
   );
+  // spec/04 § Branching — the user turn being edited in the main composer
+  // (everything from it down is greyed). `savedDraft` is what was typed in the
+  // composer before, put back when the edit ends.
+  const [turnEdit, setTurnEdit] = useState<{ seq: number; savedDraft: string } | null>(null);
   useEffect(() => {
+    setTurnEdit(null);
     setQueuedEdit(null);
     setComposerInsert(null);
     setHookChecking(false);
@@ -1433,21 +1438,28 @@ export function ChatRoute({
   );
 
   const handleFork = useCallback(
-    (seq: number, message: string): void => {
+    async (seq: number, message: string, files: OutgoingFile[] = []): Promise<boolean> => {
       if (!ws) {
         pushError('not connected');
-        return;
+        return false;
+      }
+      // The replacement turn's files go up first (the fork carries refs, as a
+      // normal send does); a failed upload leaves the edit open untouched.
+      const refs: AttachmentRef[] = [];
+      try {
+        for (const a of files) {
+          const { ref } = await api.uploadAttachment(chatId, a.file);
+          refs.push({ id: ref.id, name: ref.name, mimeType: ref.mimeType, kind: ref.kind });
+        }
+      } catch (err) {
+        pushError(failed('attachment upload'), undefined, (err as Error).message);
+        return false;
       }
       // Everything from the edited turn down belongs to the track we're
       // leaving. The prefix ABOVE it is shared with the new track, so keep it
       // and let the fork's turn stream in beneath — no replay round-trip, and
       // never a moment showing a conversation that no longer exists.
-      useChatStore.setState((s) => ({
-        timelines: {
-          ...s.timelines,
-          [chatId]: (s.timelines[chatId] ?? []).filter((e) => e.seq < seq),
-        },
-      }));
+      const disabledTools = useToolsStore.getState().disabledFor(chatId);
       try {
         ws.send({
           type: 'chat.fork_request',
@@ -1455,13 +1467,43 @@ export function ChatRoute({
           seq,
           message,
           localId: `fork-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          ...(refs.length > 0 ? { attachments: refs } : {}),
+          ...(disabledTools.length > 0 ? { disabledTools } : {}),
         });
       } catch (err) {
         pushError(failed('edit'), undefined, (err as Error).message);
+        return false;
       }
+      useChatStore.setState((s) => ({
+        timelines: {
+          ...s.timelines,
+          [chatId]: (s.timelines[chatId] ?? []).filter((e) => e.seq < seq),
+        },
+      }));
+      return true;
     },
     [ws, chatId, pushError],
   );
+
+  // Carry a settled user turn back into the main composer: its text, and every
+  // control the composer has (model, approval mode, attachments).
+  const handleEditTurn = useCallback(
+    (seq: number, text: string): void => {
+      setTurnEdit((cur) => ({
+        seq,
+        savedDraft: cur?.savedDraft ?? useComposerDraftStore.getState().get(chatId),
+      }));
+      setComposerReplace({ text, nonce: Date.now() });
+    },
+    [chatId],
+  );
+
+  function endTurnEdit(): void {
+    const edit = turnEdit;
+    if (!edit) return;
+    setTurnEdit(null);
+    setComposerReplace({ text: edit.savedDraft, nonce: Date.now() });
+  }
 
   const handleSwitchTrack = useCallback(
     (branchId: string): void => {
@@ -1497,6 +1539,13 @@ export function ChatRoute({
     _chatId?: string,
     sendOpts?: { afterTurn?: boolean; interrupt?: boolean },
   ): Promise<boolean | void> {
+    if (turnEdit) {
+      const ok = await handleFork(turnEdit.seq, message.trim(), files ?? []);
+      if (!ok) return false;
+      setTurnEdit(null);
+      setComposerReplace({ text: turnEdit.savedDraft, nonce: Date.now() });
+      return;
+    }
     const afterTurn = sendOpts?.afterTurn === true;
     const interrupt = sendOpts?.interrupt === true;
     // patch/todo.md — `/goal <text>` sets the chat's goal INSTEAD of sending a
@@ -1939,7 +1988,8 @@ export function ChatRoute({
           onRetryDelivery={handleRetryDelivery}
           onRetryTurn={handleRetryTurn}
           onContinueTurn={handleContinueTurn}
-          onFork={handleFork}
+          onEditTurn={handleEditTurn}
+          {...(turnEdit?.seq === entry.seq && !entry.queued ? { editAnchor: true } : {})}
           onSwitchTrack={handleSwitchTrack}
           tracks={trackNav.get(entry.seq)}
           {...(paging.pageable.get(entry.seq) ? { attemptPageable: true } : {})}
@@ -2102,7 +2152,10 @@ export function ChatRoute({
                 await api.setLoop(chatId, { message, at });
               }}
               onAddToTodo={handleAddToTodo}
-              onValueChange={(t) => useComposerDraftStore.getState().setDraft(chatId, t)}
+              onValueChange={(t) => {
+                if (!turnEdit) useComposerDraftStore.getState().setDraft(chatId, t);
+              }}
+              {...(turnEdit ? { editingTurn: { onCancel: endTurnEdit } } : {})}
               // spec/14 § Composer — opening a chat puts the cursor in the
               // composer, so you can type straight away without clicking it.
               // The `key={chatId}` above is what makes this fire on EVERY
@@ -2154,7 +2207,8 @@ const TimelineEntry = memo(function TimelineEntry({
   onRetryDelivery,
   onRetryTurn,
   onContinueTurn,
-  onFork,
+  onEditTurn,
+  editAnchor,
   onSwitchTrack,
   tracks,
   attemptPageable,
@@ -2197,7 +2251,9 @@ const TimelineEntry = memo(function TimelineEntry({
   /** spec/14 § Running-turn controls — nudge a `turnStopped` chat onward with a fresh turn. */
   onContinueTurn?(): void;
   /** spec/04 § Branching — edit this user turn, forking a new track from it. */
-  onFork?(seq: number, message: string): void;
+  onEditTurn?(seq: number, text: string): void;
+  /** This turn is the one being edited in the main composer (spec/04 § Branching). */
+  editAnchor?: boolean;
   onSwitchTrack?(branchId: string): void;
   /** Set when this turn is a fork point with more than one track. */
   tracks?: TrackNav;
@@ -2320,7 +2376,8 @@ const TimelineEntry = memo(function TimelineEntry({
         {...(onRetryDelivery ? { onRetryDelivery } : {})}
         {...(onRetryTurn ? { onRetryTurn } : {})}
         {...(onContinueTurn ? { onContinueTurn } : {})}
-        {...(onFork ? { onFork } : {})}
+        {...(onEditTurn ? { onEditTurn } : {})}
+        {...(editAnchor ? { editAnchor } : {})}
         {...(onSwitchTrack ? { onSwitchTrack } : {})}
         {...(tracks ? { tracks } : {})}
         {...(attemptPageable ? { attemptPageable } : {})}
@@ -2514,7 +2571,8 @@ function MessageEntry({
   onRetryDelivery,
   onRetryTurn,
   onContinueTurn,
-  onFork,
+  onEditTurn,
+  editAnchor,
   onSwitchTrack,
   tracks,
   attemptPageable,
@@ -2543,7 +2601,9 @@ function MessageEntry({
   onRetryTurn?(entry: ChatEventEntry): void;
   /** spec/14 § Running-turn controls — nudge a `turnStopped` chat onward with a fresh turn. */
   onContinueTurn?(): void;
-  onFork?(seq: number, message: string): void;
+  onEditTurn?(seq: number, text: string): void;
+  /** This turn is the one being edited in the main composer (spec/04 § Branching). */
+  editAnchor?: boolean;
   onSwitchTrack?(branchId: string): void;
   tracks?: TrackNav;
   /** An attempt of this re-sent turn has replies or a failure to page to. */
@@ -2552,7 +2612,6 @@ function MessageEntry({
   attemptAt?: number;
   onAttemptAt?(seq: number, idx: number): void;
 }): JSX.Element {
-  const [forkDraft, setForkDraft] = useState<string | null>(null);
   // spec/14 § Side threads panel TRIGGER — hover button + right-click "Open
   // side thread" on ANY message, user or agent.
   const sideThreadMenu = useContextMenu();
@@ -2575,27 +2634,17 @@ function MessageEntry({
   // editor, but its text lives in `ChatRoute` (see `queuedEdit` there), since
   // this row is re-keyed the moment the message starts running.
   const isQueuedEdit = entry.queued === true && entry.localId !== undefined && !!onQueuedDraft;
-  const draft = isQueuedEdit ? (queuedDraft ?? null) : forkDraft;
+  const draft = isQueuedEdit ? (queuedDraft ?? null) : null;
   const editFolder = useChatStore((st) => st.chats[chatId]?.folder ?? '');
   const editHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? null);
   const setDraft = (text: string | null): void => {
     if (isQueuedEdit) onQueuedDraft!(entry.localId!, text);
-    else setForkDraft(text);
   };
-  // spec/04 § Branching — saving an edited turn forks a new track from it. One
-  // function, so the Save button and `⌘↵` cannot disagree about when a fork is
-  // allowed (an empty edit is not a turn, so neither can send one). A queued
-  // message's edit replaces its text in the queue instead; emptying it is a
-  // remove, which `onEditQueued` decides.
+  // A queued message's inline edit replaces its text in the queue; emptying it is
+  // a remove, which `onEditQueued` decides. A settled turn is edited in the main
+  // composer instead (spec/04 § Branching).
   function saveEdit(text: string): void {
-    const next = text.trim();
-    if (isQueuedEdit) {
-      onEditQueued?.(entry, next);
-      return;
-    }
-    if (next.length === 0) return;
-    setDraft(null);
-    onFork?.(entry.seq, next);
+    onEditQueued?.(entry, text.trim());
   }
   // spec/14 § Messages — Long user messages collapse (accordion). Plain React
   // state, not persisted: reopening the chat resets to collapsed, same as the
@@ -2670,7 +2719,7 @@ function MessageEntry({
     !entry.queued &&
     !entry.transcribing &&
     !entry.streaming &&
-    onFork !== undefined;
+    onEditTurn !== undefined;
   // spec/14 § Side threads panel TRIGGER — "Hovering any message (user or
   // agent)". Same settled-turn restriction as the edit pencil (above), minus
   // the user-only role check: a seq the host has no persisted record of yet
@@ -2693,7 +2742,7 @@ function MessageEntry({
     (entry.role === 'user' || entry.role === 'assistant') && !entry.transcribing && text.length > 0;
   return (
     <div
-      className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}`}
+      className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}${editAnchor ? ' msg-edit-anchor' : ''}`}
       {...(canSideThread
         ? {
             onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
@@ -2802,7 +2851,7 @@ function MessageEntry({
           data-testid="msg-edit"
           aria-label="edit this message"
           title="Edit"
-          onClick={() => setDraft(entry.content ?? '')}
+          onClick={() => onEditTurn!(entry.seq, entry.content ?? '')}
         >
           <Pencil size={14} aria-hidden="true" />
         </button>

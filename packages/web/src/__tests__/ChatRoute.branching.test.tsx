@@ -3,11 +3,13 @@
 // from it, and a fork point offers a track switcher.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { useComposerDraftStore } from '../stores/composerDraftStore.js';
+import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useSideThreadsStore, DRAFT_TAB_ID } from '../stores/sideThreadsStore.js';
@@ -18,6 +20,7 @@ vi.mock('../api/rest.js', () => ({
   api: {
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getChatHistory: vi.fn().mockResolvedValue({ events: [] }),
+    uploadAttachment: vi.fn(),
   },
 }));
 
@@ -85,134 +88,125 @@ describe('editing a user turn forks a track', () => {
     expect(screen.getAllByTestId('msg-edit')).toHaveLength(1);
   });
 
-  it('saving an edit fires chat.fork_request with that turn seq and the new text', () => {
-    const send = vi.fn();
+  const WS = () =>
+    ({ send: vi.fn(), requestReplay() {} }) as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+
+  it('the pencil carries the turn into the MAIN composer, keeping every control', () => {
     seedChat('c-fork', [
       { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
       { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
     ]);
-    renderChat('c-fork', { send, requestReplay() {} } as unknown as Parameters<
-      typeof ChatRoute
-    >[0]['ws']);
+    renderChat('c-fork', WS());
+    fireEvent.click(screen.getByTestId('msg-edit'));
+
+    expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe('ask one');
+    expect(screen.getByTestId('composer-edit-banner')).toBeTruthy();
+    // No second, cut-down editor inside the turn.
+    expect(screen.queryByTestId('msg-editor')).toBeNull();
+    // Attachments (and the rest of the composer) stay available.
+    expect(screen.getByTestId('attach-btn')).toBeTruthy();
+    expect(screen.getByTestId('send-btn').getAttribute('title')).toContain('Save edit');
+  });
+
+  it('marks the edited turn as the anchor the greying runs from', () => {
+    seedChat('c-fork', [
+      { seq: 2, kind: 'message', role: 'user', content: 'earlier', at: 0 },
+      { seq: 3, kind: 'message', role: 'assistant', content: 'earlier answer', at: 0 },
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', WS());
+    fireEvent.click(screen.getAllByTestId('msg-edit')[1]!);
+    const anchors = document.querySelectorAll('.msg-edit-anchor');
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]!.getAttribute('data-seq')).toBe('4');
+  });
+
+  it('sending from the composer fires chat.fork_request with that turn seq and the new text', async () => {
+    const ws = WS();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', ws);
 
     fireEvent.click(screen.getByTestId('msg-edit'));
-    const field = screen.getByTestId('msg-edit-input') as HTMLTextAreaElement;
-    // Pre-filled with the turn's own text — an edit, not a blank composer.
-    expect(field.value).toBe('ask one');
-    fireEvent.change(field, { target: { value: 'ask one, rephrased' } });
-    fireEvent.click(screen.getByTestId('msg-edit-save'));
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: 'ask one, rephrased' },
+    });
+    fireEvent.click(screen.getByTestId('send-btn'));
 
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'chat.fork_request',
-        chatId: 'c-fork',
-        seq: 4,
-        message: 'ask one, rephrased',
-      }),
+    await waitFor(() =>
+      expect(ws!.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'chat.fork_request',
+          chatId: 'c-fork',
+          seq: 4,
+          message: 'ask one, rephrased',
+        }),
+      ),
     );
     // The old track's transcript is dropped — the host's replay of the new
     // track is the authority, so no stale turns linger from the track we left.
     expect(useChatStore.getState().timelines['c-fork']).toEqual([]);
+    expect(screen.queryByTestId('composer-edit-banner')).toBeNull();
   });
 
-  it('cancelling an edit sends nothing and restores the message', () => {
-    const send = vi.fn();
+  it('files attached while editing are uploaded and ride the fork', async () => {
+    const ws = WS();
+    vi.stubGlobal(
+      'URL',
+      Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }),
+    );
+    vi.mocked(api.uploadAttachment).mockResolvedValue({
+      ok: true,
+      ref: { id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image', url: '/x/a1' },
+    });
     seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
-    renderChat('c-fork', { send, requestReplay() {} } as unknown as Parameters<
-      typeof ChatRoute
-    >[0]['ws']);
+    renderChat('c-fork', ws);
 
     fireEvent.click(screen.getByTestId('msg-edit'));
-    fireEvent.click(screen.getByTestId('msg-edit-cancel'));
-    expect(send).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('msg-edit-input')).toBeNull();
+    fireEvent.change(screen.getByTestId('composer-file-input'), {
+      target: { files: [new File(['x'], 'pic.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(screen.getByTestId('send-btn'));
+
+    await waitFor(() =>
+      expect(ws!.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'chat.fork_request',
+          seq: 4,
+          attachments: [{ id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image' }],
+        }),
+      ),
+    );
+  });
+
+  it('cancelling sends nothing, restores the unsent draft and clears the grey-out', () => {
+    const ws = WS();
+    seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
+    useComposerDraftStore.getState().setDraft('c-fork', 'half-typed');
+    renderChat('c-fork', ws);
+
+    fireEvent.click(screen.getByTestId('msg-edit'));
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'changed' } });
+    fireEvent.click(screen.getByTestId('composer-edit-cancel'));
+
+    expect(ws!.send).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('composer-edit-banner')).toBeNull();
+    expect(document.querySelector('.msg-edit-anchor')).toBeNull();
+    expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe('half-typed');
     expect(screen.getByTestId('msg-content').textContent).toContain('ask one');
   });
 
-  // spec/14 § Keyboard shortcuts — `⌘↵` commits the field being typed in. The
-  // message editor had NO key handler at all, so the only way to save an edited
-  // turn was to take your hands off the keyboard and find the button.
-  it('⌘↵ in the edit box saves it, exactly as the Save button does', () => {
-    const send = vi.fn();
+  it('Esc in the composer cancels the edit', () => {
+    const ws = WS();
     seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
-    renderChat('c-fork', { send, requestReplay() {} } as unknown as Parameters<
-      typeof ChatRoute
-    >[0]['ws']);
-
+    renderChat('c-fork', ws);
     fireEvent.click(screen.getByTestId('msg-edit'));
-    const field = screen.getByTestId('msg-edit-input');
-    fireEvent.change(field, { target: { value: 'ask one, rephrased' } });
-    fireEvent.keyDown(field, { key: 'Enter', metaKey: true });
-
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'chat.fork_request',
-        chatId: 'c-fork',
-        seq: 4,
-        message: 'ask one, rephrased',
-      }),
-    );
-    // Saved means closed — the same end state the button leaves behind.
-    expect(screen.queryByTestId('msg-edit-input')).toBeNull();
-  });
-
-  it('Ctrl↵ saves it too, for the keyboard that has no ⌘', () => {
-    const send = vi.fn();
-    seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
-    renderChat('c-fork', { send, requestReplay() {} } as unknown as Parameters<
-      typeof ChatRoute
-    >[0]['ws']);
-
-    fireEvent.click(screen.getByTestId('msg-edit'));
-    fireEvent.change(screen.getByTestId('msg-edit-input'), { target: { value: 'redone' } });
-    fireEvent.keyDown(screen.getByTestId('msg-edit-input'), { key: 'Enter', ctrlKey: true });
-
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'chat.fork_request', message: 'redone' }),
-    );
-  });
-
-  it('bare ↵ and ⇧↵ leave the edit box alone — a turn can be several lines', () => {
-    const send = vi.fn();
-    seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
-    renderChat('c-fork', { send, requestReplay() {} } as unknown as Parameters<
-      typeof ChatRoute
-    >[0]['ws']);
-
-    fireEvent.click(screen.getByTestId('msg-edit'));
-    const field = screen.getByTestId('msg-edit-input');
-    fireEvent.keyDown(field, { key: 'Enter' });
-    fireEvent.keyDown(field, { key: 'Enter', metaKey: true, shiftKey: true });
-
-    expect(send).not.toHaveBeenCalled();
-    expect(screen.getByTestId('msg-edit-input')).toBeTruthy();
-  });
-
-  it('⌘↵ cannot fork on an emptied edit box, which is what Save is disabled for', () => {
-    const send = vi.fn();
-    seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
-    renderChat('c-fork', { send, requestReplay() {} } as unknown as Parameters<
-      typeof ChatRoute
-    >[0]['ws']);
-
-    fireEvent.click(screen.getByTestId('msg-edit'));
-    const field = screen.getByTestId('msg-edit-input');
-    fireEvent.change(field, { target: { value: '   ' } });
-    expect(screen.getByTestId('msg-edit-save')).toBeDisabled();
-    fireEvent.keyDown(field, { key: 'Enter', metaKey: true });
-
-    expect(send).not.toHaveBeenCalled();
-    expect(screen.getByTestId('msg-edit-input')).toBeTruthy();
-  });
-
-  it('the Save button names the chord that presses it (spec/14 § Discoverability)', () => {
-    seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
-    renderChat('c-fork');
-    fireEvent.click(screen.getByTestId('msg-edit'));
-    const save = screen.getByTestId('msg-edit-save');
-    // jsdom's navigator is not a Mac, so the chord is named in PC words.
-    expect(save.hasAttribute('title')).toBe(false);
-    expect(screen.getByTestId('msg-edit-save-chord').textContent).toBe('Ctrl+Enter');
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Escape' });
+    expect(screen.queryByTestId('composer-edit-banner')).toBeNull();
+    expect(ws!.send).not.toHaveBeenCalled();
   });
 
   // The side-thread feature was removed (Todoist) and is now being rebuilt in
