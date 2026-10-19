@@ -68,6 +68,20 @@ describe('permission mode: a chat is stamped at creation and keeps it', () => {
     expect(daemon.chatPermissionMode(chatId)).toBe('plan');
   });
 
+  it('a provider with its own default is stamped with it; others keep the host default', async () => {
+    const { daemon, folder } = setup({ permissionModeDefault: 'auto' });
+    daemon.setProviderPermissionDefaults({ codex: 'bypassPermissions' });
+    const codex = await daemon.spawnChat({ folder, model: 'openai/gpt-5' });
+    expect(daemon.chatPermissionMode(codex)).toBe('bypassPermissions');
+    const claude = await daemon.spawnChat({ folder });
+    expect(daemon.chatPermissionMode(claude)).toBe('auto');
+  });
+
+  it('a provider default its provider cannot run is refused, not quietly swapped', () => {
+    const { daemon } = setup();
+    expect(() => daemon.setProviderPermissionDefaults({ codex: 'auto' })).toThrow(/codex/);
+  });
+
   it('a spawn naming a mode is stamped with that, not the host default', async () => {
     const { daemon, folder } = setup({ permissionModeDefault: 'plan' });
     const chatId = await daemon.spawnChat({ folder, permissionMode: 'bypassPermissions' });

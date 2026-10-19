@@ -168,7 +168,11 @@ one already running. The mode is stored with the chat rather than in the
 running process, so a host restart does not disturb it.
 
 The default is a shared setting (`01-server.md` § Settings), so every host
-stamps new chats from the same one; `auto` until one is chosen. A chat is set from within the chat itself. There
+stamps new chats from the same one; `auto` until one is chosen. A provider may also have a
+default of its own (`providerPermissionDefaults`, keyed by provider id), which
+wins for chats on that provider and may only name a mode the provider can run;
+the server refuses any other. A provider with none takes the shared default, or
+`default` where it cannot run that (Codex has no `auto`). A chat is set from within the chat itself. There
 is no clearing a chat back to the host default — a chat with no mode of its own
 does not exist. A chat that predates chats carrying their own mode adopts the
 host default once, when its host first loads it, and keeps it thereafter.

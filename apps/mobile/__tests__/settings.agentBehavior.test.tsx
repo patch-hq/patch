@@ -206,6 +206,17 @@ describe('Agent page: Permission mode', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('sets a default for Codex among only the modes it can run', async () => {
+    const r = await renderAgent();
+    expect(textOf(get(r, 'permission-default-codex'))).toBe('Default');
+    await openPicker(r, 'permission-default-codex');
+    expect(query(r, 'permission-default-codex-option-auto')).toBeNull();
+    await pick(r, 'permission-default-codex', 'bypassPermissions');
+    expect(api.setPreferences).toHaveBeenCalledWith({
+      providerPermissionDefaults: { codex: 'bypassPermissions' },
+    });
+  });
+
   it('offers exactly the five SDK modes', async () => {
     const r = await renderAgent();
     await openPicker(r, 'permission-default');

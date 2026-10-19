@@ -2028,6 +2028,12 @@ export const SharedSettings = z
     /** Absent until one is chosen: each host then uses its Kokoro default. */
     kokoroVoice: z.string().min(1).optional(),
     permissionModeDefault: PermissionMode,
+    /**
+     * Per-provider override of `permissionModeDefault`, keyed by provider id
+     * (spec/02 § Permission mode). A provider absent here takes
+     * `permissionModeDefault`.
+     */
+    providerPermissionDefaults: z.record(z.string(), PermissionMode),
     chatNameInterval: z.number().int().nonnegative(),
     /** Whether the one-shot AI chat title (a token-spending call) runs. */
     titleGenerationEnabled: z.boolean(),
@@ -2106,6 +2112,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   dictationPauseSeconds: 10,
   dictationTurnDetection: true,
   permissionModeDefault: 'auto',
+  providerPermissionDefaults: {},
   chatNameInterval: 0,
   titleGenerationEnabled: true,
   statusGenerationEnabled: true,

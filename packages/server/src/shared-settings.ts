@@ -37,6 +37,7 @@ import {
   SharedSettingsPatch,
   type AccountStrategy,
   type ClaudeCredential,
+  HARNESS_PERMISSION_MODES,
   type HostSettingsState,
   type ProviderKeyId,
   type SettingsAdoptKind,
@@ -730,6 +731,13 @@ export class SharedSettingsService {
     if (parsed.data.claudeSettings) {
       for (const k of ['shared', 'darwin', 'linux'] as const) {
         assertJsonObjectText(`claudeSettings.${k}`, parsed.data.claudeSettings[k]);
+      }
+    }
+    for (const [id, mode] of Object.entries(parsed.data.providerPermissionDefaults ?? {})) {
+      const modes = (HARNESS_PERMISSION_MODES as Record<string, readonly string[]>)[id];
+      if (!modes) throw new SettingsError(400, 'invalid_input', `unknown provider: ${id}`);
+      if (!modes.includes(mode)) {
+        throw new SettingsError(400, 'invalid_input', `${id} cannot run permission mode ${mode}`);
       }
     }
     this.settings = { ...this.settings, ...parsed.data };

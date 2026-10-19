@@ -172,6 +172,18 @@ describe('SharedSettingsService', () => {
     expect(s.defaultModel).toBe(DEFAULT_SHARED_SETTINGS.defaultModel);
   });
 
+  it('stores a per-provider permission default and refuses one the provider cannot run', () => {
+    expect(service.current().providerPermissionDefaults).toEqual({});
+    service.update({ providerPermissionDefaults: { codex: 'bypassPermissions' } });
+    expect(service.current().providerPermissionDefaults).toEqual({ codex: 'bypassPermissions' });
+    expect(() => service.update({ providerPermissionDefaults: { codex: 'auto' } })).toThrow(
+      /codex cannot run permission mode auto/,
+    );
+    expect(() => service.update({ providerPermissionDefaults: { nope: 'plan' } })).toThrow(
+      /unknown provider/,
+    );
+  });
+
   it('merges two hosts’ accounts, dropping a second copy of the same Claude account', () => {
     service.mergeImport('d1', {
       settings: {},

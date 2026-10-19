@@ -1059,6 +1059,23 @@ describe('Settings → Agent', () => {
       );
     });
 
+    it('sets a default for Codex among only the modes it can run', async () => {
+      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      loadShared({ settings: { permissionModeDefault: 'auto' } });
+      renderSettings('/settings/agent');
+      const select = (await screen.findByTestId('permission-default-codex')) as HTMLSelectElement;
+      // Codex cannot run `auto`, so it shows what a new Codex chat gets.
+      expect(select.value).toBe('default');
+      expect(Array.from(select.options).map((o) => o.value)).not.toContain('auto');
+      fireEvent.change(select, { target: { value: 'bypassPermissions' } });
+      await waitFor(() =>
+        expect(server.writes).toContainEqual({
+          providerPermissionDefaults: { codex: 'bypassPermissions' },
+        }),
+      );
+    });
+
     it('does not depend on any host being online', async () => {
       vi.stubGlobal('fetch', makeFetch());
       loadShared();

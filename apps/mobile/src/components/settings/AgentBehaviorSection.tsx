@@ -18,6 +18,9 @@ import { useRouter } from 'expo-router';
 import {
   QUESTION_EXPIRY_SECONDS_MAX,
   QUESTION_EXPIRY_SECONDS_MIN,
+  DEFAULT_PROVIDER_ID,
+  HARNESS_PERMISSION_MODES,
+  PROVIDERS,
   type PermissionMode,
 } from '@patch/wire';
 import type { AccountPreferences } from '../../api/rest';
@@ -107,6 +110,14 @@ export function AgentPage(): React.ReactElement {
                 onSelect={(id) => writePreferences({ defaultModel: id })}
               />
               <PermissionDefaultRow value={data.preferences.permissionModeDefault} />
+              {PROVIDERS.filter((p) => p.id !== DEFAULT_PROVIDER_ID).map((p) => (
+                <ProviderPermissionDefaultRow
+                  key={p.id}
+                  id={p.id}
+                  label={p.label}
+                  preferences={data.preferences}
+                />
+              ))}
             </SettingsSection>
             <QuestionExpiry preferences={data.preferences} />
             <SettingsSection title="Chats" testID="settings-agent-chats">
@@ -155,6 +166,52 @@ function PermissionDefaultRow({ value }: { value: PermissionMode }): React.React
           options={PERMISSION_MODES.map((m) => ({ id: m, label: permissionModeLabel(m) }))}
           onSelect={(m) =>
             void patchShared('Permission mode', { permissionModeDefault: m as PermissionMode })
+          }
+          emptyText="No modes"
+        />
+      }
+    />
+  );
+}
+
+/**
+ * A provider's own default mode (spec/02 § Permission mode). Until one is
+ * chosen it shows what a new chat on the provider is stamped with: the account
+ * default where the provider can run it, else `default`.
+ */
+function ProviderPermissionDefaultRow({
+  id,
+  label,
+  preferences,
+}: {
+  id: string;
+  label: string;
+  preferences: AccountPreferences;
+}): React.ReactElement {
+  const modes = (HARNESS_PERMISSION_MODES as Record<string, readonly PermissionMode[]>)[id] ?? [];
+  const account = preferences.permissionModeDefault;
+  const value =
+    preferences.providerPermissionDefaults[id] ?? (modes.includes(account) ? account : 'default');
+  return (
+    <Row
+      testID={`permission-row-${id}`}
+      title={`Permission mode (${label})`}
+      right={
+        <OptionPicker
+          testID={`permission-default-${id}`}
+          selectedId={value}
+          selectedLabel={permissionModeLabel(value)}
+          options={PERMISSION_MODES.filter((m) => modes.includes(m)).map((m) => ({
+            id: m,
+            label: permissionModeLabel(m),
+          }))}
+          onSelect={(m) =>
+            void patchShared('Permission mode', {
+              providerPermissionDefaults: {
+                ...preferences.providerPermissionDefaults,
+                [id]: m as PermissionMode,
+              },
+            })
           }
           emptyText="No modes"
         />

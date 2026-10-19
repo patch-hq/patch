@@ -9,6 +9,9 @@ import { useState } from 'react';
 import {
   QUESTION_EXPIRY_SECONDS_MAX,
   QUESTION_EXPIRY_SECONDS_MIN,
+  DEFAULT_PROVIDER_ID,
+  HARNESS_PERMISSION_MODES,
+  PROVIDERS,
   type PermissionMode,
 } from '@patch/wire';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
@@ -33,6 +36,9 @@ export function AgentPage(): JSX.Element {
       <Group label="Defaults" testid="settings-default-model">
         <DefaultModelRow />
         <PermissionModeRow />
+        {PROVIDERS.filter((p) => p.id !== DEFAULT_PROVIDER_ID).map((p) => (
+          <ProviderPermissionModeRow key={p.id} id={p.id} label={p.label} />
+        ))}
       </Group>
       <QuestionsGroup />
       <ChatsGroup />
@@ -120,6 +126,44 @@ function PermissionModeRow(): JSX.Element {
         }
       >
         {PERMISSION_MODES.map((m) => (
+          <option key={m} value={m}>
+            {permissionModeLabel(m)}
+          </option>
+        ))}
+      </select>
+    </Row>
+  );
+}
+
+/**
+ * A provider's own default mode (spec/02 § Permission mode), for a provider
+ * that cannot run the account default. Until one is chosen it shows what a new
+ * chat on it is stamped with: the account default where the provider can run
+ * it, else `default`.
+ */
+function ProviderPermissionModeRow({ id, label }: { id: string; label: string }): JSX.Element {
+  const account = usePreferencesStore((s) => s.preferences.permissionModeDefault);
+  const own = usePreferencesStore((s) => s.preferences.providerPermissionDefaults[id]);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const modes = (HARNESS_PERMISSION_MODES as Record<string, readonly PermissionMode[]>)[id] ?? [];
+  const value = own ?? (modes.includes(account) ? account : 'default');
+  return (
+    <Row title={`Permission mode (${label})`} testid={`permission-default-${id}-row`}>
+      <select
+        aria-label={`Permission mode (${label})`}
+        data-testid={`permission-default-${id}`}
+        value={value}
+        disabled={!loaded}
+        onChange={(e) =>
+          void patchShared('permission mode', {
+            providerPermissionDefaults: {
+              ...usePreferencesStore.getState().preferences.providerPermissionDefaults,
+              [id]: e.target.value as PermissionMode,
+            },
+          })
+        }
+      >
+        {PERMISSION_MODES.filter((m) => modes.includes(m)).map((m) => (
           <option key={m} value={m}>
             {permissionModeLabel(m)}
           </option>

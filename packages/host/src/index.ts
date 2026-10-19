@@ -1517,6 +1517,7 @@ async function startHost(
         'default permission mode changed',
       );
     }
+    daemon.setProviderPermissionDefaults(shared.providerPermissionDefaults);
     setDefaultModel(shared.defaultModel);
     if (JSON.stringify(shared.voiceConfig) !== JSON.stringify(voiceConfig)) {
       voiceConfig = shared.voiceConfig;

@@ -1217,7 +1217,12 @@ function parseAttachmentBlock(content: string): {
  * schema admits this exact sentinel); re-exported here for daemon-local use.
  */
 export { OUT_OF_BAND_SEQ } from '@patch/wire';
-import { OUT_OF_BAND_SEQ, formatAgentReturn, isGroupableToolCall } from '@patch/wire';
+import {
+  HARNESS_PERMISSION_MODES,
+  OUT_OF_BAND_SEQ,
+  formatAgentReturn,
+  isGroupableToolCall,
+} from '@patch/wire';
 import { identityHash, readSeqIndexFile } from './seqIndex.js';
 import { ChatLog, HistoryWriteError } from './chatLog.js';
 import { readTrack, readTrackRecords } from './readTrack.js';
@@ -3900,11 +3905,7 @@ export class Daemon {
     // decides its own), otherwise the host default in force right now. It is not
     // re-derived later: a chat created today under `auto` stays on `auto` when
     // the host default is raised tomorrow.
-    const permissionMode =
-      req.permissionMode ??
-      (!harnessModesInclude(model, this.permissionModeDefault())
-        ? 'default'
-        : this.permissionModeDefault());
+    const permissionMode = req.permissionMode ?? this.permissionModeDefaultFor(model);
     const meta: ChatMeta = {
       chatId,
       folder,
@@ -13701,6 +13702,30 @@ export class Daemon {
    */
   setPermissionModeDefault(mode: SdkPermissionMode): void {
     this.opts.permissionModeDefault = mode;
+  }
+
+  /**
+   * Set the per-provider overrides of the host default (spec/02 § Permission
+   * mode). Refuses a mode the provider cannot run rather than swapping it.
+   */
+  setProviderPermissionDefaults(defaults: Record<string, SdkPermissionMode>): void {
+    for (const [id, mode] of Object.entries(defaults)) {
+      const modes = (HARNESS_PERMISSION_MODES as Record<string, readonly SdkPermissionMode[]>)[id];
+      if (!modes?.includes(mode)) {
+        throw new Error(`provider ${id} cannot run permission mode ${mode}`);
+      }
+    }
+    this.providerPermissionDefaults = { ...defaults };
+  }
+
+  private providerPermissionDefaults: Record<string, SdkPermissionMode> = {};
+
+  /** The mode a new chat on `model` is stamped with: its provider's default, else the host's. */
+  private permissionModeDefaultFor(model: string | null | undefined): SdkPermissionMode {
+    const own = this.providerPermissionDefaults[harnessOfModel(model)];
+    if (own !== undefined) return own;
+    const dflt = this.permissionModeDefault();
+    return harnessModesInclude(model, dflt) ? dflt : 'default';
   }
 
   /** The host-wide default currently in force. */
