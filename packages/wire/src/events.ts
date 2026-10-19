@@ -2589,9 +2589,7 @@ export const HostInfoEvent = z
     /**
      * The machine's power state: whether it is running on battery, and the
      * charge, 0-100. Absent when the host has no battery (a desktop, a server)
-     * or cannot read one — absent never means "plugged in". The server warns
-     * when a host that owns enabled cron jobs is low on battery, because a
-     * machine that hibernates misses every job (spec/08 § Wake host).
+     * or cannot read one — absent never means "plugged in".
      */
     power: z
       .object({

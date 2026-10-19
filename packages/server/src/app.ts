@@ -106,7 +106,6 @@ import { PhoneHandover } from './notifications/handover.js';
 import { CallOrchestrator } from './notifications/call-orchestrator.js';
 import { ChatCompletionNotifier } from './notifications/chat-complete.js';
 import { AwaitingPermissionNotifier } from './notifications/awaiting-permission.js';
-import { LowBatteryNotifier } from './notifications/low-battery.js';
 import { SignInNeededNotifier } from './notifications/sign-in-needed.js';
 import { ReplyRouter } from './notifications/reply-router.js';
 import { registerNotificationRoutes } from './notifications/routes.js';
@@ -2086,23 +2085,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     },
   });
   hostWaker.start();
-  // A host that owns cron jobs and is about to run flat will miss them.
-  const lowBatteryNotifier = new LowBatteryNotifier({
-    router: notificationRouter,
-    logger: log.child({ component: 'low-battery' }),
-    ownsEnabledCronJobs: (hostId) =>
-      jobs
-        .list()
-        .some(
-          (job) =>
-            job.enabled &&
-            job.trigger.type === 'cron' &&
-            (job.action.type === 'message'
-              ? chatRegistry.get(job.action.chatId)?.hostId
-              : job.action.hostId) === hostId,
-        ),
-  });
-  hostLink.onEvent((event) => lowBatteryNotifier.observe(event));
   const signInNeededNotifier = new SignInNeededNotifier({
     router: notificationRouter,
     logger: log.child({ component: 'sign-in-needed' }),
