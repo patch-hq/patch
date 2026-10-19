@@ -32,7 +32,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   // already on is reported without them having to navigate or scroll first.
   const [activations, setActivations] = useState(0);
 
-  const adopt = (): void => {
+  const adopt = (allowOwn = false): void => {
     const st = useViewPositionStore.getState();
     const own = usePresenceStore.getState().surfaceId;
     const r = st.remote;
@@ -41,7 +41,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
       !usePreferencesStore.getState().loaded
     )
       return;
-    if (!r || r.surfaceId === own || r.updatedAt <= st.handledAt) return;
+    if (!r || (r.surfaceId === own && !allowOwn) || r.updatedAt <= st.handledAt) return;
     st.markHandled(r.updatedAt);
     navigate(pathFromPosition(r));
   };
@@ -49,7 +49,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   useEffect(() => {
     if (enabled && remote && launchRef.current && !activeRef.current) {
       launchRef.current = false;
-      adopt();
+      adopt(true);
     }
   }, [remote, enabled]);
 
