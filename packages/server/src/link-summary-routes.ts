@@ -38,12 +38,12 @@ export const LINK_SUMMARY_TIMEOUT_MS = 60_000;
 
 const Body = z.object({ url: z.string().min(1) }).strict();
 
-type Response = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
+type SummaryResponse = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
 
 export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummaryRoutesDeps): void {
   const pending = new Map<
     string,
-    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
+    { resolve: (ev: SummaryResponse) => void; timeout: NodeJS.Timeout; hostId: string }
   >();
   deps.hostLink.onEvent((event: WireEvent, from) => {
     if (event.type !== 'patch.link_summary.response') return;
@@ -90,7 +90,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
         .code(400)
         .send({ error: 'blocked_host', message: 'this host cannot be summarised' });
     }
-    const hostId = deps.registry.managerHostId();
+    const hostId = deps.registry.homeHostId();
     if (hostId === null || !deps.hostLink.isOnline(hostId)) {
       return reply.code(503).send({
         error: 'host_offline',
@@ -142,7 +142,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
     }
 
     const requestId = deps.idGenerator();
-    const result = await new Promise<Response | 'timeout'>((resolve) => {
+    const result = await new Promise<SummaryResponse | 'timeout'>((resolve) => {
       const timeout = setTimeout(() => {
         pending.delete(requestId);
         resolve('timeout');
