@@ -3041,18 +3041,14 @@ function MessageEntry({
 
           Host and model follow the time on agent messages only: they are the
           chat's current ones, which says nothing about a message Tom typed. */}
-      {entry.messageAt !== undefined ? (
-        <div className="msg-time-rail" aria-hidden="true">
-          <span className="msg-time" data-testid="msg-time">
-            {formatMessageTime(entry.messageAt)}
-          </span>
-        </div>
-      ) : null}
-      {attemptCount > 1 ||
-      (entry.role !== 'user' && entry.messageAt !== undefined && (metaHost !== '' || metaModel)) ||
+      {entry.messageAt !== undefined ||
+      attemptCount > 1 ||
       entry.midTurn === true ||
       entry.sentNow === true ? (
         <div className="msg-meta" data-testid="msg-meta">
+          {entry.messageAt !== undefined ? (
+            <span data-testid="msg-time">{formatMessageTime(entry.messageAt)}</span>
+          ) : null}
           {entry.sentNow === true ? (
             <span data-testid="msg-meta-interrupted">interrupted</span>
           ) : null}
