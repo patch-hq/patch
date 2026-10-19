@@ -18,9 +18,6 @@
 import { useSyncExternalStore } from 'react';
 import { api } from '../api/rest.js';
 
-/** The picker offers this many models: the host's catalogue is newest-first. */
-export const RECENT_MODEL_COUNT = 5;
-
 export interface ModelOption {
   /** SDK `options.model` value. */
   id: string;

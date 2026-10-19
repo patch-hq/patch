@@ -426,7 +426,7 @@ Folder picker sheet. The same one-control model as web's popover (`14-design-web
 
 ### Model picker
 
-The model pill reads the model the chat will start on and opens the five most recent models of the chosen host's catalogue (`02-daemon.md` § Model catalogue) as a list with a tick on the current one. It preselects that host's last-used model (`04-chats-and-folders.md` § Spawn), and a spawn the user never touched the pill for names no model at all, so the host resolves that itself rather than the phone pinning a model on its behalf.
+The model pill reads the model the chat will start on and opens every model of the chosen host's catalogue, all backends (ChatGPT included), newest first, (`02-daemon.md` § Model catalogue) as a list with a tick on the current one. It preselects that host's last-used model (`04-chats-and-folders.md` § Spawn), and a spawn the user never touched the pill for names no model at all, so the host resolves that itself rather than the phone pinning a model on its behalf.
 
 Wherever the pill sits — the new-chat screen's Model row or the composer — its list opens over the composer at the foot of the screen, where the permission-mode list opens, never under the header where the screen's own ⋯ menu drops. The list is live and never stood in for: it reads `Loading models…` until the catalogue arrives, and a failed load reads the reason in its place. The pill still names the model in force while that is true, so a chat can be started with the catalogue unavailable. Choosing a model closes the list; tapping the backdrop dismisses it and changes nothing.
 
