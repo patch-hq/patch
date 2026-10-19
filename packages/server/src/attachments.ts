@@ -88,6 +88,65 @@ function encodeRFC5987(value: string): string {
   );
 }
 
+/**
+ * What the serve-back is willing to echo back as a Content-Type, and therefore
+ * what it will render `inline`.
+ *
+ * The stored `mimeType` is whatever the uploader's multipart part CLAIMED, and
+ * the serve-back is unauthenticated and sits on the SPA's own origin — the one
+ * holding the surface credential. Reflecting that claim verbatim with `inline`
+ * meant a file uploaded as `text/html` was a program running in that origin.
+ * `artifacts.ts` next door spells out the same danger and answers it with a
+ * sandbox CSP; this route had nothing.
+ *
+ * So: a short allow-list of types that are DATA in every renderer, echoed as
+ * given; anything else is served as `application/octet-stream` with
+ * `attachment`, which downloads rather than renders. `nosniff` rides on every
+ * response so the browser cannot recover a richer type from the bytes.
+ *
+ * SVG is the awkward one and gets its own answer. It IS a real image — the
+ * transcript renders image attachments with `<img src>`, so downgrading it would
+ * just show a broken picture — but it is also a scriptable DOCUMENT when you
+ * navigate straight at it, which is exactly what this route's URL is. Script in
+ * an SVG never runs inside an `<img>`, so keeping the type costs nothing there,
+ * and the sandbox CSP covers the navigation case by putting the document in an
+ * opaque origin that cannot read the SPA's credential. A CSP on a subresource
+ * response is ignored, so the `<img>` path is untouched.
+ */
+const INLINE_SAFE_MIME = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'image/bmp',
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/heic',
+  'image/heif',
+  'application/pdf',
+  'text/plain',
+]);
+
+interface ServedType {
+  type: string;
+  disposition: 'inline' | 'attachment';
+  /** Set only where the type is renderable but scriptable on navigation. */
+  csp?: string;
+}
+
+function servedContentType(mimeType: string): ServedType {
+  // Strip any parameters (`text/html; charset=utf-8`) before deciding.
+  const base = (mimeType.split(';')[0] ?? '').trim().toLowerCase();
+  if (base === 'image/svg+xml') return { type: base, disposition: 'inline', csp: 'sandbox' };
+  if (INLINE_SAFE_MIME.has(base)) return { type: base, disposition: 'inline' };
+  if (base.startsWith('video/') || base.startsWith('audio/')) {
+    return { type: base, disposition: 'inline' };
+  }
+  return { type: 'application/octet-stream', disposition: 'attachment' };
+}
+
 interface AttachmentSidecar {
   name: string;
   mimeType: string;
@@ -310,17 +369,23 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
       } catch {
         return reply.code(404).send({ error: 'attachment not found' });
       }
+      const served = servedContentType(sidecar.mimeType);
       return (
         reply
           .code(200)
-          .header('content-type', sidecar.mimeType)
+          .header('content-type', served.type)
           .header('content-length', String(statSync(dataPath).size))
-          // `inline` so images render in-page; the filename rides for downloads.
+          // Never let the browser recover a richer (scriptable) type from the
+          // bytes after we have decided what this is.
+          .header('x-content-type-options', 'nosniff')
+          .headers(served.csp ? { 'content-security-policy': served.csp } : {})
+          // `inline` so images render in-page; anything not on the safe list
+          // downloads instead. The filename rides either way.
           // A header value can't carry chars past U+00FF (Node throws), so
           // `filename` gets an ASCII stand-in and `filename*` the real name.
           .header(
             'content-disposition',
-            `inline; filename="${sidecar.name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; ` +
+            `${served.disposition}; filename="${sidecar.name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; ` +
               `filename*=UTF-8''${encodeRFC5987(sidecar.name)}`,
           )
           .send(createReadStream(dataPath))

@@ -89,6 +89,43 @@ describe('VoiceConcurrencyArbiter', () => {
     expect(a.queueDepth()).toBe(0);
   });
 
+  it('fills the whole cap when a phone call ends, not one device of it', () => {
+    // Production runs cap 3 (local whisper) or 4 (Groq). A call that several
+    // devices rang during frees EVERY slot at once, so draining a single event
+    // leaves the rest silent behind idle capacity until some other session
+    // happens to end.
+    let phone = true;
+    const ran: string[] = [];
+    const a = new VoiceConcurrencyArbiter({ isPhoneCallActive: () => phone, cap: 3 });
+    a.admit(ev('kitchen', ran));
+    a.admit(ev('bedroom', ran));
+    a.admit(ev('study', ran));
+    expect(a.queueDepth()).toBe(3);
+
+    phone = false;
+    const released = a.onPhoneCallEnded();
+    expect(released.map((e) => e.deviceId)).toEqual(['kitchen', 'bedroom', 'study']);
+    expect(ran).toEqual(['kitchen', 'bedroom', 'study']);
+    expect(a.activeCount()).toBe(3);
+    expect(a.queueDepth()).toBe(0);
+  });
+
+  it('stops draining at the cap and leaves the remainder queued', () => {
+    let phone = true;
+    const ran: string[] = [];
+    const a = new VoiceConcurrencyArbiter({ isPhoneCallActive: () => phone, cap: 2 });
+    a.admit(ev('kitchen', ran));
+    a.admit(ev('bedroom', ran));
+    a.admit(ev('study', ran));
+
+    phone = false;
+    expect(a.onPhoneCallEnded().map((e) => e.deviceId)).toEqual(['kitchen', 'bedroom']);
+    expect(a.queueDepth()).toBe(1);
+    // One slot frees → exactly one more comes off the queue.
+    expect(a.release('kitchen').map((e) => e.deviceId)).toEqual(['study']);
+    expect(ran).toEqual(['kitchen', 'bedroom', 'study']);
+  });
+
   it('phone call still blocks the queue drain even after a device frees up', () => {
     let phone = false;
     const ran: string[] = [];

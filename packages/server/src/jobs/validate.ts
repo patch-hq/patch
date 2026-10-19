@@ -15,7 +15,7 @@
 import cron from 'node-cron';
 import jsonata from 'jsonata';
 import rrulePkg from 'rrule';
-import { isValidTimeZone } from '@patch/wire';
+import { assertValidCron, isValidTimeZone } from '@patch/wire';
 import { nextOccurrence } from './recurrence.js';
 import type { JobCreateBody, JobPatchBody, JobTrigger, Queueing } from './types.js';
 
@@ -106,6 +106,28 @@ export function assertValidJobBody(body: JobCreateBody | JobPatchBody): void {
         `invalid cron expression (expected 5 fields, got ${fieldCount}): ${trigger.expression}`,
         'trigger.expression',
       );
+    }
+    // STRUCTURE FIRST, and not only for tidiness. node-cron expands a step of
+    // zero by walking a range that never advances: `cron.validate('*/0 * * * *')`
+    // burns SECONDS of blocking CPU before answering false (~5s idle, ~19s on a
+    // loaded box). That happens on the single-threaded event loop, so the server
+    // answers nothing at all meanwhile — no surface, no webhook, no daemon
+    // frame — and a job write is reachable from the REST route, the daemon UDS,
+    // a file load and the in-chat `patch_job_create` bridge alike, so an agent
+    // that invents `*/0` freezes the box for everyone.
+    //
+    // It also catches what node-cron gets WRONG: `1/0` is a zero step too, and
+    // `cron.validate` calls it valid, so it was persisted and registered as a
+    // schedule that cannot mean anything.
+    //
+    // @patch/wire's checker is the pure-TS mirror of this grammar (cron-tz.ts) —
+    // linear in the expression's length, no expansion — so it is safe to run on
+    // anything. node-cron still runs after it, as the authority on what it will
+    // actually accept at registration time.
+    try {
+      assertValidCron(trigger.expression);
+    } catch (err) {
+      throw new JobValidationError((err as Error).message, 'trigger.expression');
     }
     if (!cron.validate(trigger.expression)) {
       throw new JobValidationError(

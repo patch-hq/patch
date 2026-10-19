@@ -224,6 +224,99 @@ describe('GET /api/link-preview', () => {
     }
   });
 
+  // `new URL('http://[::1]/').hostname` is `'[::1]'` — WITH the brackets — so an
+  // equality check against `'::1'` never matches and every IPv6 literal walked
+  // straight past the guard. Same server, same loopback, different spelling.
+  it('rejects IPv6 loopback and private literals, which spell the same hosts', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const { app, jwt } = await boot();
+    try {
+      for (const url of [
+        'http://[::1]:3000/secret', // loopback
+        'http://[::ffff:127.0.0.1]/secret', // IPv4-mapped loopback
+        'http://[fd00::1]/secret', // unique-local
+        'http://[fe80::1]/secret', // link-local
+      ]) {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/api/link-preview?url=' + encodeURIComponent(url),
+          headers: { authorization: `Bearer ${jwt}` },
+        });
+        expect(res.json(), url).toMatchObject({ error: 'blocked_host' });
+        expect(res.statusCode, url).toBe(400);
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('still previews a PUBLIC IPv6 host — the guard must not over-block', async () => {
+    // `fd::1` is 0x00fd, not unique-local, and `2606:4700::1` is Cloudflare. A
+    // text-prefix range check gets the first of these wrong.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('<html><head><title>public</title></head></html>', {
+            status: 200,
+            headers: { 'content-type': 'text/html' },
+          }),
+      ),
+    );
+    const { app, jwt } = await boot();
+    try {
+      for (const url of ['http://[2606:4700::1]/', 'http://[fd::1]/']) {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/api/link-preview?url=' + encodeURIComponent(url),
+          headers: { authorization: `Bearer ${jwt}` },
+        });
+        expect(res.statusCode, url).toBe(200);
+        expect(res.json().title, url).toBe('public');
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  // The guard ran on the URL the caller named and then the fetch followed
+  // redirects wherever they led. A public page Tom pastes a link to could
+  // 302 to 127.0.0.1 or the cloud metadata address and the guard never saw it,
+  // which defeats the whole point of having one.
+  it('does not follow a redirect into a blocked host', async () => {
+    const calls: { url: string; redirect?: string }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { redirect?: string }) => {
+        calls.push({ url: String(url), ...(init?.redirect ? { redirect: init.redirect } : {}) });
+        if (String(url).includes('evil.example')) {
+          return new Response(null, {
+            status: 302,
+            headers: { location: 'http://169.254.169.254/latest/meta-data/' },
+          });
+        }
+        throw new Error('followed the redirect into a blocked host');
+      }),
+    );
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/link-preview?url=' + encodeURIComponent('http://evil.example/start'),
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('blocked_host');
+      // Only the first hop was ever fetched, and not with redirect: 'follow'.
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.redirect).not.toBe('follow');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('surfaces an upstream fetch failure as 502, not a silent empty preview', async () => {
     vi.stubGlobal(
       'fetch',
