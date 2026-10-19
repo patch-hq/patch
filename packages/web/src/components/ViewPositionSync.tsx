@@ -3,7 +3,7 @@
 // on launch or when this surface returns to the foreground — never while the
 // user is mid-use, so a screen does not move under a hand.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { positionFromPath, pathFromPosition } from '../lib/viewPosition.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -28,6 +28,9 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   const activeRef = useRef(false);
   // Still waiting for the launch snapshot.
   const launchRef = useRef(true);
+  // Bumped on the first touch after launch / foreground so the page the user is
+  // already on is reported without them having to navigate or scroll first.
+  const [activations, setActivations] = useState(0);
 
   const adopt = (): void => {
     const st = useViewPositionStore.getState();
@@ -52,6 +55,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
 
   useEffect(() => {
     const onInput = (): void => {
+      if (!activeRef.current) setActivations((n) => n + 1);
       activeRef.current = true;
       launchRef.current = false;
     };
@@ -85,7 +89,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
       if (pos) ws.send({ type: 'view_position.set', ...pos });
     }, VIEW_POSITION_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [ws, enabled, location.pathname, scroll]);
+  }, [ws, enabled, location.pathname, scroll, activations]);
 
   return null;
 }
