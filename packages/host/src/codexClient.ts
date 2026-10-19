@@ -121,7 +121,11 @@ export class CodexClient {
           }
           return;
         }
-        const notification = msg as CodexNotification;
+        // JSON-RPC makes `params` optional, so a notification can arrive
+        // without one. CodexNotification declares it as always present and
+        // every subscriber reads it straight off, so an absent `params` threw
+        // out of this handler. Absent means "no parameters": `{}` is that.
+        const notification = { ...msg, params: msg.params ?? {} } as CodexNotification;
         for (const listener of this.listeners) listener(notification);
         if (msg.id !== undefined && this.listeners.size === 0)
           this.respond(msg.id, undefined, 'No handler for Codex request');
