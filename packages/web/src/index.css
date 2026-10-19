@@ -3035,7 +3035,7 @@ a.ch-row:hover {
    either scrolls or clips. Above the sidebar and the panels it overhangs. */
 .context-menu {
   position: fixed;
-  z-index: 60;
+  z-index: 1100; /* above the 1000 image viewer it can open over */
   /* Sized to the widest label so no item wraps and strands its icon (the same
      trap `.head-menu` hit), with a floor so a one-item menu is still a menu. */
   width: max-content;

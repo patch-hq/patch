@@ -54,4 +54,29 @@ test.describe('image lightbox', () => {
     await page.keyboard.press('Escape');
     await expect(lightbox).toHaveCount(0);
   });
+  test('right-click opens the image menu above the viewer', async ({ page }) => {
+    await page.route('**/api/chats/*/attachment/*', (route) =>
+      route.fulfill({ status: 200, contentType: 'image/png', body: PNG }),
+    );
+    await page.goto(IMAGE_CHAT);
+    await page.getByTestId('msg-attachment-img').click();
+    await page
+      .getByTestId('lightbox-img')
+      .or(page.locator('.lightbox-img'))
+      .click({ button: 'right' });
+    const menu = page.getByTestId('lightbox-menu');
+    await expect(menu).toBeVisible();
+    // Painted above the viewer: the item hit-tests to the menu, not the overlay.
+    const item = page.getByRole('menuitem', { name: 'Download image' });
+    const box = await item.boundingBox();
+    if (!box) throw new Error('menu item has no box');
+    const hit = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x!, y!)?.closest('[role="menuitem"]') !== null,
+      [box.x + box.width / 2, box.y + box.height / 2],
+    );
+    expect(hit).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(page.getByTestId('image-lightbox')).toBeVisible();
+  });
 });
