@@ -494,6 +494,7 @@ async function handleServerEvent(
       case 'chat.permission_response':
         daemon.submitPermissionResponse({
           requestId: event.requestId,
+          ...(event.chatId !== undefined ? { chatId: event.chatId } : {}),
           decision: event.decision ?? (event.approve ? 'approve' : 'deny'),
           ...(event.editedNewString !== undefined && event.editedNewString !== null
             ? { editedNewString: event.editedNewString }
