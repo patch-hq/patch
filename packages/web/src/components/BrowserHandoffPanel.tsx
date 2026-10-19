@@ -631,6 +631,10 @@ function LiveView({
                 send(textInput(e.currentTarget.value));
                 e.currentTarget.value = '';
               }}
+              onPaste={(e) => {
+                e.preventDefault();
+                send(textInput(e.clipboardData.getData('text/plain')));
+              }}
               onKeyDown={(e) => {
                 const key = keyForEvent(e);
                 if (key === null) return;
