@@ -1099,15 +1099,6 @@ setting that applies on every host (`01-server.md` § Settings).
   the window resets, rather than waiting for the user to retry it.
 - Chat names — how many user messages between regenerating a chat's name,
   where 0 leaves the name as first set.
-- Claude Code settings — the shared `settings.json` as raw text, and beneath it
-  one override box per OS (`02-daemon.md` § Claude Code settings), each a
-  multi-line monospace editing box with a Save control directly beneath it. An
-  empty box still shows at its full height with an empty-object placeholder
-  inside, so the section never collapses to a heading and a lone Save. A box is
-  sized by the text it holds: it grows with the content up to half the window
-  height, past which it scrolls within itself, never shrinks below several
-  lines, and can be dragged taller. It takes the full width of the settings
-  column, because a narrow box wraps the indented lines this file is made of.
 - Provider-level context — `providerContextVerbosity` (`02-daemon.md` §
   Provider-level context); a three-step control (Off / Summary / Full)
   setting the default expand state of `ProviderContextPanel`. Summary by
@@ -1117,7 +1108,7 @@ setting that applies on every host (`01-server.md` § Settings).
 
 #### Hooks
 
-Its own page (`20-hooks.md`), the same shape as Settings → Keys: a list of
+Its own page (`20-hooks.md`), the same shape as Settings → Providers: a list of
 every configured hook — name, `when`, kind (script/prompt), enabled switch —
 each opening an editor (name, kind and its fields, gate, timeout) with Save
 and a destructive, confirmed Delete. Add opens the same editor blank. Nothing
@@ -1139,7 +1130,7 @@ selectable; a cell that is refused, or that runs as something other than its
 name (a hosted `direct` runs as `light`; Gemini hands-free does not apply the
 address word), says so honestly rather than being blocked. A hosted cell whose key a
 host lacks names that host and the key; the line clears as soon as the host
-reports the key, which Settings → Keys sets without a restart.
+reports the key, which Settings → Providers sets without a restart.
 
 #### Credit sources
 
@@ -1150,13 +1141,25 @@ reports the key, which Settings → Keys sets without a restart.
   Add another account control. Beneath the list, one Adopt control per host that has a
   Claude login of its own not already stored, naming the host.
 - OpenAI — the shared OpenAI/Codex accounts, on the same terms as Claude above.
-- Keys — the provider keys (`02-daemon.md` § Provider keys): Gemini, OpenAI
+- Providers — the provider keys (`02-daemon.md` § Provider keys): Gemini, OpenAI
   Realtime and Groq, one row each, stating where the value in use comes from —
   _Set from UI_, _Set from environment_ (naming the hosts) or _Not set_ — with
   its last four characters. Add / Replace opens a write-only password field
   with Save and Cancel; Revoke, on a UI-set key only, asks first. A key only a
   host's environment supplies offers Adopt instead of Revoke. The value is
-  never shown back.
+  never shown back. Below them, Claude Code settings.json
+  (`02-daemon.md` § Claude Code settings): the host chosen in the page's host
+  switch, shown by name with whether it has a file, and an Edit control that
+  opens that host's `settings.json` text in a multi-line monospace box with
+  Save and Cancel directly beneath it. There is no shared copy, per-OS box,
+  keep or discard. Save sends the text to that host alone and the box closes
+  when the host reports the file changed; text the host refuses stays in the
+  box with the host's reason. An empty box still shows at its full height
+  with an empty-object placeholder inside. A box is sized by the text it
+  holds: it grows with the content up to half the window height, past which
+  it scrolls within itself, never shrinks below several lines, and can be
+  dragged taller. It takes the full width of the settings column, because a
+  narrow box wraps the indented lines this file is made of.
 
 #### Notifications
 
@@ -1186,12 +1189,9 @@ reports the key, which Settings → Keys sets without a restart.
     that, and an edit aimed at an offline host is refused up front naming it.
   - Claude Code — that host's memory entries, each showing name, type and
     description with a remove control, a debugging view of the raw files on
-    that machine distinct from the Memory switch in Agent behavior. When that
-    host's `settings.json` has drifted (`02-daemon.md` § Claude Code settings),
-    the changed text, with Keep as shared, Keep for this OS and Discard. Remove
-    and discard write through to that host and settle when its
-    `claude_settings.updated` arrives; aimed at an offline host they are
-    refused up front naming it.
+    that machine distinct from the Memory switch in Agent behavior. Remove
+    writes through to that host and settles when its `claude_settings.updated`
+    arrives; aimed at an offline host it is refused up front naming it.
   - Browser — Route through: None, or any OTHER registered host (never this
     one), picking which network this host's `patch_browser_*` traffic
     egresses from (`02-daemon.md` § Route through). Written through to that

@@ -105,9 +105,9 @@ export function reportHost(
 export function reportClaudeSettings(
   hostId: string,
   memories: ClaudeMemoryEntry[] = [],
-  drift?: string,
+  settingsJson = '',
 ): void {
-  usePresenceStore.getState().setClaudeSettings(hostId, drift, memories);
+  usePresenceStore.getState().setClaudeSettings(hostId, settingsJson, memories);
 }
 
 /** Report one host's folder registry (`folders.list` / `folders.updated`). */

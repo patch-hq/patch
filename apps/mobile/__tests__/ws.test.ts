@@ -875,22 +875,30 @@ describe('message dispatch', () => {
     const sock = open();
     const memory = { project: 'p', file: 'm.md', name: 'n', description: '', memoryType: 'user' };
     sock.emitMessage(
-      JSON.stringify({ type: 'claude_settings.list', hostId: 'd1', memories: [memory] }),
+      JSON.stringify({
+        type: 'claude_settings.list',
+        hostId: 'd1',
+        settingsJson: '',
+        memories: [memory],
+      }),
     );
-    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings).toEqual({ memories: [memory] });
+    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings).toEqual({
+      settingsJson: '',
+      memories: [memory],
+    });
     sock.emitMessage(
       JSON.stringify({
         type: 'claude_settings.updated',
         hostId: 'd1',
-        drift: '{"a":1}',
+        settingsJson: '{"a":1}',
         memories: [],
       }),
     );
-    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.drift).toBe('{"a":1}');
+    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.settingsJson).toBe('{"a":1}');
     usePresenceStore
       .getState()
       .setHosts([{ hostId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] }]);
-    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.drift).toBe('{"a":1}');
+    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.settingsJson).toBe('{"a":1}');
   });
 
   // spec/03 § Settings — the shared settings arrive in the greeting and after every change.

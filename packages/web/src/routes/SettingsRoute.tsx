@@ -41,7 +41,7 @@ import { ComputerUsePage } from './settings/ComputerUsePage.js';
 import { HostsPage } from './settings/HostsPage.js';
 import { AgentIdentityPage } from './settings/AgentIdentityPage.js';
 import { ActivityPage } from './settings/ActivityPage.js';
-import { KeysPage } from './settings/KeysPage.js';
+import { ProvidersPage } from './settings/ProvidersPage.js';
 import { DevicesPage } from './settings/DevicesPage.js';
 import { NotificationsPage } from './settings/NotificationsPage.js';
 import { UpdatesPage } from './settings/UpdatesPage.js';
@@ -60,7 +60,7 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   activity: ActivityPage,
   hosts: HostsPage,
   identity: AgentIdentityPage,
-  keys: KeysPage,
+  providers: ProvidersPage,
   notifications: NotificationsPage,
   devices: DevicesPage,
   updates: UpdatesPage,

@@ -1961,21 +1961,6 @@ export type SendToPhoneAfter = z.infer<typeof SendToPhoneAfter>;
 const TimeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
 /**
- * Claude Code's `settings.json` as a shared setting (spec/02 § Claude Code
- * settings): one text for every host, and an optional override per OS whose
- * top-level keys replace the shared ones on hosts of that OS. Each is JSON text
- * (`''` meaning none), validated as a JSON object on the way in.
- */
-export const ClaudeSettingsSetting = z
-  .object({
-    shared: z.string(),
-    darwin: z.string(),
-    linux: z.string(),
-  })
-  .strict();
-export type ClaudeSettingsSetting = z.infer<typeof ClaudeSettingsSetting>;
-
-/**
  * Every setting that is not tied to one machine (spec/01 § Settings). The
  * server stores it, every host runs from the copy in the last snapshot.
  */
@@ -2085,7 +2070,6 @@ export const SharedSettings = z
     /** `null` = no explicit configuration. */
     harnessSkills: z.union([z.array(z.string().min(1)), z.literal('all')]).nullable(),
     harnessMemoryEnabled: z.boolean(),
-    claudeSettings: ClaudeSettingsSetting,
     accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
   })
   .strict();
@@ -2152,7 +2136,6 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   harnessToolsPrompt: null,
   harnessSkills: null,
   harnessMemoryEnabled: false,
-  claudeSettings: { shared: '', darwin: '', linux: '' },
   accountStrategy: { claude: 'priority', codex: 'priority' },
   jobAutonomyPrompt: DEFAULT_JOB_AUTONOMY_PROMPT,
 };
@@ -2341,7 +2324,6 @@ export type SettingsSecretUpdateEvent = z.infer<typeof SettingsSecretUpdateEvent
  * - `claude-login` / `codex-login` — the backend's own login on this machine.
  * - `codex-signin` — run a ChatGPT device sign-in here and send its result.
  * - `provider-key` — the key of `id` in the host's environment.
- * - `claude-settings` — this machine's drifted `settings.json` text.
  */
 export const SettingsAdoptKind = z.enum([
   'import',
@@ -2349,7 +2331,6 @@ export const SettingsAdoptKind = z.enum([
   'codex-login',
   'codex-signin',
   'provider-key',
-  'claude-settings',
 ]);
 export type SettingsAdoptKind = z.infer<typeof SettingsAdoptKind>;
 
@@ -2393,7 +2374,6 @@ export const SettingsAdoptResponseEvent = z
         z
           .object({ kind: z.literal('provider-key'), id: ProviderKeyId, value: z.string().min(1) })
           .strict(),
-        z.object({ kind: z.literal('claude-settings'), text: z.string() }).strict(),
       ])
       .optional(),
     error: z.string().min(1).optional(),
@@ -2401,14 +2381,19 @@ export const SettingsAdoptResponseEvent = z
   .strict();
 export type SettingsAdoptResponseEvent = z.infer<typeof SettingsAdoptResponseEvent>;
 
-/** Surface → host: rewrite a drifted `settings.json` from the snapshot. */
-export const HostClaudeSettingsDiscardEvent = z
+/**
+ * Surface → host: replace that host's Claude Code `settings.json` with `text`
+ * (spec/02 § Claude Code settings). Text that is not a JSON object is refused
+ * with `claude_settings_invalid`, and the file is left as it was.
+ */
+export const HostClaudeSettingsSetEvent = z
   .object({
-    type: z.literal('host.claude_settings_discard'),
+    type: z.literal('host.claude_settings_set'),
     hostId: z.string().min(1),
+    text: z.string(),
   })
   .strict();
-export type HostClaudeSettingsDiscardEvent = z.infer<typeof HostClaudeSettingsDiscardEvent>;
+export type HostClaudeSettingsSetEvent = z.infer<typeof HostClaudeSettingsSetEvent>;
 
 /**
  * Host → server: a ChatGPT sign-in run on this host (`host.backend_add_account`)
@@ -4443,11 +4428,7 @@ const claudeSettingsFields = {
    * pass-through, not a second source of truth for it. Empty string when the
    * host has no such file.
    */
-  /**
-   * This machine's `settings.json` text when it no longer matches what the
-   * last snapshot wrote (spec/02 § Claude Code settings). Absent when in step.
-   */
-  drift: z.string().optional(),
+  settingsJson: z.string(),
   /** Every memory entry found under that host's `~/.claude/projects/*\/memory/`. */
   memories: z.array(ClaudeMemoryEntry),
 };
@@ -8130,7 +8111,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'host.folder_add',
   'host.folder_remove',
   'host.claude_memory_delete',
-  'host.claude_settings_discard',
+  'host.claude_settings_set',
   'host.claude_memory_set',
   'host.backend_add_account',
   'host.backend_usage_refresh',
@@ -8220,7 +8201,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   SettingsAdoptRequestEvent,
   SettingsAdoptResponseEvent,
   SettingsAccountSignedInEvent,
-  HostClaudeSettingsDiscardEvent,
+  HostClaudeSettingsSetEvent,
   HostClaudeMemorySetEvent,
   HostBackendAddAccountEvent,
   HostBackendUsageRefreshEvent,
@@ -8499,7 +8480,7 @@ export const EVENT_SCHEMAS = {
   'settings.adopt.request': SettingsAdoptRequestEvent,
   'settings.adopt.response': SettingsAdoptResponseEvent,
   'settings.account_signed_in': SettingsAccountSignedInEvent,
-  'host.claude_settings_discard': HostClaudeSettingsDiscardEvent,
+  'host.claude_settings_set': HostClaudeSettingsSetEvent,
   'host.claude_memory_set': HostClaudeMemorySetEvent,
   'host.backend_add_account': HostBackendAddAccountEvent,
   'host.backend_usage_refresh': HostBackendUsageRefreshEvent,

@@ -38,7 +38,6 @@ Shared by every host, stored on the server:
 - Provider keys (`02-daemon.md` § Provider keys).
 - Agent behaviour: default model, default permission mode, auto-resume after a limit, question expiry, chat-name interval, and the layers in `14-design-web.md` § Agent behavior.
 - Voice: the Kokoro voice and the voice config matrix (`07-voice-app.md`).
-- Claude Code `settings.json` (`02-daemon.md` § Claude Code settings).
 - Manager sweep and quiet hours, the voice address word, and the special threads' model and rotation schedule.
 - `Send to my phone after`: how long a computer may sit idle before notifications go to the phone instead (`09-notifications.md` § Presence heuristic). 1 minute (the default), 5 minutes, or `Only when I lock`.
 
@@ -50,7 +49,7 @@ Every change goes through the server: a surface over REST, the CLI through the s
 
 A host that connects for the first time since settings were shared is asked, once, for everything it held on its own — its accounts, its provider keys and, for the first host only, its settings — before it is sent a snapshot. Accounts already held are not added twice: a second copy of the same Claude organisation or the same OpenAI login is dropped, and a label that would read twice gains the host's name. A host whose import fails keeps running on what it held and is asked again when it next connects.
 
-Some values start on a host and still end on the server. Provider refresh tokens stay on the server, which renews them serially and sends only access credentials to hosts (`10-auth.md` § Backend credentials). A successful sign-in on one host replaces the shared login for that credit source. A value found on the machine — the backend's own login, a provider key in the host's environment, or a Claude Code `settings.json` changed there (`02-daemon.md` § Claude Code settings) — can be adopted from Settings, which asks that host to send it to the server as the shared value.
+Some values start on a host and still end on the server. Provider refresh tokens stay on the server, which renews them serially and sends only access credentials to hosts (`10-auth.md` § Backend credentials). A successful sign-in on one host replaces the shared login for that credit source. A value found on the machine — the backend's own login, or a provider key in the host's environment — can be adopted from Settings, which asks that host to send it to the server as the shared value.
 
 ## Starting with no settings
 

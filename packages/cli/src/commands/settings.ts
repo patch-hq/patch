@@ -5,7 +5,6 @@
 // CLI runs — never a machine's own socket. With no server reachable they fail,
 // naming it, rather than changing one machine behind the others' backs.
 
-import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
 import { emitJson, emitText, getTransport, run } from './_common.js';
@@ -111,28 +110,6 @@ export function registerSettingsCommands(program: Command): void {
         });
         if (opts.json) emitJson(res);
         else emitText(`${field}: ${value}`);
-      });
-    });
-
-  settings
-    .command('claude <file>')
-    .description("Replace the shared Claude Code settings.json from a file (or '-' for none)")
-    .option('--os <os>', 'set the override for darwin or linux instead of the shared text')
-    .option('--json', 'JSON output')
-    .action(async (file: string, opts: CommonOpts & { os?: string }) => {
-      await run(opts, async () => {
-        const which = opts.os ?? 'shared';
-        if (!['shared', 'darwin', 'linux'].includes(which)) {
-          throw new Error(`--os must be darwin or linux (got ${which})`);
-        }
-        const t = server(opts);
-        const current = await t.get<SharedState>('/api/settings/shared');
-        const text = file === '-' ? '' : readFileSync(file, 'utf8');
-        const claudeSettings = {
-          ...(current.settings['claudeSettings'] as Record<string, string>),
-          [which]: text,
-        };
-        emitJson(await t.patch<unknown>('/api/settings', { claudeSettings }));
       });
     });
 

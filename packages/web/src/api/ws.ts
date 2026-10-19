@@ -855,7 +855,9 @@ export class PatchWs {
       return;
     }
     if (event.type === 'claude_settings.list' || event.type === 'claude_settings.updated') {
-      usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
+      usePresenceStore
+        .getState()
+        .setClaudeSettings(event.hostId, event.settingsJson, event.memories);
       return;
     }
     // Agent browser live view and hand-off: live-only, never a timeline entry.

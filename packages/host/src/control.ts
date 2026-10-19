@@ -299,11 +299,11 @@ export interface BuildOptions {
       install: (componentId: string) => void;
       remove: (componentId: string) => void;
     };
-    /** This host's Claude Code memory entries and any settings.json drift (spec/02 § Claude Code settings). */
+    /** This host's Claude Code settings.json and memory entries (spec/02 § Claude Code settings). */
     claudeSettings: {
-      snapshot: () => { drift?: string; memories: ClaudeMemoryEntry[] };
-      /** Rewrite a drifted settings.json from the shared settings. */
-      discard: () => void;
+      snapshot: () => { settingsJson: string; memories: ClaudeMemoryEntry[] };
+      /** Replace settings.json. Throws InvalidSettingsJsonError, named. */
+      set: (text: string) => void;
       /** Throws InvalidMemoryRefError / MemoryNotFoundError, named. */
       deleteMemory: (project: string, file: string) => void;
     };
@@ -1422,12 +1422,22 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return host.claudeSettings.snapshot();
   });
 
-  // POST /claude-settings/discard — rewrite a drifted settings.json from the
-  // shared settings (spec/02 § Claude Code settings).
-  app.post('/claude-settings/discard', async (req, reply) => {
+  // POST /claude-settings — replace this host's settings.json (spec/02 §
+  // Claude Code settings). Text that is not a JSON object is refused.
+  app.post('/claude-settings', async (req, reply) => {
     const host = hostGate(req, reply);
     if (!host) return;
-    host.claudeSettings.discard();
+    const parsed = z.object({ text: z.string() }).strict().safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'bad_request', detail: parsed.error.flatten() });
+    }
+    try {
+      host.claudeSettings.set(parsed.data.text);
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: 'claude_settings_invalid', message: (err as Error).message });
+    }
     return { ok: true, ...host.claudeSettings.snapshot() };
   });
 

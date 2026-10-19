@@ -333,7 +333,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'signin-1',
     account: { id: 'c2', label: 'me@example.com', kind: 'chatgpt', authJson: '{"tokens":{}}' },
   },
-  'host.claude_settings_discard': { type: 'host.claude_settings_discard', hostId: 'host-a' },
+  'host.claude_settings_set': {
+    type: 'host.claude_settings_set',
+    hostId: 'host-a',
+    text: '{"model":"opus"}',
+  },
   'device.session': { type: 'device.session', deviceId: 'dev-1', name: 'kitchen', active: true },
   'folders.list': {
     type: 'folders.list',
@@ -350,12 +354,13 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'claude_settings.list': {
     type: 'claude_settings.list',
     hostId: 'host-a',
-    drift: '{"model":"opus"}',
+    settingsJson: '{"model":"opus"}',
     memories: [],
   },
   'claude_settings.updated': {
     type: 'claude_settings.updated',
     hostId: 'host-a',
+    settingsJson: '',
     memories: [],
   },
   'new_chat_draft.set': {

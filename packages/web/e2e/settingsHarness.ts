@@ -158,7 +158,6 @@ export async function stubSettingsApi(
   };
   await page.route('**/api/accounts/**', write);
   await page.route('**/api/providers/keys/**', write);
-  await page.route('**/api/settings/claude/adopt', write);
   await page.route('**/api/healthz', (r) =>
     r.fulfill(json({ ok: true, version: '0.0.0', gitSha: 'abc1234' })),
   );
@@ -188,7 +187,7 @@ type Store = {
     setHostReport(r: Record<string, unknown>): void;
     setHostOnline(hostId: string, online: boolean): void;
     setHostAccount(r: Record<string, unknown>): void;
-    setClaudeSettings(hostId: string, drift: string | undefined, memories: unknown[]): void;
+    setClaudeSettings(hostId: string, settingsJson: string, memories: unknown[]): void;
   };
 };
 
@@ -221,18 +220,18 @@ export async function addSecondHost(
   );
 }
 
-/** Play a host's `claude_settings.list`: its memories, and any settings.json drift. */
+/** Play a host's `claude_settings.list`: its memories, and its settings.json text. */
 export async function setClaudeSettings(
   page: Page,
   memories: unknown[] = [],
-  opts: { drift?: string; hostId?: string } = {},
+  opts: { settingsJson?: string; hostId?: string } = {},
 ): Promise<void> {
   await page.evaluate(
-    ({ mems, drift, id }) =>
+    ({ mems, json, id }) =>
       (window as unknown as { __presenceStore: Store }).__presenceStore
         .getState()
-        .setClaudeSettings(id, drift ?? undefined, mems),
-    { mems: memories, drift: opts.drift ?? null, id: opts.hostId ?? 'd1' },
+        .setClaudeSettings(id, json, mems),
+    { mems: memories, json: opts.settingsJson ?? '', id: opts.hostId ?? 'd1' },
   );
 }
 

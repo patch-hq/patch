@@ -348,8 +348,6 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
         </div>
       ) : null}
 
-      <ClaudeSettingsDrift host={host} />
-
       {report && report.components.length > 0 ? (
         <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-components`}>
           {report.components.map((c) => (
@@ -446,63 +444,6 @@ function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | nul
       testid={`host-${host.hostId}-settings-version`}
       sub={<span data-testid={`host-${host.hostId}-settings-state`}>{text}</span>}
     />
-  );
-}
-
-/**
- * This machine's Claude Code settings.json changed on the machine itself
- * (spec/02 § Claude Code settings). Nothing overwrites it until the change is
- * taken into the shared settings — for every host, or for this OS — or thrown away.
- */
-function ClaudeSettingsDrift({ host }: { host: HostPresence }): JSX.Element | null {
-  const drift = host.claudeSettings?.drift;
-  if (drift === undefined) return null;
-  const os =
-    host.host?.platform === 'darwin' ? 'darwin' : host.host?.platform === 'linux' ? 'linux' : null;
-  const id = `host-${host.hostId}-claude-drift`;
-  return (
-    <div className="set-card set-card-gap" data-testid={id}>
-      <Row title="Claude Code settings.json changed on this machine" />
-      <pre className="claude-settings-json" data-testid={`${id}-text`}>
-        {drift}
-      </pre>
-      <div className="set-actions">
-        <button
-          type="button"
-          className="set-btn"
-          data-testid={`${id}-keep-shared`}
-          onClick={() =>
-            void writeShared('keep settings.json', () =>
-              api.adoptClaudeSettings(host.hostId, 'shared'),
-            )
-          }
-        >
-          Keep for every host
-        </button>
-        {os ? (
-          <button
-            type="button"
-            className="set-btn"
-            data-testid={`${id}-keep-os`}
-            onClick={() =>
-              void writeShared('keep settings.json', () => api.adoptClaudeSettings(host.hostId, os))
-            }
-          >
-            Keep for {os === 'darwin' ? 'macOS' : 'Linux'}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="set-btn ghost"
-          data-testid={`${id}-discard`}
-          onClick={() =>
-            sendToHost(host, { type: 'host.claude_settings_discard', hostId: host.hostId })
-          }
-        >
-          Discard
-        </button>
-      </div>
-    </div>
   );
 }
 

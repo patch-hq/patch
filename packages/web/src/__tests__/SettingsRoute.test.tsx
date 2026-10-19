@@ -2,7 +2,7 @@
 // beside a nav grouped Agents / Setup / System. This file covers the shell —
 // the nav, the addresses, the host switcher, what was removed — and the
 // Account, Devices, Voice, Agent and Manager pages. Usage (accounts), MCP,
-// Memories, Hosts, Keys and Updates each have a file of their own.
+// Memories, Hosts, Providers and Updates each have a file of their own.
 //
 // Backed by /api/auth/me, /api/settings and the live per-host reports.
 
@@ -44,7 +44,7 @@ const PAGE_TESTID: Record<string, string> = {
   activity: 'settings-activity',
   hosts: 'settings-hosts',
   identity: 'settings-identity',
-  keys: 'settings-keys',
+  providers: 'settings-providers',
   notifications: 'settings-notifications',
   devices: 'settings-devices',
   updates: 'settings-version',
@@ -88,7 +88,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Activity',
       'Hosts',
       'Agent identity',
-      'Keys',
+      'Providers',
       'Notifications',
       'Devices',
       'Updates',
@@ -712,7 +712,7 @@ describe('Settings → Voice', () => {
       expect(screen.queryByTestId('voice-call-keys')).toBeNull();
     });
 
-    // spec/02 § Provider keys: a key set from Settings → Keys takes effect with
+    // spec/02 § Provider keys: a key set from Settings → Providers takes effect with
     // no restart, and the host's next report is what clears the line.
     it('clears the line live when the host reports the key has been set', async () => {
       usePreferencesStore.setState({
@@ -1150,47 +1150,6 @@ describe('Settings → Agent', () => {
         expect(server.writes).toContainEqual({ harnessSystemPrompt: 'Be kind.' }),
       );
       await waitFor(() => expect(screen.queryByTestId(SYSTEM)).toBeNull());
-    });
-
-    it('edits the shared settings.json and each OS override, refusing text the server refuses', async () => {
-      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
-      vi.stubGlobal(
-        'fetch',
-        makeFetch({}, (url, init) => {
-          if (url.includes('/api/settings') && init?.method === 'PATCH') {
-            const body = JSON.parse(String(init.body)) as { claudeSettings?: { shared: string } };
-            if (body.claudeSettings?.shared === '[1]') {
-              return json(
-                { error: 'invalid_input', message: 'claudeSettings.shared must be a JSON object' },
-                400,
-              );
-            }
-          }
-          return server.handler(url, init);
-        }),
-      );
-      loadShared();
-      renderSettings('/settings/agent');
-      fireEvent.click(await screen.findByTestId('claude-settings-shared-edit'));
-      fireEvent.change(screen.getByTestId('claude-settings-shared-json'), {
-        target: { value: '[1]' },
-      });
-      fireEvent.click(screen.getByTestId('claude-settings-shared-save'));
-      await waitFor(() =>
-        expect(errors().some((e) => e.includes('must be a JSON object'))).toBe(true),
-      );
-      expect(screen.getByTestId('claude-settings-shared-json')).toBeInTheDocument();
-      fireEvent.click(screen.getByTestId('claude-settings-shared-cancel'));
-      fireEvent.click(screen.getByTestId('claude-settings-darwin-edit'));
-      fireEvent.change(screen.getByTestId('claude-settings-darwin-json'), {
-        target: { value: '{"hooks":{}}' },
-      });
-      fireEvent.click(screen.getByTestId('claude-settings-darwin-save'));
-      await waitFor(() =>
-        expect(server.writes).toContainEqual({
-          claudeSettings: { shared: '', darwin: '{"hooks":{}}', linux: '' },
-        }),
-      );
     });
   });
 

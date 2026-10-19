@@ -375,14 +375,22 @@ describe('SharedSettingsService', () => {
     ]);
   });
 
-  it('refuses Claude settings text that is not a JSON object', () => {
-    expect(() =>
-      service.update({ claudeSettings: { shared: '[1]', darwin: '', linux: '' } }),
-    ).toThrow(/must be a JSON object/);
-    expect(() =>
-      service.update({ claudeSettings: { shared: '{', darwin: '', linux: '' } }),
-    ).toThrow(/not valid JSON/);
-    service.update({ claudeSettings: { shared: '{"model":"opus"}', darwin: '', linux: '' } });
+  it('drops the retired shared claudeSettings from an old settings file, and never sends it to hosts', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        sweepEnabled: false,
+        claudeSettings: { shared: '{"model":"opus"}', darwin: '', linux: '' },
+      }),
+    );
+    const reloaded = make();
+    expect(reloaded.current()).not.toHaveProperty('claudeSettings');
+    expect(reloaded.current().sweepEnabled).toBe(false);
+    reloaded.update({ sweepEnabled: true });
+    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'))).not.toHaveProperty(
+      'claudeSettings',
+    );
+    expect(() => reloaded.update({ claudeSettings: {} } as never)).toThrow();
   });
 
   it('adopts a provider key from a host’s environment', async () => {

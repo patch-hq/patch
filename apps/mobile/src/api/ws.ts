@@ -623,7 +623,9 @@ export class PatchWs {
       // spec/02 § Claude Code settings — that host's settings.json + memory
       // entries, sent whole on connect and after every edit, so Settings →
       // Hosts settles on what the machine actually holds.
-      usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
+      usePresenceStore
+        .getState()
+        .setClaudeSettings(event.hostId, event.settingsJson, event.memories);
       return;
     }
     // spec/09 § bell — the agent-notification log changed; refetch.

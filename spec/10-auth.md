@@ -295,7 +295,7 @@ follow:
 
 Provider keys — the API keys the host itself uses for hosted voice and Groq
 Whisper — are shared by every host and set and revoked from one Settings →
-Keys page (`02-daemon.md` § Provider keys). The gate is every other shared
+Providers page (`02-daemon.md` § Provider keys). The gate is every other shared
 setting's: a live surface credential. They are stored like every other secret
 (`01-server.md` § Settings): on the server, encrypted, sent to every host, and
 never sent back to a surface, which sees where each key comes from and its

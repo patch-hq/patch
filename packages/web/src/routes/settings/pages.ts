@@ -14,7 +14,7 @@ export type SettingsPageId =
   | 'activity'
   | 'hosts'
   | 'identity'
-  | 'keys'
+  | 'providers'
   | 'notifications'
   | 'devices'
   | 'updates'
@@ -33,7 +33,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
   { id: 'activity', title: 'Activity', group: 'Agents' },
   { id: 'hosts', title: 'Hosts', group: 'Setup' },
   { id: 'identity', title: 'Agent identity', group: 'Setup' },
-  { id: 'keys', title: 'Keys', group: 'Setup' },
+  { id: 'providers', title: 'Providers', group: 'Setup' },
   { id: 'notifications', title: 'Notifications', group: 'Setup' },
   { id: 'devices', title: 'Devices', group: 'Setup' },
   { id: 'updates', title: 'Updates', group: 'System' },

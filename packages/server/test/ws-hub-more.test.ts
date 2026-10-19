@@ -419,7 +419,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       h.hostLink.emit({
         type: 'claude_settings.list',
         hostId: 'd1',
-        drift: '{"model":"opus"}',
+        settingsJson: '{"model":"opus"}',
         memories: [
           {
             project: 'portfolio',
@@ -452,7 +452,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       const ev = await replayed;
       expect(ev).toMatchObject({
         hostId: 'd1',
-        drift: '{"model":"opus"}',
+        settingsJson: '{"model":"opus"}',
         memories: [
           {
             project: 'portfolio',
@@ -478,7 +478,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       h.hostLink.emit({
         type: 'claude_settings.list',
         hostId: 'd1',
-        drift: '{"model":"sonnet"}',
+        settingsJson: '{"model":"sonnet"}',
         memories: [
           {
             project: 'portfolio',
@@ -492,7 +492,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       h.hostLink.emit({
         type: 'claude_settings.updated',
         hostId: 'd1',
-        drift: '{"model":"opus"}',
+        settingsJson: '{"model":"opus"}',
         memories: [],
       });
       await new Promise((r) => setTimeout(r, 20));
@@ -515,7 +515,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       const ev = await replayed;
       // The update REPLACED the cache, so the surface never sees the stale
       // memory entry — same "carries the COMPLETE state" contract as folders.
-      expect(ev).toMatchObject({ hostId: 'd1', drift: '{"model":"opus"}', memories: [] });
+      expect(ev).toMatchObject({ hostId: 'd1', settingsJson: '{"model":"opus"}', memories: [] });
       await client.close();
     } finally {
       await h.close();

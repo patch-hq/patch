@@ -911,11 +911,6 @@ export const api = {
       method: 'POST',
       body: { hostId },
     }),
-  adoptClaudeSettings: (hostId: string, target: 'shared' | 'darwin' | 'linux') =>
-    request<SharedState>('/api/settings/claude/adopt', {
-      method: 'POST',
-      body: { hostId, target },
-    }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every
   // connected surface (this one included) is also sent `host.removed

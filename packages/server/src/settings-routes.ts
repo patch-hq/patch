@@ -31,9 +31,6 @@ const OrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).st
 const StrategyBody = z.object({ strategy: AccountStrategy }).strict();
 const AdoptBody = z.object({ hostId: z.string().min(1) }).strict();
 const KeyBody = z.object({ value: z.string().min(1) }).strict();
-const ClaudeAdoptBody = z
-  .object({ hostId: z.string().min(1), target: z.enum(['shared', 'darwin', 'linux']) })
-  .strict();
 
 export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoutesDeps): void {
   const { shared } = deps;
@@ -196,13 +193,6 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     '/api/providers/keys/:keyId/adopt',
     handle(AdoptBody, async (req, body) => {
       await shared.adoptInto(body.hostId, 'provider-key', keyOf(req));
-    }),
-  );
-
-  app.post(
-    '/api/settings/claude/adopt',
-    handle(ClaudeAdoptBody, async (_req, body) => {
-      await shared.adoptInto(body.hostId, 'claude-settings', body.target);
     }),
   );
 }

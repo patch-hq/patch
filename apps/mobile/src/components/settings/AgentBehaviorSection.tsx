@@ -3,9 +3,8 @@
 //   Defaults — Model for new chats and the Permission mode new chats start in.
 //   Questions — whether an unanswered question expires, and when.
 //   Chats — Warn before switching provider, Provider-level context.
-//   Layers added to Claude Code — the Patch tools prompt, the System prompt
-//              override and Claude Code's settings.json (shared, and per OS),
-//              each opened in a full-screen editor (LayerEditor,
+//   Layers added to Claude Code — the Patch tools prompt and the System prompt
+//              override, each opened in a full-screen editor (LayerEditor,
 //              app/settings/layer.tsx).
 //
 // Every row is a shared setting (spec/01 § Settings): written to the server,
@@ -63,20 +62,11 @@ const VERBOSITY_LABEL: Record<(typeof VERBOSITY)[number], string> = {
   full: 'Full',
 };
 
-export type Layer =
-  | 'tools'
-  | 'system'
-  | 'claude-shared'
-  | 'claude-darwin'
-  | 'claude-linux'
-  | 'goal-judge';
+export type Layer = 'tools' | 'system' | 'goal-judge';
 
 export const LAYER_TITLE: Record<Layer, string> = {
   tools: 'Patch tools prompt',
   system: 'System prompt override',
-  'claude-shared': 'Claude Code settings.json',
-  'claude-darwin': 'settings.json on macOS',
-  'claude-linux': 'settings.json on Linux',
   'goal-judge': 'Goal judge prompt',
 };
 
@@ -84,17 +74,8 @@ export const LAYER_TITLE: Record<Layer, string> = {
 const EDITOR_TITLE: Record<Layer, string> = {
   tools: 'Tools prompt',
   system: 'System prompt',
-  'claude-shared': 'settings.json',
-  'claude-darwin': 'macOS settings.json',
-  'claude-linux': 'Linux settings.json',
   'goal-judge': 'Judge prompt',
 };
-
-const CLAUDE_PART = {
-  'claude-shared': 'shared',
-  'claude-darwin': 'darwin',
-  'claude-linux': 'linux',
-} as const;
 
 export function AgentPage(): React.ReactElement {
   return (
@@ -320,14 +301,10 @@ function Layers({ preferences }: { preferences: AccountPreferences }): React.Rea
       }
     />
   );
-  const cs = preferences.claudeSettings;
   return (
     <SettingsSection title="Layers added to Claude Code" testID="harness-config">
       {row('tools', toolsPromptSummary(preferences.harnessToolsPrompt, toolsDefault))}
       {row('system', promptSummary(preferences.harnessSystemPrompt))}
-      {row('claude-shared', cs.shared.trim() === '' ? 'None' : 'Set')}
-      {row('claude-darwin', cs.darwin.trim() === '' ? 'None' : 'Set')}
-      {row('claude-linux', cs.linux.trim() === '' ? 'None' : 'Set')}
     </SettingsSection>
   );
 }
@@ -349,9 +326,7 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
         ? (preferences.harnessToolsPrompt ?? toolsDefault)
         : layer === 'system'
           ? preferences.harnessSystemPrompt
-          : layer === 'goal-judge'
-            ? preferences.goalEvalPrompt
-            : preferences.claudeSettings[CLAUDE_PART[layer]];
+          : preferences.goalEvalPrompt;
   const [draft, setDraft] = React.useState(initial);
   const [saving, setSaving] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -384,11 +359,7 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
     if (layer === 'tools') void write({ harnessToolsPrompt: draft });
     // An empty string clears the override (the SDK default).
     else if (layer === 'system') void write({ harnessSystemPrompt: draft });
-    else if (layer === 'goal-judge') void write({ goalEvalPrompt: draft });
-    else
-      void write({
-        claudeSettings: { ...preferences.claudeSettings, [CLAUDE_PART[layer]]: draft },
-      });
+    else void write({ goalEvalPrompt: draft });
   };
 
   return (
@@ -408,10 +379,8 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
         testID="layer-editor-text"
         accessibilityLabel={LAYER_TITLE[layer]}
         multiline
-        code={layer.startsWith('claude-')}
         value={draft}
         onChangeText={setDraft}
-        placeholder={layer.startsWith('claude-') ? '{}' : ''}
         style={{
           minHeight: 360,
           textAlignVertical: 'top',

@@ -218,9 +218,9 @@ TODOIST_WEBHOOK_SECRET=...
 
 # Voice
 WHISPER_BACKEND=groq         # or "local" for self-hosted
-GROQ_API_KEY=...             # groq backend; or set it in Settings → Keys
+GROQ_API_KEY=...             # groq backend; or set it in Settings → Providers
 # GEMINI_API_KEY / OPENAI_REALTIME_API_KEY — hosted voice. Optional here:
-# provider keys can be set from Settings → Keys instead (shared by every
+# provider keys can be set from Settings → Providers instead (shared by every
 # host, stored on the server), which wins over the environment
 # (02-daemon.md § Provider keys).
 # Voice model files are downloaded by the daemon on demand into its own
@@ -237,8 +237,8 @@ CLAUDE_CODE_OAUTH_TOKEN=...
 
 `WHISPER_BACKEND`, `GROQ_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are read by the
 daemon, so they are set in the environment of each host's service rather than in
-the server's compose env — or, for the provider keys, from Settings → Hosts →
-Keys, which stores them on the host and never on the server. The rest are the
+the server's compose env — or, for the provider keys, from Settings →
+Providers, which stores them on the host and never on the server. The rest are the
 server's.
 
 ## Deploy guide

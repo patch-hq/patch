@@ -2452,16 +2452,19 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
-  // spec/02 § Claude Code settings: the host publishes this host's memory
-  // entries on connect; settings.json is written from the shared settings'
-  // snapshot, except when changed on the machine, which is reported as drift
-  // until it is discarded; memory edits land on disk and republish.
-  it('publishes memory on connect, writes settings.json from the snapshot, reports drift, and memory frames write through', async () => {
+  // spec/02 § Claude Code settings: the host publishes its settings.json text
+  // and memory entries on connect; settings.json is the machine's own file,
+  // written only by a `host.claude_settings_set` (a refused edit leaves it
+  // alone) and left alone by shared-settings snapshots; memory edits land on
+  // disk and republish.
+  it('publishes settings.json and memory on connect, writes settings.json only from a set frame, and memory frames write through', async () => {
     const boot = await bootMain();
     try {
       const claudeProjectsRoot = join(boot.home, 'claude-projects');
       const memoryDir = join(claudeProjectsRoot, 'my-project', 'memory');
       mkdirSync(memoryDir, { recursive: true });
+      const settingsPath = join(boot.home, 'settings.json');
+      writeFileSync(settingsPath, '{"model":"sonnet"}');
       writeFileSync(
         join(memoryDir, 'feedback_tests.md'),
         '---\nname: feedback_tests\ndescription: a seeded memory\ntype: feedback\n---\n\nBody text.\n',
@@ -2475,6 +2478,7 @@ describe('src/index.ts main() — full host boot', () => {
         (e) => e.type === 'claude_settings.list' && e.hostId === 'd1',
       );
       expect(listFrame).toMatchObject({
+        settingsJson: '{"model":"sonnet"}',
         memories: [
           {
             project: 'my-project',
@@ -2487,42 +2491,56 @@ describe('src/index.ts main() — full host boot', () => {
           },
         ],
       });
-      expect(listFrame).not.toHaveProperty('drift');
 
-      const snapshot = (version: number, shared: string, hostId = 'd1'): WireEvent => ({
+      // A shared-settings snapshot does not touch the machine's file.
+      boot.fakeServer.send({
         type: 'settings.snapshot',
-        hostId,
-        version,
-        settings: { ...DEFAULT_SHARED_SETTINGS, claudeSettings: { shared, darwin: '', linux: '' } },
+        hostId: 'd1',
+        version: 1,
+        settings: DEFAULT_SHARED_SETTINGS,
         secrets: { claude: [], codex: [], providerKeys: {} },
       });
-      const settingsPath = join(boot.home, 'settings.json');
-
-      // The shared text is written where Claude Code reads it.
-      boot.fakeServer.send(snapshot(1, '{"model":"opus"}'));
       await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
-      expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({ model: 'opus' });
-
-      // Changed on the machine: the next snapshot leaves it alone and reports it.
-      writeFileSync(settingsPath, '{"model":"sonnet"}');
-      boot.fakeServer.send(snapshot(2, '{"model":"haiku"}'));
-      const drifted = await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'claude_settings.updated' && e.hostId === 'd1' && 'drift' in e,
-      );
-      expect(drifted).toMatchObject({ drift: '{"model":"sonnet"}' });
       expect(readFileSync(settingsPath, 'utf8')).toBe('{"model":"sonnet"}');
 
-      // Discard rewrites it from the snapshot.
-      boot.fakeServer.send({ type: 'host.claude_settings_discard', hostId: 'd1' });
-      await vi.waitFor(() =>
-        expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({ model: 'haiku' }),
+      // A set frame writes the file and republishes its text.
+      boot.fakeServer.send({
+        type: 'host.claude_settings_set',
+        hostId: 'd1',
+        text: '{"model":"haiku"}',
+      });
+      await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'claude_settings.updated' &&
+          e.hostId === 'd1' &&
+          (e as { settingsJson: string }).settingsJson === '{"model":"haiku"}',
       );
+      expect(readFileSync(settingsPath, 'utf8')).toBe('{"model":"haiku"}');
 
-      // A snapshot naming a different machine is not applied here.
-      boot.fakeServer.send(snapshot(3, '{"model":"should-not-land"}', 'some-other-host'));
-      boot.fakeServer.send(snapshot(4, '{"model":"sonnet"}'));
-      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 4);
-      expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({ model: 'sonnet' });
+      // Text that is not a JSON object is refused, named, and the file stays.
+      boot.fakeServer.send({ type: 'host.claude_settings_set', hostId: 'd1', text: '[1]' });
+      const refused = await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'chat.error' &&
+          e.error.code === 'claude_settings_invalid' &&
+          e.error.message.includes('host.claude_settings_set'),
+      );
+      expect((refused as { error: { message: string } }).error.message).toContain('JSON object');
+      expect(readFileSync(settingsPath, 'utf8')).toBe('{"model":"haiku"}');
+
+      // A set frame naming a different machine is not applied here.
+      boot.fakeServer.send({
+        type: 'host.claude_settings_set',
+        hostId: 'some-other-host',
+        text: '{"model":"should-not-land"}',
+      });
+      boot.fakeServer.send({ type: 'host.claude_settings_set', hostId: 'd1', text: '{}' });
+      await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'claude_settings.updated' &&
+          (e as { settingsJson: string }).settingsJson === '{}',
+      );
+      expect(readFileSync(settingsPath, 'utf8')).toBe('{}');
 
       // host.claude_memory_set rewrites the text under the same frontmatter
       // and republishes the entry with its new body.

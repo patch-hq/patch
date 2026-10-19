@@ -27,7 +27,8 @@ import { usePresenceStore, type HostPresence } from '../../stores/presenceStore'
 import { useUiStore } from '../../stores/uiStore';
 import { SettingsSection } from '../SettingsSection';
 import { agoLabel, sendToHost } from './hostSend';
-import { NoticeRow, hostName, sortedHosts } from './HostSwitcher';
+import { NoticeRow, hostName, sortedHosts, unreportedText, useSettingsHost } from './HostSwitcher';
+import { ClaudeSettingsRow } from './ClaudeSettingsSection';
 import { SecretsSection } from './SecretsSection';
 import { SettingsPage } from './SettingsPage';
 import {
@@ -167,7 +168,6 @@ export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
         <>
           <HostIdentity host={host} />
           <HostSettingsState host={host} />
-          <ClaudeSettingsDrift host={host} />
           <HostBackends host={host} />
           <HostComponents host={host} />
           <HostTools host={host} />
@@ -200,54 +200,6 @@ function HostSettingsState({ host }: { host: HostPresence }): React.ReactElement
   return (
     <SettingsSection testID={`host-${host.hostId}-settings-version`}>
       <Row title="Settings" subtitle={text} subtitleTestID={`host-${host.hostId}-settings-state`} />
-    </SettingsSection>
-  );
-}
-
-/**
- * This machine's Claude Code settings.json changed on the machine itself
- * (spec/02 § Claude Code settings): shown, and kept for every host, kept for
- * this OS, or discarded. Nothing overwrites it until one is chosen.
- */
-function ClaudeSettingsDrift({ host }: { host: HostPresence }): React.ReactElement | null {
-  const drift = host.claudeSettings?.drift;
-  if (drift === undefined) return null;
-  const hostId = host.hostId;
-  const platform = host.host?.platform;
-  const os = platform === 'darwin' || platform === 'linux' ? platform : null;
-  return (
-    <SettingsSection
-      title="settings.json changed on this machine"
-      testID={`host-${hostId}-claude-drift`}
-    >
-      <Muted testID={`host-${hostId}-claude-drift-text`}>{drift}</Muted>
-      <ButtonRow>
-        <SettingsButton
-          testID={`host-${hostId}-claude-drift-keep-shared`}
-          label="Keep for every host"
-          onPress={() =>
-            void writeShared('Keep settings.json', () => api.adoptClaudeSettings(hostId, 'shared'))
-          }
-        />
-        {os ? (
-          <SettingsButton
-            testID={`host-${hostId}-claude-drift-keep-os`}
-            label={`Keep for ${os === 'darwin' ? 'macOS' : 'Linux'}`}
-            variant="quiet"
-            onPress={() =>
-              void writeShared('Keep settings.json', () => api.adoptClaudeSettings(hostId, os))
-            }
-          />
-        ) : null}
-        <SettingsButton
-          testID={`host-${hostId}-claude-drift-discard`}
-          label="Discard"
-          variant="quiet"
-          onPress={() =>
-            void sendToHost(hostId, { type: 'host.claude_settings_discard', hostId }, 'Discard')
-          }
-        />
-      </ButtonRow>
     </SettingsSection>
   );
 }
@@ -730,13 +682,22 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
   );
 }
 
-// ── Keys ─────────────────────────────────────────────────────────────────────
+// ── Providers ────────────────────────────────────────────────────────────────
 
-export function KeysPage(): React.ReactElement {
+export function ProvidersPage(): React.ReactElement {
+  const host = useSettingsHost();
+  const gap = unreportedText(host);
   return (
-    <SettingsPage title="Keys" testID="settings-page-keys">
+    <SettingsPage title="Providers" testID="settings-page-providers" hostSwitcher>
       <ProviderKeys />
       <SecretsSection />
+      {host === null || gap !== null ? (
+        <SettingsSection title="Claude Code settings.json">
+          <NoticeRow text={gap ?? ''} />
+        </SettingsSection>
+      ) : (
+        <ClaudeSettingsRow host={host} />
+      )}
     </SettingsPage>
   );
 }

@@ -30,7 +30,7 @@ const PAGES = [
   { id: 'voice', title: 'Voice', testid: 'settings-voice' },
   { id: 'hooks', title: 'Hooks', testid: 'settings-hooks-page' },
   { id: 'hosts', title: 'Hosts', testid: 'settings-hosts' },
-  { id: 'keys', title: 'Keys', testid: 'settings-keys' },
+  { id: 'providers', title: 'Providers', testid: 'settings-providers' },
   { id: 'devices', title: 'Devices', testid: 'settings-devices' },
   { id: 'updates', title: 'Updates', testid: 'settings-version' },
   { id: 'account', title: 'Account', testid: 'settings-account' },
@@ -158,7 +158,7 @@ test.describe('Settings — desktop', () => {
       'Activity',
       'Hosts',
       'Agent identity',
-      'Keys',
+      'Providers',
       'Notifications',
       'Devices',
       'Updates',
@@ -263,7 +263,7 @@ test.describe('Settings — behaviour', () => {
   });
 
   // Only what belongs to a machine is chosen per host (spec/01 § Settings):
-  // Memories and MCP. Usage, Agent, Voice and Keys are the account's.
+  // Memories and MCP. Usage, Agent, Voice and Providers are the account's.
   test('the host switcher appears on per-host pages once two hosts have reported', async ({
     page,
   }) => {
@@ -463,7 +463,9 @@ test.describe('Settings — behaviour', () => {
     expect(mem.height).toBeGreaterThan(520);
   });
 
-  test('Keys: adding a secret PUTs it and the list re-reads from the server', async ({ page }) => {
+  test('Providers: adding a secret PUTs it and the list re-reads from the server', async ({
+    page,
+  }) => {
     let secrets: Array<{ key: string; value: string }> = [];
     const puts: Array<{ key: string; body: unknown }> = [];
     await page.route('**/api/secrets', (r) =>
@@ -481,7 +483,7 @@ test.describe('Settings — behaviour', () => {
       secrets = [...secrets, { key, value: body.value }];
       return r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
     });
-    await page.goto(settingsUrl('keys'));
+    await page.goto(settingsUrl('providers'));
     await expect(page.getByTestId('secrets-empty')).toBeVisible();
 
     await page.getByTestId('secret-add').click();

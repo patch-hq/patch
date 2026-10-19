@@ -178,15 +178,17 @@ import { handleBlobRequest } from './blobFetch.js';
 import { ToolLogStore } from './toolLog.js';
 import { ChatTokenReader, UsageHistoryStore } from './usageHistory.js';
 import { ProviderKeyError, ProviderKeyStore, providerKeysPath } from './providerKeys.js';
-import { ClaudeSettingsFile, claudeSettingsFor, settingsOs } from './sharedSettings.js';
 import { createSecretsStore, InvalidSecretKeyError, type SecretsStore } from './secrets.js';
 import {
   claudeHomeFromProjectsRoot,
   deleteClaudeMemory,
   setClaudeMemory,
   InvalidMemoryRefError,
+  InvalidSettingsJsonError,
   listClaudeMemories,
   MemoryNotFoundError,
+  readClaudeSettingsJson,
+  writeClaudeSettingsJson,
 } from './claudeSettings.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startAudioServer, type AudioServerHandle } from './audio/server.js';
@@ -356,19 +358,15 @@ async function startHost(
   // transcript-history root the host already resolves; reusing that root
   // means PATCH_CLAUDE_PROJECTS_ROOT sandboxes this too (see claudeSettings.ts).
   const claudeHome = claudeHomeFromProjectsRoot(config.claudeProjectsRoot);
-  // Written from the shared settings, except when changed on this machine
-  // (spec/02 § Claude Code settings): that is reported as drift instead.
-  const claudeSettingsFile = new ClaudeSettingsFile(claudeHome, config.patchHome);
+  // settings.json is this machine's own file (spec/02 § Claude Code settings):
+  // read as it is each time it is reported, written only by a surface's edit.
   const claudeSettingsSnapshot = (): {
-    drift?: string;
+    settingsJson: string;
     memories: ReturnType<typeof listClaudeMemories>;
-  } => {
-    const drift = claudeSettingsFile.drift();
-    return {
-      ...(drift !== undefined ? { drift } : {}),
-      memories: listClaudeMemories(config.claudeProjectsRoot),
-    };
-  };
+  } => ({
+    settingsJson: readClaudeSettingsJson(claudeHome),
+    memories: listClaudeMemories(config.claudeProjectsRoot),
+  });
 
   // 0. Deployment credential gate (group H1, spec/11-deployment.md § Env): the
   // whisper backend's credential is validated EAGERLY, before OAuth, before the
@@ -1652,14 +1650,6 @@ async function startHost(
         throw err;
       }
     });
-    await part('Claude Code settings.json', () => {
-      claudeSettingsFile.apply(claudeSettingsFor(snapshot.settings.claudeSettings, settingsOs()));
-      link.send({
-        type: 'claude_settings.updated',
-        hostId: selfHostId,
-        ...claudeSettingsSnapshot(),
-      });
-    });
     link.send(buildAccountReport());
     publishHost();
     logger.info({ version: snapshot.version, errors }, 'shared settings: snapshot applied');
@@ -1699,7 +1689,6 @@ async function startHost(
             harnessToolsPrompt: harnessToolsPrompt ?? null,
             harnessSkills: harnessSkills ?? null,
             harnessMemoryEnabled,
-            claudeSettings: { shared: claudeSettingsFile.text(), darwin: '', linux: '' },
           };
           const store = readPatchStore(oauthOpts);
           return {
@@ -1773,12 +1762,6 @@ async function startHost(
           if (!value) throw new Error(`${hostName} has no ${parsed.data} key in its environment`);
           return { ...base, ok: true, result: { kind: 'provider-key', id: parsed.data, value } };
         }
-        case 'claude-settings':
-          return {
-            ...base,
-            ok: true,
-            result: { kind: 'claude-settings', text: claudeSettingsFile.text() },
-          };
         case 'codex-signin':
           throw new Error('a ChatGPT sign-in is started with host.backend_add_account');
       }
@@ -2134,10 +2117,23 @@ async function startHost(
         sender(await answerAdopt(event));
         return;
       }
-      if (event.type === 'host.claude_settings_discard') {
+      if (event.type === 'host.claude_settings_set') {
         if (!isForThisHost(event.hostId, event.type)) return;
-        claudeSettingsFile.discard();
-        logger.info('Claude Code settings.json: the change made on this machine was discarded');
+        try {
+          writeClaudeSettingsJson(claudeHome, event.text);
+        } catch (err) {
+          if (!(err instanceof InvalidSettingsJsonError)) throw err;
+          const message = `host.claude_settings_set: ${selfHostId} — ${err.message}`;
+          logger.warn({ frameType: event.type }, message);
+          sender({
+            type: 'chat.error',
+            chatId: 'pending-spawn',
+            error: { code: 'claude_settings_invalid', message },
+            seq: OUT_OF_BAND_SEQ,
+          });
+          return;
+        }
+        logger.info('Claude Code settings.json edited');
         sender({
           type: 'claude_settings.updated',
           hostId: selfHostId,
@@ -4215,8 +4211,8 @@ async function startHost(
       },
       claudeSettings: {
         snapshot: claudeSettingsSnapshot,
-        discard: () => {
-          claudeSettingsFile.discard();
+        set: (text) => {
+          writeClaudeSettingsJson(claudeHome, text);
           emit({
             type: 'claude_settings.updated',
             hostId: selfHostId,

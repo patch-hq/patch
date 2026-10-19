@@ -60,7 +60,7 @@ export interface HostPresence {
    * Absent/null until the host has reported it — Settings then draws no editor
    * rather than an empty one that would read as "this machine has none".
    */
-  claudeSettings?: { drift?: string; memories: ClaudeMemoryEntry[] } | null;
+  claudeSettings?: { settingsJson: string; memories: ClaudeMemoryEntry[] } | null;
 }
 
 /**
@@ -153,7 +153,7 @@ interface PresenceState {
    */
   removeHost(hostId: string): void;
   /** One host's Claude Code settings + memory snapshot (`claude_settings.*`). */
-  setClaudeSettings(hostId: string, drift: string | undefined, memories: ClaudeMemoryEntry[]): void;
+  setClaudeSettings(hostId: string, settingsJson: string, memories: ClaudeMemoryEntry[]): void;
   /** A socket reached OPEN: clears the failure counters. */
   noteWsOpen(url: string): void;
   /** A socket closed (or a connect attempt failed): records why, counts it. */
@@ -272,7 +272,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
       return { hosts, daemon: anyOnline(hosts) ? 'online' : 'offline' };
     });
   },
-  setClaudeSettings(hostId, drift, memories) {
+  setClaudeSettings(hostId, settingsJson, memories) {
     set((s) => {
       const prev = s.hosts[hostId] ?? blankHost(hostId);
       return {
@@ -280,7 +280,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
           ...s.hosts,
           [hostId]: {
             ...prev,
-            claudeSettings: { ...(drift !== undefined ? { drift } : {}), memories },
+            claudeSettings: { settingsJson, memories },
           },
         },
       };

@@ -16,6 +16,7 @@
 // `--host` names another machine and forces the REST path, since another
 // machine's host is not reachable over this one's socket.
 
+import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
 import { emitJson, emitText, getTransport, run } from './_common.js';
@@ -222,11 +223,11 @@ export function registerHostsCommands(program: Command): void {
 
   const claudeSettings = hosts
     .command('claude-settings')
-    .description("That host's Claude Code memory entries and any settings.json drift");
+    .description("That host's Claude Code settings.json and memory entries");
 
   claudeSettings
     .command('get', { isDefault: true })
-    .description('Show memory entries and any settings.json drift')
+    .description('Show settings.json text and memory entries')
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
@@ -241,18 +242,18 @@ export function registerHostsCommands(program: Command): void {
     });
 
   claudeSettings
-    .command('discard')
-    .description("Rewrite that host's drifted settings.json from the shared settings")
+    .command('set <file>')
+    .description("Replace that host's settings.json from a file")
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
-    .action(async (opts: HostsOpts) => {
+    .action(async (file: string, opts: HostsOpts) => {
       await run(opts, async () => {
         const { t, path } = await hostRoute(
           opts,
-          '/claude-settings/discard',
-          () => '/api/hosts/claude-settings/discard',
+          '/claude-settings',
+          () => '/api/hosts/claude-settings',
         );
-        emitJson(await t.post<unknown>(path, {}));
+        emitJson(await t.post<unknown>(path, { text: readFileSync(file, 'utf8') }));
       });
     });
 

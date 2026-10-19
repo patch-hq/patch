@@ -1478,7 +1478,7 @@ export class WsHub {
       // a UI sender and a host handler; three of those four are no use.
       case 'host.backend_add_account':
       case 'host.backend_usage_refresh':
-      case 'host.claude_settings_discard':
+      case 'host.claude_settings_set':
       case 'host.claude_memory_delete':
       case 'host.claude_memory_set': {
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, event);
@@ -1742,7 +1742,7 @@ export class WsHub {
       this.lastClaudeSettings.set(event.hostId, {
         type: 'claude_settings.list',
         hostId: event.hostId,
-        ...(event.drift !== undefined ? { drift: event.drift } : {}),
+        settingsJson: event.settingsJson,
         memories: event.memories,
       });
     }

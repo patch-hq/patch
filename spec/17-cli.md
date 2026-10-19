@@ -40,15 +40,14 @@ patch hosts models [--host H]             # that host's model catalogue across i
 patch hosts install <component> [--host H]  # install an optional component (e.g. kokoro)
 patch hosts uninstall <component> [--host H]
 patch hosts update [--host H]             # apply an available daemon update
-patch hosts claude-settings [--host H]                    # that host's Claude Code memory entries and any settings.json drift
-patch hosts claude-settings discard [--host H]            # rewrite a drifted settings.json from the shared settings
+patch hosts claude-settings [--host H]                    # that host's Claude Code settings.json text and memory entries
+patch hosts claude-settings set <file> [--host H]         # replace that host's settings.json from a file
 patch hosts memory remove <project> <file> [--host H]     # delete one Claude Code memory entry
 patch hosts pair-device                   # on this machine only: open a five-minute window for a voice device to announce itself (16-voice-device.md)
 patch hosts remove --host H               # revoke a host (confirmed; names its chat count)
 
 patch settings                            # every shared setting, and each host's applied version (01-server.md § Settings)
 patch settings set <key> <value>          # change a shared setting, e.g. permission-mode, question-expiry, default-model
-patch settings claude <file>              # replace the shared Claude Code settings.json; --os darwin|linux for that OS's override
 patch accounts [<backend>]                # the shared backend accounts, in order
 patch accounts add <backend> --token T [--label L]
 patch accounts connect <backend> <accountId> --token T

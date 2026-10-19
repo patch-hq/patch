@@ -3943,6 +3943,59 @@ describe('host-scoped control endpoints (spec/02 § Control IPC)', () => {
     }
   });
 
+  // spec/02 § Claude Code settings: settings.json is the machine's own file,
+  // read and replaced over the host's socket; invalid text is refused, named.
+  it('reads and replaces this host’s settings.json, refusing text the host rejects', async () => {
+    const { daemon } = setup();
+    let text = '{"model":"opus"}';
+    const claudeSettings = {
+      snapshot: () => ({ settingsJson: text, memories: [] }),
+      set: (next: string) => {
+        if (next === 'nope') throw new Error('settings.json must be a JSON object');
+        text = next;
+      },
+      deleteMemory: () => undefined,
+    };
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      ...hostHooks({ claudeSettings }),
+    });
+    try {
+      const got = await app.inject({ method: 'GET', url: '/claude-settings', headers: AUTH });
+      expect(got.json()).toEqual({ settingsJson: '{"model":"opus"}', memories: [] });
+      const set = await app.inject({
+        method: 'POST',
+        url: '/claude-settings',
+        headers: AUTH,
+        payload: { text: '{"model":"haiku"}' },
+      });
+      expect(set.statusCode).toBe(200);
+      expect(set.json()).toMatchObject({ ok: true, settingsJson: '{"model":"haiku"}' });
+      const bad = await app.inject({
+        method: 'POST',
+        url: '/claude-settings',
+        headers: AUTH,
+        payload: { text: 'nope' },
+      });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json()).toMatchObject({
+        error: 'claude_settings_invalid',
+        message: 'settings.json must be a JSON object',
+      });
+      expect(text).toBe('{"model":"haiku"}');
+      const extra = await app.inject({
+        method: 'POST',
+        url: '/claude-settings',
+        headers: AUTH,
+        payload: { text: '{}', target: 'shared' },
+      });
+      expect(extra.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('removing a path that is not a project root 404s rather than reporting success', async () => {
     const { daemon } = setup();
     const app = await buildControl({ localKey: LOCAL_KEY, daemon, ...hostHooks() });

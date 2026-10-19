@@ -588,13 +588,14 @@ The host runs Claude Code against the user's own configuration (§ Runtime and
 installation), and two parts of it are visible and editable from Settings:
 
 - `settings.json` in the `~/.claude` the agent backend reads — permissions,
-  hooks, model, statusLine, output style, env and the rest. It is a shared
-  setting (`01-server.md` § Settings): one text for every host, plus an optional
-  override per OS (`darwin`, `linux`) whose top-level keys replace the shared
-  ones on hosts of that OS, for values such as hook paths that differ between
-  machines. The host writes the file from each snapshot. Shown and edited as
-  raw JSON; text that is not valid JSON is refused, naming why, rather than
-  stored.
+  hooks, model, statusLine, output style, env and the rest. It is that
+  machine's own file, not a shared setting: it is edited on one chosen host
+  and nothing copies it to another, so hook paths and the like can differ
+  between machines without any override. Settings shows the text as the host
+  holds it and Save sends the whole text to that host (`host.claude_settings_set`),
+  which replaces the file. Text that is not a JSON object is refused, naming
+  why, and the file is left as it was. A change made on the machine itself
+  (Claude Code, an editor) is simply the file; there is no drift to resolve.
 - Memory entries: Claude Code's own persistent-memory files, one per topic,
   under each project's `~/.claude/projects/<project>/memory/` alongside its
   `MEMORY.md` index. These stay on the host that wrote them, since they are
@@ -603,16 +604,8 @@ installation), and two parts of it are visible and editable from Settings:
   Deleting one also drops its line from that project's `MEMORY.md` index where
   present.
 
-Claude Code itself can change `settings.json` on the machine, and so can a
-person editing the file. The host watches it, and a file that no longer
-matches what the snapshot wrote is reported as drift on that host rather than
-overwritten or ignored. Settings offers two actions on it: take it into the
-shared text (or that OS's override), or discard it, which rewrites the file
-from the snapshot. A new snapshot does not overwrite a drifted file either;
-the drift stays reported until one of the two is chosen.
-
-The host publishes memory entries and any drift on connect and after every
-change (`03-wire-protocol.md` § Host events), and the local CLI socket carries
+The host publishes its `settings.json` text and memory entries on connect and
+after every change (`03-wire-protocol.md` § Host events), and the local CLI socket carries
 the same operations (§ Control IPC).
 
 ## Provider keys
@@ -626,9 +619,9 @@ and not Secrets (which are injected into chats, `15-design-mobile.md` §
 Settings tab).
 
 Provider keys are shared settings (`01-server.md` § Settings): set once on
-Settings → Keys and used by every host.
+Settings → Providers and used by every host.
 
-- A key comes from Settings → Keys, or from the host's own environment, read
+- A key comes from Settings → Providers, or from the host's own environment, read
   once at boot. A key set from Settings wins over the environment; revoking it
   lets a host's environment apply again. A key in one host's environment can
   be adopted from Settings as the shared value.
@@ -858,25 +851,25 @@ Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discover
 
 `patch <subcommand>` invoked on the host itself (e.g. while SSH'd in) talks to the running host over a Unix domain socket at `~/.patch/daemon.sock` (HTTP framing over the socket), not via the public WebSocket. The socket path is fixed under `~/.patch`, so the local CLI finds it without a port-discovery file. The socket is created mode `0600` (owner-only).
 
-| Endpoint                         | Verb | Purpose                                                                   |
-| -------------------------------- | ---- | ------------------------------------------------------------------------- |
-| `/list`                          | GET  | Active chats                                                              |
-| `/spawn-chat`                    | POST | Spawn a new chat in a folder                                              |
-| `/stop-chat`                     | POST | SIGTERM a tracked chat                                                    |
-| `/stop`                          | POST | Shut the host down                                                        |
-| `/host`                          | GET  | This host's self-description — the same content as its `host.host` report |
-| `/folders`                       | GET  | This host's folder registry                                               |
-| `/folders/add`                   | POST | Designate a project root                                                  |
-| `/folders/remove`                | POST | Drop a designated project root                                            |
-| `/backends`                      | GET  | Each backend's version and this host's view of its shared accounts        |
-| `/models`                        | GET  | This host's model catalogue across its backends                           |
-| `/components/install`            | POST | Install an optional component                                             |
-| `/components/remove`             | POST | Delete an installed component                                             |
-| `/claude-settings`               | GET  | This host's Claude Code memory entries and any settings.json drift        |
-| `/claude-settings/memory/delete` | POST | Delete one memory entry                                                   |
-| `/claude-settings/discard`       | POST | Rewrite a drifted settings.json from the last snapshot                    |
-| `/update`                        | POST | Apply an available host update                                            |
-| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)  |
+| Endpoint                         | Verb | Purpose                                                                        |
+| -------------------------------- | ---- | ------------------------------------------------------------------------------ |
+| `/list`                          | GET  | Active chats                                                                   |
+| `/spawn-chat`                    | POST | Spawn a new chat in a folder                                                   |
+| `/stop-chat`                     | POST | SIGTERM a tracked chat                                                         |
+| `/stop`                          | POST | Shut the host down                                                             |
+| `/host`                          | GET  | This host's self-description — the same content as its `host.host` report      |
+| `/folders`                       | GET  | This host's folder registry                                                    |
+| `/folders/add`                   | POST | Designate a project root                                                       |
+| `/folders/remove`                | POST | Drop a designated project root                                                 |
+| `/backends`                      | GET  | Each backend's version and this host's view of its shared accounts             |
+| `/models`                        | GET  | This host's model catalogue across its backends                                |
+| `/components/install`            | POST | Install an optional component                                                  |
+| `/components/remove`             | POST | Delete an installed component                                                  |
+| `/claude-settings`               | GET  | This host's Claude Code settings.json text and memory entries                  |
+| `/claude-settings/memory/delete` | POST | Delete one memory entry                                                        |
+| `/claude-settings`               | POST | Replace settings.json with `{text}`; text that is not a JSON object is refused |
+| `/update`                        | POST | Apply an available host update                                                 |
+| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)       |
 
 Below the chat endpoints, the socket carries every host-scoped control of
 `03-wire-protocol.md` § Host events that this host owns, one endpoint per

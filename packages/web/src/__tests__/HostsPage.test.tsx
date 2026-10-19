@@ -314,23 +314,6 @@ describe('Settings → Hosts', () => {
     );
   });
 
-  it('a settings.json changed on the machine is shown, and can be kept for every host or discarded', async () => {
-    reportHost('host-a', { hostName: 'laptop', platform: 'linux' });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
-    const adopt = vi
-      .spyOn(api, 'adoptClaudeSettings')
-      .mockResolvedValue(sharedState({ version: 2 }));
-    renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-claude-drift-text')).toHaveTextContent(
-      '"model":"sonnet"',
-    );
-    fireEvent.click(screen.getByTestId('host-host-a-claude-drift-keep-os'));
-    await waitFor(() => expect(adopt).toHaveBeenCalledWith('host-a', 'linux'));
-    fireEvent.click(screen.getByTestId('host-host-a-claude-drift-discard'));
-    expect(send).toHaveBeenCalledWith({ type: 'host.claude_settings_discard', hostId: 'host-a' });
-  });
-
   it('shows a host on battery with its charge, and a plugged-in one as plugged in', () => {
     reportHost('host-a', { hostName: 'laptop', power: { onBattery: true, percent: 12 } });
     reportHost('host-b', { hostName: 'desk', power: { onBattery: false, percent: 80 } });
@@ -341,11 +324,12 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-c-power')).toBeNull();
   });
 
-  it('shows no drift for a machine whose settings.json is in step', () => {
+  it('shows nothing about settings.json: it is edited under Providers', () => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportClaudeSettings('host-a');
+    reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
     renderPage('hosts');
-    expect(screen.queryByTestId('host-host-a-claude-drift')).toBeNull();
+    expect(screen.queryByText(/settings\.json/)).toBeNull();
+    expect(screen.queryByText(/Keep for/)).toBeNull();
   });
 
   it('Sign in on a codex backend hands the host to the ChatGPT sign-in on Usage', () => {

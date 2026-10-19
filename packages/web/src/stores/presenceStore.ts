@@ -47,7 +47,7 @@ export interface HostPresence {
    * (`claude_settings.list` / `.updated`, spec/02 § Claude Code settings);
    * null until the host has reported it.
    */
-  claudeSettings: { drift?: string; memories: ClaudeMemoryEntry[] } | null;
+  claudeSettings: { settingsJson: string; memories: ClaudeMemoryEntry[] } | null;
   /**
    * That host's folder registry (`folders.list` / `folders.updated`, spec/04 §
    * Folders): its designated project `roots` and the folders `recent` chats ran
@@ -139,7 +139,7 @@ interface PresenceState {
   /** One backend's credential state on one host (`host.account`). */
   setHostAccount(report: HostAccountEvent): void;
   /** One host's Claude Code settings + memory snapshot (`claude_settings.list` / `.updated`). */
-  setClaudeSettings(hostId: string, drift: string | undefined, memories: ClaudeMemoryEntry[]): void;
+  setClaudeSettings(hostId: string, settingsJson: string, memories: ClaudeMemoryEntry[]): void;
   /** One host's folder registry, replaced whole (`folders.list` / `.updated`). */
   setHostFolders(hostId: string, roots: string[], recent: string[]): void;
   /** A socket reached OPEN: clears the failure counters. */
@@ -261,14 +261,14 @@ export const usePresenceStore = create<PresenceState>((set) => ({
       return { hosts };
     });
   },
-  setClaudeSettings(hostId, drift, memories) {
+  setClaudeSettings(hostId, settingsJson, memories) {
     set((s) => {
       const prev = s.hosts[hostId] ?? blankHost(hostId);
       const hosts = {
         ...s.hosts,
         [hostId]: {
           ...prev,
-          claudeSettings: { ...(drift !== undefined ? { drift } : {}), memories },
+          claudeSettings: { settingsJson, memories },
         },
       };
       return { hosts };

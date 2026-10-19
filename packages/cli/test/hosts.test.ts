@@ -83,13 +83,13 @@ test('folders has add and remove under it', () => {
   assert.ok(subs.includes('remove'));
 });
 
-test('claude-settings has get (default) and discard under it, both taking --host', () => {
+test('claude-settings has get (default) and set under it, both taking --host', () => {
   const claudeSettings = hostsCmd(build()).commands.find((c) => c.name() === 'claude-settings');
   assert.ok(claudeSettings);
   const subs = claudeSettings.commands.map((c) => c.name());
   assert.ok(subs.includes('get'));
-  assert.ok(subs.includes('discard'));
-  for (const name of ['get', 'discard']) {
+  assert.ok(subs.includes('set'));
+  for (const name of ['get', 'set']) {
     const cmd = claudeSettings.commands.find((c) => c.name() === name);
     assert.ok(cmd);
     assert.ok(

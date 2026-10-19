@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { NO_SECRETS, reportHost, settingsUrl, stubSettingsApi } from './settingsHarness.js';
 
-// Real-browser e2e for Settings → Keys (spec/02 § Provider keys, spec/01 §
+// Real-browser e2e for Settings → Providers (spec/02 § Provider keys, spec/01 §
 // Settings). The keys are shared settings, held on the server: each row says
 // whether a key is set and its last four characters — never the value — and a
 // key only a host's environment supplies names that host and can be adopted.
@@ -18,12 +18,12 @@ const GEMINI_ON_DICTATION = {
   },
 };
 
-test.describe('Settings — Keys', () => {
+test.describe('Settings — Providers', () => {
   test('shows whether each key is set, and names the host whose environment supplies one', async ({
     page,
   }) => {
     await stubSettingsApi(page, { preferences: GEMINI_ON_DICTATION });
-    await page.goto(settingsUrl('keys'));
+    await page.goto(settingsUrl('providers'));
     await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Not set');
     await expect(page.getByTestId('provider-key-groq-status')).toHaveText(
       'From the environment on dev-host',
@@ -32,7 +32,7 @@ test.describe('Settings — Keys', () => {
     await expect(page.getByTestId('provider-key-groq-adopt')).toBeVisible();
   });
 
-  test('adding a key sends it once, masked, and the answer settles Keys; the host’s report settles Voice', async ({
+  test('adding a key sends it once, masked, and the answer settles Providers; the host’s report settles Voice', async ({
     page,
   }) => {
     const server = await stubSettingsApi(page, {
@@ -52,7 +52,7 @@ test.describe('Settings — Keys', () => {
     await expect(page.getByTestId('voice-dictation-keys')).toContainText(
       'GEMINI_API_KEY is missing',
     );
-    await page.getByTestId('settings-nav-keys').click();
+    await page.getByTestId('settings-nav-providers').click();
 
     await page.getByTestId('provider-key-gemini-edit').click();
     const input = page.getByTestId('provider-key-gemini-input');
@@ -88,7 +88,7 @@ test.describe('Settings — Keys', () => {
         ),
       },
     });
-    await page.goto(settingsUrl('keys'));
+    await page.goto(settingsUrl('providers'));
     await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Set · ends LAST');
     await page.getByTestId('provider-key-gemini-revoke').click();
     const dialog = page.getByRole('dialog');
@@ -101,7 +101,7 @@ test.describe('Settings — Keys', () => {
 
   test('adopting a host’s environment key sends that host to the server', async ({ page }) => {
     const server = await stubSettingsApi(page);
-    await page.goto(settingsUrl('keys'));
+    await page.goto(settingsUrl('providers'));
     await page.getByTestId('provider-key-groq-adopt').click();
     await expect
       .poll(() => server.writes)
@@ -123,7 +123,7 @@ test.describe('Settings — Keys', () => {
             }
           : undefined,
     });
-    await page.goto(settingsUrl('keys'));
+    await page.goto(settingsUrl('providers'));
     await page.getByTestId('provider-key-openai-edit').click();
     await page.getByTestId('provider-key-openai-input').fill('short');
     await page.getByTestId('provider-key-openai-save').click();

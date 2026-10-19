@@ -63,7 +63,6 @@ vi.mock('../src/api/rest', () => {
       removeHost: vi.fn(),
       addAccount: vi.fn(async () => SHARED),
       adoptAccount: vi.fn(async () => SHARED),
-      adoptClaudeSettings: vi.fn(async () => SHARED),
     },
   };
 });
@@ -523,23 +522,12 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(api.adoptAccount).toHaveBeenCalledWith('claude-code', 'h1');
     });
 
-    it('a settings.json changed on the machine is shown, with Keep and Discard', async () => {
+    it('shows nothing about settings.json: it is edited under Providers', () => {
       reportHost('h1', { hostName: 'laptop', platform: 'linux' });
       usePresenceStore.getState().setClaudeSettings('h1', '{"model":"sonnet"}', []);
       const r = render(<HostDetail hostId="h1" />);
-      expect(textOf(findHost(r.root, byTestId('host-h1-claude-drift-text')))).toContain('sonnet');
-      await actAsync(async () => {
-        findHost(r.root, byTestId('host-h1-claude-drift-keep-os')).props.onPress();
-        await flush();
-      });
-      expect(api.adoptClaudeSettings).toHaveBeenCalledWith('h1', 'linux');
-      await actAsync(() =>
-        findHost(r.root, byTestId('host-h1-claude-drift-discard')).props.onPress(),
-      );
-      expect(wsMock.send).toHaveBeenCalledWith({
-        type: 'host.claude_settings_discard',
-        hostId: 'h1',
-      });
+      expect(queryHost(r.root, byTestId('host-h1-claude-drift'))).toBeNull();
+      expect(queryHost(r.root, byTestId('host-h1-claude-drift-discard'))).toBeNull();
     });
 
     it('Sign in on an offline machine is refused, naming it', async () => {
