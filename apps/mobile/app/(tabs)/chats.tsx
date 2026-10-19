@@ -26,6 +26,7 @@ import { useChatStore } from '../../src/stores/chatStore';
 import { ChatRowItem, useSettledPreview } from '../../src/components/ChatRow';
 import { BatchView } from '../../src/components/BatchView';
 import { OfflineBanner } from '../../src/components/OfflineBanner';
+import { AppUpdateBanner } from '../../src/components/AppUpdateBanner';
 import { HostOfflineBanner } from '../../src/components/HostOfflineBanner';
 import { EmptyState } from '../../src/components/EmptyState';
 import { EMPTY_STATES } from '../../src/lib/emptyStates';
@@ -884,6 +885,7 @@ export default function ChatsScreen(): React.ReactElement {
       <SidebarViewMenu />
       <OfflineBanner />
       <HostOfflineBanner />
+      <AppUpdateBanner />
       {batchMode ? (
         <BatchView />
       ) : serverQuery !== null ? (

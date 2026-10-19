@@ -18,6 +18,21 @@ export function __setChannel(v: string | null): void {
   channel = v;
 }
 
+// The native runtime this build reports; matches app.config.ts.
+export let runtimeVersion: string | null = '0.1.6';
+export function __setRuntimeVersion(v: string | null): void {
+  runtimeVersion = v;
+}
+
+// The runtime update-URL override (updateSource.ts). Recorded, not applied:
+// like the real module, it would only take effect at the next launch.
+export let __override: { updateUrl: string; requestHeaders: Record<string, string> } | null = null;
+export function setUpdateURLAndRequestHeadersOverride(
+  config: { updateUrl: string; requestHeaders: Record<string, string> } | null,
+): void {
+  __override = config;
+}
+
 // Retained for otaUpdates' own tests. buildInfo.ts no longer reads these: the
 // running bundle's identity is inlined into it by Metro, and `createdAt` can
 // describe a DOWNLOADED-but-not-launched update rather than the running one.

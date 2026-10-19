@@ -19,6 +19,9 @@ import { installRelayTransport } from '../src/lib/relayTransport';
 import { bootstrap } from '../src/lib/bootstrap';
 import { startCrashCapture } from '../src/lib/crashReport';
 import { checkForOtaUpdate, startOtaUpdatePolling } from '../src/lib/otaUpdates';
+import { startPublishedApkPolling } from '../src/lib/publishedApk';
+import { installApk } from '../src/lib/apkInstall';
+import { pointUpdatesAtServer } from '../src/lib/updateSource';
 import { resolveNotificationAction } from '../src/lib/notificationLink';
 import { resolveDeepLink } from '../src/lib/deepLink';
 import { initShareIntent } from '../src/lib/nativeShare';
@@ -49,7 +52,13 @@ import { useBatchStore } from '../src/stores/batchStore';
 installRelayTransport();
 
 /** Every in-app destination this layout can be asked to open. */
-type NavTarget = `/chats/${string}` | '/new-chat' | '/share' | '/(tabs)/chats' | '/(tabs)/settings';
+type NavTarget =
+  | `/chats/${string}`
+  | '/new-chat'
+  | '/share'
+  | '/(tabs)/chats'
+  | '/(tabs)/settings'
+  | '/settings/updates';
 
 /**
  * How long a held navigation waits for the root navigator. Fonts load and the
@@ -92,6 +101,8 @@ export default function RootLayout(): React.ReactElement | null {
     // only DOWNLOADED — it launches at the next cold start, so startup is never
     // interrupted by a reload (spec/11 § Mobile OTA "NO automatic reload").
     startCrashCapture();
+    // Updates come from the paired server; set that before anything checks.
+    pointUpdatesAtServer();
     void checkForOtaUpdate();
     void bootstrap();
     // Android share-sheet entry point (spec/15 ## Mobile equivalent of the
@@ -99,8 +110,14 @@ export default function RootLayout(): React.ReactElement | null {
     // that arrive while it's already running (src/lib/nativeShare.ts).
     initShareIntent();
     // Keep checking while the app stays open — a launch-only check leaves a
-    // long-lived app on old JS indefinitely.
-    return startOtaUpdatePolling();
+    // long-lived app on old JS indefinitely. And keep reading the published
+    // APK, which is how a build that needs INSTALLING is noticed.
+    const stopOta = startOtaUpdatePolling();
+    const stopApk = startPublishedApkPolling();
+    return () => {
+      stopOta();
+      stopApk();
+    };
   }, []);
 
   // Navigation readiness (spec/15 § Push notifications — a tap that arrives
@@ -220,6 +237,11 @@ export default function RootLayout(): React.ReactElement | null {
     } else if (action.type === 'chats') {
       // Handover push (spec/09 § Handing over to the phone) — the chat list.
       navigateWhenReady('/(tabs)/chats');
+    } else if (action.type === 'install') {
+      // A build that needs installing: Updates shows the progress, and the
+      // download starts at once when the push named the file.
+      navigateWhenReady('/settings/updates');
+      if (action.url) void installApk(action.url, action.version ?? 'update');
     } else if (action.type === 'settings') {
       // Account sign-in expired — the accounts live in Settings.
       navigateWhenReady('/(tabs)/settings');

@@ -107,6 +107,9 @@ const PASS_THROUGH = [
   /^patch-host-.+\.tar\.gz(\.sig)?$/,
   /^patch-.+\.apk$/,
   /^android-latest\.json$/,
+  // The phone's signed update manifest. Only the manifest: the files it names
+  // stay on the release, where the signed URLs point (spec/11 § Mobile updates).
+  /^mobile-update\.json$/,
   /^latest-mac\.yml$/,
   /^.+\.zip(\.blockmap)?$/,
   /^desktop-latest\.json$/,
@@ -241,6 +244,7 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
     const MANIFESTS = new Set([
       'host-latest.json',
       'android-latest.json',
+      'mobile-update.json',
       'latest-mac.yml',
       'desktop-latest.json',
     ]);

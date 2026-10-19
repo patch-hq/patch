@@ -116,7 +116,7 @@ No SQLite. If we hit limits, that's a separate spec change.
 - expo-notifications for the Expo push token, local notification channels, and call/message handling.
 - react-native-callkeep + a custom Expo config plugin for Android `ConnectionService` (Manager incoming-call UI). TBD: confirm callkeep covers the foreground-service + audio-focus story before group 21 — fallback is a hand-rolled native module.
 - expo-av for audio I/O; react-native-webrtc if we need lower-level access for voice.
-- expo-updates for JS-only over-the-air delivery via EAS Update (`11-deployment.md` § Mobile OTA).
+- expo-updates for JS-only over-the-air delivery, signed in CI and served by the paired server (`11-deployment.md` § Mobile updates); expo-intent-launcher to install a new APK in place.
 - Build with `expo prebuild && cd android && ./gradlew assembleRelease`. The APK is installed via `adb install` or sideload; no Play Store distribution.
 
 ## Voice device firmware

@@ -75,6 +75,8 @@ const MANAGER_SWEEP_TICK_MS = 10_000;
 // less frequent tick than the watch loop's is enough.
 const THREAD_ROTATION_TICK_MS = 30_000;
 import { registerLinkPreviewRoutes } from './link-preview-routes.js';
+import { RELEASE_REPO } from './release-channel.js';
+import { MobileUpdateNotifier, registerMobileUpdateRoutes } from './mobile-updates.js';
 import { registerClientCrashRoutes } from './client-crash-routes.js';
 import { SecretsRegistry } from './secrets-registry.js';
 import { registerSecretsRoutes } from './secrets-routes.js';
@@ -995,6 +997,24 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         .send(createReadStream(artifact));
     },
   );
+
+  // Phone updates from the followed release (spec/11 § Mobile updates): the
+  // update check, and one notice when a release needs a new APK.
+  registerMobileUpdateRoutes(app, {
+    downloadsDir,
+    logger: log.child({ component: 'mobile-updates' }),
+  });
+  const announceDataDir = opts.dataDir ?? registry.dataDir;
+  if (announceDataDir) {
+    const stopAnnouncing = new MobileUpdateNotifier({
+      downloadsDir,
+      dataDir: announceDataDir,
+      repo: RELEASE_REPO,
+      router: notificationRouter,
+      logger: log.child({ component: 'mobile-updates' }),
+    }).start();
+    app.addHook('onClose', async () => stopAnnouncing());
+  }
 
   // Public desktop-shell update feed (spec/11 § Version reporting). This is what
   // electron-updater's `generic` provider polls: it fetches `latest-mac.yml`,

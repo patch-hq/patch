@@ -3,8 +3,8 @@
 // running build, last check date, and a manual check).
 //
 // Check now in the header; Behind — each thing that is behind with the action
-// that fixes it (Restart to update, Download APK, a host's Update, drift with
-// its remedy); Versions — this app and every layer from GET /api/version at
+// that fixes it (Restart to update, Install, a host's Update, drift with its
+// remedy); Versions — this app and every layer from GET /api/version at
 // once; Last checked with the status sentence. buildInfo + updateCheck are
 // mocked so every render/outcome branch is driven deterministically — their
 // own logic is covered by their unit tests.
@@ -34,22 +34,15 @@ import {
   flush,
 } from './testUtils/render';
 import { api } from '../src/api/rest';
-import {
-  __clearLastAlert,
-  __getLastAlert,
-  __getLinkingOpenedUrls,
-  __resetLinkingOpenedUrls,
-} from './stubs/react-native';
+import { __clearLastAlert, __getLastAlert } from './stubs/react-native';
 import { __resetRouterMock } from './stubs/expo-router';
 import { mobileBuildInfo } from '../src/lib/buildInfo';
-import { getLastCheckedAt, runUpdateCheck, fetchPublishedApk } from '../src/lib/updateCheck';
+import { getLastCheckedAt, runUpdateCheck } from '../src/lib/updateCheck';
+import { refreshPublishedApk, usePublishedApkStore } from '../src/lib/publishedApk';
+import { installApk, useApkInstallStore } from '../src/lib/apkInstall';
+import { updateSourceProblem } from '../src/lib/updateSource';
 import * as Updates from 'expo-updates';
-import {
-  __setUseUpdates,
-  __resetUseUpdates,
-  __setChannel,
-  __setEnabled,
-} from './stubs/expo-updates';
+import { __setUseUpdates, __resetUseUpdates, __setEnabled } from './stubs/expo-updates';
 import { reportHost, resetHosts } from './testUtils/settingsFixtures';
 
 const wsMock = { send: vi.fn() };
@@ -60,13 +53,26 @@ vi.mock('../src/lib/buildInfo', () => ({ mobileBuildInfo: vi.fn() }));
 vi.mock('../src/lib/updateCheck', () => ({
   getLastCheckedAt: vi.fn(),
   runUpdateCheck: vi.fn(),
-  fetchPublishedApk: vi.fn(),
 }));
+// The real stores; only the network read and the install are stood in for.
+vi.mock('../src/lib/publishedApk', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/publishedApk')>()),
+  refreshPublishedApk: vi.fn(async () => undefined),
+}));
+vi.mock('../src/lib/apkInstall', async (orig) => ({
+  ...(await orig<typeof import('../src/lib/apkInstall')>()),
+  installApk: vi.fn(async () => undefined),
+}));
+vi.mock('../src/lib/updateSource', () => ({ updateSourceProblem: vi.fn() }));
 
 const buildInfoMock = vi.mocked(mobileBuildInfo);
 const getLastCheckedAtMock = vi.mocked(getLastCheckedAt);
 const runUpdateCheckMock = vi.mocked(runUpdateCheck);
-const fetchPublishedApkMock = vi.mocked(fetchPublishedApk);
+const refreshMock = vi.mocked(refreshPublishedApk);
+const installMock = vi.mocked(installApk);
+const problemMock = vi.mocked(updateSourceProblem);
+const publish = (apk: typeof NEEDS_INSTALL | null, error: string | null = null): void =>
+  usePublishedApkStore.setState({ apk, error });
 
 const REPORT: VersionReport = {
   checkedAt: '2026-09-24T10:00:00.000Z',
@@ -101,12 +107,15 @@ const REPORT: VersionReport = {
   drift: [],
 };
 
-const NEWER_APK = {
+/** A published build on another native runtime: only installing reaches it. */
+const NEEDS_INSTALL = {
   version: '0.1.1',
   gitSha: 'f997fc3',
   builtAt: '2026-09-18T10:34:48.609Z',
   url: 'https://example.test/patch.apk',
   newer: true,
+  runtimeVersion: '0.1.7',
+  needsInstall: true,
 };
 
 beforeEach(() => {
@@ -114,18 +123,18 @@ beforeEach(() => {
   wsMock.send.mockReset();
   __resetRouterMock();
   __clearLastAlert();
-  __resetLinkingOpenedUrls();
   resetHosts();
   buildInfoMock.mockReset().mockReturnValue({ version: 'dev' });
   getLastCheckedAtMock.mockReset().mockReturnValue(null);
   runUpdateCheckMock.mockReset().mockResolvedValue({ status: 'current' });
-  fetchPublishedApkMock.mockReset().mockResolvedValue(null);
+  refreshMock.mockClear();
+  installMock.mockClear();
+  publish(null);
+  useApkInstallStore.setState({ state: { phase: 'idle' } });
+  // A release build whose launch is checking its paired server.
+  problemMock.mockReset().mockReturnValue(null);
   __resetUseUpdates();
-  // A real release build: updates are on and the build carries a channel. The
-  // stub defaults to the dev/Expo Go shape (disabled), which is a different
-  // branch of the page and is covered by its own test below.
   __setEnabled(true);
-  __setChannel('preview');
   vi.spyOn(Updates, 'reloadAsync').mockReset().mockResolvedValue();
 });
 
@@ -213,7 +222,7 @@ describe('Settings — Updates — page', () => {
     const r = await mount();
     expect(behind(r)).toBeNull();
     expect(queryHost(r.root, byTestId('restart-to-update'))).toBeNull();
-    expect(queryHost(r.root, byTestId('download-apk'))).toBeNull();
+    expect(queryHost(r.root, byTestId('install-apk'))).toBeNull();
   });
 });
 
@@ -290,87 +299,67 @@ describe('Settings — Updates — this app', () => {
     expect(status(r)).toBe("Couldn't check for updates: manifest 500");
   });
 
-  // A build with no channel can never receive an OTA, so the honest answer is
-  // the APK — offered as the one download, in Behind.
-  it('a build that cannot update itself says so and offers the APK', async () => {
-    __setChannel(null);
-    fetchPublishedApkMock.mockResolvedValue({ ...NEWER_APK, version: '0.1.0' });
-    const r = await mount();
-    expect(status(r)).toBe(
-      'This build cannot update itself — it has no update channel. Install the latest APK.',
+  // A launch not yet checking its server (newly paired, or relayed) says why,
+  // rather than reading as current (spec/11 § Mobile updates).
+  it('says why there is no update check when this launch has none', async () => {
+    problemMock.mockReturnValue(
+      'Updates from this server start at the next launch. Restart the app.',
     );
-    const group = behind(r)!;
-    expect(hasText(group, 'dev → 0.1.0')).toBe(true);
-    const dl = findHost(group, byTestId('download-apk'));
-    expect(textOf(dl)).toBe('Download APK');
-    await actAsync(() => dl.props.onPress());
-    expect(__getLinkingOpenedUrls()).toEqual(['https://example.test/patch.apk']);
-  });
-
-  it('updates switched off entirely reads the same as no channel', async () => {
-    __setEnabled(false);
     const r = await mount();
-    expect(status(r)).toBe(
-      'This build cannot update itself — it has no update channel. Install the latest APK.',
-    );
+    expect(status(r)).toBe('Updates from this server start at the next launch. Restart the app.');
   });
 
-  // The APK is a download from the server's own address; a phone that reaches its
-  // server through a relay has none, and takes its updates over the air.
-  it('offers no APK download on a route through a relay, newer or not', async () => {
-    const { setRoute } = await import('../src/config');
-    setRoute({
-      kind: 'relay',
-      relay: { url: 'wss://relay.example.com', channel: 'c', serverKey: 'k' },
-    });
-    try {
-      fetchPublishedApkMock.mockResolvedValue({ ...NEWER_APK, version: '0.1.0' });
-      const r = await mount();
-      expect(queryHost(r.root, byTestId('download-apk'))).toBeNull();
-    } finally {
-      (await import('./stubs/mmkv')).__clearAllMmkv();
-    }
-  });
-
-  it('offers no APK download while the published APK is not newer', async () => {
-    fetchPublishedApkMock.mockResolvedValue({ ...NEWER_APK, newer: false });
-    const r = await mount();
-    expect(queryHost(r.root, byTestId('download-apk'))).toBeNull();
-    expect(behind(r)).toBeNull();
-    // Checked regardless of channel — see the next test for why.
-    expect(fetchPublishedApkMock).toHaveBeenCalled();
-  });
-
-  it('a failed APK lookup offers nothing and says nothing of its own', async () => {
-    fetchPublishedApkMock.mockRejectedValue(new Error('HTTP 502'));
-    const r = await mount();
-    expect(queryHost(r.root, byTestId('download-apk'))).toBeNull();
-    expect(queryHost(r.root, byTestId('update-status'))).toBeNull();
-  });
-
-  // A native change bumps `runtimeVersion`, and every OTA published after that
-  // point is invisible to a phone still on the old native shell —
-  // `checkForUpdateAsync` reports nothing FOR THAT RUNTIME forever, which reads
-  // identically to genuinely current.
-  it('a build stuck on an old native runtime points at the APK, not "Up to date"', async () => {
-    fetchPublishedApkMock.mockResolvedValue(NEWER_APK);
+  // A native change bumps `runtimeVersion`, and the server offers that phone
+  // nothing over the air — which would read as "Up to date". The published
+  // build on another runtime is offered instead, and installs in place.
+  it('a build that needs installing says so, and Install installs it in place', async () => {
+    publish(NEEDS_INSTALL);
     buildInfoMock.mockReturnValue({ version: '0.1.0' });
     const r = await mount();
     await checkNow(r);
-    expect(status(r)).toBe('A newer build is out. Install it directly.');
+    expect(status(r)).toBe('A new build needs installing.');
     expect(hasText(r.root, 'Up to date.')).toBe(false);
     expect(hasText(behind(r)!, '0.1.0 → 0.1.1')).toBe(true);
-    expect(textOf(findHost(r.root, byTestId('download-apk')))).toBe('Download APK');
-    // Check now stays available.
-    expect(findHost(r.root, byTestId('check-updates'))).toBeTruthy();
+    const button = findHost(r.root, byTestId('install-apk'));
+    expect(textOf(button)).toBe('Install');
+    await actAsync(() => button.props.onPress());
+    expect(installMock).toHaveBeenCalledWith('https://example.test/patch.apk', '0.1.1');
+    // Check now re-reads the published build too.
+    expect(refreshMock).toHaveBeenCalled();
   });
 
-  it('a pending OTA wins over a newer APK: restart only, no download', async () => {
+  it('shows the download as it happens, and holds the button until it is done', async () => {
+    publish(NEEDS_INSTALL);
+    useApkInstallStore.setState({
+      state: { phase: 'downloading', version: '0.1.1', fraction: 0.5 },
+    });
+    const r = await mount();
+    expect(status(r)).toBe('Downloading Patch 0.1.1 · 50%');
+    const button = findHost(r.root, byTestId('install-apk'));
+    expect(textOf(button)).toBe('Installing…');
+    expect(button.props.disabled ?? button.props.accessibilityState?.disabled).toBeTruthy();
+  });
+
+  it('offers no install for a newer build this phone gets over the air', async () => {
+    publish({ ...NEEDS_INSTALL, runtimeVersion: '0.1.6', needsInstall: false });
+    const r = await mount();
+    expect(queryHost(r.root, byTestId('install-apk'))).toBeNull();
+    expect(behind(r)).toBeNull();
+  });
+
+  it('a failed APK lookup offers nothing and says nothing of its own', async () => {
+    publish(null, 'HTTP 502');
+    const r = await mount();
+    expect(queryHost(r.root, byTestId('install-apk'))).toBeNull();
+    expect(queryHost(r.root, byTestId('update-status'))).toBeNull();
+  });
+
+  it('a pending OTA wins over a build to install: restart only', async () => {
     __setUseUpdates({ isUpdatePending: true });
-    fetchPublishedApkMock.mockResolvedValue(NEWER_APK);
+    publish(NEEDS_INSTALL);
     const r = await mount();
     expect(findHost(r.root, byTestId('restart-to-update'))).toBeTruthy();
-    expect(queryHost(r.root, byTestId('download-apk'))).toBeNull();
+    expect(queryHost(r.root, byTestId('install-apk'))).toBeNull();
   });
 });
 
@@ -554,7 +543,7 @@ describe('useUpdatesBehind', () => {
 
   it('is false when nothing is behind', async () => {
     reportHost('h1', { updateAvailable: false });
-    fetchPublishedApkMock.mockResolvedValue({ ...NEWER_APK, newer: false });
+    publish({ ...NEEDS_INSTALL, needsInstall: false });
     expect(await read()).toBe('no');
   });
 
@@ -563,8 +552,8 @@ describe('useUpdatesBehind', () => {
     expect(await read()).toBe('yes');
   });
 
-  it('is true when a newer APK is published', async () => {
-    fetchPublishedApkMock.mockResolvedValue(NEWER_APK);
+  it('is true when a build needs installing', async () => {
+    publish(NEEDS_INSTALL);
     expect(await read()).toBe('yes');
   });
 
@@ -575,19 +564,7 @@ describe('useUpdatesBehind', () => {
   });
 
   it('is false when the APK lookup fails', async () => {
-    fetchPublishedApkMock.mockRejectedValue(new Error('HTTP 502'));
+    publish(null, 'HTTP 502');
     expect(await read()).toBe('no');
-  });
-
-  it('ignores an APK answer that lands after unmount', async () => {
-    let resolve!: (v: typeof NEWER_APK) => void;
-    fetchPublishedApkMock.mockReturnValue(new Promise((res) => (resolve = res)));
-    const r = renderRN(<Harness />);
-    await actAsync(() => r.unmount());
-    await actAsync(async () => {
-      resolve(NEWER_APK);
-      await flush();
-    });
-    expect(r.toJSON()).toBeNull();
   });
 });

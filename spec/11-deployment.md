@@ -214,7 +214,7 @@ TODOIST_WEBHOOK_SECRET=...
 
 # Push (Android) — nothing to set here. The server posts to Expo's push API,
 # which takes no server-side credential; the FCM V1 credentials that actually
-# reach the device are a one-time upload to the EAS project (see § Mobile OTA).
+# reach the device are a one-time upload to the EAS project (see § Mobile updates).
 
 # Voice
 WHISPER_BACKEND=groq         # or "local" for self-hosted
@@ -295,7 +295,7 @@ immutable` — safe to cache forever because a rebuild changes their filename.
   that makes the reload automatic.
 - mobile: native vs JS. A native change (new module, permission, icon,
   `app.config` plugin, `version` bump) needs a fresh APK; a JS-only change
-  ships over the air (OTA, below) with no reinstall.
+  ships over the air (§ Mobile updates) with no reinstall.
 - verify, don't trust exit 0. Poll `GET /api/healthz` until `gitSha` matches
   HEAD (fail loudly on timeout); assert the published APK URL returns 200. NO
   FALLBACK — any failed step aborts.
@@ -303,43 +303,73 @@ immutable` — safe to cache forever because a rebuild changes their filename.
 - Single monorepo: `projects/patch/` contains `packages/{server,host,cli,web,wire,auth,desktop}` and `apps/mobile`.
 - Built in place on one box — no registry, no CI.
 
-## Mobile OTA (Expo Android)
+## Mobile updates (Android)
 
-JS-only changes to the mobile app ship over the air via EAS Update — no new
-APK, no reinstall.
+The phone updates the way the hosts and the desktop app do: from the server it
+is paired to, which mirrors the GitHub release on the channel it follows. Nothing
+reaches a phone that is not in a release, and a stable server's phones get only
+stable code.
 
-- Config. `expo-updates` is installed; `apps/mobile/app.config.ts` sets
-  `updates.url = https://u.expo.dev/<easProjectId>`, `updates.checkAutomatically
-= 'ON_LOAD'`, and `runtimeVersion: { policy: 'appVersion' }`. The committed
-  `android/.../AndroidManifest.xml` carries the matching `expo.modules.updates.*`
-  meta-data (ENABLED, EXPO_UPDATE_URL, EXPO_RUNTIME_VERSION, check-on-launch).
-- Launch behaviour. The mobile app runs a check → fetch on launch from the
-  root layout, and re-checks on a 30-minute timer and on every background →
-  foreground transition while it stays open. It is best-effort and non-blocking
-  (`fallbackToCacheTimeout: 0`): the app boots on the bundle it already has and
-  a newer one downloads behind it. A no-op in dev / Expo Go.
-- NO automatic reload. No automatic path reloads into a fetched update —
-  `expo-updates` launches the downloaded bundle by itself at the next cold
-  start. Reloading on launch made the app paint the old bundle and then restart
-  into the new one, which reads as a white flash and a second load; reloading
-  while the app is open restarts it mid-use. The only reload in the app is the
-  one the user presses: Settings → Version → "Restart to update", which appears
-  whenever a bundle is downloaded and pending.
-- Runtime-version gate (NO broken OTA). An update is delivered only to a
-  build whose `runtimeVersion` matches the published branch. `appVersion` policy
-  ties the runtime to the app `version`, so a NATIVE change (new permission /
-  native module / callkeep / `version` bump) needs a fresh binary rather than a JS-only
-  OTA — it requires a fresh APK.
-- First OTA-capable build. Enabling `expo-updates` is itself a native change,
-  so the first APK carrying it must be built + installed once. Every JS-only
-  change after that ships via EAS Update (`preview` branch) — no new APK. See
-  Deploy guide above.
-- Push credentials. A one-time upload, made by the app publisher, not a
-  deploy step: the Firebase project's FCM V1 service-account key is uploaded
-  to the EAS project (`eas credentials`), which is what lets Expo's push API
-  actually deliver to the device. `google-services.json` stays committed in
-  the mobile app so the native build links to that Firebase project; neither
-  credential is ever read by the server.
+- Two kinds of update. A JS-only change ships over the air: no new APK, no
+  reinstall. A native change (new module, permission, `app.config` plugin)
+  bumps `runtimeVersion` in `apps/mobile/app.config.ts` and needs a new APK,
+  which the phone installs in place (below). An over-the-air update is only
+  ever offered to a phone on its own runtime, so JS can never land on native
+  code it needs and does not have.
+- Built and signed in CI. The release workflow's `mobile-update` job runs
+  `scripts/build-mobile-update.mjs`: `expo export` for android (with this
+  commit's version stamps, checked present in the bundle), then an Expo Updates
+  manifest naming every file by its URL on the GitHub release, signed with
+  `PATCH_UPDATE_SIGNING_KEY`. The bundle and its assets become release files
+  (`mobile-update-<md5>.<ext>`) beside `mobile-update.json`, the signed manifest.
+  Promoting a release re-publishes the same files, so the signature still holds.
+- Served by the server. The release mirror copies `mobile-update.json` (and not
+  the files it names, which stay on the release). `GET /api/mobile/updates` is
+  the update check (Expo Updates protocol v1, unauthenticated like the APK
+  download): the signed manifest, relayed byte for byte with its
+  `expo-signature`, to a phone on the same runtime; `204` to a phone on another
+  runtime or already running it; `404` when nothing is published. The server
+  cannot change what a phone runs — the manifest pins every file by hash and
+  the app refuses a manifest not signed by the key behind its certificate —
+  only whether it is offered.
+- Pointed at by the app. The APK has no server address built in, so the app
+  hands the paired server's `/api/mobile/updates` to expo-updates at runtime
+  (`setUpdateURLAndRequestHeadersOverride`, which needs
+  `disableAntiBrickingMeasures`; code signing is what makes that safe, and
+  expo-updates still rolls back an update that crashes on launch). The
+  override takes effect from the next launch, and nothing checks before a
+  launch is using it: there is no native check on launch
+  (`checkAutomatically: 'NEVER'`), and `src/lib/updateSource.ts` only lets the
+  JS check once the override was in place when the launch began. A phone
+  reached through the relay cannot use it — native code has no relay
+  connection — and moves on by installing APKs; Settings → Updates says so.
+- Checking. The app checks at launch, every 30 minutes and on every return to
+  the foreground, and only downloads. NO automatic reload: expo-updates
+  launches a downloaded bundle at the next cold start (reloading on launch was
+  a white flash and a second load). The one reload is the user's: Settings →
+  Updates → "Restart to update".
+- A new APK. `android-latest.json` carries the APK's `runtimeVersion`. When it
+  differs from the last one announced, the server sends the phone one silent
+  push (`kind: 'app-update'`, never held back by presence), linking the APK on
+  the release; it records what it announced on disk, since it restarts itself
+  to install the release that carries the news. A tap downloads the APK inside
+  the app and opens Android's installer (`expo-intent-launcher`,
+  `REQUEST_INSTALL_PACKAGES`); Android asks the user to confirm, as it does for
+  anything installed outside a store. An app from before this opens the same
+  link in the browser, because the push names it. The chat list shows an
+  "Install Patch <version>" banner, and Settings → Updates an Install row,
+  whenever the published APK is newer and on another runtime.
+- The signing key. `PATCH_UPDATE_SIGNING_KEY` is in the password manager
+  (`patch-update-signing-key`); its certificate is
+  `apps/mobile/certs/certificate.pem`, valid to 2056. Losing the key means no
+  installed app accepts another over-the-air update until it installs an APK
+  carrying a new certificate.
+- Push credentials, not updates. Notifications still go through Expo's push
+  API, and that is the one thing the EAS project is for: the Firebase
+  project's FCM V1 service-account key is uploaded to it once by the app
+  publisher (`eas credentials`), which is what lets Expo deliver to the device.
+  `google-services.json` stays committed so the native build links to that
+  Firebase project; neither credential is read by the server.
 
 ## Version reporting
 

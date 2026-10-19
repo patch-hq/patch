@@ -1,6 +1,7 @@
 // OTA update check-and-FETCH (spec/11 § Mobile OTA).
 //
-// JS-only changes ship via EAS Update without a new APK. Nothing here ever
+// JS-only changes ship as a signed update from the paired server, without a
+// new APK (spec/11 § Mobile updates; where it comes from: updateSource.ts). Nothing here ever
 // reloads: the automatic paths DOWNLOAD a newer bundle and leave the running
 // one alone, and expo-updates launches the downloaded bundle by itself on the
 // next cold start.
@@ -12,11 +13,10 @@
 // worse: the 30-minute timer and every background -> foreground transition
 // could restart the app under him mid-use.
 //
-// The native layer already does the right thing without our help
-// (`app.config.ts`: `checkAutomatically: 'ON_LOAD'`, `fallbackToCacheTimeout:
-// 0`; AndroidManifest `EXPO_UPDATES_CHECK_ON_LAUNCH=ALWAYS`,
-// `EXPO_UPDATES_LAUNCH_WAIT_MS=0`), so a fetched update costs the user nothing
-// and applies at the next natural start. The only reload left in the app is the
+// The native layer never checks by itself (`app.config.ts`:
+// `checkAutomatically: 'NEVER'`) — it does not know the server's address — so
+// these checks are the only ones. A fetched update costs the user nothing and
+// applies at the next natural start. The only reload left in the app is the
 // one the user presses themself — Settings -> Version -> "Restart to update", which
 // also names the pending update so a downloaded-but-not-running bundle is never
 // invisible.
@@ -28,6 +28,7 @@
 import { AppState, type NativeEventSubscription } from 'react-native';
 import * as Updates from 'expo-updates';
 import { recordUpdateCheck } from './updateCheck';
+import { updateSource } from './updateSource';
 
 /**
  * Check for an OTA update and, if one is available, fetch it — and stop there.
@@ -43,6 +44,8 @@ import { recordUpdateCheck } from './updateCheck';
 export async function checkForOtaUpdate(): Promise<void> {
   // `isEnabled` is false in Expo Go and in dev builds — nothing to do.
   if (__DEV__ || !Updates.isEnabled) return;
+  // Not before this launch is pointed at the paired server (updateSource.ts).
+  if (updateSource().state !== 'active') return;
   try {
     const result = await Updates.checkForUpdateAsync();
     // Record the check so Settings → Version shows an accurate "Last checked",

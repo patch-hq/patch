@@ -68,6 +68,7 @@ export default defineConfig({
       'react-native-webview': path.resolve(__dirname, '__tests__/stubs/webview.ts'),
       'expo-av': path.resolve(__dirname, '__tests__/stubs/expo-av.ts'),
       'expo-file-system': path.resolve(__dirname, '__tests__/stubs/expo-file-system.ts'),
+      'expo-intent-launcher': path.resolve(__dirname, '__tests__/stubs/expo-intent-launcher.ts'),
       'expo-camera': path.resolve(__dirname, '__tests__/stubs/expo-camera.ts'),
       'expo-notifications': path.resolve(__dirname, '__tests__/stubs/expo-notifications.ts'),
       'expo-router': path.resolve(__dirname, '__tests__/stubs/expo-router.ts'),

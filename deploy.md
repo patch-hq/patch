@@ -14,7 +14,9 @@ Push to `main`. That is the whole release process.
    swaps `current`, restarts the server and waits for `/api/healthz`.
 3. **Hosts, the desktop app and the phone** update from their server, as they
    always have: a host is told to update as it reconnects, the desktop app
-   checks the feed, the phone fetches its OTA from Expo.
+   checks the feed, and the phone checks `/api/mobile/updates` for its signed
+   over-the-air update — or, when a release needs a new APK, gets one push
+   and installs it in place (spec/11 § Mobile updates).
 
 A push reaches every device in roughly the build time (~25 min) plus two.
 

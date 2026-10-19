@@ -9,8 +9,8 @@
 //
 // otaUpdates.test.ts pins that unit's behaviour in isolation. This file pins the
 // WIRING, which is where the bug actually lived: the root layout is mounted for
-// real, `../src/lib/otaUpdates` is NOT mocked, an update IS available on the
-// channel, and the launch must still paint once and stay on the running bundle.
+// real, `../src/lib/otaUpdates` is NOT mocked, an update IS available from the
+// server, and the launch must still paint once and stay on the running bundle.
 // Only bootstrap is doubled, so no socket or network work happens.
 
 import React from 'react';
@@ -21,7 +21,9 @@ import { __setColorScheme, __emitAppStateChange } from './stubs/react-native';
 import { __setLastNotificationResponse } from './stubs/expo-notifications';
 import { __setFontsLoaded, __setFontsError } from './stubs/google-fonts';
 import { __setInitialURL } from './stubs/expo-linking';
-import { __setEnabled, __setCheckResult, __setChannel } from './stubs/expo-updates';
+import { __setEnabled, __setCheckResult } from './stubs/expo-updates';
+import { TEST_SERVER_URL } from './stubs/mmkv';
+import { store } from '../src/lib/credential';
 import * as Updates from 'expo-updates';
 import { useUiStore } from '../src/stores/uiStore';
 
@@ -44,7 +46,9 @@ beforeEach(() => {
   // A real release build with a newer bundle waiting on the channel — the exact
   // situation that produced the double load.
   __setEnabled(true);
-  __setChannel('preview');
+  // Launched with the updater already pointed at the paired server, as every
+  // launch after the first one is (src/lib/updateSource.ts).
+  store().set('patch.updates.source', `${TEST_SERVER_URL}/api/mobile/updates`);
   __setCheckResult({ isAvailable: true });
   vi.spyOn(Updates, 'fetchUpdateAsync').mockResolvedValue();
   vi.spyOn(Updates, 'reloadAsync').mockResolvedValue();

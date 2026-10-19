@@ -55,6 +55,46 @@ describe('resolveNotificationAction — chat routing', () => {
     ).toEqual({ action: { type: 'settings' } });
   });
 
+  // spec/11 § Mobile updates: a release that needs a new APK installs from the
+  // file the push names; with no file named, the Updates page reads it.
+  it('an app-update push installs from the release link it carries', () => {
+    expect(
+      resolveNotificationAction(
+        {
+          kind: 'app-update',
+          chatId: 'app-update',
+          deepLink: 'https://github.com/o/r/releases/download/dev-1.2.3/patch-1.2.3.apk',
+        },
+        { title: 'Patch', body: 'Patch 1.2.3 needs installing. Tap to download it.' },
+      ),
+    ).toEqual({
+      action: {
+        type: 'install',
+        url: 'https://github.com/o/r/releases/download/dev-1.2.3/patch-1.2.3.apk',
+        version: '1.2.3',
+      },
+    });
+    expect(
+      resolveNotificationAction({ kind: 'app-update', chatId: 'app-update' }, NO_TEXT),
+    ).toEqual({
+      action: { type: 'install' },
+    });
+  });
+
+  // The same push reaching an app from before 'app-update' existed: it falls to
+  // the deep-link rule, which opens the link because the text names it — so an
+  // old phone still gets the APK, through the browser.
+  it('an old app would open the same push’s link, which its text names', () => {
+    const text = { title: 'Patch', body: 'Patch 1.2.3 needs installing. Tap to download it.' };
+    const link = 'https://github.com/o/r/releases/download/dev-1.2.3/patch-1.2.3.apk';
+    expect(
+      resolveNotificationAction(
+        { kind: 'something-new', chatId: 'app-update', deepLink: link },
+        text,
+      ),
+    ).toEqual({ action: { type: 'external', url: link } });
+  });
+
   it('returns no action when there is no chatId or deepLink', () => {
     expect(resolveNotificationAction({ message: 'orphan' }, NO_TEXT)).toEqual({ action: null });
   });

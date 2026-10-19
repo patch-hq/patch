@@ -14,6 +14,7 @@
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
@@ -28,9 +29,12 @@
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:networkSecurityConfig="@xml/network_security_config">
     <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>
+    <meta-data android:name="expo.modules.updates.CODE_SIGNING_CERTIFICATE" android:value="-----BEGIN CERTIFICATE-----&#xD;&#xA;MIICzzCCAbegAwIBAgIJB33DD3EZCETkMA0GCSqGSIb3DQEBCwUAMBAxDjAMBgNV&#xD;&#xA;BAMTBVBhdGNoMCAXDTI2MTAxOTA5MDYwNVoYDzIwNTYxMDE5MDkwNjA1WjAQMQ4w&#xD;&#xA;DAYDVQQDEwVQYXRjaDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMnl&#xD;&#xA;wROIoC9H7NXnDsXEekp/ojtWiEtAb7aJJFynC8uzSkP1V5US2tysr/OGkmyo8lV8&#xD;&#xA;9x0M/Kz1S6PSae/lGlg0LKOzn70g7k57r0/yNlWLvkBeXqlLG3YqSSxi9zaSYFxl&#xD;&#xA;vbpcnEdFHTvKWcTbF9ozEaAI3n5Dml1CznmLJg7Soedbt7+En78h2ud8OJTqHtRI&#xD;&#xA;fSJJifHCSFAFtpggykdpnsqd/DkQhspF262iVds9q15V7Z/tyOUmtYSVQzS0wy4A&#xD;&#xA;a756n0oKAhKziETE6tvz3quCv23yZ3zHAXVelVmDG/Me+ltZw0tU4ExcuEhhnQkQ&#xD;&#xA;3z6DGodHgb91X3ki+xsCAwEAAaMqMCgwDgYDVR0PAQH/BAQDAgeAMBYGA1UdJQEB&#xD;&#xA;/wQMMAoGCCsGAQUFBwMDMA0GCSqGSIb3DQEBCwUAA4IBAQAisJ9QrA+r6hab6/tj&#xD;&#xA;b6wV3LR3nSADRELTnDgKowPjglqDHUVBlzggYNc83ViqXTWdOQNxUraSCaryQNE+&#xD;&#xA;oLDtytnwG03JMe3EmozGmbBZfE+mV+5mDChT+SstQkQXcNJAK49CZ3D2ZbCq/Kr9&#xD;&#xA;FnOui+6N/1TM0gRO5zOwDEoaZpszQja18Oe4iw21qQtihd4nrtLECM1L9nmCZzWx&#xD;&#xA;3Dr/qAEy/37l2t69NCP5mLeeTBpd4tq1yUUilSgeNS1KmiF/33nGAL1nRr0wPjHq&#xD;&#xA;gn9IJDei6oqrf6zHg1S/UPZu8FwEjb+EM4V75jUCk26W61+vESlx6Wkqp1N4z2FV&#xD;&#xA;6OiE&#xD;&#xA;-----END CERTIFICATE-----&#xD;&#xA;"/>
+    <meta-data android:name="expo.modules.updates.CODE_SIGNING_METADATA" android:value="{&quot;keyid&quot;:&quot;main&quot;,&quot;alg&quot;:&quot;rsa-v1_5-sha256&quot;}"/>
+    <meta-data android:name="expo.modules.updates.DISABLE_ANTI_BRICKING_MEASURES" android:value="true"/>
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="true"/>
     <meta-data android:name="expo.modules.updates.EXPO_RUNTIME_VERSION" android:value="@string/expo_runtime_version"/>
-    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
+    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="NEVER"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/07ef948a-199a-4689-ad8b-24d6b87300c4"/>
     <meta-data android:name="expo.modules.updates.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY" android:value="{&quot;expo-channel-name&quot;:&quot;preview&quot;}"/>

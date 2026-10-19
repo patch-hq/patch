@@ -13,14 +13,14 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.1.5',
+  version: '0.1.6',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
   userInterfaceStyle: 'automatic',
   platforms: ['android'],
-  // OTA updates (spec/11 § Mobile OTA). JS-only changes ship via EAS Update
-  // without a new APK. `runtimeVersion` is the compatibility key: an update is
+  // OTA updates (spec/11 § Mobile updates). JS-only changes ship as a signed
+  // update the phone fetches from its own server, without a new APK. `runtimeVersion` is the compatibility key: an update is
   // only delivered to a build whose runtime matches, so a native change (bump
   // this literal) correctly forces a fresh APK instead of a broken OTA.
   //
@@ -55,15 +55,32 @@ const config: ExpoConfig = {
   //
   // Bumped to 0.1.5 for headset routing in VoiceAudioService (communication mode
   // + setCommunicationDevice): native, so it needs a fresh APK.
-  runtimeVersion: '0.1.5',
+  //
+  // Bumped to 0.1.6 for updates from the phone's own server (spec/11 § Mobile
+  // updates): code signing, the runtime update-URL override, and installing a
+  // downloaded APK (expo-intent-launcher, REQUEST_INSTALL_PACKAGES).
+  runtimeVersion: '0.1.6',
   updates: {
+    // Never contacted. The app points the updater at ITS server once paired
+    // (src/lib/otaUpdates.ts), and nothing checks before that: there is no
+    // check on launch, and the JS only checks once a launch is running with
+    // that address. expo-updates needs a build-time URL to be enabled at all.
     url: `https://u.expo.dev/${EAS_PROJECT_ID}`,
-    // Check on launch and download in the background; the update is LAUNCHED
-    // at the next cold start, never swapped into the running app. Nothing in
-    // the JS bootstrap (src/lib/otaUpdates.ts) reloads — see spec/11
-    // § Mobile OTA "NO automatic reload".
-    checkAutomatically: 'ON_LOAD',
+    // The JS decides when to check (it knows the server's address, the native
+    // launch does not). A fetched update is LAUNCHED at the next cold start,
+    // never swapped into the running app — spec/11 "NO automatic reload".
+    checkAutomatically: 'NEVER',
     fallbackToCacheTimeout: 0,
+    // Required by the runtime URL override. What it gives up — dropping a
+    // downloaded update when the URL changes — matters for an update source
+    // nobody vouches for; here every update must carry CI's signature (below),
+    // and expo-updates still rolls back an update that crashes on launch.
+    disableAntiBrickingMeasures: true,
+    // Only an update signed with the release key is accepted
+    // (scripts/build-mobile-update.mjs). The certificate is public; its key
+    // is the CI secret PATCH_UPDATE_SIGNING_KEY.
+    codeSigningCertificate: './certs/certificate.pem',
+    codeSigningMetadata: { keyid: 'main', alg: 'rsa-v1_5-sha256' },
   },
   // Both native-Android chrome that paints before any JS runs. Without these,
   // Expo defaults both to plain white — visible as a white flash on cold start
@@ -108,6 +125,9 @@ const config: ExpoConfig = {
       'MANAGE_OWN_CALLS',
       'WAKE_LOCK',
       'VIBRATE',
+      // Hand a downloaded APK to Android's installer (spec/11 § Mobile updates).
+      // Android still asks the user to confirm every install.
+      'REQUEST_INSTALL_PACKAGES',
     ],
   },
   plugins: [

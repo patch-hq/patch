@@ -3,9 +3,10 @@
 // `define`); the disabled path is driven via the expo-updates stub's
 // __setEnabled, and MMKV is the in-memory stub (aliased in vitest.config).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { __clearAllMmkv } from './stubs/mmkv';
 import type * as Updates from './stubs/expo-updates';
+import { activeUpdateSource } from './testUtils/updateSource';
 
 beforeEach(() => {
   vi.resetModules();
@@ -35,6 +36,7 @@ describe('runUpdateCheck', () => {
   it('returns {current} and records the check when nothing newer is available', async () => {
     const Updates = await import('./stubs/expo-updates');
     Updates.__setEnabled(true);
+    await activeUpdateSource();
     Updates.__setCheckResult({ isAvailable: false });
     const fetchSpy = vi.spyOn(Updates, 'fetchUpdateAsync');
     const { runUpdateCheck, getLastCheckedAt } = await import('../src/lib/updateCheck');
@@ -46,6 +48,7 @@ describe('runUpdateCheck', () => {
   it('fetches (but does NOT reload) and returns {downloaded} when an update exists', async () => {
     const Updates = await import('./stubs/expo-updates');
     Updates.__setEnabled(true);
+    await activeUpdateSource();
     Updates.__setCheckResult({ isAvailable: true });
     const fetchSpy = vi.spyOn(Updates, 'fetchUpdateAsync');
     const reloadSpy = vi.spyOn(Updates, 'reloadAsync');
@@ -59,6 +62,7 @@ describe('runUpdateCheck', () => {
   it('returns {error} (and still records) when the check throws', async () => {
     const Updates = await import('./stubs/expo-updates');
     Updates.__setEnabled(true);
+    await activeUpdateSource();
     vi.spyOn(Updates, 'checkForUpdateAsync').mockRejectedValue(new Error('network down'));
     const { runUpdateCheck, getLastCheckedAt } = await import('../src/lib/updateCheck');
     expect(await runUpdateCheck()).toEqual({ status: 'error', message: 'network down' });
@@ -68,6 +72,7 @@ describe('runUpdateCheck', () => {
   it('returns {error} when the fetch throws after a successful check', async () => {
     const Updates = await import('./stubs/expo-updates');
     Updates.__setEnabled(true);
+    await activeUpdateSource();
     Updates.__setCheckResult({ isAvailable: true });
     Updates.__setFetchError(new Error('fetch failed'));
     const { runUpdateCheck } = await import('../src/lib/updateCheck');
@@ -96,12 +101,13 @@ describe('runUpdateCheck', () => {
       },
       (U: typeof Updates) => {
         U.__setEnabled(true);
-        U.__setChannel(null);
       },
     ]) {
       vi.resetModules();
+      __clearAllMmkv();
       const Updates = await import('./stubs/expo-updates');
       setup(Updates);
+      if (Updates.isEnabled) await activeUpdateSource();
       const reloadSpy = vi.spyOn(Updates, 'reloadAsync');
       const { runUpdateCheck } = await import('../src/lib/updateCheck');
       await runUpdateCheck();
@@ -109,19 +115,51 @@ describe('runUpdateCheck', () => {
     }
   });
 
-  it('returns a clear {error} — and records the check, without ever calling the network — when the build has no channel', async () => {
+  // Before this launch is pointed at the paired server a check would ask the
+  // build-time address, which serves nothing: say why instead, without the
+  // network (spec/11 § Mobile updates).
+  it('does not check, and says why, until this launch is pointed at the paired server', async () => {
     const Updates = await import('./stubs/expo-updates');
     Updates.__setEnabled(true);
-    Updates.__setChannel(null);
     const checkSpy = vi.spyOn(Updates, 'checkForUpdateAsync');
+    const { clearRoute, setRoute } = await import('../src/config');
+    const source = await import('../src/lib/updateSource');
     const { runUpdateCheck, getLastCheckedAt } = await import('../src/lib/updateCheck');
+
+    clearRoute();
+    source.pointUpdatesAtServer();
     expect(await runUpdateCheck()).toEqual({
       status: 'error',
-      message:
-        'This build has no update channel (built locally, not via EAS) — it can never receive an OTA update.',
+      message: 'This phone is not paired to a server yet.',
+    });
+
+    setRoute({ kind: 'relay', relay: { url: 'wss://relay.test', channel: 'c' } } as never);
+    source.pointUpdatesAtServer();
+    expect((await runUpdateCheck()) as { message: string }).toMatchObject({
+      message: expect.stringMatching(/relay/),
+    });
+
+    // Newly paired: set for next launch, not this one.
+    setRoute({ kind: 'direct', url: 'https://patch.test' });
+    expect(source.pointUpdatesAtServer()).toEqual({
+      state: 'pending',
+      url: 'https://patch.test/api/mobile/updates',
+    });
+    expect(Updates.__override).toEqual({
+      updateUrl: 'https://patch.test/api/mobile/updates',
+      requestHeaders: {},
+    });
+    expect(await runUpdateCheck()).toEqual({
+      status: 'error',
+      message: 'Updates from this server start at the next launch. Restart the app.',
     });
     expect(checkSpy).not.toHaveBeenCalled();
     expect(getLastCheckedAt()).not.toBeNull();
+
+    // The next launch finds the override already in place and checks.
+    expect(source.pointUpdatesAtServer().state).toBe('active');
+    expect(await runUpdateCheck()).toEqual({ status: 'current' });
+    expect(checkSpy).toHaveBeenCalledOnce();
   });
 });
 
@@ -227,5 +265,55 @@ describe('fetchPublishedApk', () => {
     );
     const { fetchPublishedApk } = await import('../src/lib/updateCheck');
     await expect(fetchPublishedApk()).rejects.toThrow('HTTP 500');
+  });
+
+  // spec/11 § Mobile updates: a newer build on THIS runtime arrives over the
+  // air; only one on another runtime has to be installed.
+  describe('needsInstall', () => {
+    const newerBuild = { ...sidecar, gitSha: 'new0001', builtAt: '2099-01-01T00:00:00.000Z' };
+    beforeEach(() => {
+      vi.doMock('../src/lib/buildInfo', () => ({
+        mobileBuildInfo: () => ({
+          version: '0.1.540',
+          gitSha: 'abc1234',
+          builtAt: '2026-08-17T10:00:00.000Z',
+        }),
+      }));
+    });
+    afterEach(() => {
+      vi.doUnmock('../src/lib/buildInfo');
+    });
+    const serve = (body: object) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+      );
+
+    it('is set for a newer build on another runtime', async () => {
+      serve({ ...newerBuild, runtimeVersion: '0.1.7' });
+      const { fetchPublishedApk } = await import('../src/lib/updateCheck');
+      expect(await fetchPublishedApk()).toMatchObject({
+        runtimeVersion: '0.1.7',
+        needsInstall: true,
+      });
+    });
+
+    it('is not set for a newer build on this phone’s own runtime — that one comes over the air', async () => {
+      serve({ ...newerBuild, runtimeVersion: '0.1.6' });
+      const { fetchPublishedApk } = await import('../src/lib/updateCheck');
+      expect(await fetchPublishedApk()).toMatchObject({ newer: true, needsInstall: false });
+    });
+
+    it('is not set for an older build on another runtime', async () => {
+      serve({ ...sidecar, builtAt: '2000-01-01T00:00:00.000Z', runtimeVersion: '0.1.5' });
+      const { fetchPublishedApk } = await import('../src/lib/updateCheck');
+      expect(await fetchPublishedApk()).toMatchObject({ needsInstall: false });
+    });
+
+    it('falls back to build time for a release that does not state its runtime', async () => {
+      serve(newerBuild);
+      const { fetchPublishedApk } = await import('../src/lib/updateCheck');
+      expect(await fetchPublishedApk()).toMatchObject({ needsInstall: true });
+    });
   });
 });

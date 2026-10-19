@@ -10,9 +10,16 @@
 // next natural launch, which expo-updates does by itself.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { __clearAllMmkv } from './stubs/mmkv';
+import { activeUpdateSource } from './testUtils/updateSource';
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules();
+  __clearAllMmkv();
+  // A release build, launched already pointed at the paired server. The
+  // disabled-path tests switch `isEnabled` back off themselves.
+  (await import('./stubs/expo-updates')).__setEnabled(true);
+  await activeUpdateSource();
 });
 
 afterEach(() => {
@@ -20,6 +27,19 @@ afterEach(() => {
 });
 
 describe('checkForOtaUpdate', () => {
+  it('does not check until this launch is pointed at the paired server', async () => {
+    vi.resetModules();
+    __clearAllMmkv(); // paired, but the updater not yet pointed there
+    const Updates = await import('./stubs/expo-updates');
+    Updates.__setEnabled(true);
+    const checkSpy = vi.spyOn(Updates, 'checkForUpdateAsync');
+    const { pointUpdatesAtServer } = await import('../src/lib/updateSource');
+    const { checkForOtaUpdate } = await import('../src/lib/otaUpdates');
+    expect(pointUpdatesAtServer().state).toBe('pending');
+    await checkForOtaUpdate();
+    expect(checkSpy).not.toHaveBeenCalled();
+  });
+
   it('no-ops when Updates.isEnabled is false (dev / Expo Go)', async () => {
     const Updates = await import('./stubs/expo-updates');
     Updates.__setEnabled(false);

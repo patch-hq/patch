@@ -151,6 +151,17 @@ describe('mirrorOnce', () => {
     expect(readdirSync(dir).filter((n) => n.startsWith('.mirror-'))).toEqual([]);
   });
 
+  it('serves the phone update manifest, but leaves the files it names on the release', async () => {
+    const files = {
+      ...GOOD(),
+      'mobile-update.json': '{"runtimeVersion":"0.1.6"}',
+      'mobile-update-0123456789abcdef0123456789abcdef.bundle': 'JS',
+    };
+    await mirrorOnce(opts(github(files).fetchImpl));
+    expect(readFileSync(join(dir, 'mobile-update.json'), 'utf8')).toContain('0.1.6');
+    expect(readdirSync(dir).some((n) => n.startsWith('mobile-update-'))).toBe(false);
+  });
+
   it('does nothing when the release is already served', async () => {
     const { fetchImpl } = github(GOOD());
     await mirrorOnce(opts(fetchImpl));

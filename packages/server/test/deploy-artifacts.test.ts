@@ -99,9 +99,12 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     // server (src/self-update.ts) — the same installer a self-hoster runs.
     const workflow = read('.github/workflows/release.yml');
     // Nothing is published unless every surface built and the gate passed...
-    expect(workflow).toMatch(/needs: \[verify, server, host, mac, android, ota\]/);
-    // ...and the phone's update, which phones fetch straight from Expo, goes last.
-    expect(workflow).toMatch(/ota:[\s\S]*?needs: \[verify, server, host, mac, android\]/);
+    expect(workflow).toMatch(/needs: \[verify, server, host, mac, android, mobile-update\]/);
+    // ...and the phone's over-the-air update is one of those surfaces: release
+    // files the servers mirror, never published anywhere else first
+    // (spec/11 § Mobile updates).
+    expect(workflow).toMatch(/mobile-update:[\s\S]*?build-mobile-update\.mjs/);
+    expect(workflow).not.toMatch(/EXPO_TOKEN|eas-cli|eas update/);
     // No second way to ship: the old box-and-Mac deploy is gone.
     const scripts = JSON.parse(read('package.json')).scripts as Record<string, string>;
     expect(scripts.deploy).toBeUndefined();

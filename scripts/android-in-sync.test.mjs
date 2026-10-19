@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { apkUpdateIdentity } from './apk-update-identity.mjs';
+import { runtimeVersionOf } from './build-mobile-update.mjs';
 
 const MOBILE = 'apps/mobile';
 const JAVA = join(MOBILE, 'android/app/src/main/java/io/github/tomchambers2/patch');
@@ -19,7 +19,7 @@ test('the committed Android project runs the runtimeVersion app.config.ts declar
   const config = readFileSync(join(MOBILE, 'app.config.ts'), 'utf8');
   const declared = /runtimeVersion:\s*'([^']+)'/.exec(config)?.[1];
   assert.ok(declared, 'no runtimeVersion in app.config.ts');
-  const { runtime } = apkUpdateIdentity(join(MOBILE, 'android'));
+  const runtime = runtimeVersionOf(join(MOBILE, 'android'));
   assert.equal(runtime, declared, 'android/ is stale: run `pnpm prebuild` in apps/mobile');
 });
 

@@ -16,6 +16,7 @@ import * as Updates from 'expo-updates';
 import { apiUrl } from '../config';
 import { mobileBuildInfo } from './buildInfo';
 import { store } from './credential';
+import { updateSource, updateSourceProblem } from './updateSource';
 
 const LAST_CHECKED_KEY = 'patch.ota.lastCheckedAt';
 
@@ -41,6 +42,14 @@ export interface PublishedApk {
   /** True when the box has published a build more recent than the one this
    *  phone is running — i.e. there is something to install, by whatever path. */
   newer: boolean;
+  /** The native runtime the published APK runs; absent from older releases. */
+  runtimeVersion?: string;
+  /**
+   * The published build is newer AND on another runtime, so no update check
+   * can bring this phone to it: only installing the APK will. A newer build on
+   * this phone's own runtime arrives over the air instead.
+   */
+  needsInstall: boolean;
 }
 
 /**
@@ -77,17 +86,24 @@ export async function fetchPublishedApk(): Promise<PublishedApk | null> {
     gitSha: string;
     builtAt: string;
     file: string;
+    runtimeVersion?: string;
   };
   const running = mobileBuildInfo();
   const newer = running.builtAt
     ? new Date(sidecar.builtAt).getTime() > new Date(running.builtAt).getTime()
     : sidecar.gitSha !== running.gitSha;
+  // A release from before the APK stated its runtime can only be judged by
+  // build time, as it always was.
+  const otherRuntime =
+    sidecar.runtimeVersion === undefined || sidecar.runtimeVersion !== Updates.runtimeVersion;
   return {
     version: sidecar.version,
     gitSha: sidecar.gitSha,
     builtAt: sidecar.builtAt,
     url: apiUrl(`/api/download/${sidecar.file}`),
     newer,
+    ...(sidecar.runtimeVersion !== undefined ? { runtimeVersion: sidecar.runtimeVersion } : {}),
+    needsInstall: newer && otherRuntime,
   };
 }
 
@@ -105,20 +121,12 @@ export type UpdateCheckResult =
  */
 export async function runUpdateCheck(): Promise<UpdateCheckResult> {
   if (__DEV__ || !Updates.isEnabled) return { status: 'disabled' };
-  // A build made by a local `gradlew assembleRelease` (as opposed to `eas
-  // build`) never gets a channel written into it (deploy.md § Mobile — the
-  // APK and its JS are ONE delivery). EAS requires a channel on every update
-  // request and rejects anything without one, so `checkForUpdateAsync()` on
-  // such a build can only ever fail with an opaque network/HTTP error. Check
-  // the one deterministic, locally-known fact first and skip the doomed
-  // network round-trip for a message that actually explains why.
-  if (!Updates.channel) {
+  // Only a launch already pointed at the paired server may check: any other
+  // would ask the build-time address, which nothing serves (updateSource.ts).
+  const problem = updateSourceProblem(updateSource());
+  if (problem !== null) {
     recordUpdateCheck(new Date().toISOString());
-    return {
-      status: 'error',
-      message:
-        'This build has no update channel (built locally, not via EAS) — it can never receive an OTA update.',
-    };
+    return { status: 'error', message: problem };
   }
   try {
     const res = await Updates.checkForUpdateAsync();

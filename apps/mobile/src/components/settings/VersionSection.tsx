@@ -11,26 +11,21 @@
 // Three cases look alike from the OTA's own point of view and have to be told
 // apart: an update downloaded but not yet launched (`checkForUpdateAsync` then
 // reports nothing further, so the page must say "restart", not "up to date");
-// no update channel at all; and a phone stuck on an old native runtime, for
-// which OTA correctly reports nothing FOR THAT RUNTIME forever.
-// `fetchPublishedApk`'s build-time comparison is what tells the last one apart
-// from genuinely current, so it runs whether or not this build has a channel.
+// a launch not yet checking the paired server (updateSource.ts); and a phone on
+// an older native runtime, for which the server correctly offers nothing over
+// the air. The published APK's runtime is what tells the last one apart from
+// genuinely current: that build is INSTALLED in place, from here.
 
 import React from 'react';
-import { Linking } from 'react-native';
 import * as Updates from 'expo-updates';
 import { useUpdates } from 'expo-updates';
 import type { VersionReport } from '@patch/wire';
 import { api } from '../../api/rest';
 import { mobileBuildInfo } from '../../lib/buildInfo';
-import {
-  fetchPublishedApk,
-  getLastCheckedAt,
-  runUpdateCheck,
-  type PublishedApk,
-  type UpdateCheckResult,
-} from '../../lib/updateCheck';
-import { isRelayed } from '../../lib/servedFile';
+import { getLastCheckedAt, runUpdateCheck, type UpdateCheckResult } from '../../lib/updateCheck';
+import { installApk, useApkInstallStore } from '../../lib/apkInstall';
+import { refreshPublishedApk, usePublishedApkStore } from '../../lib/publishedApk';
+import { updateSourceProblem } from '../../lib/updateSource';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { SettingsSection } from '../SettingsSection';
 import { sendToHost } from './hostSend';
@@ -55,23 +50,6 @@ function stamp(b: { version: string | null; gitSha: string | null }): string {
   return b.gitSha ? `${v} · ${b.gitSha}` : v;
 }
 
-/** The newest published APK, read once per mount; null until (or unless) known. */
-function usePublishedApk(): PublishedApk | null {
-  const [apk, setApk] = React.useState<PublishedApk | null>(null);
-  React.useEffect(() => {
-    let live = true;
-    // Failure here is not worth a message of its own: the OTA-based status
-    // line already covers this build's own update path.
-    void fetchPublishedApk()
-      .then((a) => live && setApk(a))
-      .catch(() => live && setApk(null));
-    return () => {
-      live = false;
-    };
-  }, []);
-  return apk;
-}
-
 /**
  * Whether anything is behind — an update downloaded and waiting for a restart,
  * a newer APK than this phone runs, or a host with a host update. Drives the
@@ -79,11 +57,11 @@ function usePublishedApk(): PublishedApk | null {
  */
 export function useUpdatesBehind(): boolean {
   const { isUpdatePending } = useUpdates();
-  const apk = usePublishedApk();
+  const apk = usePublishedApkStore((s) => s.apk);
   const hostBehind = usePresenceStore((s) =>
     Object.values(s.hosts).some((h) => h.host?.updateAvailable === true),
   );
-  return isUpdatePending || (apk?.newer ?? false) || hostBehind;
+  return isUpdatePending || (apk?.needsInstall ?? false) || hostBehind;
 }
 
 export function UpdatesPage(): React.ReactElement {
@@ -94,12 +72,13 @@ export function UpdatesPage(): React.ReactElement {
   const [lastChecked, setLastChecked] = React.useState<string | null>(() => getLastCheckedAt());
   const [checking, setChecking] = React.useState(false);
   const [checkedResult, setCheckedResult] = React.useState<UpdateCheckResult | null>(null);
-  const apk = usePublishedApk();
+  const apk = usePublishedApkStore((s) => s.apk);
+  const install = useApkInstallStore((s) => s.state);
   const hosts = usePresenceStore((s) => s.hosts);
   const [report, setReport] = React.useState<VersionReport | null>(null);
   const [reportError, setReportError] = React.useState<string | null>(null);
 
-  const canOta = Updates.isEnabled && Boolean(Updates.channel);
+  const sourceProblem = updateSourceProblem();
 
   const readReport = React.useCallback(() => {
     setReportError(null);
@@ -118,13 +97,15 @@ export function UpdatesPage(): React.ReactElement {
     setCheckedResult(res);
     setChecking(false);
     readReport();
+    void refreshPublishedApk();
   }, [readReport]);
 
   const busy = checking || isChecking || isDownloading;
   const pending = isUpdatePending || checkedResult?.status === 'downloaded';
-  // The APK is a download from the server's own address, which a phone reached
-  // through a relay does not have: it takes its updates over the air.
-  const apkAvailable = !pending && !isRelayed() && (apk?.newer ?? false);
+  // Only a build on another runtime: a newer one on this runtime comes over
+  // the air. (A relayed phone never reads one — publishedApk.ts.)
+  const apkAvailable = !pending && (apk?.needsInstall ?? false);
+  const installing = install.phase === 'downloading' || install.phase === 'installing';
   const failure =
     checkedResult?.status === 'error'
       ? checkedResult.message
@@ -135,11 +116,11 @@ export function UpdatesPage(): React.ReactElement {
   let sentence: string;
   if (busy) sentence = isDownloading ? 'Downloading update…' : 'Checking for updates…';
   else if (pending) sentence = 'An update is downloaded and ready to install.';
-  else if (!canOta)
-    sentence = __DEV__
-      ? 'Updates are off in development.'
-      : 'This build cannot update itself — it has no update channel. Install the latest APK.';
-  else if (apkAvailable) sentence = 'A newer build is out. Install it directly.';
+  else if (install.phase === 'downloading')
+    sentence = `Downloading Patch ${install.version}${install.fraction !== null ? ` · ${Math.round(install.fraction * 100)}%` : ''}`;
+  else if (install.phase === 'installing') sentence = `Installing Patch ${install.version}`;
+  else if (apkAvailable) sentence = 'A new build needs installing.';
+  else if (sourceProblem) sentence = sourceProblem;
   else if (failure) sentence = `Couldn't check for updates: ${failure}`;
   else if (checkedResult?.status === 'current') sentence = 'Up to date.';
   else sentence = '';
@@ -184,10 +165,11 @@ export function UpdatesPage(): React.ReactElement {
               subtitle={`${build.version} → ${apk.version}`}
               right={
                 <SettingsButton
-                  testID="download-apk"
-                  label="Download APK"
+                  testID="install-apk"
+                  label={installing ? 'Installing…' : 'Install'}
                   variant="quiet"
-                  onPress={() => void Linking.openURL(apk.url)}
+                  disabled={installing}
+                  onPress={() => void installApk(apk.url, apk.version)}
                 />
               }
             />

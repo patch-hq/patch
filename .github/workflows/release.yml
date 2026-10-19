@@ -21,7 +21,8 @@
 #   PATCH_MAC_CERT_PASSWORD          its password
 #   APPLE_API_KEY_P8                 App Store Connect API key, for notarisation
 #   APPLE_API_KEY_ID, APPLE_API_ISSUER
-#   EXPO_TOKEN                       publishes the phone's over-the-air update
+#   PATCH_UPDATE_SIGNING_KEY         signs the phone's over-the-air update (its certificate is
+#                                    apps/mobile/certs/certificate.pem, built into the APK)
 
 name: release
 
@@ -41,8 +42,8 @@ jobs:
   # The gate (scripts/verify.mjs), four runners wide. Every runner runs the
   # cheap layers (lint, types, unit/contract/integration); the browser layer is
   # split between them with Playwright's --shard, because the whole suite on one
-  # runner took about an hour. Each shard is a required check: `ota` and
-  # `publish` need the whole matrix.
+  # runner took about an hour. Each shard is a required check: `publish` needs
+  # the whole matrix, so nothing built alongside it is released without it.
   verify:
     if: github.repository == 'tomchambers2/patch'
     runs-on: ubuntu-latest
@@ -216,7 +217,10 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/apk"
           cp "$APK" "$RUNNER_TEMP/apk/patch-$VERSION.apk"
-          printf '{"version":"%s","gitSha":"%s","builtAt":"%s","file":"patch-%s.apk"}\n' "$VERSION" "$SHA" "$BUILT" "$VERSION" > "$RUNNER_TEMP/apk/android-latest.json"
+          # The runtime says whether an over-the-air update can reach a phone or
+          # it must install this APK (spec/11 § Mobile updates).
+          RUNTIME=$(node -e 'import("./scripts/build-mobile-update.mjs").then((m) => console.log(m.runtimeVersionOf()))')
+          printf '{"version":"%s","gitSha":"%s","builtAt":"%s","file":"patch-%s.apk","runtimeVersion":"%s"}\n' "$VERSION" "$SHA" "$BUILT" "$VERSION" "$RUNTIME" > "$RUNNER_TEMP/apk/android-latest.json"
           rm -rf "$HOME/.patch-mobile-credentials" apps/mobile/credentials
       - uses: actions/upload-artifact@v4
         with:
@@ -338,9 +342,11 @@ jobs:
   # The phone's JavaScript, as an over-the-air update for installed APKs. Phones
   # fetch it straight from Expo, not through a server, so it goes out only once
   # everything else has built.
-  ota:
+  # The phone's over-the-air update: this commit's JS, signed, as release files
+  # (spec/11 § Mobile updates). Servers mirror its manifest and serve it to the
+  # phones paired to them; the files it names stay here, on the release.
+  mobile-update:
     if: github.repository == 'tomchambers2/patch'
-    needs: [verify, server, host, mac, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -353,13 +359,23 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build the phone's workspace dependencies
         run: pnpm turbo build --filter='@patch/mobile^...' --output-logs=errors-only
-      - run: node scripts/publish-ota.mjs
+      - name: Build and sign the update
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          PATCH_UPDATE_SIGNING_KEY: ${{ secrets.PATCH_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          read -r VERSION SHA BUILT < <(node scripts/version.mjs --json | node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.version,v.gitSha,v.builtAt)')
+          node scripts/build-mobile-update.mjs --version "$VERSION" --sha "$SHA" --built-at "$BUILT" \
+            --repo "$GITHUB_REPOSITORY" --tag "dev-$VERSION" --out "$RUNNER_TEMP/mobile-update"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-update
+          if-no-files-found: error
+          path: ${{ runner.temp }}/mobile-update/*
 
   publish:
     if: github.repository == 'tomchambers2/patch'
-    needs: [verify, server, host, mac, android, ota]
+    needs: [verify, server, host, mac, android, mobile-update]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

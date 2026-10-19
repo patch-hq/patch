@@ -39,7 +39,13 @@ export type NotificationAction =
   | { type: 'chats' }
   /** An expired AI-account sign-in — `kind: 'sign-in'` with a placeholder
    *  chatId. Tapping it lands on Settings, never a chat. */
-  | { type: 'settings' };
+  | { type: 'settings' }
+  /**
+   * A release that needs a new APK (spec/11 § Mobile updates): install it in
+   * place from `url` — the release's own copy, named in the push — when there
+   * is one; otherwise the Updates page, which reads the published build.
+   */
+  | { type: 'install'; url?: string; version?: string };
 
 export type DeepLinkRejectionReason =
   /** The URI yielded no word distinctive enough to look for in the text. */
@@ -159,6 +165,12 @@ export function resolveNotificationAction(
   // tab" — there is no source chat to fall back to and no deepLink to consider.
   if (data['kind'] === 'batch') return { action: { type: 'batch' } };
   if (data['kind'] === 'sign-in') return { action: { type: 'settings' } };
+  if (data['kind'] === 'app-update') {
+    const url = data['deepLink'];
+    if (typeof url !== 'string' || url.length === 0) return { action: { type: 'install' } };
+    const version = /patch-([^/]+)\.apk$/.exec(url)?.[1];
+    return { action: { type: 'install', url, ...(version ? { version } : {}) } };
+  }
   if (data['kind'] === 'handover') return { action: { type: 'chats' } };
   const deepLink = data['deepLink'];
   if (typeof deepLink === 'string' && deepLink.length > 0) {

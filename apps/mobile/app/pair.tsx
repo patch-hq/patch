@@ -27,6 +27,7 @@ import { parsePairingUri } from '@patch/wire';
 import { clearRoute, getRoute, setRoute } from '../src/config';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { fixed, fonts, radii, space, useTheme } from '../src/lib/theme';
+import { pointUpdatesAtServer } from '../src/lib/updateSource';
 
 export default function Pair(): React.ReactElement {
   const [perm, requestPerm] = useCameraPermissions();
@@ -64,6 +65,8 @@ export default function Pair(): React.ReactElement {
           clientType: 'surface-mobile',
         });
         saveCredential(res.credential);
+        // Updates come from this server from the next launch (updateSource.ts).
+        pointUpdatesAtServer();
       } catch (e) {
         if (before) setRoute(before);
         else clearRoute();

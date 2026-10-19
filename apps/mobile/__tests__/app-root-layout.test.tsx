@@ -528,6 +528,24 @@ describe('RootLayout — notification tap deep-link (spec/15 § Push notificatio
     renderRN(<RootLayout />);
     expect(routerMock.navigate).toHaveBeenCalledWith('/(tabs)/settings');
   });
+
+  // spec/11 § Mobile updates: the notice of a build that needs installing opens
+  // Updates and starts the install from the file it names.
+  it('tapping an app-update notification opens Updates and starts the install', async () => {
+    const IntentLauncher = await import('./stubs/expo-intent-launcher');
+    IntentLauncher.__started.length = 0;
+    __setLastNotificationResponse(
+      notificationResponse('n-update', {
+        kind: 'app-update',
+        chatId: 'app-update',
+        deepLink: 'https://github.com/o/r/releases/download/dev-1.2.3/patch-1.2.3.apk',
+      }),
+    );
+    renderRN(<RootLayout />);
+    expect(routerMock.navigate).toHaveBeenCalledWith('/settings/updates');
+    await flush();
+    expect(IntentLauncher.__started).toHaveLength(1);
+  });
 });
 
 // The diagnostics takeover draws over the WHOLE app from the root layout, so

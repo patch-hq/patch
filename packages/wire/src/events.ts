@@ -7616,9 +7616,12 @@ export type PatchSecretsResponseEvent = z.infer<typeof PatchSecretsResponseEvent
  * so it is never held back for presence the way an ordinary push is.
  * `'sign-in'` is an AI account whose sign-in expired: it has no chat, and a
  * tap opens the accounts settings.
+ * `'app-update'` is a release that needs a new phone APK (spec/11 § Mobile
+ * updates): server-originated and push-only, so no surface or host ever decodes
+ * it from the wire; a tap on the phone installs it.
  * Default (omitted) is treated as `'message'`.
  */
-export const NotifyKind = z.enum(['message', 'call', 'batch', 'ask', 'sign-in']);
+export const NotifyKind = z.enum(['message', 'call', 'batch', 'ask', 'sign-in', 'app-update']);
 export type NotifyKind = z.infer<typeof NotifyKind>;
 
 /**
