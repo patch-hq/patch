@@ -1,0 +1,35 @@
+# Linux image for the host's real-Chromium tests (test/browser*.test.ts).
+# On macOS those tests would open visible Chrome windows on the desktop and take
+# focus; here Chromium runs on a virtual display (Xvfb) inside the container.
+# Build context is the repo root. Playwright tag must match the lockfile version.
+
+# syntax=docker/dockerfile:1.7
+FROM mcr.microsoft.com/playwright:v1.61.1-noble
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends xvfb x11-utils \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /repo
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json tsconfig.json ./
+COPY packages/wire/package.json packages/wire/
+COPY packages/auth/package.json packages/auth/
+COPY packages/server/package.json packages/server/
+COPY packages/host/package.json packages/host/
+COPY packages/cli/package.json packages/cli/
+COPY packages/web/package.json packages/web/
+COPY packages/desktop/package.json packages/desktop/
+COPY apps/mobile/package.json apps/mobile/
+
+# Playwright's browsers already live in the base image.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm --filter @patch/wire --filter @patch/auth build
+
+WORKDIR /repo/packages/host
+CMD ["pnpm", "exec", "vitest", "run", "test/browser.test.ts", "test/browser-tunnel.test.ts"]
