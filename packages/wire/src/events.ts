@@ -6580,6 +6580,7 @@ export type PatchFoldersBrowseResponseEvent = z.infer<typeof PatchFoldersBrowseR
 
 export const HostFilesEntry = z
   .object({
+    /** A bare filename for a plain `list`; a path relative to `path` when `recursive`. */
     name: z.string().min(1),
     /** Symlinks are reported as what they point at; a dangling one is `other`. */
     type: z.enum(['file', 'dir', 'other']),
@@ -6604,6 +6605,16 @@ export const PatchHostFilesRequestEvent = z
     content: z.string().optional(),
     /** `write` only: the `version` the edit started from. */
     baseVersion: z.string().min(1).optional(),
+    /**
+     * `list` only (editor overhaul — host-wide ⌘P): walk `path` recursively
+     * instead of one level, returning a flat list of files (and the empty
+     * directories a flat file list can't imply) with `name` holding a path
+     * RELATIVE to `path` rather than a bare filename. Backs quick-open across
+     * a whole project folder / Skills / Claude settings without a chat.
+     */
+    recursive: z.boolean().optional(),
+    /** `recursive` only: caps the walk (spec/02 § Host files). */
+    maxEntries: z.number().int().positive().optional(),
   })
   .strict();
 export type PatchHostFilesRequestEvent = z.infer<typeof PatchHostFilesRequestEvent>;
@@ -6717,6 +6728,100 @@ export const PatchBlobResponseEvent = z
   })
   .strict();
 export type PatchBlobResponseEvent = z.infer<typeof PatchBlobResponseEvent>;
+
+// ---------------------------------------------------------------------------
+// Host search (surface ↔ host), spec/02 § Host files, spec/03 § Host files,
+// spec/14 § File browser — ⌘⇧F search in files.
+//
+// Content search under one absolute directory, on the host that owns it.
+// Unlike `patch.host_files.*` (one request, one answer) this is a SESSION like
+// a terminal's: the surface mints `searchId`, the hub stamps `forSurfaceId` so
+// matches stream back to the asking surface alone, and the host answers with
+// zero or more `patch.host_search.result` batches followed by exactly one
+// `patch.host_search.done`. `patch.host_search.cancel` ends it early — the
+// host kills whatever is still running and sends no further frames for that
+// `searchId`, not even `done`, since cancelling is not a result to report.
+
+export const HostSearchMatch = z
+  .object({
+    /** Relative to the search root. */
+    path: z.string().min(1),
+    /** 1-based. */
+    line: z.number().int().positive(),
+    /** 1-based column the match starts at. */
+    column: z.number().int().positive(),
+    /** The matched line's text, for the results list — never more than one line. */
+    preview: z.string(),
+  })
+  .strict();
+export type HostSearchMatch = z.infer<typeof HostSearchMatch>;
+
+export const PatchHostSearchRequestEvent = z
+  .object({
+    type: z.literal('patch.host_search.request'),
+    /** Surface-minted; every later frame (including `done`) correlates on it. */
+    searchId: z.string().min(1),
+    ...hostIdField,
+    /** Absolute, canonical (`isCanonicalAbsolute`) directory to search under. */
+    root: z.string().min(1),
+    /** Plain substring, never a regex — see spec/02 § Host search. */
+    query: z.string().min(1),
+    caseSensitive: z.boolean().optional(),
+    forSurfaceId: z.string().min(1).optional(),
+  })
+  .strict();
+export type PatchHostSearchRequestEvent = z.infer<typeof PatchHostSearchRequestEvent>;
+
+export const PatchHostSearchCancelEvent = z
+  .object({
+    type: z.literal('patch.host_search.cancel'),
+    searchId: z.string().min(1),
+    forSurfaceId: z.string().min(1).optional(),
+  })
+  .strict();
+export type PatchHostSearchCancelEvent = z.infer<typeof PatchHostSearchCancelEvent>;
+
+export const PatchHostSearchResultEvent = z
+  .object({
+    type: z.literal('patch.host_search.result'),
+    searchId: z.string().min(1),
+    matches: z.array(HostSearchMatch),
+    forSurfaceId: z.string().min(1).optional(),
+  })
+  .strict();
+export type PatchHostSearchResultEvent = z.infer<typeof PatchHostSearchResultEvent>;
+
+export const PatchHostSearchDoneEvent = z
+  .object({
+    type: z.literal('patch.host_search.done'),
+    searchId: z.string().min(1),
+    ok: z.boolean(),
+    /** The walk hit `HOST_SEARCH_MAX_MATCHES` and stopped before finishing. */
+    truncated: z.boolean().optional(),
+    error: z
+      .object({
+        /**
+         * - `path_invalid` — `root` not absolute/normalised (→ 400).
+         * - `not_found` — nothing at `root` (→ 404).
+         * - `not_a_directory` — `root` is a file (→ 400).
+         * - `permission_denied` — the host's user cannot read it (→ 403).
+         * - `internal` — anything else (→ 502).
+         */
+        code: z.enum([
+          'path_invalid',
+          'not_found',
+          'not_a_directory',
+          'permission_denied',
+          'internal',
+        ]),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+    forSurfaceId: z.string().min(1).optional(),
+  })
+  .strict();
+export type PatchHostSearchDoneEvent = z.infer<typeof PatchHostSearchDoneEvent>;
 
 // ---------------------------------------------------------------------------
 // Moving a chat between hosts (spec/04 § Moving a chat to another host)
@@ -8088,6 +8193,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'patch.terminal.open',
   'patch.folders.browse.request',
   'patch.host_files.request',
+  'patch.host_search.request',
 ] as const satisfies readonly WireEventType[];
 
 export type HostAddressedSurfaceEventType = (typeof HOST_ADDRESSED_SURFACE_EVENTS)[number];
@@ -8294,6 +8400,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchFoldersBrowseResponseEvent,
   PatchHostFilesRequestEvent,
   PatchHostFilesResponseEvent,
+  PatchHostSearchRequestEvent,
+  PatchHostSearchCancelEvent,
+  PatchHostSearchResultEvent,
+  PatchHostSearchDoneEvent,
   PatchBlobRequestEvent,
   PatchBlobResponseEvent,
   ChatReplayBatchEvent,
@@ -8570,6 +8680,10 @@ export const EVENT_SCHEMAS = {
   'patch.folders.browse.response': PatchFoldersBrowseResponseEvent,
   'patch.host_files.request': PatchHostFilesRequestEvent,
   'patch.host_files.response': PatchHostFilesResponseEvent,
+  'patch.host_search.request': PatchHostSearchRequestEvent,
+  'patch.host_search.cancel': PatchHostSearchCancelEvent,
+  'patch.host_search.result': PatchHostSearchResultEvent,
+  'patch.host_search.done': PatchHostSearchDoneEvent,
   'patch.blob.request': PatchBlobRequestEvent,
   'patch.blob.response': PatchBlobResponseEvent,
   'chat.replay_batch': ChatReplayBatchEvent,

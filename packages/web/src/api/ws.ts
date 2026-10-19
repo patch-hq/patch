@@ -18,6 +18,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
+import { useHostSearchStore } from '../stores/hostSearchStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
@@ -681,6 +682,12 @@ export class PatchWs {
       event.type === 'patch.terminal.error'
     ) {
       useTerminalStore.getState().ingest(event);
+      return;
+    }
+    // Host search stream (spec/14 § File browser — ⌘⇧F). Per-surface by the
+    // same construction as terminal output above.
+    if (event.type === 'patch.host_search.result' || event.type === 'patch.host_search.done') {
+      useHostSearchStore.getState().ingest(event);
       return;
     }
     // spec/14 § File browser — live updates: a file on this chat's folder

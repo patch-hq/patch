@@ -132,6 +132,43 @@ describe('list', () => {
   });
 });
 
+describe('recursive list (editor overhaul — host-wide ⌘P)', () => {
+  it('walks a non-git directory flat, names relative to the root', async () => {
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'a.ts'), 'x');
+    writeFileSync(join(dir, 'top.md'), 'x');
+    const res = await ask({ op: 'list', path: dir, recursive: true });
+    expect(res.ok).toBe(true);
+    expect(res.entries).toEqual(
+      expect.arrayContaining([
+        { name: 'src', type: 'dir' },
+        { name: 'src/a.ts', type: 'file' },
+        { name: 'top.md', type: 'file' },
+      ]),
+    );
+  });
+
+  it('caps the walk at maxEntries', async () => {
+    for (let i = 0; i < 10; i++) writeFileSync(join(dir, `f${i}.txt`), 'x');
+    const res = await ask({ op: 'list', path: dir, recursive: true, maxEntries: 3 });
+    expect(res.ok).toBe(true);
+    expect(res.entries).toHaveLength(3);
+  });
+
+  it('a path-less recursive list walks home', async () => {
+    writeFileSync(join(dir, 'a.txt'), 'x');
+    const res = await ask({ op: 'list', recursive: true }, { home: dir });
+    expect(res.ok).toBe(true);
+    expect(res.entries?.map((e) => e.name)).toEqual(['a.txt']);
+  });
+
+  it('still refuses a file as the root', async () => {
+    writeFileSync(join(dir, 'f.txt'), 'x');
+    const res = await ask({ op: 'list', path: join(dir, 'f.txt'), recursive: true });
+    expect(res.error?.code).toBe('not_a_directory');
+  });
+});
+
 describe('read', () => {
   it('returns the content, its size and a version that is the hash of the bytes', async () => {
     writeFileSync(join(dir, 'SKILL.md'), '# plant ☃\n');

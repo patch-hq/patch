@@ -24,6 +24,10 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix } from 'node:path';
 import type { Logger } from 'pino';
 import type { HostFilesEntry, PatchHostFilesRequestEvent, WireEvent } from '@patch/wire';
+import { listFilesRecursive } from './files-recursive.js';
+
+/** Cap for a `recursive` list with no explicit `maxEntries` (editor overhaul — host-wide ⌘P). */
+export const HOST_FILES_RECURSIVE_DEFAULT_CAP = 20_000;
 
 /**
  * The editor's size cap. A phone editing a file bigger than this is not editing
@@ -145,6 +149,28 @@ async function list(path: string): Promise<Ok> {
   return { path, parent: path === '/' ? null : dirname(path), entries };
 }
 
+/**
+ * `recursive` list (editor overhaul — host-wide ⌘P): a flat walk of `path`,
+ * `name` holding each entry's path RELATIVE to `path` rather than a bare
+ * filename. Reuses the same git-aware walk the chat-scoped recursive index
+ * uses (`files-recursive.ts`) — gitignore-aware when `path` is a work-tree,
+ * a bounded manual walk otherwise.
+ */
+async function listRecursive(path: string, maxEntries: number): Promise<Ok> {
+  let info;
+  try {
+    info = await stat(path);
+  } catch (err) {
+    throw fsError(err, path);
+  }
+  if (!info.isDirectory()) {
+    throw new HostFileError('not_a_directory', `not a directory: ${path}`);
+  }
+  const flat = await listFilesRecursive(path, maxEntries);
+  const entries: HostFilesEntry[] = flat.map((e) => ({ name: e.name, type: e.type }));
+  return { path, parent: path === '/' ? null : dirname(path), entries };
+}
+
 /** Stat a path that must be an existing regular file within the size cap. */
 async function requireEditableFile(path: string): Promise<void> {
   let info;
@@ -259,7 +285,10 @@ export async function handleHostFilesRequest(
   try {
     let result: Ok;
     if (event.op === 'list' && event.path === undefined) {
-      result = await list(opts.home ?? homedir());
+      const home = opts.home ?? homedir();
+      result = event.recursive
+        ? await listRecursive(home, event.maxEntries ?? HOST_FILES_RECURSIVE_DEFAULT_CAP)
+        : await list(home);
     } else {
       const path = event.path;
       if (path === undefined || !isCanonicalAbsolute(path)) {
@@ -268,8 +297,11 @@ export async function handleHostFilesRequest(
           `path must be absolute and normalised: ${path ?? '(none)'}`,
         );
       }
-      if (event.op === 'list') result = await list(path);
-      else if (event.op === 'read') result = await read(path);
+      if (event.op === 'list') {
+        result = event.recursive
+          ? await listRecursive(path, event.maxEntries ?? HOST_FILES_RECURSIVE_DEFAULT_CAP)
+          : await list(path);
+      } else if (event.op === 'read') result = await read(path);
       else {
         if (event.content === undefined || event.baseVersion === undefined) {
           throw new HostFileError('path_invalid', 'a write needs content and baseVersion');

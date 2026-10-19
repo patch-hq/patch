@@ -467,9 +467,11 @@ export function AppShell(): JSX.Element {
         // Group 20 fix DX-8: single-press ⌘P opens the picker directly — it
         // reads whichever chat's `files-recursive` index is cached, which
         // needs a Files tab open for this chat at least once; open it now,
-        // not just the picker, same as before.
+        // not just the picker, same as before. With no chat focused it is the
+        // host-wide ⌘P instead (spec/14 § File browser — open without a chat).
         if (!activeChatId) {
-          pushError('no chat focused');
+          useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' });
+          useUiStore.getState().setFilePickerOpen(true);
           return;
         }
         useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId: activeChatId });
@@ -551,9 +553,31 @@ export function AppShell(): JSX.Element {
         useLayoutStore.getState().toggleTab({ kind: 'terminal', chatId });
       },
       onFileBrowser: () => {
-        // ⌘⇧' — G3-8: open the per-chat file browser.
-        if (!activeChatId) return;
+        // ⌘⇧' — G3-8: open the per-chat file browser, or the host-wide one
+        // when no chat is focused (spec/14 § File browser — open without a chat).
+        if (!activeChatId) {
+          useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' });
+          return;
+        }
         useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId: activeChatId });
+      },
+      onSearchInFiles: () => {
+        // ⌘⇧F — search in files (spec/14 § File browser). The chat's own tree
+        // has no search UI (an arbitrary host directory can be huge in a way a
+        // chat's folder isn't, so that UI is host-browser only) — from a chat
+        // this opens the host browser rooted at the chat's OWN folder first.
+        const row = activeChatId ? useChatStore.getState().chats[activeChatId] : null;
+        if (row) {
+          useUiStore.getState().setHostBrowse({
+            hostId: row.hostId,
+            path: row.folder,
+            openFile: null,
+            draft: null,
+            version: null,
+          });
+        }
+        useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' });
+        useUiStore.getState().setSearchInFilesOpen(true);
       },
       onCloseTab: () => {
         const layout = useLayoutStore.getState();

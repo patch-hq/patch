@@ -52,6 +52,7 @@ import {
   Phone,
   SquarePlus,
   PanelRightOpen,
+  Folder,
   Target,
   Layers,
   Bell,
@@ -103,7 +104,7 @@ import {
   openNewChatInNewWindow,
   openSidebarInNewWindow,
 } from '../lib/newWindow.js';
-import { useLayoutStore } from '../stores/layoutStore.js';
+import { useLayoutStore, resolvePane } from '../stores/layoutStore.js';
 import {
   startVoiceNote,
   sendVoiceNote,
@@ -980,10 +981,26 @@ function BottomNav(): JSX.Element {
   const pending = (pads ?? []).reduce((n, p) => n + p.pending, 0);
   const onJobs = location.pathname.startsWith('/jobs');
   const onSettings = location.pathname.startsWith('/settings');
+  // spec/14 § File browser — open without a chat: the one entry point that
+  // works from anywhere, not just a chat view (§ Sidebar item 7). Lit while
+  // the host files tab is the focused one.
+  const filesActive = useLayoutStore((s) => {
+    const pane = resolvePane(s.root, s.activePaneId);
+    const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
+    return tab?.descriptor.kind === 'page' && tab.descriptor.page === 'host-files';
+  });
   return (
     <>
       <JobAlerts />
       <nav className="sb-bottom" data-testid="bottom-nav">
+        <button
+          type="button"
+          className={`nav-row ${filesActive ? 'active' : ''}`}
+          data-testid="nav-files"
+          onClick={() => useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' })}
+        >
+          <Folder size={16} aria-hidden className="nav-icon" /> Files
+        </button>
         <Link to="/pads" className={`nav-row ${onPads ? 'active' : ''}`} data-testid="nav-pads">
           <Layers size={16} aria-hidden className="nav-icon" /> Pads
           {pending > 0 ? (

@@ -31,6 +31,8 @@ import {
   isDocxPath,
 } from './EditorRail.js';
 import { ColumnDivider } from './ColumnDivider.js';
+import { Breadcrumb, PlacesMenu } from './HostFilesPage.js';
+import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore, EMPTY_BROWSE_STATE } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { api, ApiError } from '../api/rest.js';
@@ -123,6 +125,21 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
     // effect (keyed on `docView`), which fires once the just-opened doc view
     // loads — covers this fresh conversion AND a later reopen of the same
     // `.md` from one place, rather than announcing it twice.
+  }
+
+  // Climb out of the repo (spec/14 § File browser): the host browser, at
+  // `path`, on this chat's host.
+  const chatRow = useChatStore((s) => s.chats[chatId] ?? null);
+  function climbOut(path: string): void {
+    if (!chatRow) return;
+    useUiStore.getState().setHostBrowse({
+      hostId: chatRow.hostId,
+      path,
+      openFile: null,
+      draft: null,
+      version: null,
+    });
+    openTab({ kind: 'page', page: 'host-files' });
   }
 
   const menu = useContextMenu();
@@ -336,7 +353,24 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
             >
               <PanelLeftClose size={16} aria-hidden />
             </button>
+            {chatRow ? (
+              <PlacesMenu hostId={chatRow.hostId} chatFolder={chatRow.folder} onPick={climbOut} />
+            ) : null}
           </div>
+          {chatRow?.folder ? (
+            <Breadcrumb
+              path={chatRow.folder}
+              onNavigate={(clicked) => {
+                // The chat-folder crumb itself has no single "directory" in a
+                // hierarchical tree to jump to — the tree already shows the
+                // whole chat folder. Only a crumb ABOVE it means anything: it
+                // hands off to the host browser (spec/14 § File browser —
+                // climb out of the repo).
+                if (clicked === chatRow.folder) return;
+                climbOut(clicked);
+              }}
+            />
+          ) : null}
           <div className="browse-filter-row">
             <Search size={13} aria-hidden />
             <input

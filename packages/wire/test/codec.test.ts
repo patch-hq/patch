@@ -1012,6 +1012,27 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     parent: '/Users/tom/.claude',
     entries: [{ name: 'plant', type: 'dir' }],
   },
+  'patch.host_search.request': {
+    type: 'patch.host_search.request',
+    searchId: 'hs1',
+    hostId: 'host-a',
+    root: '/home/dev/project',
+    query: 'needle',
+    caseSensitive: true,
+  },
+  'patch.host_search.cancel': { type: 'patch.host_search.cancel', searchId: 'hs1' },
+  'patch.host_search.result': {
+    type: 'patch.host_search.result',
+    searchId: 'hs1',
+    matches: [{ path: 'src/a.ts', line: 3, column: 5, preview: 'a needle here' }],
+  },
+  'patch.host_search.done': {
+    type: 'patch.host_search.done',
+    searchId: 'hs1',
+    ok: true,
+    truncated: false,
+  },
+
   'patch.blob.request': {
     type: 'patch.blob.request',
     requestId: 'b1',

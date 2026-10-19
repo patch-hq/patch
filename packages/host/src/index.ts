@@ -174,6 +174,7 @@ import { provisionSidecarRuntime, resolveUv } from './audio/sidecarRuntime.js';
 import { bundledSidecarDir } from './installPaths.js';
 import { TerminalSessions } from './terminal.js';
 import { handleHostFilesRequest } from './hostFiles.js';
+import { HostSearchManager } from './hostSearch.js';
 import { handleBlobRequest } from './blobFetch.js';
 import { ToolLogStore } from './toolLog.js';
 import { ChatTokenReader, UsageHistoryStore } from './usageHistory.js';
@@ -1488,6 +1489,18 @@ async function startHost(
     },
     logger,
   });
+  // Host search (spec/02 § Host search). Same bound-sender pattern as
+  // `terminals` above — a session only exists downstream of a surface frame,
+  // so the sender is always bound by the time anything needs to emit.
+  let hostSearchSend: ((event: WireEvent) => void) | undefined;
+  const hostSearch = new HostSearchManager({
+    emit: (event) => {
+      /* v8 ignore next */
+      if (!hostSearchSend) return;
+      hostSearchSend(event);
+    },
+    logger,
+  });
   // The outbound server link owns its own offline buffer (cap 10k, drop-oldest;
   // spec/12). `emit` always routes through it — buffered while offline, sent
   // live once authed.
@@ -2177,6 +2190,14 @@ async function startHost(
         // stream lands on the one surface driving the shell.
         terminalSend = sender;
         terminals.handle(event);
+        return;
+      }
+      if (event.type === 'patch.host_search.request' || event.type === 'patch.host_search.cancel') {
+        // spec/02 § Host search — ⌘⇧F search in files, with no chat in
+        // between. Same `forSurfaceId`-stamped streaming pattern as terminal
+        // sessions above.
+        hostSearchSend = sender;
+        hostSearch.handle(event);
         return;
       }
       if (event.type === 'host.wake_request') {
@@ -4720,6 +4741,9 @@ async function startHost(
     // Terminal shells die with the host (spec/02 — no reattach); surfaces are
     // told via `patch.terminal.exit { reason: 'daemon_shutdown' }`.
     await terminals.shutdown().catch(() => undefined);
+    // Host searches die with the host too — a surface mid-search just gets
+    // no more frames for that `searchId`, same as a cancel.
+    hostSearch.cancelAll();
     // spec/02 § Browser — Route through: close every SOCKS listener/outbound
     // socket this host holds, on either half, rather than leaking them.
     browserTunnelClient.dispose();

@@ -43,6 +43,7 @@ import { ChatRoute } from '../routes/ChatRoute.js';
 import { SideThreadsPanel } from './SideThreadsPanel.js';
 import { FileEditorTab } from './FileEditorTab.js';
 import { FilesPage } from './FilesPage.js';
+import { HostFilesPage } from './HostFilesPage.js';
 import { JobsRoute } from '../routes/JobsRoute.js';
 import { JobEditorRoute } from '../routes/JobEditorRoute.js';
 import { SettingsRoute } from '../routes/SettingsRoute.js';
@@ -127,6 +128,8 @@ function tabTitle(
           return 'Settings';
         case 'files':
           return `Files — ${chatTitle(d.chatId, chatName)}`;
+        case 'host-files':
+          return 'Host files';
         case 'pads':
           return 'Pads';
         case 'pad':
@@ -155,6 +158,7 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
         case 'settings':
           return <SettingsIcon size={13} aria-hidden />;
         case 'files':
+        case 'host-files':
           return <Files size={13} aria-hidden />;
         case 'pads':
         case 'pad':
@@ -356,6 +360,8 @@ function TabContent({
           return <SettingsRoute />;
         case 'files':
           return <FilesPage chatId={d.chatId} />;
+        case 'host-files':
+          return <HostFilesPage ws={ws} />;
         case 'pads':
           return <PadsPage />;
         case 'pad':

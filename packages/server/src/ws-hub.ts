@@ -295,6 +295,14 @@ export class WsHub {
    */
   private readonly terminalSessionHost = new Map<string, string>();
   /**
+   * The host-search counterpart of `terminalSessionHost` — `searchId →
+   * hostId`, stamped from `patch.host_search.request` (the only host-search
+   * frame that carries a `hostId`). `patch.host_search.cancel` names only
+   * the `searchId`, so without this it could not be routed. NO FALLBACK: an
+   * unknown `searchId` is refused rather than guessed at.
+   */
+  private readonly hostSearchHost = new Map<string, string>();
+  /**
    * Build the host reported on its last successful hello (spec/11 § Version
    * reporting). The host has no presence record, and we deliberately KEEP this
    * after the link drops so the update panel can still name the build that went
@@ -452,6 +460,11 @@ export class WsHub {
     // having its keystrokes buffered for a shell that no longer exists.
     for (const [sessionId, host] of this.terminalSessionHost.entries()) {
       if (host === hostId) this.terminalSessionHost.delete(sessionId);
+    }
+    // Same reasoning for a search mid-walk on that machine — it died with
+    // the host, and a cancel for it would otherwise route nowhere.
+    for (const [searchId, host] of this.hostSearchHost.entries()) {
+      if (host === hostId) this.hostSearchHost.delete(searchId);
     }
   }
 
@@ -1539,6 +1552,27 @@ export class WsHub {
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, tagged);
         return;
       }
+      case 'patch.host_search.request': {
+        // spec/03 § Host search. Same reasoning as `patch.terminal.open`: a
+        // search is per-SURFACE, and `request` is the only host-search frame
+        // that names a machine, so it is where this search's host is
+        // recorded for the `cancel` that might follow.
+        this.hostSearchHost.set(event.searchId, event.hostId);
+        const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
+        this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, tagged);
+        return;
+      }
+      case 'patch.host_search.cancel': {
+        // Route by SEARCH: no hostId of its own. An unknown searchId (never
+        // opened here, or already finished) is dropped: the host-side
+        // session is gone either way, so there is nothing left to cancel.
+        const hostId = this.hostSearchHost.get(event.searchId);
+        if (hostId === undefined) return;
+        this.hostSearchHost.delete(event.searchId);
+        const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
+        this.deps.hostLink.sendTo(hostId, conn.surfaceId, tagged);
+        return;
+      }
       case 'patch.terminal.input':
       case 'patch.terminal.signal':
       case 'patch.terminal.resize':
@@ -1710,6 +1744,9 @@ export class WsHub {
     // machine it was on so a stale id is refused rather than mis-routed.
     if (event.type === 'patch.terminal.exit') {
       this.terminalSessionHost.delete(event.sessionId);
+    }
+    if (event.type === 'patch.host_search.done') {
+      this.hostSearchHost.delete(event.searchId);
     }
     // Cache each host's self-description and per-backend credential state so a
     // late-joining surface gets them inside its auth.ok greeting (a host only
@@ -1945,6 +1982,9 @@ export class WsHub {
     this.lastClaudeSettings.delete(hostId);
     for (const [sessionId, host] of this.terminalSessionHost.entries()) {
       if (host === hostId) this.terminalSessionHost.delete(sessionId);
+    }
+    for (const [searchId, host] of this.hostSearchHost.entries()) {
+      if (host === hostId) this.hostSearchHost.delete(searchId);
     }
     return this.sendToAll({ type: 'host.removed', hostId });
   }

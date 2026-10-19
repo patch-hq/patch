@@ -998,7 +998,9 @@ on Tab and runs full-screen programs.
 A surface can list, read and write files on a host by absolute path, with no
 chat in between (`03-wire-protocol.md` § Host files). The chat-scoped file
 browser resolves every path through a chat's folder; this is how a file outside
-every chat — a skill under `~/.claude/skills`, a dotfile — is reached.
+every chat — a skill under `~/.claude/skills`, a dotfile — is reached: opening
+the file browser without a chat at all, or climbing a chat's own browser above
+its folder (`14-design-web.md` § File browser).
 
 - It is not confined to the project roots. A surface that can reach this can
   already open a terminal on the host, which reaches every file the host's
@@ -1020,6 +1022,41 @@ every chat — a skill under `~/.claude/skills`, a dotfile — is reached.
   file or the new one.
 - A committed write inside a chat's folder is announced to that chat's
   surfaces with `patch.file_changed`, as its own editor's save would be.
+- A `recursive` `list` walks `path` flat instead of one level, for the host-wide
+  `⌘P` quick-open — the same git-aware walk the chat-scoped recursive index
+  uses (tracked + untracked-but-not-ignored files via `git ls-files` when
+  `path` is a work-tree, a bounded manual walk otherwise), capped at
+  `maxEntries` (default 20,000). `entries[].name` is a path relative to `path`
+  rather than a bare filename.
+
+## Host search
+
+A surface can search file CONTENTS under one absolute directory on a host, with
+no chat in between — the search-in-files half of the host-wide file browser
+(`03-wire-protocol.md` § Host search; `14-design-web.md` § File browser — `⌘⇧F`).
+
+- A SESSION, not a request/response: the surface mints `searchId`, opens with
+  `patch.host_search.request`, and the host streams zero or more
+  `patch.host_search.result` batches followed by exactly one
+  `patch.host_search.done`. `patch.host_search.cancel` ends it early — the
+  host stops the walk and sends nothing further for that `searchId`,
+  `done` included.
+- The query is a plain substring, never a regex — case-insensitive unless
+  `caseSensitive` is set. There is no query language to get wrong.
+- `root` must be absolute and already normal, exactly like host files' `path`
+  (`path_invalid` otherwise); it must exist and be a directory (`not_found` /
+  `not_a_directory`).
+- Prefers `rg` (ripgrep) on the host's PATH: already gitignore-aware, already
+  skips binary files, fast enough that most searches answer in one batch. A
+  host with no `rg` falls back to its own walk — the same git-aware listing
+  `recursive` host files / the chat-scoped index use, each file read (if UTF-8
+  text, within the editor's size cap) and scanned line by line.
+- Capped at 500 matches total; hitting the cap stops the walk and reports
+  `truncated: true` rather than running unbounded over a huge tree.
+- A search's own frames are per-surface the same way terminal output is
+  (`forSurfaceId`, stamped by the hub from `request`/`cancel` since those are
+  the only host-search frames a surface sends) — never fanned out to every
+  connected surface.
 
 ## Chat search
 

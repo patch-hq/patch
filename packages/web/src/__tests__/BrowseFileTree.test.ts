@@ -10,8 +10,29 @@
 //     instead of Monaco.
 
 import { describe, it, expect } from 'vitest';
-import { buildFileTree, filterFileTree, isPreviewableBinary } from '../components/EditorRail.js';
+import {
+  buildFileTree,
+  filterFileTree,
+  isPreviewableBinary,
+  breadcrumbSegments,
+} from '../components/EditorRail.js';
 import type { TreeNode } from '../components/EditorRail.js';
+
+describe('breadcrumbSegments (climb out of the repo, spec/14 § File browser)', () => {
+  it('splits an absolute path into every ancestor from / down, each carrying its full path', () => {
+    expect(breadcrumbSegments('/home/tom/projects/widget')).toEqual([
+      { label: '/', path: '/' },
+      { label: 'home', path: '/home' },
+      { label: 'tom', path: '/home/tom' },
+      { label: 'projects', path: '/home/tom/projects' },
+      { label: 'widget', path: '/home/tom/projects/widget' },
+    ]);
+  });
+
+  it('the root itself is just one crumb', () => {
+    expect(breadcrumbSegments('/')).toEqual([{ label: '/', path: '/' }]);
+  });
+});
 
 describe('buildFileTree', () => {
   it('nests entries under their parent directory by path', () => {

@@ -285,8 +285,8 @@
     --amber: #e0a43a;
     --goal-working: #f0903a;
     --goal-met: #5cb877;
-  --goal-working: #f0903a;
-  --goal-met: #5cb877;
+    --goal-working: #f0903a;
+    --goal-met: #5cb877;
     --amber-tint: rgba(224, 164, 58, 0.16);
     --leaf: #77a966;
     --voice-tint: #3a2b22;
@@ -2407,6 +2407,17 @@ a.ch-row:hover {
   text-decoration: none;
   font-size: var(--text-min);
   border-radius: var(--radius);
+}
+/* The Files row (spec/14 § Sidebar item 7) is a button, not a route Link —
+   it opens a tab rather than navigating — so it needs the Link rows'
+   browser-default resets undone. */
+button.nav-row {
+  width: 100%;
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 .nav-row:hover {
   background: var(--bg-soft);
@@ -14984,7 +14995,12 @@ select.new-chat-account:focus-visible {
   border: 1px solid var(--line);
   border-radius: var(--radius-md, 12px);
   background: var(--bg-elevated);
-  font-family: 'Figtree Variable', 'Inter Variable', -apple-system, system-ui, sans-serif;
+  font-family:
+    'Figtree Variable',
+    'Inter Variable',
+    -apple-system,
+    system-ui,
+    sans-serif;
   font-size: 15px;
   color: var(--ink);
   display: flex;
@@ -15058,4 +15074,178 @@ select.new-chat-account:focus-visible {
   color: inherit;
   cursor: pointer;
   padding: 2px;
+}
+
+/* Host files tab (spec/14 § File browser — open anywhere, climb to /, Places,
+   host-wide ⌘P, ⌘⇧F): breadcrumb, Places menu, search panel. */
+.browse-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.browse-breadcrumb-crumb {
+  padding: 1px 4px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+.browse-breadcrumb-crumb:hover {
+  background: var(--bg-soft);
+  color: var(--accent-strong);
+}
+.browse-breadcrumb-current {
+  padding: 1px 4px;
+  color: var(--ink);
+}
+.browse-places {
+  position: relative;
+  margin-left: auto;
+}
+.browse-places-toggle {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  cursor: pointer;
+}
+.browse-places-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.browse-places-item {
+  padding: 5px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: var(--text-min);
+  text-align: left;
+  cursor: pointer;
+}
+.browse-places-item:hover {
+  background: var(--bg-soft);
+}
+.browse-places-empty {
+  padding: 6px 8px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.browse-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 10px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font-size: var(--text-min);
+  text-align: left;
+  cursor: pointer;
+}
+.browse-row:hover:not(:disabled) {
+  background: var(--bg-soft);
+}
+.browse-row:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+.browse-meta-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.browse-meta-strip .browse-meta-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-search-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.host-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+.host-search-results {
+  max-height: 40%;
+  overflow: auto;
+}
+.host-search-file {
+  display: flex;
+  flex-direction: column;
+}
+.host-search-file-path {
+  padding: 4px 10px;
+  color: var(--ink-2);
+  font-size: var(--text-min);
+}
+.host-search-match {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 10px 2px 20px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font-size: var(--text-min);
+  text-align: left;
+  cursor: pointer;
+}
+.host-search-match:hover {
+  background: var(--bg-soft);
+}
+.host-search-line {
+  color: var(--ink-3);
+}
+.host-search-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-search-empty,
+.host-search-truncated,
+.file-search-empty,
+.file-search-hint {
+  padding: 6px 10px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.host-search-error {
+  padding: 6px 10px;
+  color: var(--danger);
+  font-size: var(--text-min);
+}
+.file-search-section {
+  padding: 4px 10px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
 }

@@ -15,7 +15,15 @@ import { create } from 'zustand';
  *  OS-level second window (`lib/artifactPanel.ts`) — they are not DOM content
  *  this app renders, so there is nothing for a pane to host; they keep their
  *  existing opening mechanism unchanged. */
-export type PageKind = 'jobs' | 'job' | 'settings' | 'files' | 'pads' | 'pad' | 'new-pad';
+export type PageKind =
+  | 'jobs'
+  | 'job'
+  | 'settings'
+  | 'files'
+  | 'host-files'
+  | 'pads'
+  | 'pad'
+  | 'new-pad';
 
 export type TabDescriptor =
   | { kind: 'chat'; chatId: string }
@@ -25,6 +33,8 @@ export type TabDescriptor =
   | { kind: 'page'; page: 'job'; jobId: string }
   | { kind: 'page'; page: 'settings' }
   | { kind: 'page'; page: 'files'; chatId: string }
+  /** A machine's filesystem by absolute path, no chat (spec/14 § File browser). Singleton. */
+  | { kind: 'page'; page: 'host-files' }
   | { kind: 'page'; page: 'pads' }
   | { kind: 'page'; page: 'pad'; padId: string }
   | { kind: 'page'; page: 'new-pad'; chatId?: string };
@@ -300,6 +310,7 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
         case 'jobs':
         case 'settings':
         case 'pads':
+        case 'host-files':
           return true;
         case 'job':
           return typeof d['jobId'] === 'string';

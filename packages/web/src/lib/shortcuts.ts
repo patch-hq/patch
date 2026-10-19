@@ -52,8 +52,14 @@ export interface ShortcutHandlers {
   onArchiveCurrent(): void;
   onFilePicker(): void;
   onDiffViewer(): void;
-  /** G3-8: ⌘⇧' opens the per-chat file browser. */
+  /**
+   * ⌘⇧' opens the file browser — the chat's own folder when a chat is
+   * focused, or the host-wide browser when there isn't one (spec/14 § File
+   * browser — open without a chat).
+   */
   onFileBrowser(): void;
+  /** ⌘⇧F — search in files under the host browser's current folder (spec/14 § File browser). */
+  onSearchInFiles(): void;
   /** `at`: the keydown's `timeStamp`, the clock every hold is measured on. */
   onVoiceHoldStart(at: number): void;
   /** `heldMs` is how long the chord was down — a tap and a press-and-hold are
@@ -217,6 +223,20 @@ export const SHORTCUT_TABLE: ShortcutEntry[] = [
   { keys: '⌘ ⌥ ← / ⌘ ⌥ →', action: 'Previous / next tab', scope: CHAT_VIEW },
   { keys: '⌘ \\', action: 'Split pane', scope: CHAT_VIEW },
   { keys: '⌘ P', action: 'File picker (project-wide)', scope: ANYWHERE },
+  {
+    keys: '⌘ ⇧ F',
+    action: 'Search in files',
+    scope: other('File browser open'),
+  },
+  {
+    keys: '⌃ G',
+    action: 'Go to line',
+    // Monaco's own built-in action (`editor.action.gotoLine`) — not bound by
+    // this file's handler, which is why it is listed here rather than wired
+    // into `handleKeyDown` below (spec/14 § Keyboard shortcuts).
+    scope: other('Editor showing a file'),
+  },
+  { keys: '⌘ E', action: 'Recent files', scope: other('File browser open') },
   { keys: '⌘ S', action: 'Save the open file', scope: other('Editor showing a file') },
   // The rule the app used to state only for the composer (spec/14 § Keyboard
   // shortcuts): wherever a field has a save action, the chord runs it.
@@ -330,6 +350,11 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       // own find bar opens, exactly as before.
       if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === 'f') {
         if (handlers.onSearch('f')) e.preventDefault();
+        return;
+      }
+      if (isMod(e) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        handlers.onSearchInFiles();
         return;
       }
       if (isMod(e) && e.key === '/') {

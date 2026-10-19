@@ -645,6 +645,7 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
         'host.update',
         'patch.folders.browse.request',
         'patch.host_files.request',
+        'patch.host_search.request',
         'patch.models.request',
         'patch.recurrence.translate.request',
         'patch.spawn',

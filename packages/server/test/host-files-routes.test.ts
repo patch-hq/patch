@@ -120,6 +120,33 @@ describe('host files routes', () => {
     }
   });
 
+  it('passes recursive + maxEntries through (editor overhaul — host-wide ⌘P)', async () => {
+    const link = new FakeHostHost((e) => ({
+      ok: true,
+      path: e.path,
+      parent: '/',
+      entries: [{ name: 'src/a.ts', type: 'file' }],
+    }));
+    const { built, auth } = await boot(link);
+    try {
+      const res = await built.app.inject({
+        method: 'GET',
+        url: `/api/hosts/d1/files?path=${encodeURIComponent('/proj')}&recursive=1&maxEntries=500`,
+        headers: auth,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ entries: [{ name: 'src/a.ts', type: 'file' }] });
+      expect(link.asked[0]!.event).toMatchObject({
+        op: 'list',
+        path: '/proj',
+        recursive: true,
+        maxEntries: 500,
+      });
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('reads a file with its version', async () => {
     const link = new FakeHostHost((e) => ({
       ok: true,

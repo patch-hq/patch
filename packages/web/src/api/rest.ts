@@ -33,6 +33,14 @@ export type SharedBackendId = 'claude-code' | 'codex';
 /** An uploaded attachment: the wire ref plus the relative URL to render it inline. */
 export type UploadedAttachment = AttachmentRef & { url: string };
 
+/** One row of a host directory listing (spec/03 § Host files). */
+export interface HostFileEntry {
+  name: string;
+  /** A symlink is listed as what it points at; a dangling one is `other`. */
+  type: 'file' | 'dir' | 'other';
+  size?: number;
+}
+
 /** One chat row as the server serves it, from the roster or by id. */
 export interface ChatSummaryRow {
   chatId: string;
@@ -1255,6 +1263,34 @@ export const api = {
       `/api/folders/browse?hostId=${encodeURIComponent(hostId)}${
         dir ? `&dir=${encodeURIComponent(dir)}` : ''
       }`,
+    ),
+  // Host files (spec/03 § Host files, spec/14 § File browser): a machine's
+  // filesystem by ABSOLUTE path, with no chat in between — climbing above a
+  // chat's folder, or browsing without a chat at all. No `path` lists the
+  // host user's home, and the answer says where that is.
+  hostFilesList: (
+    hostId: string,
+    path?: string,
+    opts?: { recursive?: boolean; maxEntries?: number },
+  ) =>
+    request<{ path: string; parent: string | null; entries: HostFileEntry[] }>(
+      `/api/hosts/${encodeURIComponent(hostId)}/files?${new URLSearchParams({
+        ...(path ? { path } : {}),
+        ...(opts?.recursive ? { recursive: '1' } : {}),
+        ...(opts?.maxEntries !== undefined ? { maxEntries: String(opts.maxEntries) } : {}),
+      }).toString()}`,
+    ),
+  hostFileRead: (hostId: string, path: string) =>
+    request<{ path: string; content: string; size: number; version: string }>(
+      `/api/hosts/${encodeURIComponent(hostId)}/files/content?path=${encodeURIComponent(path)}`,
+    ),
+  // Saves only over the version it was opened at: a file changed on disk since
+  // is a 409 `conflict`, and nothing is written (the host-files version guard,
+  // spec/14 § File browser).
+  hostFileWrite: (hostId: string, body: { path: string; content: string; baseVersion: string }) =>
+    request<{ path: string; size: number; version: string }>(
+      `/api/hosts/${encodeURIComponent(hostId)}/files/content`,
+      { method: 'PUT', body },
     ),
   /**
    * The one-line install command for a new machine, per target OS. The SERVER

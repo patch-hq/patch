@@ -2842,9 +2842,90 @@ if (editorParam === 'browse' || fileStubParam === 'skill') {
     }
     return v;
   };
+  // Editor overhaul (climb out of the repo, spec/14 § File browser): a tiny
+  // host-wide filesystem for the breadcrumb/Places/host-picker/⌘P specs —
+  // `/home/tom/projects/bus` is deliberately the SAME path as the chat
+  // fixture's own folder above, so climbing out of the chat and back lands on
+  // recognisable fixture data either way.
+  const hostFs: Record<string, Array<{ name: string; type: 'file' | 'dir' }>> = {
+    '/home/tom': [
+      { name: 'projects', type: 'dir' },
+      { name: '.claude', type: 'dir' },
+    ],
+    '/home/tom/projects': [
+      { name: 'bus', type: 'dir' },
+      { name: 'portfolio', type: 'dir' },
+    ],
+    '/home/tom/projects/bus': [
+      { name: 'src', type: 'dir' },
+      { name: 'foo.ts', type: 'file' },
+    ],
+    '/home/tom/projects/bus/src': [{ name: 'index.ts', type: 'file' }],
+    '/home/tom/.claude': [
+      { name: 'skills', type: 'dir' },
+      { name: 'CLAUDE.md', type: 'file' },
+    ],
+    '/home/tom/.claude/skills': [{ name: 'plant', type: 'dir' }],
+    '/home/tom/.claude/skills/plant': [{ name: 'SKILL.md', type: 'file' }],
+  };
+  const hostFsContent = (path: string): string =>
+    path.endsWith('SKILL.md')
+      ? '# plant\n\nSow what is in season.\n'
+      : `// ${path}\nexport const x = 1;\n`;
   const realFetch = window.fetch.bind(window);
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes('/api/hosts/')) {
+      const u = new URL(url, window.location.origin);
+      const path = u.searchParams.get('path');
+      if (u.pathname.endsWith('/files/content') && (init?.method ?? 'GET') === 'PUT') {
+        const body = init?.body
+          ? (JSON.parse(String(init.body)) as { path: string })
+          : { path: '' };
+        return Promise.resolve(
+          new Response(JSON.stringify({ path: body.path, size: 20, version: 'v2' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }
+      if (u.pathname.endsWith('/files/content')) {
+        const content = hostFsContent(path ?? '');
+        return Promise.resolve(
+          new Response(JSON.stringify({ path, content, size: content.length, version: 'v1' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }
+      // `/files` list — recursive or one level.
+      const recursive = u.searchParams.get('recursive') === '1';
+      const root = path ?? '/home/tom';
+      if (recursive) {
+        const flat: Array<{ name: string; type: 'file' | 'dir' }> = [];
+        const walk = (dir: string, prefix: string): void => {
+          for (const e of hostFs[dir] ?? []) {
+            flat.push({ name: prefix + e.name, type: e.type });
+            if (e.type === 'dir') walk(`${dir}/${e.name}`, `${prefix}${e.name}/`);
+          }
+        };
+        walk(root, '');
+        return Promise.resolve(
+          new Response(JSON.stringify({ path: root, parent: null, entries: flat }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }
+      const entries = hostFs[root] ?? [];
+      const parent = root === '/' ? null : root.slice(0, root.lastIndexOf('/')) || '/';
+      return Promise.resolve(
+        new Response(JSON.stringify({ path: root, parent, entries }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
     if (url.includes('/doc/action') && (init?.method ?? 'GET') === 'POST') {
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
       const path = body['path'] as string;
@@ -3241,9 +3322,13 @@ function recordingHandlers(): ShortcutHandlers {
     onFileBrowser: () => {
       record('fileBrowser')();
       const chatId = useChatStore.getState().activeChatId;
-      if (!chatId) return;
+      if (!chatId) {
+        useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' });
+        return;
+      }
       useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId });
     },
+    onSearchInFiles: record('searchInFiles'),
     // Recorded, and routed to the open composer exactly as AppShell does.
     onVoiceHoldStart: (at: number) => {
       record('voiceHoldStart')();

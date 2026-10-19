@@ -833,7 +833,15 @@ export function SaveConflictModal({
 }: {
   path: string;
   onReload: () => void;
-  onOverwrite: () => void;
+  /**
+   * Omitted for the host-files version guard (spec/14 § File browser — a file
+   * changed on disk since opening is refused, with Reload; same contract as
+   * mobile's host file editor, which offers no Overwrite at all): the host
+   * never took a baseline content snapshot to compare against, only a hash, so
+   * there is nothing here to offer "write over it anyway" against except the
+   * draft itself — Reload-then-redo is the only honest way to continue.
+   */
+  onOverwrite?: () => void;
   onCancel: () => void;
 }): JSX.Element {
   useEffect(() => {
@@ -875,19 +883,22 @@ export function SaveConflictModal({
             type="button"
             className="modal-btn"
             data-testid="save-conflict-reload"
+            autoFocus={onOverwrite === undefined}
             onClick={onReload}
           >
             Reload
           </button>
-          <button
-            type="button"
-            className="modal-btn danger-btn"
-            data-testid="save-conflict-overwrite"
-            autoFocus
-            onClick={onOverwrite}
-          >
-            Overwrite
-          </button>
+          {onOverwrite ? (
+            <button
+              type="button"
+              className="modal-btn danger-btn"
+              data-testid="save-conflict-overwrite"
+              autoFocus
+              onClick={onOverwrite}
+            >
+              Overwrite
+            </button>
+          ) : null}
         </div>
       </div>
     </ModalOverlay>
@@ -1349,6 +1360,28 @@ export function dirName(path: string): string {
 export function baseName(path: string): string {
   const slash = path.lastIndexOf('/');
   return slash === -1 ? path : path.slice(slash + 1);
+}
+
+/**
+ * Editor overhaul (climb out of the repo, spec/14 § File browser): an
+ * absolute path split into every crumb from `/` down to the path itself,
+ * each carrying the FULL path a click on it navigates to. `/` is always the
+ * first crumb (its own label), so there is always one click from anywhere to
+ * the root.
+ */
+export interface BreadcrumbSegment {
+  label: string;
+  path: string;
+}
+export function breadcrumbSegments(path: string): BreadcrumbSegment[] {
+  const segs: BreadcrumbSegment[] = [{ label: '/', path: '/' }];
+  const parts = path.split('/').filter((p) => p.length > 0);
+  let cur = '';
+  for (const part of parts) {
+    cur += `/${part}`;
+    segs.push({ label: part, path: cur });
+  }
+  return segs;
 }
 
 /**

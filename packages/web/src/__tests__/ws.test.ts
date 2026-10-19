@@ -18,6 +18,7 @@ import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
+import { useHostSearchStore } from '../stores/hostSearchStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { saveCredential, clearCredential } from '../lib/credential.js';
 
@@ -1802,6 +1803,24 @@ describe('PatchWs dispatch — agent browser live view and hand-off', () => {
       outcome: 'done',
     });
     expect(useBrowserHandoffStore.getState().handoffs['c1']).toBeUndefined();
+    expect(useUiStore.getState().errors).toHaveLength(0);
+  });
+});
+
+describe('PatchWs dispatch — host search frames (spec/14 § File browser — search in files)', () => {
+  it('routes result/done frames into hostSearchStore', async () => {
+    useHostSearchStore.getState().reset();
+    useHostSearchStore.getState().start('s1', 'h1', '/proj', 'needle');
+    const { fake } = await connectAndOpen();
+    fake.receive({
+      type: 'patch.host_search.result',
+      searchId: 's1',
+      matches: [{ path: 'a.ts', line: 1, column: 1, preview: 'needle here' }],
+    });
+    fake.receive({ type: 'patch.host_search.done', searchId: 's1', ok: true });
+    expect(useHostSearchStore.getState().matches).toHaveLength(1);
+    expect(useHostSearchStore.getState().status).toBe('done');
+    // Not a toast channel, not a chat-timeline event.
     expect(useUiStore.getState().errors).toHaveLength(0);
   });
 });

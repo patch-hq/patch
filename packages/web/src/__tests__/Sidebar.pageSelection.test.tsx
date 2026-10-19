@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { JSX } from 'react';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
@@ -15,6 +15,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { useLayoutStore, resolvePane } from '../stores/layoutStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
 import { api } from '../api/rest.js';
 import type { ChatRow } from '../stores/types.js';
@@ -49,6 +50,7 @@ describe('Sidebar selection tracks the page you are actually on', () => {
   beforeEach(() => {
     window.localStorage.clear();
     useChatStore.getState()._reset();
+    useLayoutStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
     useVoiceStore.setState({ activeDevices: {} });
     useUiStore.getState().setChannelsOpen(false);
@@ -111,5 +113,18 @@ describe('Sidebar selection tracks the page you are actually on', () => {
     renderAt('/chats/r1');
     expect(screen.getByTestId('nav-jobs')).not.toHaveClass('active');
     expect(screen.getByTestId('nav-settings')).not.toHaveClass('active');
+  });
+
+  // spec/14 § Sidebar §7, § File browser — open without a chat: the Files row
+  // opens the host files tab from ANY route, not just a chat.
+  it('the Files row opens the host files tab', () => {
+    useChatStore.getState().hydrate([rowFixture({ chatId: 'r1' })]);
+    renderAt('/settings');
+    expect(screen.getByTestId('nav-files')).not.toHaveClass('active');
+    fireEvent.click(screen.getByTestId('nav-files'));
+    const layout = useLayoutStore.getState();
+    const pane = resolvePane(layout.root, layout.activePaneId);
+    expect(pane.tabs.map((t) => t.descriptor)).toContainEqual({ kind: 'page', page: 'host-files' });
+    expect(screen.getByTestId('nav-files')).toHaveClass('active');
   });
 });
