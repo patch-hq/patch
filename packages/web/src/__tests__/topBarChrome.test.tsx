@@ -199,6 +199,15 @@ describe('the top row stylesheet', () => {
     );
   });
 
+  it('opts the whole annotator overlay out of the desktop drag regions', () => {
+    // The overlay is portalled to <body>, over the chat header's `drag`
+    // rectangle. Drag is native hit-testing by geometry, so without this the
+    // header swallows clicks on the annotator toolbar ("cannot click on top
+    // buttons"). Chromium drops the property from the CSSOM, so read the source.
+    expect(css).toMatch(/\.annotator-backdrop\s*\{[^}]*-webkit-app-region:\s*no-drag;/);
+    expect(css).toMatch(/\.annotator-toolbar\s*\{[^}]*-webkit-app-region:\s*no-drag;/);
+  });
+
   it('makes the Jobs / Settings / editor page head drag the window, with its controls punched out', () => {
     // A window opened onto one of these pages (Todoist: "patch cant move a
     // new window, cant drag it") has no title bar, and `.route-head` is its top
