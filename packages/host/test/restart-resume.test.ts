@@ -350,6 +350,45 @@ describe('resuming turns a host restart interrupted', () => {
     expect(pendingOf(second.metaStore, chatId)).toEqual([]);
   });
 
+  // A transient SDK failure parks the turn for a 10s/30s/90s retry. A reboot
+  // that lands inside that window used to leave the chat errored for good
+  // ("expired transient retry left failed") — the turn was still owed, so the
+  // next host must run it. It never ran to completion, so it goes back
+  // verbatim rather than with the "you were cut off" framing.
+  it('re-sends a turn that was waiting out a transient retry when the host went down', async () => {
+    const { home, folder } = setup();
+    const metaStore = createMetaStore(home);
+    const flaky: SdkBackend = {
+      run: async function* (): AsyncGenerator<never> {
+        throw new Error('socket hang up');
+      },
+    };
+    const first = new Daemon({
+      hostId: 'd1',
+      metaStore,
+      sdkBackend: flaky,
+      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: 'a1' }),
+      emit: () => {},
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: () => 'chat-1',
+    });
+    const chatId = await first.spawnChat({ folder });
+    await first.sendInput({ chatId, message: 'go', localId: 'L1' });
+    expect(pendingOf(metaStore, chatId)).toEqual([
+      expect.objectContaining({ message: 'go', waitingFor: 'retry' }),
+    ]);
+    first.shutdown();
+
+    const g2 = gatedBackend();
+    const second = hostOver(home, g2.backend);
+    second.daemon.hydrate();
+    await tick();
+
+    expect(g2.prompts).toEqual(['go']);
+    await g2.drain();
+  });
+
   it('a cancelled queued turn stops being owed', async () => {
     const g = gatedBackend();
     const { home, folder } = setup();
