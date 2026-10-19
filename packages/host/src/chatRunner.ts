@@ -847,6 +847,9 @@ export interface SpawnChatOptions {
  */
 const SDK_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000];
 
+/** Re-sends for a session the SDK aborted unasked: one resumed, one on a fresh session. */
+const SESSION_ABORT_RESTARTS = 2;
+
 /**
  * How old a failed turn may be and still be re-fired automatically.
  *
@@ -2847,6 +2850,8 @@ export class Daemon {
    * rather than a chat's lifetime total.
    */
   private readonly sdkRetryCount = new Map<string, number>();
+  /** Consecutive session aborts per chat; cleared by a settled turn. */
+  private readonly sessionAbortCount = new Map<string, number>();
   /** Armed generic-error retries, so shutdown can cancel them. */
   private readonly sdkRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
@@ -2871,6 +2876,7 @@ export class Daemon {
     for (const t of this.sdkRetryTimers.values()) clearTimeout(t);
     this.sdkRetryTimers.clear();
     this.sdkRetryCount.clear();
+    this.sessionAbortCount.clear();
     // NOT persisted away on shutdown: a parked turn is still owed, and
     // meta.json is exactly how the next host finds out about it.
     this.parkedTurns.clear();
@@ -9000,6 +9006,7 @@ export class Daemon {
         // next one starts from the first backoff step rather than inheriting
         // an old chat's exhausted budget.
         this.sdkRetryCount.delete(chatId);
+        this.sessionAbortCount.delete(chatId);
         // A turn that got through owes nothing to the accounts it was bounced
         // between: the next turn starts with every account eligible again.
         this.failoverTriedAccounts.delete(chatId);
@@ -9425,6 +9432,45 @@ export class Daemon {
           );
           return false;
         }
+        // The SDK aborted a turn nobody stopped (the user-stop branch above has
+        // already returned), typically after a long or hung tool call. It is a
+        // dead session, not a transient fault: the ladder re-sends into the
+        // same wedged state and cannot succeed, so it is skipped. Re-send at
+        // once, resuming the session; if that aborts too, restart the turn on
+        // a fresh session; only then leave the chat errored.
+        if (err instanceof Error && err.name === 'AbortError') {
+          const aborts = (this.sessionAbortCount.get(chatId) ?? 0) + 1;
+          if (aborts <= SESSION_ABORT_RESTARTS) {
+            this.sessionAbortCount.set(chatId, aborts);
+            const cur = this.chatState.get(chatId);
+            const restartFresh = aborts === SESSION_ABORT_RESTARTS;
+            if (restartFresh && cur) {
+              cur.claudeSessionId = undefined;
+              this.opts.metaStore.update(chatId, (m) => {
+                const { claudeSessionId: _drop, ...rest } = m;
+                void _drop;
+                return { ...rest, updatedAt: this.opts.now() };
+              });
+              this.hydratedFromDisk.delete(chatId);
+            }
+            this.opts.logger.warn(
+              { chatId, aborts, restartFresh, error: errMsg },
+              'session aborted without a stop — re-sending the turn instead of the retry ladder',
+            );
+            void this.sendInput({
+              chatId,
+              message: prompt,
+              localId: `session-abort-${chatId}-${aborts}-${this.opts.now()}`,
+              ...(cur?.turnOrigin ? { origin: cur.turnOrigin } : {}),
+              ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
+            });
+            this.chatState.setActivity(chatId, 'idle');
+            this.emitState(chatId);
+            return false;
+          }
+          // Restarts spent: fall through and report the failure. The ladder
+          // below still does not run for it (see `scheduleSdkRetry` call).
+        }
         // Distinguish a stale/missing Claude session from generic SDK
         // failures (spec/04 line 46): clear claudeSessionId so the next
         // input starts fresh, and surface a `claude_session_invalid` code.
@@ -9572,6 +9618,7 @@ export class Daemon {
             !blockedOnCredit &&
             failureClass.kind === 'transient' &&
             !isSessionInvalid &&
+            !(err instanceof Error && err.name === 'AbortError') &&
             (this.sdkRetryCount.get(chatId) ?? 0) < SDK_RETRY_BACKOFF_MS.length;
         }
         this.emitState(chatId);
@@ -9601,6 +9648,11 @@ export class Daemon {
           this.opts.logger.warn(
             { chatId, errMsg, reason: failureClass.reason },
             'failure classified permanent — not retrying',
+          );
+        } else if (err instanceof Error && err.name === 'AbortError') {
+          this.opts.logger.error(
+            { chatId, errMsg },
+            'session aborted again after its restarts — leaving the chat errored',
           );
         } else if (!isSessionInvalid) {
           // Loud on purpose: a failure that reaches the ladder carried no reset

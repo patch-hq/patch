@@ -230,3 +230,46 @@ describe('a restart mid-wait does not lose the turn', () => {
     daemon.shutdown();
   }, 20_000);
 });
+
+describe('a session the SDK aborted unasked is re-sent, not laddered', () => {
+  function abortErr(): Error {
+    const e = new Error('Request was aborted');
+    e.name = 'AbortError';
+    return e;
+  }
+
+  it('re-sends at once and the chat recovers', async () => {
+    let calls = 0;
+    const backend: SdkBackend = {
+      async *run() {
+        calls++;
+        if (calls === 1) throw abortErr();
+        yield { type: 'assistant', content: 'back' } as SdkEnvelope;
+        yield { type: 'result', sessionId: 's-abort' } as SdkEnvelope;
+      },
+    };
+    const { daemon, folder } = makeHost(backend, 'abort1');
+    const chatId = await daemon.spawnChat({ folder, prompt: 'hung scan' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls).toBe(2);
+    expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
+    daemon.shutdown();
+  });
+
+  it('gives up after a resume and a fresh restart, with no backoff ladder', async () => {
+    let calls = 0;
+    const backend: SdkBackend = {
+      async *run() {
+        calls++;
+        throw abortErr();
+      },
+    };
+    const { daemon, folder } = makeHost(backend, 'abort2');
+    const chatId = await daemon.spawnChat({ folder, prompt: 'hung scan' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(calls).toBe(3);
+    expect(daemon.chatState.get(chatId)?.activity).toBe('errored');
+    expect(daemon.chatState.get(chatId)?.turnRetrying).toBe(false);
+    daemon.shutdown();
+  });
+});
