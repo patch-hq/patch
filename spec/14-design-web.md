@@ -569,20 +569,25 @@ alone.
 
 ## Message links
 
-An `http(s)` link in a message carries a small icon beside it. Clicking the
-icon expands an inline preview card directly below the message showing the
-linked page's title, description and image, followed by the start of the page's
-own readable text (an excerpt of about 600 characters, without scripts, navigation
-or footers) and its host, all fetched server-side. The image is
-fetched through the server as well, since the page's own image lives on another
-origin that the app's image policy refuses. Clicking again collapses it. To the
-right of the preview icon sits an open in browser icon, which opens the link in
-a new window — on the desktop shell that is the user's real browser (§ Links
-and the web panel). The link itself still follows the normal link-click rules
-above — the icons are an addition, not a replacement.
+An `http(s)` link in a message carries a small Summarise button beside it.
+Clicking it expands an inline card directly below the message showing a
+model-written summary of the linked page, followed by the page's host. The
+server fetches the page and sends its readable text (scripts, navigation and
+footers removed, capped at 24,000 characters) to the account's home machine,
+which runs the one-shot summary with the **link summary prompt**
+(`linkSummaryPrompt`, a shared setting edited under Settings → Agent → Link
+summary, with Reset to default). The card reads "Summarising…" while it waits;
+a failure — page unfetchable, home machine offline, no account able to answer —
+shows its reason in the card, never an empty summary. A summary is kept for the
+session per link and prompt, so reopening is free and editing the prompt makes
+the next open summarise afresh. Clicking the button again collapses the card. To
+the right of the Summarise button sits an open in browser icon, which opens the
+link in a new window — on the desktop shell that is the user's real browser (§
+Links and the web panel). The link itself still follows the normal link-click
+rules above — the icons are an addition, not a replacement.
 
 A link to another chat — `/chats/<id>` or `patch://chats/<id>` — is an in-app
-link: it carries no preview or open in browser icons, and a plain click opens
+link: it carries no Summarise or open in browser icons, and a plain click opens
 that chat in the current pane without a page load. A modified or middle click
 keeps the browser's new-tab meaning.
 

@@ -1273,46 +1273,15 @@ export const api = {
     request<{ os: string; version: string; targets: string[]; command: string }>(
       `/api/daemon/install-command?os=${encodeURIComponent(os)}`,
     ),
-  // GET /api/link-preview — server-side fetched title/description/image for a
-  // message link, powering the inline mini-preview toggle (spec/14 § Message
+  // POST /api/link-summary — the server fetches the linked page and a host
+  // summarises it with the account's link-summary prompt (spec/14 § Message
   // links). Fetched server-side because the target's CORS policy would
   // otherwise block the browser doing it directly.
-  linkPreview: (url: string) =>
-    request<{
-      url: string;
-      title?: string;
-      description?: string;
-      image?: string;
-      excerpt?: string;
-    }>(`/api/link-preview?url=${encodeURIComponent(url)}`),
-  // GET /api/link-preview/image — same reasoning as getFileRawBlob above: the
-  // CSP locks img-src down to 'self'/data:/blob:, so a preview's og:image (an
-  // arbitrary third-party URL) can't be a plain `<img src>` either way. Fetched
-  // here with the bearer header and turned into a Blob; the caller builds an
-  // object URL from it.
-  linkPreviewImage: async (url: string): Promise<Blob> => {
-    const cred = loadCredential();
-    const headers = new Headers();
-    if (cred) headers.set('authorization', `Bearer ${cred}`);
-    const res = await fetch(`/api/link-preview/image?url=${encodeURIComponent(url)}`, { headers });
-    if (!res.ok) {
-      const text = await res.text();
-      let parsed: unknown = null;
-      if (text.length > 0) {
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          parsed = text;
-        }
-      }
-      const errMsg =
-        parsed && typeof parsed === 'object' && 'error' in parsed
-          ? String((parsed as { error: unknown }).error)
-          : `HTTP ${res.status}`;
-      throw new ApiError(res.status, errMsg, parsed);
-    }
-    return res.blob();
-  },
+  linkSummary: (url: string) =>
+    request<{ url: string; summary: string }>('/api/link-summary', {
+      method: 'POST',
+      body: { url },
+    }),
   // spec/14 § Batch mode — one account-wide batch, held server-side.
   getBatch: () => request<BatchResponse>('/api/batch'),
   startBatch: (checkIn: BatchCheckInChoice) =>

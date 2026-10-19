@@ -9,6 +9,7 @@
 
 import { z } from 'zod';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
+import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_GOAL_MODEL,
@@ -1985,6 +1986,8 @@ export const SharedSettings = z
     sweepPrompt: z.string().min(1),
     /** The model the sweep's one decision call runs on. */
     sweepModel: z.string().min(1),
+    /** The instructions the message-link Summarise button runs with; "Reset to default" writes `DEFAULT_LINK_SUMMARY_PROMPT` back. */
+    linkSummaryPrompt: z.string().min(1),
     // ---- goals (spec/04 § Goals), applied on every host ----
     /** The goal judge's instructions; "Reset to default" writes `DEFAULT_GOAL_EVAL_PROMPT` back. */
     goalEvalPrompt: z.string().min(1),
@@ -2084,6 +2087,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   sweepPrompt: DEFAULT_SWEEP_PROMPT,
   // Mid-size by default (spec/06 § Settings).
   sweepModel: 'claude-sonnet-5',
+  linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
   goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT,
   goalModel: DEFAULT_GOAL_MODEL,
   goalRefusalLimit: DEFAULT_GOAL_REFUSAL_LIMIT,
@@ -6118,6 +6122,40 @@ export type PatchRecurrenceTranslateResponseEvent = z.infer<
   typeof PatchRecurrenceTranslateResponseEvent
 >;
 
+// `patch.link_summary.request` is server-originated: it backs
+// `POST /api/link-summary` (spec/14 § Message links — the Summarise button).
+// The server fetches the page and sends its readable text with the account's
+// summary prompt; the host holds the Claude OAuth credential, so only it can
+// run the one-shot call. NO FALLBACK: a failed summary is `ok:false` with a
+// reason, never an empty or invented one.
+
+export const PatchLinkSummaryRequestEvent = z
+  .object({
+    type: z.literal('patch.link_summary.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** The account's `linkSummaryPrompt` setting. */
+    prompt: z.string().min(1),
+    url: z.string().min(1),
+    /** The page's readable text, already capped by the server. */
+    text: z.string().min(1),
+  })
+  .strict();
+export type PatchLinkSummaryRequestEvent = z.infer<typeof PatchLinkSummaryRequestEvent>;
+
+export const PatchLinkSummaryResponseEvent = z
+  .object({
+    type: z.literal('patch.link_summary.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    ok: z.boolean(),
+    summary: z.string().min(1).optional(),
+    /** Present when `ok:false`. */
+    error: z.string().optional(),
+  })
+  .strict();
+export type PatchLinkSummaryResponseEvent = z.infer<typeof PatchLinkSummaryResponseEvent>;
+
 // ---------------------------------------------------------------------------
 // Terminal sessions (spec/02 § Terminal sessions, spec/03 § Terminal sessions,
 // spec/14 § Terminal).
@@ -8357,6 +8395,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchModelsResponseEvent,
   PatchRecurrenceTranslateRequestEvent,
   PatchRecurrenceTranslateResponseEvent,
+  PatchLinkSummaryRequestEvent,
+  PatchLinkSummaryResponseEvent,
   PatchFoldersBrowseRequestEvent,
   PatchFoldersBrowseResponseEvent,
   PatchHostFilesRequestEvent,
@@ -8635,6 +8675,8 @@ export const EVENT_SCHEMAS = {
   'patch.models.response': PatchModelsResponseEvent,
   'patch.recurrence.translate.request': PatchRecurrenceTranslateRequestEvent,
   'patch.recurrence.translate.response': PatchRecurrenceTranslateResponseEvent,
+  'patch.link_summary.request': PatchLinkSummaryRequestEvent,
+  'patch.link_summary.response': PatchLinkSummaryResponseEvent,
   'patch.folders.browse.request': PatchFoldersBrowseRequestEvent,
   'patch.folders.browse.response': PatchFoldersBrowseResponseEvent,
   'patch.host_files.request': PatchHostFilesRequestEvent,

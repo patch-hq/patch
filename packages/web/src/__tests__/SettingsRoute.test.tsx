@@ -8,7 +8,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent, act, within } from '@testing-library/react';
-import { DEFAULT_GOAL_EVAL_PROMPT, DEFAULT_SWEEP_PROMPT } from '@patch/wire';
+import {
+  DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_SWEEP_PROMPT,
+} from '@patch/wire';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -1450,6 +1454,23 @@ describe('Settings → Manager (account-wide)', () => {
     fireEvent.click(screen.getByTestId('sweep-prompt-reset'));
     await waitFor(() => expect(server.writes[1]).toEqual({ sweepPrompt: DEFAULT_SWEEP_PROMPT }));
     expect(screen.queryByTestId('sweep-prompt')).toBeNull(); // editor closes on a successful reset
+  });
+
+  it('link summary prompt: edits it on the Agent page, and Reset restores the built-in default', async () => {
+    const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    renderSettings('/settings/agent');
+    fireEvent.click(await screen.findByTestId('link-summary-prompt-edit'));
+    const box = screen.getByTestId('link-summary-prompt') as HTMLTextAreaElement;
+    expect(box.value).toBe(DEFAULT_LINK_SUMMARY_PROMPT);
+    fireEvent.change(box, { target: { value: 'One line only.' } });
+    fireEvent.click(screen.getByTestId('link-summary-prompt-save'));
+    await waitFor(() => expect(server.writes).toEqual([{ linkSummaryPrompt: 'One line only.' }]));
+    fireEvent.click(screen.getByTestId('link-summary-prompt-edit'));
+    fireEvent.click(screen.getByTestId('link-summary-prompt-reset'));
+    await waitFor(() =>
+      expect(server.writes[1]).toEqual({ linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT }),
+    );
   });
 
   it('keeps the saved special-thread model as an option and writes a new pick', async () => {

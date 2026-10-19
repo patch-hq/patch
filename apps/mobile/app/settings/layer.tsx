@@ -14,6 +14,7 @@ const LAYERS: readonly Layer[] = [
   'claude-darwin',
   'claude-linux',
   'goal-judge',
+  'link-summary',
 ];
 
 export default function LayerEditorScreen(): React.ReactElement {

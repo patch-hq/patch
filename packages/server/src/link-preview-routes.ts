@@ -45,7 +45,7 @@ const FETCH_TIMEOUT_MS = 5_000;
 const MAX_REDIRECTS = 5;
 
 /** A redirect the preview refuses to follow; `status` is what the route answers. */
-class RedirectRefused extends Error {
+export class RedirectRefused extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -59,7 +59,7 @@ class RedirectRefused extends Error {
 // the server's own network. Not exhaustive DNS-rebinding protection — this is
 // a single-user personal app previewing links the account owner pasted, not a
 // public-facing service.
-function isBlockedHost(hostname: string): boolean {
+export function isBlockedHost(hostname: string): boolean {
   // URL.hostname keeps the brackets on an IPv6 literal: "[::1]".
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (h === 'localhost' || h.endsWith('.localhost')) return true;
@@ -143,7 +143,7 @@ export interface LinkPreview {
 const EXCERPT_CHARS = 600;
 
 /** Readable body text with scripts, styles and page chrome (nav/header/footer/aside) removed. */
-function extractExcerpt(html: string): string | undefined {
+export function extractReadableText(html: string): string {
   const body = /<body[^>]*>([\s\S]*)/i.exec(html)?.[1] ?? html;
   const text = decodeEntities(
     body
@@ -156,6 +156,11 @@ function extractExcerpt(html: string): string | undefined {
   )
     .replace(/\s+/g, ' ')
     .trim();
+  return text;
+}
+
+function extractExcerpt(html: string): string | undefined {
+  const text = extractReadableText(html);
   if (!text) return undefined;
   return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS).trimEnd()}…` : text;
 }
@@ -194,7 +199,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
  * caller named, and a public page that 302s to 127.0.0.1 or the cloud metadata
  * address was fetched anyway — which is the whole of what the check stops.
  */
-async function fetchChecked(
+export async function fetchChecked(
   start: URL,
   init: { signal: AbortSignal; headers: Record<string, string> },
   logger: Logger,

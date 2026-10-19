@@ -13,7 +13,7 @@
 
 import React from 'react';
 import { Alert, View } from 'react-native';
-import { DEFAULT_GOAL_EVAL_PROMPT } from '@patch/wire';
+import { DEFAULT_GOAL_EVAL_PROMPT, DEFAULT_LINK_SUMMARY_PROMPT } from '@patch/wire';
 import { useRouter } from 'expo-router';
 import {
   QUESTION_EXPIRY_SECONDS_MAX,
@@ -69,7 +69,8 @@ export type Layer =
   | 'claude-shared'
   | 'claude-darwin'
   | 'claude-linux'
-  | 'goal-judge';
+  | 'goal-judge'
+  | 'link-summary';
 
 export const LAYER_TITLE: Record<Layer, string> = {
   tools: 'Patch tools prompt',
@@ -78,6 +79,7 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'claude-darwin': 'settings.json on macOS',
   'claude-linux': 'settings.json on Linux',
   'goal-judge': 'Goal judge prompt',
+  'link-summary': 'Summarise prompt',
 };
 
 /** What a layer's editor is titled: short enough to fit the header. */
@@ -88,6 +90,7 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'claude-darwin': 'macOS settings.json',
   'claude-linux': 'Linux settings.json',
   'goal-judge': 'Judge prompt',
+  'link-summary': 'Summarise prompt',
 };
 
 const CLAUDE_PART = {
@@ -141,6 +144,7 @@ export function AgentPage(): React.ReactElement {
                 />
               </Row>
             </SettingsSection>
+            <LinkSummary preferences={data.preferences} />
             <Layers preferences={data.preferences} />
           </>
         )}
@@ -298,6 +302,34 @@ function useToolsDefault(): string {
   );
 }
 
+/** The prompt the Summarise button beside a message link runs with. */
+function LinkSummary({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
+  const router = useRouter();
+  return (
+    <SettingsSection title="Link summary" testID="settings-link-summary">
+      <Row
+        title={LAYER_TITLE['link-summary']}
+        subtitle={
+          preferences.linkSummaryPrompt === DEFAULT_LINK_SUMMARY_PROMPT
+            ? 'Built-in default'
+            : promptSummary(preferences.linkSummaryPrompt)
+        }
+        subtitleTestID="link-summary-summary"
+        right={
+          <SettingsButton
+            testID="link-summary-edit"
+            label="Edit"
+            variant="quiet"
+            onPress={() =>
+              router.push({ pathname: '/settings/layer', params: { layer: 'link-summary' } })
+            }
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 /** The layers Patch adds on top of Claude Code, each with Edit. */
 function Layers({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
   const router = useRouter();
@@ -351,7 +383,9 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
           ? preferences.harnessSystemPrompt
           : layer === 'goal-judge'
             ? preferences.goalEvalPrompt
-            : preferences.claudeSettings[CLAUDE_PART[layer]];
+            : layer === 'link-summary'
+              ? preferences.linkSummaryPrompt
+              : preferences.claudeSettings[CLAUDE_PART[layer]];
   const [draft, setDraft] = React.useState(initial);
   const [saving, setSaving] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -385,6 +419,7 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
     // An empty string clears the override (the SDK default).
     else if (layer === 'system') void write({ harnessSystemPrompt: draft });
     else if (layer === 'goal-judge') void write({ goalEvalPrompt: draft });
+    else if (layer === 'link-summary') void write({ linkSummaryPrompt: draft });
     else
       void write({
         claudeSettings: { ...preferences.claudeSettings, [CLAUDE_PART[layer]]: draft },
@@ -434,6 +469,15 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
               variant="quiet"
               disabled={preferences.goalEvalPrompt === DEFAULT_GOAL_EVAL_PROMPT}
               onPress={() => void write({ goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT })}
+            />
+          ) : null}
+          {layer === 'link-summary' ? (
+            <SettingsButton
+              testID="layer-editor-reset"
+              label="Reset to default"
+              variant="quiet"
+              disabled={preferences.linkSummaryPrompt === DEFAULT_LINK_SUMMARY_PROMPT}
+              onPress={() => void write({ linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT })}
             />
           ) : null}
           {layer === 'tools' ? (

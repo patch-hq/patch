@@ -1019,6 +1019,21 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     cols: 48,
     rows: 20,
   },
+  'patch.link_summary.request': {
+    type: 'patch.link_summary.request',
+    requestId: 'ls1',
+    hostId: 'host-a',
+    prompt: 'Summarise it.',
+    url: 'https://example.com/a',
+    text: 'Page text.',
+  },
+  'patch.link_summary.response': {
+    type: 'patch.link_summary.response',
+    requestId: 'ls1',
+    hostId: 'host-a',
+    ok: true,
+    summary: 'A page.',
+  },
   'patch.host_files.request': {
     type: 'patch.host_files.request',
     requestId: 'hf1',

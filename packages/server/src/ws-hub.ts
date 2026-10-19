@@ -1671,6 +1671,8 @@ export class WsHub {
       event.type === 'patch.pad.request' ||
       event.type === 'patch.pad.response' ||
       event.type === 'patch.host_files.response' ||
+      // The summary is answered over REST to the one caller that asked.
+      event.type === 'patch.link_summary.response' ||
       event.type === 'patch.chat_move.response' ||
       event.type === 'patch.chat_search.response' ||
       // A host's question to the server-run queue is answered by the server alone.

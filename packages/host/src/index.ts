@@ -108,6 +108,7 @@ import { makeToolRunSummarizer } from './toolRunGen.js';
 import { makeBranchSendBackSummarizer } from './branchSendBackGen.js';
 import { makeDigestGenerator } from './rotationDigest.js';
 import { makeRecurrenceTranslator } from './recurrenceTranslate.js';
+import { makeLinkSummariser } from './linkSummary.js';
 import {
   ensureSpecialThreads,
   appendBroadcast,
@@ -2143,6 +2144,17 @@ async function startHost(
         );
         return;
       }
+      if (event.type === 'patch.link_summary.request') {
+        void handleLinkSummaryRequest(
+          event,
+          summariseLink,
+          sender,
+          logger,
+          selfHostId,
+          config.patchHome,
+        );
+        return;
+      }
       if (event.type === 'patch.folders.browse.request') {
         void handleFoldersBrowseRequest(event, folderRegistry, sender, logger, selfHostId);
         return;
@@ -3601,6 +3613,8 @@ async function startHost(
     runOnAccountWithCredit,
     logger,
   });
+  // spec/14 § Message links — the Summarise button's one-shot.
+  const summariseLink = makeLinkSummariser({ sdkBackend, runOnAccountWithCredit });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
   const daemon: Daemon = new Daemon({
     pullQueued: (chatId) => pullQueuedFromServer?.(chatId) ?? Promise.resolve([]),
@@ -5042,6 +5056,59 @@ export async function handleRecurrenceTranslateRequest(
       error: message,
       ...(event.forSurfaceId !== undefined ? { forSurfaceId: event.forSurfaceId } : {}),
     });
+  }
+}
+
+/**
+ * spec/14 § Message links — the Summarise button. Runs the one-shot and answers
+ * `patch.link_summary.response`. NO FALLBACK: a null or a throw is `ok:false`
+ * with a reason, never an empty summary.
+ */
+export async function handleLinkSummaryRequest(
+  event: import('@patch/wire').PatchLinkSummaryRequestEvent,
+  summarise: (input: {
+    requestId: string;
+    prompt: string;
+    url: string;
+    text: string;
+    folder: string;
+  }) => Promise<string | null>,
+  sender: (e: WireEvent) => void,
+  logger: Logger,
+  hostId: string,
+  patchHome: string,
+): Promise<void> {
+  const fail = (error: string): void =>
+    sender({
+      type: 'patch.link_summary.response',
+      requestId: event.requestId,
+      hostId,
+      ok: false,
+      error,
+    });
+  try {
+    const summary = await summarise({
+      requestId: event.requestId,
+      prompt: event.prompt,
+      url: event.url,
+      text: event.text,
+      folder: patchHome,
+    });
+    if (summary === null) {
+      fail('no account could produce a summary');
+      return;
+    }
+    sender({
+      type: 'patch.link_summary.response',
+      requestId: event.requestId,
+      hostId,
+      ok: true,
+      summary,
+    });
+  } catch (err) {
+    const message = (err as Error).message;
+    logger.warn({ err: message }, 'patch.link_summary.request: summary failed');
+    fail(message);
   }
 }
 
