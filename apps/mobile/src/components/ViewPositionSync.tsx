@@ -21,10 +21,15 @@ export const VIEW_POSITION_DEBOUNCE_MS = 800;
 // Module-level so the root layout's touch capture can set it.
 let active = false;
 let launching = true;
+// The report below is scheduled from route/scroll changes; a first touch after
+// launch or foreground changes neither, so it has to wake the report itself.
+const activatedListeners = new Set<() => void>();
 
 export function noteUserInput(): void {
+  const wasActive = active;
   active = true;
   launching = false;
+  if (!wasActive) for (const l of activatedListeners) l();
 }
 
 /**
@@ -61,6 +66,17 @@ export function ViewPositionSync(): null {
 
   React.useEffect(() => {
     if (useSettingsStore.getState().data === null) void useSettingsStore.getState().load();
+  }, []);
+
+  // Bumped when the user first touches the surface, so the chat they are
+  // already on is reported without needing to navigate or scroll first.
+  const [activations, setActivations] = React.useState(0);
+  React.useEffect(() => {
+    const l = (): void => setActivations((n) => n + 1);
+    activatedListeners.add(l);
+    return () => {
+      activatedListeners.delete(l);
+    };
   }, []);
 
   const enabledRef = React.useRef(enabled);
@@ -105,7 +121,7 @@ export function ViewPositionSync(): null {
       if (pos) getWs().send({ type: 'view_position.set', ...pos });
     }, VIEW_POSITION_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [enabled, pathname, id, scroll]);
+  }, [enabled, pathname, id, scroll, activations]);
 
   return null;
 }

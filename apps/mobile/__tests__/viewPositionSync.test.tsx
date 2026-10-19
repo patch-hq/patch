@@ -185,6 +185,16 @@ describe('ViewPositionSync', () => {
     });
   });
 
+  it('reports the open chat on first touch even when nothing else changes', () => {
+    mount();
+    actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
+    expect(send).not.toHaveBeenCalled();
+    // Same chat, no navigation, no scroll: the touch alone makes it the live position.
+    actSync(() => noteUserInput());
+    actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
+    expect(send).toHaveBeenCalledWith({ type: 'view_position.set', page: 'chat', id: 'c1' });
+  });
+
   it('reports a job editor with its id param', () => {
     __setCurrentRoute('settings/job-editor', { id: 'j1' });
     mount();

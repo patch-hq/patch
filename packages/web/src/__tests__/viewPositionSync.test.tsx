@@ -119,6 +119,19 @@ describe('ViewPositionSync', () => {
     });
   });
 
+  it('reports the open chat on first touch even when nothing else changes', () => {
+    const { send } = mount('/chats/c1');
+    act(() => {
+      vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1);
+    });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.pointerDown(window);
+    act(() => {
+      vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1);
+    });
+    expect(send).toHaveBeenCalledWith({ type: 'view_position.set', page: 'chat', id: 'c1' });
+  });
+
   it('reports a chat at the latest message with no seq', () => {
     const { send } = mount('/chats/c1');
     fireEvent.keyDown(window);
