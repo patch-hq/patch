@@ -17,17 +17,13 @@ describe('StatusBadge', () => {
     render(<StatusBadge badge="done" />);
     expect(screen.getByTestId('badge-done')).toBeInTheDocument();
   });
-  // B4 (DESKTOP-REVIEW): the read tick is a proper drawn glyph (an SVG
-  // double-check read-receipt), not the blunt `✓` text character.
-  it('renders read as a drawn SVG tick, not the raw ✓ character', () => {
+  // The read badge is a grey outline circle with nothing inside — no tick.
+  it('renders read as an empty outline circle', () => {
     const { container } = render(<StatusBadge badge="read" />);
     const el = screen.getByTestId('badge-read');
-    expect(el).toBeInTheDocument();
-    // No literal check character in the text content.
     expect(el.textContent).not.toContain('✓');
-    // A drawn glyph: an inline SVG.
-    expect(container.querySelector('[data-testid="badge-read"] svg')).not.toBeNull();
-    // Still labelled "read" for assistive tech.
+    expect(container.querySelector('[data-testid="badge-read"] svg circle')).not.toBeNull();
+    expect(container.querySelector('[data-testid="badge-read"] svg path')).toBeNull();
     expect(el).toHaveAttribute('aria-label', 'read');
   });
 

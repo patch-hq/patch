@@ -13,7 +13,7 @@
 // which is what every test and e2e spec locates on.
 
 import { useEffect, useState, type JSX } from 'react';
-import { CircleCheck, Clock, Terminal, TriangleAlert } from 'lucide-react';
+import { Circle, Clock, Terminal, TriangleAlert } from 'lucide-react';
 import type { PendingWake } from '@patch/wire';
 import type { DisplayBadge } from '../stores/types.js';
 import { formatWakeCountdown } from './WakeBar.js';
@@ -41,12 +41,10 @@ export function StatusBadge({
 }): JSX.Element {
   const title = BADGE_TITLE[badge];
   if (badge === 'read') {
-    // B4 (DESKTOP-REVIEW): a drawn tick, not the blunt `✓` text character.
-    // User: "tick is fine, just a nicer one" — a circled check reads as more
-    // finished/polished at sidebar size than the bare double-line glyph did.
+    // A grey outline circle, empty: read is the quiet resting state.
     return (
       <span className="badge badge-read" data-testid="badge-read" aria-label="read" title={title}>
-        <CircleCheck size={15} strokeWidth={2.5} aria-hidden />
+        <Circle size={15} strokeWidth={2} aria-hidden />
       </span>
     );
   }

@@ -2,11 +2,11 @@
 // § Status badges) but slightly larger (12px target, 18px ring) for touch.
 
 import React from 'react';
-import { Animated, Easing, Text, View } from 'react-native';
+import { Animated, Easing, View } from 'react-native';
 import { Clock, Terminal, TriangleAlert } from 'lucide-react-native';
 import type { DisplayBadge } from '../stores/types';
 import { badgeColor } from '../lib/badge';
-import { fonts, useTheme } from '../lib/theme';
+import { useTheme } from '../lib/theme';
 
 interface Props {
   badge: DisplayBadge;
@@ -70,7 +70,7 @@ function WorkingPulse({
 export function StatusBadge({ badge, size = 12 }: Props): React.ReactElement {
   const colors = useTheme();
   if (badge === 'read') {
-    // small grey check glyph
+    // empty grey outline circle
     return (
       <View
         style={{
@@ -80,7 +80,16 @@ export function StatusBadge({ badge, size = 12 }: Props): React.ReactElement {
           justifyContent: 'center',
         }}
       >
-        <Text style={{ fontFamily: fonts.body, color: colors.inkFaint, fontSize: size }}>✓</Text>
+        <View
+          testID="badge-read"
+          style={{
+            width: size + 2,
+            height: size + 2,
+            borderRadius: (size + 2) / 2,
+            borderWidth: 1.5,
+            borderColor: colors.inkFaint,
+          }}
+        />
       </View>
     );
   }

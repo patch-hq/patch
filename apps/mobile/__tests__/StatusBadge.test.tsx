@@ -1,7 +1,7 @@
 // Render coverage for the seven-state status badge (spec/15 § the same
 // seven-state vocabulary as the web sidebar). Each branch renders a visually
 // distinct treatment:
-//   - 'read'       → a small grey check glyph
+//   - 'read'       → an empty grey outline circle
 //   - 'working'    → the looped opacity-pulse ring (WorkingPulse)
 //   - 'done'       → a solid ring + dot in the leaf accent
 //   - 'permission' → the same ring shape but in the waiting/amber colour
@@ -19,16 +19,16 @@ import { lightColors } from '../src/lib/theme';
 import { badgeColor } from '../src/lib/badge';
 
 describe('StatusBadge — read', () => {
-  it('renders the grey check glyph inside a plain sized wrapper (no ring)', () => {
+  it('renders an empty grey outline circle, no tick', () => {
     const r = renderRN(<StatusBadge badge="read" />);
-    expect(hasText(r.root, '✓')).toBe(true);
-    const text = findHost(r.root, byType('Text'));
-    expect(text.props.style.color).toBe(lightColors.inkFaint);
-    // Exactly one View — the size+4 wrapper — no ring/dot structure.
+    expect(hasText(r.root, '✓')).toBe(false);
     const views = findAllHost(r.root, byType('View'));
-    expect(views.length).toBe(1);
+    expect(views.length).toBe(2);
     expect(views[0]!.props.style.width).toBe(16); // size(12) + 4
-    expect(views[0]!.props.style.borderWidth).toBeUndefined();
+    const circle = views[1]!.props.style;
+    expect(circle.borderColor).toBe(lightColors.inkFaint);
+    expect(circle.borderWidth).toBeGreaterThan(0);
+    expect(circle.backgroundColor).toBeUndefined();
   });
 });
 
