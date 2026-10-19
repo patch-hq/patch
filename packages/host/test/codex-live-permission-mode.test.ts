@@ -59,7 +59,7 @@ async function runWithApproval(switchTo: 'bypassPermissions' | undefined) {
       return { approve: false };
     },
   } as any)) {
-    // drain
+    void _; // drain
   }
   return { responses, asked };
 }
