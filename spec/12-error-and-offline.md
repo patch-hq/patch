@@ -150,6 +150,9 @@ A user's `chat.input` is either delivered or reported as failed. There are two h
   answered `503` naming the host that has not reported yet and whether it is
   reconnecting or offline, never "chat not found". Only once every registered
   host has reported is an unknown chat a `404`.
+- A surface's replay request for a chat the server has not yet learned the host of
+  is answered from the server's own message log straight away, so history is on
+  screen before any host has reconnected.
 
 ### A host process dies
 

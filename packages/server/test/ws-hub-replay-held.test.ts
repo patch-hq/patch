@@ -115,8 +115,14 @@ describe("answering a replay from the server's log", () => {
     expect(t.sent).toEqual([]);
   });
 
-  it('leaves a chat it does not know to the host too', () => {
-    const t = setup({ chatLogStore: storeOf([say('nope', 1)]) as never });
+  it('answers a chat the registry has not learned yet (server just restarted) from its log', () => {
+    const t = setup({ chatLogStore: storeOf([say('nope', 1), say('nope', 2)]) as never });
+    t.replay('nope', { fromSeq: 1 });
+    expect(t.sent.map((e) => (e as { seq: number }).seq)).toEqual([2]);
+  });
+
+  it('says nothing for a chat neither the registry nor the log knows', () => {
+    const t = setup({ chatLogStore: storeOf([say('other', 1)]) as never });
     t.link.setStatus('offline');
     t.replay('nope');
     expect(t.sent).toEqual([]);
