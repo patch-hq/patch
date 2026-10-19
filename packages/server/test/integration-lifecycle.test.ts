@@ -526,10 +526,14 @@ describe('integration: archiving on one surface reaches the other', () => {
         const url = `ws://127.0.0.1:${(built.app.server.address() as AddressInfo).port}/ws`;
         const web = new WireTestClient({ url, auth: creds['srf-web']! });
         const phone = new WireTestClient({ url, auth: creds['srf-phone']! });
+        // Listen before connecting: each client is greeted the moment its hello
+        // is accepted, and the web client's greeting used to arrive while the
+        // test was still connecting the phone — before anything was waiting for
+        // it — so the wait could never end.
+        const greeted = Promise.all([web.waitFor('host.online'), phone.waitFor('host.online')]);
         await web.connect();
         await phone.connect();
-        await web.waitFor('host.online');
-        await phone.waitFor('host.online');
+        await greeted;
         const spawn = await built.app.inject({
           method: 'POST',
           url: '/api/chats',
