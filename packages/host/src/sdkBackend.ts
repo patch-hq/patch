@@ -21,6 +21,7 @@ import { AGENT_SDK_PACKAGE } from './installPaths.js';
 import { encodeFolder, translateAttachment } from './history.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { isAccountExhaustedError } from './accountFailover.js';
+import { skillsReloader } from './projectSkills.js';
 import { McpSupervisor, MCP_START_TIMEOUT_MS, supervisorHooks } from './mcpSupervisor.js';
 import { createClaudeSessionStore } from './claudeSessionStore.js';
 import { readSidecar, type DocMode } from './docSidecar.js';
@@ -1749,7 +1750,16 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   // is what every later decision in this turn reads, and `setLiveRunPermissionMode`
   // is how a change reaches the process itself.
   const live: LiveRun = { mode: opts.permissionMode ?? 'auto' };
-  const q = query({
+  // A skill added or edited mid-turn reaches this process at the next tool
+  // boundary (a new process on the next turn reads them anyway).
+  const reloadSkills = skillsReloader(opts.cwd, () => q.reloadPlugins());
+  const boundaryOpts = {
+    onToolBoundary: async () => {
+      await reloadSkills();
+      return opts.onToolBoundary?.();
+    },
+  };
+  const q: Query = query({
     prompt: oneShotPrompt(opts),
     options: {
       cwd: opts.cwd,
@@ -1766,7 +1776,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
         : {}),
       ...SHARED_OPTS,
       ...machineOpts(opts),
-      ...withMcpSupervisor(boundaryHooks(opts), sup),
+      ...withMcpSupervisor(boundaryHooks(boundaryOpts), sup),
       disallowedTools: disallowedToolsFor(opts),
       env,
       mcpServers,

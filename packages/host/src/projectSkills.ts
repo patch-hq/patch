@@ -82,3 +82,33 @@ export function skillCatalogueText(skills: readonly FoundSkill[]): string | unde
     ...lines,
   ].join('\n');
 }
+
+/**
+ * Fingerprint of the skills a chat in `folder` can see: name, file, mtime and
+ * description. Any add, remove, rename or edit changes it.
+ */
+function skillsFingerprint(folder: string, home: string): string {
+  return discoverSkills(folder, home)
+    .map((s) => `${s.name}\0${s.file}\0${statSync(s.file).mtimeMs}\0${s.description}`)
+    .join('\n');
+}
+
+/**
+ * A check to run at each tool boundary of a live agent process: when the skills
+ * on disk differ from the last time it looked, calls `reload` so the process
+ * picks them up mid-turn rather than on the next one. A failed reload throws
+ * and is retried on the next check.
+ */
+export function skillsReloader(
+  folder: string,
+  reload: () => Promise<unknown>,
+  home = process.env['HOME'] ?? homedir(),
+): () => Promise<void> {
+  let seen = skillsFingerprint(folder, home);
+  return async () => {
+    const now = skillsFingerprint(folder, home);
+    if (now === seen) return;
+    await reload();
+    seen = now;
+  };
+}
