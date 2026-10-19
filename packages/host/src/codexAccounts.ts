@@ -674,7 +674,7 @@ export class CodexAccounts {
       throw new Error(
         candidates.some((a) => a.connected && a.kind === 'chatgpt')
           ? 'ChatGPT usage limit exceeded. Refresh usage or wait for the account reset.'
-          : 'Your ChatGPT sign-in has expired or is missing.',
+          : 'Your ChatGPT sign-in has expired or is missing. Sign in again in Settings > Usage.',
       );
     return { accountId: account.id, client: await this.client(account) };
   }

@@ -106,7 +106,6 @@ import { PhoneHandover } from './notifications/handover.js';
 import { CallOrchestrator } from './notifications/call-orchestrator.js';
 import { ChatCompletionNotifier } from './notifications/chat-complete.js';
 import { AwaitingPermissionNotifier } from './notifications/awaiting-permission.js';
-import { SignInNeededNotifier } from './notifications/sign-in-needed.js';
 import { ReplyRouter } from './notifications/reply-router.js';
 import { registerNotificationRoutes } from './notifications/routes.js';
 import { NotificationLog } from './notifications/log.js';
@@ -2085,11 +2084,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     },
   });
   hostWaker.start();
-  const signInNeededNotifier = new SignInNeededNotifier({
-    router: notificationRouter,
-    logger: log.child({ component: 'sign-in-needed' }),
-  });
-  hostLink.onEvent((event) => signInNeededNotifier.observe(event));
   recurrenceScheduler = new RecurrenceScheduler({
     jobs,
     dispatcher: jobDispatcher,
