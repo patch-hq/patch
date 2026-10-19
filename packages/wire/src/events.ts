@@ -7539,6 +7539,9 @@ export const PatchArtifactPublishRequestEvent = z
       .object({
         contentType: z.string().min(1),
         base64: z.string().min(1),
+        /** Set for a downloadable file (a Word doc, a spreadsheet): the
+         * server serves it as an attachment under this name. */
+        filename: z.string().min(1).optional(),
       })
       .strict()
       .optional(),

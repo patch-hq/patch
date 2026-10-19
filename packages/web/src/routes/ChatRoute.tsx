@@ -139,6 +139,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Bell,
+  Download,
   ExternalLink,
   FileText,
   GitFork,
@@ -4004,13 +4005,15 @@ function ToolBlobBody({ blob }: { blob: ToolBlobRef }): JSX.Element {
 
 /** What `view_file` hands back: where the rendered page lives, and what it is. */
 interface ViewFileView {
-  kind: 'image' | 'pdf' | 'html';
+  kind: 'image' | 'pdf' | 'html' | 'file';
   /** Server-relative URL of the wrapped page (`/api/chats/:id/artifact/:aid`). */
   url: string;
   name: string;
   /** An image's real pixel size, so its box is held before it loads. */
   width?: number | undefined;
   height?: number | undefined;
+  /** A downloadable file's size in bytes. */
+  size?: number | undefined;
 }
 
 /**
@@ -4054,12 +4057,13 @@ function asViewFile(value: unknown): ViewFileView | null {
   const kind = v['kind'];
   const url = v['url'];
   const name = v['name'];
-  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html') return null;
+  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html' && kind !== 'file') return null;
   if (typeof url !== 'string' || !url.startsWith('/api/')) return null;
   if (typeof name !== 'string' || name.length === 0) return null;
   const width = typeof v['width'] === 'number' ? v['width'] : undefined;
   const height = typeof v['height'] === 'number' ? v['height'] : undefined;
-  return { kind, url, name, width, height };
+  const size = typeof v['size'] === 'number' ? v['size'] : undefined;
+  return { kind, url, name, width, height, size };
 }
 
 /**
@@ -4395,6 +4399,32 @@ function ViewFileCard({ view }: { view: ViewFileView }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const isImage = view.kind === 'image';
+  if (view.kind === 'file') {
+    return (
+      <div className="view-file view-file-file" data-testid="view-file" data-kind="file">
+        <div className="view-file-bar">
+          <FileText size={14} aria-hidden />
+          <span className="view-file-name" data-testid="view-file-filename">
+            {view.name}
+          </span>
+          {view.size !== undefined ? (
+            <span className="view-file-size" data-testid="view-file-size">
+              {formatBytes(view.size)}
+            </span>
+          ) : null}
+          <a
+            className="view-file-download"
+            href={view.url}
+            download={view.name}
+            data-testid="view-file-download"
+            aria-label={`Download ${view.name}`}
+          >
+            <Download size={14} aria-hidden />
+          </a>
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       className={`view-file view-file-${view.kind}${expanded ? ' expanded' : ''}`}

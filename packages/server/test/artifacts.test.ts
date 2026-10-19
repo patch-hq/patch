@@ -186,6 +186,53 @@ describe('artifacts', () => {
     }
   });
 
+  it('serves a raw publish carrying a filename as an attachment', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const bytes = Buffer.from('PK-fake-docx');
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab02',
+          html: undefined,
+          raw: {
+            contentType: 'application/msword',
+            base64: bytes.toString('base64'),
+            filename: 'Q3 report "final".docx',
+          },
+        }),
+      );
+      expect(res.ok).toBe(true);
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.statusCode).toBe(200);
+      expect(get.headers['content-type']).toBe('application/msword');
+      const disposition = String(get.headers['content-disposition']);
+      expect(disposition).toMatch(/^attachment;/);
+      expect(disposition).toContain("filename*=UTF-8''Q3%20report%20%22final%22.docx");
+      expect(get.rawPayload.equals(bytes)).toBe(true);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('sends no content-disposition for a raw publish without a filename', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab03',
+          html: undefined,
+          raw: { contentType: 'image/png', base64: Buffer.from('x').toString('base64') },
+        }),
+      );
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.headers['content-disposition']).toBeUndefined();
+    } finally {
+      await built.app.close();
+    }
+  });
+
   // The Todoist-reported worry: an agent shows an image with `view_file`, then
   // cleans up the source file it just rendered (CLAUDE.md's own "clean up your
   // temp files" instruction). By the time this request lands, the host has

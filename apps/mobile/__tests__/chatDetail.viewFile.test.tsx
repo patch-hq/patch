@@ -3,11 +3,12 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderRN, actSync, findHost, findAllHost, byTestId } from './testUtils/render';
+import { renderRN, actSync, findHost, findAllHost, byTestId, textOf } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { TEST_SERVER_URL as DEFAULT_SERVER_URL } from './stubs/mmkv';
 import { __setLocalSearchParams } from './stubs/expo-router';
+import { __getLinkingOpenedUrls, __resetLinkingOpenedUrls } from './stubs/react-native';
 
 vi.mock('../src/api/rest', () => ({
   api: {
@@ -97,6 +98,19 @@ describe('view_file tool row', () => {
     expect(findAllHost(r.root, (n) => n.type === 'Image')).toHaveLength(0);
     actSync(() => findHost(r.root, byTestId('view-file')).props.onPress());
     expect(findAllHost(r.root, byTestId('artifact-viewer'))).toHaveLength(1);
+  });
+
+  it('gives a downloadable file a card with its size that opens the download link', () => {
+    emitViewFile('file', block({ ...ack('file'), name: 'Report Q3.docx', size: 48213 }));
+    const r = renderRN(<ChatDetailScreen />);
+    const card = findHost(r.root, byTestId('view-file'));
+    expect(findAllHost(r.root, (n) => n.type === 'Image')).toHaveLength(0);
+    expect(textOf(card)).toContain('Report Q3.docx · 47 KB');
+    __resetLinkingOpenedUrls();
+    const viewersBefore = findAllHost(r.root, byTestId('artifact-viewer')).length;
+    actSync(() => card.props.onPress());
+    expect(__getLinkingOpenedUrls()).toEqual([`${DEFAULT_SERVER_URL}${URL_PATH}`]);
+    expect(findAllHost(r.root, byTestId('artifact-viewer'))).toHaveLength(viewersBefore);
   });
 
   it('an error result stays an ordinary tool row', () => {
