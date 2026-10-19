@@ -112,7 +112,8 @@ import { permissionModeLabel } from '../lib/permissionModeLabel.js';
 import { GOAL_COMMAND_NAME, GOAL_COMMAND_DESCRIPTION } from '../lib/goalCommand.js';
 import { CLEAR_COMMAND_NAME, CLEAR_COMMAND_DESCRIPTION } from '../lib/clearCommand.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
-import { shortcutTitle } from '../lib/shortcuts.js';
+import { isSubmitChord } from '../lib/submitChord.js';
+import { shortcutLabel, shortcutTitle } from '../lib/shortcuts.js';
 import { chordGlyphs } from '../lib/dictateChord.js';
 import { computeTooltipPosition, type TooltipPosition } from '../lib/tooltipPosition.js';
 import { api } from '../api/rest.js';
@@ -385,6 +386,18 @@ export interface ComposerProps {
   checking?: boolean;
   /** The hook name(s) a `checking` state is waiting on, for the button's label. */
   checkingHookNames?: string[];
+  /**
+   * Edit mode (spec/04 § Branching): this composer edits the text
+   * of a message already in the transcript instead of composing a new one. It
+   * is the same box — `/` skill menu and chips, dictation, quotes, auto-grow,
+   * paste — with the parts that only make sense for a new turn (attachments,
+   * call, meeting, approval mode, model, context ring, drafts, stop) left out,
+   * and Cancel / Save in place of Send. ⌘↵ saves (bare ↵ is a newline), Esc cancels. `onSave`
+   * gets the trimmed text; with `allowEmpty` an empty text is passed through
+   * (a queued message's edit to nothing is a remove), without it Save stays
+   * disabled until there is text. Seed the text with `initialValue`.
+   */
+  edit?: { onSave(text: string): void; onCancel(): void; allowEmpty?: boolean };
 }
 
 /**
@@ -457,6 +470,7 @@ export const Composer = forwardRef(function Composer(
     onStop,
     checking = false,
     checkingHookNames,
+    edit,
   }: ComposerProps,
   ref: Ref<ComposerHandle>,
 ): JSX.Element {
@@ -581,6 +595,8 @@ export const Composer = forwardRef(function Composer(
   // not landed yet — which wiped a draft opened by "Send to new chat".
   const seededOnMount = useRef(initialValue !== undefined);
   useEffect(() => {
+    // An editor owns its text; the chat's unsent-message draft is not its.
+    if (edit) return;
     const apply = (): void => {
       if (useComposerDraftStore.getState().focused[chatId]) return;
       const next = useComposerDraftStore.getState().drafts[chatId] ?? '';
@@ -598,7 +614,7 @@ export const Composer = forwardRef(function Composer(
       last = next;
       apply();
     });
-  }, [chatId]);
+  }, [chatId, !!edit]);
   const insertNonce = insert?.nonce;
   const insertText = insert?.text;
   useEffect(() => {
@@ -862,6 +878,12 @@ export const Composer = forwardRef(function Composer(
   function addFiles(files: FileList | File[]): void {
     const list = Array.from(files);
     if (list.length === 0) return;
+    if (edit) {
+      // An edit replaces the text only; the host has no way to add a file to a
+      // message already sent. Say so rather than dropping it (spec/12).
+      useUiStore.getState().pushError('Files can’t be added while editing a message');
+      return;
+    }
     setAttachments((cur) => [...cur, ...list.map(makePending)]);
   }
 
@@ -953,7 +975,7 @@ export const Composer = forwardRef(function Composer(
     if (!items) return;
     // spec/14 § Composer — a long text paste becomes a document attachment.
     const text = e.clipboardData.getData?.('text/plain') ?? '';
-    if (text.length >= LONG_PASTE_CHARS) {
+    if (!edit && text.length >= LONG_PASTE_CHARS) {
       e.preventDefault();
       addFiles([new File([text], pastedTextName(text), { type: 'text/markdown' })]);
       return;
@@ -1126,7 +1148,7 @@ export const Composer = forwardRef(function Composer(
     return () => clearTimeout(t);
   }, [pendingSend]);
   // A hook check in flight shows its own Checking… button, not Stop.
-  const showStop = (running || (pendingSend && !checking)) && !!onStop && !hasContent;
+  const showStop = !edit && (running || (pendingSend && !checking)) && !!onStop && !hasContent;
   const recPrepareRef = useRef<Promise<void> | null>(null);
   // Send pressed while dictating: the dictation ends and, once its transcript
   // lands, the whole message (typed text + transcript) goes out as one turn.
@@ -1402,12 +1424,12 @@ export const Composer = forwardRef(function Composer(
   const micHandlersRef = useRef({ down: onMicDown, up: onMicUp });
   micHandlersRef.current = { down: onMicDown, up: onMicUp };
   useEffect(() => {
-    if (noteMode) return;
+    if (noteMode || edit) return;
     return registerComposerMic(chatId, {
       down: (at) => micHandlersRef.current.down(at),
       up: (at) => micHandlersRef.current.up(at),
     });
-  }, [chatId, noteMode]);
+  }, [chatId, noteMode, !!edit]);
 
   // Unmount (switching chats, closing the window) must not leave the preview's
   // audio session open on the host — the recording is already gone with the
@@ -1423,6 +1445,15 @@ export const Composer = forwardRef(function Composer(
   // cursor in the composer; § New chat). The bare `autoFocus` attribute is
   // unreliable when the composer mounts before the WS hydrates the chat roster
   // — focus via effect once, on mount.
+  // An editor was opened by a click, for the purpose of typing: it takes the
+  // cursor unconditionally, caret at the end of the text.
+  useEffect(() => {
+    if (!edit) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
   const autoFocusedRef = useRef(false);
   useEffect(() => {
     // Focus on the autoFocus→ready transition (not on every keystroke — value
@@ -1560,6 +1591,12 @@ export const Composer = forwardRef(function Composer(
   /** Returns false when there was nothing to send or sending is blocked. */
   function submitText(text: string, afterTurn = false, interrupt = false): boolean {
     if (resolving) return false;
+    if (edit) {
+      const edited = text.trim();
+      if (!edited && !edit.allowEmpty) return false;
+      edit.onSave(edited);
+      return true;
+    }
     // The textarea itself stays enabled while offline (typing is never
     // blocked), so Enter's direct call here — not gated by the send
     // button's own `disabled` — needs its own guard. `sendBlocked` only
@@ -1647,8 +1684,8 @@ export const Composer = forwardRef(function Composer(
   return (
     <form
       ref={formRef}
-      className={`composer${dragDepth > 0 ? ' composer-drag-active' : ''}`}
-      data-testid="composer"
+      className={`composer${dragDepth > 0 ? ' composer-drag-active' : ''}${edit ? ' composer-editing' : ''}`}
+      data-testid={edit ? 'msg-editor' : 'composer'}
       data-chat-id={chatId}
       onSubmit={(e) => {
         e.preventDefault();
@@ -1908,7 +1945,7 @@ export const Composer = forwardRef(function Composer(
             className="composer-input"
             data-preview={showLivePreview ? 'true' : undefined}
             data-chips={showChipMirror ? 'true' : undefined}
-            data-testid="composer-input"
+            data-testid={edit ? 'msg-edit-input' : 'composer-input'}
             /* spec/14 § Copy — no helper text: the prompt names the field and
              stops. It used to trail the send convention, which put a sentence
              of instruction in front of the user on every empty chat; the send
@@ -1927,12 +1964,15 @@ export const Composer = forwardRef(function Composer(
             onKeyUp={(e) => syncCursor(e.currentTarget)}
             onSelect={(e) => syncCursor(e.currentTarget)}
             onPaste={onPaste}
-            onFocus={() => useComposerDraftStore.getState().setFocused(chatId, true)}
+            onFocus={() => {
+              if (!edit) useComposerDraftStore.getState().setFocused(chatId, true);
+            }}
             onBlur={() => {
               // spec/14 § Composer — a draft that arrived from another
               // surface while this composer had focus is held back rather
               // than overwriting text under the cursor; losing focus is what
               // resolves it, taking the newer text if there is one.
+              if (edit) return;
               const applied = useComposerDraftStore.getState().setFocused(chatId, false);
               if (applied !== undefined) setValue(applied);
             }}
@@ -2019,6 +2059,12 @@ export const Composer = forwardRef(function Composer(
                 cancelRecording();
                 return;
               }
+              if (e.key === 'Escape' && edit) {
+                e.preventDefault();
+                e.stopPropagation();
+                edit.onCancel();
+                return;
+              }
               // Esc interrupts the running turn (parity with Claude Code). Scoped to
               // the composer + guarded on `running` so it doesn't clash with the
               // global Esc handlers (dismiss call / close kebab / cancel voice note).
@@ -2035,6 +2081,9 @@ export const Composer = forwardRef(function Composer(
               // ⇧ alone is a newline; ⌘⇧↵ / Ctrl⇧↵ is the keyboard form of the send
               // menu's "Send, interrupt immediately" — send, then promote.
               if (e.shiftKey && !(e.metaKey || e.ctrlKey)) return; // newline
+              // An edit is often several lines: bare ↵ is a newline there and only
+              // ⌘↵ / Ctrl↵ saves (spec/14 § Keyboard shortcuts).
+              if (edit && !isSubmitChord(e)) return;
               e.preventDefault();
               // ↵ and ⌘↵ both just send; mid-turn that queues behind the running
               // turn and does not interrupt it. Only ⌘⇧↵, Stop, Esc and a queued
@@ -2065,28 +2114,32 @@ export const Composer = forwardRef(function Composer(
             left is the offline/unavailable case: that states a REASON the
             control is dead, which nothing else on screen says. */}
         <div className="composer-actions">
-          <button
-            type="button"
-            className="attach-btn"
-            data-testid="attach-btn"
-            aria-label="attach file"
-            title="Attach"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={linkOrCredentialBlocked || resolving}
-          >
-            <Paperclip size={ICON_SIZE} aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="attach-btn"
-            data-testid="sketch-btn"
-            aria-label="sketch"
-            title="Sketch"
-            onClick={() => setSketching(true)}
-            disabled={linkOrCredentialBlocked || resolving}
-          >
-            <PenLine size={ICON_SIZE} aria-hidden />
-          </button>
+          {edit ? null : (
+            <>
+              <button
+                type="button"
+                className="attach-btn"
+                data-testid="attach-btn"
+                aria-label="attach file"
+                title="Attach"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={linkOrCredentialBlocked || resolving}
+              >
+                <Paperclip size={ICON_SIZE} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="attach-btn"
+                data-testid="sketch-btn"
+                aria-label="sketch"
+                title="Sketch"
+                onClick={() => setSketching(true)}
+                disabled={linkOrCredentialBlocked || resolving}
+              >
+                <PenLine size={ICON_SIZE} aria-hidden />
+              </button>
+            </>
+          )}
           <button
             type="button"
             className={`voice-note-btn ${noteActive || micState !== 'idle' || dictModeOn ? 'active' : ''}${micState === 'transcribing' ? ' busy' : ''}`}
@@ -2126,100 +2179,126 @@ export const Composer = forwardRef(function Composer(
           >
             <Mic size={ICON_SIZE} aria-hidden />
           </button>
-          {/* Call (spec/14 § Composer) — starts a sustained voice call for
+          {edit ? null : (
+            <>
+              {/* Call (spec/14 § Composer) — starts a sustained voice call for
               this chat. Moved here from the chat header (§ Chat panel
               header): attach, dictate and call read as one family of
               composer-adjacent actions rather than splitting call off into
               the header's own icon rail. */}
-          <button
-            type="button"
-            className={`call-btn${onCall ? ' live' : ''}`}
-            data-testid="call-btn"
-            data-live={onCall ? 'true' : undefined}
-            aria-pressed={onCall}
-            aria-label={onCall ? 'end call' : 'call'}
-            title={
-              onCall
-                ? 'End call'
-                : voiceDisabled
-                  ? 'Voice unavailable while the agent is offline'
-                  : 'Call'
-            }
-            onClick={() => void handleCall()}
-            disabled={voiceDisabled && !onCall}
-          >
-            <Phone size={ICON_SIZE} aria-hidden />
-          </button>
-          {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
+              <button
+                type="button"
+                className={`call-btn${onCall ? ' live' : ''}`}
+                data-testid="call-btn"
+                data-live={onCall ? 'true' : undefined}
+                aria-pressed={onCall}
+                aria-label={onCall ? 'end call' : 'call'}
+                title={
+                  onCall
+                    ? 'End call'
+                    : voiceDisabled
+                      ? 'Voice unavailable while the agent is offline'
+                      : 'Call'
+                }
+                onClick={() => void handleCall()}
+                disabled={voiceDisabled && !onCall}
+              >
+                <Phone size={ICON_SIZE} aria-hidden />
+              </button>
+              {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
-          {chatId === 'new' ? null : (
-            <button
-              type="button"
-              className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
-              data-testid="meeting-btn"
-              aria-pressed={inMeeting}
-              aria-label={inMeeting ? 'end meeting' : 'meeting'}
-              title={inMeeting ? 'End meeting' : 'Meeting'}
-              onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
-              disabled={voiceDisabled && !inMeeting}
-            >
-              <AudioLines size={ICON_SIZE} aria-hidden />
-            </button>
-          )}
-          {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
+              {chatId === 'new' ? null : (
+                <button
+                  type="button"
+                  className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
+                  data-testid="meeting-btn"
+                  aria-pressed={inMeeting}
+                  aria-label={inMeeting ? 'end meeting' : 'meeting'}
+                  title={inMeeting ? 'End meeting' : 'Meeting'}
+                  onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
+                  disabled={voiceDisabled && !inMeeting}
+                >
+                  <AudioLines size={ICON_SIZE} aria-hidden />
+                </button>
+              )}
+              {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
               chat's next turn will use, last in the utility group so it reads
               against the turn about to be sent without displacing stop/send from
               the right edge. Options are the SDK's own mode names — the value is
               passed through to it verbatim. Disabled while the link is down —
               `getActiveWs()` is null then, and a select that silently dropped the
               change would be exactly the fallback spec/12 forbids. */}
-          {chatId === 'new' ? null : (
-            // A plain <select> here draws with the OS's own chrome — a native
-            // arrow glyph and reserved gutter that read as a different control
-            // from the model pill beside it (spec/14 § Composer — Approval
-            // mode wants the two to look like one family). `appearance: none`
-            // (index.css) drops that chrome; the caret below stands in for it,
-            // coloured through the sibling combinator so it dims and lights up
-            // exactly as the select's own text does.
-            <div className="permission-mode-wrap">
-              <select
-                className="permission-mode"
-                data-testid="permission-mode"
-                aria-label="Approval mode"
-                title="Approval mode"
-                value={permissionMode ?? ''}
-                disabled={offline}
-                onChange={(e) => {
-                  getActiveWs()?.send({
-                    type: 'chat.settings',
-                    chatId,
-                    permissionMode: e.target.value as PermissionMode,
-                  });
-                }}
-              >
-                {permissionMode === undefined ? (
-                  <option value="" disabled>
-                    Approval mode
-                  </option>
-                ) : null}
-                {PERMISSION_MODES.filter(
-                  (m) => offeredModes.includes(m) || m === permissionMode,
-                ).map((m) => (
-                  <option key={m} value={m}>
-                    {permissionModeLabel(m)}
-                    {offeredModes.includes(m) ? '' : ' (not on this model)'}
-                  </option>
-                ))}
-              </select>
-              <span className="permission-mode-caret" aria-hidden>
-                ▾
-              </span>
-            </div>
+              {chatId === 'new' ? null : (
+                // A plain <select> here draws with the OS's own chrome — a native
+                // arrow glyph and reserved gutter that read as a different control
+                // from the model pill beside it (spec/14 § Composer — Approval
+                // mode wants the two to look like one family). `appearance: none`
+                // (index.css) drops that chrome; the caret below stands in for it,
+                // coloured through the sibling combinator so it dims and lights up
+                // exactly as the select's own text does.
+                <div className="permission-mode-wrap">
+                  <select
+                    className="permission-mode"
+                    data-testid="permission-mode"
+                    aria-label="Approval mode"
+                    title="Approval mode"
+                    value={permissionMode ?? ''}
+                    disabled={offline}
+                    onChange={(e) => {
+                      getActiveWs()?.send({
+                        type: 'chat.settings',
+                        chatId,
+                        permissionMode: e.target.value as PermissionMode,
+                      });
+                    }}
+                  >
+                    {permissionMode === undefined ? (
+                      <option value="" disabled>
+                        Approval mode
+                      </option>
+                    ) : null}
+                    {PERMISSION_MODES.filter(
+                      (m) => offeredModes.includes(m) || m === permissionMode,
+                    ).map((m) => (
+                      <option key={m} value={m}>
+                        {permissionModeLabel(m)}
+                        {offeredModes.includes(m) ? '' : ' (not on this model)'}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="permission-mode-caret" aria-hidden>
+                    ▾
+                  </span>
+                </div>
+              )}
+              <ChatModelControl chatId={chatId} />
+              {/* spec/14 § Composer — context ring, immediately left of stop/send. */}
+              <ContextRing chatId={chatId} />
+            </>
           )}
-          <ChatModelControl chatId={chatId} />
-          {/* spec/14 § Composer — context ring, immediately left of stop/send. */}
-          <ContextRing chatId={chatId} />
-          {showStop ? (
+          {edit ? (
+            <>
+              <button
+                type="button"
+                className="msg-edit-cancel"
+                data-testid="msg-edit-cancel"
+                onClick={edit.onCancel}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="msg-edit-save"
+                data-testid="msg-edit-save"
+                disabled={!edit.allowEmpty && !hasContent}
+              >
+                Save
+                <span className="btn-chord" data-testid="msg-edit-save-chord" aria-hidden="true">
+                  {shortcutLabel('⌘↵')}
+                </span>
+              </button>
+            </>
+          ) : showStop ? (
             <button
               type="button"
               className="stop-btn"

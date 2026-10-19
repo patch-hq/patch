@@ -89,3 +89,26 @@ test.describe('edit a turn / switch tracks', () => {
     await expect(page.getByTestId('track-switcher')).toHaveCount(1);
   });
 });
+
+test.describe('the message editor is the composer', () => {
+  test('carries dictation, no attachments, and Esc cancels', async ({ page }) => {
+    await page.goto(FORKED);
+    const userTurn = page.locator('.msg-user').nth(1);
+    await userTurn.locator('.content').hover();
+    await userTurn.getByTestId('msg-edit').click();
+
+    const editor = userTurn.getByTestId('msg-editor');
+    await expect(editor.getByTestId('msg-edit-input')).toBeFocused();
+    await expect(editor.getByTestId('voice-note-btn')).toBeVisible();
+    await expect(editor.getByTestId('attach-btn')).toHaveCount(0);
+    await expect(editor.getByTestId('send-btn')).toHaveCount(0);
+    // Fills the turn rather than sitting in the composer's reading column.
+    const turnBox = await userTurn.boundingBox();
+    const editorBox = await editor.boundingBox();
+    expect(editorBox!.width).toBeGreaterThan(turnBox!.width * 0.6);
+
+    await page.keyboard.press('Escape');
+    await expect(userTurn.getByTestId('msg-editor')).toHaveCount(0);
+    await expect(userTurn.getByTestId('msg-content')).toContainText('the edited turn');
+  });
+});

@@ -187,6 +187,20 @@ interface Props {
   dictationChatId?: string | null;
   /** A send into `chatId` went out (echoed; delivery follows its uploads). */
   onSent?(chatId: string): void;
+  /**
+   * Edit mode (spec/15 § Editing a queued message): this composer edits the
+   * text of a message already in the stream instead of composing a new one —
+   * the same input (`/` skill menu and chips, dictation, quotes, auto-grow),
+   * minus attachments, model, approval mode, context ring and drafts, with
+   * Cancel / Save in place of Send. `onSave` gets the trimmed text, which may
+   * be empty (the caller decides whether that is a remove).
+   */
+  edit?: {
+    initial: string;
+    onChange(text: string): void;
+    onSave(text: string): void;
+    onCancel(): void;
+  };
 }
 
 // One glyph size across the action buttons so they read as a matched set and
@@ -255,11 +269,15 @@ export function Composer({
   sendTarget,
   onSent,
   autoFocus,
+  edit,
 }: Props): React.ReactElement {
   const colors = useTheme();
   // spec/15 § Composer — unsent text belongs to the chat it was typed in, so it
   // is seeded from that chat's stored draft and written back as it is typed.
-  const [draft, setDraft] = React.useState(() => getComposerDraft(chatId));
+  const [draft, setDraft] = React.useState(() => (edit ? edit.initial : getComposerDraft(chatId)));
+  // An editor owns its text: nothing it types reaches the chat's unsent draft.
+  const editRef = React.useRef(edit);
+  editRef.current = edit;
   const draftRef = React.useRef(draft);
   draftRef.current = draft;
   // spec/15 § Composer — quotes: leading `> ` blocks of the draft are cards
@@ -273,13 +291,15 @@ export function Composer({
       const value = typeof next === 'function' ? next(draftRef.current) : next;
       draftRef.current = value;
       setDraft(value);
-      setComposerDraft(chatId, value);
+      if (editRef.current) editRef.current.onChange(value);
+      else setComposerDraft(chatId, value);
     },
     [chatId],
   );
   // Re-seed if this composer is reused for a different chat (the screen is not
   // guaranteed to remount). Never writes, so it cannot cross-contaminate.
   React.useEffect(() => {
+    if (editRef.current) return;
     const stored = getComposerDraft(chatId);
     draftRef.current = stored;
     setDraft(stored);
@@ -290,6 +310,7 @@ export function Composer({
   // Subscribed imperatively: a hook selector re-rendered the composer on the
   // echo of every keystroke's own write to this store.
   React.useEffect(() => {
+    if (editRef.current) return;
     const apply = (): void => {
       const stored = useComposerDraftStore.getState().drafts[chatId] ?? '';
       if (stored === draftRef.current) return;
@@ -302,7 +323,8 @@ export function Composer({
   }, [chatId]);
   // Held per draft key in a store rather than here, so the share sheet can
   // drop a shared file into this composer (spec/15 § Share into Patch).
-  const attachments = useComposerAttachmentStore((s) => s.byKey[chatId] ?? NO_ATTACHMENTS);
+  const storedAttachments = useComposerAttachmentStore((s) => s.byKey[chatId] ?? NO_ATTACHMENTS);
+  const attachments = edit ? NO_ATTACHMENTS : storedAttachments;
   // This chat's row — the mode, model, host and activity the controls on the
   // right of the action row read, and the host the skill list below is fetched
   // from. Undefined until the roster or the stream has named the chat; the
@@ -1070,6 +1092,10 @@ export function Composer({
 
   const sendDraft = (): void => {
     if (resolving) return;
+    if (edit) {
+      edit.onSave(draftRef.current.trim());
+      return;
+    }
     // No `linkDown` guard: sending into an existing chat while the link is
     // down queues + flushes on reconnect (Todoist 6hWrcpCQFqXGJpF6; spec/12 §
     // Surface → server disconnect — deliveryTracker already retries
@@ -1179,9 +1205,10 @@ export function Composer({
   submitRef.current = sendDraft;
 
   const sendDisabled =
-    resolving ||
-    hookChecking ||
-    (draft.trim().length === 0 && attachments.length === 0 && micState === 'idle');
+    !edit &&
+    (resolving ||
+      hookChecking ||
+      (draft.trim().length === 0 && attachments.length === 0 && micState === 'idle'));
 
   // Un-pressable and DEAD are different things. A send held open while the
   // new chat is created — or by `pendingSend` waiting on the host to confirm
@@ -1204,6 +1231,7 @@ export function Composer({
   const onlyQuestionsPending =
     pendingTools.length > 0 && pendingTools.every((p) => p.tool === 'AskUserQuestion');
   const showStop =
+    !edit &&
     (running ||
       (row?.activity === 'awaiting-permission' && !onlyQuestionsPending) ||
       pendingSend) &&
@@ -1459,11 +1487,12 @@ export function Composer({
       <View testID="composer-input-row" style={{ position: 'relative' }}>
         <TextInput
           ref={inputRef}
-          autoFocus={autoFocus}
+          autoFocus={autoFocus || edit !== undefined}
+          {...(edit ? { testID: 'queued-edit-input' } : {})}
           value={body}
           onChangeText={(text) => {
             // spec/15 § Composer — a long paste becomes a document attachment.
-            const pasted = extractLongPaste(body, text);
+            const pasted = edit ? null : extractLongPaste(body, text);
             if (pasted !== null) {
               void attachPastedText(pasted.inserted);
               text = pasted.remaining;
@@ -1492,12 +1521,15 @@ export function Composer({
             updateDraft(joinQuotes(quotes, body.slice(0, chip.start) + body.slice(cursorPos)));
             pendingCursorRef.current = chip.start;
           }}
-          onFocus={() => useComposerDraftStore.getState().setFocused(chatId, true)}
+          onFocus={() => {
+            if (!edit) useComposerDraftStore.getState().setFocused(chatId, true);
+          }}
           onBlur={() => {
             // spec/14 § Composer — a draft that arrived from another surface
             // while this composer had focus is held back rather than
             // overwriting text under the cursor; losing focus is what
             // resolves it, taking the newer text if there is one.
+            if (edit) return;
             const applied = useComposerDraftStore.getState().setFocused(chatId, false);
             if (applied !== undefined) updateDraft(applied);
           }}
@@ -1617,96 +1649,102 @@ export function Composer({
         testID="composer-actions-row"
         style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, minWidth: 0 }}
       >
-        {/* Three clear attach controls (spec/15 § Composer): a camera, a
+        {edit ? null : (
+          <>
+            {/* Three clear attach controls (spec/15 § Composer): a camera, a
             photo/image picker and an any-type file picker. */}
-        <Pressable
-          onPress={() => {
-            if (disabled || resolving) return;
-            void takePhoto();
-          }}
-          disabled={disabled || resolving}
-          style={({ pressed }) => ({
-            width: ACTION_SIZE,
-            height: ACTION_SIZE,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: radii.md,
-            backgroundColor: pressed ? colors.divider : 'transparent',
-          })}
-          accessibilityRole="button"
-          accessibilityLabel={
-            disabled ? `Take photo unavailable — ${disabledReason ?? 'disconnected'}` : 'Take photo'
-          }
-        >
-          <Camera size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            if (disabled || resolving) return;
-            void pickImage();
-          }}
-          disabled={disabled || resolving}
-          style={({ pressed }) => ({
-            width: ACTION_SIZE,
-            height: ACTION_SIZE,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: radii.md,
-            backgroundColor: pressed ? colors.divider : 'transparent',
-          })}
-          accessibilityRole="button"
-          accessibilityLabel={
-            disabled
-              ? `Attach unavailable — ${disabledReason ?? 'disconnected'}`
-              : 'Attach photo or image'
-          }
-        >
-          <ImageIcon size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            if (disabled || resolving) return;
-            void pickDocument();
-          }}
-          disabled={disabled || resolving}
-          style={({ pressed }) => ({
-            width: ACTION_SIZE,
-            height: ACTION_SIZE,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: radii.md,
-            backgroundColor: pressed ? colors.divider : 'transparent',
-          })}
-          accessibilityRole="button"
-          accessibilityLabel={
-            disabled
-              ? `Attach unavailable — ${disabledReason ?? 'disconnected'}`
-              : 'Attach any file'
-          }
-        >
-          <Paperclip size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            if (disabled || resolving) return;
-            setSketching(true);
-          }}
-          disabled={disabled || resolving}
-          style={({ pressed }) => ({
-            width: ACTION_SIZE,
-            height: ACTION_SIZE,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: radii.md,
-            backgroundColor: pressed ? colors.divider : 'transparent',
-          })}
-          accessibilityRole="button"
-          accessibilityLabel={
-            disabled ? `Sketch unavailable — ${disabledReason ?? 'disconnected'}` : 'Sketch'
-          }
-        >
-          <PenLine size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-        </Pressable>
+            <Pressable
+              onPress={() => {
+                if (disabled || resolving) return;
+                void takePhoto();
+              }}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_SIZE,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={
+                disabled
+                  ? `Take photo unavailable — ${disabledReason ?? 'disconnected'}`
+                  : 'Take photo'
+              }
+            >
+              <Camera size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (disabled || resolving) return;
+                void pickImage();
+              }}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_SIZE,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={
+                disabled
+                  ? `Attach unavailable — ${disabledReason ?? 'disconnected'}`
+                  : 'Attach photo or image'
+              }
+            >
+              <ImageIcon size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (disabled || resolving) return;
+                void pickDocument();
+              }}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_SIZE,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={
+                disabled
+                  ? `Attach unavailable — ${disabledReason ?? 'disconnected'}`
+                  : 'Attach any file'
+              }
+            >
+              <Paperclip size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (disabled || resolving) return;
+                setSketching(true);
+              }}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_SIZE,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={
+                disabled ? `Sketch unavailable — ${disabledReason ?? 'disconnected'}` : 'Sketch'
+              }
+            >
+              <PenLine size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
+            </Pressable>
+          </>
+        )}
         <Pressable
           onPressIn={() => {
             if (disabled) return;
@@ -1777,7 +1815,7 @@ export function Composer({
           </Pressable>
         ) : null}
         <View testID="composer-actions-spacer" style={{ flex: 1, minWidth: space.xs }} />
-        {sendTarget === undefined ? (
+        {sendTarget === undefined && !edit ? (
           <ModelPicker
             hostId={row?.hostId ? row.hostId : null}
             selected={pendingModel ?? chatModel}
@@ -1794,7 +1832,7 @@ export function Composer({
           />
         ) : null}
         {/* Which account the latest turn ran on (spec/10 § Backend credentials). */}
-        {row?.account ? (
+        {!edit && row?.account ? (
           <Text
             testID="chat-account"
             numberOfLines={1}
@@ -1810,7 +1848,7 @@ export function Composer({
             {row.account.label}
           </Text>
         ) : null}
-        {sendTarget === undefined ? (
+        {sendTarget === undefined && !edit ? (
           <Pressable
             testID="permission-mode-padlock"
             onPress={() => setModeMenuOpen(true)}
@@ -1838,8 +1876,33 @@ export function Composer({
             />
           </Pressable>
         ) : null}
-        {sendTarget === undefined ? <ContextRing chatId={chatId} size={ACTION_SIZE} /> : null}
-        {showStop ? (
+        {sendTarget === undefined && !edit ? (
+          <ContextRing chatId={chatId} size={ACTION_SIZE} />
+        ) : null}
+        {edit ? (
+          <>
+            <Pressable
+              testID="queued-edit-cancel"
+              accessibilityRole="button"
+              accessibilityLabel="Cancel edit"
+              onPress={edit.onCancel}
+              hitSlop={8}
+            >
+              <Text style={{ ...typography.meta, color: colors.ink3 }}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              testID="queued-edit-save"
+              accessibilityRole="button"
+              accessibilityLabel="Save edit"
+              onPress={submit}
+              hitSlop={8}
+            >
+              <Text style={{ ...typography.meta, color: colors.leaf, fontWeight: '600' }}>
+                Save
+              </Text>
+            </Pressable>
+          </>
+        ) : showStop ? (
           <Pressable
             testID="composer-stop"
             onPress={stopTurn}

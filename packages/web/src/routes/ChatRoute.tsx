@@ -155,8 +155,6 @@ import {
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
-import { shortcutLabel } from '../lib/shortcuts.js';
-import { isSubmitChord } from '../lib/submitChord.js';
 import { failed } from '../lib/errorCopy.js';
 import { isStoppable } from '../stores/types.js';
 
@@ -2518,6 +2516,8 @@ function MessageEntry({
   // this row is re-keyed the moment the message starts running.
   const isQueuedEdit = entry.queued === true && entry.localId !== undefined && !!onQueuedDraft;
   const draft = isQueuedEdit ? (queuedDraft ?? null) : forkDraft;
+  const editFolder = useChatStore((st) => st.chats[chatId]?.folder ?? '');
+  const editHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? null);
   const setDraft = (text: string | null): void => {
     if (isQueuedEdit) onQueuedDraft!(entry.localId!, text);
     else setForkDraft(text);
@@ -2527,9 +2527,8 @@ function MessageEntry({
   // allowed (an empty edit is not a turn, so neither can send one). A queued
   // message's edit replaces its text in the queue instead; emptying it is a
   // remove, which `onEditQueued` decides.
-  function saveEdit(): void {
-    if (draft === null) return;
-    const next = draft.trim();
+  function saveEdit(text: string): void {
+    const next = text.trim();
     if (isQueuedEdit) {
       onEditQueued?.(entry, next);
       return;
@@ -2667,42 +2666,21 @@ function MessageEntry({
       {/* spec/04 § Branching — editing a turn opens it in place. Saving forks a
           new track from it; cancelling puts the turn back untouched. */}
       {draft !== null ? (
-        <div className="msg-editor" data-testid="msg-editor">
-          <textarea
-            className="msg-edit-input"
-            data-testid="msg-edit-input"
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (!isSubmitChord(e)) return;
-              e.preventDefault();
-              saveEdit();
-            }}
-          />
-          <div className="msg-edit-actions">
-            <button
-              type="button"
-              className="msg-edit-cancel"
-              data-testid="msg-edit-cancel"
-              onClick={() => setDraft(null)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="msg-edit-save"
-              data-testid="msg-edit-save"
-              disabled={!isQueuedEdit && draft.trim().length === 0}
-              onClick={saveEdit}
-            >
-              Save
-              <span className="btn-chord" data-testid="msg-edit-save-chord" aria-hidden="true">
-                {shortcutLabel('⌘↵')}
-              </span>
-            </button>
-          </div>
-        </div>
+        <Composer
+          chatId={chatId}
+          hostId={editHostId}
+          folder={editFolder}
+          initialValue={draft}
+          onValueChange={setDraft}
+          onSend={() => {
+            throw new Error('an edit composer does not send');
+          }}
+          edit={{
+            onSave: saveEdit,
+            onCancel: () => setDraft(null),
+            allowEmpty: isQueuedEdit,
+          }}
+        />
       ) : text.length > 0 || entry.streaming ? (
         <>
           <div className={entry.voice ? 'msg-voice-row' : 'msg-content-row'}>

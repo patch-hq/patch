@@ -3663,35 +3663,17 @@ a.ch-row:hover {
   grid-row: 1;
 }
 
-.msg-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* The message editor is the composer in edit mode (spec/14 § Editing a sent
+   message): it sits inside the turn, so it drops the composer's page padding and
+   reading-column centring and fills the turn's width. */
+.msg-editor,
+.composer.composer-editing {
   width: 100%;
+  padding: 0;
+  align-items: stretch;
 }
-.msg-edit-input {
-  width: 100%;
-  min-height: 72px;
-  padding: 12px 16px;
-  font: inherit;
-  line-height: 1.65;
-  color: var(--ink);
-  background: var(--bg-elevated);
-  border: 1px solid var(--accent-soft);
-  border-radius: 10px;
-  resize: vertical;
-}
-.msg-edit-input:focus {
-  outline: 2px solid var(--accent-soft);
-  outline-offset: 1px;
-}
-.msg-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.msg-edit-cancel,
-.msg-edit-save {
+.composer-editing .msg-edit-cancel,
+.composer-editing .msg-edit-save {
   padding: 5px 12px;
   font-size: 14px;
   border-radius: 6px;

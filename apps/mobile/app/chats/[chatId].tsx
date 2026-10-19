@@ -18,7 +18,6 @@ import {
   Platform,
   Pressable,
   Text,
-  TextInput,
   View,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -2301,6 +2300,8 @@ const TimelineItem = React.memo(function TimelineItem({
 }): React.ReactElement | null {
   const colors = useTheme();
   const hostOnline = usePresenceStore((s) => s.daemon === 'online');
+  // Sources the `/` skill menu in an open queued-message editor.
+  const chatFolder = useChatStore((s) => s.chats[chatId]?.folder);
   // spec/15 ## Chat detail, spec/02 § Background task completions — a
   // completion that arrived still wrapped in its raw block (replay, or a host
   // on a pre-lifting host) is not a turn anyone typed and none of its
@@ -2444,37 +2445,17 @@ const TimelineItem = React.memo(function TimelineItem({
             }}
           >
             {queuedDraft !== undefined && entry.localId !== undefined ? (
-              <View>
-                <TextInput
-                  testID="queued-edit-input"
-                  value={queuedDraft}
-                  onChangeText={(t) => onQueuedDraft?.(entry.localId!, t)}
-                  multiline
-                  autoFocus
-                  style={{ color: fg, minWidth: 200, padding: 0 }}
+              <View style={{ minWidth: 280 }}>
+                <Composer
+                  chatId={chatId}
+                  {...(chatFolder !== undefined ? { folder: chatFolder } : {})}
+                  edit={{
+                    initial: queuedDraft,
+                    onChange: (t) => onQueuedDraft?.(entry.localId!, t),
+                    onSave: (t) => onEditQueued?.(entry, t),
+                    onCancel: () => onQueuedDraft?.(entry.localId!, null),
+                  }}
                 />
-                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: space.md }}>
-                  <Pressable
-                    testID="queued-edit-cancel"
-                    accessibilityRole="button"
-                    accessibilityLabel="Cancel edit"
-                    onPress={() => onQueuedDraft?.(entry.localId!, null)}
-                    hitSlop={8}
-                  >
-                    <Text style={{ color: colors.ink3, fontSize: textMin }}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    testID="queued-edit-save"
-                    accessibilityRole="button"
-                    accessibilityLabel="Save edit"
-                    onPress={() => onEditQueued?.(entry, queuedDraft)}
-                    hitSlop={8}
-                  >
-                    <Text style={{ color: colors.leaf, fontSize: textMin, fontWeight: '600' }}>
-                      Save
-                    </Text>
-                  </Pressable>
-                </View>
               </View>
             ) : null}
             {/* Markdown, not raw asterisks/backticks (spec/15 § Chat detail). */}
