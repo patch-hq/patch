@@ -913,6 +913,9 @@ function ChatDetailBody(): React.ReactElement {
         atBottom: atNewest,
         anchorSeq: atNewest ? null : anchorSeqRef.current,
       });
+      // Handover (spec/05): where the list came to rest is what other surfaces
+      // pick up — the drag-time reports above stop at the finger-lift.
+      useViewPositionStore.getState().setScroll(chatId, atNewest ? null : anchorSeqRef.current);
     },
     [chatId],
   );
