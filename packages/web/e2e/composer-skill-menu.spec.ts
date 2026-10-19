@@ -108,3 +108,30 @@ test('hovering a skill row leaves exactly one highlighted row', async ({ page })
   const highlighted = bg.filter((c) => c !== 'rgba(0, 0, 0, 0)');
   expect(highlighted).toHaveLength(1);
 });
+
+// A skill named like the provider's own built-in command (Claude Code's
+// /context) is red and unselectable; typed, it reads amber as a command.
+test('a skill colliding with a provider command is red, unselectable, and amber when typed', async ({
+  page,
+}) => {
+  await page.route('**/api/skills*', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ skills: ['plant', 'context'] }),
+    }),
+  );
+  await page.goto(CHAT);
+  const input = page.getByTestId('composer-input');
+  await input.fill('/con');
+  const row = page.getByTestId('composer-skill-option-context');
+  await expect(row).toHaveClass(/blocked/);
+  await row.click({ force: true });
+  await expect(input).toHaveValue('/con');
+  await input.fill('/context ');
+  const color = (sel: string) => page.locator(sel).evaluate((e) => getComputedStyle(e).color);
+  await expect(page.locator('.composer-chip.command')).toHaveCount(1);
+  expect(await color('.composer-chip.command')).not.toBe(
+    await page.getByTestId('composer-input').evaluate((e) => getComputedStyle(e).color),
+  );
+});

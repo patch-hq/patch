@@ -104,7 +104,7 @@ import {
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { harnessForModel, type PermissionMode } from '@patch/wire';
+import { harnessForModel, providerBuiltinCommands, type PermissionMode } from '@patch/wire';
 import { AnchoredMenu } from './AnchoredMenu';
 import { ImageAnnotatorModal, type AnnotatedImage } from './ImageAnnotatorModal';
 import { ModelPicker } from './ModelPicker';
@@ -451,10 +451,23 @@ export function Composer({
         ]
       : [];
   const showSkillMenu = slashActive && filteredSkills.length > 0;
+  // The provider's own commands win over a same-named skill (the CLI handles
+  // them first), so such a skill is shown red and cannot be completed; typed,
+  // the token reads amber as a command. Patch's own commands are exempt.
+  const providerCommands = React.useMemo(
+    () =>
+      new Set(
+        [...providerBuiltinCommands(row?.model)].filter((n) => !BUILTIN_COMMAND_NAMES.includes(n)),
+      ),
+    [row?.model],
+  );
   // Every name a chip can legitimately be: the folder's skills. The built-in
   // commands (lib/slashCommands.ts) are offered in the list but are not
   // chipped — they run instead of sending, so there is no skill to preview.
-  const knownChipNames = React.useMemo(() => new Set(skills), [skills]);
+  const knownChipNames = React.useMemo(
+    () => new Set([...skills, ...providerCommands]),
+    [skills, providerCommands],
+  );
   const chipTokens = React.useMemo(
     () => findChipTokens(body, knownChipNames),
     [body, knownChipNames],
@@ -482,7 +495,7 @@ export function Composer({
           }
           style={{
             backgroundColor: colors.divider,
-            color: colors.leaf,
+            color: providerCommands.has(chip.name) ? colors.amber : colors.leaf,
             borderRadius: 4,
           }}
         >
@@ -495,6 +508,7 @@ export function Composer({
     return nodes;
   }
   const completeSkill = (name: string): void => {
+    if (skills.includes(name) && providerCommands.has(name)) return;
     if (activeToken === null) return;
     const { text, cursor } = spliceCompletion(body, activeToken.start, cursorPos, name);
     updateDraft(joinQuotes(quotes, text));
@@ -1352,24 +1366,36 @@ export function Composer({
           }}
         >
           <ScrollView keyboardShouldPersistTaps="handled">
-            {filteredSkills.map((s) => (
-              <Pressable
-                key={s}
-                testID={`skill-option-${s}`}
-                onPress={() => completeSkill(s)}
-                style={({ pressed }) => ({
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: space.xs,
-                  paddingHorizontal: space.md,
-                  paddingVertical: space.sm,
-                  backgroundColor: pressed ? colors.divider : 'transparent',
-                })}
-              >
-                <Text style={{ ...typography.secondary, color: colors.leaf }}>/</Text>
-                <Text style={{ ...typography.secondary, color: colors.ink }}>{s}</Text>
-              </Pressable>
-            ))}
+            {filteredSkills.map((s) => {
+              const blocked = skills.includes(s) && providerCommands.has(s);
+              return (
+                <Pressable
+                  key={s}
+                  testID={`skill-option-${s}`}
+                  accessibilityState={{ disabled: blocked }}
+                  onPress={() => completeSkill(s)}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: space.xs,
+                    paddingHorizontal: space.md,
+                    paddingVertical: space.sm,
+                    backgroundColor: pressed && !blocked ? colors.divider : 'transparent',
+                  })}
+                >
+                  <Text
+                    style={{ ...typography.secondary, color: blocked ? colors.red : colors.leaf }}
+                  >
+                    /
+                  </Text>
+                  <Text
+                    style={{ ...typography.secondary, color: blocked ? colors.red : colors.ink }}
+                  >
+                    {s}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
         </View>
       ) : null}

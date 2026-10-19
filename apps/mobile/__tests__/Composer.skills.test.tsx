@@ -288,6 +288,24 @@ describe('Composer — skill menu triggering', () => {
     expect(() => findHost(r.root, byTestId('skill-menu'))).toThrow();
   });
 
+  it('a skill named like a provider command is disabled and will not complete', async () => {
+    skillsSpy.mockResolvedValue({ skills: ['plant', 'context'] });
+    const r = renderRN(<Composer chatId="c1" folder="work" />);
+    await actAsync(async () => {
+      findHost(r.root, byType('TextInput')).props['onChangeText']('/');
+      await flush();
+    });
+    update(r, <Composer chatId="c1" folder="work" />);
+    const row = findHost(r.root, byTestId('skill-option-context'));
+    expect(row.props['accessibilityState']).toEqual({ disabled: true });
+    row.props['onPress']();
+    update(r, <Composer chatId="c1" folder="work" />);
+    expect(findHost(r.root, byType('TextInput')).props['value']).toBe('/');
+    expect(findHost(r.root, byTestId('skill-option-plant')).props['accessibilityState']).toEqual({
+      disabled: false,
+    });
+  });
+
   it('a skill row exercises both pressed-style branches via onPressIn/onPressOut', async () => {
     skillsSpy.mockResolvedValue({ skills: ['plant'] });
     const r = renderRN(<Composer chatId="c1" folder="work" />);

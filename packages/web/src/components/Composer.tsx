@@ -64,7 +64,12 @@ import { ImageAnnotator } from './ImageAnnotator.js';
 import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
 import type { PermissionMode } from '@patch/wire';
-import { permissionModesFor } from '@patch/wire';
+import {
+  permissionModesFor,
+  providerBuiltinCommands,
+  providerDescriptor,
+  providerForModel,
+} from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -754,11 +759,16 @@ export const Composer = forwardRef(function Composer(
   // Every name a chip can legitimately be — a skill from the folder, or a
   // built-in — used both to recognise a completed chip anywhere in the text
   // and to know which name a Backspace right after one should remove whole.
+  // The provider's own commands win over a same-named skill (the CLI handles
+  // them before any skill), so a colliding skill is blocked in the menu and
+  // its typed token reads as the provider command, not a skill.
+  const providerCommands = useMemo(() => providerBuiltinCommands(accountModel), [accountModel]);
+  const providerLabel = providerDescriptor(providerForModel(accountModel)).label;
   const knownChipNames = useMemo(
-    () => new Set<string>([...skills, ...BUILTIN_COMMANDS.map((c) => c.name)]),
+    () => new Set<string>([...skills, ...providerCommands, ...BUILTIN_COMMANDS.map((c) => c.name)]),
     // BUILTIN_COMMANDS is a fresh array every render but its content is
     // static, so `skills` is the only thing that actually changes this set.
-    [skills],
+    [skills, providerCommands],
   );
   const chipTokens = useMemo(() => findChipTokens(body, knownChipNames), [body, knownChipNames]);
 
@@ -788,14 +798,21 @@ export const Composer = forwardRef(function Composer(
   // list is built-ins first and the feature is unaffected.
   const lastUsed = getLastUsedSkill(trimmedFolder);
   const leadSkill = filteredSkills[0] === lastUsed ? filteredSkills[0] : null;
-  const allItems: Array<{ name: string; isBuiltin: boolean; description?: string }> = [
-    ...(leadSkill === null
-      ? []
-      : [{ name: leadSkill, isBuiltin: false, description: skillDescriptions[leadSkill] }]),
+  const skillItem = (s: string) => ({
+    name: s,
+    isBuiltin: false,
+    description: skillDescriptions[s],
+    blocked: providerCommands.has(s),
+  });
+  const allItems: Array<{
+    name: string;
+    isBuiltin: boolean;
+    description?: string;
+    blocked?: boolean;
+  }> = [
+    ...(leadSkill === null ? [] : [skillItem(leadSkill)]),
     ...filteredBuiltins.map((c) => ({ name: c.name, isBuiltin: true, description: c.description })),
-    ...filteredSkills
-      .filter((s) => s !== leadSkill)
-      .map((s) => ({ name: s, isBuiltin: false, description: skillDescriptions[s] })),
+    ...filteredSkills.filter((s) => s !== leadSkill).map(skillItem),
   ];
   // The menu is open whenever `/` is active — an EMPTY result is a state the
   // user is shown, not silence (the user, `patch/todo.md` — "typing / in a folder
@@ -824,6 +841,7 @@ export const Composer = forwardRef(function Composer(
   }, [slashQuery]);
 
   function completeItem(name: string, isBuiltin: boolean): void {
+    if (!isBuiltin && providerCommands.has(name)) return;
     /* v8 ignore next -- defensive only: completion is only ever reachable
        through a menu row, and the menu only renders while `activeToken` is
        non-null (`showSkillMenu` requires `slashActive`). */
@@ -1057,7 +1075,7 @@ export const Composer = forwardRef(function Composer(
       nodes.push(
         <span
           key={`chip-${i}`}
-          className="composer-chip"
+          className={`composer-chip${providerCommands.has(chip.name) && !BUILTIN_COMMANDS.some((c) => c.name === chip.name) ? ' command' : ''}`}
           data-testid="composer-chip"
           data-skill={chip.name}
           onMouseEnter={(e) => showChipPreview(chip.name, e.currentTarget)}
@@ -1669,7 +1687,13 @@ export const Composer = forwardRef(function Composer(
                   type="button"
                   role="option"
                   aria-selected={i === activeSkillIndex}
-                  className={`composer-skill-option${i === activeSkillIndex ? ' active' : ''}${item.isBuiltin ? ' builtin' : ''}`}
+                  className={`composer-skill-option${i === activeSkillIndex ? ' active' : ''}${item.isBuiltin ? ' builtin' : ''}${item.blocked ? ' blocked' : ''}`}
+                  aria-disabled={item.blocked || undefined}
+                  title={
+                    item.blocked
+                      ? `/${item.name} is a built-in ${providerLabel} command, so this skill can't be used here`
+                      : undefined
+                  }
                   data-testid={`composer-skill-option-${item.name}`}
                   // Hover moves the selection (mousemove, not mouseenter, so a
                   // keyboard-driven scroll under a still pointer doesn't steal

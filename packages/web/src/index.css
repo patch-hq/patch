@@ -92,6 +92,8 @@
      --accent-tint. Was hardcoded rgba() at two call sites; spec/14 § Theming:
      "no component hardcodes a colour". */
   --danger-tint: rgba(180, 70, 47, 0.08);
+  --amber: #a86a00;
+  --amber-tint: rgba(214, 140, 0, 0.14);
   --leaf: #4f7a3e;
   --voice-tint: #ecc99a;
   --text-muted: var(--ink-3);
@@ -197,6 +199,8 @@
   --on-accent: #0f1a08;
   --danger: #cd7e70;
   --danger-tint: rgba(205, 126, 112, 0.14);
+  --amber: #e0a43a;
+  --amber-tint: rgba(224, 164, 58, 0.16);
   --leaf: #77a966;
   --voice-tint: #3a2b22;
   --text-muted: var(--ink-3);
@@ -274,6 +278,8 @@
     --on-accent: #0f1a08;
     --danger: #cd7e70;
     --danger-tint: rgba(205, 126, 112, 0.14);
+    --amber: #e0a43a;
+    --amber-tint: rgba(224, 164, 58, 0.16);
     --leaf: #77a966;
     --voice-tint: #3a2b22;
     --text-muted: var(--ink-3);
@@ -5403,6 +5409,14 @@ a.ch-row:hover {
   align-items: center;
   gap: 6px;
 }
+.composer-skill-option.blocked {
+  color: var(--danger);
+  background: var(--danger-tint);
+  cursor: not-allowed;
+}
+.composer-skill-option.blocked .composer-skill-slash {
+  color: var(--danger);
+}
 .composer-skill-option.active {
   background: var(--bg-soft);
 }
@@ -5846,6 +5860,10 @@ a.ch-row:hover {
   background: var(--accent-tint);
   color: var(--accent);
   cursor: default;
+}
+.composer-chip.command {
+  background: var(--amber-tint);
+  color: var(--amber);
 }
 .composer-input[data-chips='true'] {
   color: transparent;

@@ -13,11 +13,12 @@ import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { api } from '../api/rest.js';
 
-function seedChat(folder = '/proj'): void {
+function seedChat(folder = '/proj', model?: string): void {
   useChatStore.getState().hydrate([
     {
       chatId: 'c1',
       hostId: 'd1',
+      ...(model ? { model } : {}),
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder,
@@ -45,7 +46,7 @@ describe('Composer — skill chips', () => {
     useChatStore.getState()._reset();
     localStorage.clear();
     vi.spyOn(api, 'skills').mockResolvedValue({
-      skills: ['plant'],
+      skills: ['plant', 'context'],
       paths: { plant: '/proj/.claude/skills/plant/SKILL.md' },
       descriptions: { plant: 'Sow what is in season.' },
       frontmatter: { plant: { description: 'Sow what is in season.' } },
@@ -56,8 +57,11 @@ describe('Composer — skill chips', () => {
     vi.restoreAllMocks();
   });
 
-  function renderComposer(onSend: (text: string) => void = () => {}): HTMLTextAreaElement {
-    seedChat();
+  function renderComposer(
+    onSend: (text: string) => void = () => {},
+    model?: string,
+  ): HTMLTextAreaElement {
+    seedChat('/proj', model);
     render(
       <Composer
         chatId="c1"
@@ -230,5 +234,35 @@ describe('Composer — skill chips', () => {
     // Only the one background fetch to prime it — not a second one from an
     // interactive open that never happened.
     expect(api.skills).toHaveBeenCalledTimes(1);
+  });
+
+  describe('provider built-in command collisions', () => {
+    it('shows a skill named like a Claude command red, and will not complete it', async () => {
+      const input = renderComposer();
+      fireEvent.change(input, { target: { value: '/con' } });
+      const row = await screen.findByTestId('composer-skill-option-context');
+      expect(row).toHaveClass('blocked');
+      expect(row).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.mouseDown(row);
+      expect(input.value).toBe('/con');
+    });
+
+    it('does not block the same skill on a provider that has no such command', async () => {
+      const input = renderComposer(undefined, 'openai/gpt-5-codex');
+      fireEvent.change(input, { target: { value: '/con' } });
+      const row = await screen.findByTestId('composer-skill-option-context');
+      expect(row).not.toHaveClass('blocked');
+      fireEvent.mouseDown(row);
+      await waitFor(() => expect(input.value).toBe('/context '));
+    });
+
+    it('renders a typed provider command as an amber command chip, a skill as a plain chip', async () => {
+      const input = renderComposer();
+      fireEvent.change(input, { target: { value: '/context and /plant ' } });
+      await waitFor(() => expect(screen.getAllByTestId('composer-chip')).toHaveLength(2));
+      const [cmd, skill] = screen.getAllByTestId('composer-chip');
+      expect(cmd).toHaveClass('command');
+      expect(skill).not.toHaveClass('command');
+    });
   });
 });

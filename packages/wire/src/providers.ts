@@ -24,6 +24,13 @@ export interface ProviderDescriptor {
   readonly sessionIdPrefix: string | null;
   /** Permission modes the provider can run at all; `'all'` is every PermissionMode. */
   readonly permissionModes: 'all' | readonly PermissionMode[];
+  /**
+   * Slash commands the provider's own CLI handles itself (`/context`, `/help`).
+   * The provider intercepts these before any skill of the same name, so Patch
+   * refuses to offer a colliding skill. Excludes Patch's own `/clear` and
+   * `/goal`, which Patch handles before the provider sees them.
+   */
+  readonly builtinCommands: readonly string[];
 }
 
 // `as const satisfies` keeps the ids as literals so HarnessId is derived from
@@ -35,6 +42,38 @@ export const PROVIDERS = [
     modelPrefix: null,
     sessionIdPrefix: null,
     permissionModes: 'all',
+    builtinCommands: [
+      'add-dir',
+      'agents',
+      'bug',
+      'compact',
+      'config',
+      'context',
+      'cost',
+      'doctor',
+      'export',
+      'help',
+      'hooks',
+      'ide',
+      'init',
+      'login',
+      'logout',
+      'mcp',
+      'memory',
+      'model',
+      'permissions',
+      'plugin',
+      'release-notes',
+      'resume',
+      'review',
+      'rewind',
+      'status',
+      'terminal-setup',
+      'theme',
+      'todos',
+      'usage',
+      'vim',
+    ],
   },
   {
     id: 'codex',
@@ -43,6 +82,22 @@ export const PROVIDERS = [
     sessionIdPrefix: 'codex-',
     // Codex has no classifier-driven approval, so no `auto`.
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    builtinCommands: [
+      'approvals',
+      'compact',
+      'diff',
+      'init',
+      'logout',
+      'mcp',
+      'mention',
+      'model',
+      'new',
+      'quit',
+      'resume',
+      'review',
+      'status',
+      'undo',
+    ],
   },
 ] as const satisfies readonly ProviderDescriptor[];
 
@@ -65,6 +120,11 @@ export function providerForModel(model: string | null | undefined): ProviderId {
     }
   }
   return DEFAULT_PROVIDER_ID;
+}
+
+/** The provider's own built-in slash commands for a chat on this model. */
+export function providerBuiltinCommands(model: string | null | undefined): ReadonlySet<string> {
+  return new Set(providerDescriptor(providerForModel(model)).builtinCommands);
 }
 
 /** Which provider minted a native session id; undefined when there is no session. */

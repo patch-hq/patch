@@ -7,9 +7,27 @@ import {
   providerDescriptor,
   providerForModel,
   providerForSessionId,
+  providerBuiltinCommands,
   permissionModesFor,
   HARNESS_PERMISSION_MODES,
 } from '../src/index.js';
+
+describe('provider built-in commands', () => {
+  it('every provider declares its own, and routing follows the model', () => {
+    for (const p of PROVIDERS) expect(p.builtinCommands.length).toBeGreaterThan(0);
+    expect(providerBuiltinCommands('claude-opus-5').has('context')).toBe(true);
+    expect(providerBuiltinCommands(null).has('context')).toBe(true);
+    expect(providerBuiltinCommands('openai/gpt-5-codex').has('context')).toBe(false);
+    expect(providerBuiltinCommands('openai/gpt-5-codex').has('approvals')).toBe(true);
+  });
+
+  it('never claims the commands Patch handles itself', () => {
+    for (const p of PROVIDERS) {
+      expect(p.builtinCommands).not.toContain('clear');
+      expect(p.builtinCommands).not.toContain('goal');
+    }
+  });
+});
 
 describe('provider registry', () => {
   it('has unique ids and exactly one default (prefix-less) provider', () => {
