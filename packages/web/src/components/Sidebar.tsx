@@ -1819,6 +1819,7 @@ function ChatRowView({
 }): JSX.Element {
   const badge = useSettledBadge(row);
   const hasUnreadNotif = useChatHasUnread(row.chatId);
+  const goalMet = row.goal === null && row.lastGoal?.outcome === 'met';
   const hostLabel = useAmbiguousHostLabel(row);
   const navigate = useNavigate();
   const menu = useContextMenu();
@@ -2213,7 +2214,7 @@ function ChatRowView({
           width and the relative time stays readable. Only a pinned-or-goal
           row takes the nested shape — an ordinary row keeps the plain text
           node. */}
-        {pinned || row.goal !== null || hasUnreadNotif ? (
+        {pinned || row.goal !== null || goalMet || hasUnreadNotif ? (
           <span className="name has-marks">
             {hasUnreadNotif && (
               <Bell
@@ -2231,13 +2232,14 @@ function ChatRowView({
                 aria-label="pinned"
               />
             )}
-            {row.goal !== null && (
+            {(row.goal !== null || goalMet) && (
               <span
-                className="goal-marker"
+                className={goalMet ? 'goal-marker is-met' : 'goal-marker'}
                 data-testid={`goal-marker-${row.chatId}`}
-                title={`Goal: ${row.goal}`}
+                data-goal-state={goalMet ? 'met' : 'working'}
+                title={goalMet ? `Goal met: ${row.lastGoal?.condition}` : `Goal: ${row.goal}`}
               >
-                <Target size={11} aria-label="working toward a goal" />
+                <Target size={11} aria-label={goalMet ? 'goal met' : 'working toward a goal'} />
               </span>
             )}
             <span className="name-text">{title}</span>

@@ -93,6 +93,8 @@
      "no component hardcodes a colour". */
   --danger-tint: rgba(180, 70, 47, 0.08);
   --amber: #a86a00;
+  --goal-working: #d9730d;
+  --goal-met: #2f8a4a;
   --amber-tint: rgba(214, 140, 0, 0.14);
   --leaf: #4f7a3e;
   --voice-tint: #ecc99a;
@@ -200,6 +202,8 @@
   --danger: #cd7e70;
   --danger-tint: rgba(205, 126, 112, 0.14);
   --amber: #e0a43a;
+  --goal-working: #f0903a;
+  --goal-met: #5cb877;
   --amber-tint: rgba(224, 164, 58, 0.16);
   --leaf: #77a966;
   --voice-tint: #3a2b22;
@@ -279,6 +283,10 @@
     --danger: #cd7e70;
     --danger-tint: rgba(205, 126, 112, 0.14);
     --amber: #e0a43a;
+    --goal-working: #f0903a;
+    --goal-met: #5cb877;
+  --goal-working: #f0903a;
+  --goal-met: #5cb877;
     --amber-tint: rgba(224, 164, 58, 0.16);
     --leaf: #77a966;
     --voice-tint: #3a2b22;
@@ -1315,7 +1323,10 @@ body {
 .goal-marker {
   display: inline-flex;
   flex: 0 0 auto;
-  color: var(--ink-3);
+  color: var(--goal-working);
+}
+.goal-marker.is-met {
+  color: var(--goal-met);
 }
 .name-text {
   overflow: hidden;

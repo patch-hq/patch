@@ -302,6 +302,39 @@ describe('Sidebar', () => {
     expect(screen.queryByTestId('goal-marker-c-no-goal')).not.toBeInTheDocument();
   });
 
+  it('goal marker is working while a goal is active, met once it finishes, absent when impossible', () => {
+    const base = {
+      hostId: 'd1',
+      permissionMode: 'bypassPermissions' as const,
+      folder: '/work',
+      activity: 'idle' as const,
+      status: 'active' as const,
+      pinned: false,
+      pinnedAt: null,
+      disabled: false,
+      lastUpdated: 1,
+    };
+    const finished = (outcome: 'met' | 'impossible') => ({
+      condition: 'Ship it',
+      startedAt: 1,
+      endedAt: 2,
+      turns: 1,
+      tokens: 1,
+      outcome,
+      reason: 'r',
+    });
+    useChatStore.getState().hydrate([
+      { ...base, chatId: 'c-work', name: 'a', goal: 'Ship it' },
+      { ...base, chatId: 'c-met', name: 'b', goal: null, lastGoal: finished('met') },
+      { ...base, chatId: 'c-imp', name: 'c', goal: null, lastGoal: finished('impossible') },
+    ]);
+    renderInRouter();
+    expect(screen.getByTestId('goal-marker-c-work')).toHaveAttribute('data-goal-state', 'working');
+    expect(screen.getByTestId('goal-marker-c-met')).toHaveAttribute('data-goal-state', 'met');
+    expect(screen.getByTestId('goal-marker-c-met')).toHaveClass('is-met');
+    expect(screen.queryByTestId('goal-marker-c-imp')).not.toBeInTheDocument();
+  });
+
   // The Manager row's mic sits in the three-up Voice note / Call / Hands-free
   // trio (spec/14 § Manager) and renders bigger + accent-tinted via the shared
   // `mic-btn--manager-ctl` variant; ordinary rows keep the plain small hover mic.
