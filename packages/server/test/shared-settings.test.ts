@@ -22,7 +22,7 @@ import {
 import {
   DEFAULT_SHARED_SETTINGS,
   EMPTY_SHARED_SECRETS,
-  type SettingsChangedEvent,
+  SettingsChangedEvent,
   type WireEvent,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
@@ -136,6 +136,15 @@ describe('SharedSettingsService', () => {
     expect(service.current().jobAutonomyPrompt).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: false }));
     expect(make().current().jobAutonomyPrompt).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
+  });
+
+  it('always sends claudeSettings to surfaces, including from a settings file written before it existed', () => {
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: false }));
+    const fresh = make();
+    expect(fresh.changedEvent().settings.claudeSettings).toEqual(
+      DEFAULT_SHARED_SETTINGS.claudeSettings,
+    );
+    expect(SettingsChangedEvent.safeParse(fresh.changedEvent()).success).toBe(true);
   });
 
   it('refuses to start on a settings file with a key that is present and wrong', () => {
