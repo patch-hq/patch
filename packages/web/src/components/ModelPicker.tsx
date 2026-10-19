@@ -17,7 +17,7 @@
 
 import { useLayoutEffect, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { useModelCatalog, RECENT_MODEL_COUNT } from '../lib/models.js';
+import { useModelCatalog } from '../lib/models.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from './ErrorDetail.js';
 
@@ -183,7 +183,7 @@ export function ModelPicker({
         </div>
       ) : null}
       <ul className="model-popup-list">
-        {catalog.models.slice(0, RECENT_MODEL_COUNT).map((m) => (
+        {catalog.models.map((m) => (
           <li key={m.id}>
             <button
               type="button"

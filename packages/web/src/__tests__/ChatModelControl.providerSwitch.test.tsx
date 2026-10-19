@@ -184,14 +184,17 @@ describe('model control — provider-switch confirmation', () => {
     ]);
   });
 
-  it('offers only the five most recent models', () => {
+  it('offers every model in the catalogue, ChatGPT included', () => {
     setModelCatalog({
       status: 'ready',
-      models: Array.from({ length: 8 }, (_, n) => ({ id: `m${n}`, label: `Model ${n}` })),
+      models: [
+        ...Array.from({ length: 7 }, (_, n) => ({ id: `m${n}`, label: `Model ${n}` })),
+        { id: 'openai/gpt-5-codex', label: 'GPT-5 Codex' },
+      ],
     });
     render(row({ model: 'm0' }));
     fireEvent.click(screen.getByTestId('chat-model'));
-    expect(screen.getAllByRole('option')).toHaveLength(5);
-    expect(screen.queryByTestId('model-option-m5')).toBeNull();
+    expect(screen.getAllByRole('option')).toHaveLength(8);
+    expect(screen.getByTestId('model-option-openai/gpt-5-codex')).toBeInTheDocument();
   });
 });
