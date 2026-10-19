@@ -142,6 +142,8 @@ import {
   FileText,
   GitFork,
   RotateCcw,
+  Copy,
+  X,
   MessageSquarePlus,
   Quote,
   LayoutTemplate,
@@ -2656,6 +2658,10 @@ function MessageEntry({
   // as a brand new turn (spec/12 § turn retry); an assistant reply re-runs the
   // user turn it answered.
   const canRetry = canSideThread && onRetryTurn !== undefined;
+  // Copy needs only some text on a user or agent turn; unlike side thread and
+  // retry it has no persisted-seq requirement, so a streaming reply can be copied.
+  const canCopy =
+    (entry.role === 'user' || entry.role === 'assistant') && !entry.transcribing && text.length > 0;
   return (
     <div
       className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}`}
@@ -3085,6 +3091,7 @@ function MessageEntry({
           <GitFork size={14} aria-hidden="true" />
         </button>
       ) : null}
+      {canCopy ? <MessageCopyButton text={text} /> : null}
       {canRetry ? (
         <button
           type="button"
@@ -3152,6 +3159,45 @@ function MessageEntry({
         <HookAdviseNote advise={entry.hookAdvise} />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * spec/14 § Messages — hover-revealed copy button in the message gutter. Puts
+ * the message's markdown source on the clipboard; the icon becomes a tick for a
+ * moment, or a cross when the write fails (NO FALLBACK: a copy that did nothing
+ * must say so).
+ */
+function MessageCopyButton({ text }: { text: string }): JSX.Element {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const settle = (next: 'copied' | 'failed'): void => {
+    setState(next);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState('idle'), 2000);
+  };
+  const label = state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy';
+  const Icon = state === 'copied' ? Check : state === 'failed' ? X : Copy;
+  return (
+    <button
+      type="button"
+      className="msg-copy"
+      data-testid="msg-copy-trigger"
+      data-state={state}
+      aria-label={label}
+      title={label}
+      onClick={() => {
+        void Promise.resolve()
+          .then(() => navigator.clipboard.writeText(text))
+          .then(
+            () => settle('copied'),
+            () => settle('failed'),
+          );
+      }}
+    >
+      <Icon size={14} aria-hidden="true" />
+    </button>
   );
 }
 

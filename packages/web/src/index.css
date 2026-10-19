@@ -3363,6 +3363,58 @@ a.ch-row:hover {
   background: var(--bg-soft);
   color: var(--ink);
 }
+/* Copy button: first row of the gutter OPPOSITE the side-thread and retry
+   buttons (left of a user bubble, right of assistant prose), so it fits a
+   one-line message. Same reveal rule and hover bridge as `.msg-side-thread`. */
+.msg-copy {
+  position: absolute;
+  top: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.msg-user .msg-copy {
+  left: calc(var(--measure-slack, 0px) - 26px);
+}
+.msg-assistant .msg-copy {
+  right: calc(var(--measure-slack, 0px) - 26px);
+}
+.msg-copy::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+}
+.msg-user .msg-copy::after {
+  left: 100%;
+}
+.msg-assistant .msg-copy::after {
+  right: 100%;
+}
+.msg:hover .msg-copy,
+.msg-copy:focus-visible,
+.msg-copy:not([data-state='idle']) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg-copy {
+    opacity: 1;
+  }
+}
+.msg-copy:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
 /* spec/14 § Side threads panel — "IN THE MAIN CHAT" marker under a message
    that has a side thread forked from it. */
 .msg-side-thread-marker {
