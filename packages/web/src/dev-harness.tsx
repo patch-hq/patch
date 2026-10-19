@@ -1818,27 +1818,21 @@ useChatStore.setState((s) => ({
       },
     ],
     // A long history so the scroll-behaviour spec has something to scroll.
-    chat_scroll: Array.from(
-      { length: 40 },
-      (_v, i): ChatEventEntry => ({
-        seq: i,
-        kind: 'message',
-        role: i % 2 === 0 ? 'user' : 'assistant',
-        content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
-        at: i,
-      }),
-    ),
+    chat_scroll: Array.from({ length: 40 }, (_v, i): ChatEventEntry => ({
+      seq: i,
+      kind: 'message',
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
+      at: i,
+    })),
     // A transcript far longer than the tail window the web panel paints on open.
-    chat_long_history: Array.from(
-      { length: 400 },
-      (_v, i): ChatEventEntry => ({
-        seq: i,
-        kind: 'message',
-        role: i % 2 === 0 ? 'user' : 'assistant',
-        content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
-        at: i,
-      }),
-    ),
+    chat_long_history: Array.from({ length: 400 }, (_v, i): ChatEventEntry => ({
+      seq: i,
+      kind: 'message',
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
+      at: i,
+    })),
     chat_deeplink: [
       {
         seq: 0,
@@ -2683,6 +2677,27 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
 // demonstrates the read-only mirror; `?chat=thread_manager` shows the full
 // composer.
 const params = new URLSearchParams(window.location.search);
+
+// The sidebar polls job alerts (spec/08 § Logs). The harness has no server, so
+// unanswered that poll failed and the sidebar drew "Job alerts failed to load"
+// in every spec — which pushed the layout specs' measurements out. The harness
+// answers "none" itself; a spec that serves its own alerts through page.route
+// opts out with `?jobAlerts=live`, so its requests reach the network.
+if (params.get('jobAlerts') !== 'live') {
+  const fetchBeforeAlerts = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (new URL(url, window.location.href).pathname === '/api/job-alerts') {
+      return Promise.resolve(
+        new Response(JSON.stringify({ alerts: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
+    return fetchBeforeAlerts(input, init);
+  }) as typeof window.fetch;
+}
 const chatId = params.get('chat') ?? 'thread_speakers';
 
 // A fixture's own tab-opening call has to run AFTER `ChatPaneRoute`'s mount
