@@ -297,7 +297,25 @@ export type ComputerUseHost = {
   error?: string;
 };
 
+/** spec/09 § bell — one agent-sent notification. */
+export interface NotificationEntry {
+  id: string;
+  chatId: string;
+  message: string;
+  importance: 'silent' | 'normal' | 'urgent';
+  deepLink?: string;
+  sentAt: number;
+  readAt: number | null;
+}
+export interface NotificationsResponse {
+  items: NotificationEntry[];
+  unread: number;
+}
+
 export const api = {
+  getNotifications: () => request<NotificationsResponse>('/api/notifications'),
+  markNotificationsRead: (target: { ids: string[] } | { all: true }) =>
+    request<NotificationsResponse>('/api/notifications/read', { method: 'POST', body: target }),
   /** Settings → Usage: probe history and per-chat token totals for a window. */
   usageReport: (params: { since: number; until: number }) =>
     request<{

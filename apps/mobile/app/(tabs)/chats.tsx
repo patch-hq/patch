@@ -10,6 +10,7 @@ import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   AlarmClock,
+  Bell,
   Bot,
   Ear,
   Inbox,
@@ -20,6 +21,8 @@ import {
   X,
 } from 'lucide-react-native';
 import { SPECIAL_THREAD_IDS, folderBackPill } from '@patch/wire';
+import { showNotificationsDrawer } from '../../src/components/NotificationsDrawer';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { showSnoozeSheet } from '../../src/components/SnoozeSheet';
 import type { ChatSearchHit, ChatSearchHostResult } from '@patch/wire';
 import { useChatStore } from '../../src/stores/chatStore';
@@ -287,6 +290,7 @@ function ChatsHeader({
   // The dot reflects the WS link ONLY (spec/15 § Offline / error states); the
   // host being down is its own app-level banner, never this dot.
   const conn = usePresenceStore((s) => s.connection);
+  const unread = useNotificationsStore((s) => s.unread);
   const dotColor = connectionDotColor(conn, colors);
   const iconButton = {
     width: HEADER_HEIGHT,
@@ -354,6 +358,14 @@ function ChatsHeader({
             />
           )}
           <View style={{ flex: 1 }} />
+          <Pressable
+            onPress={showNotificationsDrawer}
+            accessibilityRole="button"
+            accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+            style={iconButton}
+          >
+            <Bell size={20} color={unread > 0 ? colors.ink : colors.ink2} />
+          </Pressable>
           <Pressable
             onPress={onOpenSearch}
             accessibilityRole="button"

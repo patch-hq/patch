@@ -32,6 +32,7 @@ import { VoiceNoteOverlay } from '../src/components/VoiceNoteOverlay';
 import { IncomingCallSheet } from '../src/components/IncomingCallSheet';
 import { SignInApprovalSheet } from '../src/components/SignInApprovalSheet';
 import { ChatLongPressSheet } from '../src/components/ChatLongPressSheet';
+import { NotificationsDrawer } from '../src/components/NotificationsDrawer';
 import { SnoozeSheet } from '../src/components/SnoozeSheet';
 import { ConnectionDiagnosticsGate } from '../src/components/ConnectionDiagnostics';
 import { SignedOutRedirect } from '../src/components/SignedOutRedirect';
@@ -352,6 +353,7 @@ export default function RootLayout(): React.ReactElement | null {
           <VoiceNoteOverlay />
           <ChatLongPressSheet />
           <SnoozeSheet />
+          <NotificationsDrawer />
           <ConnectionDiagnosticsGate />
           {/* A credential the server REFUSED is terminal, not a link that might
             come back — leave for pairing rather than sit in a shell that can

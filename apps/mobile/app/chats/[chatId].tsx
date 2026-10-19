@@ -26,6 +26,7 @@ import {
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
 import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
 import { ChatErrorBoundary } from '../../src/components/ChatErrorBoundary';
+import { useMarkChatNotificationsRead } from '../../src/stores/notificationsStore';
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import {
   ChevronLeft,
@@ -245,6 +246,7 @@ function ChatDetailBody(): React.ReactElement {
   const justCreated = params.justCreated === '1';
   const row = useChatStore((s) => s.chats[chatId]);
   useLeaveWhenArchivedElsewhere(chatId, router, '/(tabs)/chats');
+  useMarkChatNotificationsRead(chatId);
   // Swipe sideways to step to the neighbouring chat in the Chats tab's order.
   // A claimed gesture must be clearly horizontal and long, so vertical
   // scrolling and horizontal scrollers inside messages (code, tables) win.
