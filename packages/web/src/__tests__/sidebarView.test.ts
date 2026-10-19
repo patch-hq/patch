@@ -28,8 +28,8 @@ describe('sidebarViewFrom', () => {
   // 'done' is a valid ChatStateFilter (matchesStateFilter still answers it)
   // but is not one of the dropdown's options — never set by applySidebarView,
   // so it reads back as 'all' rather than inventing a seventh view.
-  it('an unreachable state filter value falls back to "all"', () => {
-    expect(sidebarViewFrom(false, false, 'done')).toBe('all');
+  it('the done state filter reads as "ready"', () => {
+    expect(sidebarViewFrom(false, false, 'done')).toBe('ready');
   });
 });
 
@@ -66,6 +66,14 @@ describe('applySidebarView', () => {
     expect(a.setStateFilter).toHaveBeenCalledWith(v);
   });
 
+  it('ready: sets the done state filter', () => {
+    const a = actions();
+    applySidebarView('ready', a);
+    expect(a.setBatchMode).toHaveBeenCalledWith(false);
+    expect(a.setAttentionOnly).toHaveBeenCalledWith(false);
+    expect(a.setStateFilter).toHaveBeenCalledWith('done');
+  });
+
   it('all: clears every piece', () => {
     const a = actions();
     applySidebarView('all', a);
@@ -85,10 +93,11 @@ describe('sidebarViewTriggerLabel', () => {
 });
 
 describe('SIDEBAR_VIEW_OPTIONS', () => {
-  it('is exactly the six options the spec names, in order', () => {
+  it('is exactly the seven options the spec names, in order', () => {
     expect(SIDEBAR_VIEW_OPTIONS.map((o) => o.label)).toEqual([
       'All',
       'Unread',
+      'Ready',
       'Working',
       'Waiting on you',
       'Failed',
