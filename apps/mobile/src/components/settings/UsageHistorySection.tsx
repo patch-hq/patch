@@ -11,11 +11,12 @@ import { space, useTheme } from '../../lib/theme';
 import {
   USAGE_PERIODS,
   buildBurndown,
+  pageOf,
   periodWindow,
   type UsagePeriod,
 } from '../../lib/usageHistory';
 import { SettingsSection } from '../SettingsSection';
-import { Chips, ErrorLine, Field, Muted, Row } from './ui';
+import { Chips, ErrorLine, Field, Muted, Row, SettingsButton } from './ui';
 
 type Report = Awaited<ReturnType<typeof api.usageReport>>;
 
@@ -38,6 +39,7 @@ export function UsageHistorySection(): React.ReactElement {
     { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; report: Report }
   >({ kind: 'loading' });
   const [attempt, setAttempt] = React.useState(0);
+  const [chatPage, setChatPage] = React.useState(0);
   const win = periodWindow(period, now, custom);
   const since = win?.since;
   const until = win?.until;
@@ -73,7 +75,10 @@ export function UsageHistorySection(): React.ReactElement {
             <Chips
               options={USAGE_PERIODS}
               selected={period}
-              onSelect={setPeriod}
+              onSelect={(p) => {
+                setPeriod(p);
+                setChatPage(0);
+              }}
               testIDPrefix="usage-period"
               labelPrefix="Period"
               labelOf={(p) => LABELS[p]}
@@ -145,16 +150,49 @@ export function UsageHistorySection(): React.ReactElement {
       </SettingsSection>
       <SettingsSection title="Chats by tokens" testID="usage-chats">
         {win === null || state.kind !== 'ok' ? null : state.report.chats.length > 0 ? (
-          state.report.chats.map((c) => (
-            <Row
-              key={`${c.hostId}/${c.chatId}`}
-              title={c.name ?? c.chatId}
-              testID={`usage-chat-${c.chatId}`}
-              right={
-                <Muted testID={`usage-chat-tokens-${c.chatId}`}>{formatTokens(c.tokens)}</Muted>
-              }
-            />
-          ))
+          (() => {
+            const paged = pageOf(state.report.chats, chatPage);
+            return (
+              <>
+                {paged.rows.map((c) => (
+                  <Row
+                    key={`${c.hostId}/${c.chatId}`}
+                    title={c.name ?? c.chatId}
+                    testID={`usage-chat-${c.chatId}`}
+                    right={
+                      <Muted testID={`usage-chat-tokens-${c.chatId}`}>
+                        {formatTokens(c.tokens)}
+                      </Muted>
+                    }
+                  />
+                ))}
+                {paged.pages > 1 ? (
+                  <Row
+                    title={`Page ${paged.page + 1} of ${paged.pages}`}
+                    testID="usage-chats-pager"
+                    right={
+                      <View style={{ flexDirection: 'row', gap: space.xs }}>
+                        <SettingsButton
+                          testID="usage-chats-prev"
+                          label="Previous"
+                          variant="quiet"
+                          disabled={paged.page === 0}
+                          onPress={() => setChatPage(paged.page - 1)}
+                        />
+                        <SettingsButton
+                          testID="usage-chats-next"
+                          label="Next"
+                          variant="quiet"
+                          disabled={paged.page >= paged.pages - 1}
+                          onPress={() => setChatPage(paged.page + 1)}
+                        />
+                      </View>
+                    }
+                  />
+                ) : null}
+              </>
+            );
+          })()
         ) : (
           <Muted testID="usage-chats-empty">No chat turns in this period</Muted>
         )}

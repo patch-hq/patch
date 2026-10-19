@@ -10,6 +10,7 @@ import {
   USAGE_PERIODS,
   buildBurndown,
   periodWindow,
+  pageOf,
   type BurndownSeries,
   type UsagePeriod,
 } from '../../lib/usageHistory.js';
@@ -88,6 +89,7 @@ function Burndown({
 export function UsageHistory(): JSX.Element {
   const [period, setPeriod] = useState<UsagePeriod>('week');
   const [custom, setCustom] = useState({ from: '', to: '' });
+  const [chatPage, setChatPage] = useState(0);
   const [now] = useState(() => Date.now());
   const win = periodWindow(period, now, custom);
 
@@ -98,6 +100,7 @@ export function UsageHistory(): JSX.Element {
   });
 
   const series = data ? buildBurndown(data.samples) : [];
+  const paged = pageOf(data?.chats ?? [], chatPage);
 
   return (
     <>
@@ -106,7 +109,10 @@ export function UsageHistory(): JSX.Element {
           <Pills
             options={USAGE_PERIODS}
             value={period}
-            onChange={setPeriod}
+            onChange={(p) => {
+              setPeriod(p);
+              setChatPage(0);
+            }}
             label="Period"
             testid="usage-period"
             labels={{ day: 'Day', week: 'Week', month: 'Month', custom: 'Custom' }}
@@ -153,15 +159,37 @@ export function UsageHistory(): JSX.Element {
       </Group>
       <Group label="Chats by tokens" testid="usage-chats">
         {win === null || isLoading || error ? null : data && data.chats.length > 0 ? (
-          data.chats.map((c) => (
-            <Row
-              key={`${c.hostId}/${c.chatId}`}
-              title={c.name ?? c.chatId}
-              testid={`usage-chat-${c.chatId}`}
-            >
-              <span data-testid={`usage-chat-tokens-${c.chatId}`}>{formatTokens(c.tokens)}</span>
-            </Row>
-          ))
+          <>
+            {paged.rows.map((c) => (
+              <Row
+                key={`${c.hostId}/${c.chatId}`}
+                title={c.name ?? c.chatId}
+                testid={`usage-chat-${c.chatId}`}
+              >
+                <span data-testid={`usage-chat-tokens-${c.chatId}`}>{formatTokens(c.tokens)}</span>
+              </Row>
+            ))}
+            {paged.pages > 1 ? (
+              <Row title={`Page ${paged.page + 1} of ${paged.pages}`} testid="usage-chats-pager">
+                <button
+                  type="button"
+                  data-testid="usage-chats-prev"
+                  disabled={paged.page === 0}
+                  onClick={() => setChatPage(paged.page - 1)}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  data-testid="usage-chats-next"
+                  disabled={paged.page >= paged.pages - 1}
+                  onClick={() => setChatPage(paged.page + 1)}
+                >
+                  Next
+                </button>
+              </Row>
+            ) : null}
+          </>
         ) : (
           <Note testid="usage-chats-empty">No chat turns in this period</Note>
         )}

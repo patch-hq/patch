@@ -86,4 +86,25 @@ describe('mobile Settings → Usage — history', () => {
     expect(textOf(get(r2, 'usage-history-error'))).toContain('host offline');
     expect(query(r2, 'usage-burndown')).toBeNull();
   });
+
+  it('pages the chats list ten at a time', async () => {
+    const chats = Array.from({ length: 25 }, (_, i) => ({
+      chatId: `c${i}`,
+      name: `Chat ${i}`,
+      tokens: 1000 - i,
+      costUsd: 0,
+      turns: 1,
+      hostId: 'h',
+    }));
+    vi.mocked(api.usageReport).mockResolvedValue({ ...REPORT, chats });
+    const r = await render();
+    expect(query(r, 'usage-chat-c9')).not.toBeNull();
+    expect(query(r, 'usage-chat-c10')).toBeNull();
+    await act(async () => get(r, 'usage-chats-next').props.onPress());
+    expect(query(r, 'usage-chat-c9')).toBeNull();
+    expect(query(r, 'usage-chat-c10')).not.toBeNull();
+    await act(async () => get(r, 'usage-chats-next').props.onPress());
+    expect(query(r, 'usage-chat-c24')).not.toBeNull();
+    expect(query(r, 'usage-chat-c19')).toBeNull();
+  });
 });

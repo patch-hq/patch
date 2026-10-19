@@ -53,3 +53,16 @@ export function buildBurndown(samples: (UsageSample & { hostId?: string })[]): B
   }
   return [...byKey.values()];
 }
+
+export const CHATS_PER_PAGE = 10;
+
+/** One page of the chats list (0-based), with the page clamped into range. */
+export function pageOf<T>(
+  items: readonly T[],
+  page: number,
+  size = CHATS_PER_PAGE,
+): { rows: T[]; page: number; pages: number } {
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  const p = Math.min(Math.max(0, page), pages - 1);
+  return { rows: items.slice(p * size, (p + 1) * size), page: p, pages };
+}

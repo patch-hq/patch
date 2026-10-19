@@ -99,4 +99,27 @@ test.describe('settings — usage history', () => {
     await page.goto(settingsUrl('usage'));
     await expect(page.getByTestId('usage-error')).toBeVisible();
   });
+
+  test('pages the chats list ten at a time', async ({ page }) => {
+    const chats = Array.from({ length: 25 }, (_, i) => ({
+      chatId: `c-${i}`,
+      name: `Chat ${i}`,
+      tokens: 1000 - i,
+      costUsd: 0,
+      turns: 1,
+      hostId: 'd1',
+    }));
+    await page.route('**/api/usage-report**', (r) =>
+      r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...REPORT, chats }) }),
+    );
+    await page.goto(settingsUrl('usage'));
+    const rows = page.locator('[data-testid^="usage-chat-c-"]:not([data-testid*="tokens"])');
+    await expect(rows).toHaveCount(10);
+    await expect(page.getByTestId('usage-chats-prev')).toBeDisabled();
+    await page.getByTestId('usage-chats-next').click();
+    await expect(rows.first()).toContainText('Chat 10');
+    await page.getByTestId('usage-chats-next').click();
+    await expect(rows).toHaveCount(5);
+    await expect(page.getByTestId('usage-chats-next')).toBeDisabled();
+  });
 });
