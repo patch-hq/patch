@@ -221,6 +221,22 @@ describe('ChatLog', () => {
     expect(log.hydrate('s', 10).nextSeq).toBe(10);
   });
 
+  it('a floor behind the log (stale meta.json nextSeq) never reissues a seq, and every event still reads back', () => {
+    const home = tmp('chatlog-stale-floor-');
+    {
+      const log = makeLog(home);
+      for (let i = 0; i < 8; i++)
+        appendEvent(log, 'f', msg('f', log.allocate('f', 0, 'f-b0'), `m${i}`));
+      log.closeAll();
+    }
+    const log = makeLog(home);
+    // meta.json says 5 while the log already holds seq 0..7.
+    expect(log.hydrate('f', 5).nextSeq).toBe(8);
+    expect(log.allocate('f', 5, 'f-b0')).toBe(8);
+    const seqs = log.readEvents('f', 0).map((e) => e.record.seq);
+    expect(seqs).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
   it('finds the high-water mark past a long run of events after the last non-event record', () => {
     const home = tmp('chatlog-hw-');
     const log = makeLog(home);
