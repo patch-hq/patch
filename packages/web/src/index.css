@@ -4842,7 +4842,7 @@ a.ch-row:hover {
 }
 .link-preview-card {
   display: block;
-  max-width: 360px;
+  max-width: 480px;
   margin: 6px 0;
   padding: 8px 10px;
   background: var(--bg-elevated);
@@ -4874,6 +4874,22 @@ a.ch-row:hover {
 .link-preview-description {
   display: block;
   margin-top: 2px;
+  color: var(--ink-3);
+}
+.link-preview-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--accent-soft, #cad9be);
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+.link-preview-host {
+  display: block;
+  margin-top: 6px;
   color: var(--ink-3);
 }
 .compaction-figures {

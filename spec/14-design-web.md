@@ -571,7 +571,9 @@ alone.
 
 An `http(s)` link in a message carries a small icon beside it. Clicking the
 icon expands an inline preview card directly below the message showing the
-linked page's title, description and image, fetched server-side. The image is
+linked page's title, description and image, followed by the start of the page's
+own readable text (an excerpt of about 600 characters, without scripts, navigation
+or footers) and its host, all fetched server-side. The image is
 fetched through the server as well, since the page's own image lives on another
 origin that the app's image policy refuses. Clicking again collapses it. To the
 right of the preview icon sits an open in browser icon, which opens the link in

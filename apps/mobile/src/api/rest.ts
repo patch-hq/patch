@@ -272,6 +272,7 @@ export interface LinkPreviewData {
   title?: string;
   description?: string;
   image?: string;
+  excerpt?: string;
 }
 
 /** spec/06 § Sweep — one completed sweep run. */

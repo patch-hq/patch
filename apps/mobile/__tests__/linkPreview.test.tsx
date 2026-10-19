@@ -92,6 +92,21 @@ describe('LinkPreview', () => {
     });
   });
 
+  it("shows the page's own text excerpt and host", async () => {
+    vi.mocked(api.linkPreview).mockResolvedValue({
+      url: URL_,
+      title: 'Title',
+      excerpt: 'The opening of the article.',
+    });
+    const r = await mount(<LinkPreview url={URL_} color="#000" />);
+    await open(r);
+    const card = findHost(r.root, byTestId('link-preview-card'));
+    expect(
+      hasText(findHost(card, byTestId('link-preview-excerpt')), 'The opening of the article.'),
+    ).toBe(true);
+    expect(hasText(card, new URL(URL_).host)).toBe(true);
+  });
+
   it('shows the error text when the fetch fails', async () => {
     vi.mocked(api.linkPreview).mockRejectedValue(new Error('bad_gateway'));
     const r = await mount(<LinkPreview url={URL_} color="#000" />);

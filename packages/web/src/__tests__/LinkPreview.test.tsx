@@ -45,11 +45,8 @@ describe('LinkPreviewToggle', () => {
   it("fetches and renders the preview on click, fetching the image through the auth'd proxy", async () => {
     createObjectURLSpy = vi.fn(() => 'blob:mock-url');
     revokeObjectURLSpy = vi.fn();
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: createObjectURLSpy,
-      revokeObjectURL: revokeObjectURLSpy,
-    });
+    URL.createObjectURL = createObjectURLSpy as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = revokeObjectURLSpy as unknown as typeof URL.revokeObjectURL;
     vi.mocked(api.linkPreview).mockResolvedValue({
       url: 'https://example.com/article',
       title: 'Example Title',
@@ -72,6 +69,22 @@ describe('LinkPreviewToggle', () => {
       const img = container.querySelector('img.link-preview-image') as HTMLImageElement;
       expect(img.src).toBe('blob:mock-url');
     });
+  });
+
+  it("shows the page's own text excerpt and host", async () => {
+    vi.mocked(api.linkPreview).mockResolvedValue({
+      url: 'https://example.com/article',
+      title: 'T',
+      excerpt: 'The opening of the article.',
+    });
+    renderToggle('https://example.com/article');
+    fireEvent.click(screen.getByRole('button', { name: /preview link/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId('link-preview-excerpt').textContent).toBe(
+        'The opening of the article.',
+      ),
+    );
+    expect(screen.getByText('example.com')).toBeTruthy();
   });
 
   it('clicking again collapses the card', async () => {

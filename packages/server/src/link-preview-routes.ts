@@ -136,6 +136,28 @@ export interface LinkPreview {
   title?: string;
   description?: string;
   image?: string;
+  /** The start of the page's own readable text, so the card shows the page and not just its metadata. */
+  excerpt?: string;
+}
+
+const EXCERPT_CHARS = 600;
+
+/** Readable body text with scripts, styles and page chrome (nav/header/footer/aside) removed. */
+function extractExcerpt(html: string): string | undefined {
+  const body = /<body[^>]*>([\s\S]*)/i.exec(html)?.[1] ?? html;
+  const text = decodeEntities(
+    body
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(
+        /<(script|style|noscript|template|svg|nav|header|footer|aside|form)\b[\s\S]*?<\/\1\s*>/gi,
+        ' ',
+      )
+      .replace(/<[^>]*>/g, ' '),
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return undefined;
+  return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS).trimEnd()}…` : text;
 }
 
 function parsePreview(html: string, baseUrl: string): Omit<LinkPreview, 'url'> {
@@ -154,10 +176,12 @@ function parsePreview(html: string, baseUrl: string): Omit<LinkPreview, 'url'> {
       image = undefined;
     }
   }
+  const excerpt = extractExcerpt(html);
   return {
     ...(title ? { title: decodeEntities(title) } : {}),
     ...(description ? { description: decodeEntities(description) } : {}),
     ...(image ? { image } : {}),
+    ...(excerpt ? { excerpt } : {}),
   };
 }
 

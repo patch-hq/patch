@@ -17,6 +17,7 @@ test.describe('a message link carries an inline preview toggle', () => {
           url: 'https://example.com/foraging-guide',
           title: 'A Guide to Foraging',
           description: 'What to look for this season.',
+          excerpt: 'Start with the hedgerows in early autumn.',
         }),
       });
     });
@@ -36,6 +37,10 @@ test.describe('a message link carries an inline preview toggle', () => {
     await expect(card).toBeVisible();
     await expect(card).toContainText('A Guide to Foraging');
     await expect(card).toContainText('What to look for this season.');
+    await expect(card.getByTestId('link-preview-excerpt')).toHaveText(
+      'Start with the hedgerows in early autumn.',
+    );
+    await expect(card).toContainText('example.com');
 
     // The link itself still points at the real target — the icon is an
     // addition, not a replacement for normal navigation.
