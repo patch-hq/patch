@@ -55,18 +55,24 @@ class _Engine:
         self._model = WhisperModel(self._model_path, device="cpu", compute_type="int8")
         logger.info("faster-whisper model ready")
 
-    def transcribe(self, pcm: np.ndarray) -> str:
+    def transcribe(self, pcm: np.ndarray, prompt: str | None = None) -> str:
         self._ensure_loaded()
         assert self._model is not None
         audio = pcm.astype(np.float32) / 32768.0
-        segments, _info = self._model.transcribe(audio, language="en", beam_size=1)
+        segments, _info = self._model.transcribe(
+            audio, language="en", beam_size=1, initial_prompt=prompt or None
+        )
         return "".join(seg.text for seg in segments).strip()
 
-    def transcribe_segments(self, pcm: np.ndarray) -> list[tuple[float, float, str]]:
+    def transcribe_segments(
+        self, pcm: np.ndarray, prompt: str | None = None
+    ) -> list[tuple[float, float, str]]:
         self._ensure_loaded()
         assert self._model is not None
         audio = pcm.astype(np.float32) / 32768.0
-        segments, _info = self._model.transcribe(audio, language="en", beam_size=1)
+        segments, _info = self._model.transcribe(
+            audio, language="en", beam_size=1, initial_prompt=prompt or None
+        )
         return [(s.start, s.end, s.text.strip()) for s in segments if s.text.strip()]
 
 
@@ -88,8 +94,8 @@ class WhisperSidecar:
     def _enrol(self, pcm: np.ndarray) -> float:
         return self._get_diariser().enrol(pcm)
 
-    def _diarised(self, session: str, pcm: np.ndarray) -> list[dict]:
-        spans = self._engine.transcribe_segments(pcm)
+    def _diarised(self, session: str, pcm: np.ndarray, prompt: str | None = None) -> list[dict]:
+        spans = self._engine.transcribe_segments(pcm, prompt)
         voices = self._get_diariser().label(session, pcm, [(a, b) for a, b, _ in spans])
         return [
             {"start": a, "end": b, "text": t, "voice": v} for (a, b, t), v in zip(spans, voices)
@@ -107,6 +113,7 @@ class WhisperSidecar:
                     continue
                 request_id = pending["requestId"]
                 session = pending.get("diarise")
+                prompt = pending.get("prompt")
                 enrol = bool(pending.get("enrol"))
                 pending = None
                 pcm = np.frombuffer(raw, dtype="<i2")
@@ -118,13 +125,13 @@ class WhisperSidecar:
                         )
                         continue
                     if session:
-                        segs = await asyncio.to_thread(self._diarised, str(session), pcm)
+                        segs = await asyncio.to_thread(self._diarised, str(session), pcm, prompt)
                         text = " ".join(s["text"] for s in segs)
                         await websocket.send(
                             json.dumps({"requestId": request_id, "text": text, "segments": segs})
                         )
                         continue
-                    text = await asyncio.to_thread(self._engine.transcribe, pcm)
+                    text = await asyncio.to_thread(self._engine.transcribe, pcm, prompt)
                     await websocket.send(json.dumps({"requestId": request_id, "text": text}))
                 except Exception as exc:
                     logger.exception("whisper: transcription failed for %s", request_id)

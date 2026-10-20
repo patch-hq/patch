@@ -665,3 +665,58 @@ describe('pcm16ToWav', () => {
     expect(wav.readUInt16LE(34)).toBe(16); // bps
   });
 });
+
+describe('transcription prompt (meeting vocabulary)', () => {
+  test('groq sends the prompt with a clip and with streamed audio, and none when absent', async () => {
+    const forms: FormData[] = [];
+    const fakeFetch = (async (_u: string, init: RequestInit) => {
+      forms.push(init.body as FormData);
+      return new Response(JSON.stringify({ text: 'ok' }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const w = new GroqWhisperBackend({
+      backend: 'groq',
+      logger,
+      groqApiKey: 'gsk_test',
+      fetchImpl: fakeFetch,
+    });
+    await w.transcribeClip(Buffer.from('c'), 'wav', { prompt: 'Terms: WECA.' });
+    await w.transcribe(new Int16Array([1, 2]), { prompt: 'Terms: CRSTS.' });
+    await w.transcribeClip(Buffer.from('c'), 'wav');
+    expect(forms.map((f) => f.get('prompt'))).toEqual(['Terms: WECA.', 'Terms: CRSTS.', null]);
+  });
+
+  test('local backend unwraps a wav clip and sends the prompt in the request envelope', async () => {
+    const seen: Record<string, unknown>[] = [];
+    let binary = 0;
+    const server = await startWsServer((sock) => {
+      sock.on('message', (raw: Buffer, isBinary: boolean) => {
+        if (isBinary) {
+          binary = raw.byteLength;
+          return;
+        }
+        const msg = parseJson(raw);
+        seen.push(msg);
+        sock.send(JSON.stringify({ requestId: msg.requestId, text: 'ok' }));
+      });
+    });
+    const w = createWhisper({
+      backend: 'local',
+      logger,
+      localSidecarUrl: `ws://127.0.0.1:${server.port}`,
+    });
+    try {
+      const wav = pcm16ToWav(new Int16Array([5, 6, 7]), 16000);
+      expect(await w.transcribeClip(wav, 'wav', { prompt: 'Participants: Priya Shah.' })).toBe(
+        'ok',
+      );
+      expect(seen[0]?.samples).toBe(3);
+      expect(seen[0]?.prompt).toBe('Participants: Priya Shah.');
+      expect(binary).toBe(6);
+      await w.transcribeClip(wav, 'wav');
+      expect(seen[1]).not.toHaveProperty('prompt');
+    } finally {
+      await w.close();
+      await server.close();
+    }
+  });
+});

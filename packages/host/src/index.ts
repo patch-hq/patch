@@ -4032,19 +4032,31 @@ async function startHost(
   // so a paid STT backend is never an option here, configured or not.
   meetings = new MeetingManager({
     dir: join(config.patchHome, 'meetings'),
-    transcribe: async (wav) => {
+    transcribe: async (wav, prompt) => {
       if (!dictationTranscribers)
         throw new Error('host audio stack not ready — whisper unavailable');
-      return dictationTranscribers.local.transcribeClip(wav, 'wav');
+      return dictationTranscribers.local.transcribeClip(
+        wav,
+        'wav',
+        prompt ? { prompt } : undefined,
+      );
+    },
+    folderChats: (chatId) => {
+      const folder = daemon.chatState.get(chatId)?.folder;
+      if (folder === undefined) return [];
+      return daemon.chatState
+        .list()
+        .filter((c) => c.folder === folder)
+        .map((c) => c.chatId);
     },
     // Voice separation needs the local sidecar and its speaker model; without
     // DIARISE_MODEL_PATH the sidecar refuses rather than merging voices.
     ...(process.env['DIARISE_MODEL_PATH']
       ? {
-          transcribeVoices: async (session: string, wav: Buffer) => {
+          transcribeVoices: async (session: string, wav: Buffer, prompt?: string) => {
             if (!(whisper instanceof LocalWhisperBackend))
               throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
-            return whisper.transcribeVoices(session, wav);
+            return whisper.transcribeVoices(session, wav, prompt);
           },
         }
       : {}),

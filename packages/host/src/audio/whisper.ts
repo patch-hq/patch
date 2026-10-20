@@ -91,6 +91,14 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
  */
 export interface TranscribeOptions {
   priority?: 'final' | 'partial';
+  /** Words the speech is likely to contain (names, acronyms): the engine's initial prompt. */
+  prompt?: string;
+}
+
+/** Options for a whole-clip transcription. */
+export interface ClipOptions {
+  /** Words the speech is likely to contain (names, acronyms): the engine's initial prompt. */
+  prompt?: string;
 }
 
 /**
@@ -147,7 +155,7 @@ export interface WhisperBackend {
    * speaks PCM only and CANNOT decode m4a — it throws `UnsupportedClipFormatError`
    * rather than fake a transcript (NO FALLBACK); documented in spec/07.
    */
-  transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string>;
+  transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -356,6 +364,7 @@ export class GroqWhisperBackend implements WhisperBackend {
       // if multi-language is ever needed.)
       form.set('language', 'en');
       form.set('temperature', '0');
+      if (opts?.prompt) form.set('prompt', opts.prompt);
       return form;
     };
 
@@ -401,7 +410,7 @@ export class GroqWhisperBackend implements WhisperBackend {
    * audio (m4a/wav) directly, so we post the clip bytes as-is — no PCM→WAV
    * re-encode. Same model + pinned params as the streaming `transcribe`.
    */
-  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
+  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     const apiKey = readKey(this.opts.groqApiKey);
     if (apiKey === undefined) {
       throw new Error(
@@ -416,6 +425,7 @@ export class GroqWhisperBackend implements WhisperBackend {
     form.set('response_format', 'json');
     form.set('language', 'en');
     form.set('temperature', '0');
+    if (opts?.prompt) form.set('prompt', opts.prompt);
     // A clip is audio that cannot be re-recorded (a meeting's minutes): a 429
     // carries a stated wait, so wait it out like a final does rather than
     // dropping the clip. Persistent 429s still throw.
@@ -539,13 +549,17 @@ export class LocalWhisperBackend implements WhisperBackend {
     this.client = new PersistentWsClient({ url: this.resolvedUrl(), logger: this.opts.logger });
     return this.client;
   }
-  async transcribe(pcm: Int16Array): Promise<string> {
+  async transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string> {
     await this.ensureProcess();
     const client = this.getClient();
     // Persistent WS protocol: text envelope `{requestId,samples}` then a
     // binary PCM frame; sidecar replies with a JSON `{requestId,text}`.
     const requestId = `w-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-    const payload = JSON.stringify({ requestId, samples: pcm.length });
+    const payload = JSON.stringify({
+      requestId,
+      samples: pcm.length,
+      ...(opts?.prompt ? { prompt: opts.prompt } : {}),
+    });
     const binary = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
     const result = await client.request({
       payload,
@@ -568,11 +582,20 @@ export class LocalWhisperBackend implements WhisperBackend {
    * voice memory, so numbers stay stable across clips. The sidecar answers with
    * an error when DIARISE_MODEL_PATH is missing; nothing falls back to one voice.
    */
-  async transcribeVoices(session: string, wav: Buffer): Promise<{ text: string; voice: number }[]> {
+  async transcribeVoices(
+    session: string,
+    wav: Buffer,
+    prompt?: string,
+  ): Promise<{ text: string; voice: number }[]> {
     await this.ensureProcess();
     const pcm = pcmFromWav(wav);
     const requestId = `w-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-    const payload = JSON.stringify({ requestId, samples: pcm.length, diarise: session });
+    const payload = JSON.stringify({
+      requestId,
+      samples: pcm.length,
+      diarise: session,
+      ...(prompt ? { prompt } : {}),
+    });
     const result = await this.getClient().request({
       payload,
       binaryPayload: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength),
@@ -617,18 +640,19 @@ export class LocalWhisperBackend implements WhisperBackend {
     });
   }
   /**
-   * DOCUMENTED LIMITATION (spec/07 § End-to-end voice transport): the
-   * faster-whisper Python sidecar's WS protocol takes raw PCM16 samples only
-   * (see `transcribe` above — it sends `{requestId,samples}` + a binary PCM
-   * frame). It has no path to decode a compressed m4a container, and the
-   * host does not bundle an ffmpeg/AAC decoder to transcode it to PCM.
+   * A WAV clip (PCM16 mono 16 kHz, what meeting capture sends) is unwrapped to
+   * its samples and goes down the same path as streamed audio.
    *
-   * Rather than fake a transcript or silently drop the clip, the local backend
-   * refuses the upload with a typed error. The mobile voice-note upload path
-   * therefore requires `WHISPER_BACKEND=groq` (the production default, which
-   * accepts m4a directly). NO FALLBACK.
+   * DOCUMENTED LIMITATION (spec/07 § End-to-end voice transport): the
+   * faster-whisper sidecar takes raw PCM16 only and the host bundles no
+   * AAC/m4a decoder, so an m4a upload is refused with a typed error rather
+   * than faked or dropped. The mobile voice-note upload path therefore
+   * requires `WHISPER_BACKEND=groq` (the production default). NO FALLBACK.
    */
-  async transcribeClip(_audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
+  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
+    if (format === 'wav') {
+      return this.transcribe(pcmFromWav(audio), opts?.prompt ? { prompt: opts.prompt } : undefined);
+    }
     throw new UnsupportedClipFormatError(
       `WHISPER_BACKEND=local (faster-whisper) cannot transcribe an uploaded ${format} clip: ` +
         'the sidecar accepts PCM16 samples only and the host bundles no AAC/m4a decoder. ' +
