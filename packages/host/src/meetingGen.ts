@@ -53,9 +53,11 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
     'time so far) get shorter and higher level, so re-send an older topic with its id and fewer, broader points',
     'as it recedes. Keep enough to answer "what did that person say 20 minutes ago".',
     'Rules: only list topics that appear in the transcript; return only topics that are new, changed or condensed;',
-    'set decided true only when the meeting clearly agreed something; actions are things the user could ask',
-    'an assistant to do (look something up, create a ticket, send a message, top up credit) that were implied or',
-    'asked for, never ones already in the notes; use [] when there are none. atSeconds is the meeting time in',
+    'set decided true only when the meeting clearly agreed something; actions are things that are genuinely the',
+    "user's to do, or that an assistant could do for them (look something up, create a ticket, send a message, top",
+    'up credit), implied or asked for, never ones already in the notes. Not every mention of a person or plan is',
+    "an action: skip things someone else's to do, things nobody can act on, and general plans or discussion;",
+    'use [] when there are none. atSeconds is the meeting time in',
     'seconds the topic or action arose, from the transcript clock. Never invent facts.',
   ].join('\n');
 }
