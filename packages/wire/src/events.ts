@@ -15,7 +15,7 @@ import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
 } from './goal-prompt.js';
-import { MeetingState } from './meeting.js';
+import { MeetingSettings, MeetingState } from './meeting.js';
 import { SnoozeRecord } from './snooze.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
 import { DEFAULT_WATCH_CHECK_IN_PROMPT } from './watch-check-in-prompt.js';
@@ -3629,7 +3629,9 @@ export const MeetingControlRequestEvent = z
   .object({
     type: z.literal('meeting.control_request'),
     chatId: z.string().min(1),
-    action: z.enum(['start', 'pause', 'resume', 'end']),
+    action: z.enum(['start', 'pause', 'resume', 'end', 'tune']),
+    /** With `start` and `tune`: how often the notes update. */
+    settings: MeetingSettings.optional(),
   })
   .strict();
 export type MeetingControlRequestEvent = z.infer<typeof MeetingControlRequestEvent>;

@@ -551,8 +551,8 @@ is not worth a sweep through 169 schemas to make it consistent.
 
 ## Meeting events
 
-Surface → host (relayed by the server; each adds the chat to the surface's watched set): `meeting.control_request {chatId, action: start|pause|resume|end}`, `meeting.get_request {chatId}`, `meeting.audio {chatId, source: mic|system, audioBase64}` (16 kHz mono PCM16 WAV), `meeting.action_request {chatId, actionId, decision: do|dismiss}`.
-Host → surfaces: `meeting.state {chatId, meeting: MeetingState | null}`, the whole state each time; detail-level, so only surfaces watching the chat receive it. A refused request comes back as `chat.error`. See `14-design-web.md` § Meeting mode.
+Surface → host (relayed by the server; each adds the chat to the surface's watched set): `meeting.control_request {chatId, action: start|pause|resume|end|tune, settings?: {clipSeconds, analyseSeconds}}` (`settings` with `start` and `tune`), `meeting.get_request {chatId}`, `meeting.audio {chatId, source: mic|system, audioBase64}` (16 kHz mono PCM16 WAV), `meeting.action_request {chatId, actionId, decision: do|dismiss}`.
+Host → surfaces: `meeting.state {chatId, meeting: MeetingState | null}`, the whole state each time (including `live`, the provisional unanalysed transcript, and `settings`); detail-level, so only surfaces watching the chat receive it. A refused request comes back as `chat.error`. See `14-design-web.md` § Meeting mode.
 
 ## Encoding
 

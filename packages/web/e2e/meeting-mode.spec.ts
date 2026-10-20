@@ -53,6 +53,28 @@ test.describe('meeting mode — live', () => {
     await expect(page.locator('.mm-dec')).toHaveCount(2);
   });
 
+  test('Now shows the provisional live line, and the speed option tunes the host', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-live')).toHaveCount(0);
+    await page.evaluate(() => {
+      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+      const cur = store.getState().byChat['chat_tools'];
+      store.getState().apply('chat_tools', { ...cur, live: 'so can we ship on Friday' });
+    });
+    await expect(page.getByTestId('meeting-live')).toHaveText('so can we ship on Friday');
+    await page.getByTestId('meeting-speed').selectOption('fast');
+    const reqs = (await sent(page, 'meeting.control_request')) as Array<{
+      action: string;
+      settings?: { clipSeconds: number; analyseSeconds: number };
+    }>;
+    expect(reqs.at(-1)).toMatchObject({
+      action: 'tune',
+      settings: { clipSeconds: 3, analyseSeconds: 8 },
+    });
+  });
+
   test('the live timer ticks', async ({ page }) => {
     await page.goto(URL_LIVE);
     const a = await page.getByTestId('meeting-pill').innerText();

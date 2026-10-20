@@ -59,6 +59,21 @@ export const MeetingAction = z
   .strict();
 export type MeetingAction = z.infer<typeof MeetingAction>;
 
+/**
+ * How live the notes are. `clipSeconds` is how much audio a surface gathers
+ * before sending it to be transcribed; `analyseSeconds` is how often the model
+ * folds new transcript into the notes. Shorter is fresher and costs more.
+ */
+export const MeetingSettings = z
+  .object({
+    clipSeconds: z.number().int().min(3).max(60),
+    analyseSeconds: z.number().int().min(5).max(300),
+  })
+  .strict();
+export type MeetingSettings = z.infer<typeof MeetingSettings>;
+
+export const DEFAULT_MEETING_SETTINGS: MeetingSettings = { clipSeconds: 6, analyseSeconds: 15 };
+
 export const MeetingState = z
   .object({
     status: MeetingStatus,
@@ -69,6 +84,12 @@ export const MeetingState = z
     /** Wall-clock ms the current live stretch began; absent while paused or ended. */
     resumedAt: z.number().optional(),
     now: MeetingNow.nullable(),
+    /**
+     * What has been said since the notes were last updated: provisional, and
+     * replaced by `now` at the next analysis. Null when the notes are current.
+     */
+    live: z.string().nullable().optional(),
+    settings: MeetingSettings.optional(),
     summary: MeetingSummary.nullable(),
     topics: z.array(MeetingTopic),
     actions: z.array(MeetingAction),

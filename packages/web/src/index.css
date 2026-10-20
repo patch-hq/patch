@@ -13523,6 +13523,18 @@ select.new-chat-account:focus-visible {
 .mm-topic li {
   display: list-item;
 }
+.mm-live {
+  color: var(--ink-2);
+  font-style: italic;
+  margin: 0 0 10px;
+}
+.mm-speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
 .mm-who {
   color: var(--ink-3);
   font-size: var(--text-min);

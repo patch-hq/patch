@@ -48,6 +48,17 @@ describe('ClipBuilder', () => {
     expect(rmsOfPcm16(new Int16Array(10))).toBeLessThan(SILENCE_RMS);
   });
 
+  it('setClipSeconds shortens the clip from now on, flushing a buffer already long enough', () => {
+    const clips: Uint8Array[] = [];
+    const b = new ClipBuilder((w) => clips.push(w), 15);
+    b.push(loud(16000 * 4));
+    expect(clips).toHaveLength(0);
+    b.setClipSeconds(3);
+    expect(clips).toHaveLength(1);
+    b.push(loud(16000 * 3));
+    expect(clips).toHaveLength(2);
+  });
+
   it('flush sends a worthwhile tail and discards a trivial one', () => {
     const clips: Uint8Array[] = [];
     const b = new ClipBuilder((w) => clips.push(w), 15);

@@ -6,7 +6,10 @@ import { formatMeetingClock, meetingElapsedMs, type MeetingState } from '@patch/
 import {
   decideAction,
   endMeeting,
+  getMeetingSpeed,
   listenHere,
+  MEETING_SPEEDS,
+  setMeetingSpeed,
   pauseMeeting,
   requestMeeting,
   resumeMeeting,
@@ -24,6 +27,17 @@ function useNow(running: boolean): number {
     return () => window.clearInterval(h);
   }, [running]);
   return now;
+}
+
+/** The named speed matching what the host is running, else the saved choice. */
+function speedOf(meeting: MeetingState): string {
+  const cur = meeting.settings;
+  const hit = cur
+    ? Object.entries(MEETING_SPEEDS).find(
+        ([, v]) => v.clipSeconds === cur.clipSeconds && v.analyseSeconds === cur.analyseSeconds,
+      )
+    : undefined;
+  return hit ? hit[0] : getMeetingSpeed();
 }
 
 export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
@@ -85,6 +99,23 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
         ) : null}
       </div>
 
+      {meeting.status !== 'ended' ? (
+        <label className="mm-speed">
+          Notes update
+          <select
+            data-testid="meeting-speed"
+            value={speedOf(meeting)}
+            onChange={(e) => setMeetingSpeed(chatId, e.target.value)}
+          >
+            {Object.entries(MEETING_SPEEDS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
       {meeting.error ? (
         <div className="mm-error" role="alert" data-testid="meeting-error">
           {meeting.error}
@@ -106,6 +137,11 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
 
       <div className="mm-now" data-testid="meeting-now">
         <div className="mm-label">{meeting.status === 'ended' ? 'Summary' : 'Now'}</div>
+        {meeting.status !== 'ended' && meeting.live ? (
+          <div className="mm-live" data-testid="meeting-live">
+            {meeting.live}
+          </div>
+        ) : null}
         {card ? (
           <>
             <h4>{card.headline}</h4>
@@ -118,7 +154,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
               <div className="mm-who">{String(card.who)}</div>
             ) : null}
           </>
-        ) : (
+        ) : meeting.live ? null : (
           <h4 className="mm-wait">Listening…</h4>
         )}
       </div>

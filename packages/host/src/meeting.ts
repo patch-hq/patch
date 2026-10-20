@@ -16,6 +16,8 @@ import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
   formatMeetingClock,
+  DEFAULT_MEETING_SETTINGS,
+  MeetingSettings,
   type MeetingAction,
   type MeetingNow,
   MeetingState,
@@ -24,7 +26,9 @@ import {
   type WireEvent,
 } from '@patch/wire';
 
-export const MEETING_ANALYSE_INTERVAL_MS = 30_000;
+export const MEETING_ANALYSE_INTERVAL_MS = DEFAULT_MEETING_SETTINGS.analyseSeconds * 1000;
+/** Longest provisional "Now" text kept on the state. */
+const MAX_LIVE_CHARS = 300;
 /** Transcript kept on the state; the oldest lines roll off past this. */
 const MAX_TRANSCRIPT_LINES = 4000;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
@@ -119,7 +123,7 @@ export class MeetingManager {
 
   // ---- controls ----
 
-  start(chatId: string): void {
+  start(chatId: string, settings?: MeetingSettings): void {
     const existing = this.load(chatId);
     if (existing && existing.state.status !== 'ended') {
       throw new MeetingError(`chat ${chatId} already has a ${existing.state.status} meeting`);
@@ -132,6 +136,8 @@ export class MeetingManager {
         elapsedBaseMs: 0,
         resumedAt: t,
         now: null,
+        live: null,
+        settings: settings ? MeetingSettings.parse(settings) : { ...DEFAULT_MEETING_SETTINGS },
         summary: null,
         topics: [],
         actions: [],
@@ -145,6 +151,17 @@ export class MeetingManager {
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
+    this.commit(chatId, rt);
+  }
+
+  /** Change how often the notes update; takes effect on the running timer now. */
+  tune(chatId: string, settings: MeetingSettings): void {
+    const rt = this.load(chatId);
+    if (!rt || rt.state.status === 'ended') {
+      throw new MeetingError(`chat ${chatId} has no running meeting to tune`);
+    }
+    rt.state.settings = MeetingSettings.parse(settings);
+    if (rt.state.status === 'live') this.armTimer(chatId, rt);
     this.commit(chatId, rt);
   }
 
@@ -402,7 +419,14 @@ export class MeetingManager {
       void this.tick(chatId).catch((err: unknown) =>
         this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: tick crashed'),
       );
-    }, this.deps.intervalMs ?? MEETING_ANALYSE_INTERVAL_MS);
+    }, this.intervalMs(rt));
+  }
+
+  /** A test-injected interval wins; otherwise the meeting's own setting. */
+  private intervalMs(rt: Runtime): number {
+    if (this.deps.intervalMs !== undefined) return this.deps.intervalMs;
+    const secs = rt.state.settings?.analyseSeconds;
+    return secs !== undefined ? secs * 1000 : MEETING_ANALYSE_INTERVAL_MS;
   }
 
   private disarmTimer(rt: Runtime): void {
@@ -451,6 +475,10 @@ export class MeetingManager {
   }
 
   private commit(chatId: string, rt: Runtime): void {
+    // The provisional Now: whatever has been said that the notes do not cover yet.
+    const unanalysed = rt.state.transcript.slice(rt.analysedUpTo);
+    const text = unanalysed.map((l) => l.text).join(' ');
+    rt.state.live = rt.state.status === 'ended' || text === '' ? null : text.slice(-MAX_LIVE_CHARS);
     const f = this.file(chatId);
     const tmp = `${f}.tmp`;
     writeFileSync(
