@@ -930,7 +930,7 @@ export class BrowserManager {
     return pending;
   }
 
-  private requireTab(tabId: string): Tab {
+  requireTab(tabId: string): Tab {
     const tab = this.tabsById.get(tabId);
     if (!tab) throw new TabNotFoundError(tabId);
     return tab;

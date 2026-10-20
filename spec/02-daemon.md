@@ -507,6 +507,17 @@ timeoutSeconds? })` blocks the tool call. The host emits
   so does `timeoutSeconds` (default 600), the tab closing, or the OAuth relay
   below. The host then emits `state` `ended` with the `outcome` (`done`,
   `cancelled`, `timeout`, `tab_closed`, `callback`).
+- **Share for review.** `patch_browser_handoff({ tabId, reason, share: true })`
+  is the non-blocking form, for a page the user should look at rather than act
+  for the agent (a local app on a headless host). It returns at once with
+  `{ ok, shared: true, handoffId, url }`. The host emits the same `state`
+  events with `shared: true` and streams the tab, but the tab is not locked,
+  nothing is redacted, and there is no timeout: the agent keeps using the tab
+  and the user's feedback arrives as ordinary chat messages. The user's input
+  is played into the page as in a hand-off. It ends (`state` `ended`) on
+  `control` `done` or `cancel`, or `tab_closed`. A second share of a tab already
+  shared is refused, and `share` with `callbackPort` or `timeoutSeconds` is
+  invalid input (400).
 - **Out of the model's reach.** Frames, the address with its query, and the
   user's input travel host ↔ surfaces as wire events, never as tool results.
   While a hand-off is open every other `patch_browser_*` tool refuses that tab

@@ -509,6 +509,7 @@ const BrowserHandoffBody = z
     reason: z.string().min(1),
     callbackPort: z.number().int().min(1).max(65535).optional(),
     timeoutSeconds: z.number().int().min(10).max(3600).optional(),
+    share: z.boolean().optional(),
   })
   .strict();
 
@@ -2310,8 +2311,18 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { timeoutSeconds, ...rest } = parsed.data;
+    const { timeoutSeconds, share, ...rest } = parsed.data;
     try {
+      if (share === true) {
+        if (rest.callbackPort !== undefined || timeoutSeconds !== undefined) {
+          return reply.code(400).send({
+            error: 'invalid_input',
+            message: 'share cannot be combined with callbackPort or timeoutSeconds',
+          });
+        }
+        const shared = await opts.daemon!.browserShare(rest);
+        return { ok: true, ...shared };
+      }
       const result = await opts.daemon!.browserHandoff({
         ...rest,
         ...(timeoutSeconds !== undefined ? { timeoutMs: timeoutSeconds * 1000 } : {}),

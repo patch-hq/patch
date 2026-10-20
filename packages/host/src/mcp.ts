@@ -852,16 +852,18 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_browser_handoff',
     {
       description:
-        'Hand a browser tab to the user so THEY can do what you must not or cannot: type a password, pass 2FA, solve a captcha, approve an OAuth consent screen. The user sees the tab live in this chat, clicks and types into it, and taps Done; this call blocks until they do (or decline, or `timeoutSeconds` passes, default 600) and returns { outcome: done|cancelled|timeout|tab_closed|callback, url }. What they see and type is NEVER shown to you, and `url` has its query and fragment removed. While the hand-off is open every other patch_browser_* tool refuses that tab. Afterwards call patch_browser_read to see where the page ended up. For an OAuth flow whose redirect is http://localhost:<port>/…, pass that port as `callbackPort` (the process listening on it must already be running on this host): the redirect is delivered to it for you without you ever seeing the authorization code, and the hand-off ends with outcome `callback`. `reason` is shown to the user — say plainly what they need to do.',
+        'Hand a browser tab to the user so THEY can do what you must not or cannot: type a password, pass 2FA, solve a captcha, approve an OAuth consent screen. The user sees the tab live in this chat, clicks and types into it, and taps Done; this call blocks until they do (or decline, or `timeoutSeconds` passes, default 600) and returns { outcome: done|cancelled|timeout|tab_closed|callback, url }. What they see and type is NEVER shown to you, and `url` has its query and fragment removed. While the hand-off is open every other patch_browser_* tool refuses that tab. Afterwards call patch_browser_read to see where the page ended up. For an OAuth flow whose redirect is http://localhost:<port>/…, pass that port as `callbackPort` (the process listening on it must already be running on this host): the redirect is delivered to it for you without you ever seeing the authorization code, and the hand-off ends with outcome `callback`. `reason` is shown to the user — say plainly what they need to do. To let the user LOOK at a page for review (a local app on this headless host, say) set `share: true`: the call returns at once with { shared, handoffId, url }, the tab stays open to them with no timeout, you keep full use of the tab and see its content as usual, and their feedback arrives as ordinary chat messages. It ends when they close the view or the tab closes; do not combine with `callbackPort` or `timeoutSeconds`.',
       inputSchema: {
         tabId: z.string().min(1).describe(TAB_ID_PARAM),
         reason: z.string().min(1),
         callbackPort: z.number().int().min(1).max(65535).optional(),
         timeoutSeconds: z.number().int().min(10).max(3600).optional(),
+        share: z.boolean().optional(),
       },
     },
-    async ({ tabId, reason, callbackPort, timeoutSeconds }) => {
+    async ({ tabId, reason, callbackPort, timeoutSeconds, share }) => {
       const body: Record<string, unknown> = { chatId: callerChatId, tabId, reason };
+      if (share !== undefined) body['share'] = share;
       if (callbackPort !== undefined) body['callbackPort'] = callbackPort;
       if (timeoutSeconds !== undefined) body['timeoutSeconds'] = timeoutSeconds;
       const res = await uds<unknown>({
