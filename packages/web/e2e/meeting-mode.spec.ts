@@ -72,6 +72,70 @@ test.describe('meeting mode — live', () => {
     await expect(page.getByTestId('meeting-cog')).toBeVisible();
   });
 
+  test('My notes: typing saves to the host, survives switching tabs, and shows in dark ink', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await page.getByTestId('meeting-tab-notes').click();
+    const box = page.getByTestId('meeting-my-notes');
+    await expect(box).toBeVisible();
+    await box.click();
+    await page.keyboard.type('Ask Priya about the rollout');
+    await expect.poll(async () => (await sent(page, 'meeting.my_notes_request')).length).toBe(1);
+    expect((await sent(page, 'meeting.my_notes_request'))[0]).toMatchObject({
+      chatId: 'chat_tools',
+      text: 'Ask Priya about the rollout',
+    });
+    await page.getByTestId('meeting-tab-points').click();
+    await page.getByTestId('meeting-tab-notes').click();
+    await expect(page.getByTestId('meeting-my-notes')).toHaveValue('Ask Priya about the rollout');
+    const [ink, ink1, ink2] = await page.evaluate(() => {
+      const colour = (v: string) => {
+        const d = document.createElement('div');
+        d.style.color = `var(${v})`;
+        document.body.appendChild(d);
+        const c = getComputedStyle(d).color;
+        d.remove();
+        return c;
+      };
+      return [
+        getComputedStyle(document.querySelector('[data-testid="meeting-my-notes"]')!).color,
+        colour('--ink'),
+        colour('--ink-2'),
+      ];
+    });
+    expect(ink).toBe(ink1);
+    expect(ink).not.toBe(ink2);
+  });
+
+  test('My notes: text saved from another surface appears, and blur saves at once', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await page.getByTestId('meeting-tab-notes').click();
+    await page.evaluate(() => {
+      const store = (
+        window as unknown as {
+          __meetingStore: {
+            getState: () => {
+              byChat: Record<string, object>;
+              apply: (c: string, m: object) => void;
+            };
+          };
+        }
+      ).__meetingStore;
+      const st = store.getState();
+      st.apply('chat_tools', { ...st.byChat['chat_tools']!, myNotes: 'From the laptop' });
+    });
+    await expect(page.getByTestId('meeting-my-notes')).toHaveValue('From the laptop');
+    const box = page.getByTestId('meeting-my-notes');
+    await box.fill('Follow up Friday');
+    await box.blur();
+    expect((await sent(page, 'meeting.my_notes_request')).at(-1)).toMatchObject({
+      text: 'Follow up Friday',
+    });
+  });
+
   test('the cog opens prompts, models and timing in place', async ({ page }) => {
     await page.goto(URL_LIVE);
     await expect(page.getByTestId('meeting-settings')).toHaveCount(0);

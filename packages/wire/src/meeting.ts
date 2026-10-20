@@ -216,6 +216,8 @@ export const MeetingState = z
     echoDetected: z.boolean().optional(),
     summary: MeetingSummary.nullable(),
     topics: z.array(MeetingTopic),
+    /** Free text the user types during or after the call; the final write-up folds it in. */
+    myNotes: z.string().optional(),
     actions: z.array(MeetingAction),
     transcript: z.array(MeetingTranscriptLine),
     /** Names given to `them` voices, keyed by voice number as a string. */

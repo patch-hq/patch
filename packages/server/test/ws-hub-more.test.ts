@@ -119,6 +119,7 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
           chatId: 'chat-mtg',
           edit: { op: 'set_title', topicId: 't1', text: 'x' },
         },
+        { type: 'meeting.my_notes_request', chatId: 'chat-mtg', text: 'x' },
         { type: 'chat.archive_request', chatId: 'chat-arc', archived: true },
         { type: 'chat.stop_request', chatId: 'chat-stop' },
         { type: 'chat.unqueue_request', chatId: 'chat-unq', localId: 'L1' },

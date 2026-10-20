@@ -3728,6 +3728,16 @@ export const MeetingNotesRequestEvent = z
   .strict();
 export type MeetingNotesRequestEvent = z.infer<typeof MeetingNotesRequestEvent>;
 
+/** Surface → host: the user's My notes text, replacing what was stored. */
+export const MeetingMyNotesRequestEvent = z
+  .object({
+    type: z.literal('meeting.my_notes_request'),
+    chatId: z.string().min(1),
+    text: z.string().max(100_000),
+  })
+  .strict();
+export type MeetingMyNotesRequestEvent = z.infer<typeof MeetingMyNotesRequestEvent>;
+
 /** Host → surfaces: the chat's full meeting state (`null` = no meeting). */
 export const MeetingStateEvent = z
   .object({
@@ -8494,6 +8504,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   MeetingAudioEvent,
   MeetingActionRequestEvent,
   MeetingNotesRequestEvent,
+  MeetingMyNotesRequestEvent,
   MeetingStateEvent,
   ChatArchiveRequestEvent,
   ChatDisableRequestEvent,
@@ -8780,6 +8791,7 @@ export const EVENT_SCHEMAS = {
   'meeting.audio': MeetingAudioEvent,
   'meeting.action_request': MeetingActionRequestEvent,
   'meeting.notes_request': MeetingNotesRequestEvent,
+  'meeting.my_notes_request': MeetingMyNotesRequestEvent,
   'meeting.state': MeetingStateEvent,
   'chat.archive_request': ChatArchiveRequestEvent,
   'chat.disable_request': ChatDisableRequestEvent,

@@ -2481,11 +2481,12 @@ const wsSent: WireEvent[] = [];
 // reducer the host runs, and answered the way the host does (`meeting.state`).
 const harnessSend = (event: WireEvent): void => {
   wsSent.push(event);
-  if (event.type !== 'meeting.notes_request') return;
+  if (event.type !== 'meeting.notes_request' && event.type !== 'meeting.my_notes_request') return;
   const cur = useMeetingStore.getState().byChat[event.chatId];
   if (!cur) return;
   const next = structuredClone(cur);
-  applyMeetingNotesOp(next.topics, event.edit);
+  if (event.type === 'meeting.my_notes_request') next.myNotes = event.text;
+  else applyMeetingNotesOp(next.topics, event.edit);
   useMeetingStore.getState().apply(event.chatId, next);
 };
 setActiveWs({

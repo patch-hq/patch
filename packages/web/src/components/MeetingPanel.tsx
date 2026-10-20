@@ -1,7 +1,7 @@
 // Meeting mode (right-hand panel + action cards above the composer). Pure view
 // of the host's MeetingState; every control goes through lib/meetingControl.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
@@ -16,6 +16,7 @@ import {
 import {
   decideAction,
   editMeetingNotes,
+  saveMyNotes,
   endMeeting,
   getMeetingSpeed,
   listenHere,
@@ -684,6 +685,49 @@ function PointRow({
   );
 }
 
+/** Free text Tom types; saved shortly after he stops, and adopted from other surfaces unless he is typing. */
+function MyNotes({ chatId, saved }: { chatId: string; saved: string }) {
+  const [text, setText] = useState(saved);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const sent = useRef(saved);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const latest = useRef(text);
+  latest.current = text;
+
+  const flush = useCallback(() => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    if (latest.current === sent.current) return;
+    sent.current = latest.current;
+    saveMyNotes(chatId, latest.current);
+  }, [chatId]);
+
+  useEffect(() => {
+    if (document.activeElement === ref.current) return;
+    sent.current = saved;
+    setText(saved);
+  }, [saved]);
+  useEffect(() => flush, [flush]);
+
+  return (
+    <textarea
+      ref={ref}
+      className="mm-mynotes"
+      data-testid="meeting-my-notes"
+      aria-label="My notes"
+      placeholder="Type your own notes…"
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        latest.current = e.target.value;
+        clearTimeout(timer.current);
+        timer.current = setTimeout(flush, 600);
+      }}
+      onBlur={flush}
+    />
+  );
+}
+
 /** Right-hand panel: Points and My notes, with a cog for the meeting's settings. */
 export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const [tab, setTab] = useState<PanelTab>('points');
@@ -756,9 +800,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
           ))}
         </div>
       ) : (
-        <div className="mm-wait" data-testid="meeting-notes-tab">
-          My notes is not built yet
-        </div>
+        <MyNotes chatId={chatId} saved={meeting.myNotes ?? ''} />
       )}
     </aside>
   );

@@ -429,6 +429,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     chatId: 'c',
     edit: { op: 'remove', topicId: 't' },
   },
+  'meeting.my_notes_request': { type: 'meeting.my_notes_request', chatId: 'c', text: 'x' },
   'meeting.action_request': {
     type: 'meeting.action_request',
     chatId: 'c1',
