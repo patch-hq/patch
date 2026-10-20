@@ -123,6 +123,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_speak',
   'patch_ask_human',
   'patch_report',
+  'patch_meeting_notes',
   'patch_artifact',
   'patch_pad_collect',
   'patch_pad_create',

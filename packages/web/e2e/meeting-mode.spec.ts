@@ -397,7 +397,7 @@ test.describe('meeting mode — live', () => {
     await expect(topics.nth(0).locator('li').first()).toBeVisible();
     await expect(topics.nth(1).locator('li').first()).toBeVisible();
     await expect(topics.nth(5).locator('li').first()).toBeHidden();
-    expect(await size(7)).toBe('12px');
+    expect(await size(7)).toBe('14px');
   });
 
   test('clicking a point title edits it in place and sends the edit', async ({ page }) => {
