@@ -110,7 +110,7 @@ import {
 } from './history.js';
 import { randomUUID } from 'node:crypto';
 import { WakeScheduler, parseDelayMs, type WakeRecord } from './wake.js';
-import { WatchScheduler, type WatchRecord } from './watch.js';
+import { WatchScheduler, readProgress, type WatchProgress, type WatchRecord } from './watch.js';
 import type { WebBotAuthConfig } from './webBotAuth.js';
 import {
   BrowserManager,
@@ -3557,7 +3557,7 @@ export class Daemon {
    */
   startWatch(
     chatId: string,
-    opts: { command: string; description: string; cwd?: string },
+    opts: { command: string; description: string; timeoutSec: number; cwd?: string },
   ): WatchRecord {
     const state = this.chatState.get(chatId);
     const meta = this.opts.metaStore.read(chatId);
@@ -3571,6 +3571,7 @@ export class Daemon {
       command: opts.command,
       description: opts.description,
       cwd,
+      timeoutSec: opts.timeoutSec,
     });
     this.opts.logger.info({ chatId, taskId: rec.taskId }, 'watch: started');
     // spec/02 § Background task completions — a launch starts work the turn
@@ -3583,8 +3584,8 @@ export class Daemon {
   }
 
   /** Every watch this chat has running or recently ended (patch_watch_list). */
-  listWatch(chatId: string): WatchRecord[] {
-    return this.watch.list(chatId);
+  listWatch(chatId: string): (WatchRecord & WatchProgress)[] {
+    return this.watch.list(chatId).map((rec) => ({ ...rec, ...readProgress(rec.outputFile) }));
   }
 
   /** A task's combined stdout+stderr (patch_watch_output). */

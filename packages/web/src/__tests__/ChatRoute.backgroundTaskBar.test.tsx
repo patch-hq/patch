@@ -150,6 +150,22 @@ describe('ChatRoute — background task bar', () => {
     expect(screen.getByTestId('background-task-bar-count').textContent).toBe('1 background task');
   });
 
+  it('shows the last output line of a running task as its progress', async () => {
+    const t = Date.now();
+    await renderWithTasks(1, [task({ startedAt: t, lastLine: 'step 3 of 9', lastOutputAt: t })]);
+    const p = screen.getByTestId('background-task-bar-progress');
+    expect(p.textContent).toBe('step 3 of 9');
+    expect(p.dataset['quiet']).toBe('false');
+  });
+
+  it('flags a task that has printed nothing for over an hour', async () => {
+    const t = Date.now() - 3 * 60 * 60 * 1000;
+    await renderWithTasks(1, [task({ startedAt: t, lastLine: 'step 3 of 9', lastOutputAt: t })]);
+    const p = screen.getByTestId('background-task-bar-progress');
+    expect(p.dataset['quiet']).toBe('true');
+    expect(p.textContent).toContain('no output for 3h');
+  });
+
   it('appears live the moment chat.state reports a count, before the list poll even resolves', async () => {
     seed();
     // Never resolves within this test — the bar's EXISTENCE must not wait on it.

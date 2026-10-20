@@ -10356,6 +10356,19 @@ button.background-task-bar-row:hover .background-task-bar-description {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* Last output line of a running task; goes amber when the task has been silent for an hour. */
+.background-task-bar-progress {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-left: 8px;
+  color: var(--ink-3, var(--ink-2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.background-task-bar-progress[data-quiet='true'] {
+  color: var(--warn, #b45309);
+}
 /* The command preview: pushed to the trailing edge (ahead of the kill button),
    monospace so it reads as a literal command rather than prose, and its own
    click target — expanding it must not also fire the row's open-terminal

@@ -5730,6 +5730,13 @@ export const WatchTaskRow = z
     status: z.enum(['running', 'exited', 'stopped', 'failed']),
     /** Epoch ms — the bar computes elapsed time from this, ticking locally. */
     startedAt: z.number().int(),
+    /** The limit the host enforces; the bar shows elapsed against it. */
+    timeoutSec: z.number().int().positive().optional(),
+    timedOut: z.boolean().optional(),
+    /** The task's last non-empty output line, shown in the bar as its progress. */
+    lastLine: z.string().optional(),
+    /** Epoch ms of the task's last output; the bar flags a long silence. */
+    lastOutputAt: z.number().int().optional(),
     endedAt: z.number().int().optional(),
     exitCode: z.number().int().nullable().optional(),
     signal: z.string().nullable().optional(),
