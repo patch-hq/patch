@@ -16,7 +16,7 @@
 import { createPcm16Downsampler, MIC_SAMPLE_RATE } from './pcmDownsample.js';
 import { silentAudioContext } from './silentAudioContext.js';
 
-export const CLIP_SECONDS = 15;
+export const CLIP_SECONDS = 6;
 /** A tail shorter than this on stop is not worth a Whisper call. */
 export const MIN_TAIL_SECONDS = 1;
 /** RMS (0..1 of full scale) below which a clip is treated as silence. */
@@ -72,8 +72,13 @@ export class ClipBuilder {
   private samples = 0;
   constructor(
     private readonly onClip: (wav: Uint8Array) => void,
-    private readonly clipSeconds: number = CLIP_SECONDS,
+    private clipSeconds: number = CLIP_SECONDS,
   ) {}
+
+  setClipSeconds(seconds: number): void {
+    this.clipSeconds = seconds;
+    if (this.samples >= seconds * MIC_SAMPLE_RATE) this.emit();
+  }
 
   push(pcm: Int16Array): void {
     this.parts.push(pcm);
@@ -125,6 +130,8 @@ export interface MeetingSources {
 export interface MeetingCapture {
   /** While paused, audio is dropped (a partial clip is flushed first). */
   setPaused(paused: boolean): void;
+  /** Cut clips at this length from now on (a longer clip in progress just keeps filling). */
+  setClipSeconds(seconds: number): void;
   /** Flush the last partial clips, then release the devices. */
   stop(): void;
 }
@@ -207,6 +214,9 @@ export function startMeetingCapture(
   if (lanes.length === 0) throw new Error('no audio sources to capture');
 
   return {
+    setClipSeconds(seconds) {
+      for (const l of lanes) l.builder.setClipSeconds(seconds);
+    },
     setPaused(p) {
       if (p && !paused) for (const l of lanes) l.builder.flush();
       paused = p;

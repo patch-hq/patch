@@ -72,6 +72,59 @@ describe('MeetingManager', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it('live Now shows what is said before analysis, then clears once the notes cover it', async () => {
+    const m = make();
+    m.start('c1');
+    expect(m.get('c1')?.live).toBeNull();
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    expect(m.get('c1')?.live).toBe('hello there');
+    expect(events.at(-1)).toMatchObject({ meeting: { live: 'hello there' } });
+    await m.tick('c1');
+    expect(m.get('c1')?.live).toBeNull();
+    expect(m.get('c1')?.now?.headline).toBe('Ledger split timing');
+  });
+
+  it('lines that arrive while analysis runs stay live', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    transcribe.mockResolvedValue('and then more');
+    let late: Promise<void> = Promise.resolve();
+    analyse.mockImplementationOnce(async () => {
+      // queued behind this analysis, so it lands after it
+      late = m.ingestAudio('c1', 'mic', Buffer.from('b'));
+      return analysis();
+    });
+    await m.tick('c1');
+    await late;
+    expect(m.get('c1')?.live).toBe('and then more');
+  });
+
+  it('settings default, are tunable mid-meeting, and set the analysis interval', () => {
+    const intervals: number[] = [];
+    const m = new MeetingManager({
+      dir,
+      transcribe,
+      analyse,
+      runAction,
+      logger,
+      emit: (e) => events.push(e),
+      now: () => clock,
+      setInterval: (_fn, ms) => {
+        intervals.push(ms);
+        return intervals.length;
+      },
+      clearInterval: () => undefined,
+    });
+    m.start('c1');
+    expect(m.get('c1')?.settings).toEqual({ clipSeconds: 6, analyseSeconds: 15 });
+    m.tune('c1', { clipSeconds: 3, analyseSeconds: 8 });
+    expect(m.get('c1')?.settings).toEqual({ clipSeconds: 3, analyseSeconds: 8 });
+    expect(intervals).toEqual([15_000, 8_000]);
+    expect(() => m.tune('c1', { clipSeconds: 1, analyseSeconds: 8 })).toThrow();
+    expect(() => m.tune('nope', { clipSeconds: 3, analyseSeconds: 8 })).toThrow(MeetingError);
+  });
+
   it('start publishes a live meeting and refuses a second', () => {
     const m = make();
     m.start('c1');

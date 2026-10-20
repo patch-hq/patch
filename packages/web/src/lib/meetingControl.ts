@@ -2,6 +2,7 @@
 // Capture is acquired BEFORE the host is told to start, so a denied mic never
 // leaves a live meeting that hears nothing.
 
+import { DEFAULT_MEETING_SETTINGS, type MeetingSettings } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
@@ -14,6 +15,34 @@ import {
 } from './meetingCapture.js';
 
 let capture: MeetingCapture | null = null;
+
+const SETTINGS_KEY = 'patch.meeting.liveness';
+
+/** Named speeds for the live notes: [label, clip seconds, analysis seconds]. */
+export const MEETING_SPEEDS: Record<string, MeetingSettings & { label: string }> = {
+  fast: { label: 'Fast', clipSeconds: 3, analyseSeconds: 8 },
+  normal: { label: 'Normal', ...DEFAULT_MEETING_SETTINGS },
+  slow: { label: 'Slow (cheaper)', clipSeconds: 15, analyseSeconds: 30 },
+};
+
+export function getMeetingSpeed(): string {
+  const v = localStorage.getItem(SETTINGS_KEY);
+  return v !== null && v in MEETING_SPEEDS ? v : 'normal';
+}
+
+function speedSettings(speed: string): MeetingSettings {
+  const { clipSeconds, analyseSeconds } = MEETING_SPEEDS[speed]!;
+  return { clipSeconds, analyseSeconds };
+}
+
+/** Remember the choice and apply it to the running meeting. */
+export function setMeetingSpeed(chatId: string, speed: string): void {
+  if (!(speed in MEETING_SPEEDS)) throw new Error(`unknown meeting speed ${speed}`);
+  localStorage.setItem(SETTINGS_KEY, speed);
+  const settings = speedSettings(speed);
+  capture?.setClipSeconds(settings.clipSeconds);
+  ws().send({ type: 'meeting.control_request', chatId, action: 'tune', settings });
+}
 
 function ws(): NonNullable<ReturnType<typeof getActiveWs>> {
   const w = getActiveWs();
@@ -68,13 +97,17 @@ async function beginCapture(chatId: string): Promise<void> {
   if (chatId === 'new') throw new Error('Send a first message to create the chat, then start it');
   const sources = await acquireSources();
   try {
-    capture = startMeetingCapture(sources, (source, audioBase64) => {
-      try {
-        ws().send({ type: 'meeting.audio', chatId, source, audioBase64 });
-      } catch (err) {
-        useUiStore.getState().pushError(`Meeting audio not sent: ${(err as Error).message}`);
-      }
-    });
+    capture = startMeetingCapture(
+      sources,
+      (source, audioBase64) => {
+        try {
+          ws().send({ type: 'meeting.audio', chatId, source, audioBase64 });
+        } catch (err) {
+          useUiStore.getState().pushError(`Meeting audio not sent: ${(err as Error).message}`);
+        }
+      },
+      { clipSeconds: speedSettings(getMeetingSpeed()).clipSeconds },
+    );
   } catch (err) {
     sources.mic?.getTracks().forEach((t) => t.stop());
     sources.system?.stop();
@@ -90,7 +123,12 @@ function report(what: string, err: unknown): void {
 export async function startMeeting(chatId: string): Promise<void> {
   try {
     await beginCapture(chatId);
-    ws().send({ type: 'meeting.control_request', chatId, action: 'start' });
+    ws().send({
+      type: 'meeting.control_request',
+      chatId,
+      action: 'start',
+      settings: speedSettings(getMeetingSpeed()),
+    });
   } catch (err) {
     stopCapture();
     report('Could not start the meeting', err);
