@@ -795,6 +795,19 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     stopped: true,
   },
+  'patch.watch_checkin.request': {
+    type: 'patch.watch_checkin.request',
+    requestId: 'wc1',
+    chatId: 'c1',
+    taskId: 't1',
+    checkInSec: 18_000,
+  },
+  'patch.watch_checkin.response': {
+    type: 'patch.watch_checkin.response',
+    requestId: 'wc1',
+    ok: true,
+    updated: true,
+  },
   'patch.files.request': {
     type: 'patch.files.request',
     requestId: 'fr1',

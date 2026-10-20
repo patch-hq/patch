@@ -1137,6 +1137,13 @@ export const api = {
     request<{ stopped: boolean }>(`/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/stop`, {
       method: 'POST',
     }),
+  // Change how often a running task's owning agent is checked in with. The
+  // next check-in is one new interval from now.
+  watchCheckIn: (chatId: string, taskId: string, checkInSec: number) =>
+    request<{ updated: boolean }>(
+      `/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/check-in`,
+      { method: 'POST', body: JSON.stringify({ checkInSec }) },
+    ),
   // Selectable models for a new chat (spec/14 § Model selector). Live list —
   // the host reads it from Anthropic with its Claude OAuth credential, so a
   // newly released model is offered without a redeploy. NO FALLBACK: a failure

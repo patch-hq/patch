@@ -160,7 +160,11 @@ import { FolderRegistry } from './folders.js';
 import { ModelCatalog } from './modelCatalog.js';
 import { ModelLimits } from './handoffRun.js';
 import { handleBackgroundTaskStatsRequest } from './backgroundTaskStats.js';
-import { handleWatchListRequest, handleWatchStopRequest } from './watchRequests.js';
+import {
+  handleWatchCheckInRequest,
+  handleWatchListRequest,
+  handleWatchStopRequest,
+} from './watchRequests.js';
 import { HostStateStore } from './hostState.js';
 import { BrowserTunnelClient, BrowserTunnelRelay } from './browser-tunnel.js';
 import { AudioRelayBridge } from './audio-relay-bridge.js';
@@ -2086,6 +2090,23 @@ async function startHost(
             hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
             listWatch: (chatId) => daemon.listWatch(chatId),
             stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
+            setWatchCheckIn: (chatId, taskId, sec) =>
+              daemon.setWatchTaskCheckIn(chatId, taskId, sec),
+          },
+          sender,
+          logger,
+        );
+        return;
+      }
+      if (event.type === 'patch.watch_checkin.request') {
+        handleWatchCheckInRequest(
+          event,
+          {
+            hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
+            listWatch: (chatId) => daemon.listWatch(chatId),
+            stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
+            setWatchCheckIn: (chatId, taskId, sec) =>
+              daemon.setWatchTaskCheckIn(chatId, taskId, sec),
           },
           sender,
           logger,
@@ -2099,6 +2120,8 @@ async function startHost(
             hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
             listWatch: (chatId) => daemon.listWatch(chatId),
             stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
+            setWatchCheckIn: (chatId, taskId, sec) =>
+              daemon.setWatchTaskCheckIn(chatId, taskId, sec),
           },
           sender,
           logger,

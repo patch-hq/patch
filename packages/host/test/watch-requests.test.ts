@@ -10,6 +10,7 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import type { WatchRecord } from '../src/watch.js';
 import {
+  handleWatchCheckInRequest,
   handleWatchListRequest,
   handleWatchStopRequest,
   type WatchRequestsDeps,
@@ -34,6 +35,7 @@ function deps(overrides: Partial<WatchRequestsDeps> = {}): WatchRequestsDeps {
     hasChat: () => true,
     listWatch: () => [RUNNING],
     stopWatch: () => true,
+    setWatchCheckIn: () => true,
     ...overrides,
   };
 }
@@ -173,5 +175,36 @@ describe('handleWatchStopRequest', () => {
       ok: false,
       error: { code: 'internal', message: 'kill failed' },
     });
+  });
+});
+
+describe('handleWatchCheckInRequest', () => {
+  const request = {
+    type: 'patch.watch_checkin.request' as const,
+    requestId: 'r3',
+    chatId: 'c1',
+    taskId: 't1',
+    checkInSec: 1800,
+  };
+
+  it('applies the interval and reports whether the task was running', () => {
+    const calls: unknown[][] = [];
+    const sent: WireEvent[] = [];
+    handleWatchCheckInRequest(
+      request,
+      deps({ setWatchCheckIn: (...a) => (calls.push(a), false) }),
+      (e) => sent.push(e),
+      silent,
+    );
+    expect(calls).toEqual([['c1', 't1', 1800]]);
+    expect(sent).toEqual([
+      { type: 'patch.watch_checkin.response', requestId: 'r3', ok: true, updated: false },
+    ]);
+  });
+
+  it('refuses an unknown chat', () => {
+    const sent: WireEvent[] = [];
+    handleWatchCheckInRequest(request, deps({ hasChat: () => false }), (e) => sent.push(e), silent);
+    expect(sent[0]).toMatchObject({ ok: false, error: { code: 'chat_not_found' } });
   });
 });
