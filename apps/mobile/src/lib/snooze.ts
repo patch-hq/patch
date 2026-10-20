@@ -10,7 +10,7 @@
 // Custom is typed as `YYYY-MM-DD HH:mm` (parseCustomSnooze) — no native date
 // picker, which would need a new APK (spec/15 § Row tools).
 
-import { SNOOZE_UNTIL_COMPLETE } from '@patch/wire';
+import { SNOOZE_UNTIL_COMPLETE, formatWakeAt } from '@patch/wire';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -85,14 +85,14 @@ export function resolvePreset(preset: SnoozePreset): number {
   return preset.resolve();
 }
 
-/** Wake time as a short local date+time, e.g. `09:30` today, `Tue 09:30` beyond. */
+/**
+ * A wake time where a surface names one outside the sheet — the banner on an
+ * open snoozed chat, a row's accessibility label. The same wording as the
+ * sheet (spec/04 § Snooze): `HH:MM` today, `Fri 08:00` within six days,
+ * `Thu 22 Oct` beyond, always 24-hour; "when done" for a snooze until complete.
+ */
 export function formatWakeTime(at: number): string {
-  if (at === SNOOZE_UNTIL_COMPLETE) return 'when done';
-  const d = new Date(at);
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  const sameDay = new Date().toDateString() === d.toDateString();
-  if (sameDay) return time;
-  return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  return formatWakeAt(at);
 }
 
 /**
