@@ -2018,9 +2018,36 @@ describe('ChatRoute regression', () => {
     renderChat('c-turn-failed');
     expect(screen.getByTestId('turn-failed')).toBeInTheDocument();
     expect(screen.getByTestId('turn-failed')).toHaveTextContent('Turn failed.');
-    // Not the old standalone raw-error-code row.
-    expect(screen.queryByText('something broke')).not.toBeInTheDocument();
+    // The host's text is behind the Details disclosure, not a standalone row.
+    expect(screen.getByTestId('turn-failed-detail')).toHaveTextContent('something broke');
+    expect(screen.queryByTestId('turn-failed-reason')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delivery-failed')).not.toBeInTheDocument();
+  });
+
+  it('a context-length turn failure says the input is too large and that an unchanged retry will fail', () => {
+    seedChat('c-turn-ctx', [
+      {
+        seq: 1,
+        kind: 'message',
+        role: 'user',
+        content: 'do the thing',
+        localId: 'L-turn-ctx',
+        turnFailed: true,
+        turnErrorMessage:
+          '400 context_length_exceeded: Your input exceeds the context window of this model.',
+        turnFailedSeq: 5,
+        at: 0,
+      },
+    ]);
+    renderChat('c-turn-ctx');
+    expect(screen.getByTestId('turn-failed')).toHaveAttribute(
+      'data-failure-kind',
+      'context_length',
+    );
+    expect(screen.getByTestId('turn-failed-reason')).toHaveTextContent(/too large/);
+    expect(screen.getByTestId('turn-failed-reason')).toHaveTextContent(/fail again/);
+    expect(screen.getByTestId('turn-retry')).toHaveTextContent('Retry anyway');
+    expect(screen.getByTestId('turn-failed-detail')).toHaveTextContent('context_length_exceeded');
   });
 
   it('tapping "retry" on a turnFailed message re-runs it IN PLACE: a fresh localId naming the original seq, and no second bubble', () => {

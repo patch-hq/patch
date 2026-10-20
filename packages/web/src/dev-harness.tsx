@@ -1006,6 +1006,20 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A chat whose last turn failed with the provider's context_length_exceeded.
+  {
+    chatId: 'chat_context_overflow',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'context-overflow-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'errored',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A chat blocked on a usage limit with NO resume armed — auto-resume off
   // (spec/12). The host publishes the structured block and no
   // `rateLimitResumingAt`, and reports the failure in patch's own words; the
@@ -1811,6 +1825,7 @@ useChatStore.setState((s) => ({
         at: 1,
       },
     ],
+    chat_context_overflow: [{ seq: 0, kind: 'message', role: 'user', content: 'carry on', at: 0 }],
     chat_limit_blocked: [
       { seq: 0, kind: 'message', role: 'user', content: 'ship the thing', at: 0 },
     ],
@@ -2506,6 +2521,19 @@ useChatStore.getState().applyEvent({
     code: 'sdk_error',
     message:
       'Usage limit reached on Default \u2014 the weekly window. It resets at 2026-09-15T04:00:00Z.',
+  },
+  seq: 1,
+  causeSeq: 0,
+});
+// The 400 an over-long conversation draws from the provider, attached to the
+// turn that failed.
+useChatStore.getState().applyEvent({
+  type: 'chat.error',
+  chatId: 'chat_context_overflow',
+  error: {
+    code: 'sdk_error',
+    message:
+      'HTTP 400 context_length_exceeded: Your input exceeds the context window of this model. Please adjust your input and try again.',
   },
   seq: 1,
   causeSeq: 0,

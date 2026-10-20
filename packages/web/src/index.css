@@ -3861,6 +3861,31 @@ a.ch-row:hover {
   gap: 8px;
   color: var(--danger, #c0392b);
 }
+.delivery-status.turn-failed {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.turn-failed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.turn-failed-reason {
+  overflow-wrap: anywhere;
+}
+.turn-failed-detail summary {
+  cursor: pointer;
+  color: var(--ink-3);
+}
+.turn-failed-detail pre {
+  margin: 4px 0 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
 /* A turn stopped by the user (spec/14 § Running-turn controls). Same shape as
    the failed line — status text plus a button — but muted: the user asked for
    the stop, so the danger colour would read as something having gone wrong.

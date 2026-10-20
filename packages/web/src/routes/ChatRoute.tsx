@@ -19,6 +19,7 @@ import {
 } from 'react';
 import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { classifyTurnFailure } from '../lib/turnFailure.js';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
 import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery } from '@tanstack/react-query';
@@ -3042,27 +3043,7 @@ function MessageEntry({
         // partway through. Same treatment as an undelivered message (not a
         // separate error line): the failure reads as "this message needs
         // resending", regardless of which hop actually broke.
-        <div
-          className="delivery-status failed"
-          data-testid="turn-failed"
-          title={
-            entry.turnErrorMessage === undefined
-              ? undefined
-              : presentFailure(entry.turnErrorMessage)
-          }
-        >
-          <span>Turn failed.</span>
-          {onRetryTurn ? (
-            <button
-              type="button"
-              className="delivery-retry"
-              data-testid="turn-retry"
-              onClick={() => onRetryTurn(entry)}
-            >
-              Tap to retry
-            </button>
-          ) : null}
-        </div>
+        <TurnFailedStatus entry={entry} onRetryTurn={onRetryTurn} />
       ) : entry.turnInterrupted ? (
         // spec/14 § Running-turn controls — a newer message got promoted ahead
         // of this one. The agent DID see it (the promoted turn resumed the same
@@ -5487,6 +5468,53 @@ function RateLimitBubble({
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+// The failed-turn line: "Turn failed." plus the reason in words, the retry
+// button (withheld's label changes when an unchanged retry cannot work), and
+// the host's original text behind a disclosure for diagnosis.
+function TurnFailedStatus({
+  entry,
+  onRetryTurn,
+}: {
+  entry: ChatEventEntry;
+  onRetryTurn: ((entry: ChatEventEntry) => void) | undefined;
+}): JSX.Element {
+  const detail =
+    entry.turnErrorMessage === undefined ? undefined : presentFailure(entry.turnErrorMessage);
+  const summary = classifyTurnFailure(entry.turnErrorMessage);
+  return (
+    <div
+      className="delivery-status failed turn-failed"
+      data-testid="turn-failed"
+      data-failure-kind={summary?.kind}
+    >
+      <div className="turn-failed-row">
+        <span>Turn failed.</span>
+        {onRetryTurn ? (
+          <button
+            type="button"
+            className="delivery-retry"
+            data-testid="turn-retry"
+            onClick={() => onRetryTurn(entry)}
+          >
+            {summary?.permanent ? 'Retry anyway' : 'Tap to retry'}
+          </button>
+        ) : null}
+      </div>
+      {summary !== undefined && summary.kind !== 'unknown' ? (
+        <div className="turn-failed-reason" data-testid="turn-failed-reason">
+          {summary.headline}
+        </div>
+      ) : null}
+      {detail !== undefined ? (
+        <details className="turn-failed-detail" data-testid="turn-failed-detail">
+          <summary>Details</summary>
+          <pre>{detail}</pre>
+        </details>
+      ) : null}
     </div>
   );
 }
