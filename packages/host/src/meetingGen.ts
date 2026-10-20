@@ -14,9 +14,12 @@ const MEETING_TIMEOUT_MS = 60_000;
 export function buildMeetingPrompt(input: AnalyseInput): string {
   const transcript = input.newLines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
   return [
-    'You are keeping live notes for a meeting the user is sitting in. "You" is the user (their microphone);',
-    '"Them" is everyone else (system audio, speakers not separated). Transcripts are machine-made and can',
-    'contain mistakes. Update the notes from the NEW transcript below.',
+    'You are keeping live notes for a meeting Tom is sitting in. "You" is Tom (their microphone);',
+    '"Them" is everyone else (system audio, speakers not separated, so several people can share the "Them" label).',
+    'Identify speakers by name wherever the transcript gives one (introductions, being addressed, "thanks Priya")',
+    'and write who said or asked what by name in topics, actions and "who"; refer to Tom as Tom, never "the user".',
+    'Where a speaker has no name yet, tell different voices apart from context as "someone" or a role, not just "Them".',
+    'Transcripts are machine-made and can contain mistakes. Update the notes from the NEW transcript below.',
     '',
     `Meeting time so far: ${formatMeetingClock(input.elapsedMs)}`,
     '',

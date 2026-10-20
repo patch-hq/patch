@@ -34,6 +34,40 @@ const MAX_TRANSCRIPT_LINES = 4000;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
+/** A Them line this close in time to a You line can be the room's echo of it. */
+const ECHO_WINDOW_MS = 30_000;
+/** Bigram overlap above which two lines count as the same speech. */
+const ECHO_SIMILARITY = 0.7;
+
+const normSpeech = (x: string): string =>
+  x
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+function bigrams(x: string): Map<string, number> {
+  const out = new Map<string, number>();
+  for (let i = 0; i < x.length - 1; i++) {
+    const g = x.slice(i, i + 2);
+    out.set(g, (out.get(g) ?? 0) + 1);
+  }
+  return out;
+}
+
+/** Dice coefficient on character bigrams: tolerant of a garbled or truncated copy. */
+export function speechSimilarity(a: string, b: string): number {
+  const x = normSpeech(a);
+  const y = normSpeech(b);
+  if (x === '' || y === '') return 0;
+  if (x === y) return 1;
+  const bx = bigrams(x);
+  const by = bigrams(y);
+  let shared = 0;
+  for (const [g, n] of bx) shared += Math.min(n, by.get(g) ?? 0);
+  return (2 * shared) / (Math.max(x.length - 1, 0) + Math.max(y.length - 1, 0));
+}
+
 export const MeetingAnalysis = z
   .object({
     now: z.object({ headline: z.string(), bullets: z.array(z.string()), who: z.string() }),
@@ -223,7 +257,21 @@ export class MeetingManager {
         return;
       }
       if (text === '') return;
-      rt.state.transcript.push({ at, speaker: source === 'mic' ? 'you' : 'them', text });
+      const speaker = source === 'mic' ? 'you' : 'them';
+      const isEcho = (l: { at: number; speaker: string; text: string }): boolean =>
+        l.speaker !== speaker &&
+        Math.abs(l.at - at) <= ECHO_WINDOW_MS &&
+        speechSimilarity(l.text, text) >= ECHO_SIMILARITY;
+      // In a room the mic and the call audio carry the same speech. The mic
+      // copy is the clean one; the system copy is the echo and is dropped.
+      if (speaker === 'them' && rt.state.transcript.some((l) => l.speaker === 'you' && isEcho(l))) {
+        return;
+      }
+      if (speaker === 'you') {
+        const echoed = rt.state.transcript.findIndex((l) => l.speaker === 'them' && isEcho(l));
+        if (echoed >= 0 && echoed >= rt.analysedUpTo) rt.state.transcript.splice(echoed, 1);
+      }
+      rt.state.transcript.push({ at, speaker, text });
       if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
         const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
         rt.state.transcript.splice(0, drop);
