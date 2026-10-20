@@ -3,7 +3,7 @@
 # Production is NOT configured here. patch.tomchambers.me is served by the
 # Hetzner host's own Caddy at /etc/caddy/Caddyfile, which sends /device/* to
 # :3003 and EVERYTHING ELSE (/audio/* included — the server relays it to the
-# chat's host) to patch-server on :3000. That file
+# chat's host) to patch-server on :3970. That file
 # lives on the box, outside this repo, and is the only routing that matters in
 # prod.
 #

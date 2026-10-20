@@ -53,7 +53,7 @@ Some values start on a host and still end on the server. Provider refresh tokens
 
 ## Starting with no settings
 
-A server starts with nothing configured. It listens on port 3000 and keeps its state in `~/.patch-server/data` (`$PATCH_SERVER_HOME/data` when that is set), made on the spot. The first time it starts it makes what it needs in that directory, 0600: `secrets.key` (§ Settings) and `internal.token`, the voice-session secret each host is handed when it is registered (`10-auth.md` § Host registration). `PATCH_DATA_DIR` and `PATCH_INTERNAL_TOKEN` override them. A value that is set and unusable (a data directory that does not exist, a token under 16 characters) stops the server rather than being quietly replaced, and so does a token file that holds no token.
+A server starts with nothing configured. It listens on port 3970 and keeps its state in `~/.patch-server/data` (`$PATCH_SERVER_HOME/data` when that is set), made on the spot. The first time it starts it makes what it needs in that directory, 0600: `secrets.key` (§ Settings) and `internal.token`, the voice-session secret each host is handed when it is registered (`10-auth.md` § Host registration). `PATCH_DATA_DIR` and `PATCH_INTERNAL_TOKEN` override them. A value that is set and unusable (a data directory that does not exist, a token under 16 characters) stops the server rather than being quietly replaced, and so does a token file that holds no token.
 
 ## Stack
 

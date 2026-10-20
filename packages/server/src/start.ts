@@ -8,6 +8,7 @@ import { RelayService } from './relay-service.js';
 import { startReleaseMirror } from './release-mirror.js';
 import { RELEASE_REPO, readChannel } from './release-channel.js';
 import { createSelfUpdater } from './self-update.js';
+import { portInUseMessage } from './port-holder.js';
 
 export async function startServer(
   config: ServerConfig,
@@ -26,7 +27,14 @@ export async function startServer(
   if (relay) app.addHook('onClose', async () => relay.stop());
   let stopMirror: (() => void) | undefined;
   app.addHook('onClose', async () => stopMirror?.());
-  await app.listen({ port: config.port, host: config.host });
+  try {
+    await app.listen({ port: config.port, host: config.host });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      throw new Error(portInUseMessage(config.port), { cause: err });
+    }
+    throw err;
+  }
   const address = app.server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
   app.log.info({ port, host: config.host }, 'patch-server listening');

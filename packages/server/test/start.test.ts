@@ -62,3 +62,24 @@ describe('startServer', () => {
     await until(() => relay.stats().servers === 0);
   });
 });
+
+describe('startServer on a taken port', () => {
+  it('fails naming the port and its holder, and does not move to another', async () => {
+    const { createServer } = await import('node:net');
+    const blocker = createServer();
+    await new Promise<void>((r) => blocker.listen(0, '127.0.0.1', r));
+    const taken = (blocker.address() as { port: number }).port;
+    try {
+      const err = await startServer(config({ port: taken }), false).then(
+        () => undefined,
+        (e: Error) => e,
+      );
+      expect(err?.message).toMatch(
+        new RegExp(`Port ${taken} is already in use by .*\\(pid ${process.pid}\\)`),
+      );
+      expect(err?.message).toMatch(/does not pick another port/);
+    } finally {
+      await new Promise((r) => blocker.close(r));
+    }
+  });
+});

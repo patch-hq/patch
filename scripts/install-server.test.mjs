@@ -48,7 +48,7 @@ test('--print-caddyfile names the domain it was given and proxies to the server'
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /email me@example\.com/);
   assert.match(r.stdout, /^patch\.example\.com \{$/m);
-  assert.match(r.stdout, /reverse_proxy 127\.0\.0\.1:3000/);
+  assert.match(r.stdout, /reverse_proxy 127\.0\.0\.1:3970/);
   assert.match(r.stdout, /@device path \/device\/\*/);
   assert.match(r.stdout, /reverse_proxy @device 127\.0\.0\.1:3003/);
   assert.doesNotMatch(r.stdout, /@audio|\/audio\/\*/);
@@ -105,7 +105,7 @@ test('--user-mode --no-service lays the release out and says how to start it', (
   assert.equal(r.status, 0, r.stderr);
   assert.ok(existsSync(join(home, 'current/patch-server')));
   const env = readFileSync(join(home, 'server.env'), 'utf8');
-  assert.match(env, /^PATCH_PUBLIC_URL=http:\/\/.*:3000$/m);
+  assert.match(env, /^PATCH_PUBLIC_URL=http:\/\/.*:3970$/m);
   assert.match(env, /^HOST=0\.0\.0\.0$/m);
   assert.match(r.stdout, /Start it with/);
 });

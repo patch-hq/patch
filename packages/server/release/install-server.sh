@@ -20,7 +20,7 @@
 # Options
 #   --domain NAME        the name the server answers to (DNS must already point here)
 #   --email ADDR         where Let's Encrypt may write about the certificate
-#   --no-https           serve plain HTTP on :3000 instead — a LAN or a tunnel
+#   --no-https           serve plain HTTP on :3970 instead — a LAN or a tunnel
 #   --user-mode          no root: install under ~/.patch-server as your own user
 #                        service, plain HTTP. For trying it out.
 #   --release-url URL    the release tarball (its checksum is at URL.sha256)
@@ -41,7 +41,7 @@ USER_MODE=0
 PRINT_CADDYFILE=0
 SERVICE=1
 HOME_DIR=""
-PORT=3000
+PORT=3970
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }

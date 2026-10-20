@@ -81,7 +81,7 @@ function internalTokenFor(dataDir: string): string {
 }
 
 export function loadConfig(opts: LoadConfigOptions = {}): ServerConfig {
-  const port = Number(process.env.PORT ?? '3000');
+  const port = Number(process.env.PORT ?? '3970');
   if (!Number.isInteger(port) || port <= 0) {
     throw new Error(`Invalid PORT: ${process.env.PORT}`);
   }
