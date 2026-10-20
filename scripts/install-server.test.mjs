@@ -54,6 +54,15 @@ test('--print-caddyfile names the domain it was given and proxies to the server'
   assert.doesNotMatch(r.stdout, /@audio|\/audio\/\*/);
 });
 
+test('--socket makes Caddy proxy to the Unix socket, with a default path', () => {
+  const a = run(['--domain', 'patch.example.com', '--socket', '--print-caddyfile']);
+  assert.equal(a.status, 0, a.stderr);
+  assert.match(a.stdout, /reverse_proxy unix\/\/run\/patch\/server\.sock/);
+  assert.doesNotMatch(a.stdout, /127\.0\.0\.1:3970/);
+  const b = run(['--domain', 'patch.example.com', '--socket=/run/x/y.sock', '--print-caddyfile']);
+  assert.match(b.stdout, /reverse_proxy unix\/\/run\/x\/y\.sock/);
+});
+
 test('with no domain it uses <ip>.sslip.io, a name that already resolves to the box', () => {
   const r = run(['--print-caddyfile'], { PATCH_INSTALL_PUBLIC_IP: '203.0.113.5' });
   assert.equal(r.status, 0, r.stderr);

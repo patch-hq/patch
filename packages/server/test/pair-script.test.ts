@@ -54,6 +54,25 @@ describe('pairNewSurface', () => {
     expect(((await res.json()) as { credential: string }).credential).toMatch(/^eyJ/);
   });
 
+  it('reaches a server listening on a Unix socket', async () => {
+    const sock = join(dir, 'pair.sock');
+    const dir2 = mkdtempSync(join(tmpdir(), 'patch-pair-sock-'));
+    const built = await buildAll({ logger: false, dataDir: dir2, internalToken: 'x'.repeat(32) });
+    await built.app.listen({ path: sock });
+    try {
+      const out = await pairNewSurface({
+        baseUrl: `unix:${sock}`,
+        dataDir: dir2,
+        publicUrl: 'https://patch.example.com',
+      });
+      expect(out.createdAccount).toBe(true);
+      expect(parsePairingUri(out.uri).server).toBe('https://patch.example.com');
+    } finally {
+      await built.app.close();
+      rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
   it('keeps its own credential, mode 600, and uses it for the next code', async () => {
     await pairNewSurface({ baseUrl: base, dataDir: dir, publicUrl: 'https://patch.example.com' });
     const file = join(dir, 'admin.credential');

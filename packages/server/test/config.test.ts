@@ -28,6 +28,18 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrowError(/Invalid PORT/);
   });
 
+  it('reads PATCH_SOCKET, and refuses a relative path or a relay alongside it', () => {
+    process.env.PATCH_DATA_DIR = scratch;
+    process.env.PATCH_INTERNAL_TOKEN = 'a'.repeat(32);
+    process.env.PATCH_SOCKET = '/run/patch/server.sock';
+    expect(loadConfig().socketPath).toBe('/run/patch/server.sock');
+    process.env.PATCH_RELAY_URL = 'wss://relay.example.com';
+    expect(() => loadConfig()).toThrowError(/cannot be combined/);
+    delete process.env.PATCH_RELAY_URL;
+    process.env.PATCH_SOCKET = 'rel.sock';
+    expect(() => loadConfig()).toThrowError(/absolute/);
+  });
+
   it('uses PATCH_DATA_DIR when set', () => {
     process.env.PATCH_DATA_DIR = scratch;
     process.env.PATCH_INTERNAL_TOKEN = 'a'.repeat(32);

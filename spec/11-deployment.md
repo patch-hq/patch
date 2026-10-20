@@ -149,6 +149,14 @@ installs for the current user with no root and no HTTPS, to try it out.
 Put a TLS reverse proxy in front of `PORT` (Caddy, nginx), sending `/device/*`
 to the host's port and everything else — `/audio/*` included — to the server, which relays each voice session to the host that owns the chat (`07-voice-app.md` § Reaching a non-Manager host's audio WSS).
 
+Instead of a port, the server can listen on a Unix socket (`PATCH_SOCKET`, an
+absolute path; the port stays the default). Nothing that clears ports can find
+or kill a socket. It cannot be combined with a relay, which tunnels to a TCP
+port. The installer offers it with `--socket [PATH]` (default
+`/run/patch/server.sock`, HTTPS installs only): systemd creates the directory,
+Caddy joins the server's group and proxies with `reverse_proxy unix//run/...`,
+and `patch-server pair` follows `PATCH_SOCKET`.
+
 ## Relay
 
 `patch-relay` is the relay of `10-auth.md` § Relay: one small Node process with

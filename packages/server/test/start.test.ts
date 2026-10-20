@@ -3,7 +3,8 @@
 // hook on a server already listening.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import http from 'node:http';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRelayServer, type RelayServerHandle } from '@patch/relay/server';
@@ -38,6 +39,26 @@ async function until(pick: () => boolean, ms = 4000): Promise<void> {
 }
 
 describe('startServer', () => {
+  it('listens on a Unix socket when given one, replacing a stale socket file', async () => {
+    const socketPath = join(dir, 'p.sock');
+    writeFileSync(socketPath, 'stale');
+    const { app } = await startServer(config({ socketPath }), false);
+    try {
+      expect(statSync(socketPath).isSocket()).toBe(true);
+      const res = await new Promise<number>((resolve, reject) => {
+        http
+          .get({ socketPath, path: '/api/healthz' }, (r) => {
+            r.resume();
+            resolve(r.statusCode ?? 0);
+          })
+          .on('error', reject);
+      });
+      expect(res).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('listens and answers without a relay', async () => {
     const { app, port, relay: r } = await startServer(config(), false);
     try {
