@@ -153,6 +153,12 @@ rather than waiting for the reader to resend it) — onto the first model of the
 provider in that host's catalogue. No fallback: with nothing usable on the other
 provider, or no model for it in the catalogue, there is no button.
 
+#### Handoff budget
+
+A cross-provider switch never sends the target more than it can take. Available input is the target's window minus its instructions, tool schemas, output headroom and a safety margin; a handoff fills at most 60% of it, estimates inflated by 25%. If the whole track fits it is reconstructed as above. Otherwise the target receives a deterministic ledger built from the chat's own log (files changed, validation run and its outcome, open todos, permission mode, branch, and the seq range left behind) plus the widest recent window of the track that fits, starting at a user turn. Nothing is summarised by a model unless one is reachable, and the divider says whether it was. Older history is read on demand through the chat's history tools; the log is never altered.
+
+The latest user message is delivered byte-exact as the turn's input and is never trimmed. If the handoff cannot fit even without verbatim turns, the switch is refused before any request, the chat stays on its current model, and the error offers Retry, Switch back and Continue in a linked fresh chat (seeded with the same handoff, linked back to the original). A `context_length_exceeded` from the target re-plans once at half the size, never resending the same request; a second one ends in that error. Each handoff has a key (chat, branch, first seq, target model) and a persisted state, so a retry or a restart delivers the pending message once and never repeats a tool call. After the target's first reply the host records the reported input tokens and the delivered instruction's hash; a large gap from the estimate is flagged.
+
 An optional cheap path for a huge chat, reachable via the API only (no button
 in any surface yet): the outgoing session writes its own handoff — resumed,
 not re-fed from scratch, so it rides that session's own cache — and the
