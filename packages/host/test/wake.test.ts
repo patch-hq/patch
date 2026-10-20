@@ -7,7 +7,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { Logger } from 'pino';
-import { WakeScheduler, parseDelayMs, WAKE_PREFIX, type WakeRecord } from '../src/wake.js';
+import {
+  WakeScheduler,
+  parseDelayMs,
+  WAKE_PREFIX,
+  LIMITED_RETRY_MS,
+  type WakeRecord,
+} from '../src/wake.js';
 
 // Mirrors the private `MAX_TIMEOUT_MS` in src/wake.ts (setTimeout's signed
 // 32-bit ms ceiling, ~24.8 days) — not exported, so duplicated here to drive
@@ -42,6 +48,7 @@ function harness() {
   };
   const delivered: Array<{ chatId: string; message: string }> = [];
   let busy = false;
+  let limited = false;
   const deps = {
     deliver: (chatId: string, message: string) => {
       delivered.push({ chatId, message });
@@ -49,6 +56,7 @@ function harness() {
     dirForChat,
     allChatIds: () => [...chatDirs.keys()],
     isBusy: () => busy,
+    isLimited: () => limited,
     now: () => now,
     logger: silent,
     setTimer,
@@ -72,7 +80,11 @@ function harness() {
   const setBusy = (v: boolean): void => {
     busy = v;
   };
+  const setLimited = (v: boolean): void => {
+    limited = v;
+  };
   return {
+    setLimited,
     sched,
     deps,
     delivered,
@@ -91,6 +103,30 @@ function rec(chatId: string, fireAt: number, extra: Partial<WakeRecord> = {}): W
 }
 
 describe('WakeScheduler', () => {
+  it('holds a wake while the chat is out of usage and delivers it once, after credit returns', async () => {
+    const h = harness();
+    h.setLimited(true);
+    h.sched.schedule(rec('c1', h.at(10_000)));
+    await h.advance(10_000 + 3 * LIMITED_RETRY_MS);
+    expect(h.delivered).toHaveLength(0);
+    expect(h.sched.peek('c1')).not.toBeNull();
+    h.setLimited(false);
+    await h.advance(LIMITED_RETRY_MS);
+    expect(h.delivered).toHaveLength(1);
+    expect(h.sched.peek('c1')).toBeNull();
+  });
+
+  it('holds a loop tick while out of usage instead of delivering it', async () => {
+    const h = harness();
+    h.setLimited(true);
+    h.sched.schedule(rec('c1', h.at(10_000), { every: 10_000 }));
+    await h.advance(10_000 + 5 * LIMITED_RETRY_MS);
+    expect(h.delivered).toHaveLength(0);
+    h.setLimited(false);
+    await h.advance(LIMITED_RETRY_MS);
+    expect(h.delivered).toHaveLength(1);
+  });
+
   it('fires a scheduled wake at its time, prefixed, exactly once', async () => {
     const h = harness();
     h.sched.schedule(rec('c1', h.at(10_000)));
