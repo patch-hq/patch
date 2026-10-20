@@ -459,7 +459,11 @@ browser if needed, reopened at the address it was on, with no action from the
 user. The page's in-memory state is lost, so the next `patch_browser_read` carries
 a one-time `notice` saying so. A tab the user closed by hand stays closed
 (`tab_not_found`). Recovery of a routed tab obeys § Route through: with the
-routing host offline it fails rather than reconnecting direct.
+routing host offline it fails rather than reconnecting direct. A host restart
+is the same: the host keeps the list of open logged-in tabs on disk (`tabs.json`
+beside the profile), and the first use of a `tabId` from before the restart
+reopens it at its last address with the same notice. Closing a tab, Stop, and a
+clean shutdown leave nothing to restore; throwaway logged-out tabs are not kept.
 
 **Watching and stopping.** The browser is one host-wide resource shared by every
 chat; a tab is attributed to the chat that opened it. A chat's browsing is visible

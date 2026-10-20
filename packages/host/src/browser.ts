@@ -19,7 +19,15 @@
 
 import { randomUUID } from 'node:crypto';
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type {
   Browser,
@@ -252,6 +260,12 @@ export interface TabInfo {
   routedVia?: string;
 }
 
+/** What survives a host restart of an open logged-in tab. */
+interface PersistedTab {
+  url: string;
+  ownerChatId?: string | undefined;
+}
+
 interface Tab {
   tabId: string;
   page: Page;
@@ -432,6 +446,7 @@ export class BrowserManager {
   constructor(private readonly opts: BrowserManagerOptions) {}
 
   private notify(chatId: string | undefined): void {
+    this.persistTabs();
     if (chatId === undefined) return;
     try {
       this.opts.onActivity?.(chatId);
@@ -517,6 +532,7 @@ export class BrowserManager {
     const tabs = [...this.tabsById.values()];
     this.tabsById.clear();
     this.handoffTabs.clear();
+    this.persistTabs();
     for (const tab of tabs) {
       await tab.page.close().catch((err: unknown) => {
         this.opts.logger.warn({ err }, 'browser: error closing tab on stop');
@@ -822,6 +838,98 @@ export class BrowserManager {
     return browser;
   }
 
+  // ---- Tab ids outlive a host restart ----------------------------------------
+
+  private disposing = false;
+  private readonly restoring = new Map<string, Promise<Tab>>();
+
+  private get tabRegistryPath(): string {
+    return join(this.opts.root, 'tabs.json');
+  }
+
+  /**
+   * Writes the open logged-in tabs (id, owner, last address) so a restarted host
+   * can reopen them under the same ids. Throwaway 'logged-out' tabs are not
+   * kept: they hold no session worth resuming. Skipped while disposing, because
+   * dispose closes tabs one by one and would otherwise wipe the list.
+   */
+  private persistTabs(): void {
+    if (this.disposing) return;
+    const entries: Record<string, PersistedTab> = {};
+    for (const [tabId, tab] of this.tabsById) {
+      if (tab.profile !== 'logged-in') continue;
+      entries[tabId] = {
+        url: tab.lastUrl,
+        ...(tab.ownerChatId ? { ownerChatId: tab.ownerChatId } : {}),
+      };
+    }
+    try {
+      mkdirSync(this.opts.root, { recursive: true });
+      const tmp = `${this.tabRegistryPath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(entries), { mode: 0o600 });
+      renameSync(tmp, this.tabRegistryPath);
+    } catch (err) {
+      this.opts.logger.warn({ err }, 'browser: could not save the tab list');
+    }
+  }
+
+  private readPersistedTab(tabId: string): PersistedTab | undefined {
+    let raw: string;
+    try {
+      raw = readFileSync(this.tabRegistryPath, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      this.opts.logger.warn({ err }, 'browser: could not read the tab list');
+      return undefined;
+    }
+    try {
+      const entry = (JSON.parse(raw) as Record<string, PersistedTab>)[tabId];
+      return entry && typeof entry.url === 'string' ? entry : undefined;
+    } catch (err) {
+      this.opts.logger.warn({ err }, 'browser: the tab list is corrupt, ignoring it');
+      return undefined;
+    }
+  }
+
+  /** A tab id this process has not seen but a previous run saved: reopened where it was. */
+  private restoreTab(tabId: string, saved: PersistedTab): Promise<Tab> {
+    let pending = this.restoring.get(tabId);
+    if (!pending) {
+      pending = (async () => {
+        this.opts.logger.warn({ tabId }, 'browser: reopening tab saved before a host restart');
+        const context = await this.getLoggedInContext();
+        const page = await context.newPage();
+        const tab = this.newTab({
+          tabId,
+          page,
+          profile: 'logged-in',
+          ownerChatId: saved.ownerChatId,
+        });
+        this.attachPage(tab, page);
+        try {
+          if (saved.url && saved.url !== 'about:blank') {
+            await page.goto(saved.url, { waitUntil: 'domcontentloaded' });
+          }
+        } catch (err) {
+          await page.close().catch(() => undefined);
+          throw new Error(
+            `tab ${tabId} was lost in a host restart and could not be reopened at ${redactUrl(saved.url)}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        tab.lastUrl = saved.url;
+        tab.notices.push(
+          `this tab was lost when the host restarted and has been reopened at ${redactUrl(saved.url)}; anything not saved in the page (typed text, scroll, open menus) is gone, and refs from before must be re-read`,
+        );
+        this.tabsById.set(tabId, tab);
+        this.activeTabId = tabId;
+        this.notify(tab.ownerChatId);
+        return tab;
+      })().finally(() => this.restoring.delete(tabId));
+      this.restoring.set(tabId, pending);
+    }
+    return pending;
+  }
+
   private requireTab(tabId: string): Tab {
     const tab = this.tabsById.get(tabId);
     if (!tab) throw new TabNotFoundError(tabId);
@@ -839,6 +947,10 @@ export class BrowserManager {
    * simply gone: `TabNotFoundError`, never resurrected.
    */
   private async tabFor(tabId: string): Promise<Tab> {
+    if (!this.tabsById.has(tabId)) {
+      const saved = this.readPersistedTab(tabId);
+      if (saved) await this.restoreTab(tabId, saved);
+    }
     const tab = this.requireTab(tabId);
     if (tab.recovering) await tab.recovering;
     if (tab.crashed || (tab.page.isClosed() && tab.contextDead)) {
@@ -1063,7 +1175,10 @@ export class BrowserManager {
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
-      if (url && url !== 'about:blank') tab.lastUrl = url;
+      if (url && url !== 'about:blank') {
+        tab.lastUrl = url;
+        if (this.tabsById.get(tab.tabId) === tab) this.persistTabs();
+      }
       tab.fileChooser = undefined;
     });
   }
@@ -2290,6 +2405,7 @@ export class BrowserManager {
 
   /** Close every tab/context/browser and stop this manager's own Xvfb. */
   async dispose(): Promise<void> {
+    this.disposing = true;
     for (const tabId of [...this.tabsById.keys()]) {
       await this.close(tabId).catch((err: unknown) => {
         this.opts.logger.warn({ tabId, err }, 'browser: error closing tab on dispose');
