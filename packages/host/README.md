@@ -301,8 +301,8 @@ implement the client side without re-deriving the construction.
 | `PATCH_DAEMON_LOCAL_KEY`    | yes                         | Bearer for the UDS HTTP `/chats*` endpoints.                                                                                 |
 | `PATCH_DAEMON_SOCKET`       | no (`~/.patch/daemon.sock`) | UDS path.                                                                                                                    |
 | `PATCH_HOME`                | no (`~/.patch`)             | Override daemon-local state root (test hook).                                                                                |
-| `PATCH_DAEMON_HEALTHZ_PORT` | no (`3001`)                 | TCP /healthz port.                                                                                                           |
-| `PATCH_DAEMON_HEALTHZ_HOST` | no (`0.0.0.0`)              | TCP /healthz host.                                                                                                           |
+| `PATCH_DAEMON_HEALTHZ_PORT` | no (off)                    | TCP /healthz port; unset opens no TCP port (socket only). Docker sets it.                                                    |
+| `PATCH_DAEMON_HEALTHZ_HOST` | no (`127.0.0.1`)            | TCP /healthz host.                                                                                                           |
 | `PATCH_DAEMON_WS_PORT`      | no (`3002`)                 | TCP server-daemon WS port.                                                                                                   |
 | `PATCH_DAEMON_WS_HOST`      | no (`0.0.0.0`)              | TCP server-daemon WS host.                                                                                                   |
 | `SDK_BACKEND`               | **yes** (no default)        | `mock` (unit tests / normal build rounds) or `real` (dev + integration round). No silent default — boot fails loud if unset. |

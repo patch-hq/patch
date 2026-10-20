@@ -7,6 +7,7 @@
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 
 export interface PatchConfig {
   serverUrl: string;
@@ -51,8 +52,16 @@ export function credentialFilePath(): string {
   return join(configHomeDir(), 'credential.jwt');
 }
 
-export function defaultHostSocketPath(): string {
-  return join(configHomeDir(), 'host.sock');
+/**
+ * Mirrors the host's `defaultSocketPath`: `<home>/host.sock` on Unix, a named
+ * pipe keyed by the home on Windows. The two must agree, so the host test and
+ * the CLI test pin the same value.
+ */
+export function defaultHostSocketPath(platform: NodeJS.Platform = process.platform): string {
+  const home = configHomeDir();
+  if (platform !== 'win32') return join(home, 'host.sock');
+  const id = createHash('sha256').update(home.toLowerCase()).digest('hex').slice(0, 12);
+  return `\\\\.\\pipe\\patch-host-${id}`;
 }
 
 /** The socket a host built before the rename listens on. */
@@ -112,8 +121,16 @@ export function loadConfig(): ResolvedConfig {
     hostSocket = envSocket;
   } else {
     // A host older than the rename still listens on daemon.sock.
-    for (const defaultPath of [defaultHostSocketPath(), legacyHostSocketPath()]) {
-      if (existsSync(defaultPath) && statSync(defaultPath).isSocket()) {
+    const candidates =
+      process.platform === 'win32'
+        ? [defaultHostSocketPath()]
+        : [defaultHostSocketPath(), legacyHostSocketPath()];
+    for (const defaultPath of candidates) {
+      // A Windows named pipe stats as something other than a socket.
+      if (
+        existsSync(defaultPath) &&
+        (process.platform === 'win32' || statSync(defaultPath).isSocket())
+      ) {
         hostSocket = defaultPath;
         break;
       }

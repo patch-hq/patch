@@ -3,6 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -75,8 +76,12 @@ export interface HostConfig {
   patchHome: string;
   /** Unix domain socket path the local control HTTP listens on. */
   socketPath: string;
-  /** TCP port for /healthz (compose healthcheck). */
-  healthzPort: number;
+  /**
+   * TCP port for /healthz (compose healthcheck). null = no TCP listener: the
+   * host is reached over its local socket only, so it holds no port a dev
+   * server could collide with. Set PATCH_DAEMON_HEALTHZ_PORT to opt in.
+   */
+  healthzPort: number | null;
   healthzHost: string;
   /**
    * WebSocket URL the host dials INTO on the patch-server, e.g.
@@ -220,19 +225,29 @@ export interface LoadConfigOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+/**
+ * Where the local control socket lives: `<home>/host.sock` on Unix, and a named
+ * pipe on Windows (which has no Unix sockets in the filesystem). The pipe name
+ * carries a hash of the home so two homes never share one.
+ */
+export function defaultSocketPath(patchHome: string, platform = process.platform): string {
+  if (platform !== 'win32') return join(patchHome, 'host.sock');
+  const id = createHash('sha256').update(patchHome.toLowerCase()).digest('hex').slice(0, 12);
+  return `\\\\.\\pipe\\patch-host-${id}`;
+}
+
 export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   const env = opts.env ?? process.env;
 
   const patchHome = env['PATCH_HOME'] ?? join(homedir(), '.patch');
   const socketPath =
-    env['PATCH_HOST_SOCKET'] ?? env['PATCH_DAEMON_SOCKET'] ?? join(patchHome, 'host.sock');
+    env['PATCH_HOST_SOCKET'] ?? env['PATCH_DAEMON_SOCKET'] ?? defaultSocketPath(patchHome);
 
-  const healthzPort = intRequired(
-    'PATCH_DAEMON_HEALTHZ_PORT',
-    env['PATCH_DAEMON_HEALTHZ_PORT'],
-    3001,
-  );
-  const healthzHost = env['PATCH_DAEMON_HEALTHZ_HOST'] ?? '0.0.0.0';
+  const healthzPort =
+    env['PATCH_DAEMON_HEALTHZ_PORT'] === undefined
+      ? null
+      : intRequired('PATCH_DAEMON_HEALTHZ_PORT', env['PATCH_DAEMON_HEALTHZ_PORT'], 0);
+  const healthzHost = env['PATCH_DAEMON_HEALTHZ_HOST'] ?? '127.0.0.1';
 
   const serverWsUrl = strRequired('PATCH_SERVER_WS_URL', env);
   const serverUrl = strRequired('PATCH_SERVER_URL', env);

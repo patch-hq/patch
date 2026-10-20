@@ -14,7 +14,7 @@ import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { acquireHomeLock, type HomeLock } from './homeLock.js';
 import { SHUTDOWN_DEADLINE_MS, shutdownThenExit } from './shutdownDeadline.js';
-import { linkLegacySocket } from './legacySocket.js';
+import { linkLegacySocket, isNamedPipe } from './legacySocket.js';
 import {
   mkdirSync,
   existsSync,
@@ -370,7 +370,9 @@ async function startHost(
 ): Promise<void> {
   // only discovered the clash at the real bind further down had already written
   // into the live host's chats and stolen its socket.
-  await assertHealthzPortFree(config.healthzHost, config.healthzPort);
+  if (config.healthzPort !== null) {
+    await assertHealthzPortFree(config.healthzHost, config.healthzPort);
+  }
   // The per-home lock was acquired by main before any state was read.
   mkdirSync(config.patchHome, { recursive: true });
   // spec/02 § Claude Code settings: settings.json sits one level above the
@@ -476,14 +478,19 @@ async function startHost(
     res.writeHead(404);
     res.end();
   });
-  await new Promise<void>((resolve_, reject) => {
-    tcp.once('error', reject);
-    tcp.listen(config.healthzPort, config.healthzHost, () => resolve_());
-  });
-  logger.info(
-    { host: config.healthzHost, port: config.healthzPort },
-    'patch-daemon healthz listening on TCP',
-  );
+  const healthzPort = config.healthzPort;
+  if (healthzPort !== null) {
+    await new Promise<void>((resolve_, reject) => {
+      tcp.once('error', reject);
+      tcp.listen(healthzPort, config.healthzHost, () => resolve_());
+    });
+    logger.info(
+      { host: config.healthzHost, port: healthzPort },
+      'patch-daemon healthz listening on TCP',
+    );
+  } else {
+    logger.info('patch-daemon healthz TCP listener off (local socket only)');
+  }
 
   // 1. Resolve OAuth — log loudly on miss, but don't fail the host process:
   //    /healthz still has to come up so compose/healthcheck reports a green
@@ -4549,10 +4556,12 @@ async function startHost(
     },
   });
   const socketDir = dirname(config.socketPath);
-  if (!existsSync(socketDir)) {
+  if (!isNamedPipe(config.socketPath) && !existsSync(socketDir)) {
     mkdirSync(socketDir, { recursive: true });
   }
-  if (existsSync(config.socketPath)) {
+  // A Windows named pipe is not a file: nothing to unlink or chmod.
+  const socketIsFile = !isNamedPipe(config.socketPath);
+  if (socketIsFile && existsSync(config.socketPath)) {
     const stat = statSync(config.socketPath);
     if (!stat.isSocket()) {
       throw new Error(
@@ -4563,7 +4572,7 @@ async function startHost(
   }
   await app.listen({ path: config.socketPath });
   // Lock down the UDS — Fastify's listen({path}) doesn't expose mode.
-  chmodSync(config.socketPath, 0o600);
+  if (socketIsFile) chmodSync(config.socketPath, 0o600);
   logger.info({ socket: config.socketPath }, 'patch-daemon control listening on UDS');
   linkLegacySocket(config.socketPath);
 
