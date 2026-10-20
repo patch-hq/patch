@@ -1724,11 +1724,16 @@ a.ch-row:hover {
    `.model-pill`), sized to its own label (`align-self: flex-start`) rather
    than stretched full-width — it is one control now, not a strip of several
    sharing the row's width. */
+.sidebar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px var(--sb-inset-right) 0 var(--sb-inset);
+}
 .sidebar-view-menu {
   position: relative;
-  align-self: flex-start;
-  /* No bottom margin — one gap per seam (see `.sb`). */
-  margin: 10px var(--sb-inset-right) 0 var(--sb-inset);
+  /* No margin of its own — `.sidebar-controls` holds the row's margins. */
 }
 .sidebar-view-trigger {
   display: flex;

@@ -66,6 +66,7 @@ import {
 import { StatusBadge } from './StatusBadge.js';
 import { ProjectSnoozeMenu } from './ProjectSnoozeMenu.js';
 import { SidebarViewMenu } from './SidebarViewMenu.js';
+import { SidebarSortMenu } from './SidebarSortMenu.js';
 import { BatchPanel } from './BatchPanel.js';
 import { deriveBadge, useChatStore } from '../stores/chatStore.js';
 import { clearComposerDraft } from '../stores/composerDraftStore.js';
@@ -402,7 +403,10 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       />
 
       {/* The sidebar's one view dropdown (spec/14 § Sidebar §1b). */}
-      <SidebarViewMenu />
+      <div className="sidebar-controls">
+        <SidebarViewMenu />
+        {batchMode ? null : <SidebarSortMenu />}
+      </div>
 
       {batchMode ? (
         <>
