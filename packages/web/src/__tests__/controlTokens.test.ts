@@ -48,4 +48,12 @@ describe('stripControlTokens (G2-d1)', () => {
     );
     expect(stripControlTokens('[[tool]]\n  indented')).toBe('  indented');
   });
+
+  it('leaves no stray space when two markers sit next to each other', () => {
+    // Each removal used to tidy only its own gap, so neighbours left a double
+    // space mid-sentence and a leading space at the start of the message.
+    expect(stripControlTokens('a [[edit]] [[tool]] b')).toBe('a b');
+    expect(stripControlTokens('[[edit]][[tool]] go')).toBe('go');
+    expect(stripControlTokens('[[edit]] [[tool]]\nhello')).toBe('hello');
+  });
 });
