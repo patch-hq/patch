@@ -340,7 +340,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
                         data-testid="background-task-bar-checkin"
                         role="button"
                         tabIndex={0}
-                        title="Change how often the agent is checked in with"
+                        title="Check-in interval"
                         onClick={(e) => {
                           e.stopPropagation();
                           openCheckInEditor(task);

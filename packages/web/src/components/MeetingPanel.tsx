@@ -897,8 +897,8 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
           type="button"
           className="mm-cog"
           data-testid="meeting-cog"
-          aria-label="Prompts, models and timing"
-          title="Prompts, models and timing"
+          aria-label="Meeting settings"
+          title="Meeting settings"
           aria-pressed={settingsOpen}
           onClick={() => setSettingsOpen(!settingsOpen)}
         >

@@ -139,6 +139,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_list_chats',
         'patch_list_devices',
         'patch_loop',
+        'patch_meeting_notes',
         'patch_notify',
         'patch_pad_collect',
         'patch_pad_create',

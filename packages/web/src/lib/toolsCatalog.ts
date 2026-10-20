@@ -197,6 +197,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'padId: string, text: string',
   },
   {
+    name: patchToolId('patch_meeting_notes'),
+    label: 'patch_meeting_notes',
+    category: 'patch',
+    description: 'Adds or edits meeting points, research and the summary in this chat.',
+    params:
+      'op: string, title?: string, topicId?: string, bullets?: string[], decided?: boolean, headline?: string, source?: object',
+  },
+  {
     name: patchToolId('patch_pad_list'),
     label: 'patch_pad_list',
     category: 'patch',
@@ -305,7 +313,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description:
       'Runs a shell command as a durable background task the host itself owns, holds a real pid for, and can kill.',
-    params: 'command: string, description: string, cwd?: string',
+    params:
+      'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number',
   },
   {
     name: patchToolId('patch_watch_list'),
@@ -541,7 +550,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description:
       'Hands a browser tab to the user to sign in, pass 2FA or approve consent, and waits for them to finish without seeing what they enter.',
-    params: 'tabId: string, reason: string, callbackPort?: number, timeoutSeconds?: number',
+    params:
+      'tabId: string, reason: string, callbackPort?: number, timeoutSeconds?: number, share?: boolean',
   },
   {
     name: patchToolId('patch_browser_tabs'),

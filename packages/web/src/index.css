@@ -13552,7 +13552,7 @@ select.new-chat-account:focus-visible {
   }
 }
 .mm-label {
-  font-size: 11px;
+  font-size: var(--text-min);
   font-weight: 600;
   color: var(--ink-3);
   text-transform: uppercase;
@@ -13644,7 +13644,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-sum .meta {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-min);
   margin-bottom: 10px;
 }
 .mm-sum .tools {
@@ -13676,7 +13676,7 @@ select.new-chat-account:focus-visible {
   border-bottom: 1px dotted var(--accent);
 }
 .mm-act-owner-name {
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--ink-3);
 }
 .mm-transcript {
@@ -13764,7 +13764,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-ln .tm {
   flex: none;
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--ink-faint);
 }
 .mm-ln .mm-voice {
@@ -13834,7 +13834,7 @@ select.new-chat-account:focus-visible {
   align-items: center;
   gap: 8px;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-min);
 }
 .mm-topic {
   position: relative;
@@ -13854,7 +13854,7 @@ select.new-chat-account:focus-visible {
   text-align: left;
   cursor: pointer;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--text-min);
   width: 38px;
   flex: none;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -13878,7 +13878,7 @@ select.new-chat-account:focus-visible {
   color: var(--ink-2);
 }
 .mm-topic.l3 .nm {
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--ink-3);
 }
 .mm-topic ul {
@@ -13938,7 +13938,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-tx {
   margin: 6px 0 0 48px;
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--ink-2);
   display: flex;
   flex-direction: column;
@@ -13981,7 +13981,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-tray-label,
 .mm-tray-grp {
-  font-size: 11px;
+  font-size: var(--text-min);
   font-weight: 600;
   color: var(--ink-3);
   text-transform: uppercase;
@@ -13991,7 +13991,7 @@ select.new-chat-account:focus-visible {
   margin: 6px 0 2px;
 }
 .mm-tray-count {
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--ink-3);
 }
 .mm-tray-count b {
@@ -14026,7 +14026,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-act-owner {
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-min);
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   padding: 1px 6px;
@@ -14034,7 +14034,7 @@ select.new-chat-account:focus-visible {
   color: var(--ink-2);
 }
 .mm-act-st {
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--accent-strong);
 }
 .mm-act-btn {
@@ -14043,7 +14043,7 @@ select.new-chat-account:focus-visible {
   background: none;
   padding: 2px 6px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--accent-strong);
   cursor: pointer;
   text-decoration: none;
@@ -15536,12 +15536,12 @@ select.new-chat-account:focus-visible {
   justify-content: space-between;
   gap: 8px;
   padding: 4px 0;
-  font-size: 13px;
+  font-size: var(--text-min);
   color: var(--ink-2);
 }
 .composer-edit-banner .msg-edit-cancel {
   padding: 2px 10px;
-  font-size: 13px;
+  font-size: var(--text-min);
   border-radius: 6px;
   cursor: pointer;
 }
@@ -15616,14 +15616,14 @@ select.new-chat-account:focus-visible {
   margin-bottom: 0;
 }
 .mm-feed-auto {
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--ink-3);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 .mm-feed-err {
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--danger);
   margin-bottom: 6px;
 }
@@ -15648,7 +15648,7 @@ select.new-chat-account:focus-visible {
   margin-bottom: 3px;
 }
 .mm-card-k {
-  font-size: 11px;
+  font-size: var(--text-min);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -15667,7 +15667,7 @@ select.new-chat-account:focus-visible {
   overflow-wrap: anywhere;
 }
 .mm-card-t {
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--ink-3);
 }
 .mm-card ul {
@@ -15676,7 +15676,7 @@ select.new-chat-account:focus-visible {
   color: var(--ink-2);
 }
 .mm-verdict {
-  font-size: 11px;
+  font-size: var(--text-min);
   font-weight: 700;
   border-radius: var(--radius-pill);
   padding: 0 7px;
@@ -15691,7 +15691,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-card-src {
   display: inline-block;
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--accent-strong);
   margin-top: 3px;
 }
@@ -15702,7 +15702,7 @@ select.new-chat-account:focus-visible {
   margin-top: 6px;
 }
 .mm-edit-chip {
-  font-size: 11px;
+  font-size: var(--text-min);
   font-weight: 600;
   color: var(--accent-strong);
   background: var(--accent-tint);

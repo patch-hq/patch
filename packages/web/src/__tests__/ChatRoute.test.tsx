@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { api, ApiError, type ChatSummaryRow } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -47,6 +48,7 @@ vi.mock('../api/rest.js', async (importOriginal) => {
       }),
       checkHooks: vi.fn(async () => ({ decision: 'pass' as const, results: [] })),
       getSweepRuns: vi.fn(async () => ({ runs: [] })),
+      getJob: vi.fn(async (id: string) => ({ id, name: 'Test job' })),
       checkSweepNow: vi.fn(async () => ({ fired: false })),
     },
   };
@@ -89,12 +91,15 @@ function clickApprove(card: HTMLElement = screen.getByTestId('permission')): voi
 }
 
 function renderChat(chatId: string, ws: Parameters<typeof ChatRoute>[0]['ws'] = null) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
-      <Routes>
-        <Route path="/chats/:chatId" element={<ChatRoute ws={ws} />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
+        <Routes>
+          <Route path="/chats/:chatId" element={<ChatRoute ws={ws} />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
