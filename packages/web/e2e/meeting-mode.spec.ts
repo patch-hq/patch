@@ -41,6 +41,68 @@ test.describe('meeting mode — live', () => {
     expect(composer!.x + composer!.width).toBeLessThanOrEqual(pan!.x + 1);
   });
 
+  test('Now is a bar across the top, above both the chat and the side panel', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const [bar, now, stream, pan] = await Promise.all([
+      page.getByTestId('meeting-bar').boundingBox(),
+      page.getByTestId('meeting-now').boundingBox(),
+      page.getByTestId('chat-stream').boundingBox(),
+      page.getByTestId('meeting-panel').boundingBox(),
+    ]);
+    expect(bar!.y + bar!.height).toBeLessThanOrEqual(stream!.y + 1);
+    expect(bar!.y + bar!.height).toBeLessThanOrEqual(pan!.y + 1);
+    expect(bar!.width).toBeGreaterThan(stream!.width + pan!.width - 2);
+    expect(now!.y).toBeGreaterThanOrEqual(bar!.y);
+    await expect(page.getByTestId('meeting-panel').getByTestId('meeting-now')).toHaveCount(0);
+  });
+
+  test('key points and transcript share the one side panel', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const panel = page.getByTestId('meeting-panel');
+    await expect(panel.getByTestId('meeting-points')).toBeVisible();
+    await expect(panel.getByTestId('meeting-transcript')).toBeVisible();
+    await expect(page.getByTestId('meeting-line').first()).toBeVisible();
+  });
+
+  test('transcript stays pinned to the latest line until Tom scrolls up', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const add = (n: number, start: number) =>
+      page.evaluate(
+        ([count, from]) => {
+          const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+          const cur = store.getState().byChat['chat_tools'];
+          const more = Array.from({ length: count }, (_, i) => ({
+            at: (from + i) * 1000,
+            speaker: 'them',
+            text: `filler line ${from + i}`,
+          }));
+          store.getState().apply('chat_tools', {
+            ...cur,
+            transcript: [...cur.transcript, ...more],
+          });
+        },
+        [n, start],
+      );
+    const lines = page.getByTestId('meeting-lines');
+    const gap = () => lines.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+    await add(60, 100);
+    await expect.poll(gap).toBeLessThan(5);
+    await add(5, 200);
+    await expect.poll(gap).toBeLessThan(5);
+    await lines.evaluate((el) => {
+      el.scrollTop = 0;
+      return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    });
+    await add(5, 300);
+    expect(await gap()).toBeGreaterThan(100);
+    await lines.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    });
+    await add(5, 400);
+    await expect.poll(gap).toBeLessThan(5);
+  });
+
   test('shows Live + timer, Now, topics newest first with Decided badges', async ({ page }) => {
     await page.goto(URL_LIVE);
     await expect(page.getByTestId('meeting-pill')).toContainText(/Live · 3\d:\d\d/);
@@ -83,11 +145,8 @@ test.describe('meeting mode — live', () => {
       .not.toBe(a);
   });
 
-  test('transcript is collapsed and searchable', async ({ page }) => {
+  test('transcript is always open and searchable', async ({ page }) => {
     await page.goto(URL_LIVE);
-    const tx = page.getByTestId('meeting-transcript');
-    await expect(tx).not.toHaveAttribute('open', '');
-    await tx.locator('summary').click();
     await expect(page.getByTestId('meeting-line')).toHaveCount(2);
     await page.getByTestId('meeting-search').fill('statement');
     await expect(page.getByTestId('meeting-line')).toHaveCount(1);

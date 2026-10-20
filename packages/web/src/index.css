@@ -13451,9 +13451,26 @@ select.new-chat-account:focus-visible {
 }
 .mm-body {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.mm-main {
+  flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(300px, 34%, 400px);
   min-height: 0;
+}
+.mm-bar {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .mm-left {
   display: flex;
@@ -13469,14 +13486,23 @@ select.new-chat-account:focus-visible {
 .mm-panel {
   border-left: 1px solid var(--line-soft);
   background: var(--bg-panel);
-  overflow: auto;
-  padding: 20px;
+  overflow: hidden;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
+  min-height: 0;
+}
+.mm-points {
+  flex: none;
+  max-height: 45%;
+  overflow: auto;
 }
 @media (max-width: 800px) {
-  .mm-body {
+  .mm-bar {
+    padding: 10px 16px;
+  }
+  .mm-main {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
   }
@@ -13573,19 +13599,15 @@ select.new-chat-account:focus-visible {
   padding: 1px 8px;
 }
 .mm-tx {
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  background: var(--bg-elevated);
-}
-.mm-tx summary {
-  padding: 10px 14px;
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--ink-2);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .mm-search {
-  margin: 0 14px 10px;
-  width: calc(100% - 28px);
+  margin: 0 0 8px;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
@@ -13594,7 +13616,9 @@ select.new-chat-account:focus-visible {
   color: var(--ink);
 }
 .mm-tx .ln {
-  padding: 0 14px 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   font-size: 14px;
   display: flex;
   flex-direction: column;
