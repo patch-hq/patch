@@ -2356,6 +2356,17 @@ describe('assertValidPermissionResponse', () => {
 });
 
 describe('chat.fork_request carries what an edited turn is sent with', () => {
+  test('an attachments-only edit (empty message) round-trips', () => {
+    const event: WireEvent = {
+      type: 'chat.fork_request',
+      chatId: 'c1',
+      seq: 4,
+      message: '',
+      localId: 'L4',
+      attachments: [{ id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image' }],
+    };
+    expect(decode(encode(event))).toEqual(event);
+  });
   test('attachments and disabledTools round-trip', () => {
     const event: WireEvent = {
       type: 'chat.fork_request',

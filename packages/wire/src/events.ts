@@ -3374,7 +3374,8 @@ export const ChatForkRequestEvent = z
     type: z.literal('chat.fork_request'),
     chatId: z.string().min(1),
     seq: z.number().int().nonnegative(),
-    message: z.string().min(1),
+    /** May be empty when `attachments` carry the turn, as on `chat.input`; the host refuses empty with no attachments. */
+    message: z.string(),
     localId: z.string().min(1),
     /** Attachments for the replacement turn (same refs and limits as `chat.input`). */
     attachments: z.array(AttachmentRef).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),

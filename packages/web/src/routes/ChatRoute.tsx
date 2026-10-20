@@ -1441,6 +1441,10 @@ export function ChatRoute({
         pushError('not connected');
         return false;
       }
+      if (message.length === 0 && files.length === 0) {
+        pushError('An edited message needs text or an attachment');
+        return false;
+      }
       // The replacement turn's files go up first (the fork carries refs, as a
       // normal send does); a failed upload leaves the edit open untouched.
       const refs: AttachmentRef[] = [];
@@ -1472,12 +1476,24 @@ export function ChatRoute({
         pushError(failed('edit'), undefined, (err as Error).message);
         return false;
       }
-      useChatStore.setState((s) => ({
-        timelines: {
-          ...s.timelines,
-          [chatId]: (s.timelines[chatId] ?? []).filter((e) => e.seq < seq),
-        },
-      }));
+      // Only once the host acknowledges the fork (it announces the new active
+      // track via `chat.branches`) — a refused fork must leave the turns alone.
+      const before = useChatStore.getState().branchGraphs[chatId]?.activeBranchId;
+      const unsubscribe = useChatStore.subscribe((s) => {
+        if (s.branchGraphs[chatId]?.activeBranchId === before) return;
+        unsubscribe();
+        clearTimeout(timer);
+        useChatStore.setState((st) => ({
+          timelines: {
+            ...st.timelines,
+            [chatId]: (st.timelines[chatId] ?? []).filter((e) => e.seq < seq),
+          },
+        }));
+      });
+      const timer = setTimeout(() => {
+        unsubscribe();
+        pushError(failed('edit'), undefined, 'the host did not confirm the new track');
+      }, 15000);
       return true;
     },
     [ws, chatId, pushError],
