@@ -1463,7 +1463,7 @@ rejected with an inline error. A malformed value in storage is self-healed:
 it's dropped and the sign-in screen returns.
 
 On a signed-in surface (web, desktop, phone) the prompt is a small card at the
-top: "<device> wants to sign in" with Deny and Allow, then the code with Done.
+top: "Approve a Patch sign-in from <device>?" with Deny and Allow, then the code with Done.
 
 ## Offline / error states
 
