@@ -95,12 +95,20 @@ describe.skipIf(!BROWSER_LAYER)('pads in the app', () => {
   });
 
   async function openApp(path = '/app/pads') {
+    // Each browser starts from the requested page, not the previous test's
+    // account-wide handover position. Enter New Pad through the real button:
+    // creation forms deliberately have no persisted view-position descriptor.
+    built.viewPosition.set(
+      'srf-test',
+      path === '/app/chats/c1' ? { page: 'chat', id: 'c1' } : { page: 'pads' },
+    );
     const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
     await ctx.addInitScript((jwt) => localStorage.setItem('patch.credential.v1', jwt), bearer);
     const page = await ctx.newPage();
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    await page.goto(`${base}${path}`);
+    await page.goto(`${base}${path === '/app/pads/new' ? '/app/pads' : path}`);
+    if (path === '/app/pads/new') await page.getByTestId('pads-new').click();
     return { ctx, page, errors };
   }
 

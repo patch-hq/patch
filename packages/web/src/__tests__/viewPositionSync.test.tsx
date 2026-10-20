@@ -73,6 +73,21 @@ describe('ViewPositionSync', () => {
     expect(where()).toBe('/chats/c9?seq=5');
   });
 
+  it.each(['/jobs?tabWindow=1&capture=1', '/jobs?tabWindow=1'])(
+    'keeps the requested screen isolated in %s',
+    (path) => {
+      const { send } = mount(path);
+      act(() => useViewPositionStore.getState().applyUpdated(remote(), 'desk'));
+      expect(where()).toBe(path);
+      fireEvent.pointerDown(window);
+      act(() => window.dispatchEvent(new Event('focus')));
+      act(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
+      expect(where()).toBe(path);
+      expect(send).not.toHaveBeenCalled();
+      expect(useViewPositionStore.getState().handledAt).toBe(0);
+    },
+  );
+
   it('restores its own last position when the launch snapshot is its own (a restart)', () => {
     mount('/');
     act(() => useViewPositionStore.getState().applyUpdated(remote({ surfaceId: 'desk' }), 'desk'));

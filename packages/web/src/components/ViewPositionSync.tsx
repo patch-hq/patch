@@ -18,12 +18,18 @@ const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 
 export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   const location = useLocation();
+  // Captures and detached tabs have an explicitly requested screen. They
+  // must neither adopt the account's last page nor publish their own position.
+  const [isolated] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('tabWindow') === '1' || params.has('capture');
+  });
   const navigate = useNavigate();
   const remote = useViewPositionStore((s) => s.remote);
   const scroll = useViewPositionStore((s) => s.scroll);
   // Account-wide "Sync position between surfaces". Until the preferences have
   // loaded the answer is unknown, so nothing is reported or adopted.
-  const enabled = usePreferencesStore((s) => s.loaded && s.preferences.syncPosition);
+  const enabled = usePreferencesStore((s) => s.loaded && s.preferences.syncPosition) && !isolated;
   // The user has touched this surface since it launched / came to the front.
   const activeRef = useRef(false);
   // Still waiting for the launch snapshot.
@@ -33,6 +39,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   const [activations, setActivations] = useState(0);
 
   const adopt = (allowOwn = false): void => {
+    if (isolated) return;
     const st = useViewPositionStore.getState();
     const own = usePresenceStore.getState().surfaceId;
     const r = st.remote;
