@@ -85,12 +85,12 @@ async function fetchChecked(
 
 const Body = z.object({ url: z.string().min(1) }).strict();
 
-type Response = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
+type LinkSummaryResponse = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
 
 export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummaryRoutesDeps): void {
   const pending = new Map<
     string,
-    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
+    { resolve: (ev: LinkSummaryResponse) => void; timeout: NodeJS.Timeout; hostId: string }
   >();
   deps.hostLink.onEvent((event: WireEvent, from) => {
     if (event.type !== 'patch.link_summary.response') return;
@@ -189,7 +189,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
     }
 
     const requestId = deps.idGenerator();
-    const result = await new Promise<Response | 'timeout'>((resolve) => {
+    const result = await new Promise<LinkSummaryResponse | 'timeout'>((resolve) => {
       const timeout = setTimeout(() => {
         pending.delete(requestId);
         resolve('timeout');

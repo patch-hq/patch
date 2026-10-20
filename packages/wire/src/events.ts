@@ -298,6 +298,7 @@ export const ChatErrorCode = z.enum([
   // spec/04 § Handoff budget — the target rejected the handoff as over its
   // context window, once again after one tighter re-plan. Same recovery actions.
   'handoff_overflow',
+  'fork_empty_message',
 ]);
 export type ChatErrorCode = z.infer<typeof ChatErrorCode>;
 
