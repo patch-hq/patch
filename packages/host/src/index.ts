@@ -65,6 +65,7 @@ import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_MEETING_ACTIONS_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_MODEL,
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
@@ -709,6 +710,8 @@ async function startHost(
     notes: DEFAULT_MEETING_NOTES_PROMPT,
     actions: DEFAULT_MEETING_ACTIONS_PROMPT,
   };
+  let meetingModels = { analysis: DEFAULT_MEETING_MODEL, cleanup: DEFAULT_MEETING_MODEL };
+  let meetingTranscriptionModel = '';
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
   // Settings → Prompts: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
@@ -1612,6 +1615,12 @@ async function startHost(
       notes: shared.meetingNotesPrompt,
       actions: shared.meetingActionsPrompt,
     };
+    meetingModels = { analysis: shared.meetingAnalysisModel, cleanup: shared.meetingCleanupModel };
+    if (shared.meetingTranscriptionModel !== meetingTranscriptionModel) {
+      meetingTranscriptionModel = shared.meetingTranscriptionModel;
+      whisper?.useModel?.(meetingTranscriptionModel);
+      logger.info({ meetingTranscriptionModel }, 'meeting transcription model changed');
+    }
     if (
       shared.watchCheckInPrompt !== watchCheckInPrompt ||
       shared.watchCheckInMinutes !== watchCheckInMinutes
@@ -4028,8 +4037,18 @@ async function startHost(
           },
         }
       : {}),
-    analyse: makeMeetingAnalyser({ sdkBackend, runOnAccountWithCredit, cwd: hostCwd }),
-    correct: makeMeetingCorrector({ sdkBackend, runOnAccountWithCredit, cwd: hostCwd }),
+    analyse: makeMeetingAnalyser({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.analysis,
+    }),
+    correct: makeMeetingCorrector({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.cleanup,
+    }),
     // Optional user glossary: <patchHome>/meetings/glossary.txt, one term per line.
     glossary: () => {
       const f = join(config.patchHome, 'meetings', 'glossary.txt');
@@ -4582,6 +4601,8 @@ async function startHost(
         }
       : {}),
   });
+  // Shared settings may have landed before the backend existed.
+  if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
     logger: logger.child({ component: 'hosted-stt' }),
     local: whisper,

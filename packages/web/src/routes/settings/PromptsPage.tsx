@@ -17,8 +17,11 @@ import {
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
-import { Group, Pills, Row, SettingsPage } from './ui.js';
+import { useUiStore } from '../../stores/uiStore.js';
+import { failed } from '../../lib/errorCopy.js';
+import { useModelOptions } from './modelOptions.js';
 import { PositiveNumberInput } from './PositiveNumberInput.js';
+import { Group, Pills, Row, SettingsPage } from './ui.js';
 import { patchShared } from './sharedWrite.js';
 
 type Mode = 'default' | 'custom';
@@ -125,6 +128,14 @@ export function PromptsPage(): JSX.Element {
         ?.harnessToolsPromptDefault ?? '',
   );
   const tools = p.harnessToolsPrompt ?? toolsDefault;
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const update = usePreferencesStore((s) => s.update);
+  const pushError = useUiStore((s) => s.pushError);
+  const analysisModel = useModelOptions(p.meetingAnalysisModel);
+  const cleanupModel = useModelOptions(p.meetingCleanupModel);
+  const write = (patch: Parameters<typeof update>[0]): void => {
+    void update(patch).catch((e: Error) => pushError(failed('settings'), undefined, e.message));
+  };
 
   return (
     <SettingsPage title="Prompts" testid="settings-prompts-page">
@@ -214,6 +225,69 @@ export function PromptsPage(): JSX.Element {
         />
       </Group>
       <Group label="Meetings" testid="settings-prompts-meetings">
+        <Row title="Analysis model">
+          <select
+            aria-label="Meeting analysis model"
+            value={p.meetingAnalysisModel}
+            disabled={!loaded}
+            data-testid="meeting-analysis-model"
+            onChange={(e) => write({ meetingAnalysisModel: e.target.value })}
+          >
+            {analysisModel.options.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <span className="set-unit">writes the live notes</span>
+        </Row>
+        <Row title="Clean-up model">
+          <select
+            aria-label="Meeting clean-up model"
+            value={p.meetingCleanupModel}
+            disabled={!loaded}
+            data-testid="meeting-cleanup-model"
+            onChange={(e) => write({ meetingCleanupModel: e.target.value })}
+          >
+            {cleanupModel.options.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <span className="set-unit">repairs mis-heard names before the notes</span>
+        </Row>
+        <Row title="Transcription model">
+          <input
+            type="text"
+            aria-label="Meeting transcription model"
+            key={p.meetingTranscriptionModel}
+            defaultValue={p.meetingTranscriptionModel}
+            placeholder="Host default"
+            disabled={!loaded}
+            data-testid="meeting-transcription-model"
+            onBlur={(e) => {
+              const next = e.target.value.trim();
+              if (next !== p.meetingTranscriptionModel) write({ meetingTranscriptionModel: next });
+            }}
+          />
+          <span className="set-unit">
+            model directory (local) or Groq model name; empty is the host's
+          </span>
+        </Row>
+        <Row title="Analyse every">
+          <PositiveNumberInput
+            integer
+            ariaLabel="Seconds between meeting analysis passes at Normal speed"
+            value={p.meetingAnalyseSeconds}
+            disabled={!loaded}
+            testid="meeting-analyse-seconds"
+            onCommit={(next) => {
+              if (next >= 5 && next <= 300) write({ meetingAnalyseSeconds: next });
+            }}
+          />
+          <span className="set-unit">seconds, at Normal speed (5–300)</span>
+        </Row>
         <PromptRow
           id="meeting-now"
           title="Meeting: Now"

@@ -8,6 +8,7 @@ import { SettingsSection } from '../SettingsSection';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { LAYER_TITLE, MEETING_PROMPTS, TEXT_PROMPTS, type Layer } from './AgentBehaviorSection';
 import { SettingsPage } from './SettingsPage';
+import { ModelChoice } from './ModelChoice';
 import { writePreferences } from './PreferenceSections';
 import { Field, Muted, Row, SettingsButton, WithSettings } from './ui';
 import type { AccountPreferences } from '../../api/rest';
@@ -91,6 +92,7 @@ export function PromptsPage(): React.ReactElement {
                 {row('system', p.harnessSystemPrompt !== '')}
               </SettingsSection>
               <SettingsSection title="Meetings" testID="settings-prompts-meetings">
+                <MeetingControls preferences={p} />
                 {MEETING_PROMPTS.map((layer) =>
                   row(layer, p[TEXT_PROMPTS[layer].key] !== TEXT_PROMPTS[layer].fallback),
                 )}
@@ -100,5 +102,79 @@ export function PromptsPage(): React.ReactElement {
         }}
       </WithSettings>
     </SettingsPage>
+  );
+}
+
+/** The meeting models and how often the notes are refreshed, saved on blur like the other fields. */
+function MeetingControls({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
+  const [seconds, setSeconds] = React.useState(String(preferences.meetingAnalyseSeconds));
+  const [stt, setStt] = React.useState(preferences.meetingTranscriptionModel);
+  React.useEffect(
+    () => setSeconds(String(preferences.meetingAnalyseSeconds)),
+    [preferences.meetingAnalyseSeconds],
+  );
+  React.useEffect(
+    () => setStt(preferences.meetingTranscriptionModel),
+    [preferences.meetingTranscriptionModel],
+  );
+  return (
+    <>
+      <ModelChoice
+        label="Analysis model"
+        testID="meeting-analysis-model"
+        value={preferences.meetingAnalysisModel}
+        onSelect={(id) => writePreferences({ meetingAnalysisModel: id })}
+      />
+      <ModelChoice
+        label="Clean-up model"
+        testID="meeting-cleanup-model"
+        value={preferences.meetingCleanupModel}
+        onSelect={(id) => writePreferences({ meetingCleanupModel: id })}
+      />
+      <Row
+        title="Transcription model"
+        subtitle="Model directory (local) or Groq model name; empty is the host's"
+        right={
+          <Field
+            testID="meeting-transcription-model"
+            accessibilityLabel="Meeting transcription model"
+            value={stt}
+            placeholder="Host default"
+            onChangeText={setStt}
+            style={{ width: 160 }}
+            onBlur={() => {
+              const next = stt.trim();
+              if (next !== preferences.meetingTranscriptionModel)
+                writePreferences({ meetingTranscriptionModel: next });
+            }}
+          />
+        }
+      />
+      <Row
+        title="Analyse every"
+        right={
+          <>
+            <Field
+              testID="meeting-analyse-seconds"
+              accessibilityLabel="Seconds between meeting analysis passes at Normal speed"
+              value={seconds}
+              onChangeText={setSeconds}
+              keyboardType="number-pad"
+              style={{ width: 56, textAlign: 'center' }}
+              onBlur={() => {
+                const next = Number(seconds.trim());
+                if (!Number.isInteger(next) || next < 5 || next > 300) {
+                  setSeconds(String(preferences.meetingAnalyseSeconds));
+                  return;
+                }
+                if (next !== preferences.meetingAnalyseSeconds)
+                  writePreferences({ meetingAnalyseSeconds: next });
+              }}
+            />
+            <Muted>seconds (5–300)</Muted>
+          </>
+        }
+      />
+    </>
   );
 }

@@ -126,6 +126,31 @@ describe('createWhisper', () => {
     expect(call.init.body).toBeInstanceOf(FormData);
   });
 
+  test('groq backend sends the model chosen in Settings, and the default when cleared', async () => {
+    const models: unknown[] = [];
+    const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
+      models.push((init?.body as FormData).get('model'));
+      return new Response(JSON.stringify({ text: 'x' }), { status: 200 });
+    }) as typeof fetch;
+    const w = new GroqWhisperBackend({
+      backend: 'groq',
+      logger,
+      groqApiKey: 'gsk_test',
+      fetchImpl: fakeFetch,
+    });
+    w.useModel('whisper-large-v3');
+    await w.transcribe(new Int16Array(160));
+    w.useModel('');
+    await w.transcribe(new Int16Array(160));
+    expect(models).toEqual(['whisper-large-v3', 'whisper-large-v3-turbo']);
+  });
+
+  test('local backend refuses a Settings model it cannot load, loudly', async () => {
+    const w = createWhisper({ backend: 'local', logger, localModelPath: '/tmp' });
+    w.useModel?.('/no/such/whisper-model');
+    await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/does not exist/);
+  });
+
   test('local backend lazy-fails when neither sidecar URL nor model path is set', async () => {
     const w = createWhisper({ backend: 'local', logger });
     // With no URL the host would spawn the sidecar — but that needs a model

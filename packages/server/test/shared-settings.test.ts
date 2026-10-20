@@ -636,6 +636,39 @@ describe('shared settings routes', () => {
     }
   });
 
+  it('PATCH /api/settings sets the meeting models, transcription model and interval, and refuses bad values', async () => {
+    const { built, auth } = await boot();
+    try {
+      const patch = (payload: object) =>
+        built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
+      const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
+      expect(before.json().preferences).toMatchObject({
+        meetingAnalysisModel: 'claude-haiku-4-5-20251001',
+        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingTranscriptionModel: '',
+        meetingAnalyseSeconds: 15,
+      });
+      const res = await patch({
+        meetingAnalysisModel: 'claude-sonnet-5',
+        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingTranscriptionModel: '/models/whisper/small.en',
+        meetingAnalyseSeconds: 40,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().preferences).toMatchObject({
+        meetingAnalysisModel: 'claude-sonnet-5',
+        meetingTranscriptionModel: '/models/whisper/small.en',
+        meetingAnalyseSeconds: 40,
+      });
+      expect((await patch({ meetingAnalysisModel: '' })).statusCode).toBe(400);
+      expect((await patch({ meetingAnalyseSeconds: 4 })).statusCode).toBe(400);
+      expect((await patch({ meetingAnalyseSeconds: 301 })).statusCode).toBe(400);
+      expect((await patch({ meetingTranscriptionModel: '' })).statusCode).toBe(200);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('PATCH /api/settings sets the goal judge prompt, model and refusal limit, and refuses bad values', async () => {
     const { built, auth } = await boot();
     try {

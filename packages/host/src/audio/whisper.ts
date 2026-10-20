@@ -123,6 +123,12 @@ export interface WhisperBackend {
    */
   readonly costModel?: string;
   /**
+   * Switch the speech-to-text model (Settings → Prompts → Meetings). Empty
+   * restores the model this host was configured with. Backends with one fixed
+   * model omit it.
+   */
+  useModel?(model: string): void;
+  /**
    * Synchronous-style: takes a complete utterance buffer (PCM16 mono
    * 16kHz) and returns the final transcript. Streaming partials are
    * out-of-scope here — Groq's REST endpoint isn't streaming, and the
@@ -295,6 +301,10 @@ export class GroqWhisperBackend implements WhisperBackend {
    */
   readonly supportsLivePartials = true;
   readonly costModel = 'whisper-large-v3-turbo';
+  private model = 'whisper-large-v3-turbo';
+  useModel(model: string): void {
+    this.model = model === '' ? 'whisper-large-v3-turbo' : model;
+  }
   private readonly opts: CreateWhisperOptions;
   /** ms timestamps of requests sent in the last minute, for the quota gate. */
   private recent: number[] = [];
@@ -339,7 +349,7 @@ export class GroqWhisperBackend implements WhisperBackend {
     const buildForm = (): FormData => {
       const form = new FormData();
       form.set('file', new Blob([body], { type: 'audio/wav' }), 'utterance.wav');
-      form.set('model', 'whisper-large-v3-turbo');
+      form.set('model', this.model);
       form.set('response_format', 'json');
       // Pin English. Without a language hint Whisper auto-detects per-utterance,
       // which misfires on short/noisy clips and tanks accuracy. (Make this an env
@@ -402,7 +412,7 @@ export class GroqWhisperBackend implements WhisperBackend {
     const mime = format === 'm4a' ? 'audio/mp4' : 'audio/wav';
     const form = new FormData();
     form.set('file', new Blob([audio], { type: mime }), `clip.${format}`);
-    form.set('model', 'whisper-large-v3-turbo');
+    form.set('model', this.model);
     form.set('response_format', 'json');
     form.set('language', 'en');
     form.set('temperature', '0');
@@ -463,6 +473,15 @@ export class LocalWhisperBackend implements WhisperBackend {
   private readonly spawnsOwn: boolean;
   private client?: PersistentWsClient;
   private proc?: ChildProcess;
+  /** Model dir chosen in Settings; empty is `opts.localModelPath`. */
+  private modelPath = '';
+  useModel(model: string): void {
+    if (model === this.modelPath) return;
+    this.modelPath = model;
+    // The sidecar loads its model once, at spawn: drop it so the next request starts one on the new model.
+    if (this.proc && !this.proc.killed) this.proc.kill('SIGTERM');
+    this.proc = undefined;
+  }
   constructor(opts: CreateWhisperOptions) {
     this.opts = opts;
     this.spawnsOwn = !opts.localSidecarUrl || opts.localSidecarUrl.length === 0;
@@ -473,12 +492,22 @@ export class LocalWhisperBackend implements WhisperBackend {
       : `ws://127.0.0.1:${this.port}`;
   }
   private async ensureProcess(): Promise<void> {
-    if (!this.spawnsOwn) return;
+    if (!this.spawnsOwn) {
+      if (this.modelPath !== '')
+        throw new Error(
+          'A transcription model is set in Settings, but this host uses an external whisper sidecar that cannot switch models',
+        );
+      return;
+    }
     if (this.proc && !this.proc.killed) return;
-    if (!this.opts.localModelPath) {
+    const modelPath = this.modelPath !== '' ? this.modelPath : this.opts.localModelPath;
+    if (!modelPath) {
       throw new Error(
         'WHISPER_BACKEND=local with no URL requires WHISPER_MODEL_PATH to spawn the sidecar (NO FALLBACKS).',
       );
+    }
+    if (this.modelPath !== '' && !existsSyncFs(modelPath)) {
+      throw new Error(`Transcription model directory does not exist: ${modelPath}`);
     }
     const { spawn } = await import('node:child_process');
     // `--no-sync`: use the image-baked venv as-is (see kokoro.ts) — plain
@@ -486,7 +515,7 @@ export class LocalWhisperBackend implements WhisperBackend {
     const proc = spawn('uv', ['run', '--no-sync', 'python', '-m', 'patch_whisper_sidecar'], {
       env: {
         ...process.env,
-        WHISPER_MODEL_PATH: this.opts.localModelPath,
+        WHISPER_MODEL_PATH: modelPath,
         WHISPER_SIDECAR_HOST: '127.0.0.1',
         WHISPER_SIDECAR_PORT: String(this.port),
       },

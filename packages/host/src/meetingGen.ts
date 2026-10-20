@@ -6,10 +6,10 @@
 import { z } from 'zod';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
-import { formatMeetingClock } from '@patch/wire';
+import { DEFAULT_MEETING_MODEL, formatMeetingClock } from '@patch/wire';
 import { MeetingAnalysis, type AnalyseInput, type CorrectInput } from './meeting.js';
 
-export const MEETING_MODEL = 'claude-haiku-4-5-20251001';
+export const MEETING_MODEL = DEFAULT_MEETING_MODEL;
 const MEETING_TIMEOUT_MS = 60_000;
 
 export function buildMeetingPrompt(input: AnalyseInput): string {
@@ -69,6 +69,8 @@ export function makeMeetingAnalyser(opts: {
   sdkBackend: SdkBackend;
   runOnAccountWithCredit: RunOnAccountWithCredit;
   cwd: string;
+  /** Read fresh each pass so a Settings change applies mid-meeting. */
+  model: () => string;
 }): (input: AnalyseInput) => Promise<MeetingAnalysis> {
   return async function analyse(input) {
     const result = await opts.runOnAccountWithCredit(
@@ -86,7 +88,7 @@ export function makeMeetingAnalyser(opts: {
             resumeSessionId: undefined,
             abortController,
             oauthAccessToken: accessToken,
-            model: MEETING_MODEL,
+            model: opts.model(),
             permissionMode: 'bypassPermissions',
           })) {
             if (env.type === 'assistant' && env.content) finalText += env.content;
@@ -146,6 +148,8 @@ export function makeMeetingCorrector(opts: {
   sdkBackend: SdkBackend;
   runOnAccountWithCredit: RunOnAccountWithCredit;
   cwd: string;
+  /** Read fresh each pass so a Settings change applies mid-meeting. */
+  model: () => string;
 }): (input: CorrectInput) => Promise<string[]> {
   return async function correct(input) {
     const result = await opts.runOnAccountWithCredit(
@@ -163,7 +167,7 @@ export function makeMeetingCorrector(opts: {
             resumeSessionId: undefined,
             abortController,
             oauthAccessToken: accessToken,
-            model: MEETING_MODEL,
+            model: opts.model(),
             permissionMode: 'bypassPermissions',
           })) {
             if (env.type === 'assistant' && env.content) finalText += env.content;

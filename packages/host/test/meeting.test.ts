@@ -642,6 +642,7 @@ describe('makeMeetingAnalyser', () => {
       sdkBackend: sdk,
       runOnAccountWithCredit: async (_l, run) => run('tok'),
       cwd: '/home/x',
+      model: () => MEETING_MODEL,
     });
     const out = await gen(input);
     expect(out.now.headline).toBe('Ledger split timing');
@@ -651,11 +652,33 @@ describe('makeMeetingAnalyser', () => {
     expect(opts?.prompt).toContain('ship monday');
   });
 
+  it('reads the model fresh on every pass', async () => {
+    const sdk = createMockSdkBackend();
+    for (let i = 0; i < 2; i++)
+      sdk.enqueue([
+        { type: 'assistant', content: JSON.stringify(analysis()) },
+        { type: 'result', sessionId: 's' },
+      ]);
+    let model = 'claude-haiku-4-5-20251001';
+    const gen = makeMeetingAnalyser({
+      sdkBackend: sdk,
+      runOnAccountWithCredit: async (_l, run) => run('tok'),
+      cwd: '/home/x',
+      model: () => model,
+    });
+    await gen(input);
+    expect(sdk.lastOptions()?.model).toBe('claude-haiku-4-5-20251001');
+    model = 'claude-sonnet-5';
+    await gen(input);
+    expect(sdk.lastOptions()?.model).toBe('claude-sonnet-5');
+  });
+
   it('throws when no account can run it, instead of returning an empty update', async () => {
     const gen = makeMeetingAnalyser({
       sdkBackend: createMockSdkBackend(),
       runOnAccountWithCredit: async () => null,
       cwd: '/home/x',
+      model: () => MEETING_MODEL,
     });
     await expect(gen(input)).rejects.toThrow(/no account/);
   });
@@ -670,6 +693,7 @@ describe('makeMeetingAnalyser', () => {
       sdkBackend: sdk,
       runOnAccountWithCredit: async (_l, run) => run('tok'),
       cwd: '/home/x',
+      model: () => MEETING_MODEL,
     });
     await expect(gen(input)).rejects.toThrow(/no JSON/);
   });
@@ -864,8 +888,9 @@ describe('meeting corrector (small model)', () => {
       sdkBackend,
       runOnAccountWithCredit: async (_l, fn) => fn('tok'),
       cwd: '/tmp',
+      model: () => 'claude-sonnet-5',
     });
     expect(await correct(input)).toEqual(['WECA and South Glos']);
-    expect(sdkBackend.lastOptions()?.model).toBe(MEETING_MODEL);
+    expect(sdkBackend.lastOptions()?.model).toBe('claude-sonnet-5');
   });
 });
