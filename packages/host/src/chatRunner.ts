@@ -6919,6 +6919,19 @@ export class Daemon {
   }): Promise<void> {
     const state = this.chatState.get(req.chatId);
     if (!state) throw new ChatNotFoundError(req.chatId);
+    if (req.message.trim().length === 0 && (req.attachments ?? []).length === 0) {
+      this.emit({
+        type: 'chat.error',
+        chatId: req.chatId,
+        error: {
+          code: 'fork_empty_message',
+          message: 'an edited turn needs text or an attachment',
+        },
+        seq: OUT_OF_BAND_SEQ,
+      });
+      this.opts.logger.warn({ chatId: req.chatId, seq: req.seq }, 'fork refused: empty turn');
+      return;
+    }
     const graph = this.ensureBranches(req.chatId);
 
     const sessionId = state.claudeSessionId;
