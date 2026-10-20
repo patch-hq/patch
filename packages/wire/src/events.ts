@@ -269,6 +269,14 @@ export const ChatErrorCode = z.enum([
   // named a branch with no parent (the root), or one that has already sent
   // back once. Mirrors the refusal the `patch_send_back` tool itself gives.
   'send_back_failed',
+  // spec/04 § Handoff budget — a provider switch whose handoff cannot fit the
+  // target model even as a ledger alone, refused BEFORE any request. The chat
+  // stays on the model it was on; the error offers retry, switch back and a
+  // linked fresh chat.
+  'handoff_too_large',
+  // spec/04 § Handoff budget — the target rejected the handoff as over its
+  // context window, once again after one tighter re-plan. Same recovery actions.
+  'handoff_overflow',
 ]);
 export type ChatErrorCode = z.infer<typeof ChatErrorCode>;
 
@@ -798,7 +806,37 @@ export const ChatMessageEvent = z
          * Codex has no auto-compaction of its own for an injected thread).
          */
         trimmedRecords: z.number().int().positive().optional(),
+        /**
+         * Present when the switch went through the budgeted handoff (spec/04
+         * § Handoff budget). `carriedEntries` of `totalEntries` track entries
+         * went over verbatim; the rest are readable on demand from
+         * `omittedFromSeq`–`omittedToSeq`. `summary` says whether a
+         * model-written narrative rode along, and `summaryNote` why not.
+         */
+        handoff: z
+          .object({
+            carriedEntries: z.number().int().nonnegative(),
+            totalEntries: z.number().int().nonnegative(),
+            omittedFromSeq: z.number().int().optional(),
+            omittedToSeq: z.number().int().optional(),
+            estimatedTokens: z.number().int().nonnegative(),
+            availableTokens: z.number().int().nonnegative(),
+            summary: z.boolean(),
+            summaryNote: z.string().optional(),
+            /** True on the divider of an attempt re-planned smaller after an overflow. */
+            replanned: z.literal(true).optional(),
+          })
+          .strict()
+          .optional(),
       })
+      .strict()
+      .optional(),
+    /**
+     * Present ONLY on the quiet row that says this chat was continued in a
+     * linked fresh chat (spec/04 § Handoff budget). Surfaces open `chatId`.
+     */
+    handoffLink: z
+      .object({ chatId: z.string().min(1) })
       .strict()
       .optional(),
     /**
@@ -3921,6 +3959,24 @@ export type ChatLoopRequestEvent = z.infer<typeof ChatLoopRequestEvent>;
  * (spec/14 § Model selector). `ChatStateEvent.model` never arriving is the
  * observable signal — an older host cannot send it.
  */
+/**
+ * spec/04 § Handoff budget — the three recoveries a failed provider switch
+ * offers. `retry` runs the pending message again (re-planned, same handoff
+ * key); `switch_back` returns the chat to the model it was switched from,
+ * resuming that session with only the delta; `linked_chat` plans the same
+ * handoff for the chat's current model, spawns a new chat seeded with it (its
+ * meta records `continuedFrom`) and posts a `handoffLink` row into this one.
+ * The old chat stays intact in every case.
+ */
+export const ChatHandoffRecoverRequestEvent = z
+  .object({
+    type: z.literal('chat.handoff_recover_request'),
+    chatId: z.string().min(1),
+    action: z.enum(['retry', 'switch_back', 'linked_chat']),
+  })
+  .strict();
+export type ChatHandoffRecoverRequestEvent = z.infer<typeof ChatHandoffRecoverRequestEvent>;
+
 export const ChatModelRequestEvent = z
   .object({
     type: z.literal('chat.model_request'),
@@ -8321,6 +8377,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatReminderRequestEvent,
   ChatLoopRequestEvent,
   ChatModelRequestEvent,
+  ChatHandoffRecoverRequestEvent,
   ChatAccountRequestEvent,
   FileWriteEvent,
   PatchFileChangedEvent,
@@ -8602,6 +8659,7 @@ export const EVENT_SCHEMAS = {
   'chat.reminder_request': ChatReminderRequestEvent,
   'chat.loop_request': ChatLoopRequestEvent,
   'chat.model_request': ChatModelRequestEvent,
+  'chat.handoff_recover_request': ChatHandoffRecoverRequestEvent,
   'chat.account_request': ChatAccountRequestEvent,
   'file.write': FileWriteEvent,
   'patch.file_changed': PatchFileChangedEvent,

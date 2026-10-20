@@ -54,7 +54,11 @@ export interface ChatEventEntry {
     | 'system'
     | 'error'
     | 'artifact'
-    | 'permission_mode';
+    | 'permission_mode'
+    | 'handoff'
+    | 'handoff_link';
+  /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
+  linkedChatId?: string;
   role?: 'user' | 'assistant' | 'system';
   content?: string;
   /**
@@ -891,6 +895,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // the conversation. Transcript furniture, not a message: none of the
           // reconcile/preview bookkeeping below applies, and (seq, kind) is its
           // identity so a repeated replay draws it once.
+          // spec/04 § Handoff budget — the provider-switch divider and the row
+          // saying the chat was continued in a linked fresh chat. Furniture:
+          // (seq, kind) is the identity, the host's one-line record the text.
+          if (
+            event.role === 'system' &&
+            (event.sessionChange?.handoff !== undefined || event.handoffLink !== undefined)
+          ) {
+            chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+            const kind = event.handoffLink ? 'handoff_link' : 'handoff';
+            const held = timelines[event.chatId];
+            if (held?.some((e) => e.kind === kind && e.seq === event.seq)) break;
+            pushTimeline(event.chatId, {
+              seq: event.seq,
+              kind,
+              content: event.content,
+              ...(event.handoffLink ? { linkedChatId: event.handoffLink.chatId } : {}),
+              at: Date.now(),
+            });
+            break;
+          }
           if (event.permissionModeChange !== undefined) {
             chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
             const held = timelines[event.chatId];

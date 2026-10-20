@@ -2314,6 +2314,33 @@ function AgentReturnItem({ agentReturn }: { agentReturn: AgentReturn }): React.R
 
 // Memoised for the same reason as ToolGroupItem: entries are immutable, so a
 // row only needs to re-render when its own entry object is replaced.
+/** spec/04 § Handoff budget — the divider row; a link row opens the chat it names. */
+function HandoffRow({ entry }: { entry: ChatEventEntry }): React.ReactElement {
+  const router = useRouter();
+  const colors = useTheme();
+  const linked = entry.kind === 'handoff_link' ? entry.linkedChatId : undefined;
+  return (
+    <View
+      testID={linked ? 'handoff-link' : 'handoff-divider'}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.sm,
+        marginBottom: space.sm,
+      }}
+    >
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.lineSoft }} />
+      <Text
+        onPress={linked ? () => router.push(`/chats/${linked}` as Href) : undefined}
+        style={{ color: colors.ink3, fontSize: textMin, flexShrink: 1, textAlign: 'center' }}
+      >
+        {entry.content}
+      </Text>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.lineSoft }} />
+    </View>
+  );
+}
+
 const TimelineItem = React.memo(function TimelineItem({
   entry,
   chatId,
@@ -2685,6 +2712,12 @@ const TimelineItem = React.memo(function TimelineItem({
       </View>
     );
   }
+  if (entry.kind === 'handoff' || entry.kind === 'handoff_link') {
+    // spec/04 § Handoff budget — the provider-switch divider (the host's own
+    // one-line record) and the row saying the chat was continued in a linked
+    // fresh chat, which opens it.
+    return <HandoffRow entry={entry} />;
+  }
   if (entry.kind === 'permission_mode') {
     // spec/15 § Chat detail — where the permission mode changed: a rule across
     // the stream with the host's one-line record on it. Nothing to open; the
@@ -2739,6 +2772,30 @@ const TimelineItem = React.memo(function TimelineItem({
           >
             {entry.errorCode}
           </Text>
+        ) : null}
+        {entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
+          <View
+            style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginTop: space.sm }}
+          >
+            {(
+              [
+                ['retry', 'Retry'],
+                ['switch_back', 'Switch back'],
+                ['linked_chat', 'Continue in a linked fresh chat'],
+              ] as const
+            ).map(([action, label]) => (
+              <Pressable
+                key={action}
+                accessibilityRole="button"
+                testID={`handoff-${action.replace('_', '-')}`}
+                onPress={() =>
+                  getWs().send({ type: 'chat.handoff_recover_request', chatId, action })
+                }
+              >
+                <Text style={{ color: colors.red, textDecorationLine: 'underline' }}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
         ) : null}
       </View>
     );

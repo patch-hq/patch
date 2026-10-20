@@ -142,7 +142,17 @@ import {
   selectNextTodo,
   TODO_PREFIX,
 } from './todos.js';
+import { execFileSync } from 'node:child_process';
 import { assistantContextTokens, resultContextWindow } from './contextUsage.js';
+import { handoffKey, planHandoff, replanAfterOverflow, type HandoffPlan } from './handoffPlan.js';
+import {
+  budgetFor,
+  dividerCopy,
+  estimateIsOff,
+  instructionHash,
+  trackForPlan,
+  type ModelLimits,
+} from './handoffRun.js';
 import { renderGoalTranscript } from './goalEval.js';
 import {
   isReservedSpecialThread,
@@ -167,6 +177,7 @@ import {
 } from './accountFailover.js';
 import {
   assistantErrorText,
+  HandoffOverflowError,
   isModelOutput,
   setLiveRunPermissionMode,
   TurnFailedError,
@@ -575,6 +586,12 @@ export interface HostOptions {
     folder: string;
     model?: string | null;
   }) => Promise<string | null>;
+  /**
+   * What the catalogue and the harnesses have reported about each model's
+   * context window and output cap (spec/04 § Handoff budget). Absent, every
+   * target is planned against the assumed window and says so on the divider.
+   */
+  modelLimits?: ModelLimits;
   /**
    * The Manager sweep's one decision call (spec/06 § Sweep;
    * `managerSweepGen.ts`). OPTIONAL — `runManagerSweep` refuses rather than
@@ -1954,6 +1971,67 @@ interface ToolRunState {
   closed?: boolean;
 }
 
+/** The numbers a handoff divider shows (the wire `sessionChange.handoff`, plus the model it names). */
+interface HandoffDivider {
+  model: string;
+  carriedEntries: number;
+  totalEntries: number;
+  omittedFromSeq?: number;
+  omittedToSeq?: number;
+  estimatedTokens: number;
+  availableTokens: number;
+  windowKnown: boolean;
+  summary: boolean;
+  summaryNote?: string;
+  replanned: boolean;
+}
+
+interface ActiveHandoff {
+  key: string;
+  prompt: string;
+  instructionHash: string;
+  track: readonly TrackEntry[];
+  targetModel: string | null;
+  planState: { permissionMode?: string; branch?: string; narrative: string | null };
+  summaryNote: string | undefined;
+  windowKnown: boolean;
+  estimatedTokens: number;
+  availableTokens: number;
+  replanned: boolean;
+  /** First input-token count the target reported for this handoff's turn. */
+  reportedInputTokens: number | null;
+}
+
+/** How long the source model gets to write an optional narrative before the handoff goes without. */
+const HANDOFF_NARRATIVE_TIMEOUT_MS = 30_000;
+
+/** The folder's git branch, when it is a git checkout; absent otherwise (not every chat folder is one). */
+function gitBranchOf(folder: string): { branch?: string } {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: folder,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    }).trim();
+    return out ? { branch: out } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A handoff track as plain text, for the first message of a linked fresh chat. */
+function renderSeedTrack(track: readonly TrackEntry[]): string {
+  const lines: string[] = [];
+  for (const { event } of track) {
+    if (event.type === 'chat.message' && event.role !== 'system')
+      lines.push(`${event.role === 'user' ? 'User' : 'Assistant'}: ${event.content}`);
+    else if (event.type === 'chat.tool_call')
+      lines.push(`[tool ${event.tool}] ${JSON.stringify(event.args).slice(0, 300)}`);
+  }
+  return lines.join('\n\n');
+}
+
 export class Daemon {
   readonly chatState: ChatStateMap;
   private readonly opts: Required<
@@ -2202,8 +2280,18 @@ export class Daemon {
        * records to fit its context window (spec/04 § History — Codex has no
        * auto-compaction for an injected thread, unlike Claude Code). */
       trimmedRecords?: number;
+      /** The budgeted handoff behind this switch (spec/04 § Handoff budget), for its divider. */
+      handoff?: HandoffDivider;
     }
   >();
+  /**
+   * The budgeted handoff in flight for each chat (spec/04 § Handoff budget):
+   * what was planned, so an overflow can re-plan once and the first reply can
+   * be verified against it. Cleared when the turn settles.
+   */
+  private readonly activeHandoffs = new Map<string, ActiveHandoff>();
+  /** A retry that must reuse the user message already logged at this seq (see `recoverHandoff`). */
+  private readonly reuseLoggedUserMessage = new Map<string, number>();
   /**
    * Set by `setChatModel(chatId, model, { compact: true })` (spec/04 § History
    * — "switch and compact", the cheap path for huge chats): the NEXT turn's
@@ -8601,7 +8689,14 @@ export class Daemon {
     // gone from the client's copy of this entry. The seq survives that
     // reconciliation (spec/12), so it is the only identity that still works.
     let userMessageSeq: number | undefined;
-    if (userContent !== null) {
+    // spec/04 § Handoff budget — a retried provider switch delivers the message
+    // already in the log; it does not append a second copy of it.
+    const reusesLoggedMessage =
+      retryOfSeq !== undefined && this.reuseLoggedUserMessage.get(chatId) === retryOfSeq;
+    if (reusesLoggedMessage) {
+      this.reuseLoggedUserMessage.delete(chatId);
+      userMessageSeq = retryOfSeq;
+    } else if (userContent !== null) {
       const raw: ChatMessageEvent = {
         type: 'chat.message',
         chatId,
@@ -8741,6 +8836,7 @@ export class Daemon {
     // run on (or whose prior session is genuinely gone).
     let reconstructTrack: readonly TrackEntry[] | undefined;
     let resumeExistingNativeSessionId: string | undefined;
+    let handoffDivider: HandoffDivider | undefined;
     if (isProviderSwitch || isNativeRebuild) {
       const compactRequest = this.pendingCompactSwitch.get(chatId);
       this.pendingCompactSwitch.delete(chatId);
@@ -8795,6 +8891,30 @@ export class Daemon {
         resumeExistingNativeSessionId = switchedClaudeAccount
           ? undefined
           : plan.resumeExistingSessionId;
+        // spec/04 § Handoff budget — a track built from scratch on another
+        // provider is sized to the target's window first; a resume of the
+        // target's own earlier session only carries the delta.
+        if (isProviderSwitch && plan.resumeExistingSessionId === undefined) {
+          const handoff = await this.planProviderHandoff({
+            chatId,
+            state,
+            fullTrack: plan.track,
+            branchId: plan.activeBranchId,
+            prompt,
+            ...(userMessageSeq !== undefined ? { userMessageSeq } : {}),
+          });
+          if (!handoff.ok) {
+            this.aborters.delete(chatId);
+            const error = this.failHandoff(chatId, 'handoff_too_large', handoff.message, {
+              ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}),
+              revertModel: true,
+            });
+            this.closeTurnInHistory(chatId, 'failed', error);
+            return false;
+          }
+          chosen = { ...plan, track: handoff.track };
+          handoffDivider = handoff.divider;
+        }
       }
       reconstructTrack = chosen.track;
       // A rebuild after a restart is not a switch: no divider to announce.
@@ -8810,6 +8930,7 @@ export class Daemon {
           seededMessages: reconstructTrack.filter(
             (t) => t.event.type === 'chat.message' && t.event.role !== 'system',
           ).length,
+          ...(handoffDivider ? { handoff: handoffDivider } : {}),
         });
       }
       // Stash the OUTGOING harness's own session + how much of the track it
@@ -8904,6 +9025,7 @@ export class Daemon {
       // session only up to the shared prefix and land the turn in a fresh
       // session, leaving the parent transcript intact.
       ...(fork ? { fork } : {}),
+      ...(handoffDivider ? { handoffStrict: true } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
@@ -9010,13 +9132,36 @@ export class Daemon {
 
     const run = (async (): Promise<boolean> => {
       try {
-        for await (const env of untilAborted(
-          withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
-          abortController.signal,
-          (env) => env.type === 'tool_result',
-        )) {
-          this.handleEnvelope(chatId, env, userMessageSeq);
+        for (;;) {
+          try {
+            for await (const env of untilAborted(
+              withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
+              abortController.signal,
+              (env) => env.type === 'tool_result',
+            )) {
+              this.handleEnvelope(chatId, env, userMessageSeq);
+            }
+            break;
+          } catch (err) {
+            // spec/04 § Handoff budget — the target refused the handoff as over
+            // its window before producing anything (so no tool ran): re-plan
+            // ONCE, tighter. Never the same request again; a second overflow
+            // is the error below.
+            const tighter =
+              err instanceof HandoffOverflowError
+                ? this.replanHandoff(chatId, state, err, userMessageSeq)
+                : undefined;
+            if (!tighter) throw err;
+            if (targetHarness === 'codex') sdkOpts.codexReseed = { events: tighter };
+            else if (sdkOpts.claudeSessionStore) {
+              sdkOpts.claudeSessionStore.reseed = {
+                events: tighter,
+                model: state.model ?? null,
+              };
+            }
+          }
         }
+        this.verifyHandoff(chatId, sdkOpts.prompt);
         turnOutcome = 'completed';
         // A turn that completes cleanly RECOVERS an errored chat: drop the
         // errored status and the persisted error detail so it no longer counts
@@ -9163,6 +9308,16 @@ export class Daemon {
             state.goalProgress = { ...state.goalProgress, pausedByStop: true };
           this.chatState.setActivity(chatId, 'idle');
           this.emitState(chatId);
+          return false;
+        }
+        if (err instanceof HandoffOverflowError) {
+          turnError = this.failHandoff(
+            chatId,
+            'handoff_overflow',
+            'The target model rejected the handoff as too large, even after re-planning it smaller. The history is untouched; retry, switch back, or continue in a linked fresh chat.',
+            { ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}) },
+          );
+          this.opts.logger.warn({ chatId, err: err.message }, 'handoff overflowed twice');
           return false;
         }
         const errMsg = (err as Error).message ?? String(err);
@@ -10531,6 +10686,17 @@ export class Daemon {
   }
 
   private handleEnvelopeInner(chatId: string, env: SdkEnvelope, userMessageSeq?: number): void {
+    // spec/04 § Handoff budget — what the target reports about itself: its real
+    // window (learned for the next switch) and the input tokens of the first
+    // request after a handoff (checked against the estimate by `verifyHandoff`).
+    const limitsModel = this.chatState.get(chatId)?.model;
+    if (env.tokenUsage?.contextWindow !== undefined && limitsModel)
+      this.opts.modelLimits?.note(limitsModel, { contextWindow: env.tokenUsage.contextWindow });
+    const active = this.activeHandoffs.get(chatId);
+    if (active && active.reportedInputTokens === null) {
+      const reported = env.tokenUsage?.inputTokens ?? assistantContextTokens(env.raw)?.tokens;
+      if (reported !== undefined) active.reportedInputTokens = reported;
+    }
     if (env.sessionId) {
       const cur = this.chatState.get(chatId);
       if (cur && cur.claudeSessionId !== env.sessionId) {
@@ -10601,6 +10767,13 @@ export class Daemon {
             : {}),
           updatedAt: this.opts.now(),
         }));
+        if (providerSwitch?.handoff) {
+          // The target accepted the handoff (its session exists, the track is in it).
+          this.opts.metaStore.update(chatId, (m) => ({
+            ...m,
+            ...(m.handoff ? { handoff: { ...m.handoff, state: 'sent' as const } } : {}),
+          }));
+        }
         if (providerSwitch) {
           // A quiet divider, not a notice — the fact rides on the field, not
           // on eye-catching text (spec/04 § History, unlike a permission-mode
@@ -10609,7 +10782,21 @@ export class Daemon {
             type: 'chat.message',
             chatId,
             role: 'system',
-            content: '',
+            content: providerSwitch.handoff
+              ? dividerCopy({
+                  model: providerSwitch.handoff.model,
+                  carried: providerSwitch.handoff.carriedEntries,
+                  total: providerSwitch.handoff.totalEntries,
+                  estimatedTokens: providerSwitch.handoff.estimatedTokens,
+                  availableTokens: providerSwitch.handoff.availableTokens,
+                  windowKnown: providerSwitch.handoff.windowKnown,
+                  summary: providerSwitch.handoff.summary,
+                  ...(providerSwitch.handoff.summaryNote !== undefined
+                    ? { summaryNote: providerSwitch.handoff.summaryNote }
+                    : {}),
+                  replanned: providerSwitch.handoff.replanned,
+                })
+              : '',
             seq: this.bumpSeq(chatId),
             createdAt: this.opts.now(),
             sessionChange: {
@@ -10618,6 +10805,27 @@ export class Daemon {
               seededMessages: providerSwitch.seededMessages,
               ...(providerSwitch.trimmedRecords
                 ? { trimmedRecords: providerSwitch.trimmedRecords }
+                : {}),
+              ...(providerSwitch.handoff
+                ? {
+                    handoff: {
+                      carriedEntries: providerSwitch.handoff.carriedEntries,
+                      totalEntries: providerSwitch.handoff.totalEntries,
+                      ...(providerSwitch.handoff.omittedFromSeq !== undefined
+                        ? {
+                            omittedFromSeq: providerSwitch.handoff.omittedFromSeq,
+                            omittedToSeq: providerSwitch.handoff.omittedToSeq!,
+                          }
+                        : {}),
+                      estimatedTokens: providerSwitch.handoff.estimatedTokens,
+                      availableTokens: providerSwitch.handoff.availableTokens,
+                      summary: providerSwitch.handoff.summary,
+                      ...(providerSwitch.handoff.summaryNote !== undefined
+                        ? { summaryNote: providerSwitch.handoff.summaryNote }
+                        : {}),
+                      ...(providerSwitch.handoff.replanned ? { replanned: true as const } : {}),
+                    },
+                  }
                 : {}),
             },
           });
@@ -13048,6 +13256,370 @@ export class Daemon {
     );
   }
 
+  /**
+   * spec/04 § Handoff budget — size a cross-provider handoff to the TARGET's
+   * window before anything is sent. Whole track if it fits; otherwise the
+   * ledger plus the widest recent window that does, plus a model-written
+   * narrative only if the source can produce one right now. `ok: false` is a
+   * refusal: nothing has been sent and the caller must say so.
+   */
+  private async planProviderHandoff(o: {
+    chatId: string;
+    state: ChatState;
+    fullTrack: readonly TrackEntry[];
+    branchId: string;
+    prompt: string;
+    userMessageSeq?: number;
+  }): Promise<
+    { ok: true; track: TrackEntry[]; divider: HandoffDivider } | { ok: false; message: string }
+  > {
+    const { chatId, state, fullTrack, prompt } = o;
+    const targetModel = state.model ?? null;
+    const { budget, windowKnown } = budgetFor(
+      this.opts.modelLimits?.get(targetModel),
+      this.harnessConfig,
+    );
+    const planState = {
+      permissionMode: this.chatPermissionMode(chatId),
+      ...gitBranchOf(state.folder),
+      narrative: null as string | null,
+    };
+    let plan = planHandoff(chatId, fullTrack, budget, {
+      latestInstruction: prompt,
+      ...planState,
+    });
+    let summaryNote: string | undefined = 'only the recent turns were needed';
+    if (plan.ok && plan.omittedEntries > 0) {
+      const narrative = await this.handoffNarrative(chatId, state);
+      summaryNote = narrative.note;
+      if (narrative.text !== null) {
+        planState.narrative = narrative.text;
+        plan = planHandoff(chatId, fullTrack, budget, { latestInstruction: prompt, ...planState });
+      }
+    }
+    if (!plan.ok) return { ok: false, message: plan.message };
+    const key = handoffKey(
+      chatId,
+      o.branchId,
+      fullTrack[0]?.record.seq ?? -1,
+      targetModel ?? 'default',
+    );
+    this.activeHandoffs.set(chatId, {
+      key,
+      prompt,
+      instructionHash: instructionHash(prompt),
+      track: fullTrack,
+      targetModel,
+      planState,
+      summaryNote: planState.narrative === null ? summaryNote : undefined,
+      windowKnown,
+      estimatedTokens: plan.estimatedTokens,
+      availableTokens: plan.availableTokens,
+      replanned: false,
+      reportedInputTokens: null,
+    });
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      handoff: {
+        key,
+        state: 'planned',
+        targetModel,
+        prompt,
+        estimatedTokens: plan.ok ? plan.estimatedTokens : 0,
+        availableTokens: plan.availableTokens,
+        instructionHash: instructionHash(prompt),
+        ...(o.userMessageSeq !== undefined ? { userMessageSeq: o.userMessageSeq } : {}),
+      },
+    }));
+    return {
+      ok: true,
+      track: trackForPlan(chatId, plan, planState, this.opts.now()),
+      divider: this.dividerFor(chatId, plan, fullTrack.length),
+    };
+  }
+
+  private dividerFor(
+    chatId: string,
+    plan: Extract<HandoffPlan, { ok: true }>,
+    totalEntries: number,
+  ): HandoffDivider {
+    const active = this.activeHandoffs.get(chatId)!;
+    return {
+      model: active.targetModel ?? 'default',
+      carriedEntries: plan.carried.length,
+      totalEntries,
+      ...(plan.omittedEntries > 0
+        ? { omittedFromSeq: plan.ledger.fromSeq, omittedToSeq: plan.carriedFromSeq - 1 }
+        : {}),
+      estimatedTokens: plan.estimatedTokens,
+      availableTokens: plan.availableTokens,
+      windowKnown: active.windowKnown,
+      summary: active.planState.narrative !== null,
+      ...(active.summaryNote !== undefined ? { summaryNote: active.summaryNote } : {}),
+      replanned: active.replanned,
+    };
+  }
+
+  /** The optional model-written summary: only when the source answers within the timeout. */
+  private async handoffNarrative(
+    chatId: string,
+    state: ChatState,
+  ): Promise<{ text: string | null; note: string | undefined }> {
+    if (!this.opts.generateDigest || !state.claudeSessionId)
+      return { text: null, note: 'no summariser is configured' };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const text = await Promise.race([
+        this.opts.generateDigest({
+          chatId,
+          resumeSessionId: state.claudeSessionId,
+          folder: state.folder,
+          model: state.model ?? null,
+        }),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), HANDOFF_NARRATIVE_TIMEOUT_MS);
+        }),
+      ]);
+      return text === null
+        ? { text: null, note: 'the previous model could not write one in time' }
+        : { text, note: undefined };
+    } catch (err) {
+      this.opts.logger.warn(
+        { chatId, err: (err as Error).message },
+        'handoff narrative unavailable — continuing from the deterministic ledger',
+      );
+      return { text: null, note: `the previous model was unavailable: ${(err as Error).message}` };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * One tighter plan after the target said the handoff was over its window.
+   * `undefined` means there is nothing smaller to try (already re-planned
+   * once, or the plan would fall below a useful size): the caller ends in an
+   * error rather than resending.
+   */
+  private replanHandoff(
+    chatId: string,
+    state: ChatState,
+    err: HandoffOverflowError,
+    userMessageSeq: number | undefined,
+  ): TrackEntry[] | undefined {
+    const active = this.activeHandoffs.get(chatId);
+    if (!active || active.replanned) return undefined;
+    if (err.reportedLimit !== undefined && active.targetModel)
+      this.opts.modelLimits?.note(active.targetModel, { contextWindow: err.reportedLimit });
+    const tighter = replanAfterOverflow(
+      { estimatedTokens: active.estimatedTokens, availableTokens: active.availableTokens },
+      err.reportedLimit,
+    );
+    if (!tighter) return undefined;
+    const { budget } = budgetFor(
+      this.opts.modelLimits?.get(active.targetModel),
+      this.harnessConfig,
+    );
+    const plan = planHandoff(chatId, active.track, budget, {
+      latestInstruction: active.prompt,
+      ...active.planState,
+      maxTokensOverride: tighter.maxTokensOverride,
+    });
+    if (!plan.ok) return undefined;
+    active.replanned = true;
+    active.estimatedTokens = plan.estimatedTokens;
+    active.availableTokens = plan.availableTokens;
+    const track = trackForPlan(chatId, plan, active.planState, this.opts.now());
+    const running = this.runningProviderSwitch.get(chatId);
+    if (running) {
+      running.handoff = this.dividerFor(chatId, plan, active.track.length);
+      running.seededMessages = track.filter(
+        (t) => t.event.type === 'chat.message' && t.event.role !== 'system',
+      ).length;
+      delete running.trimmedRecords;
+    }
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      ...(m.handoff
+        ? {
+            handoff: {
+              ...m.handoff,
+              state: 'planned' as const,
+              replanned: true,
+              estimatedTokens: plan.estimatedTokens,
+              availableTokens: plan.availableTokens,
+            },
+          }
+        : {}),
+    }));
+    // The re-run starts on a fresh thread: the chat is not on the half-made one.
+    void state;
+    this.opts.logger.warn(
+      { chatId, userMessageSeq: userMessageSeq ?? null, estimatedTokens: plan.estimatedTokens },
+      'handoff overflowed — re-planned tighter, once',
+    );
+    return track;
+  }
+
+  /**
+   * A handoff that cannot go ahead, said plainly with the recoveries a surface
+   * offers (retry, switch back, linked fresh chat). `revertModel` returns a
+   * refused (never-sent) switch to the model it left.
+   */
+  private failHandoff(
+    chatId: string,
+    code: 'handoff_too_large' | 'handoff_overflow',
+    message: string,
+    o: { causeSeq?: number; revertModel?: boolean },
+  ): { code: ChatErrorCode; message: string } {
+    const error = { code, message };
+    this.emit({
+      type: 'chat.error',
+      chatId,
+      error,
+      seq: this.bumpSeq(chatId),
+      ...(o.causeSeq !== undefined ? { causeSeq: o.causeSeq } : {}),
+    });
+    const s = this.chatState.get(chatId);
+    if (o.revertModel && s) {
+      const from = this.opts.metaStore.read(chatId)?.switchedFrom;
+      if (from?.model) {
+        s.model = from.model;
+        this.opts.metaStore.update(chatId, (m) => {
+          const { switchedFrom: _drop, ...rest } = m;
+          void _drop;
+          return { ...rest, model: from.model! };
+        });
+      }
+    }
+    this.activeHandoffs.delete(chatId);
+    this.runningProviderSwitch.delete(chatId);
+    this.chatState.setLastError(chatId, { ...error, at: this.opts.now() });
+    this.chatState.setActivity(chatId, 'idle');
+    this.emitState(chatId);
+    return error;
+  }
+
+  /** The target answered: write `handoff.verified` and close the handoff's state. */
+  private verifyHandoff(chatId: string, deliveredPrompt: string): void {
+    const active = this.activeHandoffs.get(chatId);
+    if (!active) return;
+    this.activeHandoffs.delete(chatId);
+    const delivered = instructionHash(deliveredPrompt);
+    this.logRecord(chatId, {
+      k: 'handoff.verified',
+      key: active.key,
+      replyReceived: true,
+      estimatedTokens: active.estimatedTokens,
+      reportedInputTokens: active.reportedInputTokens,
+      flagged: estimateIsOff(active.estimatedTokens, active.reportedInputTokens),
+      instructionHash: delivered,
+    });
+    if (delivered !== active.instructionHash)
+      this.opts.logger.error(
+        { chatId, planned: active.instructionHash, delivered },
+        'handoff instruction was altered before delivery',
+      );
+    this.opts.metaStore.update(chatId, (m) => {
+      const { switchedFrom: _drop, ...rest } = m;
+      void _drop;
+      return {
+        ...rest,
+        ...(m.handoff ? { handoff: { ...m.handoff, state: 'confirmed' as const } } : {}),
+      };
+    });
+  }
+
+  /**
+   * The recoveries a failed provider switch offers (spec/04 § Handoff budget).
+   * Refused loudly when there is nothing to recover.
+   */
+  async recoverHandoff(
+    chatId: string,
+    action: 'retry' | 'switch_back' | 'linked_chat',
+  ): Promise<void> {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
+    const meta = this.opts.metaStore.read(chatId);
+    const handoff = meta?.handoff;
+    if (!handoff || handoff.state === 'confirmed')
+      throw new Error('This chat has no failed provider switch to recover from');
+    if (action === 'switch_back') {
+      const from = meta?.switchedFrom;
+      const current = this.chatState.get(chatId)?.model ?? null;
+      if (!from?.model) throw new Error('The model this chat was switched from is not recorded');
+      if (current !== from.model) await this.setChatModel(chatId, from.model);
+      this.opts.metaStore.update(chatId, (m) => {
+        const { handoff: _h, switchedFrom: _s, ...rest } = m;
+        void _h;
+        void _s;
+        return rest;
+      });
+      return;
+    }
+    if (action === 'retry') {
+      if (handoff.targetModel && state.model !== handoff.targetModel)
+        await this.setChatModel(chatId, handoff.targetModel);
+      if (handoff.userMessageSeq !== undefined)
+        this.reuseLoggedUserMessage.set(chatId, handoff.userMessageSeq);
+      await this.sendInput({
+        chatId,
+        message: handoff.prompt,
+        localId: `handoff-retry-${chatId}-${this.opts.now()}`,
+        ...(handoff.userMessageSeq !== undefined ? { retryOfSeq: handoff.userMessageSeq } : {}),
+      });
+      return;
+    }
+    const model = handoff.targetModel ?? state.model ?? null;
+    const fullTrack = meta
+      ? readTrack(
+          this.chatLog,
+          chatId,
+          meta,
+          meta.activeBranchId ?? this.branchIdFor(chatId),
+          -1,
+        ).filter(
+          (t) => handoff.userMessageSeq === undefined || t.record.seq < handoff.userMessageSeq,
+        )
+      : [];
+    const { budget } = budgetFor(this.opts.modelLimits?.get(model), this.harnessConfig);
+    const overflowed = state.lastError?.code === 'handoff_overflow';
+    const retighten = overflowed
+      ? replanAfterOverflow({
+          estimatedTokens: handoff.estimatedTokens,
+          availableTokens: handoff.availableTokens,
+        })
+      : null;
+    const plan = planHandoff(chatId, fullTrack, budget, {
+      latestInstruction: handoff.prompt,
+      permissionMode: this.chatPermissionMode(chatId),
+      ...gitBranchOf(state.folder),
+      narrative: null,
+      ...(retighten ? { maxTokensOverride: retighten.maxTokensOverride } : {}),
+    });
+    if (!plan.ok) throw new Error(plan.message);
+    const seed = trackForPlan(
+      chatId,
+      plan,
+      { permissionMode: this.chatPermissionMode(chatId), narrative: null },
+      this.opts.now(),
+    );
+    const newChatId = await this.spawnChat({
+      folder: state.folder,
+      ...(model ? { model } : {}),
+      prompt: [renderSeedTrack(seed), '[The task]', handoff.prompt].join('\n\n'),
+    });
+    this.opts.metaStore.update(newChatId, (m) => ({ ...m, continuedFrom: { chatId } }));
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: 'Continued in a linked fresh chat',
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+      handoffLink: { chatId: newChatId },
+    });
+  }
+
   private async planHarnessReconstruction(
     chatId: string,
     targetHarness: HarnessId,
@@ -14031,8 +14603,21 @@ export class Daemon {
       // intent must not silently fire on a later, differently-requested turn.
       this.pendingCompactSwitch.delete(chatId);
     }
+    // spec/04 § Handoff budget — remember the model a provider switch leaves,
+    // so a failed switch can go back. Kept from the FIRST crossing (A→B→C is
+    // still "from A"); dropped when the chat is back on its session's provider.
+    const sessionHarness = harnessOfSessionId(s.claudeSessionId);
+    const crossing = sessionHarness !== undefined && sessionHarness !== harnessOfModel(model);
+    const leaving = s.model ?? null;
     s.model = model;
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, model }));
+    this.opts.metaStore.update(chatId, (m) => {
+      const { switchedFrom: kept, ...rest } = m;
+      return {
+        ...rest,
+        model,
+        ...(crossing ? { switchedFrom: kept ?? { model: leaving } } : {}),
+      };
+    });
     // Approval mode follows the provider: a mode the new model cannot run moves
     // to its static closest (wire `closestPermissionModeForModel`), recorded as
     // an automatic change so the transcript says it was not the user's pick.

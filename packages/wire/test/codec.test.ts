@@ -530,6 +530,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     chatId: 'c1',
     model: 'claude-opus-4-1',
   },
+  'chat.handoff_recover_request': {
+    type: 'chat.handoff_recover_request',
+    chatId: 'c1',
+    action: 'switch_back',
+  },
   'chat.account_request': {
     type: 'chat.account_request',
     chatId: 'c1',

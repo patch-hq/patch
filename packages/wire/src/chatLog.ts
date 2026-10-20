@@ -132,6 +132,23 @@ export const LogRecordBody = z.discriminatedUnion('k', [
       seed: z.record(z.unknown()).optional(),
     })
     .strict(),
+  /**
+   * spec/04 § Handoff budget — written after the target's first reply to a
+   * budgeted handoff: the reply arrived, the input tokens it reported against
+   * what the host estimated (`flagged` when more than 2x apart), and a hash of
+   * the instruction as delivered.
+   */
+  z
+    .object({
+      k: z.literal('handoff.verified'),
+      key: z.string().min(1),
+      replyReceived: z.literal(true),
+      estimatedTokens: z.number().int().nonnegative(),
+      reportedInputTokens: z.number().int().nonnegative().nullable(),
+      flagged: z.boolean(),
+      instructionHash: z.string().length(64),
+    })
+    .strict(),
   z
     .object({
       k: z.literal('permission.request'),

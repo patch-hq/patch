@@ -195,6 +195,43 @@ export const ChatMeta = z
           .strict(),
       )
       .optional(),
+    /**
+     * spec/04 § Handoff budget — the provider-switch handoff in flight or last
+     * run: its idempotency key and where it got to (planned → sent →
+     * confirmed), so a retry or a host restart delivers the pending message
+     * once.
+     */
+    handoff: z
+      .object({
+        key: z.string().min(1),
+        state: z.enum(['planned', 'sent', 'confirmed']),
+        targetModel: z.string().min(1).nullable(),
+        /** The pending message, so Retry survives a host restart. */
+        prompt: z.string(),
+        estimatedTokens: z.number().int().nonnegative(),
+        availableTokens: z.number().int().nonnegative(),
+        instructionHash: z.string().length(64),
+        /** The turn's own seq, so a retry reuses the logged message rather than appending another. */
+        userMessageSeq: z.number().int().nonnegative().optional(),
+        /** Set after one overflow re-plan; a second ends the switch in an error. */
+        replanned: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    /**
+     * The model a cross-provider switch left (spec/04 § Handoff budget), kept
+     * until the target has answered — what Switch back returns to. Cleared
+     * when the handoff is confirmed or the chat moves back to that provider.
+     */
+    switchedFrom: z
+      .object({ model: z.string().min(1).nullable() })
+      .strict()
+      .optional(),
+    /** The chat this one was continued from as a linked fresh chat (spec/04 § Handoff budget). */
+    continuedFrom: z
+      .object({ chatId: z.string().min(1) })
+      .strict()
+      .optional(),
     /** Which track the chat IS right now (spec/04 § Branching). */
     activeBranchId: z.string().min(1).optional(),
     /** Per-chat monotonic sequence — next value to stamp. Strictly increasing. */

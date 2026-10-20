@@ -570,7 +570,11 @@ export interface ChatEventEntry {
     | 'artifact'
     | 'error'
     | 'compaction'
-    | 'permission_mode';
+    | 'permission_mode'
+    | 'handoff'
+    | 'handoff_link';
+  /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
+  linkedChatId?: string;
   role?: 'user' | 'assistant' | 'system';
   content?: string;
   /**
@@ -1884,6 +1888,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.permissionModeChangeAutomatic
                 ? { permissionModeChangeAutomatic: true }
                 : {}),
+              at: Date.now(),
+            });
+            break;
+          }
+          // spec/04 § Handoff budget — the provider-switch divider and the row
+          // saying the chat was continued in a linked fresh chat. Furniture, like
+          // a mode change: (seq, kind) is the identity, the host's one-line
+          // record is the text.
+          if (
+            event.role === 'system' &&
+            (event.sessionChange?.handoff !== undefined || event.handoffLink !== undefined)
+          ) {
+            chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+            const kind = event.handoffLink ? 'handoff_link' : 'handoff';
+            const list = timelines[event.chatId];
+            if (list?.some((e) => e.kind === kind && e.seq === event.seq)) break;
+            pushTimeline(event.chatId, {
+              seq: event.seq,
+              kind,
+              content: event.content,
+              ...(event.handoffLink ? { linkedChatId: event.handoffLink.chatId } : {}),
               at: Date.now(),
             });
             break;
