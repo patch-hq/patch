@@ -65,10 +65,15 @@ describe('sanitizeTitle', () => {
     expect(sanitizeTitle('Dark   Mode\tToggle')).toBe('Dark Mode Toggle');
   });
 
-  it('caps the length at ~48 chars with an ellipsis', () => {
-    const out = sanitizeTitle('A'.repeat(200));
+  it('keeps a long but sensible title whole (the window title and Foreman read it)', () => {
+    const t = 'Summarize UK Bus Lane Enforcement Guidance for councils';
+    expect(sanitizeTitle(t)).toBe(t);
+  });
+
+  it('caps a runaway title at 120 chars with an ellipsis', () => {
+    const out = sanitizeTitle('A'.repeat(300));
     expect(out).not.toBeNull();
-    expect((out as string).length).toBeLessThanOrEqual(48);
+    expect((out as string).length).toBeLessThanOrEqual(120);
     expect((out as string).endsWith('…')).toBe(true);
   });
 
