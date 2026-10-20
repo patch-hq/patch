@@ -11,6 +11,11 @@ import { z } from 'zod';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
+} from './meeting-prompts.js';
+import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
@@ -2027,6 +2032,12 @@ export const SharedSettings = z
     sweepModel: z.string().min(1),
     /** The instructions the message-link Summarise button runs with; "Reset to default" writes `DEFAULT_LINK_SUMMARY_PROMPT` back. */
     linkSummaryPrompt: z.string().min(1),
+    /** Meeting-mode instructions for the live "now" block; "Reset to default" writes `DEFAULT_MEETING_NOW_PROMPT` back. */
+    meetingNowPrompt: z.string().min(1),
+    /** Meeting-mode instructions for the topic notes (`DEFAULT_MEETING_NOTES_PROMPT`). */
+    meetingNotesPrompt: z.string().min(1),
+    /** Meeting-mode instructions for action cards (`DEFAULT_MEETING_ACTIONS_PROMPT`). */
+    meetingActionsPrompt: z.string().min(1),
     // ---- goals (spec/04 § Goals), applied on every host ----
     /** The goal judge's instructions; "Reset to default" writes `DEFAULT_GOAL_EVAL_PROMPT` back. */
     goalEvalPrompt: z.string().min(1),
@@ -2129,6 +2140,9 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Mid-size by default (spec/06 § Settings).
   sweepModel: 'claude-sonnet-5',
   linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
+  meetingNowPrompt: DEFAULT_MEETING_NOW_PROMPT,
+  meetingNotesPrompt: DEFAULT_MEETING_NOTES_PROMPT,
+  meetingActionsPrompt: DEFAULT_MEETING_ACTIONS_PROMPT,
   goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT,
   watchCheckInPrompt: DEFAULT_WATCH_CHECK_IN_PROMPT,
   goalModel: DEFAULT_GOAL_MODEL,

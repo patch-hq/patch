@@ -63,6 +63,9 @@ import {
   type SharedSettings,
   type SharedSettingsPatch,
   DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
   QUESTION_EXPIRY_SECONDS_DEFAULT,
@@ -109,7 +112,7 @@ import { DEFAULT_CHECK_IN_MS } from './watch.js';
 import { createMockSdkBackend, createRealSdkBackend, type SdkBackend } from './sdkBackend.js';
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
-import { MeetingManager } from './meeting.js';
+import { MeetingManager, type MeetingPrompts } from './meeting.js';
 import { makeMeetingAnalyser, makeMeetingCorrector } from './meetingGen.js';
 import { makeSweepDecider } from './managerSweepGen.js';
 import { makeGoalEvaluator } from './goalEval.js';
@@ -699,6 +702,11 @@ async function startHost(
    */
   let managerContextWindow: number = persistedHostState.managerContextWindow ?? 200;
   // Settings → Goals (spec/04 § Goals): how the goal judge is asked, and when a goal gives up on a refusing agent.
+  let meetingPrompts: MeetingPrompts = {
+    now: DEFAULT_MEETING_NOW_PROMPT,
+    notes: DEFAULT_MEETING_NOTES_PROMPT,
+    actions: DEFAULT_MEETING_ACTIONS_PROMPT,
+  };
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
   // Settings → Prompts: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
@@ -1595,6 +1603,11 @@ async function startHost(
       hostStateStore.update({ goalEvalPrompt, goalModel, goalRefusalLimit });
       logger.info({ goalModel, goalRefusalLimit }, 'goal settings changed');
     }
+    meetingPrompts = {
+      now: shared.meetingNowPrompt,
+      notes: shared.meetingNotesPrompt,
+      actions: shared.meetingActionsPrompt,
+    };
     if (shared.watchCheckInPrompt !== watchCheckInPrompt) {
       watchCheckInPrompt = shared.watchCheckInPrompt;
       daemon.setWatchCheckIn({ intervalMs: DEFAULT_CHECK_IN_MS, prompt: watchCheckInPrompt });
@@ -3977,6 +3990,7 @@ async function startHost(
         .map((l) => l.trim())
         .filter((l) => l !== '' && !l.startsWith('#'));
     },
+    prompts: () => meetingPrompts,
     emit,
     runAction: async (chatId, message) => {
       await daemon.sendInput({ chatId, message, localId: randomUUID(), fromUser: true });

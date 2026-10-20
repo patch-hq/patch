@@ -332,3 +332,44 @@ test.describe('meeting mode — capture with a real (fake) microphone', () => {
     expect(events.at(-1)).toMatchObject({ type: 'meeting.control_request', action: 'end' });
   });
 });
+
+test.describe('meeting mode — editing prompts mid-call', () => {
+  test('a section label opens its prompt, and Save writes it without leaving the meeting', async ({
+    page,
+  }) => {
+    const writes: Record<string, unknown>[] = [];
+    await page.route('**/api/settings', async (route) => {
+      if (route.request().method() !== 'PATCH') return route.fallback();
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      writes.push(body);
+      const prefs = await page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __preferencesStore: { getState: () => { preferences: object } };
+            }
+          ).__preferencesStore.getState().preferences,
+      );
+      await route.fulfill({ json: { preferences: { ...prefs, ...body } } });
+    });
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-prompt-editor')).toHaveCount(0);
+    await page.getByTestId('meeting-edit-now').click();
+    const box = page.getByTestId('meeting-prompt-text');
+    await expect(box).toContainText('headline');
+    await box.fill('Only a headline.');
+    await page.getByTestId('meeting-prompt-save').click();
+    await expect(page.getByTestId('meeting-prompt-editor')).toHaveCount(0);
+    expect(writes).toEqual([{ meetingNowPrompt: 'Only a headline.' }]);
+    // still on the meeting page, still live
+    await expect(page.getByTestId('meeting-panel')).toBeVisible();
+    // the always-present Prompts button reaches the other two via tabs
+    await page.getByTestId('meeting-prompts').click();
+    await page.getByTestId('meeting-prompt-tab-actions').click();
+    await expect(page.getByTestId('meeting-prompt-text')).toContainText('"actions"');
+    await page.getByTestId('meeting-prompt-reset').click();
+    await expect(page.getByTestId('meeting-prompt-editor')).toHaveCount(0);
+    expect(writes).toHaveLength(2);
+    expect(Object.keys(writes[1]!)).toEqual(['meetingActionsPrompt']);
+  });
+});

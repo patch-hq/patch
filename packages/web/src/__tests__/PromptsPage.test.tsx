@@ -5,6 +5,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
   DEFAULT_SWEEP_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
@@ -95,5 +98,22 @@ describe('Settings → Prompts', () => {
     expect(screen.getByTestId('prompt-sweep-mode-default').getAttribute('aria-pressed')).toBe(
       'true',
     );
+  });
+
+  it('has a Meetings group with the now, notes and actions prompts, editable', async () => {
+    const server = serve();
+    renderSettings('/settings/prompts');
+    const group = await screen.findByTestId('settings-prompts-meetings');
+    expect(group).toBeTruthy();
+    const shown = (id: string) => screen.getByTestId(`prompt-${id}-shown`).textContent;
+    expect(shown('meeting-now')).toBe(DEFAULT_MEETING_NOW_PROMPT);
+    expect(shown('meeting-notes')).toBe(DEFAULT_MEETING_NOTES_PROMPT);
+    expect(shown('meeting-actions')).toBe(DEFAULT_MEETING_ACTIONS_PROMPT);
+    fireEvent.click(screen.getByTestId('prompt-meeting-notes-mode-custom'));
+    fireEvent.change(screen.getByTestId('prompt-meeting-notes-text'), {
+      target: { value: 'Terse.' },
+    });
+    fireEvent.click(screen.getByTestId('prompt-meeting-notes-save'));
+    await waitFor(() => expect(server.writes).toEqual([{ meetingNotesPrompt: 'Terse.' }]));
   });
 });

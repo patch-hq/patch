@@ -3,13 +3,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WireEvent } from '@patch/wire';
+import {
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
+  type WireEvent,
+} from '@patch/wire';
 import {
   MeetingManager,
   MeetingError,
   type AnalyseInput,
   type CorrectInput,
   type MeetingAnalysis,
+  type MeetingPrompts,
 } from '../src/meeting.js';
 import {
   buildMeetingPrompt,
@@ -24,6 +30,12 @@ import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { handleServerEvent } from '../src/index.js';
 
 const logger = pino({ level: 'silent' });
+
+const PROMPTS: MeetingPrompts = {
+  now: DEFAULT_MEETING_NOW_PROMPT,
+  notes: DEFAULT_MEETING_NOTES_PROMPT,
+  actions: DEFAULT_MEETING_ACTIONS_PROMPT,
+};
 
 const analysis = (over: Partial<MeetingAnalysis> = {}): MeetingAnalysis => ({
   now: { headline: 'Ledger split timing', bullets: ['Black Friday risk'], who: 'Dev' },
@@ -50,6 +62,7 @@ describe('MeetingManager', () => {
       dir,
       transcribe,
       analyse,
+      prompts: () => PROMPTS,
       runAction,
       logger,
       emit: (e) => events.push(e),
@@ -108,6 +121,7 @@ describe('MeetingManager', () => {
       newLines: [{ clock: '00:05', speaker: 'Them', text: "Hi, I'm Priya" }],
       final: false,
       elapsedMs: 5000,
+      prompts: PROMPTS,
     });
     expect(p).toContain('by name');
     expect(p).toContain('never "the user"');
@@ -144,6 +158,7 @@ describe('MeetingManager', () => {
   it('settings default, are tunable mid-meeting, and set the analysis interval', () => {
     const intervals: number[] = [];
     const m = new MeetingManager({
+      prompts: () => PROMPTS,
       dir,
       transcribe,
       analyse,
@@ -424,6 +439,7 @@ describe('meetingGen', () => {
       newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
       final: false,
       elapsedMs: 5000,
+      prompts: PROMPTS,
     };
     expect(buildMeetingPrompt(base)).toContain('"summary":null');
     expect(buildMeetingPrompt({ ...base, final: true })).toContain('one-line outcome');
@@ -441,11 +457,60 @@ describe('meetingGen', () => {
       newLines: [{ clock: '20:00', speaker: 'Them', text: 'x' }],
       final: false,
       elapsedMs: 1_200_000,
+      prompts: PROMPTS,
     });
     expect(p).toMatch(/main thrust/);
     expect(p).toMatch(/never repeat/i);
     expect(p).toMatch(/older topics[^]*shorter/i);
     expect(p).toContain('"atSeconds":90');
+  });
+});
+
+describe('editable meeting prompts', () => {
+  const input: AnalyseInput = {
+    chatId: 'c',
+    previous: { now: null, topics: [], actions: [] },
+    newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
+    final: false,
+    elapsedMs: 5000,
+    prompts: { now: 'NOW-RULES', notes: 'NOTES-RULES', actions: 'ACTION-RULES' },
+  };
+
+  it('puts each custom block in the analysis prompt and drops the defaults', () => {
+    const p = buildMeetingPrompt(input);
+    expect(p).toContain('NOW-RULES');
+    expect(p).toContain('NOTES-RULES');
+    expect(p).toContain('ACTION-RULES');
+    expect(p).not.toContain(DEFAULT_MEETING_NOTES_PROMPT);
+    expect(p).toContain('Reply with ONE JSON object');
+  });
+
+  it('the manager reads the prompts fresh on every pass', async () => {
+    const dir2 = mkdtempSync(join(tmpdir(), 'meeting-p-'));
+    let current = PROMPTS;
+    const seen: MeetingPrompts[] = [];
+    const m = new MeetingManager({
+      dir: dir2,
+      transcribe: async () => 'hello',
+      analyse: async (i) => {
+        seen.push(i.prompts);
+        return analysis();
+      },
+      prompts: () => current,
+      runAction: async () => undefined,
+      logger,
+      emit: () => undefined,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+    });
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1');
+    current = { now: 'N2', notes: 'T2', actions: 'A2' };
+    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+    await m.tick('c1');
+    expect(seen).toEqual([PROMPTS, current]);
+    rmSync(dir2, { recursive: true, force: true });
   });
 });
 
@@ -457,8 +522,9 @@ describe('meeting action restraint', () => {
       newLines: [{ clock: '00:05', speaker: 'Them', text: 'x' }],
       final: false,
       elapsedMs: 5000,
+      prompts: PROMPTS,
     });
-    expect(p).toMatch(/genuinely the\suser's to do/i);
+    expect(p).toMatch(/genuinely Tom's to do/i);
     expect(p).toMatch(/not every mention/i);
     expect(p).toMatch(/someone else's/i);
   });
@@ -471,6 +537,7 @@ describe('makeMeetingAnalyser', () => {
     newLines: [{ clock: '00:05', speaker: 'Them', text: 'ship monday' }],
     final: false,
     elapsedMs: 5000,
+    prompts: PROMPTS,
   };
 
   it('runs the cheap model with the transcript and parses the reply', async () => {
@@ -521,6 +588,7 @@ describe('meeting events on the host link', () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-ev-'));
     const sent: WireEvent[] = [];
     const m = new MeetingManager({
+      prompts: () => PROMPTS,
       dir,
       transcribe: async () => 'hi',
       analyse: async () => analysis({ summary: { headline: 'h', bullets: [] } }),
@@ -586,6 +654,7 @@ describe('transcript correction pass', () => {
   ): MeetingManager => {
     const q = [...texts];
     return new MeetingManager({
+      prompts: () => PROMPTS,
       dir,
       transcribe: async () => q.shift() as string,
       analyse,

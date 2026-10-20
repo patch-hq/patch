@@ -5,10 +5,15 @@
 import { create } from 'zustand';
 import type { MeetingState } from '@patch/wire';
 
+export type MeetingPromptKey = 'now' | 'notes' | 'actions';
+
 interface MeetingStoreState {
   byChat: Record<string, MeetingState | null>;
   /** The chat this surface is currently capturing audio for, if any. */
   capturingChatId: string | null;
+  /** Which meeting prompt the in-call editor is open on, if any. */
+  promptEditor: MeetingPromptKey | null;
+  openPromptEditor(key: MeetingPromptKey | null): void;
   apply(chatId: string, meeting: MeetingState | null): void;
   setCapturing(chatId: string | null): void;
   reset(): void;
@@ -17,9 +22,11 @@ interface MeetingStoreState {
 export const useMeetingStore = create<MeetingStoreState>((set) => ({
   byChat: {},
   capturingChatId: null,
+  promptEditor: null,
+  openPromptEditor: (promptEditor) => set({ promptEditor }),
   apply: (chatId, meeting) => set((s) => ({ byChat: { ...s.byChat, [chatId]: meeting } })),
   setCapturing: (capturingChatId) => set({ capturingChatId }),
-  reset: () => set({ byChat: {}, capturingChatId: null }),
+  reset: () => set({ byChat: {}, capturingChatId: null, promptEditor: null }),
 }));
 
 /** A meeting that is still running (live or paused). */
