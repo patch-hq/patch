@@ -819,6 +819,10 @@ conversation is. A `view_file` whose result is not a valid ack (an error, say)
 falls back to the ordinary tool row so the failure is visible; it never
 renders an empty frame.
 
+## Action requests
+
+A `patch_ask_human` call is the agent blocked on something only the user can do, so its task is not left in a collapsed tool row. It renders as a card in the transcript: the task, then the `why` beneath it in a quieter colour. In either text, an `http(s)` URL is a link that opens in a new tab and a device code (groups of 3-6 capitals or digits joined by hyphens, such as `ABCD-EFGH`) is a button that copies the code. The card is never folded into a tool run (`isGroupableToolCall` in `@patch/wire`, so host and surfaces agree), and mobile draws the same card with the same parsing (`splitActionText`). A call whose arguments are not `{ task, why? }` renders as the ordinary tool row so the failure stays visible.
+
 ## Terminal
 
 A shell on the chat's own host. It exists because the host is remote: cloning

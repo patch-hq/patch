@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
 import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
+import * as Clipboard from 'expo-clipboard';
 import { ChatErrorBoundary } from '../../src/components/ChatErrorBoundary';
 import { useMarkChatNotificationsRead } from '../../src/stores/notificationsStore';
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -42,7 +43,7 @@ import {
   Clock,
   CloudOff,
 } from 'lucide-react-native';
-import { ArrowUp, Check, ChevronDown, ChevronRight, Copy } from 'lucide-react-native';
+import { ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hand } from 'lucide-react-native';
 import {
   SPECIAL_THREAD_IDS,
   folderName,
@@ -50,6 +51,8 @@ import {
   isReservedSpecialThread,
   taskNotificationSummary,
   labelForRun,
+  parseAskHuman,
+  splitActionText,
   type AttachmentRef,
 } from '@patch/wire';
 import { apiUrl, getRoute } from '../../src/config';
@@ -1422,6 +1425,13 @@ function ToolCallItem({
   // through to the ordinary row. Stable per entry, like the branches above.
   const todoItems = entry.tool === 'TodoWrite' ? todoCardItems(entry.toolArgs) : null;
   if (todoItems) return <TodoCard items={todoItems} />;
+  // A `patch_ask_human` is the agent blocked on the user: the task is the card,
+  // with links that open and a code that copies (spec/15 § Chat detail).
+  const askHuman =
+    entry.tool && toolLabel(entry.tool) === 'patch_ask_human'
+      ? parseAskHuman(entry.toolArgs)
+      : null;
+  if (askHuman) return <AskHumanCard task={askHuman.task} why={askHuman.why} />;
   const colors = useTheme();
   const [expanded, setExpanded] = React.useState(false);
   const diff = diffFromToolCall(entry.tool, entry.toolArgs);
@@ -1691,6 +1701,76 @@ const TODO_STATUS_LABEL: Record<TodoCardItem['status'], string> = {
 };
 
 // A marker per step: dashed ring pending, solid ring in progress, filled tick done.
+function ActionText({ text }: { text: string }): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <Text style={{ ...typography.body, color: colors.ink }} selectable>
+      {splitActionText(text).map((seg, i) => {
+        if (seg.kind === 'link') {
+          return (
+            <Text
+              key={i}
+              testID="ask-human-link"
+              accessibilityRole="link"
+              style={{ color: colors.leaf, textDecorationLine: 'underline' }}
+              onPress={() => void Linking.openURL(seg.href)}
+            >
+              {seg.text}
+            </Text>
+          );
+        }
+        if (seg.kind === 'code') {
+          return (
+            <Text
+              key={i}
+              testID="ask-human-code"
+              accessibilityRole="button"
+              accessibilityLabel={`Copy code ${seg.text}`}
+              style={{ ...typography.code, color: colors.leaf }}
+              onPress={() => void Clipboard.setStringAsync(seg.text)}
+            >
+              {seg.text}
+            </Text>
+          );
+        }
+        return seg.text;
+      })}
+    </Text>
+  );
+}
+
+function AskHumanCard({
+  task,
+  why,
+}: {
+  task: string;
+  why: string | undefined;
+}): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <View
+      testID="ask-human-card"
+      style={{
+        backgroundColor: colors.paperRaised,
+        borderColor: colors.lineSoft,
+        borderWidth: 1,
+        borderRadius: radii.lg,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm,
+        marginBottom: space.sm,
+        flexDirection: 'row',
+        gap: space.sm,
+      }}
+    >
+      <Hand size={14} color={colors.leaf} style={{ marginTop: 4 }} />
+      <View style={{ flex: 1, gap: space.xs }}>
+        <ActionText text={task} />
+        {why ? <ActionText text={why} /> : null}
+      </View>
+    </View>
+  );
+}
+
 function TodoCard({ items }: { items: TodoCardItem[] }): React.ReactElement {
   const colors = useTheme();
   return (
