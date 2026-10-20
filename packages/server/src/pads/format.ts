@@ -31,6 +31,8 @@ export function describeChange(c: Change): string {
       return `Deleted ${on}`;
     case 'duplicate':
       return `Duplicated ${on} — the copy goes straight after it; later changes may refer to the copy`;
+    case 'add':
+      return `Added new text "${clip(a['text'], 1000)}" inside ${on} — as its last child; later changes may refer to it`;
     case 'note':
       return `Note on ${on}: "${clip(a['text'], 1000)}"`;
     case 'draw':
@@ -79,7 +81,7 @@ export function batchMessage(opts: {
     'Each picture shows the change on its screen at the size Tom was looking at, marked and numbered. They',
     'show what surrounds each change, which the text cannot.',
     '',
-    'Moves, resizes, text edits and deletions are previews Tom made on the Pad. Make each one real in the',
+    'Moves, resizes, text edits, added text and deletions are previews Tom made on the Pad. Make each one real in the',
     'source, in the idiom the code already uses. Notes are requests in his own words.',
     '',
     'Open each picture, make the changes in the source, then call patch_pad_update(padId, dir) and patch_pad_reply(padId, text)',
