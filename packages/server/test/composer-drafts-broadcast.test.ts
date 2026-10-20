@@ -240,4 +240,26 @@ describe('composer drafts — surface → server → every other surface', () =>
       await cleanUp(ctx);
     }
   });
+  it('sending a message into a chat drops its draft and tells every surface', async () => {
+    const ctx = await setUp();
+    try {
+      const a = await ctx.clientFor('srf-a');
+      const b = await ctx.clientFor('srf-b');
+      try {
+        a.send({ type: 'composer_draft.set', chatId: 'c1', text: 'about to send' });
+        await b.waitFor('composer_draft.updated');
+
+        const gotClear = b.waitFor('composer_draft.cleared');
+        a.sendInput({ chatId: 'c1', message: 'about to send' });
+        const event = await gotClear;
+        expect(event).toMatchObject({ type: 'composer_draft.cleared', chatId: 'c1' });
+        expect(ctx.built.composerDrafts.get('c1')).toBeUndefined();
+      } finally {
+        await a.close();
+        await b.close();
+      }
+    } finally {
+      await cleanUp(ctx);
+    }
+  });
 });

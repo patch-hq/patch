@@ -1360,6 +1360,11 @@ export class WsHub {
         }
         // chat.input is a focus signal too — surface clearly cares about this chat.
         conn.watchedChats.add(event.chatId);
+        // A message sent is a draft done (spec/14 § Composer): drop the chat's
+        // server draft whichever surface sent it, so a surface that did not
+        // clear its own copy (killed mid-send, a different surface) cannot
+        // resurrect already-sent text on the next snapshot.
+        this.deps.composerDrafts?.clear(event.chatId);
         // Group 12 (HIGH-1): strip `source` on the surface ingress path.
         // Only the voice-device hook may attach `source`
         // (per ChatInputSource JSDoc). A surface that sets it would otherwise
