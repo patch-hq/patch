@@ -83,6 +83,18 @@ describe('parseNaturalSchedule', () => {
     expect(parseNaturalSchedule('every day at 9am and 10:30pm')).toBeNull();
   });
 
+  it('returns null when a second time is phrased outside the "at" list, rather than dropping it', () => {
+    expect(parseNaturalSchedule('every day at 9am and at 5pm')).toBeNull();
+    expect(parseNaturalSchedule('8am and 5pm every day')).toBeNull();
+    expect(parseNaturalSchedule('every monday at 8:30 and tuesday at 9')).toBeNull();
+  });
+
+  it('returns null for an exclusion or alternative it cannot express, rather than ignoring the word', () => {
+    // "except weekends" used to come out as `0 9-17 * * 0,6` — the opposite schedule.
+    expect(parseNaturalSchedule('every hour between 9am and 5pm except weekends')).toBeNull();
+    expect(parseNaturalSchedule('every day at 9am or 10pm')).toBeNull();
+  });
+
   it('renders a multi-time schedule in the live preview', () => {
     expect(describeCron(parseNaturalSchedule('every day at 9am and 10pm')!)).toBe(
       'at 9am and 10pm',
