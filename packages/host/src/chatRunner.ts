@@ -2314,6 +2314,10 @@ export class Daemon {
       // a loop tick due while the chat's pump is occupied is absorbed rather
       // than queued (see wake.ts `fire`/`onTurnEnd`).
       isBusy: (chatId) => this.pumping.has(chatId),
+      isLimited: (chatId) =>
+        this.limitBlocks.has(chatId) ||
+        this.rateLimitPendingTurns.has(chatId) ||
+        this.rateLimitTimers.has(chatId),
       now: () => this.opts.now(),
       logger: this.opts.logger,
     });
