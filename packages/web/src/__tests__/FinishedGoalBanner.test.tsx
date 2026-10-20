@@ -24,7 +24,7 @@ describe('FinishedGoalBanner', () => {
     render(<FinishedGoalBanner row={row()} />);
     expect(screen.getByTestId('finished-goal-summary')).toHaveTextContent(`Goal met: ${long}`);
     expect(screen.getByTestId('finished-goal-detail')).toHaveTextContent(
-      '9m · 3 turns · 8.2k tokens · All checks pass',
+      '9m · 3 checks · 8.2k tokens · All checks pass',
     );
   });
 

@@ -2,7 +2,7 @@
 // chat panel — Goal bar). The goal is set from the composer via `/goal <text>`
 // (which also starts a turn with the condition as the directive) and cleared
 // with a bare `/goal`; this bar is the always-visible readout of what Patch's
-// own evaluator is judging — condition, running time, turns evaluated, tokens
+// own evaluator is judging — condition, running time, checks evaluated, tokens
 // spent, and its latest reason — so the user can see progress without opening
 // the transcript. The condition's text is shown in full (wrapped, never
 // truncated) and edited in a modal opened by clicking it (re-arms the
@@ -12,7 +12,7 @@
 // pattern.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Pause, Target, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Pause, Target, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
@@ -118,6 +118,7 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
   const pushError = useUiStore((s) => s.pushError);
   const [now, setNow] = useState(() => Date.now());
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const goal = row.goal;
   const progress = row.goalProgress;
@@ -152,7 +153,7 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
     metrics.push({ key: 'time', label: formatElapsed(now - progress.startedAt) });
     metrics.push({
       key: 'turns',
-      label: `${progress.turnsEvaluated} turn${progress.turnsEvaluated === 1 ? '' : 's'}`,
+      label: `${progress.turnsEvaluated} check${progress.turnsEvaluated === 1 ? '' : 's'}`,
     });
     if (progress.tokensSpent > 0)
       metrics.push({ key: 'tokens', label: `${formatTokenCount(progress.tokensSpent)} tokens` });
@@ -167,13 +168,16 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
 
   return (
     <div
-      className={`goal-banner${paused ? ' goal-banner-paused' : ''}`}
+      className={`goal-banner${paused ? ' goal-banner-paused' : ''}${expanded ? ' goal-banner-expanded' : ''}`}
       data-testid="goal-banner"
       data-paused={paused ? 'true' : 'false'}
       role="status"
     >
       <div className="goal-banner-main">
         {paused ? <Pause size={16} aria-hidden /> : <Target size={16} aria-hidden />}
+        <span className="goal-banner-label" data-testid="goal-banner-label">
+          {paused ? 'Goal paused' : 'Goal active'}
+        </span>
         <button
           type="button"
           className="goal-banner-text"
@@ -183,6 +187,17 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
           onClick={() => setEditing(true)}
         >
           {goal}
+        </button>
+        <button
+          type="button"
+          className="goal-clear-btn goal-expand-btn"
+          data-testid="goal-expand-btn"
+          aria-label={expanded ? 'Show less' : 'Show full goal'}
+          aria-expanded={expanded}
+          title={expanded ? 'Show less' : 'Show full goal'}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
         </button>
         <button
           type="button"
@@ -254,6 +269,7 @@ export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | nul
     >
       <div className="goal-banner-main">
         <Target size={16} aria-hidden />
+        <span className="goal-banner-label">Goal finished</span>
         <span className="finished-goal-title" data-testid="finished-goal-summary">
           {label}: {last.condition}
         </span>
@@ -269,7 +285,7 @@ export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | nul
         </button>
       </div>
       <div className="finished-goal-meta" data-testid="finished-goal-detail">
-        {formatElapsed(last.endedAt - last.startedAt)} · {last.turns} turn
+        {formatElapsed(last.endedAt - last.startedAt)} · {last.turns} check
         {last.turns === 1 ? '' : 's'}
         {last.tokens > 0 ? ` · ${formatTokenCount(last.tokens)} tokens` : ''}
         {' · '}

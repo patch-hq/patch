@@ -9995,7 +9995,7 @@ main.empty-state p {
   border-bottom: 1px solid var(--line-soft);
 }
 /* Two plain lines: icon, goal text and clear; then one muted line of metrics
-   (and the evaluator's reason), single-line with the full text in the title. */
+   (and the evaluator's reason), wrapped so nothing is cut mid-word. */
 .goal-banner-main {
   display: flex;
   align-items: center;
@@ -10006,16 +10006,24 @@ main.empty-state p {
   min-width: 0;
   font-size: var(--text-min);
   line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
   padding-left: 24px;
+}
+.goal-banner-label {
+  flex: none;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm, 6px);
+  padding: 0 6px;
+}
+.goal-banner-expanded .goal-banner-text {
+  display: block;
 }
 .goal-banner-cell + .goal-banner-cell::before {
   content: ' · ';
 }
 .goal-banner-main .goal-clear-btn {
-  margin-left: auto;
   flex: none;
 }
 .goal-banner-text {
