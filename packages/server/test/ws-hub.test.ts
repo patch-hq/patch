@@ -1282,7 +1282,7 @@ describe('WS hub host gate', () => {
       const errorPromise = surface.waitFor('chat.error', undefined, 2000);
       surface.sendInput({ chatId: 'c1', message: 'hi', localId: 'L1' });
 
-      // Not misrouted to the connected-but-wrong home host while the wait
+      // Not misrouted to the connected-but-wrong Manager host while the wait
       // is still running.
       await new Promise((r) => setTimeout(r, 80));
       expect(host1Got).toHaveLength(0);

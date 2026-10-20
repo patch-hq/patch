@@ -138,7 +138,7 @@ describe('Agent page: frame', () => {
 });
 
 describe('Agent page: Model for new chats', () => {
-  it('offers the home machine’s catalogue and saves the choice', async () => {
+  it('offers the default machine’s catalogue and saves the choice', async () => {
     const r = await renderAgent();
     expect(api.models).toHaveBeenCalledWith('d1');
     expect(textOf(get(r, 'default-model'))).toBe('Opus 5');

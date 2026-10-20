@@ -28,7 +28,7 @@ patch                                     # interactive picker: recent folders g
 patch --folder <path> [--host H] [--model M] [--no-status]   # start a chat there and render it inline (13-design-terminal.md)
 
 patch hosts list                          # every registered host: name, status, version, components
-patch hosts get [--host H]                # one host (platform, backends and their versions, components, permission mode, home marker)
+patch hosts get [--host H]                # one host (platform, backends and their versions, components, permission mode)
 patch hosts add                           # server-minted registration nonce as a QR + short code, for the new machine's installer to redeem, plus the server's install command for the target OS
 patch hosts rename <name> [--host H]
 patch hosts folders [--host H]            # that host's project-folder registry

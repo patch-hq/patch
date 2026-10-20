@@ -505,7 +505,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
   // account's HOME machine. Every request originating anywhere else was
   // answered to the wrong host and hung until the caller's 10s timeout. The
   // reply must be addressed to the requester.
-  it('replies to the REQUESTING machine, not the account home machine', () => {
+  it('replies to the REQUESTING machine, not the account default host', () => {
     // The link's own (home) machine is `d1`; the request comes from `d2`.
     expect(link.hostId()).toBe('d1');
     link.emit({ type: 'patch.jobs.request', requestId: 'r-from-d2', op: 'list' }, 'd2');

@@ -429,7 +429,7 @@ describe('Manager page', () => {
     expect(api.setPreferences).toHaveBeenCalledWith({ addressWord: 'otto' });
   });
 
-  it('offers the special threads’ model from the home machine’s catalogue', async () => {
+  it('offers the special threads’ model from the default machine’s catalogue', async () => {
     seedSettings();
     const r = renderRN(<ManagerPage />);
     await flush();

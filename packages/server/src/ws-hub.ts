@@ -337,8 +337,8 @@ export class WsHub {
    * The Manager machine (spec/06). Exactly one machine holds it: the
    * registry's explicit choice, else the first registered machine.
    */
-  private homeHostId(): string | null {
-    return this.deps.registry.homeHostId() ?? this.registeredHostIds()[0] ?? null;
+  private managerHostId(): string | null {
+    return this.deps.registry.managerHostId() ?? this.registeredHostIds()[0] ?? null;
   }
 
   /**
@@ -353,7 +353,7 @@ export class WsHub {
     return {
       ...event,
       ...(name !== undefined ? { hostName: name } : {}),
-      isHomeHost: this.homeHostId() === event.hostId,
+      runsManager: this.managerHostId() === event.hostId,
     };
   }
 
@@ -1435,25 +1435,6 @@ export class WsHub {
         );
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, event);
         this.republishHost(event.hostId);
-        return;
-      }
-      case 'host.set_home': {
-        try {
-          this.deps.registry.setHomeHostId(event.hostId);
-        } catch (err) {
-          this.sendControlError(conn, 'invalid_frame', (err as Error).message);
-          return;
-        }
-        slog.info({ hostId: event.hostId }, 'home machine changed');
-        // EVERY machine's flag moves: the new home gains it and the previous
-        // one loses it, so exactly one machine reports it.
-        for (const hostId of this.registeredHostIds()) {
-          this.deps.hostLink.sendTo(hostId, conn.surfaceId, {
-            type: 'host.set_home',
-            hostId: event.hostId,
-          });
-          this.republishHost(hostId);
-        }
         return;
       }
       // ---- host-scoped controls the MACHINE owns ----

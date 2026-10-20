@@ -1,5 +1,5 @@
 // POST /api/link-summary (spec/14 § Message links — Summarise): fetches the
-// page, round-trips one `patch.link_summary.request` to the home machine with
+// page, round-trips one `patch.link_summary.request` to the Manager host with
 // the account's prompt, and turns its answer into the HTTP response.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -71,7 +71,7 @@ describe('POST /api/link-summary', () => {
   const post = (app: Awaited<ReturnType<typeof boot>>['app'], auth: object, url: unknown) =>
     app.inject({ method: 'POST', url: '/api/link-summary', headers: auth, payload: { url } });
 
-  it('sends the page text and the account prompt to the home host and returns its summary', async () => {
+  it('sends the page text and the account prompt to the Manager host and returns its summary', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -134,7 +134,7 @@ describe('POST /api/link-summary', () => {
     }
   });
 
-  it('is 503 when the home host is offline, before fetching anything', async () => {
+  it('is 503 when the Manager host is offline, before fetching anything', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const link = new FakeHost(() => null);
