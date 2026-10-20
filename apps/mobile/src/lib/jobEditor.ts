@@ -552,8 +552,16 @@ export function withRecurrenceFrequency(
     freq,
     days: f.days.slice(0, 1).length > 0 ? f.days.slice(0, 1) : ['SU'],
     setPos: f.setPos ?? 1,
-    // A YEARLY rule needs at least one month.
-    months: f.months && f.months.length > 0 ? f.months : freq === 'YEARLY' ? [1] : null,
+    // A YEARLY rule holds exactly one month: with several, BYSETPOS counts over
+    // the whole year's set and the rule fires once a year, not once per month.
+    months:
+      freq === 'YEARLY'
+        ? f.months && f.months.length > 0
+          ? f.months.slice(0, 1)
+          : [1]
+        : f.months && f.months.length > 0
+          ? f.months
+          : null,
   };
 }
 
@@ -565,11 +573,11 @@ export function toggleRecurrenceDay(f: RecurrenceFields, code: string): Recurren
   return { ...f, days: f.days.filter((d) => d !== code) };
 }
 
-/** Toggle a month; YEARLY keeps at least one. */
+/** MONTHLY toggles membership; YEARLY replaces its single month (see withRecurrenceFrequency). */
 export function toggleRecurrenceMonth(f: RecurrenceFields, month: number): RecurrenceFields {
+  if (f.freq === 'YEARLY') return { ...f, months: [month] };
   const cur = f.months ?? [];
   if (!cur.includes(month)) return { ...f, months: [...cur, month].sort((a, b) => a - b) };
-  if (f.freq === 'YEARLY' && cur.length === 1) return f;
   const next = cur.filter((m) => m !== month);
   return { ...f, months: next.length > 0 ? next : null };
 }
