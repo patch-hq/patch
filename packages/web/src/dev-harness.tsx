@@ -2466,6 +2466,22 @@ const wsSent: WireEvent[] = [];
 // reducer the host runs, and answered the way the host does (`meeting.state`).
 const harnessSend = (event: WireEvent): void => {
   wsSent.push(event);
+  if (event.type === 'meeting.action_request') {
+    // The host's side of the tray: reassign, dismiss, start a chat, flip the checkbox.
+    const cur = useMeetingStore.getState().byChat[event.chatId];
+    if (!cur) return;
+    const next = structuredClone(cur);
+    if (event.agentRuns !== undefined) next.agentRunsActions = event.agentRuns;
+    const a = next.actions.find((x) => x.id === event.actionId);
+    if (a && event.owner !== undefined) a.owner = event.owner;
+    if (a && event.decision === 'dismiss') a.status = 'dismissed';
+    if (a && (event.decision === 'do' || event.decision === 'chat')) {
+      a.status = 'running';
+      a.chatId = 'chat_child';
+    }
+    useMeetingStore.getState().apply(event.chatId, next);
+    return;
+  }
   if (event.type !== 'meeting.notes_request' && event.type !== 'meeting.my_notes_request') return;
   const cur = useMeetingStore.getState().byChat[event.chatId];
   if (!cur) return;
@@ -3275,6 +3291,7 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
     actions: [
       {
         id: 'a1',
+        kind: 'mine',
         title: "Top up Sam's sandbox credit by £50",
         why: 'Sam: tests keep failing',
         at: 31 * 60_000 + 40_000,
@@ -3282,21 +3299,26 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
       },
       {
         id: 'a2',
-        title: 'Create ticket: move points ledger',
-        why: 'Agreed by Dev and Priya',
+        kind: 'other',
+        owner: 'Priya',
+        title: 'Send the Q3 retention deck',
+        why: 'Priya offered to share it',
         at: 22 * 60_000 + 5000,
         status: 'pending',
       },
       {
         id: 'a3',
-        title: 'Sent Priya the Q3 retention deck',
-        why: '',
+        kind: 'agent',
+        title: 'Find dates for the vendor review',
+        why: 'Dev: we need a slot before the 20th',
         at: 9 * 60_000,
-        status: 'done',
-        resolvedAt: t0,
+        status: 'pending',
       },
     ],
+    agentRunsActions: false,
     transcript: [
+      { at: 20_000, speaker: 'them', name: 'Priya', text: 'Morning all.' },
+      { at: 25_000, speaker: 'them', name: 'Dev', text: 'Morning.' },
       {
         at: 33 * 60_000 + 58_000,
         speaker: 'them',

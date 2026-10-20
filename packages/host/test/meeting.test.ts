@@ -14,7 +14,7 @@ import {
   MeetingError,
   type AnalyseInput,
   type CorrectInput,
-  type MeetingAnalysis,
+  MeetingAnalysis,
   type MeetingPrompts,
 } from '../src/meeting.js';
 import {
@@ -42,7 +42,7 @@ const analysis = (over: Partial<MeetingAnalysis> = {}): MeetingAnalysis => ({
   topics: [
     { id: null, title: 'Points ledger', points: ['Own service'], decided: true, atSeconds: 5 },
   ],
-  actions: [{ title: "Top up Sam's sandbox", why: 'Sam: tests fail', atSeconds: 7 }],
+  actions: [{ kind: 'mine', title: "Top up Sam's sandbox", why: 'Sam: tests fail', atSeconds: 7 }],
   summary: null,
   ...over,
 });
@@ -53,7 +53,7 @@ describe('MeetingManager', () => {
   let events: WireEvent[];
   let analyse: ReturnType<typeof vi.fn<(i: AnalyseInput) => Promise<MeetingAnalysis>>>;
   let transcribe: ReturnType<typeof vi.fn<(b: Buffer) => Promise<string>>>;
-  let runAction: ReturnType<typeof vi.fn<(c: string, m: string) => Promise<void>>>;
+  let startChat: ReturnType<typeof vi.fn<(c: string, m: string) => Promise<string>>>;
   let ticks: (() => void)[];
   let n: number;
 
@@ -63,7 +63,7 @@ describe('MeetingManager', () => {
       transcribe,
       analyse,
       prompts: () => PROMPTS,
-      runAction,
+      startChat,
       logger,
       emit: (e) => events.push(e),
       now: () => clock,
@@ -85,7 +85,7 @@ describe('MeetingManager', () => {
     n = 0;
     analyse = vi.fn(async () => analysis());
     transcribe = vi.fn(async () => 'hello there');
-    runAction = vi.fn(async () => undefined);
+    startChat = vi.fn(async () => 'child1');
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -178,7 +178,7 @@ describe('MeetingManager', () => {
       dir,
       transcribe,
       analyse,
-      runAction,
+      startChat,
       logger,
       emit: (e) => events.push(e),
       now: () => clock,
@@ -263,7 +263,7 @@ describe('MeetingManager', () => {
         topics: [
           { id: 'id1', title: 'Points ledger', points: ['Own service', 'November'], decided: true },
         ],
-        actions: [{ title: "top up  Sam's SANDBOX", why: 'again' }],
+        actions: [{ kind: 'mine', title: "top up  Sam's SANDBOX", why: 'again' }],
       }),
     );
     await m.tick('c1');
@@ -492,8 +492,8 @@ describe('MeetingManager', () => {
     analyse.mockResolvedValueOnce(
       analysis({
         actions: [
-          { title: 'A one', why: 'w' },
-          { title: 'B two', why: 'w' },
+          { kind: 'agent', title: 'A one', why: 'w' },
+          { kind: 'mine', title: 'B two', why: 'w' },
         ],
       }),
     );
@@ -501,11 +501,12 @@ describe('MeetingManager', () => {
     const [a, b] = m.get('c1')!.actions;
     clock += 1;
     await m.decide('c1', a!.id, 'do');
-    expect(runAction).toHaveBeenCalledWith('c1', expect.stringContaining('A one'));
+    expect(startChat).toHaveBeenCalledWith('c1', expect.stringContaining('A one'));
     await m.decide('c1', b!.id, 'dismiss');
-    expect(runAction).toHaveBeenCalledTimes(1);
-    expect(m.get('c1')!.actions.map((x) => x.status)).toEqual(['done', 'dismissed']);
-    await expect(m.decide('c1', a!.id, 'do')).rejects.toThrow(/already done/);
+    expect(startChat).toHaveBeenCalledTimes(1);
+    expect(m.get('c1')!.actions.map((x) => x.status)).toEqual(['running', 'dismissed']);
+    expect(m.get('c1')!.actions[0]!.chatId).toBe('child1');
+    await expect(m.decide('c1', a!.id, 'do')).rejects.toThrow(/already running/);
     await expect(m.decide('c1', 'zzz', 'do')).rejects.toThrow(/no action/);
   });
 
@@ -514,8 +515,8 @@ describe('MeetingManager', () => {
     m.start('c1');
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     await m.tick('c1');
-    runAction.mockRejectedValueOnce(new Error('chat busy'));
-    await expect(m.decide('c1', m.get('c1')!.actions[0]!.id, 'do')).rejects.toThrow('chat busy');
+    startChat.mockRejectedValueOnce(new Error('chat busy'));
+    await expect(m.decide('c1', m.get('c1')!.actions[0]!.id, 'chat')).rejects.toThrow('chat busy');
     expect(m.get('c1')!.actions[0]!.status).toBe('pending');
   });
 
@@ -525,14 +526,109 @@ describe('MeetingManager', () => {
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     await m.tick('c1');
     let release!: () => void;
-    runAction.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    startChat.mockImplementationOnce(
+      () => new Promise<string>((r) => (release = () => r('child1'))),
+    );
     const id = m.get('c1')!.actions[0]!.id;
-    const first = m.decide('c1', id, 'do');
-    await expect(m.decide('c1', id, 'do')).rejects.toThrow(/already/);
+    const first = m.decide('c1', id, 'chat');
+    await expect(m.decide('c1', id, 'chat')).rejects.toThrow(/already/);
     release();
     await first;
-    expect(runAction).toHaveBeenCalledTimes(1);
-    expect(m.get('c1')!.actions[0]!.status).toBe('done');
+    expect(startChat).toHaveBeenCalledTimes(1);
+    expect(m.get('c1')!.actions[0]!.status).toBe('running');
+  });
+
+  describe('action tray', () => {
+    const triage = [
+      { kind: 'mine' as const, title: 'Mine one', why: 'w' },
+      { kind: 'other' as const, owner: 'Priya', title: 'Priya sends the deck', why: 'w' },
+      { kind: 'agent' as const, title: 'Find vendor dates', why: 'w' },
+    ];
+    const started = async (): Promise<MeetingManager> => {
+      const m = make();
+      m.start('c1');
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+      analyse.mockResolvedValueOnce(analysis({ actions: triage }));
+      await m.tick('c1');
+      return m;
+    };
+
+    it('keeps the kind and owner the analysis gave each action', async () => {
+      const m = await started();
+      expect(m.get('c1')!.actions.map((a) => [a.kind, a.owner])).toEqual([
+        ['mine', undefined],
+        ['other', 'Priya'],
+        ['agent', undefined],
+      ]);
+    });
+
+    it('rejects an analysis action for someone else with no owner, and one with no kind', () => {
+      expect(() =>
+        MeetingAnalysis.parse(analysis({ actions: [{ kind: 'other', title: 't', why: 'w' }] })),
+      ).toThrow(/owner/);
+      expect(() =>
+        MeetingAnalysis.parse({ ...analysis(), actions: [{ title: 't', why: 'w' }] }),
+      ).toThrow();
+    });
+
+    it("never starts a chat on someone else's action, or does Tom's as the agent", async () => {
+      const m = await started();
+      const [mine, other, agent] = m.get('c1')!.actions;
+      await expect(m.decide('c1', other!.id, 'do')).rejects.toThrow(/cannot/);
+      await expect(m.decide('c1', other!.id, 'chat')).rejects.toThrow(/cannot/);
+      await expect(m.decide('c1', mine!.id, 'do')).rejects.toThrow(/cannot/);
+      await expect(m.decide('c1', agent!.id, 'chat')).rejects.toThrow(/cannot/);
+      expect(startChat).not.toHaveBeenCalled();
+    });
+
+    it("starts a chat on Tom's action seeded with the action and the meeting", async () => {
+      const m = await started();
+      const mine = m.get('c1')!.actions[0]!;
+      await m.decide('c1', mine.id, 'chat');
+      const [parent, seed] = startChat.mock.calls[0]!;
+      expect(parent).toBe('c1');
+      expect(seed).toContain('Mine one');
+      expect(seed).toContain('Points ledger');
+      expect(m.get('c1')!.actions[0]).toMatchObject({ status: 'running', chatId: 'child1' });
+    });
+
+    it('lets any action be dismissed, and reassigns an owner', async () => {
+      const m = await started();
+      const [mine, other, agent] = m.get('c1')!.actions;
+      m.setActionOwner('c1', other!.id, 'Everyone');
+      expect(m.get('c1')!.actions[1]!.owner).toBe('Everyone');
+      expect(() => m.setActionOwner('c1', mine!.id, 'Dev')).toThrow(/no owner/);
+      for (const a of [mine, other, agent]) await m.decide('c1', a!.id, 'dismiss');
+      expect(m.get('c1')!.actions.map((a) => a.status)).toEqual([
+        'dismissed',
+        'dismissed',
+        'dismissed',
+      ]);
+    });
+
+    it('with the checkbox on, agent actions start at once, now and as they arrive', async () => {
+      const m = await started();
+      await m.setAgentRunsActions('c1', true);
+      expect(startChat).toHaveBeenCalledTimes(1);
+      expect(startChat.mock.calls[0]![1]).toContain('Find vendor dates');
+      expect(m.get('c1')!.actions[2]).toMatchObject({ status: 'running', chatId: 'child1' });
+      expect(m.get('c1')!.actions[0]!.status).toBe('pending');
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+      analyse.mockResolvedValueOnce(
+        analysis({ actions: [{ kind: 'agent', title: 'Draft the recap', why: 'w' }] }),
+      );
+      await m.tick('c1');
+      expect(startChat).toHaveBeenCalledTimes(2);
+      expect(m.get('c1')!.agentRunsActions).toBe(true);
+    });
+
+    it('says so on the panel when an agent action cannot start', async () => {
+      const m = await started();
+      startChat.mockRejectedValueOnce(new Error('no credit'));
+      await m.setAgentRunsActions('c1', true);
+      expect(m.get('c1')!.error).toMatch(/Find vendor dates.*no credit/);
+      expect(m.get('c1')!.actions[2]!.status).toBe('pending');
+    });
   });
 
   it('contextFor hands the chat the panel and only unseen transcript, once', async () => {
@@ -664,7 +760,7 @@ describe('editable meeting prompts', () => {
         return analysis();
       },
       prompts: () => current,
-      runAction: async () => undefined,
+      startChat: async () => 'child',
       logger,
       emit: () => undefined,
       setInterval: () => 1,
@@ -691,9 +787,10 @@ describe('meeting action restraint', () => {
       elapsedMs: 5000,
       prompts: PROMPTS,
     });
-    expect(p).toMatch(/genuinely Tom's to do/i);
+    expect(p).toMatch(/"kind"/);
+    expect(p).toMatch(/"mine"[^]*"other"[^]*"agent"/);
     expect(p).toMatch(/not every mention/i);
-    expect(p).toMatch(/someone else's/i);
+    expect(p).toMatch(/nobody can or should act on/i);
   });
 });
 
@@ -783,7 +880,7 @@ describe('meeting events on the host link', () => {
       dir,
       transcribe: async () => 'hi',
       analyse: async () => analysis({ summary: { headline: 'h', bullets: [] } }),
-      runAction: async () => undefined,
+      startChat: async () => 'child',
       logger,
       emit: (e) => sent.push(e),
     });
@@ -851,7 +948,7 @@ describe('transcript correction pass', () => {
       analyse,
       correct,
       glossary: () => glossary,
-      runAction: async () => undefined,
+      startChat: async () => 'child',
       logger,
       emit: () => undefined,
       setInterval: () => 1,

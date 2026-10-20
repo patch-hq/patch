@@ -516,50 +516,110 @@ test.describe('meeting mode — live', () => {
       .not.toBe(a);
   });
 
-  test('action cards: pending ones have Do it / Dismiss, done ones collapse to a tick', async ({
+  test('the tray counts actions by kind and has one compact row each', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-actions-count')).toHaveText(
+      '1 mine · 1 others · 1 agent',
+    );
+    const rows = page.getByTestId('meeting-action');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toHaveAttribute('data-kind', 'mine');
+    await expect(rows.nth(1)).toHaveAttribute('data-kind', 'other');
+    await expect(rows.nth(2)).toHaveAttribute('data-kind', 'agent');
+    const body = await page.getByTestId('meeting-actions-body').boundingBox();
+    expect(body!.height).toBeLessThanOrEqual(171);
+  });
+
+  test("Tom's action offers Start chat, not Do it; someone else's offers only an owner and ✕", async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    const cards = page.getByTestId('meeting-action');
-    await expect(cards).toHaveCount(3);
-    await expect(cards.nth(0)).toHaveAttribute('data-status', 'pending');
-    await expect(cards.nth(2)).toHaveAttribute('data-status', 'done');
-    await expect(cards.nth(2)).toContainText('✓');
-    await expect(cards.nth(2).getByTestId('meeting-action-do')).toHaveCount(0);
+    const [mine, other] = [0, 1].map((n) => page.getByTestId('meeting-action').nth(n));
+    await expect(mine.getByTestId('meeting-action-chat')).toHaveText('Start chat');
+    await expect(mine.getByTestId('meeting-action-do')).toHaveCount(0);
+    await expect(other.getByTestId('meeting-action-do')).toHaveCount(0);
+    await expect(other.getByTestId('meeting-action-chat')).toHaveCount(0);
+    await expect(other.getByTestId('meeting-action-owner')).toHaveValue('Priya');
+    await expect(other.getByTestId('meeting-action-dismiss')).toBeVisible();
 
-    await cards.nth(0).getByTestId('meeting-action-do').click();
-    await cards.nth(1).getByTestId('meeting-action-dismiss').click();
+    await mine.getByTestId('meeting-action-chat').click();
     const reqs = (await sent(page, 'meeting.action_request')) as Array<{
       actionId: string;
       decision: string;
     }>;
-    expect(reqs.map((r) => [r.actionId, r.decision])).toEqual([
-      ['a1', 'do'],
-      ['a2', 'dismiss'],
-    ]);
+    expect(reqs.map((r) => [r.actionId, r.decision])).toEqual([['a1', 'chat']]);
+    // The host answers with the new chat: the row now opens it.
+    await expect(mine.getByTestId('meeting-action-open')).toHaveText('Open chat');
+    await expect(mine.getByTestId('meeting-action-chat')).toHaveCount(0);
   });
 
-  test('a card stays until the host says it is done, then collapses to a tick; dismissed ones vanish', async ({
+  test('the owner dropdown lists the meeting speakers plus Everyone and sends the choice', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
+    const owner = page.getByTestId('meeting-action').nth(1).getByTestId('meeting-action-owner');
+    await expect(owner.locator('option')).toHaveText(['Priya', 'Dev', 'Everyone']);
+    await owner.selectOption('Everyone');
+    const reqs = (await sent(page, 'meeting.action_request')) as Array<Record<string, unknown>>;
+    expect(reqs).toEqual([
+      { type: 'meeting.action_request', chatId: 'chat_tools', actionId: 'a2', owner: 'Everyone' },
+    ]);
+    await expect(owner).toHaveValue('Everyone');
+  });
+
+  test('agent actions: Run until the checkbox is on, then status and Open chat', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const agent = page.getByTestId('meeting-action').nth(2);
+    const box = page.getByTestId('meeting-agent-runs');
+    await expect(box).toHaveAttribute('title', 'Agent runs its own actions');
+    await expect(box).not.toBeChecked();
+    await expect(agent.getByTestId('meeting-action-do')).toHaveText('Run');
+    await box.check();
+    expect(await sent(page, 'meeting.action_request')).toEqual([
+      { type: 'meeting.action_request', chatId: 'chat_tools', agentRuns: true },
+    ]);
+    await expect(box).toBeChecked();
+    // With it on the host starts them itself: simulate its answer.
     await page.evaluate(() => {
       const store = (window as unknown as { __meetingStore: { getState(): any } }).__meetingStore;
       const m = store.getState().byChat['chat_tools'];
       store.getState().apply('chat_tools', {
         ...m,
         actions: m.actions.map((a: any) =>
-          a.id === 'a1'
-            ? { ...a, status: 'done', resolvedAt: Date.now() }
-            : a.id === 'a2'
-              ? { ...a, status: 'dismissed', resolvedAt: Date.now() }
-              : a,
+          a.id === 'a3' ? { ...a, status: 'running', chatId: 'chat_child' } : a,
         ),
       });
     });
-    const cards = page.getByTestId('meeting-action');
-    await expect(cards).toHaveCount(2);
-    await expect(cards.nth(0)).toHaveAttribute('data-status', 'done');
+    await expect(agent.getByTestId('meeting-action-do')).toHaveCount(0);
+    await expect(agent.getByTestId('meeting-action-status')).toBeVisible();
+    await expect(agent.getByTestId('meeting-action-open')).toHaveAttribute(
+      'href',
+      /\/chats\/chat_child$/,
+    );
+  });
+
+  test('every action can be dismissed and the tray collapses', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    for (const n of [0, 1, 2]) {
+      await page
+        .getByTestId('meeting-action')
+        .first()
+        .getByTestId('meeting-action-dismiss')
+        .click();
+      await expect(page.getByTestId('meeting-action')).toHaveCount(2 - n);
+    }
+    const reqs = (await sent(page, 'meeting.action_request')) as Array<{ actionId: string }>;
+    expect(reqs.map((r) => r.actionId)).toEqual(['a1', 'a2', 'a3']);
+  });
+
+  test('the caret collapses the tray body', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-actions-body')).toBeVisible();
+    await page.getByTestId('meeting-actions-toggle').click();
+    await expect(page.getByTestId('meeting-actions-body')).toHaveCount(0);
+    await expect(page.getByTestId('meeting-actions-count')).toBeVisible();
   });
 
   test('Pause, Resume and End send the controls', async ({ page }) => {
@@ -611,7 +671,7 @@ test.describe('meeting mode — after', () => {
     );
     await expect(page.getByTestId('meeting-pause')).toHaveCount(0);
     await expect(page.getByTestId('meeting-end')).toHaveCount(0);
-    await expect(page.getByTestId('meeting-action-do')).toHaveCount(2);
+    await expect(page.getByTestId('meeting-action')).toHaveCount(3);
     await expect(page.getByTestId('composer-input')).toBeEnabled();
     // Ended: the button offers a new meeting, not End.
     await expect(page.getByTestId('meeting-btn')).toHaveAttribute('aria-pressed', 'false');

@@ -212,8 +212,22 @@ export function endMeeting(chatId: string): void {
   ws().send({ type: 'meeting.control_request', chatId, action: 'end' });
 }
 
-export function decideAction(chatId: string, actionId: string, decision: 'do' | 'dismiss'): void {
+export function decideAction(
+  chatId: string,
+  actionId: string,
+  decision: 'do' | 'chat' | 'dismiss',
+): void {
   ws().send({ type: 'meeting.action_request', chatId, actionId, decision });
+}
+
+/** Hands someone else's action to a speaker, or `Everyone`. */
+export function setActionOwner(chatId: string, actionId: string, owner: string): void {
+  ws().send({ type: 'meeting.action_request', chatId, actionId, owner });
+}
+
+/** The tray checkbox: agent actions start by themselves when on. */
+export function setAgentRunsActions(chatId: string, agentRuns: boolean): void {
+  ws().send({ type: 'meeting.action_request', chatId, agentRuns });
 }
 
 /** An edit to the points panel; the host stores it as fixed input and answers with `meeting.state`. */
