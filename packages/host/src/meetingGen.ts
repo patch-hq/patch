@@ -3,10 +3,11 @@
 // returns the updated Now / Discussed / Actions as JSON. Same shape as
 // statusGen.ts, except a failure THROWS: the manager puts it on the panel.
 
+import { z } from 'zod';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { formatMeetingClock } from '@patch/wire';
-import { MeetingAnalysis, type AnalyseInput } from './meeting.js';
+import { MeetingAnalysis, type AnalyseInput, type CorrectInput } from './meeting.js';
 
 export const MEETING_MODEL = 'claude-haiku-4-5-20251001';
 const MEETING_TIMEOUT_MS = 60_000;
@@ -106,5 +107,82 @@ export function makeMeetingAnalyser(opts: {
     if (result === null || result === undefined)
       throw new Error('no account could run the meeting analysis');
     return parseMeetingAnalysis(result);
+  };
+}
+
+export function buildCorrectionPrompt(input: CorrectInput): string {
+  return [
+    'You repair speech-to-text errors in meeting transcript lines. Fix only mis-heard proper nouns:',
+    'names of people, organisations, places and acronyms. Use the glossary and the meeting context to decide',
+    "what was really said (e.g. an organisation's acronym heard as a similar-sounding word, or a place name",
+    'heard as another place). Do not rephrase, summarise, fix grammar, add or remove words, or change anything',
+    'you are not confident is a mis-heard name; leave such lines exactly as given.',
+    '',
+    'Glossary (one per line; "Term: heard as, heard as" lists known mishearings):',
+    input.glossary.length ? input.glossary.join('\n') : '(none)',
+    '',
+    `Meeting so far: ${input.context.now ?? '(not yet known)'}`,
+    `Topics: ${input.context.topics.join('; ') || '(none yet)'}`,
+    '',
+    'Preceding lines, for context only (do not return these):',
+    input.before.join('\n') || '(none)',
+    '',
+    'Lines to correct (JSON array of {speaker,text}):',
+    JSON.stringify(input.lines),
+    '',
+    `Reply with ONE JSON array of exactly ${input.lines.length} strings, the corrected text of each line in order, and nothing else.`,
+  ].join('\n');
+}
+
+/** First `[` to last `]`, same tolerance as the notes parser. */
+export function parseCorrections(raw: string, expected: number): string[] {
+  const start = raw.indexOf('[');
+  const end = raw.lastIndexOf(']');
+  if (start < 0 || end <= start)
+    throw new Error(`no JSON array in correction reply: ${raw.slice(0, 120)}`);
+  const out = z.array(z.string()).parse(JSON.parse(raw.slice(start, end + 1)));
+  if (out.length !== expected)
+    throw new Error(`correction returned ${out.length} lines, expected ${expected}`);
+  return out;
+}
+
+export function makeMeetingCorrector(opts: {
+  sdkBackend: SdkBackend;
+  runOnAccountWithCredit: RunOnAccountWithCredit;
+  cwd: string;
+}): (input: CorrectInput) => Promise<string[]> {
+  return async function correct(input) {
+    const result = await opts.runOnAccountWithCredit(
+      `meeting correct ${input.chatId}`,
+      async (accessToken) => {
+        const abortController = new AbortController();
+        const timer = setTimeout(() => abortController.abort(), MEETING_TIMEOUT_MS);
+        try {
+          let finalText = '';
+          let deltaText = '';
+          for await (const env of opts.sdkBackend.run({
+            prompt: buildCorrectionPrompt(input),
+            inferenceProfile: 'classifier',
+            cwd: opts.cwd,
+            resumeSessionId: undefined,
+            abortController,
+            oauthAccessToken: accessToken,
+            model: MEETING_MODEL,
+            permissionMode: 'bypassPermissions',
+          })) {
+            if (env.type === 'assistant' && env.content) finalText += env.content;
+            else if (env.type === 'assistant_delta' && env.content) deltaText += env.content;
+            else if (env.type === 'error')
+              throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
+          }
+          return finalText !== '' ? finalText : deltaText;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    );
+    if (result === null || result === undefined)
+      throw new Error('no account could run the meeting correction');
+    return parseCorrections(result, input.lines.length);
   };
 }

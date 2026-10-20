@@ -8,6 +8,7 @@ import {
   MeetingManager,
   MeetingError,
   type AnalyseInput,
+  type CorrectInput,
   type MeetingAnalysis,
 } from '../src/meeting.js';
 import {
@@ -15,6 +16,9 @@ import {
   makeMeetingAnalyser,
   MEETING_MODEL,
   parseMeetingAnalysis,
+  buildCorrectionPrompt,
+  parseCorrections,
+  makeMeetingCorrector,
 } from '../src/meetingGen.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { handleServerEvent } from '../src/index.js';
@@ -549,5 +553,134 @@ describe('meeting events on the host link', () => {
       {} as never,
     );
     expect(sent[0]).toMatchObject({ type: 'chat.error', chatId: 'c' });
+  });
+});
+
+describe('transcript correction pass', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'meeting-corr-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const make = (
+    correct: (i: CorrectInput) => Promise<string[]>,
+    analyse: (i: AnalyseInput) => Promise<MeetingAnalysis>,
+    texts: string[],
+    glossary: string[] = ['WECA: Leca, Weka, WEPA'],
+  ): MeetingManager => {
+    const q = [...texts];
+    return new MeetingManager({
+      dir,
+      transcribe: async () => q.shift() as string,
+      analyse,
+      correct,
+      glossary: () => glossary,
+      runAction: async () => undefined,
+      logger,
+      emit: () => undefined,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+    });
+  };
+
+  it('corrects lines before analysis and the notes and chat context get the fixed text', async () => {
+    const correct = vi.fn(async (i: CorrectInput) =>
+      i.lines.map((l) => l.text.replace('Weka', 'WECA').replace('self gloss', 'South Glos')),
+    );
+    const analyse = vi.fn(async (_i: AnalyseInput) => analysis());
+    const m = make(correct, analyse, ['Weka funds the bus', 'self gloss agreed']);
+    m.start('c');
+    await m.ingestAudio('c', 'system', Buffer.from(''));
+    await m.ingestAudio('c', 'system', Buffer.from(''));
+    await m.tick('c');
+    expect(correct.mock.calls[0]![0].glossary).toEqual(['WECA: Leca, Weka, WEPA']);
+    expect(analyse.mock.calls[0]![0].newLines.map((l) => l.text)).toEqual([
+      'WECA funds the bus',
+      'South Glos agreed',
+    ]);
+    expect(m.contextFor('c')).toContain('South Glos agreed');
+  });
+
+  it('a correction failure is surfaced, analysis is skipped, and the lines are retried', async () => {
+    let fail = true;
+    const correct = vi.fn(async (i: CorrectInput) => {
+      if (fail) throw new Error('model down');
+      return i.lines.map((l) => l.text.toUpperCase());
+    });
+    const analyse = vi.fn(async (_i: AnalyseInput) => analysis());
+    const m = make(correct, analyse, ['hello']);
+    m.start('c');
+    await m.ingestAudio('c', 'system', Buffer.from(''));
+    await m.tick('c');
+    expect(m.get('c')!.error).toContain('model down');
+    expect(analyse).not.toHaveBeenCalled();
+    fail = false;
+    await m.tick('c');
+    expect(analyse.mock.calls[0]![0].newLines[0]!.text).toBe('HELLO');
+  });
+
+  it('does not re-correct lines already corrected', async () => {
+    const correct = vi.fn(async (i: CorrectInput) => i.lines.map((l) => l.text));
+    const m = make(correct, async () => analysis(), ['a', 'b']);
+    m.start('c');
+    await m.ingestAudio('c', 'system', Buffer.from(''));
+    await m.tick('c');
+    await m.ingestAudio('c', 'system', Buffer.from(''));
+    await m.tick('c');
+    expect(correct.mock.calls[1]![0].lines.map((l) => l.text)).toEqual(['b']);
+    expect(correct.mock.calls[1]![0].before).toEqual(['a']);
+  });
+
+  it('a wrong-length correction is an error, not a silent misalignment', async () => {
+    const m = make(
+      async () => [],
+      async () => analysis(),
+      ['a'],
+    );
+    m.start('c');
+    await m.ingestAudio('c', 'system', Buffer.from(''));
+    await m.tick('c');
+    expect(m.get('c')!.error).toContain('correction returned 0 lines for 1');
+  });
+});
+
+describe('meeting corrector (small model)', () => {
+  const input: CorrectInput = {
+    chatId: 'c',
+    glossary: ['South Glos: self gloss, South Wales'],
+    context: { now: 'Bus funding', topics: ['WECA grant'] },
+    before: [],
+    lines: [{ speaker: 'Them', text: 'Leca and self gloss' }],
+  };
+
+  it('prompt carries glossary, context and the lines, and forbids rephrasing', () => {
+    const p = buildCorrectionPrompt(input);
+    expect(p).toContain('South Glos: self gloss');
+    expect(p).toContain('WECA grant');
+    expect(p).toContain('Leca and self gloss');
+    expect(p).toContain('exactly 1 strings');
+    expect(p).toContain('Do not rephrase');
+  });
+
+  it('parses fenced arrays and rejects a wrong count or non-array', () => {
+    expect(parseCorrections('```json\n["a","b"]\n```', 2)).toEqual(['a', 'b']);
+    expect(() => parseCorrections('["a"]', 2)).toThrow(/expected 2/);
+    expect(() => parseCorrections('nope', 1)).toThrow(/no JSON array/);
+  });
+
+  it('runs on the cheap model and returns the corrected lines', async () => {
+    const sdkBackend = createMockSdkBackend();
+    sdkBackend.enqueue([
+      { type: 'assistant', content: '["WECA and South Glos"]' },
+      { type: 'result', sessionId: 's' },
+    ]);
+    const correct = makeMeetingCorrector({
+      sdkBackend,
+      runOnAccountWithCredit: async (_l, fn) => fn('tok'),
+      cwd: '/tmp',
+    });
+    expect(await correct(input)).toEqual(['WECA and South Glos']);
+    expect(sdkBackend.lastOptions()?.model).toBe(MEETING_MODEL);
   });
 });
