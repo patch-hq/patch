@@ -1,7 +1,7 @@
 // Meeting mode (right-hand panel + action cards above the composer). Pure view
 // of the host's MeetingState; every control goes through lib/meetingControl.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { formatMeetingClock, meetingElapsedMs, type MeetingState } from '@patch/wire';
 import {
   decideAction,
@@ -40,21 +40,15 @@ function speedOf(meeting: MeetingState): string {
   return hit ? hit[0] : getMeetingSpeed();
 }
 
-export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+/** Bar across the top of the meeting: timer, controls, errors and Now. */
+export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const capturing = useMeetingStore((s) => s.capturingChatId === chatId);
   const now = useNow(meeting.status === 'live');
-  const [query, setQuery] = useState('');
   const elapsed = meetingElapsedMs(meeting, now);
-  const topics = useMemo(() => [...meeting.topics].sort((a, b) => b.at - a.at), [meeting.topics]);
-  const q = query.trim().toLowerCase();
-  const lines = useMemo(
-    () => meeting.transcript.filter((l) => q === '' || l.text.toLowerCase().includes(q)),
-    [meeting.transcript, q],
-  );
   const card = meeting.status === 'ended' ? meeting.summary : meeting.now;
 
   return (
-    <aside className="mm-panel" data-testid="meeting-panel" data-status={meeting.status}>
+    <section className="mm-bar" data-testid="meeting-bar" data-status={meeting.status}>
       <div className="mm-head">
         {meeting.status === 'ended' ? (
           <span className="mm-pill ended" data-testid="meeting-pill">
@@ -158,10 +152,36 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
           <h4 className="mm-wait">Listening…</h4>
         )}
       </div>
+    </section>
+  );
+}
 
+/** Right-hand panel: key points and the transcript in one scrolling column. */
+export function MeetingPanel({ meeting }: { meeting: MeetingState }) {
+  const [query, setQuery] = useState('');
+  const topics = useMemo(() => [...meeting.topics].sort((a, b) => b.at - a.at), [meeting.topics]);
+  const q = query.trim().toLowerCase();
+  const lines = useMemo(
+    () => meeting.transcript.filter((l) => q === '' || l.text.toLowerCase().includes(q)),
+    [meeting.transcript, q],
+  );
+  const scroller = useRef<HTMLDivElement>(null);
+  // Pinned to the latest line until Tom scrolls up; scrolling back down re-pins.
+  const pinned = useRef(true);
+  const onScroll = () => {
+    const el = scroller.current;
+    if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  };
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
+  return (
+    <aside className="mm-panel" data-testid="meeting-panel" data-status={meeting.status}>
       {topics.length > 0 ? (
-        <div>
-          <div className="mm-label">Discussed</div>
+        <div className="mm-points" data-testid="meeting-points">
+          <div className="mm-label">Key points</div>
           {topics.map((t) => (
             <div className="mm-topic" key={t.id} data-testid="meeting-topic">
               <div className="r">
@@ -179,8 +199,8 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
         </div>
       ) : null}
 
-      <details className="mm-tx" data-testid="meeting-transcript">
-        <summary>Transcript</summary>
+      <div className="mm-tx" data-testid="meeting-transcript">
+        <div className="mm-label">Transcript</div>
         <input
           className="mm-search"
           data-testid="meeting-search"
@@ -189,7 +209,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <div className="ln">
+        <div className="ln" data-testid="meeting-lines" ref={scroller} onScroll={onScroll}>
           {lines.map((l, i) => (
             <div key={i} data-testid="meeting-line">
               <span>
@@ -199,7 +219,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
             </div>
           ))}
         </div>
-      </details>
+      </div>
     </aside>
   );
 }
@@ -267,8 +287,8 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
 }
 
 /**
- * Wraps the chat's stream + composer. With a meeting it becomes a two-column
- * body with the panel on the right; without one it is `display: contents`, so
+ * Wraps the chat's stream + composer. With a meeting it becomes a bar on top
+ * and a two-column body with the panel on the right; without one it is `display: contents`, so
  * the wrapped tree never remounts when a meeting starts or ends.
  */
 export function MeetingLayout({ chatId, children }: { chatId: string; children: ReactNode }) {
@@ -282,8 +302,11 @@ export function MeetingLayout({ chatId, children }: { chatId: string; children: 
       className={meeting ? 'mm-body' : 'mm-contents'}
       data-testid={meeting ? 'meeting-body' : undefined}
     >
-      <div className={meeting ? 'mm-left' : 'mm-contents'}>{children}</div>
-      {meeting ? <MeetingPanel chatId={chatId} meeting={meeting} /> : null}
+      {meeting ? <MeetingBar chatId={chatId} meeting={meeting} /> : null}
+      <div className={meeting ? 'mm-main' : 'mm-contents'}>
+        <div className={meeting ? 'mm-left' : 'mm-contents'}>{children}</div>
+        {meeting ? <MeetingPanel meeting={meeting} /> : null}
+      </div>
     </div>
   );
 }
