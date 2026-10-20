@@ -68,6 +68,7 @@ import { parseSavedPlacement, resolvePlacement, type DisplayInfo } from './windo
 import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
+import { readHostLink, serverLostText, watchServerLink } from './server-watch';
 import { installLocalHost, localHostStatus, serverOrigin } from './local-host';
 import { SystemPresence } from './system-presence';
 import { loadFirstRun, type SetupChoice } from './first-run-api';
@@ -247,7 +248,8 @@ export interface DesktopEvent {
     | 'window:load-failed'
     | 'window:render-process-gone'
     | 'meeting:detection-off'
-    | 'meeting:auto-ended';
+    | 'meeting:auto-ended'
+    | 'server-watch:error';
   ts: number;
   payload?: Record<string, unknown>;
 }
@@ -611,6 +613,39 @@ function showTrayPopover(): void {
   trayPopover.focus();
   sendPopoverVisibility(true);
 }
+
+/** spec/12 § Server lost: surface a host that has been without its server for a minute. */
+function startServerLostWatch(): void {
+  const patchHome = join(app.getPath('home'), '.patch');
+  let lastError = '';
+  watchServerLink({
+    // Only a Mac that runs a host has a link to watch.
+    read: async () => {
+      if (!localHostStatus(app.getPath('home')).installed) {
+        return { online: true, offlineSince: null };
+      }
+      return readHostLink(patchHome);
+    },
+    onLost: (sinceMs) => {
+      const text = serverLostText(sinceMs);
+      tray?.setToolTip(`Patch: server unreachable`);
+      if (!serverLostNotified) {
+        serverLostNotified = true;
+        new Notification({ title: 'Patch server unreachable', body: text }).show();
+      }
+    },
+    onRestored: () => {
+      serverLostNotified = false;
+      tray?.setToolTip('Patch');
+    },
+    onError: (e) => {
+      if (e.message === lastError) return;
+      lastError = e.message;
+      logDesktopEvent({ type: 'server-watch:error', payload: { message: e.message } });
+    },
+  });
+}
+let serverLostNotified = false;
 
 function createTray(): Tray {
   // Group 20 fix DX-12: ship a real template image (mac auto-tints
@@ -1735,6 +1770,7 @@ export function bootstrap(): void {
     registerGlobalHotkeys();
     registerIpc();
     startMeetingDetection();
+    startServerLostWatch();
     setupAutoUpdater();
 
     app.on('activate', () => {

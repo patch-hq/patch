@@ -105,6 +105,12 @@ interface PresenceState {
   outageVisible: boolean;
   setOutageVisible(v: boolean): void;
   /**
+   * The link has stayed down past `SERVER_LOST_MS` (api/ws.ts) with the app in
+   * the foreground: the server is lost, not a blip. Escalates the banner's wording.
+   */
+  serverLost: boolean;
+  setServerLost(v: boolean): void;
+  /**
    * Every registered host, keyed by hostId, seeded from the `auth.ok`
    * greeting so the list is complete even for machines that are asleep.
    */
@@ -190,6 +196,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   // presence so the first paint shows a neutral, quiet indicator.
   connection: 'connecting',
   outageVisible: false,
+  serverLost: false,
   authRejected: null,
   hosts: {},
   daemon: 'unknown',
@@ -208,6 +215,9 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   },
   setOutageVisible(v) {
     set({ outageVisible: v });
+  },
+  setServerLost(v) {
+    set({ serverLost: v });
   },
   setHost(p) {
     set({ daemon: p });

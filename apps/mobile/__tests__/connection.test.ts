@@ -37,6 +37,11 @@ describe('offlineBannerText — no offline flash on load', () => {
     expect(offlineBannerText('reconnecting', true)).toBe('Reconnecting…');
     expect(offlineBannerText('offline', true)).toBe('Offline');
   });
+  it('says the server is unreachable once the outage has lasted a minute', () => {
+    expect(offlineBannerText('reconnecting', true, true)).toBe('Server unreachable. Retrying');
+    expect(offlineBannerText('offline', true, true)).toBe('Server unreachable. Retrying');
+    expect(offlineBannerText('connected', true, true)).toBeNull();
+  });
   it('renders nothing while the outage is still inside its grace period', () => {
     expect(offlineBannerText('reconnecting', false)).toBeNull();
     expect(offlineBannerText('offline', false)).toBeNull();
