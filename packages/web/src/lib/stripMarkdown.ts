@@ -21,7 +21,10 @@ export function stripMarkdown(s: string): string {
       // headings and quotes are handled line-anchored above, and elsewhere they
       // are text ("C#", "~/projects", "a > b").
       .replace(/[*`]/g, '')
-      .replace(/(^|\W)_+|_+(?=\W|$)/g, '$1') // stray underscores, but not inside a word
+      // Stray underscores: a run not attached to a word on either side. One that
+      // follows a letter (`file__name__.txt`) is part of the name — CommonMark
+      // cannot open emphasis there either.
+      .replace(/(^|\W)_+(?=\W|$)/g, '$1')
       .replace(/\s+/g, ' ') // collapse to one line
       .trim()
   );
