@@ -1,7 +1,10 @@
 // Copy the image at `url` to the system clipboard as an image. The async
 // clipboard only accepts image/png, so any other format is redrawn to a PNG
-// first. The URL is fetched (not read off the <img>) so the auth the app's
-// own requests carry applies. NO FALLBACK: every failure rejects.
+// first. In the desktop shell the write goes through its native clipboard
+// (the async clipboard rejects image writes there). The URL is fetched (not
+// read off the <img>) so the auth the app's own requests carry applies. NO FALLBACK: every failure rejects.
+
+import { getDesktopBridge } from './desktopBridge.js';
 
 async function toPng(blob: Blob): Promise<Blob> {
   if (blob.type === 'image/png') return blob;
@@ -28,5 +31,10 @@ export async function copyImageToClipboard(url: string): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} returned HTTP ${res.status}`);
   const png = await toPng(await res.blob());
+  const bridge = getDesktopBridge();
+  if (bridge?.copyImagePng) {
+    await bridge.copyImagePng(new Uint8Array(await png.arrayBuffer()));
+    return;
+  }
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
 }
