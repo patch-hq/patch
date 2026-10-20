@@ -888,6 +888,31 @@ describe('tool call / tool result', () => {
     ]);
   });
 
+  it('a patch_ask_human call renders a card with a link that opens and a code that copies (spec/15 § Chat detail)', async () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      tool: 'mcp__patch__patch_ask_human',
+      args: {
+        task: 'Open https://device.example.com/activate and enter ABCD-EFGH',
+        why: 'blocked',
+      },
+      callId: 'call1',
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    findHost(r.root, byTestId('ask-human-card'));
+    findHost(r.root, byTestId('ask-human-link')).props.onPress();
+    expect(__getLinkingOpenedUrls()).toEqual(['https://device.example.com/activate']);
+    await findHost(r.root, byTestId('ask-human-code')).props.onPress();
+    expect(__lastCopied()).toBe('ABCD-EFGH');
+    expect(
+      findAllHost(r.root, (i) =>
+        String(i.props['accessibilityLabel'] ?? '').startsWith('Tool call'),
+      ).length,
+    ).toBe(0);
+  });
+
   it('a patch_notify tool_call with no deepLink renders no link row', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.tool_call',

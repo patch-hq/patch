@@ -30,6 +30,7 @@ export const CloudOff = icon('CloudOff');
 export const CornerLeftUp = icon('CornerLeftUp');
 export const Ear = icon('Ear');
 export const ExternalLink = icon('ExternalLink');
+export const Hand = icon('Hand');
 export const Eye = icon('Eye');
 export const EyeOff = icon('EyeOff');
 export const FileText = icon('FileText');

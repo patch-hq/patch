@@ -39,7 +39,7 @@ import {
   type GoalOutcomeNotice,
   type SystemContextItem,
 } from '@patch/wire';
-import { backRecord, parseAgentReturn, type AgentReturn } from '@patch/wire';
+import { backRecord, parseAgentReturn, parseAskHuman, type AgentReturn } from '@patch/wire';
 import { SnoozeDivider } from '../components/SnoozeDivider.js';
 import type { WireEvent } from '@patch/wire';
 import type { Job, JobTrigger } from '@patch/wire/jobs';
@@ -128,6 +128,7 @@ import {
 import { attemptPaging } from '../lib/turnAttempts.js';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../lib/askUserQuestion.js';
 import { QuestionCard } from '../components/QuestionCard.js';
+import { AskHumanCard } from '../components/AskHumanCard.js';
 import { toolCallSummary, toolRunNarrative } from '../lib/toolSummary.js';
 import { toolLabel } from '../lib/toolsCatalog.js';
 import { formatElapsed } from '../lib/backgroundTasks.js';
@@ -3633,6 +3634,16 @@ function ToolCall({
   // when the chat fired a notification and what it said. A `deepLink` is a
   // tappable row inside the box (not buried in the expanded JSON), opening the
   // same URI a push tap would.
+  // spec/14 § Action requests — a `patch_ask_human` is the agent blocked on
+  // the user, so its task is the card itself, links and codes live. Args that
+  // are not its shape fall through to the ordinary row.
+  const askHuman =
+    entry.tool && toolLabel(entry.tool) === 'patch_ask_human'
+      ? parseAskHuman(entry.toolArgs)
+      : null;
+  if (askHuman)
+    return <AskHumanCard task={askHuman.task} {...(askHuman.why ? { why: askHuman.why } : {})} />;
+
   if (entry.tool && toolLabel(entry.tool) === 'patch_notify') {
     const message = typeof args['message'] === 'string' ? args['message'] : '';
     const importance = typeof args['importance'] === 'string' ? args['importance'] : 'normal';
@@ -4740,6 +4751,7 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
     !!entry.tool &&
     (toolLabel(entry.tool) === 'view_file' ||
       toolLabel(entry.tool) === 'patch_notify' ||
+      (toolLabel(entry.tool) === 'patch_ask_human' && parseAskHuman(entry.toolArgs) !== null) ||
       (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null))
   );
 }

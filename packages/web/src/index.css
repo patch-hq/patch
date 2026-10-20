@@ -15129,3 +15129,53 @@ select.new-chat-account:focus-visible {
   border-radius: 6px;
   cursor: pointer;
 }
+
+/* spec/14 § Main chat panel — Action requests: a patch_ask_human call drawn as
+   a card, so the task's links and codes can be acted on without expanding. */
+.ask-human-card {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--ink);
+}
+.ask-human-icon {
+  flex: none;
+  margin-top: 5px;
+  color: var(--accent-strong);
+}
+.ask-human-body {
+  min-width: 0;
+}
+.ask-human-task,
+.ask-human-why {
+  margin: 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ask-human-why {
+  color: var(--ink-3);
+}
+.ask-human-link {
+  color: var(--accent);
+}
+.ask-human-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  color: var(--accent-strong);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  cursor: pointer;
+}
+.ask-human-code code {
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: var(--text-min);
+}
