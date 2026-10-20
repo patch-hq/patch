@@ -222,6 +222,7 @@ import {
   createWhisper,
   validateWhisperCredentials,
   UnsupportedClipFormatError,
+  LocalWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
@@ -4016,6 +4017,17 @@ async function startHost(
         throw new Error('host audio stack not ready — whisper unavailable');
       return dictationTranscribers.local.transcribeClip(wav, 'wav');
     },
+    // Voice separation needs the local sidecar and its speaker model; without
+    // DIARISE_MODEL_PATH the sidecar refuses rather than merging voices.
+    ...(process.env['DIARISE_MODEL_PATH']
+      ? {
+          transcribeVoices: async (session: string, wav: Buffer) => {
+            if (!(whisper instanceof LocalWhisperBackend))
+              throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
+            return whisper.transcribeVoices(session, wav);
+          },
+        }
+      : {}),
     analyse: makeMeetingAnalyser({ sdkBackend, runOnAccountWithCredit, cwd: hostCwd }),
     correct: makeMeetingCorrector({ sdkBackend, runOnAccountWithCredit, cwd: hostCwd }),
     // Optional user glossary: <patchHome>/meetings/glossary.txt, one term per line.
@@ -6347,6 +6359,10 @@ export async function handleServerEvent(
         else if (event.action === 'tune') {
           if (!event.settings) throw new Error('meeting tune needs settings');
           m.tune(event.chatId, event.settings);
+        } else if (event.action === 'name_voice') {
+          if (event.voice === undefined || event.name === undefined)
+            throw new Error('meeting name_voice needs voice and name');
+          m.nameVoice(event.chatId, event.voice, event.name);
         } else if (event.action === 'pause') m.pause(event.chatId);
         else if (event.action === 'resume') m.resume(event.chatId);
         else await m.end(event.chatId);

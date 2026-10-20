@@ -103,6 +103,39 @@ test.describe('meeting mode — live', () => {
     await expect.poll(gap).toBeLessThan(5);
   });
 
+  test('numbered voices show as Them N, and naming one sends it to the host and relabels it', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const apply = (extra: Record<string, unknown>) =>
+      page.evaluate((e) => {
+        const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+        const cur = store.getState().byChat['chat_tools'];
+        store.getState().apply('chat_tools', {
+          ...cur,
+          ...e,
+          transcript: [
+            ...cur.transcript,
+            { at: 9000, speaker: 'them', voice: 1, text: 'voice one speaking' },
+            { at: 9500, speaker: 'them', voice: 2, text: 'voice two speaking' },
+          ],
+        });
+      }, extra);
+    await apply({});
+    const voices = page.getByTestId('meeting-voice');
+    await expect(voices).toHaveText(['Them 1', 'Them 2']);
+    page.once('dialog', (d) => d.accept('Priya'));
+    await voices.nth(1).click();
+    const reqs = (await sent(page, 'meeting.control_request')) as Array<Record<string, unknown>>;
+    expect(reqs.at(-1)).toMatchObject({ action: 'name_voice', voice: 2, name: 'Priya' });
+    await page.evaluate(() => {
+      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+      const cur = store.getState().byChat['chat_tools'];
+      store.getState().apply('chat_tools', { ...cur, voices: { '2': 'Priya' } });
+    });
+    await expect(voices).toHaveText(['Them 1', 'Priya']);
+  });
+
   test('shows Live + timer, Now, topics newest first with Decided badges', async ({ page }) => {
     await page.goto(URL_LIVE);
     await expect(page.getByTestId('meeting-pill')).toContainText(/Live · 3\d:\d\d/);

@@ -355,6 +355,72 @@ describe('LocalWhisperBackend (external localSidecarUrl — operator-owned proce
     }
   });
 
+  test('transcribeVoices() sends the diarise session with the WAV samples and returns voiced segments', async () => {
+    let sent: Record<string, unknown> = {};
+    let binaryLength = -1;
+    const server = await startWsServer((sock) => {
+      sock.on('message', (raw: Buffer, isBinary: boolean) => {
+        if (isBinary) {
+          binaryLength = raw.byteLength;
+          return;
+        }
+        sent = parseJson(raw);
+        sock.send(
+          JSON.stringify({
+            requestId: sent.requestId,
+            text: 'a b',
+            segments: [
+              { start: 0, end: 1, text: 'a', voice: 1 },
+              { start: 1, end: 2, text: 'b', voice: 2 },
+            ],
+          }),
+        );
+      });
+    });
+    const w = new LocalWhisperBackend({
+      backend: 'local',
+      logger,
+      localSidecarUrl: `ws://127.0.0.1:${server.port}`,
+    });
+    try {
+      const wav = pcm16ToWav(new Int16Array([1, 2, 3, 4]), 16000);
+      const out = await w.transcribeVoices('chat:1', wav);
+      expect(out).toEqual([
+        { text: 'a', voice: 1 },
+        { text: 'b', voice: 2 },
+      ]);
+      expect(sent.diarise).toBe('chat:1');
+      expect(sent.samples).toBe(4);
+      expect(binaryLength).toBe(8);
+    } finally {
+      await w.close();
+      await server.close();
+    }
+  });
+
+  test('transcribeVoices() surfaces a sidecar error and a missing .segments', async () => {
+    const server = await startWsServer((sock) => {
+      sock.on('message', (raw: Buffer, isBinary: boolean) => {
+        if (isBinary) return;
+        const msg = parseJson(raw);
+        sock.send(JSON.stringify({ requestId: msg.requestId, text: 'x' }));
+      });
+    });
+    const w = new LocalWhisperBackend({
+      backend: 'local',
+      logger,
+      localSidecarUrl: `ws://127.0.0.1:${server.port}`,
+    });
+    try {
+      const wav = pcm16ToWav(new Int16Array([1, 2]), 16000);
+      await expect(w.transcribeVoices('s', wav)).rejects.toThrow(/missing \.segments/);
+      await expect(w.transcribeVoices('s', Buffer.from('nope'))).rejects.toThrow(/not a WAV/);
+    } finally {
+      await w.close();
+      await server.close();
+    }
+  });
+
   test('transcribe() rejects when the sidecar response is missing .text', async () => {
     const server = await startWsServer((sock) => {
       sock.on('message', (raw: Buffer, isBinary: boolean) => {

@@ -13683,6 +13683,11 @@ select.new-chat-account:focus-visible {
   flex-direction: column;
   gap: 6px;
 }
+.mm-tx .ln .mm-voice {
+  all: unset;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
 .mm-tx .ln span {
   color: var(--ink-faint);
   font-size: var(--text-min);

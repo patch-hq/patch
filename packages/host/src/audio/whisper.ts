@@ -20,6 +20,7 @@ import type { Logger } from 'pino';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync as existsSyncFs } from 'node:fs';
 import { PersistentWsClient } from './persistent-ws.js';
+import { pcmFromWav } from './smartTurn.js';
 import { readKey, type KeySource } from './keySource.js';
 
 /** Subset of the host's audio config the credential check needs. */
@@ -531,6 +532,38 @@ export class LocalWhisperBackend implements WhisperBackend {
       },
     });
     return (result as string).trim();
+  }
+  /**
+   * Transcribes a 16 kHz mono PCM16 WAV and labels each stretch with the
+   * distinct voice that spoke it. `session` keys the sidecar's per-meeting
+   * voice memory, so numbers stay stable across clips. The sidecar answers with
+   * an error when DIARISE_MODEL_PATH is missing; nothing falls back to one voice.
+   */
+  async transcribeVoices(session: string, wav: Buffer): Promise<{ text: string; voice: number }[]> {
+    await this.ensureProcess();
+    const pcm = pcmFromWav(wav);
+    const requestId = `w-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const payload = JSON.stringify({ requestId, samples: pcm.length, diarise: session });
+    const result = await this.getClient().request({
+      payload,
+      binaryPayload: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength),
+      handlers: {
+        onJson(msg: unknown) {
+          const m = msg as { segments?: unknown };
+          if (!Array.isArray(m.segments)) {
+            throw new Error('faster-whisper sidecar: missing .segments');
+          }
+          return {
+            done: true,
+            value: (m.segments as { text: string; voice: number }[]).map((g) => ({
+              text: g.text,
+              voice: g.voice,
+            })),
+          };
+        },
+      },
+    });
+    return result as { text: string; voice: number }[];
   }
   /**
    * DOCUMENTED LIMITATION (spec/07 § End-to-end voice transport): the

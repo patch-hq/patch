@@ -12,7 +12,13 @@ export const MeetingSpeaker = z.enum(['you', 'them']);
 export type MeetingSpeaker = z.infer<typeof MeetingSpeaker>;
 
 export const MeetingTranscriptLine = z
-  .object({ at: z.number(), speaker: MeetingSpeaker, text: z.string() })
+  .object({
+    at: z.number(),
+    speaker: MeetingSpeaker,
+    /** Which distinct voice within `them` (1, 2, …) when the host could separate them. */
+    voice: z.number().int().min(1).optional(),
+    text: z.string(),
+  })
   .strict();
 export type MeetingTranscriptLine = z.infer<typeof MeetingTranscriptLine>;
 
@@ -94,11 +100,23 @@ export const MeetingState = z
     topics: z.array(MeetingTopic),
     actions: z.array(MeetingAction),
     transcript: z.array(MeetingTranscriptLine),
+    /** Names given to `them` voices, keyed by voice number as a string. */
+    voices: z.record(z.string(), z.string()).optional(),
     /** Set when the last analysis or transcription failed; cleared by the next success. */
     error: z.string().nullable(),
   })
   .strict();
 export type MeetingState = z.infer<typeof MeetingState>;
+
+/** Who a transcript line is from: You, a named voice, "Them 2", or plain "Them". */
+export function meetingSpeakerLabel(
+  line: Pick<MeetingTranscriptLine, 'speaker' | 'voice'>,
+  voices?: Record<string, string>,
+): string {
+  if (line.speaker === 'you') return 'You';
+  if (line.voice === undefined) return 'Them';
+  return voices?.[String(line.voice)] ?? `Them ${line.voice}`;
+}
 
 /** Total running time of a meeting at wall-clock `nowMs`. */
 export function meetingElapsedMs(m: MeetingState, nowMs: number): number {

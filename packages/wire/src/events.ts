@@ -3660,9 +3660,12 @@ export const MeetingControlRequestEvent = z
   .object({
     type: z.literal('meeting.control_request'),
     chatId: z.string().min(1),
-    action: z.enum(['start', 'pause', 'resume', 'end', 'tune']),
+    action: z.enum(['start', 'pause', 'resume', 'end', 'tune', 'name_voice']),
     /** With `start` and `tune`: how often the notes update. */
     settings: MeetingSettings.optional(),
+    /** With `name_voice`: which `them` voice, and the name to show for it. */
+    voice: z.number().int().min(1).optional(),
+    name: z.string().trim().min(1).max(60).optional(),
   })
   .strict();
 export type MeetingControlRequestEvent = z.infer<typeof MeetingControlRequestEvent>;

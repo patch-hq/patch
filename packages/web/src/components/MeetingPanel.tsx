@@ -8,6 +8,7 @@ import {
   DEFAULT_MEETING_NOW_PROMPT,
   formatMeetingClock,
   meetingElapsedMs,
+  meetingSpeakerLabel,
   type MeetingState,
 } from '@patch/wire';
 import {
@@ -15,6 +16,7 @@ import {
   endMeeting,
   getMeetingSpeed,
   listenHere,
+  nameMeetingVoice,
   MEETING_SPEEDS,
   setMeetingSpeed,
   pauseMeeting,
@@ -278,7 +280,7 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
 }
 
 /** Right-hand panel: key points and the transcript in one scrolling column. */
-export function MeetingPanel({ meeting }: { meeting: MeetingState }) {
+export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const [query, setQuery] = useState('');
   const topics = useMemo(() => [...meeting.topics].sort((a, b) => b.at - a.at), [meeting.topics]);
   const q = query.trim().toLowerCase();
@@ -334,7 +336,26 @@ export function MeetingPanel({ meeting }: { meeting: MeetingState }) {
           {lines.map((l, i) => (
             <div key={i} data-testid="meeting-line">
               <span>
-                {formatMeetingClock(l.at)} {l.speaker === 'you' ? 'You' : 'Them'}
+                {formatMeetingClock(l.at)}{' '}
+                {l.voice !== undefined ? (
+                  <button
+                    type="button"
+                    className="mm-voice"
+                    data-testid="meeting-voice"
+                    onClick={() => {
+                      const name = window.prompt(
+                        'Who is this?',
+                        meeting.voices?.[String(l.voice)] ?? '',
+                      );
+                      if (name && name.trim() !== '')
+                        nameMeetingVoice(chatId, l.voice!, name.trim());
+                    }}
+                  >
+                    {meetingSpeakerLabel(l, meeting.voices)}
+                  </button>
+                ) : (
+                  meetingSpeakerLabel(l)
+                )}
               </span>
               {l.text}
             </div>
@@ -426,7 +447,7 @@ export function MeetingLayout({ chatId, children }: { chatId: string; children: 
       {meeting ? <MeetingBar chatId={chatId} meeting={meeting} /> : null}
       <div className={meeting ? 'mm-main' : 'mm-contents'}>
         <div className={meeting ? 'mm-left' : 'mm-contents'}>{children}</div>
-        {meeting ? <MeetingPanel meeting={meeting} /> : null}
+        {meeting ? <MeetingPanel chatId={chatId} meeting={meeting} /> : null}
       </div>
     </div>
   );

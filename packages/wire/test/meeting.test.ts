@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { EVENT_SCHEMAS, formatMeetingClock, meetingElapsedMs, MeetingState } from '../src/index.js';
+import {
+  EVENT_SCHEMAS,
+  formatMeetingClock,
+  meetingElapsedMs,
+  meetingSpeakerLabel,
+  MeetingState,
+} from '../src/index.js';
 
 const state = {
   status: 'live',
@@ -18,6 +24,7 @@ describe('meeting wire', () => {
   it('accepts every meeting event shape', () => {
     const ok = [
       { type: 'meeting.control_request', chatId: 'c', action: 'start' },
+      { type: 'meeting.control_request', chatId: 'c', action: 'name_voice', voice: 2, name: 'P' },
       { type: 'meeting.get_request', chatId: 'c' },
       { type: 'meeting.audio', chatId: 'c', source: 'mic', audioBase64: 'AA==' },
       { type: 'meeting.action_request', chatId: 'c', actionId: 'a', decision: 'do' },
@@ -49,5 +56,23 @@ describe('meeting wire', () => {
     ).toBe(1000);
     expect(formatMeetingClock(65_000)).toBe('01:05');
     expect(formatMeetingClock(3_725_000)).toBe('1:02:05');
+  });
+});
+
+describe('meetingSpeakerLabel', () => {
+  it('labels you, an unseparated them, a numbered voice and a named voice', () => {
+    expect(meetingSpeakerLabel({ speaker: 'you' })).toBe('You');
+    expect(meetingSpeakerLabel({ speaker: 'them' })).toBe('Them');
+    expect(meetingSpeakerLabel({ speaker: 'them', voice: 2 })).toBe('Them 2');
+    expect(meetingSpeakerLabel({ speaker: 'them', voice: 2 }, { '2': 'Priya' })).toBe('Priya');
+  });
+
+  it('accepts a state with voiced lines and a voice name map', () => {
+    const ok = MeetingState.safeParse({
+      ...state,
+      transcript: [{ at: 0, speaker: 'them', voice: 1, text: 'hi' }],
+      voices: { '1': 'Priya' },
+    });
+    expect(ok.success).toBe(true);
   });
 });

@@ -144,6 +144,11 @@ export async function listenHere(chatId: string): Promise<void> {
   }
 }
 
+/** Show `name` for a `Them N` voice, e.g. once Tom has recognised who it is. */
+export function nameMeetingVoice(chatId: string, voice: number, name: string): void {
+  ws().send({ type: 'meeting.control_request', chatId, action: 'name_voice', voice, name });
+}
+
 export function pauseMeeting(chatId: string): void {
   capture?.setPaused(true);
   ws().send({ type: 'meeting.control_request', chatId, action: 'pause' });

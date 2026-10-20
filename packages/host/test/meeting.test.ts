@@ -54,6 +54,10 @@ describe('MeetingManager', () => {
   let analyse: ReturnType<typeof vi.fn<(i: AnalyseInput) => Promise<MeetingAnalysis>>>;
   let transcribe: ReturnType<typeof vi.fn<(b: Buffer) => Promise<string>>>;
   let runAction: ReturnType<typeof vi.fn<(c: string, m: string) => Promise<void>>>;
+  let transcribeVoices: ReturnType<
+    typeof vi.fn<(s: string, b: Buffer) => Promise<{ text: string; voice: number }[]>>
+  >;
+  let diarise: boolean;
   let ticks: (() => void)[];
   let n: number;
 
@@ -61,6 +65,7 @@ describe('MeetingManager', () => {
     new MeetingManager({
       dir,
       transcribe,
+      ...(diarise ? { transcribeVoices } : {}),
       analyse,
       prompts: () => PROMPTS,
       runAction,
@@ -86,8 +91,95 @@ describe('MeetingManager', () => {
     analyse = vi.fn(async () => analysis());
     transcribe = vi.fn(async () => 'hello there');
     runAction = vi.fn(async () => undefined);
+    transcribeVoices = vi.fn(async () => []);
+    diarise = false;
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    transcribeVoices.mockResolvedValueOnce([
+      { text: 'Shall we start?', voice: 1 },
+      { text: 'Yes please.', voice: 1 },
+      { text: 'I have the numbers.', voice: 2 },
+    ]);
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    expect(m.get('c1')?.transcript.map((l) => [l.speaker, l.voice, l.text])).toEqual([
+      ['them', 1, 'Shall we start? Yes please.'],
+      ['them', 2, 'I have the numbers.'],
+    ]);
+    expect(transcribeVoices).toHaveBeenCalledWith('c1:1000000', expect.any(Buffer));
+    expect(transcribe).not.toHaveBeenCalled();
+  });
+
+  it('never diarises the mic, and keeps one Them label without a diariser', async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    expect(transcribeVoices).not.toHaveBeenCalled();
+    expect(m.get('c1')?.transcript[0]).toEqual({ at: 0, speaker: 'you', text: 'hello there' });
+  });
+
+  it('labels voices in the analysis input, and a name replaces the number', async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    transcribeVoices.mockResolvedValueOnce([
+      { text: 'Morning all', voice: 1 },
+      { text: 'Hi, Priya here', voice: 2 },
+    ]);
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    await m.tick('c1');
+    expect(analyse.mock.calls[0]![0].newLines.map((l) => l.speaker)).toEqual(['Them 1', 'Them 2']);
+    m.nameVoice('c1', 2, 'Priya');
+    transcribeVoices.mockResolvedValueOnce([{ text: 'Next item', voice: 2 }]);
+    await m.ingestAudio('c1', 'system', Buffer.from('b'));
+    await m.tick('c1');
+    expect(analyse.mock.calls[1]![0].newLines.map((l) => l.speaker)).toEqual(['Priya']);
+    expect(m.contextFor('c1')).toContain('Priya] Next item');
+  });
+
+  it('takes a voice name from the analysis once, and never overwrites a given one', async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    transcribeVoices.mockResolvedValueOnce([
+      { text: 'a', voice: 1 },
+      { text: 'b', voice: 2 },
+    ]);
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    m.nameVoice('c1', 1, 'Sam');
+    analyse.mockResolvedValueOnce(
+      analysis({
+        voices: [
+          { voice: 1, name: 'Dev' },
+          { voice: 2, name: 'Priya' },
+          { voice: 9, name: 'Nobody' },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    expect(m.get('c1')?.voices).toEqual({ '1': 'Sam', '2': 'Priya' });
+  });
+
+  it('refuses to name a voice that has not spoken', () => {
+    const m = make();
+    m.start('c1');
+    expect(() => m.nameVoice('c1', 3, 'X')).toThrow(MeetingError);
+  });
+
+  it('a failed diarised transcription lands on state.error', async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    transcribeVoices.mockRejectedValueOnce(new Error('DIARISE_MODEL_PATH is not set'));
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    expect(m.get('c1')?.error).toContain('DIARISE_MODEL_PATH');
+    expect(m.get('c1')?.transcript).toEqual([]);
+  });
 
   it('drops a Them line that is a garbled echo of a recent You line', async () => {
     const m = make();
@@ -630,6 +722,15 @@ describe('meeting events on the host link', () => {
     const daemon = { allocErrorSeq: () => 1 } as never;
     await handleServerEvent(
       { type: 'meeting.control_request', chatId: 'c', action: 'start' },
+      daemon,
+      (x) => sent.push(x),
+      logger,
+      {} as never,
+    );
+    expect(sent[0]).toMatchObject({ type: 'chat.error', chatId: 'c' });
+    sent.length = 0;
+    await handleServerEvent(
+      { type: 'meeting.control_request', chatId: 'c', action: 'name_voice', name: 'Pri' },
       daemon,
       (x) => sent.push(x),
       logger,

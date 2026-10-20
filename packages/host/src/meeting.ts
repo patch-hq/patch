@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
+  meetingSpeakerLabel,
   formatMeetingClock,
   DEFAULT_MEETING_SETTINGS,
   MeetingSettings,
@@ -83,6 +84,8 @@ export const MeetingAnalysis = z
     actions: z.array(
       z.object({ title: z.string(), why: z.string(), atSeconds: z.number().optional() }),
     ),
+    /** Names for `Them N` voices, where the transcript makes who they are clear. */
+    voices: z.array(z.object({ voice: z.number().int().min(1), name: z.string() })).optional(),
     summary: z
       .object({ headline: z.string(), bullets: z.array(z.string()) })
       .nullable()
@@ -124,6 +127,12 @@ export interface MeetingDeps {
   dir: string;
   /** Local Whisper only. */
   transcribe: (wav: Buffer) => Promise<string>;
+  /**
+   * Local diarisation: transcribes a `them` clip and says which distinct voice
+   * spoke each stretch. `session` is stable for the whole meeting so voice
+   * numbers stay the same across clips. Omitted: `them` stays one speaker.
+   */
+  transcribeVoices?: (session: string, wav: Buffer) => Promise<{ text: string; voice: number }[]>;
   analyse: (input: AnalyseInput) => Promise<MeetingAnalysis>;
   /**
    * Cheap pass over new transcript lines that repairs mis-heard names and places
@@ -157,6 +166,21 @@ interface Runtime {
   correctedUpTo: number;
   /** Serialises transcription and analysis so lines land in order. */
   chain: Promise<void>;
+}
+
+/** Consecutive segments from one voice read as one line. */
+function mergeVoiceRuns(
+  segs: { text: string; voice: number }[],
+): { text: string; voice: number }[] {
+  const out: { text: string; voice: number }[] = [];
+  for (const g of segs) {
+    const text = g.text.trim();
+    if (text === '') continue;
+    const last = out[out.length - 1];
+    if (last && last.voice === g.voice) last.text += ` ${text}`;
+    else out.push({ text, voice: g.voice });
+  }
+  return out;
 }
 
 export class MeetingError extends Error {
@@ -276,9 +300,16 @@ export class MeetingManager {
     }
     const at = meetingElapsedMs(rt.state, this.now());
     return this.enqueue(rt, async () => {
-      let text: string;
+      const speaker = source === 'mic' ? 'you' : 'them';
+      let pieces: { text: string; voice?: number }[];
       try {
-        text = (await this.deps.transcribe(wav)).trim();
+        if (speaker === 'them' && this.deps.transcribeVoices) {
+          pieces = mergeVoiceRuns(
+            await this.deps.transcribeVoices(`${chatId}:${rt.state.startedAt}`, wav),
+          );
+        } else {
+          pieces = [{ text: (await this.deps.transcribe(wav)).trim() }];
+        }
       } catch (err) {
         rt.state.error = `transcription failed: ${(err as Error).message}`;
         this.deps.logger.error(
@@ -288,22 +319,29 @@ export class MeetingManager {
         this.commit(chatId, rt);
         return;
       }
-      if (text === '') return;
-      const speaker = source === 'mic' ? 'you' : 'them';
-      const isEcho = (l: { at: number; speaker: string; text: string }): boolean =>
-        l.speaker !== speaker &&
-        Math.abs(l.at - at) <= ECHO_WINDOW_MS &&
-        speechSimilarity(l.text, text) >= ECHO_SIMILARITY;
-      // In a room the mic and the call audio carry the same speech. The mic
-      // copy is the clean one; the system copy is the echo and is dropped.
-      if (speaker === 'them' && rt.state.transcript.some((l) => l.speaker === 'you' && isEcho(l))) {
-        return;
+      let added = false;
+      for (const { text, voice } of pieces) {
+        if (text === '') continue;
+        const isEcho = (l: { at: number; speaker: string; text: string }): boolean =>
+          l.speaker !== speaker &&
+          Math.abs(l.at - at) <= ECHO_WINDOW_MS &&
+          speechSimilarity(l.text, text) >= ECHO_SIMILARITY;
+        // In a room the mic and the call audio carry the same speech. The mic
+        // copy is the clean one; the system copy is the echo and is dropped.
+        if (
+          speaker === 'them' &&
+          rt.state.transcript.some((l) => l.speaker === 'you' && isEcho(l))
+        ) {
+          continue;
+        }
+        if (speaker === 'you') {
+          const echoed = rt.state.transcript.findIndex((l) => l.speaker === 'them' && isEcho(l));
+          if (echoed >= 0 && echoed >= rt.analysedUpTo) rt.state.transcript.splice(echoed, 1);
+        }
+        rt.state.transcript.push({ at, speaker, ...(voice !== undefined ? { voice } : {}), text });
+        added = true;
       }
-      if (speaker === 'you') {
-        const echoed = rt.state.transcript.findIndex((l) => l.speaker === 'them' && isEcho(l));
-        if (echoed >= 0 && echoed >= rt.analysedUpTo) rt.state.transcript.splice(echoed, 1);
-      }
-      rt.state.transcript.push({ at, speaker, text });
+      if (!added) return;
       if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
         const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
         rt.state.transcript.splice(0, drop);
@@ -314,6 +352,17 @@ export class MeetingManager {
       rt.state.error = null;
       this.commit(chatId, rt);
     });
+  }
+
+  /** Show `name` for a `them` voice (e.g. the user recognised Them 2 as Priya). */
+  nameVoice(chatId: string, voice: number, name: string): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (!rt.state.transcript.some((l) => l.voice === voice)) {
+      throw new MeetingError(`chat ${chatId}'s meeting has no voice ${voice}`);
+    }
+    rt.state.voices = { ...rt.state.voices, [String(voice)]: name };
+    this.commit(chatId, rt);
   }
 
   // ---- actions ----
@@ -383,9 +432,7 @@ export class MeetingManager {
       lines.push("Pending actions on the user's panel:", ...pending.map((a) => `- ${a.title}`));
     if (fresh.length) {
       let tx = fresh
-        .map(
-          (l) => `[${formatMeetingClock(l.at)} ${l.speaker === 'you' ? 'You' : 'Them'}] ${l.text}`,
-        )
+        .map((l) => `[${formatMeetingClock(l.at)} ${meetingSpeakerLabel(l, s.voices)}] ${l.text}`)
         .join('\n');
       if (tx.length > MAX_PROMPT_TRANSCRIPT_CHARS)
         tx = `…${tx.slice(-MAX_PROMPT_TRANSCRIPT_CHARS)}`;
@@ -423,7 +470,7 @@ export class MeetingManager {
         topics: rt.state.topics.map((t) => t.title),
       },
       before: rt.state.transcript.slice(Math.max(0, from - 5), from).map((l) => l.text),
-      lines: lines.map((l) => ({ speaker: l.speaker === 'you' ? 'You' : 'Them', text: l.text })),
+      lines: lines.map((l) => ({ speaker: meetingSpeakerLabel(l, rt.state.voices), text: l.text })),
     });
     if (out.length !== lines.length)
       throw new MeetingError(`correction returned ${out.length} lines for ${lines.length}`);
@@ -449,7 +496,7 @@ export class MeetingManager {
         previous: { now: rt.state.now, topics: rt.state.topics, actions: rt.state.actions },
         newLines: newLines.map((l) => ({
           clock: formatMeetingClock(l.at),
-          speaker: l.speaker === 'you' ? 'You' : 'Them',
+          speaker: meetingSpeakerLabel(l, rt.state.voices),
           text: l.text,
         })),
         final,
@@ -486,6 +533,12 @@ export class MeetingManager {
           decided: t.decided ?? false,
         });
       }
+    }
+    for (const v of a.voices ?? []) {
+      const name = v.name.trim();
+      if (name === '' || s.voices?.[String(v.voice)] !== undefined) continue;
+      if (!s.transcript.some((l) => l.voice === v.voice)) continue;
+      s.voices = { ...s.voices, [String(v.voice)]: name };
     }
     const norm = (x: string): string => x.toLowerCase().replace(/\s+/g, ' ').trim();
     for (const act of a.actions) {
