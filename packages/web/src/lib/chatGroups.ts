@@ -283,7 +283,17 @@ export function groupChats(
   // the list rejoining the back of it on update, rather than cutting to the
   // front, is what makes the list stop reshuffling out from under you.
   automations.sort((a, b) => a.lastUpdated - b.lastUpdated || cmpId(a, b));
-  hidden.sort((a, b) => a.lastUpdated - b.lastUpdated || cmpId(a, b));
+  // Hidden: chats still working lead (FIFO, as above); settled ones follow,
+  // most recent first, so a stale finished run (12 days old) sinks to the
+  // bottom instead of heading the list.
+  const hiddenLive = (c: ChatRow): boolean =>
+    c.activity === 'running' || c.activity === 'awaiting-permission';
+  hidden.sort((a, b) => {
+    const la = hiddenLive(a);
+    const lb = hiddenLive(b);
+    if (la !== lb) return la ? -1 : 1;
+    return (la ? a.lastUpdated - b.lastUpdated : b.lastUpdated - a.lastUpdated) || cmpId(a, b);
+  });
   // Recent folders: most-recently-active first, but ONLY folders that aren't
   // already shown above as an open Folders section or a pinned chat — otherwise
   // the same folder is listed twice. Recent folders then reads as "other
