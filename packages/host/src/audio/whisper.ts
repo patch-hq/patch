@@ -90,6 +90,14 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
  */
 export interface TranscribeOptions {
   priority?: 'final' | 'partial';
+  /** Words the speech is likely to contain (names, acronyms): the engine's initial prompt. */
+  prompt?: string;
+}
+
+/** Options for a whole-clip transcription. */
+export interface ClipOptions {
+  /** Words the speech is likely to contain (names, acronyms): the engine's initial prompt. */
+  prompt?: string;
 }
 
 /**
@@ -146,7 +154,7 @@ export interface WhisperBackend {
    * speaks PCM only and CANNOT decode m4a — it throws `UnsupportedClipFormatError`
    * rather than fake a transcript (NO FALLBACK); documented in spec/07.
    */
-  transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string>;
+  transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -355,6 +363,7 @@ export class GroqWhisperBackend implements WhisperBackend {
       // if multi-language is ever needed.)
       form.set('language', 'en');
       form.set('temperature', '0');
+      if (opts?.prompt) form.set('prompt', opts.prompt);
       return form;
     };
 
@@ -400,7 +409,7 @@ export class GroqWhisperBackend implements WhisperBackend {
    * audio (m4a/wav) directly, so we post the clip bytes as-is — no PCM→WAV
    * re-encode. Same model + pinned params as the streaming `transcribe`.
    */
-  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
+  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     const apiKey = readKey(this.opts.groqApiKey);
     if (apiKey === undefined) {
       throw new Error(
@@ -415,6 +424,7 @@ export class GroqWhisperBackend implements WhisperBackend {
     form.set('response_format', 'json');
     form.set('language', 'en');
     form.set('temperature', '0');
+    if (opts?.prompt) form.set('prompt', opts.prompt);
     // A clip is audio that cannot be re-recorded (a meeting's minutes): a 429
     // carries a stated wait, so wait it out like a final does rather than
     // dropping the clip. Persistent 429s still throw.
@@ -538,13 +548,17 @@ export class LocalWhisperBackend implements WhisperBackend {
     this.client = new PersistentWsClient({ url: this.resolvedUrl(), logger: this.opts.logger });
     return this.client;
   }
-  async transcribe(pcm: Int16Array): Promise<string> {
+  async transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string> {
     await this.ensureProcess();
     const client = this.getClient();
     // Persistent WS protocol: text envelope `{requestId,samples}` then a
     // binary PCM frame; sidecar replies with a JSON `{requestId,text}`.
     const requestId = `w-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-    const payload = JSON.stringify({ requestId, samples: pcm.length });
+    const payload = JSON.stringify({
+      requestId,
+      samples: pcm.length,
+      ...(opts?.prompt ? { prompt: opts.prompt } : {}),
+    });
     const binary = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
     const result = await client.request({
       payload,
@@ -562,18 +576,19 @@ export class LocalWhisperBackend implements WhisperBackend {
     return (result as string).trim();
   }
   /**
-   * DOCUMENTED LIMITATION (spec/07 § End-to-end voice transport): the
-   * faster-whisper Python sidecar's WS protocol takes raw PCM16 samples only
-   * (see `transcribe` above — it sends `{requestId,samples}` + a binary PCM
-   * frame). It has no path to decode a compressed m4a container, and the
-   * host does not bundle an ffmpeg/AAC decoder to transcode it to PCM.
+   * A WAV clip (PCM16 mono 16 kHz, what meeting capture sends) is unwrapped to
+   * its samples and goes down the same path as streamed audio.
    *
-   * Rather than fake a transcript or silently drop the clip, the local backend
-   * refuses the upload with a typed error. The mobile voice-note upload path
-   * therefore requires `WHISPER_BACKEND=groq` (the production default, which
-   * accepts m4a directly). NO FALLBACK.
+   * DOCUMENTED LIMITATION (spec/07 § End-to-end voice transport): the
+   * faster-whisper sidecar takes raw PCM16 only and the host bundles no
+   * AAC/m4a decoder, so an m4a upload is refused with a typed error rather
+   * than faked or dropped. The mobile voice-note upload path therefore
+   * requires `WHISPER_BACKEND=groq` (the production default). NO FALLBACK.
    */
-  async transcribeClip(_audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
+  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
+    if (format === 'wav') {
+      return this.transcribe(wavToPcm16(audio), opts?.prompt ? { prompt: opts.prompt } : undefined);
+    }
     throw new UnsupportedClipFormatError(
       `WHISPER_BACKEND=local (faster-whisper) cannot transcribe an uploaded ${format} clip: ` +
         'the sidecar accepts PCM16 samples only and the host bundles no AAC/m4a decoder. ' +
@@ -587,6 +602,47 @@ export class LocalWhisperBackend implements WhisperBackend {
 }
 
 // --- WAV encoder -----------------------------------------------------------
+
+/** The samples of a PCM16 mono 16 kHz WAV, as `pcm16ToWav` writes. Anything else is refused. */
+export function wavToPcm16(wav: Buffer): Int16Array {
+  const bad = (why: string): never => {
+    throw new UnsupportedClipFormatError(`WAV clip not usable by the local whisper: ${why}`);
+  };
+  if (
+    wav.length < 12 ||
+    wav.toString('ascii', 0, 4) !== 'RIFF' ||
+    wav.toString('ascii', 8, 12) !== 'WAVE'
+  )
+    bad('not a RIFF/WAVE file');
+  let fmtOk = false;
+  let off = 12;
+  while (off + 8 <= wav.length) {
+    const id = wav.toString('ascii', off, off + 4);
+    const size = wav.readUInt32LE(off + 4);
+    const body = off + 8;
+    if (id === 'fmt ') {
+      const format = wav.readUInt16LE(body);
+      const channels = wav.readUInt16LE(body + 2);
+      const rate = wav.readUInt32LE(body + 4);
+      const bits = wav.readUInt16LE(body + 14);
+      if (format !== 1 || channels !== 1 || rate !== 16000 || bits !== 16)
+        bad(
+          `need PCM16 mono 16 kHz, got format ${format}, ${channels} ch, ${rate} Hz, ${bits} bit`,
+        );
+      fmtOk = true;
+    } else if (id === 'data') {
+      if (!fmtOk) bad('data chunk before fmt chunk');
+      const end = Math.min(wav.length, body + size);
+      const bytes = (end - body) & ~1;
+      // Copy: the Buffer's bytes may not be 2-aligned within its pool.
+      const out = new Int16Array(bytes / 2);
+      for (let i = 0; i < out.length; i++) out[i] = wav.readInt16LE(body + i * 2);
+      return out;
+    }
+    off = body + size + (size & 1);
+  }
+  return bad('no data chunk');
+}
 
 export function pcm16ToWav(pcm: Int16Array, sampleRate: number): Buffer {
   const dataLen = pcm.length * 2;

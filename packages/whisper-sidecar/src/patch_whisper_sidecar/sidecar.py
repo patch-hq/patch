@@ -53,11 +53,13 @@ class _Engine:
         self._model = WhisperModel(self._model_path, device="cpu", compute_type="int8")
         logger.info("faster-whisper model ready")
 
-    def transcribe(self, pcm: np.ndarray) -> str:
+    def transcribe(self, pcm: np.ndarray, prompt: str | None = None) -> str:
         self._ensure_loaded()
         assert self._model is not None
         audio = pcm.astype(np.float32) / 32768.0
-        segments, _info = self._model.transcribe(audio, language="en", beam_size=1)
+        segments, _info = self._model.transcribe(
+            audio, language="en", beam_size=1, initial_prompt=prompt or None
+        )
         return "".join(seg.text for seg in segments).strip()
 
 
@@ -77,10 +79,11 @@ class WhisperSidecar:
                     logger.warning("whisper: binary frame with no pending request")
                     continue
                 request_id = pending["requestId"]
+                prompt = pending.get("prompt")
                 pending = None
                 pcm = np.frombuffer(raw, dtype="<i2")
                 try:
-                    text = await asyncio.to_thread(self._engine.transcribe, pcm)
+                    text = await asyncio.to_thread(self._engine.transcribe, pcm, prompt)
                     await websocket.send(json.dumps({"requestId": request_id, "text": text}))
                 except Exception as exc:
                     logger.exception("whisper: transcription failed for %s", request_id)

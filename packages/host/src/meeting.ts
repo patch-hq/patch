@@ -12,6 +12,13 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import {
+  learnedTerms,
+  termsFromTranscript,
+  uniqueTerms,
+  vocabularyPrompt,
+  type MeetingVocab,
+} from './meetingVocab.js';
 import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
@@ -136,7 +143,12 @@ export interface CorrectInput {
 export interface MeetingDeps {
   dir: string;
   /** Local Whisper only. */
-  transcribe: (wav: Buffer) => Promise<string>;
+  transcribe: (wav: Buffer, prompt?: string) => Promise<string>;
+  /**
+   * The other chats in this chat's folder, whose finished meetings seed this
+   * one's transcription vocabulary. Omitted: only this chat's own earlier meeting.
+   */
+  folderChats?: (chatId: string) => string[];
   analyse: (input: AnalyseInput) => Promise<MeetingAnalysis>;
   /**
    * Cheap pass over new transcript lines that repairs mis-heard names and places
@@ -183,7 +195,14 @@ interface Runtime {
   researching: Promise<void> | undefined;
   /** Serialises transcription and analysis so lines land in order. */
   chain: Promise<void>;
+  /** Terms fed to transcription; host-only, never on the wire. */
+  vocab: MeetingVocab;
 }
+
+/** Corrected terms kept per meeting for the transcription prompt. */
+const LEARNED_LIMIT = 60;
+/** Earlier meetings mined for vocabulary: the most recent few. */
+const EARLIER_MEETINGS = 5;
 
 /** The model complaining about its input instead of writing notes. */
 const META_TEXT = /\bno (new )?transcript\b|nothing (new )?to (process|summari[sz]e)/i;
@@ -222,6 +241,7 @@ export class MeetingManager {
     if (existing && existing.state.status !== 'ended') {
       throw new MeetingError(`chat ${chatId} already has a ${existing.state.status} meeting`);
     }
+    const earlier = this.earlierTerms(chatId, existing?.state);
     const t = this.now();
     const rt: Runtime = {
       state: {
@@ -249,6 +269,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
+      vocab: { learned: [], earlier },
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
@@ -318,7 +339,8 @@ export class MeetingManager {
     return this.enqueue(rt, async () => {
       let text: string;
       try {
-        text = (await this.deps.transcribe(wav)).trim();
+        const prompt = this.vocabPrompt(rt, speakerName);
+        text = (await this.deps.transcribe(wav, prompt === '' ? undefined : prompt)).trim();
       } catch (err) {
         rt.state.error = `transcription failed: ${(err as Error).message}`;
         this.deps.logger.error(
@@ -697,6 +719,69 @@ export class MeetingManager {
     for (const rt of this.runtimes.values()) this.disarmTimer(rt);
   }
 
+  // ---- transcription vocabulary ----
+
+  /** The initial prompt for the next clip: who is on the call and the terms this meeting needs. */
+  private vocabPrompt(rt: Runtime, speakerName: string | undefined): string {
+    const names = rt.state.transcript.flatMap((l) => (l.name ? [l.name] : []));
+    if (speakerName) names.push(speakerName);
+    return vocabularyPrompt({
+      names,
+      vocab: rt.vocab,
+      glossary: this.deps.glossary?.() ?? [],
+    });
+  }
+
+  /**
+   * Terms from this chat's previous meeting and the finished meetings of the
+   * other chats in its folder: speaker names plus names and acronyms used. A
+   * file that cannot be read is logged and skipped; it is only a head start.
+   */
+  private earlierTerms(chatId: string, previous: MeetingState | undefined): string[] {
+    const found: { at: number; terms: string[] }[] = [];
+    const mine = previous ? [previous] : [];
+    const others = (this.deps.folderChats?.(chatId) ?? []).filter((c) => c !== chatId);
+    const peers: MeetingState[] = [...mine];
+    for (const other of others) {
+      try {
+        const state = this.peek(other);
+        if (state && state.status === 'ended') peers.push(state);
+      } catch (err) {
+        this.deps.logger.warn(
+          { chatId: other, err: (err as Error).message },
+          'meeting: earlier meeting unreadable, skipped for vocabulary',
+        );
+      }
+    }
+    for (const m of peers) {
+      found.push({
+        at: m.startedAt,
+        terms: [
+          ...m.transcript.flatMap((l) => (l.name ? [l.name] : [])),
+          ...termsFromTranscript(m.transcript.map((l) => l.text)),
+        ],
+      });
+    }
+    return uniqueTerms(
+      found
+        .sort((a, b) => b.at - a.at)
+        .slice(0, EARLIER_MEETINGS)
+        .flatMap((f) => f.terms),
+    );
+  }
+
+  /** Another chat's saved meeting, without loading it into this process. */
+  private peek(chatId: string): MeetingState | undefined {
+    let raw: string;
+    try {
+      raw = readFileSync(this.file(chatId), 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw err;
+    }
+    return MeetingState.parse((JSON.parse(raw) as { state: unknown }).state);
+  }
+
   // ---- internals ----
 
   /** One analysis pass if there is anything new. Exposed for tests. */
@@ -727,7 +812,11 @@ export class MeetingManager {
     if (out.length !== lines.length)
       throw new MeetingError(`correction returned ${out.length} lines for ${lines.length}`);
     lines.forEach((l, i) => {
-      l.text = out[i] as string;
+      const fixed = out[i] as string;
+      rt.vocab.learned = uniqueTerms([...rt.vocab.learned, ...learnedTerms(l.text, fixed)]).slice(
+        -LEARNED_LIMIT,
+      );
+      l.text = fixed;
     });
     rt.correctedUpTo = rt.state.transcript.length;
   }
@@ -870,6 +959,7 @@ export class MeetingManager {
       analysedUpTo: number;
       deliveredUpTo: number;
       researchedUpTo?: number;
+      vocab?: MeetingVocab;
     };
     const state = MeetingState.parse(parsed.state);
     const rt: Runtime = {
@@ -882,6 +972,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
+      vocab: parsed.vocab ?? { learned: [], earlier: [] },
     };
     this.runtimes.set(chatId, rt);
     // A host restart finds the meeting `live` with no audio coming: park it as
@@ -908,6 +999,7 @@ export class MeetingManager {
         analysedUpTo: rt.analysedUpTo,
         deliveredUpTo: rt.deliveredUpTo,
         researchedUpTo: rt.researchedUpTo,
+        vocab: rt.vocab,
       }),
     );
     renameSync(tmp, f);
