@@ -6,7 +6,7 @@ import React from 'react';
 import { useRouter } from 'expo-router';
 import { SettingsSection } from '../SettingsSection';
 import { usePresenceStore } from '../../stores/presenceStore';
-import { LAYER_TITLE, TEXT_PROMPTS, type Layer } from './AgentBehaviorSection';
+import { LAYER_TITLE, MEETING_PROMPTS, TEXT_PROMPTS, type Layer } from './AgentBehaviorSection';
 import { SettingsPage } from './SettingsPage';
 import { writePreferences } from './PreferenceSections';
 import { Field, Muted, Row, SettingsButton, WithSettings } from './ui';
@@ -79,14 +79,23 @@ export function PromptsPage(): React.ReactElement {
             p.harnessToolsPrompt !== null &&
             (toolsDefault === '' || p.harnessToolsPrompt !== toolsDefault);
           return (
-            <SettingsSection title="Prompts" testID="settings-prompts">
-              <CheckInInterval preferences={p} />
-              {(Object.keys(TEXT_PROMPTS) as (keyof typeof TEXT_PROMPTS)[]).map((layer) =>
-                row(layer, p[TEXT_PROMPTS[layer].key] !== TEXT_PROMPTS[layer].fallback),
-              )}
-              {row('tools', toolsCustom)}
-              {row('system', p.harnessSystemPrompt !== '')}
-            </SettingsSection>
+            <>
+              <SettingsSection title="Prompts" testID="settings-prompts">
+                <CheckInInterval preferences={p} />
+                {(Object.keys(TEXT_PROMPTS) as (keyof typeof TEXT_PROMPTS)[])
+                  .filter((layer) => !(MEETING_PROMPTS as readonly string[]).includes(layer))
+                  .map((layer) =>
+                    row(layer, p[TEXT_PROMPTS[layer].key] !== TEXT_PROMPTS[layer].fallback),
+                  )}
+                {row('tools', toolsCustom)}
+                {row('system', p.harnessSystemPrompt !== '')}
+              </SettingsSection>
+              <SettingsSection title="Meetings" testID="settings-prompts-meetings">
+                {MEETING_PROMPTS.map((layer) =>
+                  row(layer, p[TEXT_PROMPTS[layer].key] !== TEXT_PROMPTS[layer].fallback),
+                )}
+              </SettingsSection>
+            </>
           );
         }}
       </WithSettings>

@@ -2,7 +2,14 @@
 // of the host's MeetingState; every control goes through lib/meetingControl.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { formatMeetingClock, meetingElapsedMs, type MeetingState } from '@patch/wire';
+import {
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
+  formatMeetingClock,
+  meetingElapsedMs,
+  type MeetingState,
+} from '@patch/wire';
 import {
   decideAction,
   endMeeting,
@@ -14,7 +21,10 @@ import {
   requestMeeting,
   resumeMeeting,
 } from '../lib/meetingControl.js';
-import { useMeetingStore } from '../stores/meetingStore.js';
+import { useMeetingStore, type MeetingPromptKey } from '../stores/meetingStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
+import type { AccountPreferences } from '../api/rest.js';
+import { patchShared } from '../routes/settings/sharedWrite.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import type { ReactNode } from 'react';
 
@@ -40,6 +50,102 @@ function speedOf(meeting: MeetingState): string {
   return hit ? hit[0] : getMeetingSpeed();
 }
 
+const PROMPT_FIELDS: Record<
+  MeetingPromptKey,
+  { title: string; field: keyof AccountPreferences; fallback: string }
+> = {
+  now: { title: 'Now', field: 'meetingNowPrompt', fallback: DEFAULT_MEETING_NOW_PROMPT },
+  notes: { title: 'Notes', field: 'meetingNotesPrompt', fallback: DEFAULT_MEETING_NOTES_PROMPT },
+  actions: {
+    title: 'Actions',
+    field: 'meetingActionsPrompt',
+    fallback: DEFAULT_MEETING_ACTIONS_PROMPT,
+  },
+};
+
+/** A section label that opens the in-call editor for that section's prompt. */
+function PromptLabel({ prompt, children }: { prompt: MeetingPromptKey; children: ReactNode }) {
+  const open = useMeetingStore((s) => s.openPromptEditor);
+  return (
+    <div className="mm-label">
+      <button
+        type="button"
+        className="mm-label-btn"
+        data-testid={`meeting-edit-${prompt}`}
+        title={`Edit the ${PROMPT_FIELDS[prompt].title.toLowerCase()} prompt`}
+        onClick={() => open(prompt)}
+      >
+        {children} ✎
+      </button>
+    </div>
+  );
+}
+
+/** Edits one of the three meeting prompts without leaving the meeting; applies from the next pass. */
+function PromptEditor() {
+  const key = useMeetingStore((s) => s.promptEditor);
+  const open = useMeetingStore((s) => s.openPromptEditor);
+  const prefs = usePreferencesStore((s) => s.preferences);
+  const [draft, setDraft] = useState('');
+  useEffect(() => {
+    if (key) setDraft(String(prefs[PROMPT_FIELDS[key].field]));
+    // Reload the text only when switching prompt, not on every preference push mid-typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  if (!key) return null;
+  const { title, field, fallback } = PROMPT_FIELDS[key];
+  const save = (text: string) =>
+    void patchShared(`${title.toLowerCase()} prompt`, { [field]: text }).then((ok) => {
+      if (ok) open(null);
+    });
+  return (
+    <div className="mm-prompt" data-testid="meeting-prompt-editor">
+      <div className="mm-prompt-tabs">
+        {(Object.keys(PROMPT_FIELDS) as MeetingPromptKey[]).map((k) => (
+          <button
+            key={k}
+            type="button"
+            className="mm-btn"
+            aria-pressed={k === key}
+            data-testid={`meeting-prompt-tab-${k}`}
+            onClick={() => open(k)}
+          >
+            {PROMPT_FIELDS[k].title}
+          </button>
+        ))}
+      </div>
+      <textarea
+        aria-label={`${title} prompt`}
+        data-testid="meeting-prompt-text"
+        rows={8}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <div className="mm-prompt-actions">
+        <button type="button" className="mm-btn" onClick={() => open(null)}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="mm-btn"
+          data-testid="meeting-prompt-reset"
+          onClick={() => save(fallback)}
+        >
+          Reset to default
+        </button>
+        <button
+          type="button"
+          className="mm-do"
+          data-testid="meeting-prompt-save"
+          onClick={() => save(draft)}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Bar across the top of the meeting: timer, controls, errors and Now. */
 export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const capturing = useMeetingStore((s) => s.capturingChatId === chatId);
@@ -61,6 +167,16 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {meeting.status !== 'ended' ? (
+          <button
+            type="button"
+            className="mm-btn"
+            data-testid="meeting-prompts"
+            onClick={() => useMeetingStore.getState().openPromptEditor('notes')}
+          >
+            Prompts
+          </button>
+        ) : null}
         {meeting.status === 'live' ? (
           <button
             type="button"
@@ -129,8 +245,13 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
         </div>
       ) : null}
 
+      <PromptEditor />
       <div className="mm-now" data-testid="meeting-now">
-        <div className="mm-label">{meeting.status === 'ended' ? 'Summary' : 'Now'}</div>
+        {meeting.status === 'ended' ? (
+          <div className="mm-label">Summary</div>
+        ) : (
+          <PromptLabel prompt="now">Now</PromptLabel>
+        )}
         {meeting.status !== 'ended' && meeting.live ? (
           <div className="mm-live" data-testid="meeting-live">
             {meeting.live}
@@ -181,7 +302,7 @@ export function MeetingPanel({ meeting }: { meeting: MeetingState }) {
     <aside className="mm-panel" data-testid="meeting-panel" data-status={meeting.status}>
       {topics.length > 0 ? (
         <div className="mm-points" data-testid="meeting-points">
-          <div className="mm-label">Key points</div>
+          <PromptLabel prompt="notes">Key points</PromptLabel>
           {topics.map((t) => (
             <div className="mm-topic" key={t.id} data-testid="meeting-topic">
               <div className="r">
@@ -232,7 +353,7 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
   return (
     <div className="mm-actions" data-testid="meeting-actions">
       <div className="mm-actions-in">
-        <div className="mm-label">Actions</div>
+        <PromptLabel prompt="actions">Actions</PromptLabel>
         {ordered.map((a) =>
           a.status === 'done' ? (
             <div

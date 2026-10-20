@@ -15,6 +15,9 @@ import { Alert, View } from 'react-native';
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_SWEEP_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
@@ -75,7 +78,10 @@ export type Layer =
   | 'link-summary'
   | 'watch-check-in'
   | 'sweep'
-  | 'job-autonomy';
+  | 'job-autonomy'
+  | 'meeting-now'
+  | 'meeting-notes'
+  | 'meeting-actions';
 
 export const LAYER_TITLE: Record<Layer, string> = {
   tools: 'Patch tools prompt',
@@ -85,6 +91,9 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'watch-check-in': 'Background task check-in',
   sweep: 'Manager sweep',
   'job-autonomy': 'Job autonomy',
+  'meeting-now': 'Meeting: Now',
+  'meeting-notes': 'Meeting: Notes',
+  'meeting-actions': 'Meeting: Actions',
 };
 
 /** What a layer's editor is titled: short enough to fit the header. */
@@ -96,6 +105,9 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'watch-check-in': 'Check-in prompt',
   sweep: 'Sweep prompt',
   'job-autonomy': 'Autonomy prompt',
+  'meeting-now': 'Meeting Now prompt',
+  'meeting-notes': 'Meeting notes prompt',
+  'meeting-actions': 'Meeting actions prompt',
 };
 
 /** The prompts whose shared setting is plain text with a built-in default. */
@@ -105,7 +117,13 @@ export const TEXT_PROMPTS = {
   'watch-check-in': { key: 'watchCheckInPrompt', fallback: DEFAULT_WATCH_CHECK_IN_PROMPT },
   sweep: { key: 'sweepPrompt', fallback: DEFAULT_SWEEP_PROMPT },
   'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
+  'meeting-now': { key: 'meetingNowPrompt', fallback: DEFAULT_MEETING_NOW_PROMPT },
+  'meeting-notes': { key: 'meetingNotesPrompt', fallback: DEFAULT_MEETING_NOTES_PROMPT },
+  'meeting-actions': { key: 'meetingActionsPrompt', fallback: DEFAULT_MEETING_ACTIONS_PROMPT },
 } as const;
+
+/** The meeting prompts, listed under their own heading on the Prompts page. */
+export const MEETING_PROMPTS = ['meeting-now', 'meeting-notes', 'meeting-actions'] as const;
 
 export function AgentPage(): React.ReactElement {
   return (

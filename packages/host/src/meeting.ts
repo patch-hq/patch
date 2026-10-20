@@ -91,6 +91,12 @@ export const MeetingAnalysis = z
   .strict();
 export type MeetingAnalysis = z.infer<typeof MeetingAnalysis>;
 
+export interface MeetingPrompts {
+  now: string;
+  notes: string;
+  actions: string;
+}
+
 export interface AnalyseInput {
   chatId: string;
   /** What the panel already shows, so the model updates rather than restarts. */
@@ -99,6 +105,8 @@ export interface AnalyseInput {
   /** The meeting has ended: also return `summary`. */
   final: boolean;
   elapsedMs: number;
+  /** The account's three editable instruction blocks, read fresh each pass. */
+  prompts: MeetingPrompts;
 }
 
 export interface CorrectInput {
@@ -125,6 +133,8 @@ export interface MeetingDeps {
   correct?: (input: CorrectInput) => Promise<string[]>;
   /** The glossary, read fresh each pass so edits apply mid-meeting. */
   glossary?: () => string[];
+  /** The meeting prompts, read fresh each pass so edits apply mid-meeting. */
+  prompts: () => MeetingPrompts;
   emit: (event: WireEvent) => void;
   /** Run an action card through the chat's normal tools and permissions. */
   runAction: (chatId: string, message: string) => Promise<void>;
@@ -444,6 +454,7 @@ export class MeetingManager {
         })),
         final,
         elapsedMs: meetingElapsedMs(rt.state, this.now()),
+        prompts: this.deps.prompts(),
       });
       const a = MeetingAnalysis.parse(raw);
       this.merge(rt, a, final);

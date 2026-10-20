@@ -8,6 +8,9 @@ import type { JSX } from 'react';
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_SWEEP_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
@@ -208,6 +211,45 @@ export function PromptsPage(): JSX.Element {
           current={p.harnessSystemPrompt}
           onSave={(text) => patchShared('system prompt', { harnessSystemPrompt: text })}
           onDefault={() => patchShared('system prompt', { harnessSystemPrompt: '' })}
+        />
+      </Group>
+      <Group label="Meetings" testid="settings-prompts-meetings">
+        <PromptRow
+          id="meeting-now"
+          title="Meeting: Now"
+          sub="How the live Now block is written. Also editable from the meeting page."
+          defaultText={DEFAULT_MEETING_NOW_PROMPT}
+          current={p.meetingNowPrompt}
+          onSave={(text) => patchShared('meeting: now prompt', { meetingNowPrompt: text })}
+          onDefault={() =>
+            patchShared('meeting: now prompt', { meetingNowPrompt: DEFAULT_MEETING_NOW_PROMPT })
+          }
+        />
+        <PromptRow
+          id="meeting-notes"
+          title="Meeting: Notes"
+          sub="How the key-point topics are written and condensed."
+          defaultText={DEFAULT_MEETING_NOTES_PROMPT}
+          current={p.meetingNotesPrompt}
+          onSave={(text) => patchShared('meeting: notes prompt', { meetingNotesPrompt: text })}
+          onDefault={() =>
+            patchShared('meeting: notes prompt', {
+              meetingNotesPrompt: DEFAULT_MEETING_NOTES_PROMPT,
+            })
+          }
+        />
+        <PromptRow
+          id="meeting-actions"
+          title="Meeting: Actions"
+          sub="What counts as an action card."
+          defaultText={DEFAULT_MEETING_ACTIONS_PROMPT}
+          current={p.meetingActionsPrompt}
+          onSave={(text) => patchShared('meeting: actions prompt', { meetingActionsPrompt: text })}
+          onDefault={() =>
+            patchShared('meeting: actions prompt', {
+              meetingActionsPrompt: DEFAULT_MEETING_ACTIONS_PROMPT,
+            })
+          }
         />
       </Group>
     </SettingsPage>

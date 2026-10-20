@@ -15,6 +15,9 @@ const LAYERS: readonly Layer[] = [
   'watch-check-in',
   'sweep',
   'job-autonomy',
+  'meeting-now',
+  'meeting-notes',
+  'meeting-actions',
 ];
 
 export default function LayerEditorScreen(): React.ReactElement {

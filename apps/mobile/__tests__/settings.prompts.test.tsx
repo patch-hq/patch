@@ -74,6 +74,9 @@ describe('Settings → Prompts', () => {
       'goal-judge',
       'link-summary',
       'job-autonomy',
+      'meeting-now',
+      'meeting-notes',
+      'meeting-actions',
       'tools',
       'system',
     ]) {
