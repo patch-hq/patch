@@ -7,6 +7,7 @@ import {
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
   formatMeetingClock,
+  meetingSpeakerLabel,
   meetingElapsedMs,
   type MeetingState,
 } from '@patch/wire';
@@ -335,7 +336,7 @@ export function MeetingPanel({ meeting }: { meeting: MeetingState }) {
           {lines.map((l, i) => (
             <div key={i} data-testid="meeting-line">
               <span>
-                {formatMeetingClock(l.at)} {l.speaker === 'you' ? 'You' : 'Them'}
+                {formatMeetingClock(l.at)} {meetingSpeakerLabel(l)}
               </span>
               {l.text}
             </div>

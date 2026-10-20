@@ -16,6 +16,7 @@ import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
   formatMeetingClock,
+  meetingSpeakerLabel,
   DEFAULT_MEETING_SETTINGS,
   MeetingSettings,
   type MeetingAction,
@@ -267,7 +268,12 @@ export class MeetingManager {
   // ---- audio ----
 
   /** Resolves once the clip is transcribed and on the state. */
-  ingestAudio(chatId: string, source: 'mic' | 'system', wav: Buffer): Promise<void> {
+  ingestAudio(
+    chatId: string,
+    source: 'mic' | 'system',
+    wav: Buffer,
+    speakerName?: string,
+  ): Promise<void> {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
     // A surface flushes its last clip before sending End; later audio is a bug.
@@ -303,7 +309,11 @@ export class MeetingManager {
         const echoed = rt.state.transcript.findIndex((l) => l.speaker === 'them' && isEcho(l));
         if (echoed >= 0 && echoed >= rt.analysedUpTo) rt.state.transcript.splice(echoed, 1);
       }
-      rt.state.transcript.push({ at, speaker, text });
+      rt.state.transcript.push(
+        speaker === 'them' && speakerName
+          ? { at, speaker, text, name: speakerName }
+          : { at, speaker, text },
+      );
       if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
         const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
         rt.state.transcript.splice(0, drop);
@@ -383,9 +393,7 @@ export class MeetingManager {
       lines.push("Pending actions on the user's panel:", ...pending.map((a) => `- ${a.title}`));
     if (fresh.length) {
       let tx = fresh
-        .map(
-          (l) => `[${formatMeetingClock(l.at)} ${l.speaker === 'you' ? 'You' : 'Them'}] ${l.text}`,
-        )
+        .map((l) => `[${formatMeetingClock(l.at)} ${meetingSpeakerLabel(l)}] ${l.text}`)
         .join('\n');
       if (tx.length > MAX_PROMPT_TRANSCRIPT_CHARS)
         tx = `…${tx.slice(-MAX_PROMPT_TRANSCRIPT_CHARS)}`;
@@ -423,7 +431,7 @@ export class MeetingManager {
         topics: rt.state.topics.map((t) => t.title),
       },
       before: rt.state.transcript.slice(Math.max(0, from - 5), from).map((l) => l.text),
-      lines: lines.map((l) => ({ speaker: l.speaker === 'you' ? 'You' : 'Them', text: l.text })),
+      lines: lines.map((l) => ({ speaker: meetingSpeakerLabel(l), text: l.text })),
     });
     if (out.length !== lines.length)
       throw new MeetingError(`correction returned ${out.length} lines for ${lines.length}`);
@@ -449,7 +457,7 @@ export class MeetingManager {
         previous: { now: rt.state.now, topics: rt.state.topics, actions: rt.state.actions },
         newLines: newLines.map((l) => ({
           clock: formatMeetingClock(l.at),
-          speaker: l.speaker === 'you' ? 'You' : 'Them',
+          speaker: meetingSpeakerLabel(l),
           text: l.text,
         })),
         final,

@@ -12,7 +12,13 @@ export const MeetingSpeaker = z.enum(['you', 'them']);
 export type MeetingSpeaker = z.infer<typeof MeetingSpeaker>;
 
 export const MeetingTranscriptLine = z
-  .object({ at: z.number(), speaker: MeetingSpeaker, text: z.string() })
+  .object({
+    at: z.number(),
+    speaker: MeetingSpeaker,
+    text: z.string(),
+    /** Who was lit up on the call while this was said (desktop Accessibility); only on `them` lines. */
+    name: z.string().min(1).optional(),
+  })
   .strict();
 export type MeetingTranscriptLine = z.infer<typeof MeetingTranscriptLine>;
 
@@ -99,6 +105,11 @@ export const MeetingState = z
   })
   .strict();
 export type MeetingState = z.infer<typeof MeetingState>;
+
+/** How a transcript line's speaker is shown: You, the named participant, or Them. */
+export function meetingSpeakerLabel(l: { speaker: MeetingSpeaker; name?: string }): string {
+  return l.speaker === 'you' ? 'You' : (l.name ?? 'Them');
+}
 
 /** Total running time of a meeting at wall-clock `nowMs`. */
 export function meetingElapsedMs(m: MeetingState, nowMs: number): number {

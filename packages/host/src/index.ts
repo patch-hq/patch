@@ -6341,6 +6341,7 @@ export async function handleServerEvent(
           event.chatId,
           event.source,
           Buffer.from(event.audioBase64, 'base64'),
+          event.speakerName,
         );
         return;
       }

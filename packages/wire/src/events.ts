@@ -3676,6 +3676,8 @@ export const MeetingAudioEvent = z
     chatId: z.string().min(1),
     source: z.enum(['mic', 'system']),
     audioBase64: z.string().min(1),
+    /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
+    speakerName: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
