@@ -79,6 +79,21 @@ describe('changes', () => {
     store.addChange('settings', { screen: 'home', kind: 'delete', target: T });
     expect(store.get('settings')!.changes).toHaveLength(4);
   });
+  it('records added text as its own change and never folds it', () => {
+    const a = store.addChange('settings', {
+      screen: 'home',
+      kind: 'add',
+      target: T,
+      text: ' Hello ',
+    });
+    store.addChange('settings', { screen: 'home', kind: 'add', target: T, text: 'Hello' });
+    expect(a).toMatchObject({ kind: 'add', text: 'Hello' });
+    expect(store.get('settings')!.changes).toHaveLength(2);
+    expect(() =>
+      store.addChange('settings', { screen: 'home', kind: 'add', target: T, text: '  ' }),
+    ).toThrow(PadError);
+    expect(describeChange(a)).toContain('Added new text "Hello"');
+  });
   it('journals add, update and remove so nothing is lost to a delete', () => {
     const c = store.addChange('settings', { screen: 'home', kind: 'note', target: T, text: 'a' });
     store.updateChange('settings', c.id, { text: 'b' });

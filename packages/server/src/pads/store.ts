@@ -33,7 +33,16 @@ export class PadError extends Error {
 
 /** A drawn change may be a shape: its points are the outline, so every surface can still replay it as a stroke. */
 export const SHAPES = ['rectangle', 'ellipse', 'line', 'arrow'];
-export const KINDS = ['move', 'resize', 'text', 'delete', 'note', 'draw', 'duplicate'] as const;
+export const KINDS = [
+  'move',
+  'resize',
+  'text',
+  'delete',
+  'note',
+  'draw',
+  'duplicate',
+  'add',
+] as const;
 export type ChangeKind = (typeof KINDS)[number];
 // Repeat edits of one element while pending fold into one change; notes,
 // drawings and deletions never do.
@@ -275,8 +284,8 @@ export class PadStore {
       if (patch[key] === undefined) continue;
       const v = patch[key];
       if (typeof v !== 'string') throw new PadError(400, `${key} must be a string`);
-      if (key === 'text' && c.kind === 'note') {
-        if (!v.trim()) throw new PadError(400, 'a note needs text');
+      if (key === 'text' && (c.kind === 'note' || c.kind === 'add')) {
+        if (!v.trim()) throw new PadError(400, 'text cannot be empty');
         next[key] = v.trim();
       } else next[key] = v;
     }
@@ -413,6 +422,10 @@ export function validateChange(input: unknown): NewChange {
     out['text'] = inp['text'].trim();
     const o = inp['offset'] ?? {};
     out['offset'] = { x: num(o.x ?? 0, 'offset.x'), y: num(o.y ?? 0, 'offset.y') };
+  } else if (kind === 'add') {
+    if (typeof inp['text'] !== 'string' || !inp['text'].trim())
+      throw new PadError(400, 'added text needs text');
+    out['text'] = inp['text'].trim();
   } else if (kind === 'draw') {
     out['points'] = points(inp['points'], 'points');
     if (typeof inp['color'] !== 'string' || !COLOR.test(inp['color']))

@@ -119,10 +119,17 @@
     if (!d || !d.body || applying) return;
     applying = true;
     var selDup = sel && sel.getAttribute && sel.getAttribute('data-pad-dup');
-    Array.prototype.forEach.call(d.querySelectorAll('[data-pad-dup]'), function (x) { x.remove(); });
+    Array.prototype.forEach.call(d.querySelectorAll('[data-pad-dup], [data-pad-add]'), function (x) { x.remove(); });
     live().forEach(function (c) {
       if (c.kind === 'note' || c.kind === 'draw') return;
       var n = find(c.target.selector); if (!n) return;
+      if (c.kind === 'add') {
+        var t = d.createElement('div');
+        t.setAttribute('data-pad-add', c.id);
+        t.textContent = c.text;
+        n.appendChild(t);
+        return;
+      }
       if (c.kind === 'duplicate') {
         var copy = n.cloneNode(true);
         copy.removeAttribute('id');
@@ -429,7 +436,7 @@
     if (t !== 'interact') editTool = t;
     document.querySelectorAll('[data-tool]').forEach(function (b) { b.classList.toggle('on', b.dataset.tool === t); });
     layer.classList.toggle('interact', t === 'interact');
-    layer.classList.toggle('text-tool', t === 'text');
+    layer.classList.toggle('text-tool', t === 'text' || t === 'addtext');
     layer.classList.toggle('draw-tool', t === 'draw' || SHAPE_TOOLS.indexOf(t) >= 0);
     if (t !== 'select') hoverEl = null;
     draw();
@@ -474,6 +481,7 @@
     if (!screen) { toast('This view isn’t one of the screens. Pick one from the list to edit it.', 3500); return; }
     var pt = local(e);
     if (tool === 'text') { e.preventDefault(); startNote(pt); return; }
+    if (tool === 'addtext') { e.preventDefault(); startAddText(pt); return; }
     if (tool === 'draw') { e.preventDefault(); startStroke(e, pt); return; }
     if (SHAPE_TOOLS.indexOf(tool) >= 0) { e.preventDefault(); startStroke(e, pt, tool); return; }
     var t = hit(pt);
@@ -793,7 +801,8 @@
     else if (k === 'escape') { if (!$('help').hidden) toggleHelp(false); else { sel = null; draw(); } }
     else if (k === 'e') setMode(tool === 'interact' ? 'edit' : 'view');
     else if (k === 'v' && editingOn) setTool('select');
-    else if ((k === 'n' || k === 't') && editingOn) setTool('text');
+    else if (k === 'n' && editingOn) setTool('text');
+    else if (k === 't' && editingOn) setTool('addtext');
     else if (k === 'd' && editingOn) setTool('draw');
     else if (k === 'r' && editingOn) setTool('rectangle');
     else if (k === 'o' && editingOn) setTool('ellipse');
@@ -808,6 +817,29 @@
     else if (k === 'tab') selectRelative(e.shiftKey ? 'prev' : 'next');
     else return;
     e.preventDefault();
+  }
+
+  // ---------- added text ----------
+  // Lands as the last child of the element tapped, so tapping a chat area adds a line to it.
+  function startAddText(pt) {
+    var anchor = hit(pt) || doc().body;
+    var n = el('div', 'note draft', notesLayer);
+    n.style.left = pt.x + 'px'; n.style.top = pt.y + 'px';
+    var ta = el('textarea', 'note-draft', n); ta.placeholder = 'Type new text';
+    var done = false;
+    var finish = function (save) {
+      if (done) return; done = true;
+      var text = ta.value.trim(); n.remove();
+      if (save && text) post({ kind: 'add', target: target(anchor), text: text });
+      setTool('select');
+    };
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') finish(false);
+    });
+    ta.addEventListener('blur', function () { finish(true); });
+    n.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    ta.focus();
   }
 
   // ---------- keyboard actions ----------
@@ -904,7 +936,7 @@
       draw();
     });
   }
-  var KIND = { move: 'Move', resize: 'Size', text: 'Text', delete: 'Delete', note: 'Note', draw: 'Draw', duplicate: 'Copy' };
+  var KIND = { move: 'Move', resize: 'Size', text: 'Text', delete: 'Delete', note: 'Note', draw: 'Draw', duplicate: 'Copy', add: 'Add' };
   function describe(c) {
     var on = c.target.label;
     if (c.kind === 'move') return on + ' moved ' + phrase(c.dx, c.dy);
@@ -912,6 +944,7 @@
     if (c.kind === 'text') return '"' + c.before.trim().slice(0, 40) + '" → "' + c.after.trim().slice(0, 60) + '"';
     if (c.kind === 'delete' || c.kind === 'duplicate') return on;
     if (c.kind === 'draw') return 'on ' + on;
+    if (c.kind === 'add') return '"' + c.text.slice(0, 60) + '" in ' + on;
     return c.text;
   }
   function phrase(dx, dy) {

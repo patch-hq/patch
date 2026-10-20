@@ -155,6 +155,33 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   });
 
+  it('desktop: the Add text tool puts a new text element in the clicked container and sends it as a change', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#p').waitFor();
+    await page.locator('[data-tool="addtext"]').click();
+    const pbox = (await design.locator('#p').boundingBox())!;
+    await page.mouse.click(pbox.x + 40, pbox.y + 5);
+    await page.keyboard.type('Brand new line');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).map((c) => c.kind)).toEqual(['add']);
+    await expect
+      .poll(() => design.locator('#p [data-pad-add]').textContent())
+      .toBe('Brand new line');
+    // Another device replays it too.
+    const other = await (
+      await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    ).newPage();
+    await other.goto(frameUrl);
+    await expect
+      .poll(() => other.frameLocator('#frame').locator('[data-pad-add]').textContent())
+      .toBe('Brand new line');
+    await ctx.close();
+  });
+
   it('phone: the screen bar has a + that adds a screen', async () => {
     const frameUrl = await newPad();
     const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, hasTouch: true });
