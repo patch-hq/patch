@@ -1484,6 +1484,12 @@ export function ChatRoute({
       // Only once the host acknowledges the fork (it announces the new active
       // track via `chat.branches`) — a refused fork must leave the turns alone.
       const before = useChatStore.getState().branchGraphs[chatId]?.activeBranchId;
+      // The old track is what is on screen NOW. The socket coalesces events, so
+      // the new track's echo and reply can land in the very commit that carries
+      // the acknowledgement — filtering by seq then would take them with it.
+      const leaving = new Set(
+        (useChatStore.getState().timelines[chatId] ?? []).filter((e) => e.seq >= seq),
+      );
       const unsubscribe = useChatStore.subscribe((s) => {
         if (s.branchGraphs[chatId]?.activeBranchId === before) return;
         unsubscribe();
@@ -1491,7 +1497,7 @@ export function ChatRoute({
         useChatStore.setState((st) => ({
           timelines: {
             ...st.timelines,
-            [chatId]: (st.timelines[chatId] ?? []).filter((e) => e.seq < seq),
+            [chatId]: (st.timelines[chatId] ?? []).filter((e) => !leaving.has(e)),
           },
         }));
       });

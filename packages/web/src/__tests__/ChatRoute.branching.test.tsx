@@ -184,6 +184,44 @@ describe('editing a user turn forks a track', () => {
     );
   });
 
+  it("the new track's turns arriving in the same batch as the acknowledgement are kept", async () => {
+    const ws = WS();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', ws);
+
+    fireEvent.click(screen.getByTestId('msg-edit'));
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'ask again' } });
+    fireEvent.click(screen.getByTestId('send-btn'));
+    await waitFor(() =>
+      expect(ws!.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'chat.fork_request' })),
+    );
+
+    // The socket coalesces events into one commit: the new track's echo and
+    // reply land together with the `chat.branches` that acknowledges it.
+    act(() =>
+      useChatStore
+        .getState()
+        .applyEvents([
+          TWO_TRACKS,
+          { type: 'chat.message', chatId: 'c-fork', role: 'user', content: 'ask again', seq: 6 },
+          {
+            type: 'chat.message',
+            chatId: 'c-fork',
+            role: 'assistant',
+            content: 'new answer',
+            seq: 7,
+          },
+        ]),
+    );
+    const contents = (useChatStore.getState().timelines['c-fork'] ?? []).map((e) => e.content);
+    expect(contents).not.toContain('answer one');
+    expect(contents).toContain('ask again');
+    expect(contents).toContain('new answer');
+  });
+
   it('an attachments-only edit sends an empty message and keeps the turns until acknowledged', async () => {
     const ws = WS();
     vi.stubGlobal(
