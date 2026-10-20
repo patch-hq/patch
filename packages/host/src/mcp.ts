@@ -1153,7 +1153,10 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       description:
         'Search every chat on the account, on ANY machine, through the Patch server. Case-insensitive substring match on chat name, folder, status summary and message text. Returns { results, truncated, chatsWithoutLog }: results are best first (name matches outrank body matches, then most recent), each with chatId, hostId, name, folder, status, matchedIn and up to three message excerpts (seq, role, text). chatsWithoutLog counts chats the server holds no message log for — those were matched on metadata only, so a miss is not proof a chat never said it. Follow up with patch_history for the full chat. Read-only.',
       inputSchema: {
-        query: z.string().min(1),
+        query: z
+          .string()
+          .min(1)
+          .describe('Text to find in chat names, folders, summaries and messages.'),
         limit: z.number().int().positive().max(100).optional().describe('Max chats, default 20.'),
       },
     },
@@ -1398,7 +1401,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         topicId: z.string().min(1).optional(),
         bullets: z.array(z.string().min(1)).max(3).optional(),
         decided: z.boolean().optional(),
-        headline: z.string().min(1).optional(),
+        headline: z.string().min(1).optional().describe('Replacement summary for set_summary.'),
         source: z.object({ name: z.string().min(1), url: z.string().url() }).optional(),
       },
     },
