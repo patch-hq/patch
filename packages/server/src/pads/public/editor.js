@@ -953,7 +953,13 @@
     if (dy) p.push(Math.abs(dy) + 'px ' + (dy > 0 ? 'down' : 'up'));
     return p.join(', ') || 'back';
   }
+  // The poll calls renderPanel every 1.5s; rebuilding identical DOM makes the
+  // bar flash and the sent-picture thumbnails reload, so skip an unchanged one.
+  var panelSig = null;
   function renderPanel() {
+    var sig2 = JSON.stringify([state.screens, state.changes, state.batches, sending]);
+    if (sig2 === panelSig) return;
+    panelSig = sig2;
     var pending = state.changes.filter(function (c) { return c.status === 'pending'; });
     var ol = $('pending'); ol.textContent = '';
     var many = state.screens.length > 1, lastScreen;

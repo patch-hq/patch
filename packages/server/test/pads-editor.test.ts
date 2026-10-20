@@ -314,4 +314,30 @@ describe('pad editor in a browser', () => {
       await ctx.close();
     }
   }, 60_000);
+  it('the Changes panel is not rebuilt by the background poll when nothing changed', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#p').waitFor();
+    await page.keyboard.press('n');
+    const pbox = (await design.locator('#p').boundingBox())!;
+    await page.mouse.click(pbox.x + 40, pbox.y + 5);
+    await page.keyboard.type('Stay put');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.locator('#pending li:not(.screen-head)').count()).toBe(1);
+    await page.locator('#send').click();
+    await expect.poll(() => page.locator('#history li').count(), { timeout: 30_000 }).toBe(1);
+    await page.evaluate(() => {
+      (document.querySelector('#history li') as unknown as { mark: number }).mark = 1;
+    });
+    // Several 1.5s polls go by with no change from anywhere.
+    await page.waitForTimeout(5000);
+    const kept = await page.evaluate(
+      () => (document.querySelector('#history li') as unknown as { mark?: number }).mark,
+    );
+    expect(kept).toBe(1);
+    await ctx.close();
+  }, 90_000);
 });
