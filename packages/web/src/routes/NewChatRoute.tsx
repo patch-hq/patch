@@ -45,7 +45,8 @@ import { sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { summariseUsage } from '../lib/usage.js';
-import { Composer } from '../components/Composer.js';
+import { Composer, type ComposerHandle } from '../components/Composer.js';
+import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
@@ -213,6 +214,9 @@ export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
 }
 
 function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }): JSX.Element {
+  // Whole-screen drop zone (spec/14 § Composer): reaches the composer by ref.
+  const composerRef = useRef<ComposerHandle>(null);
+  const chatDrop = useWholeChatDrop(composerRef);
   const navigate = useNavigate();
   // E6: the sidebar's Recent folders rows start a new chat in a specific folder
   // via `/chats/new?folder=<path>`. When present it preselects that folder
@@ -1340,7 +1344,19 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   );
 
   return (
-    <main className="chat-main new-chat-main" data-testid="new-chat-main">
+    <main
+      className={`chat-main new-chat-main${chatDrop.dragActive ? ' chat-drag-active' : ''}`}
+      data-testid="new-chat-main"
+      onDragEnter={chatDrop.handlers.onDragEnter}
+      onDragOver={chatDrop.handlers.onDragOver}
+      onDragLeave={chatDrop.handlers.onDragLeave}
+      onDrop={chatDrop.handlers.onDrop}
+    >
+      {chatDrop.dragActive ? (
+        <div className="chat-drop-hint" data-testid="chat-drop-hint" aria-hidden>
+          {chatDrop.dropBlocked ? 'Can’t attach right now' : 'Drop to attach'}
+        </div>
+      ) : null}
       <header className="chat-head" data-testid="chat-head">
         {/* Far left: the same zone a live chat's header has (spec/14 § Chat
             panel header) — Back / Forward, then the usage crumb (there is no
@@ -1452,6 +1468,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           // Keyed by draftId so switching drafts remounts the composer and
           // re-seeds its text from the newly-active draft.
           key={draftId}
+          ref={composerRef}
           chatId="new"
           selectedModel={effectiveModel ?? undefined}
           hostId={pickerHostId}
