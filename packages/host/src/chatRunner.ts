@@ -111,7 +111,14 @@ import {
 } from './history.js';
 import { randomUUID } from 'node:crypto';
 import { WakeScheduler, parseDelayMs, type WakeRecord } from './wake.js';
-import { WatchScheduler, readProgress, type WatchProgress, type WatchRecord } from './watch.js';
+import {
+  DEFAULT_CHECK_IN_MS,
+  DEFAULT_CHECK_IN_PROMPT,
+  WatchScheduler,
+  readProgress,
+  type WatchProgress,
+  type WatchRecord,
+} from './watch.js';
 import type { WebBotAuthConfig } from './webBotAuth.js';
 import {
   BrowserManager,
@@ -2434,6 +2441,7 @@ export class Daemon {
       allChatIds: () => this.opts.metaStore.list().map((m) => m.chatId),
       now: () => this.opts.now(),
       logger: this.opts.logger,
+      checkIn: () => this.watchCheckIn,
     });
     // spec/02 § Browser: the agent browser, one real Chromium this host owns.
     // Rooted beside the meta store, same trick ChatLog's blobsDir above uses
@@ -3597,6 +3605,16 @@ export class Daemon {
     // finished tick while the watched command is still running.
     this.emitState(chatId);
     return rec;
+  }
+
+  /** The periodic background-task check-in: how often, and the prompt the owning agent is sent. */
+  private watchCheckIn = { intervalMs: DEFAULT_CHECK_IN_MS, prompt: DEFAULT_CHECK_IN_PROMPT };
+
+  setWatchCheckIn(cfg: { intervalMs: number; prompt: string }): void {
+    if (!(cfg.intervalMs > 0) || cfg.prompt.trim() === '') {
+      throw new Error('setWatchCheckIn: intervalMs must be positive and prompt non-empty');
+    }
+    this.watchCheckIn = cfg;
   }
 
   /** Every watch this chat has running or recently ended (patch_watch_list). */

@@ -472,7 +472,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         'turn (survives a host restart either way — the task keeps running and is re-attached). Use ' +
         'for anything that takes longer than you want to wait: a build, a long test run, a download. ' +
         "Every line the command prints is its progress: the last one shows in the user's task strip, so print short status lines. " +
-        'A `timeoutSec` is required, and you are messaged if it prints nothing for an hour. ' +
+        'A `timeoutSec` is required, and every hour you are sent a check-in asking whether it is still working as intended. ' +
         "`cwd` defaults to this chat's own folder.",
       inputSchema: {
         command: z.string().min(1),
