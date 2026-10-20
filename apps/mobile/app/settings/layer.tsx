@@ -7,7 +7,15 @@ import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { LayerEditor, type Layer } from '../../src/components/settings/AgentBehaviorSection';
 
-const LAYERS: readonly Layer[] = ['tools', 'system', 'goal-judge', 'link-summary'];
+const LAYERS: readonly Layer[] = [
+  'tools',
+  'system',
+  'goal-judge',
+  'link-summary',
+  'watch-check-in',
+  'sweep',
+  'job-autonomy',
+];
 
 export default function LayerEditorScreen(): React.ReactElement {
   const { layer } = useLocalSearchParams<{ layer: string }>();

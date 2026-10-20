@@ -183,6 +183,7 @@ export * from './chat-move.js';
 export * from './sweep-prompt.js';
 export * from './link-summary-prompt.js';
 export * from './goal-prompt.js';
+export * from './watch-check-in-prompt.js';
 export { WireDecodeError } from './errors.js';
 
 /**

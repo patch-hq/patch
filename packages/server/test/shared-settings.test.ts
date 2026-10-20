@@ -26,6 +26,7 @@ import {
   type WireEvent,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
+import { DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 import { SettingsError, SharedSettingsService } from '../src/shared-settings.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
@@ -610,6 +611,22 @@ describe('shared settings routes', () => {
       expect(empty.statusCode).toBe(400);
       const after = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
       expect(after.json().preferences.jobAutonomyPrompt).toBe('House rule.');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('PATCH /api/settings sets the watch check-in prompt, defaults to the built-in, and refuses empty', async () => {
+    const { built, auth } = await boot();
+    try {
+      const patch = (payload: object) =>
+        built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
+      const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
+      expect(before.json().preferences.watchCheckInPrompt).toBe(DEFAULT_WATCH_CHECK_IN_PROMPT);
+      const res = await patch({ watchCheckInPrompt: 'Still alive?' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().preferences.watchCheckInPrompt).toBe('Still alive?');
+      expect((await patch({ watchCheckInPrompt: '' })).statusCode).toBe(400);
     } finally {
       await built.app.close();
     }

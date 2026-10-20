@@ -1135,6 +1135,10 @@ and a destructive, confirmed Delete. Add opens the same editor blank. Nothing
 is preinstalled, so the list's empty state says so rather than showing
 nothing with no explanation.
 
+#### Prompts
+
+Its own page, right after Goals in the Agents group, listing every prompt Patch sends to an agent: the background-task check-in (`watchCheckInPrompt`, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in per task), the Manager sweep, the goal judge, link summary, job autonomy, the Patch tools guidance and the system prompt override. Each row says whether the text in force is the Default or a Custom version and shows it. Custom opens an editor seeded with the text in force; Save writes the shared setting; Default writes the built-in text back (`null` for tools guidance, `''` for the system prompt). The existing per-feature editors remain as shortcuts to the same settings. Mobile has the same page, opening the shared full-screen layer editor.
+
 #### Goals
 
 Its own page, between Manager and Voice in the Agents group (`04-chats-and-folders.md` § Goals). Three rows, account-wide, each applied by every host on its next judgement: the judge model (the one model that judges every chat's goal, whichever provider the chat runs on, default Sonnet 5.5), how many refusals in a row end a goal's pushing (default 3), and the judge prompt. The prompt is the judge's instructions only: the host adds the goal, the conversation and the reply format around it, so an edit cannot break how the answer is read. It opens in the same editor as the sweep prompt, showing the full default, with a Reset to default.

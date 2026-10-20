@@ -8,6 +8,7 @@ export type SettingsPageId =
   | 'memories'
   | 'manager'
   | 'goals'
+  | 'prompts'
   | 'voice'
   | 'hooks'
   | 'computer'
@@ -27,6 +28,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
   { id: 'memories', title: 'Memories', group: 'Agents' },
   { id: 'manager', title: 'Manager', group: 'Agents' },
   { id: 'goals', title: 'Goals', group: 'Agents' },
+  { id: 'prompts', title: 'Prompts', group: 'Agents' },
   { id: 'voice', title: 'Voice', group: 'Agents' },
   { id: 'hooks', title: 'Hooks', group: 'Agents' },
   { id: 'computer', title: 'Computer use', group: 'Agents' },

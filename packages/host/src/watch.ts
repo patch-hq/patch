@@ -43,6 +43,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { z } from 'zod';
+import { DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 
 /** A background task, persisted at `<chatDir>/watch/<taskId>.json`. */
 export const WatchRecord = z
@@ -109,9 +110,7 @@ const WATCH_DIR = 'watch';
 export const WATCH_PREFIX = '[watch]';
 const DEFAULT_POLL_MS = 3_000;
 export const DEFAULT_CHECK_IN_MS = 60 * 60 * 1000;
-export const DEFAULT_CHECK_IN_PROMPT =
-  'Background task "{description}" has been running for {running}. Last output: {lastOutput}. ' +
-  'Is it still working as intended? Check patch_watch_output("{taskId}") and patch_watch_stop it if it is stuck or failing.';
+export const DEFAULT_CHECK_IN_PROMPT = DEFAULT_WATCH_CHECK_IN_PROMPT;
 
 /** What a running watch last printed: its final non-empty line and when it was written. */
 export interface WatchProgress {

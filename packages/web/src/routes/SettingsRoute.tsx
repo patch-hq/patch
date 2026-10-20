@@ -35,6 +35,7 @@ import { McpPage } from './settings/McpPage.js';
 import { MemoriesPage } from './settings/MemoriesPage.js';
 import { ManagerPage } from './settings/ManagerPage.js';
 import { GoalsPage } from './settings/GoalsPage.js';
+import { PromptsPage } from './settings/PromptsPage.js';
 import { VoicePage } from './settings/VoicePage.js';
 import { HooksPage } from './settings/HooksPage.js';
 import { ComputerUsePage } from './settings/ComputerUsePage.js';
@@ -54,6 +55,7 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   memories: MemoriesPage,
   manager: ManagerPage,
   goals: GoalsPage,
+  prompts: PromptsPage,
   voice: VoicePage,
   hooks: HooksPage,
   computer: ComputerUsePage,
