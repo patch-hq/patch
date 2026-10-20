@@ -4794,6 +4794,39 @@ describe('JobEditorRoute — recurrence trigger', () => {
     expect(screen.getByTestId('job-recurrence-value')).not.toHaveTextContent('BYDAY=FR,SU');
   });
 
+  it('YEARLY keeps exactly one month: a second month pick replaces the first', () => {
+    // FREQ=YEARLY with BYMONTH=5,6 and BYSETPOS=1 fires once a year, not once
+    // in each month: BYSETPOS counts over the whole year's set. The picker
+    // used to let several months accumulate and the preview said "May
+    // through August" for a rule that only ever fired in May.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => defaultRoute(String(url))),
+    );
+    renderNew();
+    fireEvent.change(screen.getByTestId('job-trigger-type'), { target: { value: 'recurrence' } });
+    fireEvent.change(screen.getByTestId('job-recurrence-frequency'), {
+      target: { value: 'YEARLY' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'May' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Jun' }));
+    expect(screen.getByTestId('job-recurrence-value')).toHaveTextContent('BYMONTH=6;');
+    expect(screen.getByTestId('job-recurrence-value')).not.toHaveTextContent('BYMONTH=5,6');
+    expect(screen.getByTestId('job-recurrence-computed')).toHaveTextContent(
+      'every year on the 1st Sunday of June at 9am',
+    );
+    // Switching from MONTHLY with several months to YEARLY keeps only the first.
+    fireEvent.change(screen.getByTestId('job-recurrence-frequency'), {
+      target: { value: 'MONTHLY' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Aug' }));
+    expect(screen.getByTestId('job-recurrence-value')).toHaveTextContent('BYMONTH=6,8;');
+    fireEvent.change(screen.getByTestId('job-recurrence-frequency'), {
+      target: { value: 'YEARLY' },
+    });
+    expect(screen.getByTestId('job-recurrence-value')).toHaveTextContent('BYMONTH=6;');
+  });
+
   it('editing the revealed raw RRULE directly updates the field, independent of the builder', () => {
     vi.stubGlobal(
       'fetch',

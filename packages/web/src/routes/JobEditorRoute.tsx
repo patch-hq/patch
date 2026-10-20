@@ -501,10 +501,18 @@ function setRecurrenceFrequency(
   freq: FormState['recurrenceFrequency'],
 ): FormState {
   const days = freq === 'WEEKLY' ? form.recurrenceWeekdays : form.recurrenceWeekdays.slice(0, 1);
+  // YEARLY holds exactly one month: with several, BYSETPOS counts over the
+  // whole year's set and the rule fires once a year, not once in each month.
+  const months =
+    freq === 'WEEKLY'
+      ? []
+      : freq === 'YEARLY'
+        ? form.recurrenceMonths.slice(0, 1)
+        : form.recurrenceMonths;
   return withRecurrenceRule(form, {
     recurrenceFrequency: freq,
     recurrenceWeekdays: days.length > 0 ? days : ['SU'],
-    recurrenceMonths: freq === 'WEEKLY' ? [] : form.recurrenceMonths,
+    recurrenceMonths: months,
   });
 }
 
@@ -520,7 +528,11 @@ function toggleRecurrenceWeekday(form: FormState, code: string): FormState {
   return withRecurrenceRule(form, { recurrenceWeekdays: next });
 }
 
+/** MONTHLY toggles membership; YEARLY replaces the single selection (see setRecurrenceFrequency). */
 function toggleRecurrenceMonth(form: FormState, month: number): FormState {
+  if (form.recurrenceFrequency === 'YEARLY') {
+    return withRecurrenceRule(form, { recurrenceMonths: [month] });
+  }
   const has = form.recurrenceMonths.includes(month);
   const next = has
     ? form.recurrenceMonths.filter((m) => m !== month)

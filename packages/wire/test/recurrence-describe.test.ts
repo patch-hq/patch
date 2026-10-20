@@ -68,6 +68,13 @@ describe('describeRecurrence — refuses rather than guesses', () => {
       'a yearly rule with no BYMONTH ("3rd Sunday of the year")',
       'FREQ=YEARLY;BYDAY=SU;BYSETPOS=3;BYHOUR=9;BYMINUTE=0',
     ],
+    [
+      // BYSETPOS picks from the whole YEAR's set of Mondays in those months,
+      // so this fires ONCE a year (the first Monday in May), not once a month.
+      // It used to read "every year on the 1st Monday of May through August".
+      'a yearly rule restricted to several months (one fire a year, not one per month)',
+      'FREQ=YEARLY;BYDAY=MO;BYSETPOS=1;BYMONTH=5,6,7,8;BYHOUR=9;BYMINUTE=0',
+    ],
     ['a FREQ this describer does not cover', 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0'],
     ['malformed key=value syntax', 'not a valid rrule string'],
     ['a repeated key (no single meaning)', 'FREQ=WEEKLY;BYDAY=SU;BYDAY=MO;BYHOUR=9;BYMINUTE=0'],
