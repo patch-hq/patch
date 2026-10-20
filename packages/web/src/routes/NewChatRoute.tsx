@@ -41,6 +41,7 @@ import {
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
 import { startVoiceCall, startVoiceNote } from '../lib/voiceController.js';
+import { startMeeting } from '../lib/meetingControl.js';
 import { sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
@@ -1458,6 +1459,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           folder={folder.trim()}
           resolveChatId={resolveNewChatId}
           onStartCall={() => void handleStartCall()}
+          onStartMeeting={() => void createThenRun((id) => void startMeeting(id))}
           autoFocus
           // Restore + persist the draft's unsent text (spec/14 § New chat drafts).
           // Keyed by draftId above, so switching drafts remounts + re-seeds.

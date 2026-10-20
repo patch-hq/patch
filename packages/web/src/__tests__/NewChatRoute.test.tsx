@@ -51,6 +51,12 @@ import { __setAudioOpenerForTests, __setRecorderFactoryForTests } from '../lib/v
 import type { VoiceRecording } from '../lib/voiceRecorder.js';
 import type { PatchWs } from '../api/ws.js';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
+import { startMeeting } from '../lib/meetingControl.js';
+
+vi.mock('../lib/meetingControl.js', async (orig) => ({
+  ...(await orig<typeof import('../lib/meetingControl.js')>()),
+  startMeeting: vi.fn(async () => undefined),
+}));
 
 function makeRow(
   chatId: string,
@@ -553,6 +559,38 @@ describe('/chats/new', () => {
 
     __setAudioOpenerForTests(null);
     useVoiceStore.getState().endCall();
+  });
+
+  it('a meeting STARTS the chat: creates it, navigates into it, starts the meeting on the new chatId', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ chatId: 'c-meet', folder: '~/x', status: 'pending' }), {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+    usePresenceStore.getState().setConnection('connected');
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/chats/new']}>
+          <Routes>
+            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
+            <Route path="/chats/:chatId" element={<div data-testid="navigated" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
+    fireEvent.change(screen.getByTestId('new-chat-folder'), { target: { value: '~/x' } });
+    fireEvent.click(screen.getByTestId('meeting-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
+    await waitFor(() => expect(startMeeting).toHaveBeenCalledWith('c-meet'));
+    expect(useChatStore.getState().chats['c-meet']?.folder).toBe('~/x');
   });
 
   // ---- Folder picker: simplified dropdown (spec/14 § Sidebar §8) ----

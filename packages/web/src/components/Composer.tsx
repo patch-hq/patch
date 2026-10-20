@@ -333,6 +333,12 @@ export interface ComposerProps {
    * for it to exist on its host and open it before a call can bind to it.
    */
   onStartCall?(): void;
+  /**
+   * When provided, the Meeting button hands over to this instead of starting a
+   * meeting in the composer's own chat. Used by NewChatRoute, which must create
+   * the chat and open it before a meeting can bind to it.
+   */
+  onStartMeeting?(): void;
   /** Test seam (transcribe mode): inject the mic recorder factory. */
   recorderFactory?(deps?: VoiceRecorderDeps): Promise<VoiceRecording>;
   /** Test seam (transcribe mode): inject the clip→transcript upload call. */
@@ -465,6 +471,7 @@ export const Composer = forwardRef(function Composer(
     onAddToTodo,
     onStartVoiceNote,
     onStartCall,
+    onStartMeeting,
     recorderFactory,
     transcribeClip,
     previewFactory,
@@ -2276,7 +2283,7 @@ export const Composer = forwardRef(function Composer(
               </button>
               {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
-              {chatId === 'new' ? null : (
+              {chatId === 'new' && !onStartMeeting ? null : (
                 <button
                   type="button"
                   className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
@@ -2284,7 +2291,13 @@ export const Composer = forwardRef(function Composer(
                   aria-pressed={inMeeting}
                   aria-label={inMeeting ? 'end meeting' : 'meeting'}
                   title={inMeeting ? 'End meeting' : 'Meeting'}
-                  onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
+                  onClick={() =>
+                    onStartMeeting
+                      ? onStartMeeting()
+                      : inMeeting
+                        ? endMeeting(chatId)
+                        : void startMeeting(chatId)
+                  }
                   disabled={voiceDisabled && !inMeeting}
                 >
                   <AudioLines size={ICON_SIZE} aria-hidden />
