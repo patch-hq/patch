@@ -851,3 +851,19 @@ test('main window placement is restored and persisted (spec/05 § Window placeme
   assert.match(src, /win\.on\('resize', scheduleBoundsSave\)/);
   assert.match(src, /win\.on\('close', \(\) => saveWindowBounds\(win\)\)/);
 });
+
+test('a call ending ends the Patch meeting by itself, with no click on a toast (Todoist: meeting kept listening 20 min after Zoom ended)', () => {
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  const body = src.slice(
+    src.indexOf('function startMeetingDetection'),
+    src.indexOf('function reportMeetingDetectionOff'),
+  );
+  assert.match(body, /ended:[\s\S]*?endMeetingForCall\(appName\)/);
+  const fn = src.slice(
+    src.indexOf('function endMeetingForCall'),
+    src.indexOf('/** NO FALLBACK: detection'),
+  );
+  assert.match(fn, /systemAudio\.running/);
+  assert.match(fn, /sendWhenReady\(mainWindow, 'patch:meeting-signal', \{ phase: 'ended'/);
+  assert.doesNotMatch(fn, /showMeetingToast\('ended'/);
+});
