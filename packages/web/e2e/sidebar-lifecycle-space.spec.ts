@@ -184,7 +184,7 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
     const lifecycle = await bandHeight(page, '.sb-lifecycle');
     const scroll = await bandHeight(page, '.sb-scroll');
 
-    // Capped at min(33%, 300px) of a 900px sidebar — nowhere near the 430px
+    // Capped at min(30%, 300px) of a 900px sidebar — nowhere near the 430px
     // the old 50% cap allowed, and it scrolls its own overflow internally.
     expect(lifecycle).toBeLessThanOrEqual(300);
     expect(

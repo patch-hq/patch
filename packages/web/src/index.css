@@ -2169,12 +2169,12 @@ a.ch-row:hover {
    view. The weight is not "backwards" — remove it and a long list clips the
    toggles again. The cap used to be `50%`, which was too loose to be the other
    half: at an 860px sidebar it let this group take 430px and left the chat list
-   13px, i.e. no rows at all. `min(33%, 300px)` keeps the list several rows at
+   13px, i.e. no rows at all. `min(30%, 300px)` keeps the list several rows at
    every height (spec/14 § Sidebar → Scroll regions). */
 .sb-lifecycle {
   flex: 0 1 auto;
   min-height: 0;
-  max-height: min(33%, 300px);
+  max-height: min(30%, 300px);
   overflow-y: auto;
   scrollbar-gutter: stable;
   --sb-inset-right: var(--sb-inset);
@@ -3712,19 +3712,17 @@ a.ch-row:hover {
 /* The pencil belongs to the turn it edits and sits in a gutter to its LEFT
    (spec/14 § Main chat panel), not on a line of its own beneath the bubble —
    where, on touch (`hover: none` keeps it permanently visible), it read as an
-   icon floating in empty space. A two-track grid reserves exactly the pencil's
-   width beside the bubble and leaves every other part of the turn — attachments,
-   the track switcher, queue and delivery status — stacked in the bubble's own
-   column, in source order. The full-width reading measure moves onto that column so the
-   bubble's own edge is unchanged; without it the percentage would resolve
-   against the already-capped track and shrink the bubble. */
+   icon floating in empty space. A zero-width first track lets the pencil hang
+   into the gutter without taking width from the bubble. Other parts of the
+   turn — attachments, track switcher, queue and delivery status — stay stacked
+   in the second track, in source order. */
 .msg-user.has-edit {
   display: grid;
-  grid-template-columns: auto minmax(0, max-content);
+  grid-template-columns: 0 minmax(0, max-content);
   justify-content: end;
   justify-items: end;
   align-items: end;
-  column-gap: 4px;
+  column-gap: 0;
 }
 .msg-user.has-edit > * {
   grid-column: 2;
@@ -3738,6 +3736,7 @@ a.ch-row:hover {
 .msg-user.has-edit > .msg-edit {
   grid-column: 1;
   grid-row: 1;
+  transform: translateX(-4px);
 }
 
 /* The message editor is the composer in edit mode (spec/14 § Editing a sent

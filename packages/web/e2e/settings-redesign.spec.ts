@@ -152,6 +152,7 @@ test.describe('Settings — desktop', () => {
       'Memories',
       'Manager',
       'Goals',
+      'Prompts',
       'Voice',
       'Hooks',
       'Computer use',

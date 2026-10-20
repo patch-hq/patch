@@ -92,11 +92,11 @@ test.describe('Hidden sidebar section', () => {
     const section = page.getByTestId('hidden-section');
     await expect(section.getByTestId('chat-row-chat_hidden')).toBeVisible();
     await expect(section.getByTestId('chat-row-hid_run')).toBeVisible();
-    // FIFO, oldest first.
+    // Working chats lead; settled chats follow (spec/14, cold storage).
     const ids = await section
       .locator('[data-testid^="chat-row-"]')
       .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
-    expect(ids).toEqual(['chat-row-chat_hidden', 'chat-row-hid_run']);
+    expect(ids).toEqual(['chat-row-hid_run', 'chat-row-chat_hidden']);
     // The status badge is what the section is for.
     await expect(
       section.getByTestId('chat-row-hid_run').getByTestId('badge-working'),
