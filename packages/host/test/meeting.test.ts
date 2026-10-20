@@ -425,6 +425,24 @@ describe('meetingGen', () => {
     expect(buildMeetingPrompt({ ...base, final: true })).toContain('one-line outcome');
     expect(buildMeetingPrompt(base)).toContain('[00:05 You] hi');
   });
+
+  it('asks for the thrust of each point, no overlap, and detail that tapers with age', () => {
+    const p = buildMeetingPrompt({
+      chatId: 'c',
+      previous: {
+        now: null,
+        topics: [{ id: 't1', at: 90_000, title: 'Ledger', points: ['a'], decided: false }],
+        actions: [],
+      },
+      newLines: [{ clock: '20:00', speaker: 'Them', text: 'x' }],
+      final: false,
+      elapsedMs: 1_200_000,
+    });
+    expect(p).toMatch(/main thrust/);
+    expect(p).toMatch(/never repeat/i);
+    expect(p).toMatch(/older topics[^]*shorter/i);
+    expect(p).toContain('"atSeconds":90');
+  });
 });
 
 describe('makeMeetingAnalyser', () => {
