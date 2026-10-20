@@ -116,3 +116,62 @@ def test_real_model_embeds_when_configured():
     emb = embed(low)
     assert emb.shape == (256,)
     assert np.isfinite(emb).all()
+
+
+def _embed_by_first_sample(pcm: np.ndarray) -> np.ndarray:
+    return voice(int(pcm[0]))
+
+
+def test_owner_voice_print_labels_owner_as_zero_and_leaves_others_numbered(tmp_path):
+    path = str(tmp_path / "me.npy")
+    d = Diariser(_embed_by_first_sample, path)
+    assert d.enrol(np.full(SR * 6, 3, "<i2")) == 6.0
+    clip = np.concatenate(
+        [np.full(SR * 2, 3, "<i2"), np.full(SR * 2, 0, "<i2"), np.full(SR * 2, 3, "<i2")]
+    )
+    assert d.label("m", clip, [(0, 2), (2, 4), (4, 6)]) == [0, 1, 0]
+
+
+def test_unembeddable_segment_after_owner_stays_owner(tmp_path):
+    path = str(tmp_path / "me.npy")
+    d = Diariser(_embed_by_first_sample, path)
+    d.enrol(np.full(SR * 6, 3, "<i2"))
+    clip = np.full(SR * 3, 3, "<i2")
+    assert d.label("m", clip, [(0, 2.8), (2.8, 3.0)]) == [0, 0]
+
+
+def test_no_voice_print_means_no_voice_zero(tmp_path):
+    d = Diariser(_embed_by_first_sample, str(tmp_path / "none.npy"))
+    assert d.label("m", np.full(SR * 2, 3, "<i2"), [(0, 2)]) == [1]
+
+
+def test_enrol_refuses_short_audio_and_missing_path(tmp_path):
+    import pytest
+
+    with pytest.raises(RuntimeError, match="at least"):
+        Diariser(_embed_by_first_sample, str(tmp_path / "x.npy")).enrol(np.full(SR, 3, "<i2"))
+    with pytest.raises(RuntimeError, match="VOICEPRINT_PATH"):
+        Diariser(_embed_by_first_sample).enrol(np.full(SR * 6, 3, "<i2"))
+
+
+def test_websocket_enrol_then_diarise_marks_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("VOICEPRINT_PATH", str(tmp_path / "me.npy"))
+    (tmp_path / "model.bin").write_bytes(b"x")
+    s = WhisperSidecar(str(tmp_path), diariser=Diariser(_embed_by_first_sample, str(tmp_path / "me.npy")))
+    s._engine.transcribe_segments = lambda pcm: [(0.0, 2.0, "hello"), (2.0, 4.0, "hi")]
+    pcm = np.concatenate([np.full(SR * 2, 3, "<i2"), np.full(SR * 2, 1, "<i2")])
+
+    async def run():
+        async with websockets.serve(s._handle, "127.0.0.1", 0) as srv:
+            port = srv.sockets[0].getsockname()[1]
+            async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"requestId": "e", "enrol": True}))
+                await ws.send(np.full(SR * 6, 3, "<i2").tobytes())
+                enrolled = json.loads(await ws.recv())
+                await ws.send(json.dumps({"requestId": "r", "diarise": "m"}))
+                await ws.send(pcm.tobytes())
+                return enrolled, json.loads(await ws.recv())
+
+    enrolled, msg = asyncio.run(run())
+    assert enrolled["enrolled"] is True
+    assert [x["voice"] for x in msg["segments"]] == [0, 1]

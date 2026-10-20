@@ -76,12 +76,21 @@ class WhisperSidecar:
         self._engine = _Engine(resolved)
         self._diariser = diariser
         self._diarise_model = os.environ.get("DIARISE_MODEL_PATH")
+        self._voiceprint = os.environ.get("VOICEPRINT_PATH")
+
+    def _get_diariser(self) -> Diariser:
+        if self._diariser is None:
+            self._diariser = Diariser(
+                sherpa_embedder(resolve_model(self._diarise_model)), self._voiceprint
+            )
+        return self._diariser
+
+    def _enrol(self, pcm: np.ndarray) -> float:
+        return self._get_diariser().enrol(pcm)
 
     def _diarised(self, session: str, pcm: np.ndarray) -> list[dict]:
-        if self._diariser is None:
-            self._diariser = Diariser(sherpa_embedder(resolve_model(self._diarise_model)))
         spans = self._engine.transcribe_segments(pcm)
-        voices = self._diariser.label(session, pcm, [(a, b) for a, b, _ in spans])
+        voices = self._get_diariser().label(session, pcm, [(a, b) for a, b, _ in spans])
         return [
             {"start": a, "end": b, "text": t, "voice": v} for (a, b, t), v in zip(spans, voices)
         ]
@@ -98,9 +107,16 @@ class WhisperSidecar:
                     continue
                 request_id = pending["requestId"]
                 session = pending.get("diarise")
+                enrol = bool(pending.get("enrol"))
                 pending = None
                 pcm = np.frombuffer(raw, dtype="<i2")
                 try:
+                    if enrol:
+                        seconds = await asyncio.to_thread(self._enrol, pcm)
+                        await websocket.send(
+                            json.dumps({"requestId": request_id, "enrolled": True, "seconds": seconds})
+                        )
+                        continue
                     if session:
                         segs = await asyncio.to_thread(self._diarised, str(session), pcm)
                         text = " ".join(s["text"] for s in segs)

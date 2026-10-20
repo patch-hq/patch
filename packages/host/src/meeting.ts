@@ -149,6 +149,12 @@ export interface MeetingDeps {
    * numbers stay the same across clips. Omitted: `them` stays one speaker.
    */
   transcribeVoices?: (session: string, wav: Buffer) => Promise<{ text: string; voice: number }[]>;
+  /**
+   * True once the owner has a voice print. Then every clip (mic included) is
+   * diarised and voice 0 is the owner: those lines are 'you' whichever channel
+   * they came in on, so in-room speech with no app still reads as the owner.
+   */
+  hasVoiceprint?: () => boolean;
   analyse: (input: AnalyseInput) => Promise<MeetingAnalysis>;
   /**
    * Cheap pass over new transcript lines that repairs mis-heard names and places
@@ -322,9 +328,10 @@ export class MeetingManager {
     const at = meetingElapsedMs(rt.state, this.now());
     return this.enqueue(rt, async () => {
       const speaker = source === 'mic' ? 'you' : 'them';
+      const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
       let pieces: { text: string; voice?: number }[];
       try {
-        if (speaker === 'them' && this.deps.transcribeVoices) {
+        if (this.deps.transcribeVoices && (speaker === 'them' || printed)) {
           pieces = mergeVoiceRuns(
             await this.deps.transcribeVoices(`${chatId}:${rt.state.startedAt}`, wav),
           );
@@ -343,11 +350,14 @@ export class MeetingManager {
       let added = false;
       for (const { text, voice } of pieces) {
         if (text === '') continue;
+        // Voice 0 is the owner's print; any other voice is someone else, even on the mic.
+        const lineSpeaker =
+          printed && voice !== undefined ? (voice === 0 ? 'you' : 'them') : speaker;
         rt.state.transcript.push({
           at,
-          speaker,
-          ...(voice !== undefined ? { voice } : {}),
-          ...(speaker === 'them' && speakerName ? { name: speakerName } : {}),
+          speaker: lineSpeaker,
+          ...(voice !== undefined && voice !== 0 ? { voice } : {}),
+          ...(lineSpeaker === 'them' && speakerName ? { name: speakerName } : {}),
           text,
         });
         added = true;

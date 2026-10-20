@@ -209,15 +209,16 @@ the server boots — the server then recognises the host's `/ws` hello and
 The host hosts the whole voice pipeline (spec/07, spec/16): Whisper STT,
 Kokoro TTS, Silero VAD, and a pure-TS NLMS AEC. Backends are selected by env:
 
-| Env var              | Values                      | Default  | Notes                                                                                                                           |
-| -------------------- | --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `WHISPER_BACKEND`    | `groq` \| `local` \| `mock` | `groq`   | `groq` needs `GROQ_API_KEY`; `local` spawns the faster-whisper sidecar.                                                         |
-| `WHISPER_MODEL_PATH` | path                        | —        | faster-whisper `medium.en` dir (spawned-sidecar mode).                                                                          |
-| `DIARISE_MODEL_PATH` | path                        | —        | Speaker-embedding ONNX (`scripts/fetch-models.sh`). With the local backend, meetings label distinct voices in the Them channel. |
-| `KOKORO_BACKEND`     | `real` \| `mock`            | `real`   | `real` spawns the Kokoro sidecar; needs `KOKORO_MODEL_PATH`.                                                                    |
-| `KOKORO_MODEL_PATH`  | path                        | —        | Kokoro v1 model dir (`config.json`, `kokoro-v1_0.pth`, `voices/`).                                                              |
-| `VAD_BACKEND`        | `silero` \| `mock`          | `silero` | `silero` runs the real ONNX VAD; needs `VAD_MODEL_PATH`. `mock` is unit-test-only.                                              |
-| `VAD_MODEL_PATH`     | path                        | —        | `silero_vad.onnx`.                                                                                                              |
+| Env var              | Values                      | Default  | Notes                                                                                                                                                                                                              |
+| -------------------- | --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WHISPER_BACKEND`    | `groq` \| `local` \| `mock` | `groq`   | `groq` needs `GROQ_API_KEY`; `local` spawns the faster-whisper sidecar.                                                                                                                                            |
+| `WHISPER_MODEL_PATH` | path                        | —        | faster-whisper `medium.en` dir (spawned-sidecar mode).                                                                                                                                                             |
+| `DIARISE_MODEL_PATH` | path                        | —        | Speaker-embedding ONNX (`scripts/fetch-models.sh`). With the local backend, meetings label distinct voices in the Them channel.                                                                                    |
+| `VOICEPRINT_PATH`    | path                        | —        | Owner's voice print (`.npy`). Save it with `python -m patch_whisper_sidecar.enrol me.wav` (5s+ of you, 16 kHz mono WAV). With it, your voice stays `you` on any channel (in-room, no app) and the mic is diarised. |
+| `KOKORO_BACKEND`     | `real` \| `mock`            | `real`   | `real` spawns the Kokoro sidecar; needs `KOKORO_MODEL_PATH`.                                                                                                                                                       |
+| `KOKORO_MODEL_PATH`  | path                        | —        | Kokoro v1 model dir (`config.json`, `kokoro-v1_0.pth`, `voices/`).                                                                                                                                                 |
+| `VAD_BACKEND`        | `silero` \| `mock`          | `silero` | `silero` runs the real ONNX VAD; needs `VAD_MODEL_PATH`. `mock` is unit-test-only.                                                                                                                                 |
+| `VAD_MODEL_PATH`     | path                        | —        | `silero_vad.onnx`.                                                                                                                                                                                                 |
 
 All four selectors **fail loudly at host boot** if a real backend is chosen
 but its model/credential is absent — no silent fallback to mock (spec

@@ -15,6 +15,7 @@ import {
   type AnalyseInput,
   type CorrectInput,
   type MeetingAnalysis,
+  type MeetingDeps,
   type MeetingPrompts,
 } from '../src/meeting.js';
 import {
@@ -61,8 +62,9 @@ describe('MeetingManager', () => {
   let ticks: (() => void)[];
   let n: number;
 
-  const make = (): MeetingManager =>
+  const make = (extra: Partial<MeetingDeps> = {}): MeetingManager =>
     new MeetingManager({
+      ...extra,
       dir,
       transcribe,
       ...(diarise ? { transcribeVoices } : {}),
@@ -114,7 +116,32 @@ describe('MeetingManager', () => {
     expect(transcribe).not.toHaveBeenCalled();
   });
 
-  it('never diarises the mic, and keeps one Them label without a diariser', async () => {
+  it('with a voice print, the mic is diarised: voice 0 is you, others are Them', async () => {
+    diarise = true;
+    const m = make({ hasVoiceprint: () => true });
+    m.start('c1');
+    transcribeVoices.mockResolvedValueOnce([
+      { text: 'Right, my update.', voice: 0 },
+      { text: 'Go on then.', voice: 1 },
+    ]);
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    expect(m.get('c1')?.transcript.map((l) => [l.speaker, l.voice, l.text])).toEqual([
+      ['you', undefined, 'Right, my update.'],
+      ['them', 1, 'Go on then.'],
+    ]);
+    expect(transcribe).not.toHaveBeenCalled();
+  });
+
+  it('with a voice print, your voice on the system channel is still you', async () => {
+    diarise = true;
+    const m = make({ hasVoiceprint: () => true });
+    m.start('c1');
+    transcribeVoices.mockResolvedValueOnce([{ text: 'Me in the room', voice: 0 }]);
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    expect(m.get('c1')?.transcript[0]?.speaker).toBe('you');
+  });
+
+  it('never diarises the mic without a voice print, and keeps one Them label without a diariser', async () => {
     diarise = true;
     const m = make();
     m.start('c1');

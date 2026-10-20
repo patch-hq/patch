@@ -595,6 +595,28 @@ export class LocalWhisperBackend implements WhisperBackend {
     return result as { text: string; voice: number }[];
   }
   /**
+   * Saves the owner's voice print from a 16 kHz mono WAV of them speaking
+   * (5s+). Afterwards `transcribeVoices` reports their stretches as voice 0.
+   */
+  async enrolVoice(wav: Buffer): Promise<void> {
+    await this.ensureProcess();
+    const pcm = pcmFromWav(wav);
+    const requestId = `w-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const payload = JSON.stringify({ requestId, samples: pcm.length, enrol: true });
+    await this.getClient().request({
+      payload,
+      binaryPayload: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength),
+      handlers: {
+        onJson(msg: unknown) {
+          if ((msg as { enrolled?: unknown }).enrolled !== true) {
+            throw new Error('faster-whisper sidecar: enrolment not confirmed');
+          }
+          return { done: true, value: true };
+        },
+      },
+    });
+  }
+  /**
    * DOCUMENTED LIMITATION (spec/07 § End-to-end voice transport): the
    * faster-whisper Python sidecar's WS protocol takes raw PCM16 samples only
    * (see `transcribe` above — it sends `{requestId,samples}` + a binary PCM

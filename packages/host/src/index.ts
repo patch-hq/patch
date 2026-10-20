@@ -4037,6 +4037,9 @@ async function startHost(
           },
         }
       : {}),
+    ...(process.env['VOICEPRINT_PATH']
+      ? { hasVoiceprint: () => existsSync(process.env['VOICEPRINT_PATH'] as string) }
+      : {}),
     analyse: makeMeetingAnalyser({
       sdkBackend,
       runOnAccountWithCredit,

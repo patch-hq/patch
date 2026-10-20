@@ -20,6 +20,12 @@ MATCH_THRESHOLD = 0.5
 MIN_ENROL_SECONDS = 1.0
 # Segments shorter than this are too short to embed at all; they take the previous voice.
 MIN_EMBED_SECONDS = 0.4
+# Cosine similarity at or above which a segment is the enrolled owner's voice.
+OWNER_THRESHOLD = 0.5
+# Enrolment needs this much audio to make a usable voice print.
+MIN_PRINT_SECONDS = 5.0
+# Voice number reported for the enrolled owner; tracked voices start at 1.
+OWNER_VOICE = 0
 MAX_VOICES = 12
 MAX_SESSIONS = 8
 
@@ -79,12 +85,44 @@ class SpeakerTracker:
 class Diariser:
     """Per-meeting trackers around one shared embedding model."""
 
-    def __init__(self, embed: Embedder) -> None:
+    def __init__(
+        self,
+        embed: Embedder,
+        voiceprint_path: str | None = None,
+        owner_threshold: float = OWNER_THRESHOLD,
+    ) -> None:
         self._embed = embed
+        self._print_path = voiceprint_path
+        self._owner_threshold = owner_threshold
         self._sessions: "OrderedDict[str, SpeakerTracker]" = OrderedDict()
 
+    def enrol(self, pcm: np.ndarray) -> float:
+        """Save the owner's voice print from `pcm` (int16, 16 kHz); returns seconds used."""
+        if not self._print_path:
+            raise RuntimeError("VOICEPRINT_PATH is not set (NO SILENT FALLBACK).")
+        seconds = len(pcm) / SAMPLE_RATE
+        if seconds < MIN_PRINT_SECONDS:
+            raise RuntimeError(
+                f"voice print needs at least {MIN_PRINT_SECONDS:.0f}s of speech, got {seconds:.1f}s"
+            )
+        vec = _unit(self._embed(pcm))
+        tmp = f"{self._print_path}.tmp"
+        with open(tmp, "wb") as f:
+            np.save(f, vec)
+        os.replace(tmp, self._print_path)
+        return seconds
+
+    def _owner_print(self) -> np.ndarray | None:
+        if not self._print_path or not os.path.isfile(self._print_path):
+            return None
+        return _unit(np.load(self._print_path))
+
     def label(self, session: str, pcm: np.ndarray, segments: list[tuple[float, float]]) -> list[int]:
-        """Voice number for each (start, end) second span of `pcm` (int16, 16 kHz)."""
+        """Voice number for each (start, end) second span of `pcm` (int16, 16 kHz).
+
+        The enrolled owner, when there is a voice print, is OWNER_VOICE (0).
+        """
+        owner = self._owner_print()
         tracker = self._sessions.get(session)
         if tracker is None:
             tracker = self._sessions[session] = SpeakerTracker()
@@ -99,6 +137,13 @@ class Diariser:
             emb = None
             if seconds >= MIN_EMBED_SECONDS:
                 emb = self._embed(pcm[a:b])
+            if owner is not None:
+                if emb is None and out and out[-1] == OWNER_VOICE:
+                    out.append(OWNER_VOICE)
+                    continue
+                if emb is not None and float(np.dot(_unit(emb), owner)) >= self._owner_threshold:
+                    out.append(OWNER_VOICE)
+                    continue
             out.append(tracker.assign(emb, seconds))
         return out
 
