@@ -10,6 +10,7 @@
 //   - patch.installUpdate()                   → the user pressed Restart
 //   - patch.onNavigate(cb)                    → main asks the renderer to navigate
 //   - patch.onStartVoiceNote(cb)              → ⌃Space global hotkey hit
+//   - patch.copyImagePng(png)                 → native clipboard image write
 //   - patch.getDesktopEvents()                → test/inspection hook
 //   - patch.localHost.status()/install()    → the host on this Mac
 //   - patch.overlayTitleBar                   → this platform's windows have no
@@ -180,6 +181,9 @@ contextBridge.exposeInMainWorld('patch', {
   // Double-click on the divider: back to the default share.
   resetPanelWidth(): void {
     ipcRenderer.send('patch:panel:reset-width');
+  },
+  async copyImagePng(png: Uint8Array): Promise<void> {
+    await ipcRenderer.invoke('patch:copy-image', png);
   },
   async getDesktopEvents(): Promise<unknown[]> {
     return (await ipcRenderer.invoke('patch:get-events')) as unknown[];

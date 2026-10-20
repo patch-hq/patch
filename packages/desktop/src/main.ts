@@ -1156,6 +1156,14 @@ function registerIpc(): void {
     },
   );
   ipcMain.handle('patch:get-events', () => eventLog);
+  // The lightbox's Copy image: Chromium's async clipboard rejects an image write
+  // in the packaged app, so the renderer hands over PNG bytes to write natively.
+  ipcMain.handle('patch:copy-image', (_e, png: unknown) => {
+    if (!(png instanceof Uint8Array)) throw new Error('copy-image: expected PNG bytes');
+    const img = nativeImage.createFromBuffer(Buffer.from(png));
+    if (img.isEmpty()) throw new Error('copy-image: bytes are not a decodable image');
+    clipboard.writeImage(img);
+  });
   // spec/14 § New windows — the renderer's explicit "open in new window"
   // actions (lib/newWindow.ts), never a link the user clicked (those stay on
   // the `setWindowOpenHandler` deny-and-hand-to-browser path above). A

@@ -111,6 +111,13 @@ export interface PatchDesktopBridge {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   };
+  /**
+   * Put PNG bytes on the system clipboard as an image, via the shell's native
+   * clipboard. Chromium's async clipboard rejects an image write in the packaged
+   * app, so the desktop shell does it in the main process. Absent in a browser
+   * and on shells that predate it.
+   */
+  copyImagePng?(png: Uint8Array): Promise<void>;
   /** Run a check now and resolve with the resulting state. */
   checkForUpdates?(): Promise<DesktopUpdaterState>;
   /** Subscribe to state pushes from main (download progress, errors). */
