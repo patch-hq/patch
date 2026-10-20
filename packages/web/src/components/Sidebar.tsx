@@ -77,7 +77,7 @@ import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
 import { hasDraftText } from '../lib/draftText.js';
-import { hostLabel, sortHosts } from '../routes/settings/hostScope.js';
+import { connectionSummary } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
@@ -337,16 +337,8 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
             <span
               className={`conn-dot ${connectedAndOnline ? '' : 'offline'}`}
               aria-label={`connection: ${connection === 'connected' ? (hostOnline ? 'connected' : 'host-offline') : connection}`}
-              title={[
-                connection !== 'connected'
-                  ? 'Reconnecting…'
-                  : hostOnline
-                    ? 'Connected'
-                    : 'Agent offline',
-                ...sortHosts(Object.values(hostStates)).map(
-                  (h) => `${hostLabel(h)}: ${h.online ? 'online' : 'offline'}`,
-                ),
-              ].join('\n')}
+              title={connectionSummary(connection, hostStates)}
+              data-tooltip-full
               data-testid="conn-dot"
             />
           </span>

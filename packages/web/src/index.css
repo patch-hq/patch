@@ -6977,7 +6977,7 @@ a.ch-row:hover {
   font-size: var(--text-min);
   line-height: 1.4;
   pointer-events: none;
-  white-space: normal;
+  white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
