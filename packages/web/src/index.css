@@ -3717,12 +3717,21 @@ a.ch-row:hover {
    turn — attachments, track switcher, queue and delivery status — stay stacked
    in the second track, in source order. */
 .msg-user.has-edit {
+  /* Paint containment must include the pencil even when the reading column
+     fills a narrow pane. Borrow the stream's left padding without shrinking
+     the bubble, as the wide-table gutter above does. */
+  --user-left-gutter: max(26px, var(--measure-slack, 0px));
+  margin-left: calc(-1 * var(--user-left-gutter));
+  padding-left: var(--user-left-gutter);
   display: grid;
   grid-template-columns: 0 minmax(0, max-content);
   justify-content: end;
   justify-items: end;
   align-items: end;
   column-gap: 0;
+}
+.msg-user.has-edit > .msg-copy {
+  left: calc(var(--user-left-gutter) - 26px);
 }
 .msg-user.has-edit > * {
   grid-column: 2;
