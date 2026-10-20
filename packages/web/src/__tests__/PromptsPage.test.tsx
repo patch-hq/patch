@@ -1,0 +1,99 @@
+// Settings → Prompts: every prompt Patch sends to an agent on one page, each
+// Default or Custom, with a way back to the default.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
+import {
+  DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_SWEEP_PROMPT,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
+} from '@patch/wire';
+import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
+import { usePresenceStore } from '../stores/presenceStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { setActiveWs } from '../api/ws.js';
+import {
+  makeFetch,
+  preferencesServer,
+  renderSettings,
+  resetSettingsState,
+} from './settingsHarness.js';
+
+beforeEach(() => {
+  resetSettingsState();
+  usePresenceStore.getState().setHostOnline('d1', true);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  setActiveWs(null);
+});
+
+const serve = () => {
+  const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+  vi.stubGlobal('fetch', makeFetch({}, server.handler));
+  return server;
+};
+
+describe('Settings → Prompts', () => {
+  it('lists every prompt with its default text and marks each Default', async () => {
+    serve();
+    renderSettings('/settings/prompts');
+    const shown = async (id: string): Promise<string | null> =>
+      (await screen.findByTestId(`prompt-${id}-shown`)).textContent;
+    expect(await shown('watch-check-in')).toBe(DEFAULT_WATCH_CHECK_IN_PROMPT);
+    expect(await shown('sweep')).toBe(DEFAULT_SWEEP_PROMPT);
+    expect(await shown('goal-judge')).toBe(DEFAULT_GOAL_EVAL_PROMPT);
+    expect(await shown('link-summary')).toBe(DEFAULT_LINK_SUMMARY_PROMPT);
+    expect(await shown('job-autonomy')).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
+    for (const id of ['watch-check-in', 'sweep', 'goal-judge', 'link-summary', 'job-autonomy']) {
+      expect(screen.getByTestId(`prompt-${id}-mode-default`).getAttribute('aria-pressed')).toBe(
+        'true',
+      );
+    }
+    expect(screen.getByTestId('prompt-tools')).toBeTruthy();
+    expect(screen.getByTestId('prompt-system')).toBeTruthy();
+  });
+
+  it('switches to Custom seeded with the default, saves, then goes back to the default', async () => {
+    const server = serve();
+    renderSettings('/settings/prompts');
+    fireEvent.click(await screen.findByTestId('prompt-watch-check-in-mode-custom'));
+    const box = screen.getByTestId('prompt-watch-check-in-text') as HTMLTextAreaElement;
+    expect(box.value).toBe(DEFAULT_WATCH_CHECK_IN_PROMPT);
+    fireEvent.change(box, { target: { value: 'Still alive, {description}?' } });
+    fireEvent.click(screen.getByTestId('prompt-watch-check-in-save'));
+    await waitFor(() =>
+      expect(server.writes).toEqual([{ watchCheckInPrompt: 'Still alive, {description}?' }]),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('prompt-watch-check-in-shown').textContent).toBe(
+        'Still alive, {description}?',
+      ),
+    );
+    expect(
+      screen.getByTestId('prompt-watch-check-in-mode-custom').getAttribute('aria-pressed'),
+    ).toBe('true');
+    fireEvent.click(screen.getByTestId('prompt-watch-check-in-mode-default'));
+    await waitFor(() =>
+      expect(server.writes[1]).toEqual({ watchCheckInPrompt: DEFAULT_WATCH_CHECK_IN_PROMPT }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('prompt-watch-check-in-shown').textContent).toBe(
+        DEFAULT_WATCH_CHECK_IN_PROMPT,
+      ),
+    );
+  });
+
+  it('cancelling a switch to Custom writes nothing', async () => {
+    const server = serve();
+    renderSettings('/settings/prompts');
+    fireEvent.click(await screen.findByTestId('prompt-sweep-mode-custom'));
+    fireEvent.click(screen.getByTestId('prompt-sweep-cancel'));
+    expect(server.writes).toEqual([]);
+    expect(screen.getByTestId('prompt-sweep-mode-default').getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+  });
+});

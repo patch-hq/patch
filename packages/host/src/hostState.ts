@@ -111,6 +111,7 @@ const HostStateFile = z
      * the built-in defaults stand.
      */
     goalEvalPrompt: z.string().min(1).optional(),
+    watchCheckInPrompt: z.string().min(1).optional(),
     goalModel: z.string().min(1).optional(),
     goalRefusalLimit: z.number().int().positive().optional(),
     /**

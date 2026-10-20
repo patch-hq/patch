@@ -70,7 +70,8 @@ describe('Settings → Goals', () => {
   it('is a page of its own, between Manager and Voice', () => {
     const ids = SETTINGS_PAGES.map((p) => p.id);
     expect(ids.indexOf('goals')).toBe(ids.indexOf('manager') + 1);
-    expect(ids.indexOf('voice')).toBe(ids.indexOf('goals') + 1);
+    expect(ids.indexOf('prompts')).toBe(ids.indexOf('goals') + 1);
+    expect(ids.indexOf('voice')).toBe(ids.indexOf('prompts') + 1);
     expect(settingsPage('goals')?.title).toBe('Goals');
   });
 

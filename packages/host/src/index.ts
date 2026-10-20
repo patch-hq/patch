@@ -96,7 +96,8 @@ import {
   type LoadClaudeOAuthOptions,
 } from '@patch/auth';
 import type { HostAccountEvent, ChatReplayBatchEvent } from '@patch/wire';
-import { REPLAY_BATCH_BYTES } from '@patch/wire';
+import { REPLAY_BATCH_BYTES, DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
+import { DEFAULT_CHECK_IN_MS } from './watch.js';
 import { createMockSdkBackend, createRealSdkBackend, type SdkBackend } from './sdkBackend.js';
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
@@ -691,6 +692,9 @@ async function startHost(
   let managerContextWindow: number = persistedHostState.managerContextWindow ?? 200;
   // Settings → Goals (spec/04 § Goals): how the goal judge is asked, and when a goal gives up on a refusing agent.
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
+  // Settings → Prompts: the check-in a running background task sends its agent.
+  let watchCheckInPrompt: string =
+    persistedHostState.watchCheckInPrompt ?? DEFAULT_WATCH_CHECK_IN_PROMPT;
   let goalModel: string = persistedHostState.goalModel ?? DEFAULT_GOAL_MODEL;
   let goalRefusalLimit: number = persistedHostState.goalRefusalLimit ?? DEFAULT_GOAL_REFUSAL_LIMIT;
   /**
@@ -1582,6 +1586,12 @@ async function startHost(
       daemon.setGoalRefusalLimit(goalRefusalLimit);
       hostStateStore.update({ goalEvalPrompt, goalModel, goalRefusalLimit });
       logger.info({ goalModel, goalRefusalLimit }, 'goal settings changed');
+    }
+    if (shared.watchCheckInPrompt !== watchCheckInPrompt) {
+      watchCheckInPrompt = shared.watchCheckInPrompt;
+      daemon.setWatchCheckIn({ intervalMs: DEFAULT_CHECK_IN_MS, prompt: watchCheckInPrompt });
+      hostStateStore.update({ watchCheckInPrompt });
+      logger.info('watch check-in prompt changed');
     }
     if (shared.chatNameInterval !== chatNameInterval) {
       chatNameInterval = shared.chatNameInterval;
@@ -3938,6 +3948,7 @@ async function startHost(
     // the store fresh each call (not cached) so an account added/removed
     // between spawns is reflected immediately.
   });
+  daemon.setWatchCheckIn({ intervalMs: DEFAULT_CHECK_IN_MS, prompt: watchCheckInPrompt });
   // Meeting mode (meeting.ts). Local Whisper only: a meeting is hours of audio,
   // so a paid STT backend is never an option here, configured or not.
   meetings = new MeetingManager({

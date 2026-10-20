@@ -12,6 +12,7 @@ import { HostsPage, KeysPage } from './HostsSection';
 import { McpPage } from './McpSection';
 import { MemoriesPage } from './MemoriesSection';
 import { GoalsPage } from './GoalsSection';
+import { PromptsPage } from './PromptsSection';
 import { ComputerUsePage } from './ComputerUseSection';
 import { HooksPage } from './HooksSection';
 import { ManagerPage, VoicePage } from './PreferenceSections';
@@ -34,6 +35,7 @@ export const SETTINGS_PAGES: readonly SettingsPageEntry[] = [
   { id: 'memories', title: 'Memories', group: 'Agents', Page: MemoriesPage },
   { id: 'manager', title: 'Manager', group: 'Agents', Page: ManagerPage },
   { id: 'goals', title: 'Goals', group: 'Agents', Page: GoalsPage },
+  { id: 'prompts', title: 'Prompts', group: 'Agents', Page: PromptsPage },
   { id: 'voice', title: 'Voice', group: 'Agents', Page: VoicePage },
   { id: 'hooks', title: 'Hooks', group: 'Agents', Page: HooksPage },
   { id: 'computer', title: 'Computer use', group: 'Agents', Page: ComputerUsePage },

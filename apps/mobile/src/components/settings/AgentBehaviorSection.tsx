@@ -13,7 +13,13 @@
 
 import React from 'react';
 import { Alert, View } from 'react-native';
-import { DEFAULT_GOAL_EVAL_PROMPT, DEFAULT_LINK_SUMMARY_PROMPT } from '@patch/wire';
+import {
+  DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_SWEEP_PROMPT,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
+} from '@patch/wire';
+import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
 import { useRouter } from 'expo-router';
 import {
   QUESTION_EXPIRY_SECONDS_MAX,
@@ -70,7 +76,10 @@ export type Layer =
   | 'claude-darwin'
   | 'claude-linux'
   | 'goal-judge'
-  | 'link-summary';
+  | 'link-summary'
+  | 'watch-check-in'
+  | 'sweep'
+  | 'job-autonomy';
 
 export const LAYER_TITLE: Record<Layer, string> = {
   tools: 'Patch tools prompt',
@@ -80,6 +89,9 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'claude-linux': 'settings.json on Linux',
   'goal-judge': 'Goal judge prompt',
   'link-summary': 'Summarise prompt',
+  'watch-check-in': 'Background task check-in',
+  sweep: 'Manager sweep',
+  'job-autonomy': 'Job autonomy',
 };
 
 /** What a layer's editor is titled: short enough to fit the header. */
@@ -91,7 +103,19 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'claude-linux': 'Linux settings.json',
   'goal-judge': 'Judge prompt',
   'link-summary': 'Summarise prompt',
+  'watch-check-in': 'Check-in prompt',
+  sweep: 'Sweep prompt',
+  'job-autonomy': 'Autonomy prompt',
 };
+
+/** The prompts whose shared setting is plain text with a built-in default. */
+export const TEXT_PROMPTS = {
+  'goal-judge': { key: 'goalEvalPrompt', fallback: DEFAULT_GOAL_EVAL_PROMPT },
+  'link-summary': { key: 'linkSummaryPrompt', fallback: DEFAULT_LINK_SUMMARY_PROMPT },
+  'watch-check-in': { key: 'watchCheckInPrompt', fallback: DEFAULT_WATCH_CHECK_IN_PROMPT },
+  sweep: { key: 'sweepPrompt', fallback: DEFAULT_SWEEP_PROMPT },
+  'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
+} as const;
 
 const CLAUDE_PART = {
   'claude-shared': 'shared',
@@ -381,11 +405,9 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
         ? (preferences.harnessToolsPrompt ?? toolsDefault)
         : layer === 'system'
           ? preferences.harnessSystemPrompt
-          : layer === 'goal-judge'
-            ? preferences.goalEvalPrompt
-            : layer === 'link-summary'
-              ? preferences.linkSummaryPrompt
-              : preferences.claudeSettings[CLAUDE_PART[layer]];
+          : layer in TEXT_PROMPTS
+            ? preferences[TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key]
+            : preferences.claudeSettings[CLAUDE_PART[layer as keyof typeof CLAUDE_PART]];
   const [draft, setDraft] = React.useState(initial);
   const [saving, setSaving] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -418,11 +440,14 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
     if (layer === 'tools') void write({ harnessToolsPrompt: draft });
     // An empty string clears the override (the SDK default).
     else if (layer === 'system') void write({ harnessSystemPrompt: draft });
-    else if (layer === 'goal-judge') void write({ goalEvalPrompt: draft });
-    else if (layer === 'link-summary') void write({ linkSummaryPrompt: draft });
+    else if (layer in TEXT_PROMPTS)
+      void write({ [TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key]: draft });
     else
       void write({
-        claudeSettings: { ...preferences.claudeSettings, [CLAUDE_PART[layer]]: draft },
+        claudeSettings: {
+          ...preferences.claudeSettings,
+          [CLAUDE_PART[layer as keyof typeof CLAUDE_PART]]: draft,
+        },
       });
   };
 
@@ -462,22 +487,21 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
             variant="quiet"
             onPress={() => router.back()}
           />
-          {layer === 'goal-judge' ? (
+          {layer in TEXT_PROMPTS ? (
             <SettingsButton
               testID="layer-editor-reset"
               label="Reset to default"
               variant="quiet"
-              disabled={preferences.goalEvalPrompt === DEFAULT_GOAL_EVAL_PROMPT}
-              onPress={() => void write({ goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT })}
-            />
-          ) : null}
-          {layer === 'link-summary' ? (
-            <SettingsButton
-              testID="layer-editor-reset"
-              label="Reset to default"
-              variant="quiet"
-              disabled={preferences.linkSummaryPrompt === DEFAULT_LINK_SUMMARY_PROMPT}
-              onPress={() => void write({ linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT })}
+              disabled={
+                preferences[TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key] ===
+                TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].fallback
+              }
+              onPress={() =>
+                void write({
+                  [TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key]:
+                    TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].fallback,
+                })
+              }
             />
           ) : null}
           {layer === 'tools' ? (
