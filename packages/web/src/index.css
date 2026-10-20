@@ -4203,9 +4203,9 @@ a.ch-row:hover {
   font-size: max(0.95em, var(--text-min));
 }
 .md blockquote {
-  border-left: 3px solid var(--line);
   margin: 8px 0;
   padding-left: 10px;
+  font-style: italic;
   color: var(--ink-2);
 }
 .md-inline-code {
@@ -9213,7 +9213,6 @@ button.set-row-open:focus-visible {
   display: block;
   width: 100%;
   padding: 8px 14px;
-  border-left: 2px solid transparent;
   cursor: pointer;
 }
 .set-mem-item:hover {
@@ -9221,7 +9220,7 @@ button.set-row-open:focus-visible {
 }
 .set-mem-item.on {
   background: var(--accent-tint);
-  border-left-color: var(--accent);
+  color: var(--accent);
 }
 .set-mem-item:focus-visible {
   outline: 2px solid var(--accent);
@@ -10210,7 +10209,6 @@ main.empty-state p {
   padding: 8px 16px;
   font-size: var(--text-min);
   border-bottom: 1px solid var(--line-soft);
-  border-left: 3px solid var(--accent, var(--ink-2));
 }
 .reminder-banner-label {
   display: inline-flex;
@@ -14420,7 +14418,6 @@ select.new-chat-account:focus-visible {
   gap: 8px;
   padding: 16px;
   background: var(--accent-tint, var(--bg-soft));
-  border-left: 4px solid var(--accent);
 }
 .set-computer-live-title {
   font-size: 16px;
@@ -15011,7 +15008,6 @@ select.new-chat-account:focus-visible {
   align-items: flex-start;
   gap: 8px;
   padding: 6px 6px 6px 12px;
-  border-left: 3px solid var(--accent, var(--ink-2));
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--ink-2);
