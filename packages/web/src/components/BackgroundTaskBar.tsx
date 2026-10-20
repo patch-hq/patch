@@ -111,6 +111,29 @@ function CommandPreview({
   );
 }
 
+/** Silence after which a running row is flagged — matches the host's nudge to the agent. */
+const QUIET_AFTER_MS = 60 * 60 * 1000;
+
+/** The task's last output line, or a warning when it has gone quiet for a long time. */
+function ProgressLine({ task, now }: { task: WatchTaskRow; now: number }): JSX.Element | null {
+  const quietMs = now - Math.max(task.startedAt, task.lastOutputAt ?? 0);
+  const quiet = quietMs >= QUIET_AFTER_MS;
+  if (!quiet && task.lastLine === undefined) return null;
+  const text = quiet
+    ? `no output for ${Math.floor(quietMs / QUIET_AFTER_MS)}h${task.lastLine ? ` · ${task.lastLine}` : ''}`
+    : task.lastLine;
+  return (
+    <span
+      className="background-task-bar-progress"
+      data-testid="background-task-bar-progress"
+      data-quiet={quiet ? 'true' : 'false'}
+      title={task.lastLine}
+    >
+      {text}
+    </span>
+  );
+}
+
 function useWatchTasks(chatId: string, enabled: boolean): WatchTaskRow[] {
   const [tasks, setTasks] = useState<WatchTaskRow[]>([]);
 
@@ -287,6 +310,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
                   >
                     {task.description}
                   </span>
+                  {ended ? null : <ProgressLine task={task} now={now} />}
                   {ended ? null : (
                     <span
                       className="background-task-bar-elapsed"

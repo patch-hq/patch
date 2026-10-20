@@ -755,6 +755,8 @@ A task with no such process is reported as unmeasured, not as zero: a background
 
 The host also counts how many of each chat's background tasks are still running, and reports that count on the chat's state (`03-wire-protocol.md` ## Event categories). It tracks them from its own outgoing stream: a `run_in_background` call starts one, a completion notice ends one, and an explicit kill ends one, paired by the same rules a surface uses (`14-design-web.md` § Main chat panel — Background task bar). A surface holding many chats has the transcript of none, so this count is the only way the list can tell a chat that has finished from one that settled idle with work still in flight. It is in memory only: a background task belongs to the agent session that launched it, and a restart leaves nothing of it running. The count is reported on every state emit, zero included, so a surface can tell a host that counts them and reports none running from a host that does not count them at all.
 
+A `patch_watch` task must be given a `timeoutSec`; the host kills the task's whole process group when it is exceeded and delivers a `[watch]` message saying it timed out. Whatever the task prints is its progress: the last non-empty line of its output, and when it was written, are reported with each task so a surface can show it beside the elapsed time (`14-design-web.md` § Main chat panel — Background task bar). A task that prints nothing for an hour is flagged amber on the bar, and the agent gets one `[watch]` message saying so; it is told again only after the task has printed something and gone quiet again.
+
 Nothing else on a user message is chat-visible. Tool results and the turn's own prompt echo arrive the same way and are not transcript entries.
 
 ## Output style

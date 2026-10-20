@@ -471,6 +471,8 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         'background and, once it exits, delivers a `[watch]`-prefixed message into THIS chat as a new ' +
         'turn (survives a host restart either way — the task keeps running and is re-attached). Use ' +
         'for anything that takes longer than you want to wait: a build, a long test run, a download. ' +
+        "Every line the command prints is its progress: the last one shows in the user's task strip, so print short status lines. " +
+        'A `timeoutSec` is required, and you are messaged if it prints nothing for an hour. ' +
         "`cwd` defaults to this chat's own folder.",
       inputSchema: {
         command: z.string().min(1),
@@ -480,11 +482,23 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .describe(
             'Short human label for what this task is, shown in patch_watch_list and the chat.',
           ),
+        timeoutSec: z
+          .number()
+          .int()
+          .positive()
+          .describe(
+            'REQUIRED maximum run time in seconds. The host kills the task when it is exceeded. Pick a realistic ceiling, not a huge one.',
+          ),
         cwd: z.string().min(1).optional(),
       },
     },
-    async ({ command, description, cwd }) => {
-      const body: Record<string, unknown> = { chatId: callerChatId, command, description };
+    async ({ command, description, timeoutSec, cwd }) => {
+      const body: Record<string, unknown> = {
+        chatId: callerChatId,
+        command,
+        description,
+        timeoutSec,
+      };
       if (cwd !== undefined) body['cwd'] = cwd;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/watch', body });
       return toolResult(res);

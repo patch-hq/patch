@@ -19,16 +19,16 @@ import type {
   WatchTaskRow,
   WireEvent,
 } from '@patch/wire';
-import type { WatchRecord } from './watch.js';
+import type { WatchProgress, WatchRecord } from './watch.js';
 
 export interface WatchRequestsDeps {
   hasChat(chatId: string): boolean;
-  listWatch(chatId: string): WatchRecord[];
+  listWatch(chatId: string): (WatchRecord & WatchProgress)[];
   stopWatch(chatId: string, taskId: string): boolean;
 }
 
 /** `WatchRecord` (daemon-internal: also carries chatId/cwd/pid) → the wire row a surface gets. */
-function toWireRow(rec: WatchRecord): WatchTaskRow {
+function toWireRow(rec: WatchRecord & WatchProgress): WatchTaskRow {
   return {
     taskId: rec.taskId,
     description: rec.description,
@@ -36,6 +36,10 @@ function toWireRow(rec: WatchRecord): WatchTaskRow {
     outputFile: rec.outputFile,
     status: rec.status,
     startedAt: rec.startedAt,
+    ...(rec.timeoutSec !== undefined ? { timeoutSec: rec.timeoutSec } : {}),
+    ...(rec.timedOut ? { timedOut: true } : {}),
+    ...(rec.lastLine !== undefined ? { lastLine: rec.lastLine } : {}),
+    ...(rec.lastOutputAt !== undefined ? { lastOutputAt: rec.lastOutputAt } : {}),
     ...(rec.endedAt !== undefined ? { endedAt: rec.endedAt } : {}),
     ...(rec.exitCode !== undefined ? { exitCode: rec.exitCode } : {}),
     ...(rec.signal !== undefined ? { signal: rec.signal } : {}),
