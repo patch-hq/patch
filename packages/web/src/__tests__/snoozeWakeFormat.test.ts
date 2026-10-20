@@ -8,6 +8,7 @@ import {
   formatElapsed,
   formatSnoozeMoment,
   formatWakeAt,
+  formatWakeTime,
 } from '../lib/snoozePresets.js';
 import { vi } from 'vitest';
 
@@ -29,6 +30,25 @@ describe('formatWakeAt', () => {
   });
   it('treats midnight crossing as tomorrow, not today', () => {
     expect(formatWakeAt(new Date(2026, 9, 16, 0, 1).getTime(), NOW)).toBe('Fri 00:01');
+  });
+});
+
+describe('formatWakeTime (sidebar, banner, header tooltip)', () => {
+  // The same wording as the sheet, per spec/04 § Snooze: 24-hour whatever
+  // the locale, and a date once the wake is more than six days out. It used
+  // to be a locale-formatted time that could read "05:00 PM" and never
+  // showed a date.
+  it('is the same wording as formatWakeAt', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      expect(formatWakeTime(new Date(2026, 9, 15, 17, 0).getTime())).toBe('17:00');
+      expect(formatWakeTime(new Date(2026, 9, 16, 8, 0).getTime())).toBe('Fri 08:00');
+      expect(formatWakeTime(new Date(2026, 9, 22, 8, 0).getTime())).toBe('Thu 22 Oct');
+      expect(formatWakeTime(8_640_000_000_000_000)).toBe('when done');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
