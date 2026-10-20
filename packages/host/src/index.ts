@@ -66,6 +66,7 @@ import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_MODEL,
+  DEFAULT_MEETING_RESEARCH_SECONDS,
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
@@ -114,7 +115,7 @@ import { createMockSdkBackend, createRealSdkBackend, type SdkBackend } from './s
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
 import { MeetingManager, type MeetingPrompts } from './meeting.js';
-import { makeMeetingAnalyser, makeMeetingCorrector } from './meetingGen.js';
+import { makeMeetingAnalyser, makeMeetingCorrector, makeMeetingResearcher } from './meetingGen.js';
 import { makeSweepDecider } from './managerSweepGen.js';
 import { makeGoalEvaluator } from './goalEval.js';
 import { makeToolRunSummarizer } from './toolRunGen.js';
@@ -708,7 +709,12 @@ async function startHost(
     notes: DEFAULT_MEETING_NOTES_PROMPT,
     actions: DEFAULT_MEETING_ACTIONS_PROMPT,
   };
-  let meetingModels = { analysis: DEFAULT_MEETING_MODEL, cleanup: DEFAULT_MEETING_MODEL };
+  let meetingModels = {
+    analysis: DEFAULT_MEETING_MODEL,
+    cleanup: DEFAULT_MEETING_MODEL,
+    research: DEFAULT_MEETING_MODEL,
+  };
+  let meetingResearchSeconds = DEFAULT_MEETING_RESEARCH_SECONDS;
   let meetingTranscriptionModel = '';
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
   // Settings → Prompts: the check-in a running background task sends its agent.
@@ -1611,7 +1617,12 @@ async function startHost(
       notes: shared.meetingNotesPrompt,
       actions: shared.meetingActionsPrompt,
     };
-    meetingModels = { analysis: shared.meetingAnalysisModel, cleanup: shared.meetingCleanupModel };
+    meetingModels = {
+      analysis: shared.meetingAnalysisModel,
+      cleanup: shared.meetingCleanupModel,
+      research: shared.meetingResearchModel,
+    };
+    meetingResearchSeconds = shared.meetingResearchSeconds;
     if (shared.meetingTranscriptionModel !== meetingTranscriptionModel) {
       meetingTranscriptionModel = shared.meetingTranscriptionModel;
       whisper?.useModel?.(meetingTranscriptionModel);
@@ -4000,6 +4011,13 @@ async function startHost(
       cwd: hostCwd,
       model: () => meetingModels.cleanup,
     }),
+    research: makeMeetingResearcher({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.research,
+    }),
+    researchSeconds: () => meetingResearchSeconds,
     // Optional user glossary: <patchHome>/meetings/glossary.txt, one term per line.
     glossary: () => {
       const f = join(config.patchHome, 'meetings', 'glossary.txt');
@@ -4481,6 +4499,7 @@ async function startHost(
     emitWire: emit,
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,
+    meetingAgentEdit: (chatId, edit) => meetings!.agentEdit(chatId, edit),
     // Live link diagnostics + spec/12 link-drop control on the control UDS.
     serverLink: {
       diagnostics: () => link.diagnostics(),
@@ -6374,6 +6393,10 @@ export async function handleServerEvent(
       }
       case 'meeting.notes_request': {
         requireMeetings(accounts).editNotes(event.chatId, event.edit);
+        return;
+      }
+      case 'meeting.research_request': {
+        requireMeetings(accounts).setResearch(event.chatId, event.on);
         return;
       }
       case 'meeting.my_notes_request': {

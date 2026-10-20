@@ -13471,6 +13471,7 @@ select.new-chat-account:focus-visible {
   gap: 10px;
 }
 .mm-left {
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -15489,4 +15490,124 @@ select.new-chat-account:focus-visible {
 .ask-human-code code {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   font-size: var(--text-min);
+}
+
+/* Agent feed (meeting mode): research cards over the chat. Type is shown by the label's colour, never a left bar. */
+.mm-feed {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 42%;
+  overflow: auto;
+  padding: 10px 20px 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mm-feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.mm-feed-head .mm-label {
+  margin-bottom: 0;
+}
+.mm-feed-auto {
+  font-size: 12px;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mm-feed-err {
+  font-size: 12px;
+  color: var(--danger);
+  margin-bottom: 6px;
+}
+.mm-feed-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.mm-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  color: var(--ink);
+  font-size: 14px;
+}
+.mm-card-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.mm-card-k {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-strong);
+}
+.mm-card[data-kind='fact'] .mm-card-k {
+  color: var(--waiting);
+}
+.mm-card[data-kind='answer'] .mm-card-k {
+  color: var(--permission);
+}
+.mm-card-q {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mm-card-t {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.mm-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+}
+.mm-verdict {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  padding: 0 7px;
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.mm-verdict[data-verdict='correct'] {
+  background: var(--accent-tint);
+}
+.mm-verdict[data-verdict='off'] {
+  background: var(--waiting-tint);
+}
+.mm-card-src {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--accent-strong);
+  margin-top: 3px;
+}
+.mm-edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.mm-edit-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-tint);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+}
+@media (max-width: 800px) {
+  .mm-feed {
+    max-height: 30%;
+    padding: 8px 16px 2px;
+  }
 }

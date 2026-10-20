@@ -9,12 +9,17 @@
 // ("Thank you.") from silence. NO FALLBACK: a denied mic or missing Web Audio
 // API rejects `startMeetingCapture`.
 //
+// When both are captured the call is also audible in the room, so the mic is
+// cleaned of the system audio (`EchoCanceller`) before it is cut into clips:
+// the mic then carries the local speaker only and each utterance is heard once.
+//
 // The mic is a MediaStream. System audio ("them") is NOT: the desktop shell's
 // native helper taps it and hands over 16 kHz PCM (`PcmFeed`), so no screen is
 // ever shared to hear a call.
 
 import { createPcm16Downsampler, MIC_SAMPLE_RATE } from './pcmDownsample.js';
 import { silentAudioContext } from './silentAudioContext.js';
+import { EchoCanceller } from './echoCanceller.js';
 
 export const CLIP_SECONDS = 6;
 /** A tail shorter than this on stop is not worth a Whisper call. */
@@ -153,7 +158,9 @@ export function startMeetingCapture(
   if (!AudioCtx) throw new Error('Web Audio API unavailable');
 
   let paused = false;
-  const lanes: { builder: ClipBuilder; teardown: () => void }[] = [];
+  // The system audio is the far-end reference for the mic. Alone, either needs no canceller.
+  const aec = sources.mic && sources.system ? new EchoCanceller() : null;
+  const lanes: { builder: ClipBuilder; drain?: () => void; teardown: () => void }[] = [];
 
   if (sources.mic) {
     const stream = sources.mic;
@@ -171,14 +178,17 @@ export function startMeetingCapture(
     const downsample = createPcm16Downsampler(ctx.sampleRate);
     const builder = new ClipBuilder((wav) => onClip('mic', bytesToBase64(wav)), deps.clipSeconds);
     processor.onaudioprocess = (e: AudioProcessingEvent): void => {
-      if (paused) return;
-      builder.push(downsample(e.inputBuffer.getChannelData(0)));
+      const raw = downsample(e.inputBuffer.getChannelData(0));
+      // While paused the canceller still sees the mic, to keep it in step with the reference.
+      const pcm = aec ? aec.processMic(raw) : raw;
+      if (!paused) builder.push(pcm);
     };
     src.connect(processor);
     processor.connect(sink);
     sink.connect(ctx.destination);
     lanes.push({
       builder,
+      drain: aec ? () => builder.push(aec.flush()) : undefined,
       teardown: () => {
         processor.onaudioprocess = null;
         try {
@@ -201,6 +211,8 @@ export function startMeetingCapture(
       deps.clipSeconds,
     );
     const unsubscribe = feed.subscribe((pcm) => {
+      // The reference runs while paused too, so the canceller's timeline stays continuous.
+      aec?.pushFar(pcm);
       if (!paused) builder.push(pcm);
     });
     lanes.push({
@@ -218,11 +230,17 @@ export function startMeetingCapture(
       for (const l of lanes) l.builder.setClipSeconds(seconds);
     },
     setPaused(p) {
-      if (p && !paused) for (const l of lanes) l.builder.flush();
+      if (p && !paused) {
+        for (const l of lanes) l.drain?.();
+        for (const l of lanes) l.builder.flush();
+      }
       paused = p;
     },
     stop() {
-      if (!paused) for (const l of lanes) l.builder.flush();
+      if (!paused) {
+        for (const l of lanes) l.drain?.();
+        for (const l of lanes) l.builder.flush();
+      }
       paused = true;
       for (const l of lanes) l.teardown();
     },

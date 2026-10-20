@@ -230,6 +230,11 @@ export function setAgentRunsActions(chatId: string, agentRuns: boolean): void {
   ws().send({ type: 'meeting.action_request', chatId, agentRuns });
 }
 
+/** The "Research as we go" checkbox. */
+export function setMeetingResearch(chatId: string, on: boolean): void {
+  ws().send({ type: 'meeting.research_request', chatId, on });
+}
+
 /** An edit to the points panel; the host stores it as fixed input and answers with `meeting.state`. */
 export function editMeetingNotes(chatId: string, edit: MeetingNotesOp): void {
   ws().send({ type: 'meeting.notes_request', chatId, edit });

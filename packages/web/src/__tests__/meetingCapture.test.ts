@@ -144,6 +144,62 @@ describe('startMeetingCapture', () => {
     expect(stopFeed).toHaveBeenCalledOnce();
   });
 
+  it('cleans the call out of the mic when both are captured, so each utterance is heard once', () => {
+    const procs: Array<{ onaudioprocess: ((e: unknown) => void) | null }> = [];
+    class RecCtx extends Ctx {
+      createScriptProcessor = () => {
+        const p = {
+          onaudioprocess: null as ((e: unknown) => void) | null,
+          connect() {},
+          disconnect() {},
+        };
+        procs.push(p);
+        return p;
+      };
+    }
+    vi.stubGlobal('MediaStream', function () {});
+    const clips: Array<[string, string]> = [];
+    let push: ((pcm: Int16Array) => void) | null = null;
+    const capture = startMeetingCapture(
+      {
+        mic: stream(),
+        system: {
+          subscribe: (cb) => {
+            push = cb;
+            return () => {};
+          },
+          stop: () => {},
+        },
+      },
+      (source, wav) => clips.push([source, wav]),
+      { AudioContextImpl: RecCtx as never, clipSeconds: 4 },
+    );
+    // Someone on the call talks for 24 s; the laptop speakers put it into the mic 150 ms later.
+    let seed = 3;
+    const noise = (): number => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x80000000 - 1;
+    };
+    const far = new Int16Array(24 * 16000);
+    let lp = 0;
+    for (let i = 0; i < far.length; i++) {
+      lp += 0.45 * (noise() - lp);
+      far[i] = lp * 6000 * Math.max(0, Math.sin((2 * Math.PI * 3.1 * i) / 16000));
+    }
+    const chunk = 1600;
+    for (let at = 0; at < far.length; at += chunk) {
+      push!(far.subarray(at, at + chunk));
+      const mic = new Float32Array(chunk);
+      for (let i = 0; i < chunk; i++) mic[i] = ((far[at + i - 2400] ?? 0) * 0.5) / 32768;
+      procs[0]!.onaudioprocess!({ inputBuffer: { getChannelData: () => mic } });
+    }
+    capture.stop();
+    const heard = (source: string): number => clips.filter(([s]) => s === source).length;
+    expect(heard('system')).toBeGreaterThanOrEqual(5);
+    // The mic clips that survive are only the first seconds, before the canceller has locked on.
+    expect(heard('mic')).toBeLessThanOrEqual(2);
+  });
+
   it('rejects when there is nothing to capture', () => {
     expect(() => startMeetingCapture({}, () => {}, { AudioContextImpl: Ctx as never })).toThrow(
       /no audio sources/,

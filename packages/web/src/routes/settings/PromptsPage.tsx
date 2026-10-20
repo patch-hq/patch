@@ -127,6 +127,7 @@ export function MeetingModelRows(): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
   const analysisModel = useModelOptions(p.meetingAnalysisModel);
   const cleanupModel = useModelOptions(p.meetingCleanupModel);
+  const researchModel = useModelOptions(p.meetingResearchModel);
   const write = (patch: Parameters<typeof update>[0]): void => {
     void update(patch).catch((e: Error) => pushError(failed('settings'), undefined, e.message));
   };
@@ -164,6 +165,22 @@ export function MeetingModelRows(): JSX.Element {
         </select>
         <span className="set-unit">repairs mis-heard names before the notes</span>
       </Row>
+      <Row title="Research model">
+        <select
+          aria-label="Meeting research model"
+          value={p.meetingResearchModel}
+          disabled={!loaded}
+          data-testid="meeting-research-model"
+          onChange={(e) => write({ meetingResearchModel: e.target.value })}
+        >
+          {researchModel.options.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <span className="set-unit">looks things up on the web for the agent feed</span>
+      </Row>
       <Row title="Transcription model">
         <input
           type="text"
@@ -194,6 +211,19 @@ export function MeetingModelRows(): JSX.Element {
           }}
         />
         <span className="set-unit">seconds, at Normal speed (5–300)</span>
+      </Row>
+      <Row title="Research at most every">
+        <PositiveNumberInput
+          integer
+          ariaLabel="Least seconds between meeting research passes"
+          value={p.meetingResearchSeconds}
+          disabled={!loaded}
+          testid="meeting-research-seconds"
+          onCommit={(next) => {
+            if (next >= 15 && next <= 900) write({ meetingResearchSeconds: next });
+          }}
+        />
+        <span className="set-unit">seconds: each pass is a model plus web search (15–900)</span>
       </Row>
     </>
   );

@@ -902,6 +902,8 @@ describe('meeting events on the host link', () => {
       decision: 'dismiss',
     });
     expect(m.get('c')!.actions[0]!.status).toBe('dismissed');
+    await send({ type: 'meeting.research_request', chatId: 'c', on: false });
+    expect(m.get('c')?.researchOn).toBe(false);
     await send({ type: 'meeting.control_request', chatId: 'c', action: 'pause' });
     await send({ type: 'meeting.control_request', chatId: 'c', action: 'resume' });
     await send({ type: 'meeting.control_request', chatId: 'c', action: 'end' });

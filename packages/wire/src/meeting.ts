@@ -159,6 +159,109 @@ export function applyMeetingNotesOp(topics: MeetingTopic[], op: MeetingNotesOp):
   }
 }
 
+/** What a research card is: a term explained, a quoted claim checked, or a question answered. */
+export const MeetingCardKind = z.enum(['explained', 'fact', 'answer']);
+export type MeetingCardKind = z.infer<typeof MeetingCardKind>;
+
+export const MeetingVerdict = z.enum(['correct', 'off', 'unclear']);
+export type MeetingVerdict = z.infer<typeof MeetingVerdict>;
+
+/** A figure: any digit in the text. */
+const HAS_FIGURE = /\d/;
+
+export const MeetingCardSource = z
+  .object({
+    name: z.string().min(1),
+    url: z
+      .string()
+      .url()
+      .refine((u) => /^https?:\/\//i.test(u), 'a source link is http(s)'),
+  })
+  .strict();
+export type MeetingCardSource = z.infer<typeof MeetingCardSource>;
+
+/** Why a card may not be shown, or null when it may. No figure without a source; a verdict needs one unless Unclear. */
+export function meetingCardProblem(c: {
+  kind: MeetingCardKind;
+  title: string;
+  bullets: string[];
+  verdict?: MeetingVerdict | undefined;
+  source?: MeetingCardSource | undefined;
+}): string | null {
+  if (c.bullets.length < 1 || c.bullets.length > 3) return 'a card has 1 to 3 bullets';
+  if (c.kind === 'fact' && c.verdict === undefined) return 'a fact check needs a verdict';
+  if (c.kind !== 'fact' && c.verdict !== undefined) return 'only a fact check has a verdict';
+  if (c.verdict !== undefined && c.verdict !== 'unclear' && !c.source)
+    return `a "${c.verdict}" verdict needs the source it rests on`;
+  if (!c.source && c.bullets.some((b) => HAS_FIGURE.test(b)))
+    return 'a figure is stated without a source';
+  return null;
+}
+
+/** One piece of research the agent surfaced during the meeting. `at` is the meeting time it was prompted. */
+export const MeetingCard = z
+  .object({
+    id: z.string().min(1),
+    kind: MeetingCardKind,
+    /** Lower-cased term or claim, used to avoid researching the same thing twice. */
+    key: z.string().min(1),
+    /** The term, the quoted claim, or the question. */
+    title: z.string().min(1),
+    at: z.number(),
+    bullets: z.array(z.string().min(1)),
+    verdict: MeetingVerdict.optional(),
+    source: MeetingCardSource.optional(),
+  })
+  .strict()
+  .superRefine((c, ctx) => {
+    const problem = meetingCardProblem(c);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem });
+  });
+export type MeetingCard = z.infer<typeof MeetingCard>;
+
+/** A change the chat agent made to the notes; shown as a chip such as "✓ Added to points" on its reply. */
+export const MeetingAgentEdit = z
+  .object({ id: z.string().min(1), at: z.number(), label: z.string().min(1) })
+  .strict();
+export type MeetingAgentEdit = z.infer<typeof MeetingAgentEdit>;
+
+/** What the chat agent may do to the notes (the `patch_meeting_notes` tool). */
+export const MeetingAgentNotesEdit = z.discriminatedUnion('op', [
+  z
+    .object({
+      op: z.literal('add_point'),
+      title: z.string().min(1),
+      bullets: z.array(z.string().min(1)).max(3).optional(),
+      decided: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('edit_point'),
+      topicId: z.string().min(1),
+      title: z.string().min(1).optional(),
+      bullets: z.array(z.string().min(1)).max(3).optional(),
+    })
+    .strict(),
+  /** Appends researched bullets to a point. A figure needs `source`. */
+  z
+    .object({
+      op: z.literal('add_research'),
+      topicId: z.string().min(1),
+      bullets: z.array(z.string().min(1)).min(1).max(3),
+      source: MeetingCardSource.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('set_summary'),
+      headline: z.string().min(1),
+      bullets: z.array(z.string().min(1)),
+    })
+    .strict(),
+]);
+export type MeetingAgentNotesEdit = z.infer<typeof MeetingAgentNotesEdit>;
+
 export const MeetingActionStatus = z.enum(['pending', 'running', 'done', 'dismissed']);
 export type MeetingActionStatus = z.infer<typeof MeetingActionStatus>;
 
@@ -204,6 +307,9 @@ export type MeetingSettings = z.infer<typeof MeetingSettings>;
 
 export const DEFAULT_MEETING_SETTINGS: MeetingSettings = { clipSeconds: 6, analyseSeconds: 15 };
 
+/** Least gap between live research passes unless Settings say otherwise. */
+export const DEFAULT_MEETING_RESEARCH_SECONDS = 60;
+
 export const MeetingState = z
   .object({
     status: MeetingStatus,
@@ -225,6 +331,14 @@ export const MeetingState = z
     /** Free text the user types during or after the call; the final write-up folds it in. */
     myNotes: z.string().optional(),
     actions: z.array(MeetingAction),
+    /** Research cards in the agent feed, oldest first. */
+    cards: z.array(MeetingCard).optional(),
+    /** The "Research as we go" checkbox. Absent on meetings saved before research existed: off. */
+    researchOn: z.boolean().optional(),
+    /** Set when the last research pass failed; cleared by the next success. */
+    researchError: z.string().nullable().optional(),
+    /** Notes changes made by the chat agent, newest last. */
+    agentEdits: z.array(MeetingAgentEdit).optional(),
     /** When on, agent actions start by themselves in a linked chat. */
     agentRunsActions: z.boolean().optional(),
     transcript: z.array(MeetingTranscriptLine),

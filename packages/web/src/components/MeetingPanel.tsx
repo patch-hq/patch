@@ -12,6 +12,7 @@ import {
   meetingElapsedMs,
   MEETING_OWNER_EVERYONE,
   type MeetingAction,
+  type MeetingCard,
   type MeetingState,
   type MeetingTopic,
 } from '@patch/wire';
@@ -19,6 +20,7 @@ import {
   decideAction,
   setActionOwner,
   setAgentRunsActions,
+  setMeetingResearch,
   editMeetingNotes,
   saveMyNotes,
   endMeeting,
@@ -766,6 +768,124 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
   );
 }
 
+const CARD_LABEL: Record<MeetingCard['kind'], string> = {
+  explained: 'Explained',
+  fact: 'Fact check',
+  answer: 'Answer',
+};
+const VERDICT_LABEL = { correct: 'Correct', off: 'Off', unclear: 'Unclear' } as const;
+
+function ResearchCard({ card }: { card: MeetingCard }) {
+  return (
+    <div className="mm-card" data-testid="meeting-card" data-kind={card.kind}>
+      <div className="mm-card-h">
+        <span className="mm-card-k" data-testid="meeting-card-kind">
+          {CARD_LABEL[card.kind]}
+        </span>
+        <span className="mm-card-q" data-testid="meeting-card-title">
+          {card.title}
+        </span>
+        {card.verdict ? (
+          <span
+            className="mm-verdict"
+            data-testid="meeting-card-verdict"
+            data-verdict={card.verdict}
+          >
+            {VERDICT_LABEL[card.verdict]}
+          </span>
+        ) : null}
+        <span className="mm-card-t">{formatMeetingClock(card.at)}</span>
+      </div>
+      <ul>
+        {card.bullets.map((b, i) => (
+          <li key={i}>{b}</li>
+        ))}
+      </ul>
+      {card.source ? (
+        <a
+          className="mm-card-src"
+          data-testid="meeting-card-source"
+          href={card.source.url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {card.source.name}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+/** Top of the left column: the research cards the agent raised, and the switch that lets it. The chat sits below. */
+export function MeetingFeed({ meeting, chatId }: { meeting: MeetingState; chatId: string }) {
+  const cards = meeting.cards ?? [];
+  const ended = meeting.status === 'ended';
+  return (
+    <section className="mm-feed" data-testid="meeting-feed">
+      <div className="mm-feed-head">
+        <span className="mm-label">Agent</span>
+        <label className="mm-feed-auto">
+          <input
+            type="checkbox"
+            data-testid="meeting-research-on"
+            checked={meeting.researchOn === true}
+            disabled={ended}
+            onChange={(e) => setMeetingResearch(chatId, e.target.checked)}
+          />{' '}
+          Research as we go
+        </label>
+      </div>
+      {meeting.researchError ? (
+        <div className="mm-feed-err" role="alert" data-testid="meeting-research-error">
+          {meeting.researchError}
+        </div>
+      ) : null}
+      {cards.length ? (
+        <div className="mm-feed-cards" data-testid="meeting-cards">
+          {[...cards].reverse().map((c) => (
+            <ResearchCard key={c.id} card={c} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Under an agent reply: a chip for each change it made to the notes during that
+ * reply. An edit belongs to the first agent message written at or after it.
+ */
+export function MeetingEditChips({
+  chatId,
+  seq,
+  messageAt,
+}: {
+  chatId: string;
+  seq: number;
+  messageAt: number | undefined;
+}) {
+  const edits = useMeetingStore((s) => s.byChat[chatId]?.agentEdits);
+  const timeline = useChatStore((s) => s.timelines[chatId]);
+  if (!edits?.length || messageAt === undefined || !timeline) return null;
+  const earlier = timeline.flatMap((e) =>
+    e.kind === 'message' && e.role === 'assistant' && e.seq < seq && e.messageAt !== undefined
+      ? [e.messageAt]
+      : [],
+  );
+  const from = earlier.length ? Math.max(...earlier) : -Infinity;
+  const mine = edits.filter((e) => e.at > from && e.at <= messageAt);
+  if (!mine.length) return null;
+  return (
+    <div className="mm-edit-chips">
+      {mine.map((e) => (
+        <span key={e.id} className="mm-edit-chip" data-testid="meeting-edit-chip">
+          ✓ {e.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const AGENT_STATE_LABEL: Record<DisplayBadge, string> = {
   working: 'Working…',
   permission: 'Needs you',
@@ -966,7 +1086,10 @@ export function MeetingLayout({ chatId, children }: { chatId: string; children: 
     >
       {meeting ? <MeetingBar chatId={chatId} meeting={meeting} /> : null}
       <div className={meeting ? 'mm-main' : 'mm-contents'}>
-        <div className={meeting ? 'mm-left' : 'mm-contents'}>{children}</div>
+        <div className={meeting ? 'mm-left' : 'mm-contents'}>
+          {meeting ? <MeetingFeed chatId={chatId} meeting={meeting} /> : null}
+          {children}
+        </div>
         {meeting ? <MeetingPanel chatId={chatId} meeting={meeting} /> : null}
       </div>
     </div>

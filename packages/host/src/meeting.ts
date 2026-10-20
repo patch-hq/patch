@@ -22,7 +22,13 @@ import {
   applyMeetingNotesOp,
   type MeetingNotesOp,
   type MeetingAction,
+  type MeetingAgentNotesEdit,
   MeetingActionKind,
+  MeetingCardKind,
+  MeetingCardSource,
+  MeetingVerdict,
+  meetingCardProblem,
+  DEFAULT_MEETING_RESEARCH_SECONDS,
   type MeetingNow,
   MeetingState,
   type MeetingSummary,
@@ -105,6 +111,33 @@ export const MeetingAnalysis = z
   .strict();
 export type MeetingAnalysis = z.infer<typeof MeetingAnalysis>;
 
+/** What the research pass returns; each card is checked by `meetingCardProblem` before it is shown. */
+export const MeetingResearchResult = z
+  .object({
+    cards: z.array(
+      z
+        .object({
+          kind: MeetingCardKind,
+          title: z.string().min(1),
+          atSeconds: z.number().optional(),
+          bullets: z.array(z.string().min(1)),
+          verdict: MeetingVerdict.optional(),
+          source: MeetingCardSource.optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type MeetingResearchResult = z.infer<typeof MeetingResearchResult>;
+
+export interface ResearchInput {
+  chatId: string;
+  lines: { clock: string; speaker: string; text: string }[];
+  /** Titles of cards already in the feed, so they are not researched again. */
+  existing: string[];
+  context: { now: string | null };
+}
+
 export interface MeetingPrompts {
   now: string;
   notes: string;
@@ -145,6 +178,10 @@ export interface MeetingDeps {
    * Omitted: transcripts go to analysis as transcribed.
    */
   correct?: (input: CorrectInput) => Promise<string[]>;
+  /** Live research: one model plus web search over new transcript. Omitted: no research. */
+  research?: (input: ResearchInput) => Promise<MeetingResearchResult>;
+  /** Least seconds between research passes, read fresh so a Settings change applies mid-meeting. */
+  researchSeconds?: () => number;
   /** The glossary, read fresh each pass so edits apply mid-meeting. */
   glossary?: () => string[];
   /** The meeting prompts, read fresh each pass so edits apply mid-meeting. */
@@ -172,6 +209,12 @@ interface Runtime {
   deliveredUpTo: number;
   /** Index into `state.transcript` already through the correction pass. */
   correctedUpTo: number;
+  /** Index into `state.transcript` already given to research. */
+  researchedUpTo: number;
+  /** Wall-clock ms the last research pass started; not persisted (a restart may research at once). */
+  lastResearchAt: number;
+  /** The pass in flight, so only one runs and tests can wait for it. */
+  researching: Promise<void> | undefined;
   /** Serialises transcription and analysis so lines land in order. */
   chain: Promise<void>;
 }
@@ -226,6 +269,9 @@ export class MeetingManager {
         summary: null,
         topics: [],
         actions: [],
+        cards: [],
+        researchOn: true,
+        agentEdits: [],
         transcript: [],
         error: null,
       },
@@ -233,6 +279,9 @@ export class MeetingManager {
       analysedUpTo: 0,
       deliveredUpTo: 0,
       correctedUpTo: 0,
+      researchedUpTo: 0,
+      lastResearchAt: 0,
+      researching: undefined,
       chain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
@@ -339,6 +388,7 @@ export class MeetingManager {
         rt.analysedUpTo = Math.max(0, rt.analysedUpTo - drop);
         rt.deliveredUpTo = Math.max(0, rt.deliveredUpTo - drop);
         rt.correctedUpTo = Math.max(0, rt.correctedUpTo - drop);
+        rt.researchedUpTo = Math.max(0, rt.researchedUpTo - drop);
       }
       rt.state.error = null;
       this.commit(chatId, rt);
@@ -366,6 +416,167 @@ export class MeetingManager {
     if ((rt.state.myNotes ?? '') === text) return;
     rt.state.myNotes = text;
     this.commit(chatId, rt);
+  }
+
+  // ---- research ----
+
+  /** The "Research as we go" checkbox. Turning it on starts from now, not from the start of the call. */
+  setResearch(chatId: string, on: boolean): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if ((rt.state.researchOn ?? false) === on) return;
+    rt.state.researchOn = on;
+    if (on) rt.researchedUpTo = rt.state.transcript.length;
+    this.commit(chatId, rt);
+  }
+
+  /** Resolves when the research pass in flight, if any, has landed. Exposed for tests. */
+  async settleResearch(chatId: string): Promise<void> {
+    await this.load(chatId)?.researching;
+  }
+
+  /**
+   * After an analysis pass: research the lines nobody has researched yet, at most
+   * once per `researchSeconds`, and never two at once. Throttled lines wait for
+   * the next pass rather than being dropped.
+   */
+  private maybeResearch(chatId: string, rt: Runtime): void {
+    const research = this.deps.research;
+    if (!research || rt.state.researchOn !== true || rt.state.status !== 'live') return;
+    if (rt.researching) return;
+    const fresh = rt.state.transcript.slice(rt.researchedUpTo);
+    if (fresh.length === 0) return;
+    const t = this.now();
+    const gapMs = (this.deps.researchSeconds?.() ?? DEFAULT_MEETING_RESEARCH_SECONDS) * 1000;
+    if (rt.lastResearchAt !== 0 && t - rt.lastResearchAt < gapMs) return;
+    rt.lastResearchAt = t;
+    const upTo = rt.state.transcript.length;
+    const cards = rt.state.cards ?? [];
+    const run = research({
+      chatId,
+      lines: fresh.map((l) => ({
+        clock: formatMeetingClock(l.at),
+        speaker: meetingSpeakerLabel(l),
+        text: l.text,
+      })),
+      existing: cards.map((c) => c.title),
+      context: { now: rt.state.now?.headline ?? null },
+    })
+      .then((res) => {
+        const rejected = this.addCards(chatId, rt, res);
+        rt.researchedUpTo = Math.max(rt.researchedUpTo, upTo);
+        rt.state.researchError = rejected.length
+          ? `research card not shown: ${rejected.join('; ')}`
+          : null;
+      })
+      .catch((err: unknown) => {
+        rt.state.researchError = `research failed: ${(err as Error).message}`;
+        this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: research failed');
+      })
+      .then(() => {
+        rt.researching = undefined;
+        this.commit(chatId, rt);
+      });
+    rt.researching = run;
+  }
+
+  /** Dedupes by term and keeps the cards that follow the sourcing rules; returns why each other was refused. */
+  private addCards(chatId: string, rt: Runtime, res: MeetingResearchResult): string[] {
+    const s = rt.state;
+    const cards = (s.cards ??= []);
+    const key = (x: string): string =>
+      x
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const rejected: string[] = [];
+    for (const c of res.cards) {
+      const k = key(c.title);
+      if (k === '' || cards.some((x) => x.key === k)) continue;
+      const problem = meetingCardProblem(c);
+      if (problem) {
+        rejected.push(`"${c.title}": ${problem}`);
+        continue;
+      }
+      cards.push({
+        id: this.newId(),
+        kind: c.kind,
+        key: k,
+        title: c.title,
+        at: c.atSeconds !== undefined ? c.atSeconds * 1000 : meetingElapsedMs(s, this.now()),
+        bullets: c.bullets,
+        ...(c.verdict !== undefined ? { verdict: c.verdict } : {}),
+        ...(c.source !== undefined ? { source: c.source } : {}),
+      });
+    }
+    if (rejected.length)
+      this.deps.logger.error({ chatId, rejected }, 'meeting: research cards rejected');
+    return rejected;
+  }
+
+  // ---- agent edits ----
+
+  /**
+   * The chat agent changing the notes. The point it touches becomes fixed, so a
+   * later analysis pass leaves it alone. Returns the chip label for its reply.
+   */
+  agentEdit(chatId: string, edit: MeetingAgentNotesEdit): string {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    const s = rt.state;
+    const find = (id: string): MeetingTopic => {
+      const t = s.topics.find((x) => x.id === id);
+      if (!t) throw new MeetingError(`no point ${id} in chat ${chatId}`);
+      return t;
+    };
+    let label: string;
+    switch (edit.op) {
+      case 'add_point':
+        s.topics.push({
+          id: this.newId(),
+          at: meetingElapsedMs(s, this.now()),
+          title: edit.title,
+          points: edit.bullets ?? [],
+          decided: edit.decided ?? false,
+          fixed: true,
+        });
+        label = 'Added to points';
+        break;
+      case 'edit_point': {
+        const t = find(edit.topicId);
+        if (edit.title === undefined && edit.bullets === undefined)
+          throw new MeetingError('edit_point needs a title or bullets');
+        if (edit.title !== undefined) t.title = edit.title;
+        if (edit.bullets !== undefined) t.points = edit.bullets;
+        t.fixed = true;
+        label = 'Edited a point';
+        break;
+      }
+      case 'add_research': {
+        const t = find(edit.topicId);
+        const problem = meetingCardProblem({
+          kind: 'explained',
+          title: t.title,
+          bullets: edit.bullets,
+          source: edit.source,
+        });
+        if (problem) throw new MeetingError(`research not added: ${problem}`);
+        const tail = edit.source ? ` (${edit.source.name}: ${edit.source.url})` : '';
+        const added = edit.bullets.map((b, i) => (i === edit.bullets.length - 1 ? b + tail : b));
+        t.points = [...t.points, ...added];
+        t.fixed = true;
+        label = 'Added research to points';
+        break;
+      }
+      case 'set_summary':
+        s.summary = { headline: edit.headline, bullets: edit.bullets };
+        label = 'Edited the summary';
+        break;
+    }
+    (s.agentEdits ??= []).push({ id: this.newId(), at: this.now(), label });
+    this.commit(chatId, rt);
+    return label;
   }
 
   // ---- actions ----
@@ -491,7 +702,7 @@ export class MeetingManager {
     const s = rt.state;
     const lines: string[] = [
       '<system-reminder>',
-      `A meeting is ${s.status} in this chat (running ${formatMeetingClock(meetingElapsedMs(s, this.now()))}). Answer questions about it from what follows; look things up and use your tools when asked. Do not take actions on other people\'s behalf unless the user asks.`,
+      `A meeting is ${s.status} in this chat (running ${formatMeetingClock(meetingElapsedMs(s, this.now()))}). Answer questions about it from what follows; look things up and use your tools when asked. Do not take actions on other people\'s behalf unless the user asks. When the user asks you to add to or change the notes (a point, research on a point, the summary), do it with the patch_meeting_notes tool and say what you changed; never state a figure without a source.`,
     ];
     if (s.summary)
       lines.push(`Summary: ${s.summary.headline}`, ...s.summary.bullets.map((b) => `- ${b}`));
@@ -502,7 +713,15 @@ export class MeetingManager {
         'Discussed:',
         ...s.topics.map(
           (t) =>
-            `- ${formatMeetingClock(t.at)} ${t.title}${t.decided ? ' (decided)' : ''}: ${t.points.join('; ')}`,
+            `- [${t.id}] ${formatMeetingClock(t.at)} ${t.title}${t.decided ? ' (decided)' : ''}: ${t.points.join('; ')}`,
+        ),
+      );
+    if (s.cards?.length)
+      lines.push(
+        "Research cards already on the user's panel:",
+        ...s.cards.map(
+          (c) =>
+            `- ${c.kind} "${c.title}"${c.verdict ? ` (${c.verdict})` : ''}: ${c.bullets.join('; ')}${c.source ? ` [${c.source.name} ${c.source.url}]` : ''}`,
         ),
       );
     const pending = s.actions.filter((a) => a.status === 'pending' && a.kind === 'mine');
@@ -532,6 +751,8 @@ export class MeetingManager {
     const rt = this.load(chatId);
     if (!rt || rt.state.status !== 'live') return;
     await this.enqueue(rt, () => this.analyse(chatId, rt, false));
+    // Also when there was nothing new to analyse: lines held back by the throttle are still waiting.
+    this.maybeResearch(chatId, rt);
   }
 
   /** Repairs mis-heard names in the lines not yet analysed. A failure throws: the pass is retried. */
@@ -695,6 +916,7 @@ export class MeetingManager {
       state: unknown;
       analysedUpTo: number;
       deliveredUpTo: number;
+      researchedUpTo?: number;
     };
     const state = MeetingState.parse(parsed.state);
     const rt: Runtime = {
@@ -703,6 +925,9 @@ export class MeetingManager {
       analysedUpTo: parsed.analysedUpTo,
       deliveredUpTo: parsed.deliveredUpTo,
       correctedUpTo: parsed.analysedUpTo,
+      researchedUpTo: parsed.researchedUpTo ?? parsed.analysedUpTo,
+      lastResearchAt: 0,
+      researching: undefined,
       chain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
@@ -729,6 +954,7 @@ export class MeetingManager {
         state: rt.state,
         analysedUpTo: rt.analysedUpTo,
         deliveredUpTo: rt.deliveredUpTo,
+        researchedUpTo: rt.researchedUpTo,
       }),
     );
     renameSync(tmp, f);

@@ -2482,6 +2482,11 @@ const harnessSend = (event: WireEvent): void => {
     useMeetingStore.getState().apply(event.chatId, next);
     return;
   }
+  if (event.type === 'meeting.research_request') {
+    const cur = useMeetingStore.getState().byChat[event.chatId];
+    if (cur) useMeetingStore.getState().apply(event.chatId, { ...cur, researchOn: event.on });
+    return;
+  }
   if (event.type !== 'meeting.notes_request' && event.type !== 'meeting.my_notes_request') return;
   const cur = useMeetingStore.getState().byChat[event.chatId];
   if (!cur) return;
@@ -3316,6 +3321,39 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
       },
     ],
     agentRunsActions: false,
+    researchOn: true,
+    cards: [
+      {
+        id: 'k3',
+        kind: 'answer',
+        key: 'how does the booking service work',
+        title: '"How does the booking service work?"',
+        at: 17 * 60_000 + 33_000,
+        bullets: ['Seats are held for 10 minutes while you pay'],
+        source: { name: 'Booking help page', url: 'https://example.org/help' },
+      },
+      {
+        id: 'k2',
+        kind: 'fact',
+        key: 'the ferry carries about fifty cars',
+        title: '"The ferry carries about fifty cars"',
+        at: 23 * 60_000 + 41_000,
+        verdict: 'off',
+        bullets: ['The operator lists a deck capacity of 40 cars'],
+        source: { name: 'Operator fleet page', url: 'https://example.org/fleet' },
+      },
+      {
+        id: 'k1',
+        kind: 'explained',
+        key: 'harbour levy',
+        title: 'Harbour levy',
+        at: 24 * 60_000 + 46_000,
+        bullets: [
+          'A charge each ship pays to use the port',
+          'Set by the harbour authority each year',
+        ],
+      },
+    ],
     transcript: [
       { at: 20_000, speaker: 'them', name: 'Priya', text: 'Morning all.' },
       { at: 25_000, speaker: 'them', name: 'Dev', text: 'Morning.' },
@@ -3333,6 +3371,17 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
     error: null,
   };
   useMeetingStore.getState().apply(chatId, seeded);
+  // Reply timestamps, so a spec can place a notes change inside one reply (the chip under it).
+  useChatStore.setState((st) => ({
+    timelines: {
+      ...st.timelines,
+      [chatId]: (st.timelines[chatId] ?? []).map((e) =>
+        e.kind === 'message' && e.messageAt === undefined
+          ? { ...e, messageAt: 1760000000000 + e.seq * 1000 }
+          : e,
+      ),
+    },
+  }));
 }
 
 // `?route=/settings` drives an arbitrary initial route (else a chat).
