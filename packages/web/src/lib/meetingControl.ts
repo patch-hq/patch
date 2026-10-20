@@ -5,6 +5,7 @@
 import { DEFAULT_MEETING_SETTINGS, type MeetingSettings } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import {
@@ -25,13 +26,24 @@ export const MEETING_SPEEDS: Record<string, MeetingSettings & { label: string }>
   slow: { label: 'Slow (cheaper)', clipSeconds: 15, analyseSeconds: 30 },
 };
 
+/** The speeds as they stand now: Normal's analysis interval is the account setting. */
+export function meetingSpeeds(): Record<string, MeetingSettings & { label: string }> {
+  return {
+    ...MEETING_SPEEDS,
+    normal: {
+      ...MEETING_SPEEDS['normal']!,
+      analyseSeconds: usePreferencesStore.getState().preferences.meetingAnalyseSeconds,
+    },
+  };
+}
+
 export function getMeetingSpeed(): string {
   const v = localStorage.getItem(SETTINGS_KEY);
   return v !== null && v in MEETING_SPEEDS ? v : 'normal';
 }
 
 function speedSettings(speed: string): MeetingSettings {
-  const { clipSeconds, analyseSeconds } = MEETING_SPEEDS[speed]!;
+  const { clipSeconds, analyseSeconds } = meetingSpeeds()[speed]!;
   return { clipSeconds, analyseSeconds };
 }
 

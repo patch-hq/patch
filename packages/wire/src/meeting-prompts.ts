@@ -10,3 +10,6 @@ Detail tapers with age: recent topics get fuller points; older topics (by atSeco
 Only list topics that appear in the transcript; return only topics that are new, changed or condensed; set decided true only when the meeting clearly agreed something.`;
 
 export const DEFAULT_MEETING_ACTIONS_PROMPT = `"actions": things that are genuinely Tom's to do, or that an assistant could do for him (look something up, create a ticket, send a message, top up credit), implied or asked for, never ones already in the notes. Not every mention of a person or plan is an action: skip things someone else's to do, things nobody can act on, and general plans or discussion; use [] when there are none.`;
+
+/** The model the live notes and the clean-up pass run on until Settings → Prompts → Meetings picks another. */
+export const DEFAULT_MEETING_MODEL = 'claude-haiku-4-5-20251001';

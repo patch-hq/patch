@@ -99,6 +99,35 @@ describe('Settings → Prompts', () => {
   });
 });
 
+describe('Settings → Prompts → Meetings models', () => {
+  it('shows the default meeting models and writes a pick, the transcription model and the interval', async () => {
+    const r = mount(<PromptsPage />);
+    await flush();
+    expect(get(r, 'meeting-analysis-model')).toBeTruthy();
+    expect(get(r, 'meeting-cleanup-model')).toBeTruthy();
+    expect(get(r, 'meeting-analyse-seconds').props.value).toBe('15');
+
+    await actAsync(() => get(r, 'meeting-transcription-model').props.onChangeText(' /m/small '));
+    await actAsync(async () => {
+      get(r, 'meeting-transcription-model').props.onBlur();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ meetingTranscriptionModel: '/m/small' });
+
+    await actAsync(() => get(r, 'meeting-analyse-seconds').props.onChangeText('2'));
+    await actAsync(() => get(r, 'meeting-analyse-seconds').props.onBlur());
+    expect(api.setPreferences).not.toHaveBeenCalledWith({ meetingAnalyseSeconds: 2 });
+    expect(get(r, 'meeting-analyse-seconds').props.value).toBe('15');
+
+    await actAsync(() => get(r, 'meeting-analyse-seconds').props.onChangeText('30'));
+    await actAsync(async () => {
+      get(r, 'meeting-analyse-seconds').props.onBlur();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ meetingAnalyseSeconds: 30 });
+  });
+});
+
 describe('the check-in prompt editor', () => {
   it('starts from the default, saves an edit, and Reset writes the default back', async () => {
     const r = mount(<LayerEditor layer="watch-check-in" />);

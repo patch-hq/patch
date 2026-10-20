@@ -16,6 +16,7 @@ import {
   getMeetingSpeed,
   listenHere,
   MEETING_SPEEDS,
+  meetingSpeeds,
   setMeetingSpeed,
   pauseMeeting,
   requestMeeting,
@@ -43,7 +44,7 @@ function useNow(running: boolean): number {
 function speedOf(meeting: MeetingState): string {
   const cur = meeting.settings;
   const hit = cur
-    ? Object.entries(MEETING_SPEEDS).find(
+    ? Object.entries(meetingSpeeds()).find(
         ([, v]) => v.clipSeconds === cur.clipSeconds && v.analyseSeconds === cur.analyseSeconds,
       )
     : undefined;

@@ -12,6 +12,7 @@ import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_MODEL,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
 } from './meeting-prompts.js';
@@ -20,7 +21,7 @@ import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
 } from './goal-prompt.js';
-import { MeetingSettings, MeetingState } from './meeting.js';
+import { DEFAULT_MEETING_SETTINGS, MeetingSettings, MeetingState } from './meeting.js';
 import { SnoozeRecord } from './snooze.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
 import { DEFAULT_WATCH_CHECK_IN_PROMPT } from './watch-check-in-prompt.js';
@@ -2038,6 +2039,14 @@ export const SharedSettings = z
     meetingNotesPrompt: z.string().min(1),
     /** Meeting-mode instructions for action cards (`DEFAULT_MEETING_ACTIONS_PROMPT`). */
     meetingActionsPrompt: z.string().min(1),
+    /** The model the meeting notes pass runs on. */
+    meetingAnalysisModel: z.string().min(1),
+    /** The model that repairs mis-heard names in transcript lines before analysis. */
+    meetingCleanupModel: z.string().min(1),
+    /** The speech-to-text model for meetings: a faster-whisper model directory (local) or a Groq model name. Empty is the host's own configured model. */
+    meetingTranscriptionModel: z.string(),
+    /** Seconds between analysis passes at the Normal meeting speed. */
+    meetingAnalyseSeconds: z.number().int().min(5).max(300),
     // ---- goals (spec/04 § Goals), applied on every host ----
     /** The goal judge's instructions; "Reset to default" writes `DEFAULT_GOAL_EVAL_PROMPT` back. */
     goalEvalPrompt: z.string().min(1),
@@ -2143,6 +2152,10 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   meetingNowPrompt: DEFAULT_MEETING_NOW_PROMPT,
   meetingNotesPrompt: DEFAULT_MEETING_NOTES_PROMPT,
   meetingActionsPrompt: DEFAULT_MEETING_ACTIONS_PROMPT,
+  meetingAnalysisModel: DEFAULT_MEETING_MODEL,
+  meetingCleanupModel: DEFAULT_MEETING_MODEL,
+  meetingTranscriptionModel: '',
+  meetingAnalyseSeconds: DEFAULT_MEETING_SETTINGS.analyseSeconds,
   goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT,
   watchCheckInPrompt: DEFAULT_WATCH_CHECK_IN_PROMPT,
   goalModel: DEFAULT_GOAL_MODEL,

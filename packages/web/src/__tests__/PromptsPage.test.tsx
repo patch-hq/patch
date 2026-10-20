@@ -6,6 +6,7 @@ import { screen, waitFor, fireEvent } from '@testing-library/react';
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_MODEL,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
@@ -115,5 +116,29 @@ describe('Settings → Prompts', () => {
     });
     fireEvent.click(screen.getByTestId('prompt-meeting-notes-save'));
     await waitFor(() => expect(server.writes).toEqual([{ meetingNotesPrompt: 'Terse.' }]));
+  });
+
+  it('shows the meeting models and interval, and writes the transcription model and interval', async () => {
+    const server = serve();
+    renderSettings('/settings/prompts');
+    const analysis = (await screen.findByTestId('meeting-analysis-model')) as HTMLSelectElement;
+    expect(analysis.value).toBe(DEFAULT_MEETING_MODEL);
+    expect((screen.getByTestId('meeting-cleanup-model') as HTMLSelectElement).value).toBe(
+      DEFAULT_MEETING_MODEL,
+    );
+    const stt = screen.getByTestId('meeting-transcription-model') as HTMLInputElement;
+    expect(stt.value).toBe('');
+    fireEvent.change(stt, { target: { value: ' /models/whisper/small.en ' } });
+    fireEvent.blur(stt);
+    await waitFor(() =>
+      expect(server.writes).toContainEqual({
+        meetingTranscriptionModel: '/models/whisper/small.en',
+      }),
+    );
+    fireEvent.change(screen.getByTestId('meeting-analyse-seconds'), { target: { value: '40' } });
+    await waitFor(() => expect(server.writes).toContainEqual({ meetingAnalyseSeconds: 40 }));
+    // Out of range is never sent.
+    fireEvent.change(screen.getByTestId('meeting-analyse-seconds'), { target: { value: '2' } });
+    expect(server.writes).not.toContainEqual({ meetingAnalyseSeconds: 2 });
   });
 });
