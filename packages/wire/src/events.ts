@@ -5767,6 +5767,9 @@ export const WatchTaskRow = z
     timedOut: z.boolean().optional(),
     /** The task's last non-empty output line, shown in the bar as its progress. */
     lastLine: z.string().optional(),
+    /** Minutes between check-ins to the owning agent, and when the next one is due (running tasks). */
+    checkInSec: z.number().int().positive().optional(),
+    nextCheckInAt: z.number().int().optional(),
     /** Epoch ms of the task's last output; the bar flags a long silence. */
     lastOutputAt: z.number().int().optional(),
     endedAt: z.number().int().optional(),
@@ -5830,6 +5833,36 @@ export const PatchWatchStopResponseEvent = z
   })
   .strict();
 export type PatchWatchStopResponseEvent = z.infer<typeof PatchWatchStopResponseEvent>;
+
+// Change a running task's check-in interval (the bar's "next check-in" control).
+export const PatchWatchCheckInRequestEvent = z
+  .object({
+    type: z.literal('patch.watch_checkin.request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    taskId: z.string().min(1),
+    checkInSec: z.number().int().positive(),
+  })
+  .strict();
+export type PatchWatchCheckInRequestEvent = z.infer<typeof PatchWatchCheckInRequestEvent>;
+
+export const PatchWatchCheckInResponseEvent = z
+  .object({
+    type: z.literal('patch.watch_checkin.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** False when the task is not running (already ended or unknown). */
+    updated: z.boolean().optional(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchWatchCheckInResponseEvent = z.infer<typeof PatchWatchCheckInResponseEvent>;
 
 // ---------------------------------------------------------------------------
 // Chat history REST RPC (server → host → server).
@@ -8482,6 +8515,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchWatchListResponseEvent,
   PatchWatchStopRequestEvent,
   PatchWatchStopResponseEvent,
+  PatchWatchCheckInRequestEvent,
+  PatchWatchCheckInResponseEvent,
   ServerQueueModeEvent,
   PatchLogSyncRequestEvent,
   PatchLogSyncBatchEvent,
@@ -8764,6 +8799,8 @@ export const EVENT_SCHEMAS = {
   'patch.watch_list.response': PatchWatchListResponseEvent,
   'patch.watch_stop.request': PatchWatchStopRequestEvent,
   'patch.watch_stop.response': PatchWatchStopResponseEvent,
+  'patch.watch_checkin.request': PatchWatchCheckInRequestEvent,
+  'patch.watch_checkin.response': PatchWatchCheckInResponseEvent,
   'server.queue_mode': ServerQueueModeEvent,
   'patch.log_sync.request': PatchLogSyncRequestEvent,
   'patch.log_sync.batch': PatchLogSyncBatchEvent,

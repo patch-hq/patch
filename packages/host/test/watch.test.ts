@@ -409,4 +409,32 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
       scheduler.dispose();
     }
   });
+
+  it('honours a per-watch check-in interval and restarts the clock when it is changed', async () => {
+    let t = 1_000_000;
+    const deps = makeDeps({ now: () => t });
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-pw',
+        command: 'sleep 30',
+        description: 'long wait',
+        timeoutSec: 86_400,
+        checkInSec: 5 * 3600,
+        cwd: deps.home,
+      });
+      expect(scheduler.nextCheckInAt(rec)).toBe(t + 5 * 3600 * 1000);
+      t += 3_700_000; // past the 1h default, well before 5h
+      await new Promise((r) => setTimeout(r, 100));
+      expect(deps.delivered).toHaveLength(0);
+      expect(scheduler.setCheckIn('c-pw', rec.taskId, 600)).toBe(true);
+      expect(scheduler.nextCheckInAt(scheduler.list('c-pw')[0]!)).toBe(t + 600_000);
+      t += 601_000;
+      await flushUntil(() => deps.delivered.length === 1);
+      scheduler.stop('c-pw', rec.taskId);
+      expect(scheduler.setCheckIn('c-pw', rec.taskId, 600)).toBe(false);
+    } finally {
+      scheduler.dispose();
+    }
+  });
 });

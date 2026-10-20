@@ -1542,7 +1542,22 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
+  const watchCheckInPending = new Map<
+    string,
+    {
+      resolve: (ev: Extract<WireEvent, { type: 'patch.watch_checkin.response' }>) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
   deps.hostLink.onEvent((event: WireEvent) => {
+    if (event.type === 'patch.watch_checkin.response') {
+      const w = watchCheckInPending.get(event.requestId);
+      if (!w) return;
+      watchCheckInPending.delete(event.requestId);
+      clearTimeout(w.timeout);
+      w.resolve(event);
+      return;
+    }
     if (event.type === 'patch.watch_list.response') {
       const w = watchListPending.get(event.requestId);
       if (!w) return;
@@ -1640,6 +1655,57 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           .send({ error: code, message: result.error?.message ?? 'watch stop error' });
       }
       return reply.code(200).send({ stopped: result.stopped ?? false });
+    },
+  );
+
+  app.post<{ Params: { id: string; taskId: string }; Body: { checkInSec?: unknown } }>(
+    '/api/chats/:id/watch/:taskId/check-in',
+    async (req, reply) => {
+      let auth;
+      try {
+        auth = await requireAuth(req, deps.registry);
+      } catch (e) {
+        return reply
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: (e as Error).message });
+      }
+      if (!deps.chatRegistry.get(req.params.id)) {
+        return sendUnknownChat(reply, req.params.id);
+      }
+      const checkInSec = req.body?.checkInSec;
+      if (typeof checkInSec !== 'number' || !Number.isInteger(checkInSec) || checkInSec <= 0) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_input', message: 'checkInSec must be a positive integer' });
+      }
+      const requestId = deps.idGenerator();
+      const result = await new Promise<
+        Extract<WireEvent, { type: 'patch.watch_checkin.response' }> | 'timeout'
+      >((resolveP) => {
+        const timeout = setTimeout(() => {
+          watchCheckInPending.delete(requestId);
+          resolveP('timeout');
+        }, WATCH_REQUEST_TIMEOUT_MS);
+        watchCheckInPending.set(requestId, { resolve: resolveP, timeout });
+        deps.hostLink.send(auth.surfaceId, {
+          type: 'patch.watch_checkin.request',
+          requestId,
+          chatId: req.params.id,
+          taskId: req.params.taskId,
+          checkInSec,
+        });
+      });
+      if (result === 'timeout') {
+        return reply.code(504).send({ error: 'daemon_timeout' });
+      }
+      if (!result.ok) {
+        const code = result.error?.code ?? 'internal';
+        const statusByCode: Record<string, number> = { chat_not_found: 404, internal: 502 };
+        return reply
+          .code(statusByCode[code] ?? 502)
+          .send({ error: code, message: result.error?.message ?? 'watch check-in error' });
+      }
+      return reply.code(200).send({ updated: result.updated ?? false });
     },
   );
 

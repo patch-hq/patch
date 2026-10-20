@@ -489,15 +489,24 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .describe(
             'REQUIRED maximum run time in seconds. The host kills the task when it is exceeded. Pick a realistic ceiling, not a huge one.',
           ),
+        checkInMinutes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            'How often, in minutes, you are sent a check-in while this runs. Omit for the default (an hour). A long wait warrants a longer interval, e.g. a 10-hour wait every 5 hours.',
+          ),
         cwd: z.string().min(1).optional(),
       },
     },
-    async ({ command, description, timeoutSec, cwd }) => {
+    async ({ command, description, timeoutSec, checkInMinutes, cwd }) => {
       const body: Record<string, unknown> = {
         chatId: callerChatId,
         command,
         description,
         timeoutSec,
+        ...(checkInMinutes !== undefined ? { checkInSec: checkInMinutes * 60 } : {}),
       };
       if (cwd !== undefined) body['cwd'] = cwd;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/watch', body });

@@ -64,6 +64,8 @@ export const WatchRecord = z
     timeoutSec: z.number().int().positive().optional(),
     /** Set once the host killed the task for exceeding `timeoutSec`. */
     timedOut: z.boolean().optional(),
+    /** Per-watch check-in interval (seconds), set by the agent at start or by the user in the bar; absent = the daemon default. */
+    checkInSec: z.number().int().positive().optional(),
     /** When the periodic check-in last went to the chat. */
     lastCheckInAt: z.number().int().optional(),
     status: z.enum(['running', 'exited', 'stopped', 'failed']),
@@ -212,6 +214,7 @@ export class WatchScheduler {
     description: string;
     cwd: string;
     timeoutSec: number;
+    checkInSec?: number;
   }): WatchRecord {
     const taskId = this.generateTaskId();
     const dir = this.dirFor(opts.chatId);
@@ -255,6 +258,7 @@ export class WatchScheduler {
       pid,
       startedAt: this.deps.now(),
       timeoutSec: opts.timeoutSec,
+      ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
       status: 'running',
     };
     this.writeRecord(rec);
@@ -402,14 +406,35 @@ export class WatchScheduler {
     );
   }
 
-  /** Every `intervalMs` a task is still running, ask the owning agent whether it is healthy. */
+  private checkInConfig(): { intervalMs: number; prompt: string } {
+    return (
+      this.deps.checkIn?.() ?? { intervalMs: DEFAULT_CHECK_IN_MS, prompt: DEFAULT_CHECK_IN_PROMPT }
+    );
+  }
+
+  /** When the next check-in for a running task is due. */
+  nextCheckInAt(rec: WatchRecord): number {
+    const intervalMs =
+      rec.checkInSec !== undefined ? rec.checkInSec * 1000 : this.checkInConfig().intervalMs;
+    return (rec.lastCheckInAt ?? rec.startedAt) + intervalMs;
+  }
+
+  /**
+   * Change a running task's check-in interval. The clock restarts now, so the
+   * next check-in is one new interval away rather than possibly already due.
+   */
+  setCheckIn(chatId: string, taskId: string, checkInSec: number): boolean {
+    const rec = this.readOne(chatId, taskId);
+    if (!rec || rec.status !== 'running') return false;
+    this.writeRecord({ ...rec, checkInSec, lastCheckInAt: this.deps.now() });
+    return true;
+  }
+
+  /** Whenever a task's check-in is due while it is still running, ask the owning agent whether it is healthy. */
   private async checkInIfDue(rec: WatchRecord): Promise<void> {
     const now = this.deps.now();
-    const cfg = this.deps.checkIn?.() ?? {
-      intervalMs: DEFAULT_CHECK_IN_MS,
-      prompt: DEFAULT_CHECK_IN_PROMPT,
-    };
-    if (now - (rec.lastCheckInAt ?? rec.startedAt) < cfg.intervalMs) return;
+    if (now < this.nextCheckInAt(rec)) return;
+    const cfg = this.checkInConfig();
     this.writeRecord({ ...rec, lastCheckInAt: now });
     const vars: Record<string, string> = {
       description: rec.description,

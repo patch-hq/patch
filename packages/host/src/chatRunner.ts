@@ -3581,7 +3581,13 @@ export class Daemon {
    */
   startWatch(
     chatId: string,
-    opts: { command: string; description: string; timeoutSec: number; cwd?: string },
+    opts: {
+      command: string;
+      description: string;
+      timeoutSec: number;
+      checkInSec?: number;
+      cwd?: string;
+    },
   ): WatchRecord {
     const state = this.chatState.get(chatId);
     const meta = this.opts.metaStore.read(chatId);
@@ -3596,6 +3602,7 @@ export class Daemon {
       description: opts.description,
       cwd,
       timeoutSec: opts.timeoutSec,
+      ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
     });
     this.opts.logger.info({ chatId, taskId: rec.taskId }, 'watch: started');
     // spec/02 § Background task completions — a launch starts work the turn
@@ -3618,13 +3625,22 @@ export class Daemon {
   }
 
   /** Every watch this chat has running or recently ended (patch_watch_list). */
-  listWatch(chatId: string): (WatchRecord & WatchProgress)[] {
-    return this.watch.list(chatId).map((rec) => ({ ...rec, ...readProgress(rec.outputFile) }));
+  listWatch(chatId: string): (WatchRecord & WatchProgress & { nextCheckInAt?: number })[] {
+    return this.watch.list(chatId).map((rec) => ({
+      ...rec,
+      ...readProgress(rec.outputFile),
+      ...(rec.status === 'running' ? { nextCheckInAt: this.watch.nextCheckInAt(rec) } : {}),
+    }));
   }
 
   /** A task's combined stdout+stderr (patch_watch_output). */
   watchOutput(chatId: string, taskId: string, tail?: number): string {
     return this.watch.output(chatId, taskId, tail);
+  }
+
+  /** Change how often a running task's owning agent is checked in with (the bar's control). */
+  setWatchTaskCheckIn(chatId: string, taskId: string, checkInSec: number): boolean {
+    return this.watch.setCheckIn(chatId, taskId, checkInSec);
   }
 
   /** Kill a running task's whole process group (patch_watch_stop). */
