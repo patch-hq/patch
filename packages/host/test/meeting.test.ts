@@ -501,6 +501,21 @@ describe('MeetingManager', () => {
     expect(() => m.start('c1')).not.toThrow(); // a new meeting may follow
   });
 
+  it('model commentary is never stored as the summary or Now', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    analyse.mockResolvedValueOnce(
+      analysis({
+        summary: { headline: 'No new transcript provided to process', bullets: [] },
+      }),
+    );
+    await m.end('c1');
+    const s = m.get('c1')!;
+    expect(s.summary).toBeNull();
+    expect(s.error).toContain('model commentary');
+  });
+
   it('a final pass with no summary is an error on the state', async () => {
     const m = make();
     m.start('c1');
@@ -609,6 +624,18 @@ describe('meetingGen', () => {
   it('rejects a reply with no JSON or the wrong shape', () => {
     expect(() => parseMeetingAnalysis('sorry')).toThrow(/no JSON/);
     expect(() => parseMeetingAnalysis('{"now":1}')).toThrow();
+  });
+
+  it('an empty new transcript tells the model to write from the notes', () => {
+    const p = buildMeetingPrompt({
+      chatId: 'c',
+      previous: { now: null, topics: [], actions: [] },
+      newLines: [],
+      final: true,
+      elapsedMs: 5000,
+      prompts: PROMPTS,
+    });
+    expect(p).toContain('already in the notes above');
   });
 
   it('asks for a summary only on the final pass', () => {

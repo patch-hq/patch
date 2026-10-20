@@ -278,7 +278,9 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
               <div className="mm-who">{String(card.who)}</div>
             ) : null}
           </>
-        ) : meeting.live ? null : (
+        ) : meeting.live ? null : meeting.status === 'ended' ? (
+          <h4 className="mm-wait">No summary</h4>
+        ) : (
           <h4 className="mm-wait">Listening…</h4>
         )}
       </div>
