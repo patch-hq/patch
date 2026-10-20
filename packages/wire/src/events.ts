@@ -3707,13 +3707,20 @@ export const MeetingAudioEvent = z
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
 
-/** Surface → host: run (`do`) or drop (`dismiss`) an action card. */
+/**
+ * Surface → host: act on an action row. `do` runs an agent action in a linked
+ * chat, `chat` starts a chat on one of Tom's own, `dismiss` drops any of them.
+ * `owner` reassigns someone else's action (a speaker's name or `Everyone`);
+ * `agentRuns` is the tray's checkbox. Exactly one of the four is given.
+ */
 export const MeetingActionRequestEvent = z
   .object({
     type: z.literal('meeting.action_request'),
     chatId: z.string().min(1),
-    actionId: z.string().min(1),
-    decision: z.enum(['do', 'dismiss']),
+    actionId: z.string().min(1).optional(),
+    decision: z.enum(['do', 'chat', 'dismiss']).optional(),
+    owner: z.string().min(1).optional(),
+    agentRuns: z.boolean().optional(),
   })
   .strict();
 export type MeetingActionRequestEvent = z.infer<typeof MeetingActionRequestEvent>;

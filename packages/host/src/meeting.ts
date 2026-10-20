@@ -22,6 +22,7 @@ import {
   applyMeetingNotesOp,
   type MeetingNotesOp,
   type MeetingAction,
+  MeetingActionKind,
   type MeetingNow,
   MeetingState,
   type MeetingSummary,
@@ -100,7 +101,17 @@ export const MeetingAnalysis = z
       }),
     ),
     actions: z.array(
-      z.object({ title: z.string(), why: z.string(), atSeconds: z.number().optional() }),
+      z
+        .object({
+          kind: MeetingActionKind,
+          owner: z.string().min(1).optional(),
+          title: z.string(),
+          why: z.string(),
+          atSeconds: z.number().optional(),
+        })
+        .refine((a) => a.kind !== 'other' || a.owner !== undefined, {
+          message: 'an action for someone else needs an owner',
+        }),
     ),
     /** Names for `Them N` voices, where the transcript makes who they are clear. */
     voices: z.array(z.object({ voice: z.number().int().min(1), name: z.string() })).optional(),
@@ -169,8 +180,11 @@ export interface MeetingDeps {
   /** The meeting prompts, read fresh each pass so edits apply mid-meeting. */
   prompts: () => MeetingPrompts;
   emit: (event: WireEvent) => void;
-  /** Run an action card through the chat's normal tools and permissions. */
-  runAction: (chatId: string, message: string) => Promise<void>;
+  /**
+   * Start a new chat linked to the meeting's chat, seeded with `message`, and
+   * return its id. It runs through the chat's normal tools and permissions.
+   */
+  startChat: (parentChatId: string, message: string) => Promise<string>;
   logger: Logger;
   now?: () => number;
   newId?: () => string;
@@ -417,34 +431,109 @@ export class MeetingManager {
 
   // ---- actions ----
 
-  async decide(chatId: string, actionId: string, decision: 'do' | 'dismiss'): Promise<void> {
+  /**
+   * `do` runs an agent action in a linked chat and `chat` starts one on an
+   * action of Tom's; both leave the row pointing at that chat. Someone else's
+   * action never starts a chat. `dismiss` drops any row.
+   */
+  async decide(
+    chatId: string,
+    actionId: string,
+    decision: 'do' | 'chat' | 'dismiss',
+  ): Promise<void> {
     const rt = this.load(chatId);
     const action = rt?.state.actions.find((a) => a.id === actionId);
     if (!rt || !action) throw new MeetingError(`no action ${actionId} in chat ${chatId}`);
-    if (action.status !== 'pending') {
+    if (action.status === 'dismissed' || action.status === 'done') {
       throw new MeetingError(`action ${actionId} is already ${action.status}`);
     }
-    const key = `${chatId}:${actionId}`;
-    if (this.deciding.has(key)) {
-      throw new MeetingError(`action ${actionId} is already being decided`);
-    }
-    if (decision === 'do') {
-      // Dispatch first: if the chat refuses the turn the card must stay pending.
-      this.deciding.add(key);
-      try {
-        await this.deps.runAction(
-          chatId,
-          `Do this action from the meeting: ${action.title}\nWhy it came up: ${action.why}`,
-        );
-      } finally {
-        this.deciding.delete(key);
-      }
-      action.status = 'done';
-    } else {
+    if (decision === 'dismiss') {
       action.status = 'dismissed';
+      action.resolvedAt = this.now();
+      this.commit(chatId, rt);
+      return;
     }
+    const wanted = decision === 'do' ? 'agent' : 'mine';
+    if (action.kind !== wanted) {
+      throw new MeetingError(
+        `action ${actionId} is ${action.kind}'s, so it cannot be "${decision}"`,
+      );
+    }
+    await this.startActionChat(chatId, rt, action);
+  }
+
+  /** Reassigns someone else's action to a speaker or `Everyone`. */
+  setActionOwner(chatId: string, actionId: string, owner: string): void {
+    const rt = this.load(chatId);
+    const action = rt?.state.actions.find((a) => a.id === actionId);
+    if (!rt || !action) throw new MeetingError(`no action ${actionId} in chat ${chatId}`);
+    if (action.kind !== 'other') throw new MeetingError(`action ${actionId} has no owner to set`);
+    if (action.owner === owner) return;
+    action.owner = owner;
+    this.commit(chatId, rt);
+  }
+
+  /** The tray's checkbox. Turning it on starts every agent action already waiting. */
+  async setAgentRunsActions(chatId: string, on: boolean): Promise<void> {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    rt.state.agentRunsActions = on;
+    this.commit(chatId, rt);
+    if (on) await this.startWaitingAgentActions(chatId, rt);
+  }
+
+  private async startWaitingAgentActions(chatId: string, rt: Runtime): Promise<void> {
+    for (const a of rt.state.actions) {
+      if (a.kind !== 'agent' || a.status !== 'pending') continue;
+      try {
+        await this.startActionChat(chatId, rt, a);
+      } catch (err) {
+        this.deps.logger.error(
+          { chatId, actionId: a.id, err: (err as Error).message },
+          'meeting: agent action did not start',
+        );
+        rt.state.error = `could not start "${a.title}": ${(err as Error).message}`;
+        this.commit(chatId, rt);
+      }
+    }
+  }
+
+  private async startActionChat(chatId: string, rt: Runtime, action: MeetingAction): Promise<void> {
+    const key = `${chatId}:${action.id}`;
+    if (this.deciding.has(key)) {
+      throw new MeetingError(`action ${action.id} is already being started`);
+    }
+    if (action.status !== 'pending') {
+      throw new MeetingError(`action ${action.id} is already ${action.status}`);
+    }
+    this.deciding.add(key);
+    try {
+      // Start first: if the chat cannot be made the row must stay pending.
+      action.chatId = await this.deps.startChat(chatId, this.seedFor(rt.state, action));
+    } finally {
+      this.deciding.delete(key);
+    }
+    action.status = 'running';
     action.resolvedAt = this.now();
     this.commit(chatId, rt);
+  }
+
+  /** The first message of an action's chat: the action and enough of the meeting to act on it. */
+  private seedFor(s: MeetingState, a: MeetingAction): string {
+    const lines = [
+      a.kind === 'agent'
+        ? `Do this action from a meeting: ${a.title}`
+        : `Help me with this action from a meeting: ${a.title}`,
+      `Why it came up: ${a.why}`,
+      '',
+      'Meeting context:',
+    ];
+    const headline = s.summary?.headline ?? s.now?.headline;
+    if (headline) lines.push(`Gist: ${headline}`);
+    for (const t of s.topics)
+      lines.push(`- ${formatMeetingClock(t.at)} ${t.title}: ${t.points.join('; ')}`);
+    if (s.myNotes?.trim()) lines.push('My notes:', s.myNotes.trim());
+    return lines.join('\n');
   }
 
   // ---- chat context ----
@@ -477,7 +566,7 @@ export class MeetingManager {
             `- ${formatMeetingClock(t.at)} ${t.title}${t.decided ? ' (decided)' : ''}: ${t.points.join('; ')}`,
         ),
       );
-    const pending = s.actions.filter((a) => a.status === 'pending');
+    const pending = s.actions.filter((a) => a.status === 'pending' && a.kind === 'mine');
     if (pending.length)
       lines.push("Pending actions on the user's panel:", ...pending.map((a) => `- ${a.title}`));
     if (fresh.length) {
@@ -562,6 +651,7 @@ export class MeetingManager {
       this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: analysis failed');
     }
     this.commit(chatId, rt);
+    if (rt.state.agentRunsActions) await this.startWaitingAgentActions(chatId, rt);
   }
 
   private merge(rt: Runtime, a: MeetingAnalysis, final: boolean): void {
@@ -599,6 +689,8 @@ export class MeetingManager {
       if (s.actions.some((x) => norm(x.title) === norm(act.title))) continue;
       s.actions.push({
         id: this.newId(),
+        kind: act.kind,
+        ...(act.owner !== undefined ? { owner: act.owner } : {}),
         title: act.title,
         why: act.why,
         at: act.atSeconds !== undefined ? act.atSeconds * 1000 : meetingElapsedMs(s, this.now()),

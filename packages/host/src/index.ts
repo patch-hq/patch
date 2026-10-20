@@ -4063,8 +4063,15 @@ async function startHost(
     },
     prompts: () => meetingPrompts,
     emit,
-    runAction: async (chatId, message) => {
-      await daemon.sendInput({ chatId, message, localId: randomUUID(), fromUser: true });
+    startChat: async (parentChatId, message) => {
+      const parent = daemon.chatState.get(parentChatId);
+      if (!parent) throw new Error(`meeting chat ${parentChatId} is not on this host`);
+      return daemon.spawnChat({
+        folder: parent.folder,
+        prompt: message,
+        ...(parent.model !== undefined ? { model: parent.model } : {}),
+        permissionMode: parent.permissionMode,
+      });
     },
     logger: logger.child({ component: 'meeting' }),
   });
@@ -6402,7 +6409,23 @@ export async function handleServerEvent(
         return;
       }
       case 'meeting.action_request': {
-        await requireMeetings(accounts).decide(event.chatId, event.actionId, event.decision);
+        const m = requireMeetings(accounts);
+        const given = [event.decision, event.owner, event.agentRuns].filter(
+          (x) => x !== undefined,
+        ).length;
+        if (given !== 1)
+          throw new Error('meeting.action_request needs exactly one of decision, owner, agentRuns');
+        if (event.agentRuns !== undefined) {
+          if (event.actionId !== undefined)
+            throw new Error('meeting.action_request agentRuns takes no actionId');
+          await m.setAgentRunsActions(event.chatId, event.agentRuns);
+          return;
+        }
+        if (event.actionId === undefined)
+          throw new Error('meeting.action_request needs an actionId');
+        if (event.owner !== undefined) m.setActionOwner(event.chatId, event.actionId, event.owner);
+        else if (event.decision !== undefined)
+          await m.decide(event.chatId, event.actionId, event.decision);
         return;
       }
       case 'meeting.notes_request': {

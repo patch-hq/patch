@@ -13869,41 +13869,6 @@ select.new-chat-account:focus-visible {
   flex-direction: column;
   gap: 4px;
 }
-.mm-actions {
-  border-top: 1px solid var(--line-soft);
-  background: var(--bg-panel);
-  padding: 10px 0 4px;
-  max-height: 40%;
-  overflow: auto;
-}
-.mm-actions-in {
-  max-width: 780px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 16px;
-}
-.mm-card {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-}
-.mm-card .w {
-  flex: 1;
-  min-width: 0;
-}
-.mm-card b {
-  font-weight: 600;
-}
-.mm-card .y {
-  color: var(--ink-3);
-  font-size: 12px;
-}
 .mm-do {
   flex: none;
   border: none;
@@ -13915,31 +13880,112 @@ select.new-chat-account:focus-visible {
   font-weight: 600;
   cursor: pointer;
 }
-/* Same box as `.mm-do` beside it — it had the browser's 1px padding, so its
-   hit area was 10px shorter than the button it sits next to, and no hover. */
-.mm-dis {
+.mm-tray {
   flex: none;
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+}
+.mm-tray-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 20px;
+}
+.mm-tray-toggle {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.mm-tray-label,
+.mm-tray-grp {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.mm-tray-grp {
+  margin: 6px 0 2px;
+}
+.mm-tray-count {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.mm-tray-count b {
+  color: var(--ink);
+}
+.mm-tray-caret {
   border: none;
   background: none;
   color: var(--ink-3);
-  border-radius: var(--radius-pill);
-  padding: 5px 12px;
+  cursor: pointer;
   font: inherit;
+}
+.mm-tray-body {
+  max-height: 170px;
+  overflow: auto;
+  padding: 0 20px 8px;
+}
+.mm-act {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 14px;
+}
+.mm-act-t {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mm-act-owner {
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 1px 6px;
+  background: var(--bg-elevated);
+  color: var(--ink-2);
+}
+.mm-act-st {
+  font-size: 12px;
+  color: var(--accent-strong);
+}
+.mm-act-btn {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent-strong);
+  cursor: pointer;
+  text-decoration: none;
+}
+.mm-act-x {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 2px 6px;
+  font: inherit;
+  color: var(--ink-3);
+  border-radius: var(--radius-pill);
   cursor: pointer;
 }
-.mm-dis:hover {
+.mm-act-x:hover {
   color: var(--ink-2);
   background: var(--bg-soft);
-}
-.mm-card.done {
-  background: var(--bg-soft);
-  border-color: var(--line-soft);
-  color: var(--ink-2);
-}
-.mm-card.done .tk {
-  color: var(--accent);
-  font-weight: 700;
-  margin-right: 6px;
 }
 .mm-head {
   display: flex;

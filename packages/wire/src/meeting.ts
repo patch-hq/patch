@@ -161,12 +161,25 @@ export function applyMeetingNotesOp(topics: MeetingTopic[], op: MeetingNotesOp):
   }
 }
 
-export const MeetingActionStatus = z.enum(['pending', 'done', 'dismissed']);
+export const MeetingActionStatus = z.enum(['pending', 'running', 'done', 'dismissed']);
 export type MeetingActionStatus = z.infer<typeof MeetingActionStatus>;
+
+/** Who an action is for: Tom (`mine`), someone else (`other`, with an `owner`), or something an agent can do now (`agent`). */
+export const MeetingActionKind = z.enum(['mine', 'other', 'agent']);
+export type MeetingActionKind = z.infer<typeof MeetingActionKind>;
+
+/** The owner choice that means no one person in particular. */
+export const MEETING_OWNER_EVERYONE = 'Everyone';
 
 export const MeetingAction = z
   .object({
     id: z.string().min(1),
+    /** Absent on meetings saved before actions were classified: those were all Tom's. */
+    kind: MeetingActionKind.default('mine'),
+    /** For `other`: the speaker it falls to, or `Everyone`. */
+    owner: z.string().min(1).optional(),
+    /** The chat started for it: the agent's linked child chat, or the one Tom started. */
+    chatId: z.string().min(1).optional(),
     title: z.string(),
     /** Why it was proposed — usually a quote and who said it. */
     why: z.string(),
@@ -219,6 +232,8 @@ export const MeetingState = z
     /** Free text the user types during or after the call; the final write-up folds it in. */
     myNotes: z.string().optional(),
     actions: z.array(MeetingAction),
+    /** When on, agent actions start by themselves in a linked chat. */
+    agentRunsActions: z.boolean().optional(),
     transcript: z.array(MeetingTranscriptLine),
     /** Names given to `them` voices, keyed by voice number as a string. */
     voices: z.record(z.string(), z.string()).optional(),

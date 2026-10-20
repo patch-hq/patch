@@ -10,11 +10,15 @@ import {
   formatMeetingClock,
   meetingSpeakerLabel,
   meetingElapsedMs,
+  MEETING_OWNER_EVERYONE,
+  type MeetingAction,
   type MeetingState,
   type MeetingTopic,
 } from '@patch/wire';
 import {
   decideAction,
+  setActionOwner,
+  setAgentRunsActions,
   editMeetingNotes,
   saveMyNotes,
   endMeeting,
@@ -36,6 +40,9 @@ import { MeetingModelRows } from '../routes/settings/PromptsPage.js';
 import { Group } from '../routes/settings/ui.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import { deriveBadge, useChatStore } from '../stores/chatStore.js';
+import type { DisplayBadge } from '../stores/types.js';
 
 const DECISION = /^Decision:\s*/;
 
@@ -73,24 +80,6 @@ const PROMPT_FIELDS: Record<
     fallback: DEFAULT_MEETING_ACTIONS_PROMPT,
   },
 };
-
-/** A section label that opens the in-call editor for that section's prompt. */
-function PromptLabel({ prompt, children }: { prompt: MeetingPromptKey; children: ReactNode }) {
-  const open = useMeetingStore((s) => s.openPromptEditor);
-  return (
-    <div className="mm-label">
-      <button
-        type="button"
-        className="mm-label-btn"
-        data-testid={`meeting-edit-${prompt}`}
-        title={`Edit the ${PROMPT_FIELDS[prompt].title.toLowerCase()} prompt`}
-        onClick={() => open(prompt)}
-      >
-        {children} ✎
-      </button>
-    </div>
-  );
-}
 
 /** Edits one of the three meeting prompts without leaving the meeting; applies from the next pass. */
 function PromptEditor() {
@@ -806,64 +795,184 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
   );
 }
 
-export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const ordered = meeting.actions
-    .filter((a) => a.status !== 'dismissed')
-    .sort((a, b) => Number(a.status !== 'pending') - Number(b.status !== 'pending') || b.at - a.at);
-  if (ordered.length === 0) return null;
+const AGENT_STATE_LABEL: Record<DisplayBadge, string> = {
+  working: 'Working…',
+  permission: 'Needs you',
+  errored: 'Failed',
+  done: 'Done',
+  background: 'Working…',
+  monitoring: 'Working…',
+  read: 'Done',
+};
+
+/** The live state of an action's chat, read from the chat list. A chat this client has not got says so. */
+function ActionChatStatus({ chatId }: { chatId: string }) {
+  const row = useChatStore((s) => s.chats[chatId]);
   return (
-    <div className="mm-actions" data-testid="meeting-actions">
-      <div className="mm-actions-in">
-        <PromptLabel prompt="actions">Actions</PromptLabel>
-        {ordered.map((a) =>
-          a.status === 'done' ? (
-            <div
-              className="mm-card done"
-              key={a.id}
-              data-testid="meeting-action"
-              data-status="done"
-            >
-              <div className="w">
-                <span className="tk">✓</span>
-                {a.title}
-              </div>
-              <span className="y">
-                {a.resolvedAt
-                  ? new Date(a.resolvedAt).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  : ''}
-              </span>
-            </div>
-          ) : (
-            <div className="mm-card" key={a.id} data-testid="meeting-action" data-status="pending">
-              <div className="w">
-                <b>{a.title}</b>
-                <div className="y">
-                  {a.why} · {formatMeetingClock(a.at)}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="mm-do"
-                data-testid="meeting-action-do"
-                onClick={() => decideAction(chatId, a.id, 'do')}
-              >
-                Do it
-              </button>
-              <button
-                type="button"
-                className="mm-dis"
-                data-testid="meeting-action-dismiss"
-                onClick={() => decideAction(chatId, a.id, 'dismiss')}
-              >
-                Dismiss
-              </button>
-            </div>
-          ),
-        )}
+    <span className="mm-act-st" data-testid="meeting-action-status">
+      {row ? AGENT_STATE_LABEL[deriveBadge(row)] : 'Chat not loaded'}
+    </span>
+  );
+}
+
+function ActionRow({
+  chatId,
+  action,
+  speakers,
+  agentRuns,
+}: {
+  chatId: string;
+  action: MeetingAction;
+  speakers: string[];
+  agentRuns: boolean;
+}) {
+  const owners =
+    action.owner && !speakers.includes(action.owner) ? [action.owner, ...speakers] : speakers;
+  return (
+    <div
+      className="mm-act"
+      data-testid="meeting-action"
+      data-kind={action.kind}
+      data-status={action.status}
+    >
+      <span className="mm-act-t" title={action.why !== '' ? action.why : undefined}>
+        {action.title}
+      </span>
+      {action.kind === 'other' ? (
+        <select
+          className="mm-act-owner"
+          data-testid="meeting-action-owner"
+          aria-label="Owner"
+          value={action.owner}
+          onChange={(e) => setActionOwner(chatId, action.id, e.target.value)}
+        >
+          {owners.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      {action.chatId ? <ActionChatStatus chatId={action.chatId} /> : null}
+      {action.chatId ? (
+        <Link
+          className="mm-act-btn"
+          data-testid="meeting-action-open"
+          to={`/chats/${action.chatId}`}
+        >
+          Open chat
+        </Link>
+      ) : action.kind === 'mine' ? (
+        <button
+          type="button"
+          className="mm-act-btn"
+          data-testid="meeting-action-chat"
+          onClick={() => decideAction(chatId, action.id, 'chat')}
+        >
+          Start chat
+        </button>
+      ) : action.kind === 'agent' && !agentRuns ? (
+        <button
+          type="button"
+          className="mm-act-btn"
+          data-testid="meeting-action-do"
+          onClick={() => decideAction(chatId, action.id, 'do')}
+        >
+          Run
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="mm-act-x"
+        data-testid="meeting-action-dismiss"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={() => decideAction(chatId, action.id, 'dismiss')}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+/** The actions tray above the composer: Tom's, other people's, and the agent's. */
+export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const [open, setOpen] = useState(true);
+  const live = meeting.actions.filter((a) => a.status !== 'dismissed');
+  if (live.length === 0) return null;
+  const of = (k: MeetingAction['kind']) => live.filter((a) => a.kind === k);
+  const mine = of('mine');
+  const others = of('other');
+  const agent = of('agent');
+  const speakers = [
+    ...new Set(meeting.transcript.flatMap((l) => (l.speaker === 'them' && l.name ? [l.name] : []))),
+    MEETING_OWNER_EVERYONE,
+  ];
+  const agentRuns = meeting.agentRunsActions === true;
+  const ended = meeting.status === 'ended';
+  const groups: Array<[string, MeetingAction[]]> = ended
+    ? [
+        ['Agent did', agent],
+        ['My actions', mine],
+        ['Other actions', others],
+      ]
+    : [
+        ['Mine', mine],
+        ['Others', others],
+        ['Agent', agent],
+      ];
+  return (
+    <div className="mm-tray" data-testid="meeting-actions">
+      <div className="mm-tray-head">
+        <button
+          type="button"
+          className="mm-tray-toggle"
+          data-testid="meeting-actions-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          <span className="mm-tray-label">Actions</span>
+          <span className="mm-tray-count" data-testid="meeting-actions-count">
+            <b>{mine.length}</b> mine · <b>{others.length}</b> others · <b>{agent.length}</b> agent
+          </span>
+        </button>
+        <input
+          type="checkbox"
+          data-testid="meeting-agent-runs"
+          title="Agent runs its own actions"
+          aria-label="Agent runs its own actions"
+          checked={agentRuns}
+          onChange={(e) => setAgentRunsActions(chatId, e.target.checked)}
+        />
+        <button
+          type="button"
+          className="mm-tray-caret"
+          aria-label={open ? 'Collapse actions' : 'Expand actions'}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? '▾' : '▸'}
+        </button>
       </div>
+      {open ? (
+        <div className="mm-tray-body" data-testid="meeting-actions-body">
+          {groups.map(([label, rows]) =>
+            rows.length === 0 ? null : (
+              <div key={label}>
+                {ended ? <div className="mm-tray-grp">{label}</div> : null}
+                {rows.map((a) => (
+                  <ActionRow
+                    key={a.id}
+                    chatId={chatId}
+                    action={a}
+                    speakers={speakers}
+                    agentRuns={agentRuns}
+                  />
+                ))}
+              </div>
+            ),
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
