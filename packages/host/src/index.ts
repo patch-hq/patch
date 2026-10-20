@@ -15,7 +15,15 @@ import { createServer as createNetServer } from 'node:net';
 import { acquireHomeLock, type HomeLock } from './homeLock.js';
 import { SHUTDOWN_DEADLINE_MS, shutdownThenExit } from './shutdownDeadline.js';
 import { linkLegacySocket } from './legacySocket.js';
-import { mkdirSync, existsSync, unlinkSync, statSync, chmodSync, realpathSync } from 'node:fs';
+import {
+  mkdirSync,
+  existsSync,
+  unlinkSync,
+  statSync,
+  chmodSync,
+  realpathSync,
+  readFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -105,7 +113,7 @@ import { createMockSdkBackend, createRealSdkBackend, type SdkBackend } from './s
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
 import { MeetingManager } from './meeting.js';
-import { makeMeetingAnalyser } from './meetingGen.js';
+import { makeMeetingAnalyser, makeMeetingCorrector } from './meetingGen.js';
 import { makeSweepDecider } from './managerSweepGen.js';
 import { makeGoalEvaluator } from './goalEval.js';
 import { makeToolRunSummarizer } from './toolRunGen.js';
@@ -3996,6 +4004,16 @@ async function startHost(
       return dictationTranscribers.local.transcribeClip(wav, 'wav');
     },
     analyse: makeMeetingAnalyser({ sdkBackend, runOnAccountWithCredit, cwd: hostCwd }),
+    correct: makeMeetingCorrector({ sdkBackend, runOnAccountWithCredit, cwd: hostCwd }),
+    // Optional user glossary: <patchHome>/meetings/glossary.txt, one term per line.
+    glossary: () => {
+      const f = join(config.patchHome, 'meetings', 'glossary.txt');
+      if (!existsSync(f)) return [];
+      return readFileSync(f, 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !l.startsWith('#'));
+    },
     emit,
     runAction: async (chatId, message) => {
       await daemon.sendInput({ chatId, message, localId: randomUUID(), fromUser: true });

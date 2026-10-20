@@ -101,11 +101,30 @@ export interface AnalyseInput {
   elapsedMs: number;
 }
 
+export interface CorrectInput {
+  chatId: string;
+  /** Terms the user wants spelt a particular way; each entry may list mishearings after a colon. */
+  glossary: string[];
+  /** What the notes already say, so names can be judged against the meeting's subject. */
+  context: { now: string | null; topics: string[] };
+  /** Lines already cleaned, immediately before `lines`, for continuity only. */
+  before: string[];
+  lines: { speaker: string; text: string }[];
+}
+
 export interface MeetingDeps {
   dir: string;
   /** Local Whisper only. */
   transcribe: (wav: Buffer) => Promise<string>;
   analyse: (input: AnalyseInput) => Promise<MeetingAnalysis>;
+  /**
+   * Cheap pass over new transcript lines that repairs mis-heard names and places
+   * before the notes are built. Returns one corrected text per input line.
+   * Omitted: transcripts go to analysis as transcribed.
+   */
+  correct?: (input: CorrectInput) => Promise<string[]>;
+  /** The glossary, read fresh each pass so edits apply mid-meeting. */
+  glossary?: () => string[];
   emit: (event: WireEvent) => void;
   /** Run an action card through the chat's normal tools and permissions. */
   runAction: (chatId: string, message: string) => Promise<void>;
@@ -124,6 +143,8 @@ interface Runtime {
   analysedUpTo: number;
   /** Index into `state.transcript` already given to the chat's model. */
   deliveredUpTo: number;
+  /** Index into `state.transcript` already through the correction pass. */
+  correctedUpTo: number;
   /** Serialises transcription and analysis so lines land in order. */
   chain: Promise<void>;
 }
@@ -181,6 +202,7 @@ export class MeetingManager {
       timer: undefined,
       analysedUpTo: 0,
       deliveredUpTo: 0,
+      correctedUpTo: 0,
       chain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
@@ -277,6 +299,7 @@ export class MeetingManager {
         rt.state.transcript.splice(0, drop);
         rt.analysedUpTo = Math.max(0, rt.analysedUpTo - drop);
         rt.deliveredUpTo = Math.max(0, rt.deliveredUpTo - drop);
+        rt.correctedUpTo = Math.max(0, rt.correctedUpTo - drop);
       }
       rt.state.error = null;
       this.commit(chatId, rt);
@@ -376,16 +399,41 @@ export class MeetingManager {
     await this.enqueue(rt, () => this.analyse(chatId, rt, false));
   }
 
+  /** Repairs mis-heard names in the lines not yet analysed. A failure throws: the pass is retried. */
+  private async correctLines(chatId: string, rt: Runtime): Promise<void> {
+    if (!this.deps.correct) return;
+    const from = Math.max(rt.analysedUpTo, rt.correctedUpTo);
+    const lines = rt.state.transcript.slice(from);
+    if (lines.length === 0) return;
+    const out = await this.deps.correct({
+      chatId,
+      glossary: this.deps.glossary?.() ?? [],
+      context: {
+        now: rt.state.now?.headline ?? null,
+        topics: rt.state.topics.map((t) => t.title),
+      },
+      before: rt.state.transcript.slice(Math.max(0, from - 5), from).map((l) => l.text),
+      lines: lines.map((l) => ({ speaker: l.speaker === 'you' ? 'You' : 'Them', text: l.text })),
+    });
+    if (out.length !== lines.length)
+      throw new MeetingError(`correction returned ${out.length} lines for ${lines.length}`);
+    lines.forEach((l, i) => {
+      l.text = out[i] as string;
+    });
+    rt.correctedUpTo = rt.state.transcript.length;
+  }
+
   private async analyse(chatId: string, rt: Runtime, final: boolean): Promise<void> {
-    const newLines = rt.state.transcript.slice(rt.analysedUpTo);
     if (
-      newLines.length === 0 &&
+      rt.state.transcript.length - rt.analysedUpTo === 0 &&
       !(final && rt.state.summary === null && rt.state.transcript.length > 0)
     ) {
       return;
     }
     const upTo = rt.state.transcript.length;
     try {
+      await this.correctLines(chatId, rt);
+      const newLines = rt.state.transcript.slice(rt.analysedUpTo);
       const raw = await this.deps.analyse({
         chatId,
         previous: { now: rt.state.now, topics: rt.state.topics, actions: rt.state.actions },
@@ -509,6 +557,7 @@ export class MeetingManager {
       timer: undefined,
       analysedUpTo: parsed.analysedUpTo,
       deliveredUpTo: parsed.deliveredUpTo,
+      correctedUpTo: parsed.analysedUpTo,
       chain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
