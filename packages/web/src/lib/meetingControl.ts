@@ -3,7 +3,12 @@
 // leaves a live meeting that hears nothing.
 
 import { SpeakerLog } from './speakerLog.js';
-import { DEFAULT_MEETING_SETTINGS, type MeetingNotesOp, type MeetingSettings } from '@patch/wire';
+import {
+  DEFAULT_MEETING_SETTINGS,
+  type MeetingNotesOp,
+  type MeetingSettings,
+  type MeetingWriteup,
+} from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -206,6 +211,17 @@ export function resumeMeeting(chatId: string): void {
   ws().send({ type: 'meeting.control_request', chatId, action: 'resume' });
 }
 
+/** Reopens a meeting that has ended: starts listening again here, then the host goes live. */
+export async function resumeEndedMeeting(chatId: string): Promise<void> {
+  try {
+    await beginCapture(chatId);
+    ws().send({ type: 'meeting.control_request', chatId, action: 'resume' });
+  } catch (err) {
+    stopCapture();
+    report('Could not resume the meeting', err);
+  }
+}
+
 /** Flushes the last audio first, so it reaches the host ahead of `end`. */
 export function endMeeting(chatId: string): void {
   stopCapture();
@@ -243,6 +259,16 @@ export function editMeetingNotes(chatId: string, edit: MeetingNotesOp): void {
 /** The My notes text; the host stores it with the meeting and answers with `meeting.state`. */
 export function saveMyNotes(chatId: string, text: string): void {
   ws().send({ type: 'meeting.my_notes_request', chatId, text });
+}
+
+/** The edited final write-up; the host stores it and answers with `meeting.state`. */
+export function saveWriteup(chatId: string, writeup: MeetingWriteup): void {
+  ws().send({ type: 'meeting.writeup_request', chatId, writeup });
+}
+
+/** Write the final write-up again from the transcript and My notes. */
+export function regenerateWriteup(chatId: string): void {
+  ws().send({ type: 'meeting.writeup_request', chatId, regenerate: true });
 }
 
 export function requestMeeting(chatId: string): void {

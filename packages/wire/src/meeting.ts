@@ -37,6 +37,27 @@ export const MeetingSummary = z
   .strict();
 export type MeetingSummary = z.infer<typeof MeetingSummary>;
 
+/** One line of the final write-up. `mine` is Tom's own wording (from My notes or typed in the write-up). */
+export const MeetingWriteupItem = z
+  .object({ text: z.string(), mine: z.boolean().optional() })
+  .strict();
+export type MeetingWriteupItem = z.infer<typeof MeetingWriteupItem>;
+
+export const MeetingWriteupSection = z
+  .object({ heading: z.string(), items: z.array(MeetingWriteupItem) })
+  .strict();
+export type MeetingWriteupSection = z.infer<typeof MeetingWriteupSection>;
+
+/** The final write-up, built when the meeting ends from the cleaned transcript plus My notes. */
+export const MeetingWriteup = z
+  .object({ title: z.string(), sections: z.array(MeetingWriteupSection) })
+  .strict();
+export type MeetingWriteup = z.infer<typeof MeetingWriteup>;
+
+/** A name the clean-up pass changed: shown in the write-up with `from` as a tooltip. */
+export const MeetingNameFix = z.object({ from: z.string().min(1), to: z.string().min(1) }).strict();
+export type MeetingNameFix = z.infer<typeof MeetingNameFix>;
+
 export const MeetingTopic = z
   .object({
     id: z.string().min(1),
@@ -327,6 +348,12 @@ export const MeetingState = z
     live: z.string().nullable().optional(),
     settings: MeetingSettings.optional(),
     summary: MeetingSummary.nullable(),
+    /** The final write-up shown in the Summary tab; absent until the meeting has ended and it is written. */
+    writeup: MeetingWriteup.nullable().optional(),
+    /** Set when writing the final write-up failed; cleared by the next success. */
+    writeupError: z.string().nullable().optional(),
+    /** Names the clean-up pass corrected, for the write-up's tooltips. */
+    nameFixes: z.array(MeetingNameFix).optional(),
     topics: z.array(MeetingTopic),
     /** Free text the user types during or after the call; the final write-up folds it in. */
     myNotes: z.string().optional(),

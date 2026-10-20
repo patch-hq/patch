@@ -115,7 +115,12 @@ import { createMockSdkBackend, createRealSdkBackend, type SdkBackend } from './s
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
 import { MeetingManager, type MeetingPrompts } from './meeting.js';
-import { makeMeetingAnalyser, makeMeetingCorrector, makeMeetingResearcher } from './meetingGen.js';
+import {
+  makeMeetingAnalyser,
+  makeMeetingCorrector,
+  makeMeetingResearcher,
+  makeMeetingWriteup,
+} from './meetingGen.js';
 import { makeSweepDecider } from './managerSweepGen.js';
 import { makeGoalEvaluator } from './goalEval.js';
 import { makeToolRunSummarizer } from './toolRunGen.js';
@@ -4030,6 +4035,12 @@ async function startHost(
       cwd: hostCwd,
       model: () => meetingModels.cleanup,
     }),
+    writeup: makeMeetingWriteup({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.analysis,
+    }),
     research: makeMeetingResearcher({
       sdkBackend,
       runOnAccountWithCredit,
@@ -6418,6 +6429,14 @@ export async function handleServerEvent(
       }
       case 'meeting.research_request': {
         requireMeetings(accounts).setResearch(event.chatId, event.on);
+        return;
+      }
+      case 'meeting.writeup_request': {
+        const m = requireMeetings(accounts);
+        if ((event.writeup === undefined) === (event.regenerate === undefined))
+          throw new Error('meeting.writeup_request needs exactly one of writeup, regenerate');
+        if (event.writeup !== undefined) m.setWriteup(event.chatId, event.writeup);
+        else await m.regenerateWriteup(event.chatId);
         return;
       }
       case 'meeting.my_notes_request': {

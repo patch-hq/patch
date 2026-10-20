@@ -6,10 +6,11 @@
 import { z } from 'zod';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
-import { DEFAULT_MEETING_MODEL, formatMeetingClock } from '@patch/wire';
+import { DEFAULT_MEETING_MODEL, formatMeetingClock, MeetingWriteup } from '@patch/wire';
 import {
   MeetingAnalysis,
   MeetingResearchResult,
+  type WriteupInput,
   type AnalyseInput,
   type CorrectInput,
   type ResearchInput,
@@ -275,5 +276,83 @@ export function makeMeetingResearcher(opts: {
     if (result === null || result === undefined)
       throw new Error('no account could run the meeting research');
     return parseResearch(result);
+  };
+}
+
+const WRITEUP_TIMEOUT_MS = 180_000;
+
+export function buildWriteupPrompt(input: WriteupInput): string {
+  const transcript = input.lines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
+  return [
+    'You write the final write-up of a meeting Tom sat in, from the whole cleaned-up transcript and his own notes.',
+    'Write something he could send to the group: plain language, acronyms spelled out on first use, names as in the transcript.',
+    'Group it under 3 to 5 short headings that fit this meeting (for example where we landed, what we offer, open questions, next steps). Each heading has short, distinct items, one idea each.',
+    'Never invent facts, figures or names. Do not comment on the task or on the transcript.',
+    '',
+    "Tom's own notes: his words belong in the write-up. Fold each of his notes into the right section, close to how he wrote it,",
+    'and set "mine": true on those items. Everything you generate yourself has no "mine" key.',
+    '',
+    `Meeting: ${input.date}, ${input.durationMinutes} min.`,
+    `Points the live notes picked out (for emphasis only; the transcript is the source): ${input.points.join('; ') || '(none)'}`,
+    '',
+    "Tom's notes:",
+    input.myNotes.trim() !== '' ? input.myNotes : '(none)',
+    '',
+    'Transcript:',
+    transcript !== '' ? transcript : '(empty: write from the notes alone)',
+    '',
+    'Reply with ONE JSON object and nothing else:',
+    '{"title":"short title of the meeting","sections":[{"heading":"","items":[{"text":"","mine":true}]}]}',
+  ].join('\n');
+}
+
+export function parseWriteup(raw: string): MeetingWriteup {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start)
+    throw new Error(`no JSON object in write-up reply: ${raw.slice(0, 120)}`);
+  return MeetingWriteup.parse(JSON.parse(raw.slice(start, end + 1)));
+}
+
+export function makeMeetingWriteup(opts: {
+  sdkBackend: SdkBackend;
+  runOnAccountWithCredit: RunOnAccountWithCredit;
+  cwd: string;
+  /** Read fresh each pass so a Settings change applies. */
+  model: () => string;
+}): (input: WriteupInput) => Promise<MeetingWriteup> {
+  return async function writeup(input) {
+    const result = await opts.runOnAccountWithCredit(
+      `meeting write-up ${input.chatId}`,
+      async (accessToken) => {
+        const abortController = new AbortController();
+        const timer = setTimeout(() => abortController.abort(), WRITEUP_TIMEOUT_MS);
+        try {
+          let finalText = '';
+          let deltaText = '';
+          for await (const env of opts.sdkBackend.run({
+            prompt: buildWriteupPrompt(input),
+            inferenceProfile: 'classifier',
+            cwd: opts.cwd,
+            resumeSessionId: undefined,
+            abortController,
+            oauthAccessToken: accessToken,
+            model: opts.model(),
+            permissionMode: 'bypassPermissions',
+          })) {
+            if (env.type === 'assistant' && env.content) finalText += env.content;
+            else if (env.type === 'assistant_delta' && env.content) deltaText += env.content;
+            else if (env.type === 'error')
+              throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
+          }
+          return finalText !== '' ? finalText : deltaText;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    );
+    if (result === null || result === undefined)
+      throw new Error('no account could run the meeting write-up');
+    return parseWriteup(result);
   };
 }

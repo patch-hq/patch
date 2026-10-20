@@ -14,6 +14,7 @@ import {
   MeetingError,
   type AnalyseInput,
   type CorrectInput,
+  type WriteupInput,
   MeetingAnalysis,
   type MeetingPrompts,
 } from '../src/meeting.js';
@@ -25,7 +26,11 @@ import {
   buildCorrectionPrompt,
   parseCorrections,
   makeMeetingCorrector,
+  buildWriteupPrompt,
+  parseWriteup,
 } from '../src/meetingGen.js';
+import type { MeetingWriteup } from '@patch/wire';
+import { nameFixes } from '../src/meetingVocab.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { handleServerEvent } from '../src/index.js';
 
@@ -54,6 +59,7 @@ describe('MeetingManager', () => {
   let analyse: ReturnType<typeof vi.fn<(i: AnalyseInput) => Promise<MeetingAnalysis>>>;
   let transcribe: ReturnType<typeof vi.fn<(b: Buffer, prompt?: string) => Promise<string>>>;
   let startChat: ReturnType<typeof vi.fn<(c: string, m: string) => Promise<string>>>;
+  let writeup: ReturnType<typeof vi.fn<(i: WriteupInput) => Promise<MeetingWriteup>>>;
   let ticks: (() => void)[];
   let n: number;
 
@@ -62,6 +68,7 @@ describe('MeetingManager', () => {
       dir,
       transcribe,
       analyse,
+      writeup,
       prompts: () => PROMPTS,
       startChat,
       logger,
@@ -86,6 +93,10 @@ describe('MeetingManager', () => {
     analyse = vi.fn(async () => analysis());
     transcribe = vi.fn(async () => 'hello there');
     startChat = vi.fn(async () => 'child1');
+    writeup = vi.fn(async () => ({
+      title: 'Rollout planning',
+      sections: [{ heading: 'Where we landed', items: [{ text: 'Ship in November' }] }],
+    }));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -538,6 +549,99 @@ describe('MeetingManager', () => {
     expect(m.get('c1')!.transcript[0]!.at).toBe(61_000);
     expect(ticks).toHaveLength(1);
     expect(() => m.resume('c1')).toThrow(MeetingError);
+  });
+
+  it('end writes the final write-up from the cleaned transcript plus My notes, and Regenerate rewrites it', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockResolvedValueOnce('We ship in November');
+    await m.ingestAudio('c1', 'system', Buffer.from('a'), 'Priya');
+    m.setMyNotes('c1', 'Ask about budget');
+    analyse.mockResolvedValueOnce(
+      analysis({ summary: { headline: 'Split in November', bullets: ['1 decision'] } }),
+    );
+    clock += 53 * 60_000;
+    await m.end('c1');
+    const input = writeup.mock.calls[0]![0];
+    expect(input.lines).toEqual([
+      { clock: '00:00', speaker: 'Priya', text: 'We ship in November' },
+    ]);
+    expect(input.myNotes).toBe('Ask about budget');
+    expect(input.durationMinutes).toBe(53);
+    expect(m.get('c1')).toMatchObject({
+      writeup: { title: 'Rollout planning' },
+      writeupError: null,
+    });
+    writeup.mockResolvedValueOnce({ title: 'Second go', sections: [] });
+    await m.regenerateWriteup('c1');
+    expect(m.get('c1')!.writeup!.title).toBe('Second go');
+    await expect(make().regenerateWriteup('nope')).rejects.toThrow(MeetingError);
+  });
+
+  it('a failed write-up is put on the state, not swallowed, and Regenerate clears it', async () => {
+    const m = make();
+    m.start('c1');
+    writeup.mockRejectedValueOnce(new Error('model down'));
+    await m.end('c1');
+    expect(m.get('c1')!.writeup ?? null).toBeNull();
+    expect(m.get('c1')!.writeupError).toMatch(/model down/);
+    await m.regenerateWriteup('c1');
+    expect(m.get('c1')!.writeupError).toBeNull();
+    expect(m.get('c1')!.writeup!.title).toBe('Rollout planning');
+  });
+
+  it("keeps the user's edited write-up", async () => {
+    const m = make();
+    m.start('c1');
+    await m.end('c1');
+    m.setWriteup('c1', {
+      title: 'Mine',
+      sections: [{ heading: 'H', items: [{ text: 'x', mine: true }] }],
+    });
+    expect(m.get('c1')!.writeup!.sections[0]!.items[0]).toEqual({ text: 'x', mine: true });
+    expect(() => m.setWriteup('c1', { title: 1 } as never)).toThrow();
+  });
+
+  it('Resume reopens an ended meeting and the write-up stays until it ends again', async () => {
+    const m = make();
+    m.start('c1');
+    clock += 60_000;
+    await m.end('c1');
+    clock += 600_000;
+    m.resume('c1');
+    expect(m.get('c1')).toMatchObject({ status: 'live', elapsedBaseMs: 60_000 });
+    expect(m.get('c1')!.endedAt).toBeUndefined();
+    expect(m.get('c1')!.writeup!.title).toBe('Rollout planning');
+    expect(ticks).toHaveLength(1);
+    await m.end('c1');
+    expect(writeup).toHaveBeenCalledTimes(2);
+  });
+
+  it('records the names the clean-up pass changed, for the write-up tooltips', () => {
+    expect(nameFixes('Leca funds the bus', 'WECA funds the bus')).toEqual([
+      { from: 'Leca', to: 'WECA' },
+    ]);
+    expect(nameFixes('met self gloss today', 'met South Glos today')).toEqual([
+      { from: 'self gloss', to: 'South Glos' },
+    ]);
+    expect(nameFixes('same', 'same')).toEqual([]);
+  });
+
+  it('write-up prompt carries notes, transcript and the mine rule; reply parses', () => {
+    const p = buildWriteupPrompt({
+      chatId: 'c',
+      date: '20 Oct',
+      durationMinutes: 5,
+      lines: [{ clock: '00:01', speaker: 'Priya', text: 'ship it' }],
+      myNotes: 'ask budget',
+      points: ['Priya: ship'],
+      prompts: PROMPTS,
+    });
+    expect(p).toContain('[00:01 Priya] ship it');
+    expect(p).toContain('ask budget');
+    expect(p).toContain('"mine": true');
+    expect(parseWriteup('```json\n{"title":"T","sections":[]}\n```').title).toBe('T');
+    expect(() => parseWriteup('nope')).toThrow(/no JSON/);
   });
 
   it('end runs a final pass that writes the summary and then rejects audio', async () => {
@@ -1004,6 +1108,14 @@ describe('meeting events on the host link', () => {
     await send({ type: 'meeting.control_request', chatId: 'c', action: 'resume' });
     await send({ type: 'meeting.control_request', chatId: 'c', action: 'end' });
     expect(m.get('c')?.status).toBe('ended');
+    await send({
+      type: 'meeting.writeup_request',
+      chatId: 'c',
+      writeup: { title: 'Edited', sections: [] },
+    });
+    expect(m.get('c')?.writeup?.title).toBe('Edited');
+    await send({ type: 'meeting.writeup_request', chatId: 'c', regenerate: true });
+    expect(m.get('c')?.writeupError).toMatch(/no write-up generator/);
     sent.length = 0;
     await send({ type: 'meeting.get_request', chatId: 'c' });
     expect(sent[0]).toMatchObject({ type: 'meeting.state', chatId: 'c' });
@@ -1053,6 +1165,15 @@ describe('transcript correction pass', () => {
       clearInterval: () => undefined,
     });
   };
+
+  it('remembers what each correction changed', async () => {
+    const correct = async (i: CorrectInput) => i.lines.map((l) => l.text.replace('Leca', 'WECA'));
+    const m = make(correct, async () => analysis(), ['Leca funds the bus']);
+    m.start('c');
+    await m.ingestAudio('c', 'system', Buffer.from(''));
+    await m.tick('c');
+    expect(m.get('c')!.nameFixes).toEqual([{ from: 'Leca', to: 'WECA' }]);
+  });
 
   it('corrects lines before analysis and the notes and chat context get the fixed text', async () => {
     const correct = vi.fn(async (i: CorrectInput) =>
