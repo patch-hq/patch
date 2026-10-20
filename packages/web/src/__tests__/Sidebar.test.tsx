@@ -182,7 +182,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).toContain('offline');
-    expect(dot.getAttribute('title')).toBe('Reconnecting…');
+    expect(dot.getAttribute('title')).toContain('Server: reconnecting');
   });
 
   // Patch Updates: "Dot should show status" — the WS link to the server can be
@@ -193,7 +193,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).toContain('offline');
-    expect(dot.getAttribute('title')).toBe('Agent offline');
+    expect(dot.getAttribute('title')).toContain('Server: reachable');
   });
 
   it('the connection dot shows connected styling + "Connected" tooltip when the WS is connected and the host is online', () => {
@@ -201,7 +201,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).not.toContain('offline');
-    expect(dot.getAttribute('title')).toBe('Connected');
+    expect(dot.getAttribute('title')).toContain('This surface (web): connected');
   });
 
   it('the connection dot tooltip lists every host with its state', () => {
@@ -231,7 +231,9 @@ describe('Sidebar', () => {
     });
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
-    expect(dot.getAttribute('title')).toBe('Connected\nd-box: offline\nd-mac: online');
+    expect(dot.getAttribute('title')).toBe(
+      'This surface (web): connected\nServer: reachable\nHost d-box: offline\nHost d-mac: online',
+    );
   });
 
   it('shows the empty manager slot when none exists', () => {
