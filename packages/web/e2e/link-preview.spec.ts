@@ -17,9 +17,7 @@ test.describe('a message link carries an inline Summarise button', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           url: 'https://example.com/foraging-guide',
-          title: 'A Guide to Foraging',
-          description: 'What to look for this season.',
-          excerpt: 'Start with the hedgerows in early autumn.',
+          summary: 'Start with the hedgerows in early autumn.',
         }),
       });
     });
@@ -39,12 +37,11 @@ test.describe('a message link carries an inline Summarise button', () => {
       'Start with the hedgerows in early autumn.',
     );
     await expect(card).toContainText('example.com');
+    expect(body).toEqual({ url: 'https://example.com/foraging-guide' });
 
-    // The link itself still points at the real target — the icon is an
-    // addition, not a replacement for normal navigation.
+    // The link itself still points at the real target.
     await expect(link).toHaveAttribute('href', 'https://example.com/foraging-guide');
 
-    // Clicking again collapses it.
     await toggle.click();
     await expect(card).toHaveCount(0);
   });
@@ -54,7 +51,7 @@ test.describe('a message link carries an inline Summarise button', () => {
       await route.fulfill({
         status: 502,
         contentType: 'application/json',
-        body: JSON.stringify({ error: 'fetch_failed', message: 'upstream 503' }),
+        body: JSON.stringify({ error: 'summary_failed', message: 'overloaded' }),
       });
     });
     await page.goto(HARNESS);
@@ -110,7 +107,7 @@ test.describe('a message link carries an inline Summarise button', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ url: 'https://example.com/foraging-guide', title: 'Jira' }),
+        body: JSON.stringify({ url: 'https://example.com/foraging-guide', summary: 'Jira' }),
       });
     });
     await page.goto(HARNESS);

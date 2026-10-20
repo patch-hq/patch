@@ -44,8 +44,8 @@ export interface HostLink {
    * host once there is more than one. `null` before any host has ever
    * attached, in which case there is nothing truthful to announce.
    *
-   * With several machines linked this is the ACCOUNT-DEFAULT machine (the home
-   * host): the one an unaddressed, chat-less frame belongs to. Anything
+   * With several machines linked this is the ACCOUNT-DEFAULT machine (the one
+   * running the Manager): the one an unaddressed, chat-less frame belongs to. Anything
    * host-specific must use `sendTo` / `onlineHostIds` instead.
    */
   hostId(): string | null;
@@ -62,8 +62,8 @@ export interface HostLink {
   onHostStatus(handler: (hostId: string, status: 'online' | 'offline') => void): () => void;
   /**
    * Send an event from a surface up to the host that owns it: the machine the
-   * frame names, else the machine the frame's chat lives on, else the account's
-   * home machine.
+   * frame names, else the machine the frame's chat lives on, else the machine
+   * running the Manager.
    */
   send(surfaceId: string, event: WireEvent): void;
   /**
@@ -135,8 +135,8 @@ export interface InboundHostLinkOptions {
    */
   heldInputs?: HeldInputStore;
   /**
-   * The machine that runs the Manager and Speakers right now. Normally the home
-   * machine; another one while it stands in for an offline home machine.
+   * The machine that runs the Manager and Speakers right now. The server moves it to
+   * another machine when the one running it has been offline a while.
    */
   specialThreadHost?: () => string | null;
   /**
@@ -147,17 +147,17 @@ export interface InboundHostLinkOptions {
    */
   resolveChatHost?: (chatId: string) => string | null;
   /**
-   * The account's home machine (spec/06) — where a frame that names neither a
+   * The machine running the Manager (spec/06) — where a frame that names neither a
    * machine nor a chat belongs (special threads, job dispatch, locks).
    */
-  homeHostId?: () => string | null;
+  managerHostId?: () => string | null;
   /**
    * Every machine this account has ever registered (`Registry.registeredHostIds`)
    * — NOT just the ones with a live link right now. Lets `send()` tell "the
-   * home machine is this account's only possible answer" from "there is more
+   * Manager machine is this account's only possible answer" from "there is more
    * than one machine this chat could actually live on, and guessing risks
    * asking the wrong one." Absent (or a single id) preserves the old
-   * behaviour exactly: guess home and let `sendTo`'s own buffering carry it
+   * behaviour exactly: guess the Manager machine and let `sendTo`'s own buffering carry it
    * until that machine reconnects, which is always correct when it is the
    * only machine there is.
    */
@@ -186,9 +186,9 @@ export interface InboundHostLinkOptions {
  * server restart empties the mirror; the owning host repopulates it a few
  * seconds later, on reconnect (`onAuthed` replays `chat.spawned` +
  * `chat.state` for every chat it holds — see host/src/index.ts). Guessing
- * the account's home machine in that gap is the exact bug host addressing
+ * the Manager machine in that gap is the exact bug host addressing
  * exists to prevent everywhere else in this file: a chat that actually lives
- * on a DIFFERENT machine would be misrouted to the home one and come back
+ * on a DIFFERENT machine would be misrouted to the Manager one and come back
  * `chat_not_found` from a host that never owned it — a real, live chat
  * reported as gone (the reported bug: a redeploy's reconnect window showed
  * this on a chat that was fine).
@@ -277,27 +277,27 @@ export class InboundHostLink implements HostLink {
   }
 
   /**
-   * The Manager and Speakers threads are the account's, and live on the home
-   * machine (spec/06 § Where special threads run). A copy a different machine
-   * still carries, from before it stopped being home, is not the account's
+   * The Manager and Speakers threads are the account's, and live on the machine
+   * running the Manager (spec/06 § Where special threads run). A copy a different
+   * machine still carries, from before the Manager moved, is not the account's
    * thread, so nothing it says about one is passed on. Without this two machines
    * both announce `thread_manager` and whichever spoke last is "the Manager".
    */
   private isStraySpecialThreadEvent(event: WireEvent, fromHostId: string): boolean {
     const chatId = (event as { chatId?: unknown }).chatId;
     if (typeof chatId !== 'string' || !isReservedSpecialThread(chatId)) return false;
-    const home = this.opts.specialThreadHost?.() ?? this.opts.homeHostId?.() ?? null;
-    return home !== null && home !== fromHostId;
+    const manager = this.opts.specialThreadHost?.() ?? this.opts.managerHostId?.() ?? null;
+    return manager !== null && manager !== fromHostId;
   }
 
   /**
-   * The account-default machine: the home machine when the registry names one
+   * The account-default machine: the Manager machine when the registry names one
    * (and it is known here), else the machine that most recently attached, else
    * any machine we have ever seen. `null` when no machine has ever attached.
    */
   hostId(): string | null {
-    const home = this.opts.homeHostId?.() ?? null;
-    if (home !== null) return home;
+    const manager = this.opts.managerHostId?.() ?? null;
+    if (manager !== null) return manager;
     if (this.lastAttachedHostId !== null) return this.lastAttachedHostId;
     return this.hosts.keys().next().value ?? null;
   }
@@ -448,12 +448,12 @@ export class InboundHostLink implements HostLink {
       // The registry mirror doesn't know this chat's host — most commonly the
       // few seconds right after a server restart, before the host that owns
       // it has reconnected and resynced. With only ONE machine ever
-      // registered on this account, the home fallback below IS that chat's
+      // registered on this account, the Manager-machine fallback below IS that chat's
       // host, whatever the mirror currently thinks — guess it and let
       // `sendTo`'s own offline buffering carry the frame until it reconnects,
       // exactly as before. It is only with more than one registered machine
       // that a guess can be WRONG: a chat living on a different one would be
-      // misrouted to home and come back a false `chat_not_found` from a
+      // misrouted to the Manager machine and come back a false `chat_not_found` from a
       // host that never owned it — hold the frame instead and give the
       // real host a chance to register.
       const registered = this.opts.registeredHostIds?.() ?? [];
@@ -706,7 +706,7 @@ export class InProcessHostLink implements HostLink {
    * Frames this fake link "sent". `hostId` records the machine the frame was
    * ADDRESSED to (null when it went through the routing `send()` rather than
    * `sendTo()`), so a test can assert a reply went back to the requester and
-   * not to the account's home machine.
+   * not to the Manager machine.
    */
   readonly sent: Array<{ surfaceId: string; event: WireEvent; hostId?: string }> = [];
 

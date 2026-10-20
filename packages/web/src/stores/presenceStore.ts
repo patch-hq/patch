@@ -152,10 +152,9 @@ interface PresenceState {
 /**
  * The host a host-scoped action targets when the user has not picked one.
  *
- * The account's HOME host wins, because that is the machine the special
- * threads and the account's defaults live on. Failing that, a single
- * registered host is unambiguous. With several and no home marked, there is no
- * right answer, so this returns null and the caller refuses with a message
+ * No host is special: hosts come and go. A single registered host is
+ * unambiguous, and so is a single online one. With several candidates there is
+ * no right answer, so this returns null and the caller refuses with a message
  * rather than picking one — sending a host-scoped edit to a guessed machine is
  * the exact failure `hostId` was added to the wire to prevent.
  *
@@ -164,9 +163,11 @@ interface PresenceState {
  */
 export function defaultHostId(hosts: Record<string, HostPresence>): string | null {
   const all = Object.values(hosts);
-  const home = all.find((h) => h.host?.isHomeHost === true);
-  if (home) return home.hostId;
-  return all.length === 1 ? (all[0] as HostPresence).hostId : null;
+  if (all.length === 1) return (all[0] as HostPresence).hostId;
+  // Hosts come and go: with several registered, the one live machine is the
+  // unambiguous target; two live machines are a choice, not a guess.
+  const online = all.filter((h) => h.online);
+  return online.length === 1 ? (online[0] as HostPresence).hostId : null;
 }
 
 /** A host row for a hostId the store has not seen described yet. */

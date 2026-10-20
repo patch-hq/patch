@@ -680,7 +680,7 @@ last-used model.
 
 - Node (pinned runtime, shipped with the host artifact), TypeScript, single process.
 - Drives its agent backend in-process (§ Agent backends), which manages whatever subprocesses the agent needs internally and gives us the agent stream as an async iterator.
-- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-machine test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json`, and its own append-only history log, `events.jsonl` — `04-chats-and-folders.md` § History) + `~/.patch/blobs/` (content-addressed store for large tool results and inline images referenced from that log) + `~/.patch/threads/{manager,speakers}/` on the home host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). The agent's native history under `~/.claude/projects/...` is a resumption cache the harness reads from, not the record.
+- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-machine test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json`, and its own append-only history log, `events.jsonl` — `04-chats-and-folders.md` § History) + `~/.patch/blobs/` (content-addressed store for large tool results and inline images referenced from that log) + `~/.patch/threads/{manager,speakers}/` on the Manager host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). The agent's native history under `~/.claude/projects/...` is a resumption cache the harness reads from, not the record.
 - Connects to server via WebSocket. Reconnects with exponential backoff; buffers outbound events during disconnect. See `12-error-and-offline.md`.
 
 ## CLI
@@ -884,10 +884,10 @@ frame, because the CLI's default host is the machine it runs on (`17-cli.md`
 through the server. A host-scoped control added to the wire gains its endpoint
 here in the same change. Shared settings are not host-scoped and have no
 endpoint here: the CLI changes them through the server wherever it runs
-(`01-server.md` § Settings). Four host controls are reached over HTTP too, even
+(`01-server.md` § Settings). Three host controls are reached over HTTP too, even
 when the CLI is invoked on that host, because the server owns them rather than
-the host: minting a registration code for a new host, renaming a host, marking
-one the home host, and revoking one. `/pair-device` runs
+the host: minting a registration code for a new host, renaming a host, and
+revoking one. `/pair-device` runs
 the other way round — it exists here and has no wire frame, since the host
 adopts the device itself and the command is local-only (`17-cli.md` § Commands).
 

@@ -3806,7 +3806,7 @@ describe('host-scoped control endpoints (spec/02 § Control IPC)', () => {
     updateAvailable: false,
     permissionModeDefault: 'default' as const,
     permissionOverrides: 0,
-    isHomeHost: true,
+    runsManager: true,
     audioRelayHost: '127.0.0.1:3003',
     backends: [
       { id: 'claude-code', label: 'Claude Code', version: null, state: 'present' as const },

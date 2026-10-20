@@ -192,8 +192,8 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     if (event.type !== 'patch.artifact.publish_request') return;
     const parsed = PatchArtifactPublishRequestEvent.safeParse(event);
     // Answer the machine that asked. `send()` would route by the chat's registry
-    // entry or the account's home machine — a chat the server has not mapped yet,
-    // or one on a non-home machine, never got its answer and the host sat out its
+    // entry or the Manager machine — a chat the server has not mapped yet,
+    // or one on a non-Manager machine, never got its answer and the host sat out its
     // timeout (`502 view_file_publish_failed: artifact publish timed out`).
     const reply = (out: WireEvent): void => {
       if (fromHostId !== null) deps.hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, out);

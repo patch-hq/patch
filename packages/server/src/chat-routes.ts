@@ -1651,7 +1651,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // host-link (the host owns the project filesystem) and waits up to 5s.
   // `hostId` is REQUIRED (like `/api/models`) and validated against the
   // registered-host list: skills are per-host, so with more than one
-  // registered machine and no home host, falling back to "whichever host
+  // registered machine, falling back to "whichever host
   // last attached" can ask the wrong machine and come back missing a skill
   // that is real on the caller's actual host. NO FALLBACK: timeout → 504;
   // host errors map to a typed status.

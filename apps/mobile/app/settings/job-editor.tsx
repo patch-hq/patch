@@ -312,8 +312,8 @@ export default function JobEditor(): React.ReactElement {
   }, [isNew, recents, jobHostId, form.spawnFolder]);
 
   // Seed the host the same way the web editor does: the account's default host
-  // (its home host, or the only one) when there is an unambiguous answer. With
-  // several hosts and no home marked there is none, the field stays empty and
+  // (the only registered or online one) when there is an unambiguous answer. With
+  // several candidates there is none, the field stays empty and
   // save refuses — better than silently scheduling work onto the wrong machine
   // (spec/08 § Action).
   React.useEffect(() => {

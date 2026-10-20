@@ -32,7 +32,7 @@ function report(hostId: string, hostName: string): void {
     updateAvailable: false,
     permissionModeDefault: 'default',
     permissionOverrides: 0,
-    isHomeHost: false,
+    runsManager: false,
     backends: [],
     components: [],
   });

@@ -1,5 +1,5 @@
 // spec/06 § Where special threads run — the Manager and Speakers belong to the
-// home machine. A copy another machine still carries is not the account's.
+// Manager host. A copy another machine still carries is not the account's.
 
 import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
@@ -25,11 +25,11 @@ const frame = (chatId: string): Buffer =>
     } as WireEvent),
   );
 
-describe('special threads come only from the home machine', () => {
+describe('special threads come only from the Manager host', () => {
   function setup(home: string | null) {
     const link = new InboundHostLink({
       logger: pino({ level: 'silent' }),
-      homeHostId: () => home,
+      managerHostId: () => home,
     });
     const heard: Array<[string, string | null]> = [];
     link.onEvent((e, from) => {
@@ -41,7 +41,7 @@ describe('special threads come only from the home machine', () => {
     return { heard, sockets };
   }
 
-  it('passes on the Manager and Speakers from the home machine only', () => {
+  it('passes on the Manager and Speakers from the Manager host only', () => {
     const { heard, sockets } = setup('home');
     sockets.home.emit('message', frame('thread_manager'));
     sockets.other.emit('message', frame('thread_manager'));
@@ -63,16 +63,16 @@ describe('special threads come only from the home machine', () => {
     ]);
   });
 
-  it('drops nothing while no home machine is known', () => {
+  it('drops nothing while no Manager host is known', () => {
     const { heard, sockets } = setup(null);
     sockets.other.emit('message', frame('thread_manager'));
     expect(heard).toEqual([['thread_manager', 'other']]);
   });
 
-  it('follows the host that stands in for the home machine, not the home machine', () => {
+  it('follows the specialThreadHost when it differs from the registry choice', () => {
     const link = new InboundHostLink({
       logger: pino({ level: 'silent' }),
-      homeHostId: () => 'home',
+      managerHostId: () => 'home',
       specialThreadHost: () => 'other',
     });
     const heard: Array<[string, string | null]> = [];

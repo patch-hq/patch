@@ -30,8 +30,8 @@ const HostStateFile = z
     hostName: z.string().min(1).optional(),
     /** This machine's DEFAULT permission mode (`host.settings`). */
     permissionModeDefault: PermissionMode.optional(),
-    /** Is this the account's home machine (`host.set_home`)? */
-    isHomeHost: z.boolean().optional(),
+    /** Does the server have this machine running the Manager (`host.set_manager`)? */
+    runsManager: z.boolean().optional(),
     /**
      * The last Manager takeover this machine acted on (`host.manager_adopt` /
      * `host.manager_release`), so the same one told twice is acted on once.

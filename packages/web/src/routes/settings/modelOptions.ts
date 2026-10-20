@@ -1,9 +1,9 @@
 // The model list the account-wide model pickers (Agent → Model for new chats,
 // Manager → Model) offer.
 //
-// The catalogue is per host, so it is read from the account's home machine
-// (the same rule every other account-wide default uses). With no home machine
-// designated there is nothing to read a list FROM, so the control says that
+// The catalogue is per host, so it is read from the account's default
+// machine (`defaultHostId`, the rule every other account-wide default uses).
+// With no unambiguous machine there is nothing to read a list FROM, so the control says that
 // rather than offering a guessed list — and the saved value is always kept as
 // an option, so an unrelated visit to the page can never unpin it.
 
@@ -31,7 +31,7 @@ export function useModelOptions(value: string): {
     options: [...extra, ...catalogue.models],
     problem:
       catalogueHost === null
-        ? { kind: 'no-host', text: 'Designate a home machine to read the model list from.' }
+        ? { kind: 'no-host', text: 'No single machine to read the model list from.' }
         : catalogue.status === 'error'
           ? {
               kind: 'error',

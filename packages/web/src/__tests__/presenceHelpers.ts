@@ -72,7 +72,7 @@ export function reportHost(
     hostName,
     permissionModeDefault,
     permissionOverrides,
-    isHomeHost,
+    runsManager,
     audioRelayHost,
     ...rest
   } = patch;
@@ -86,7 +86,7 @@ export function reportHost(
     updateAvailable: false,
     permissionModeDefault: permissionModeDefault ?? 'bypassPermissions',
     permissionOverrides: permissionOverrides ?? 0,
-    isHomeHost: isHomeHost ?? true,
+    runsManager: runsManager ?? true,
     audioRelayHost: audioRelayHost ?? '127.0.0.1:3003',
     backends: [],
     components: [],

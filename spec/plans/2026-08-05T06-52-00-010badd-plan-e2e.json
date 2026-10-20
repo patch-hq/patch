@@ -126,7 +126,7 @@
       "02-daemon.md ## Agent backends",
       "02-daemon.md ## Optional components (large models)"
     ],
-    "outcome": "daemon.host carries daemonId, hostName, platform, arch, daemonVersion, updateAvailable, permissionModeDefault, the count of that machine's chats carrying a per-chat override, lastUsedModel (absent until it has one), isHomeHost, backends[] of {id,label,version,state} and components[] of {id,label,bytes,state,progress?,error?}.",
+    "outcome": "daemon.host carries daemonId, hostName, platform, arch, daemonVersion, updateAvailable, permissionModeDefault, the count of that machine's chats carrying a per-chat override, lastUsedModel (absent until it has one), runsManager, backends[] of {id,label,version,state} and components[] of {id,label,bytes,state,progress?,error?}.",
     "evidence": "The raw daemon.host frame emitted by host-a on link, field by field, with the machine's real platform/arch/version cross-checked on that host."
   },
   {
@@ -342,8 +342,8 @@
       "03-wire-protocol.md ### Host events",
       "06-threads-manager-telegram-speakers.md ## Where special threads run"
     ],
-    "outcome": "host.set_home carrying daemonId marks that machine the account's home machine, and the change shows up as isHomeHost on that machine's self-description.",
-    "evidence": "The frame sent from a live surface and the daemon.host / greeting roster read back showing isHomeHost moved to the named machine."
+    "outcome": "host.set_manager carrying daemonId marks that machine the account's home machine, and the change shows up as runsManager on that machine's self-description.",
+    "evidence": "The frame sent from a live surface and the daemon.host / greeting roster read back showing runsManager moved to the named machine."
   },
   {
     "title": "Setting a machine's default permission mode is a frame a surface can send to that machine",

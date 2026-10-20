@@ -187,8 +187,8 @@ export interface WsHubDeps {
   /** Told what the server committed, so each host can be told how far its chats reach. */
   commitAcks?: CommitAcks;
   /**
-   * Which host runs the Manager when the home host is away, and the stretch of
-   * the Manager's transcript the home host's own log is missing.
+   * Which host runs the Manager when the Manager host is away, and the stretch of
+   * the Manager's transcript the Manager host's own log is missing.
    */
   managerFailover?: ManagerFailover;
   /** Server-owned new-chat drafts (spec/14 § New chat drafts). */
@@ -334,7 +334,7 @@ export class WsHub {
   }
 
   /**
-   * The account's HOME machine (spec/06). Exactly one machine holds it: the
+   * The Manager machine (spec/06). Exactly one machine holds it: the
    * registry's explicit choice, else the first registered machine.
    */
   private managerHostId(): string | null {
@@ -344,8 +344,8 @@ export class WsHub {
   /**
    * Apply the SERVER-owned fields to a machine's self-description before it
    * reaches a surface: the user-editable name (`host.rename` is surface →
-   * server) and the home flag (`host.set_manager`). The registry is the authority
-   * for both, so exactly one machine can claim home and a rename survives the
+   * server) and whether it runs the Manager. The registry is the authority
+   * for both, so exactly one machine can claim the Manager and a rename survives the
    * machine restarting.
    */
   private withServerOwnedHostFields(event: HostInfoEvent): HostInfoEvent {
@@ -1201,7 +1201,7 @@ export class WsHub {
 
   /**
    * Re-publish a machine's self-description to every surface after the SERVER
-   * changed something it owns (its name, the home flag). Without this the
+   * changed something it owns (its name, whether it runs the Manager). Without this the
    * change would only appear the next time the machine happened to speak.
    */
   private republishHost(hostId: string): void {
@@ -1419,7 +1419,7 @@ export class WsHub {
       }
       // ---- host-scoped controls the SERVER owns (spec/03 § Host events) ----
       // The registry entry — not the machine — holds the user-editable name and
-      // which machine is home, so these two are answered here and the result is
+      // which machine runs the Manager, so these two are answered here and the result is
       // pushed to every surface. The machine is told as well, so its own CLI
       // and self-description agree with the registry.
       case 'host.rename': {
@@ -1593,7 +1593,7 @@ export class WsHub {
     if (!store) return;
     const hostId = this.deps.chatRegistry.get(request.chatId)?.hostId;
     const hostOffline = hostId === undefined || !this.deps.hostLink.isOnline(hostId);
-    // The home host's own log does not hold what the Manager said while another
+    // The Manager host's own log does not hold what the Manager said while another
     // host stood in for it, so that stretch is added from the server's copy.
     const events = hostOffline
       ? store.read(request.chatId, request.fromSeq)
@@ -1703,11 +1703,11 @@ export class WsHub {
     if (event.type === 'host.host') {
       this.lastHostReport.set(event.hostId, event);
       this.hostLastSeenAt.set(event.hostId, Date.now());
-      // The name and the home flag are SERVER-owned (spec/03: `host.rename` and
-      // `host.set_manager` are surface → server). Overwrite what the machine
+      // The name and the Manager flag are SERVER-owned (spec/03: `host.rename` is
+      // surface → server, `host.set_manager` server → host). Overwrite what the machine
       // reported before any surface sees it, so a rename is not undone by the
       // machine's next self-description and two machines can never both claim
-      // home.
+      // the Manager.
       event = this.withServerOwnedHostFields(event);
     }
     if (event.type === 'folders.list' || event.type === 'folders.updated') {
@@ -1936,9 +1936,9 @@ export class WsHub {
   }
 
   /**
-   * Re-publish every machine's self-description after the home machine moved
-   * without anyone choosing it (the home machine was removed), so exactly one
-   * machine reads as home on every surface.
+   * Re-publish every machine's self-description after the Manager machine moved
+   * without anyone choosing it (the Manager machine was removed), so exactly one
+   * machine reads as running the Manager on every surface.
    */
   republishAllHosts(): void {
     for (const hostId of this.registeredHostIds()) this.republishHost(hostId);

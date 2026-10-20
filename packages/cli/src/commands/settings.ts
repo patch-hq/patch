@@ -262,11 +262,11 @@ export function registerSettingsCommands(program: Command): void {
   accounts
     .command('adopt <backend>')
     .description("Store a machine's own login as a shared account")
-    .option('--host <h>', 'machine name or hostId prefix (default: the home host)')
+    .option('--host <h>', 'machine name or hostId prefix (default: the only machine online)')
     .option('--json', 'JSON output')
     .action(async (backend: string, opts: CommonOpts & { host?: string }) => {
       await run(opts, async () => {
-        const hostId = await hostOrHome(opts);
+        const hostId = await onlineHost(opts);
         const id = backendOf(backend);
         const state = await server(opts).post<SharedState>(`/api/accounts/${id}/adopt`, {
           hostId,
@@ -310,7 +310,7 @@ export function registerSettingsCommands(program: Command): void {
           const res =
             value !== undefined
               ? await t.put<unknown>(path, { value })
-              : await t.post<unknown>(`${path}/adopt`, { hostId: await hostOrHome(opts) });
+              : await t.post<unknown>(`${path}/adopt`, { hostId: await onlineHost(opts) });
           if (opts.json) emitJson(res);
           else emitText(`${keyId}: set`);
         });
@@ -332,13 +332,17 @@ export function registerSettingsCommands(program: Command): void {
     });
 }
 
-/** `--host`, or the account's home host when none is named. */
-async function hostOrHome(opts: CommonOpts & { host?: string }): Promise<string> {
+/** `--host`, or the only machine that is online when none is named. */
+async function onlineHost(opts: CommonOpts & { host?: string }): Promise<string> {
   if (opts.host !== undefined) return resolveHost(opts);
   const { hosts } = await server(opts).get<{
-    hosts: Array<{ hostId: string; isHomeHost: boolean }>;
+    hosts: Array<{ hostId: string; online: boolean }>;
   }>('/api/hosts');
-  const home = hosts.find((h) => h.isHomeHost);
-  if (!home) throw new Error('no home host — name one with --host');
-  return home.hostId;
+  const online = hosts.filter((h) => h.online);
+  if (online.length !== 1) {
+    throw new Error(
+      `${online.length === 0 ? 'no machine is online' : 'more than one machine is online'} — name one with --host`,
+    );
+  }
+  return (online[0] as { hostId: string }).hostId;
 }

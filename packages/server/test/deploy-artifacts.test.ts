@@ -174,7 +174,7 @@ describe('the docker build context', () => {
   });
 });
 
-// spec/07 § Reaching a non-home host's audio WSS: `/audio/:sessionId` is served
+// spec/07 § Reaching a host's audio WSS: `/audio/:sessionId` is served
 // by the SERVER, which relays it to the chat's own host. Proxying it straight
 // to the local host's :3003 (what this installer and prod's Caddy once did)
 // sends a session for a chat on another machine to a host that has never

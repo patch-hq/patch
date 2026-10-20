@@ -4,7 +4,7 @@
 // Hosts — Add a host (the server's install command and a single-use pairing
 // code), then one row per machine: a presence dot, its name, platform and when
 // it was last seen, Update when it is behind. Tapping a row opens that host
-// (app/hosts/[hostId]/index.tsx → HostDetail): its name, Make home, the
+// (app/hosts/[hostId]/index.tsx → HostDetail): its name, the
 // state of its agent backends with Sign in, its optional components, its Files
 // and Terminal, and Remove this host.
 //
@@ -54,11 +54,10 @@ export function platformLabel(platform: string): string {
 export function hostSubtitle(h: HostPresence, now: number = Date.now()): string {
   if (!h.host) return 'awaiting first report';
   const where = platformLabel(h.host.platform);
-  const home = h.host.isHomeHost ? 'home · ' : '';
   const power = h.host.power
     ? ` · ${Math.round(h.host.power.percent)}% ${h.host.power.onBattery ? 'on battery' : 'plugged in'}`
     : '';
-  return `${home}${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}${power}`;
+  return `${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}${power}`;
 }
 
 // ── Hosts ────────────────────────────────────────────────────────────────────
@@ -127,7 +126,7 @@ export function HostsSection(): React.ReactElement {
 }
 
 /**
- * One host's own page. Its name (renamable), Make home, Update, the state of
+ * One host's own page. Its name (renamable), Update, the state of
  * its agent backends with Sign in on any that needs one, its optional
  * components, Files and Terminal, and Remove this host.
  */
@@ -318,23 +317,6 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
               onPress={() => void sendToHost(hostId, { type: 'host.update', hostId }, 'Update')}
             />
           ) : null
-        }
-      />
-      <Row
-        title="Home"
-        right={
-          report.isHomeHost ? (
-            <RowValue testID={`host-${hostId}-home`}>This is home</RowValue>
-          ) : (
-            <SettingsButton
-              testID={`host-${hostId}-set-home`}
-              label="Make home"
-              variant="quiet"
-              onPress={() =>
-                void sendToHost(hostId, { type: 'host.set_home', hostId }, 'Make home')
-              }
-            />
-          )
         }
       />
     </SettingsSection>

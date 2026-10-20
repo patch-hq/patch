@@ -133,7 +133,7 @@ export interface BuildOptions {
   webDistDir?: string;
   /** Required for WS auth + pairing — file-backed registry is loaded from this dir. */
   dataDir?: string;
-  /** How long the home host must be offline before another takes over (tests shorten it). */
+  /** How long the Manager host must be offline before another takes over (tests shorten it). */
   managerFailoverGraceMs?: number;
   /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
   hostOfflineGraceMs?: number;
@@ -395,7 +395,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         logger: log.child({ component: 'held-input' }),
       }),
       resolveChatHost: (chatId: string) => chatRegistryRef?.get(chatId)?.hostId ?? null,
-      homeHostId: () => registry.homeHostId(),
+      managerHostId: () => registry.managerHostId(),
       registeredHostIds: () => registry.registeredHostIds(),
       hostName: (hostId: string) => registry.hostName(hostId),
       specialThreadHost: () => managerFailover.specialThreadHost(),
@@ -454,6 +454,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   hostLink.onHostStatus((hostId, status) => {
     if (status === 'online') {
       hostLink.sendTo(hostId, '_server', { type: 'server.queue_mode', enabled: true });
+      // The server decides which machine runs the Manager; each machine is told as it attaches.
+      const manager = registry.managerHostId();
+      if (manager !== null) {
+        hostLink.sendTo(hostId, '_server', { type: 'host.set_manager', hostId: manager });
+      }
     }
   });
   // A host asks at a tool boundary what is waiting.
@@ -493,7 +498,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // Manager failover (spec/06 § Manager failover).
   const managerFailover = new ManagerFailover({
-    homeHostId: () => registry.homeHostId(),
+    managerHostId: () => registry.managerHostId(),
+    setManagerHostId: (hostId) => registry.setManagerHostId(hostId),
+    onMoved: (hostId) => {
+      for (const id of registry.registeredHostIds()) {
+        hostLink.sendTo(id, '_server', { type: 'host.set_manager', hostId });
+      }
+      wsHub.republishAllHosts();
+    },
     registeredHostIds: () => registry.registeredHostIds(),
     isOnline: (hostId) => hostLink.isOnline(hostId),
     onHostStatus: (handler) => hostLink.onHostStatus(handler),
@@ -506,8 +518,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   managerFailover.start();
   app.addHook('onClose', async () => managerFailover.stop());
-  const specialThreadHost = (): string | null =>
-    managerFailover.specialThreadHost() ?? registry.homeHostId();
+  const specialThreadHost = (): string | null => managerFailover.specialThreadHost();
 
   // Durable copy of message text so an offline host's chats stay searchable.
   const chatMirror = registry.dataDir
@@ -598,7 +609,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const managerSweeper = new ManagerSweeper({
     chats: chatRegistry,
     settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
-    homeHostId: () => {
+    managerHostId: () => {
       const id = specialThreadHost();
       return id && hostLink.onlineHostIds().includes(id) ? id : undefined;
     },
@@ -1335,7 +1346,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         // is known and do not invent a name for it.
         hostName: h.host?.hostName ?? null,
         online: h.online,
-        isHomeHost: h.host?.isHomeHost ?? false,
+        runsManager: h.host?.runsManager ?? false,
         ...(h.host?.defaultModel !== undefined ? { defaultModel: h.host.defaultModel } : {}),
       })),
     };
@@ -1478,9 +1489,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // revokes the machine's credential (so its next hello is answered
   // `auth.revoked` and it wipes its key), its live link is closed and its
   // buffered frames dropped, the hub forgets every cached report about it and
-  // tells every surface `host.removed {hostId}`. If it was the home machine,
-  // home passes to the next registered one and every machine and surface is
-  // told, exactly as a `set-home` would. Chats that ran on it are left as they
+  // tells every surface `host.removed {hostId}`. If it ran the Manager,
+  // the Manager passes to the next registered one and every machine and surface is
+  // told, as any Manager move would. Chats that ran on it are left as they
   // are: their history is the account's, not the machine's.
   app.delete<{ Params: { hostId: string } }>('/api/hosts/:hostId', async (req, reply) => {
     let auth;
@@ -1500,33 +1511,29 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         knownHosts: registry.registeredHostIds(),
       });
     }
-    const homeBefore = registry.homeHostId();
+    const managerBefore = registry.managerHostId();
     registry.removeHost(hostId);
     const linkClosed = wsHub.disconnectHostNow(hostId, () => hostLink.forget(hostId));
     const told = wsHub.removeHost(hostId);
-    const homeAfter = registry.homeHostId();
-    if (homeBefore === hostId && homeAfter !== null) {
+    const managerAfter = registry.managerHostId();
+    if (managerBefore === hostId && managerAfter !== null) {
       for (const id of registry.registeredHostIds()) {
-        hostLink.sendTo(id, 'server', { type: 'host.set_home', hostId: homeAfter });
-        wsHub.sendToAll({ type: 'host.set_home', hostId: homeAfter });
+        hostLink.sendTo(id, 'server', { type: 'host.set_manager', hostId: managerAfter });
       }
       wsHub.republishAllHosts();
     }
     log.info(
-      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told, homeAfter },
+      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told, managerAfter },
       'host removed from the account',
     );
     return { ok: true, hosts: wsHub.hosts() };
   });
 
-  // Renaming a machine and marking one the account home are SERVER-owned, even
-  // when the CLI naming them runs on that very machine (spec/17 § Hosts and the
-  // CLI). The registry holds both, so they must be written here and pushed to
-  // every surface — a daemon-local write would leave other surfaces stale.
-  for (const [route, kind] of [
-    ['/api/hosts/rename', 'rename'] as const,
-    ['/api/hosts/set-home', 'set-home'] as const,
-  ]) {
+  // Renaming a machine is SERVER-owned, even when the CLI naming it runs on
+  // that very machine (spec/17 § Hosts and the CLI). The registry holds the
+  // name, so it must be written here and pushed to every surface — a
+  // daemon-local write would leave other surfaces stale.
+  for (const route of ['/api/hosts/rename']) {
     app.post<{ Body: { hostId?: string; hostName?: string } }>(route, async (req, reply) => {
       const account = registry.getAccount();
       if (!account) return reply.code(401).send({ error: 'unauthenticated' });
@@ -1562,32 +1569,22 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         });
       }
 
-      if (kind === 'rename') {
-        const hostName = req.body?.hostName;
-        if (typeof hostName !== 'string' || hostName.trim().length === 0) {
-          // A machine must always have a name; an empty rename is refused.
-          return reply
-            .code(400)
-            .send({ error: 'invalid_name', message: 'a machine name cannot be empty' });
-        }
-        registry.setHostName(hostId, hostName.trim());
-        // The machine keeps its own self-description in step (and persists the
-        // rename so a restart does not revert it); every surface is told too.
-        hostLink.sendTo(hostId, 'server', {
-          type: 'host.rename',
-          hostId,
-          hostName: hostName.trim(),
-        });
-        wsHub.sendToAll({ type: 'host.rename', hostId, hostName: hostName.trim() });
-      } else {
-        registry.setHomeHostId(hostId);
-        // Broadcast to EVERY machine: the named one becomes home and the rest
-        // lose it, so exactly one machine reports the flag.
-        for (const id of registry.registeredHostIds()) {
-          hostLink.sendTo(id, 'server', { type: 'host.set_home', hostId });
-        }
-        wsHub.sendToAll({ type: 'host.set_home', hostId });
+      const hostName = req.body?.hostName;
+      if (typeof hostName !== 'string' || hostName.trim().length === 0) {
+        // A machine must always have a name; an empty rename is refused.
+        return reply
+          .code(400)
+          .send({ error: 'invalid_name', message: 'a machine name cannot be empty' });
       }
+      registry.setHostName(hostId, hostName.trim());
+      // The machine keeps its own self-description in step (and persists the
+      // rename so a restart does not revert it); every surface is told too.
+      hostLink.sendTo(hostId, 'server', {
+        type: 'host.rename',
+        hostId,
+        hostName: hostName.trim(),
+      });
+      wsHub.sendToAll({ type: 'host.rename', hostId, hostName: hostName.trim() });
       return { ok: true, hosts: wsHub.hosts() };
     });
   }

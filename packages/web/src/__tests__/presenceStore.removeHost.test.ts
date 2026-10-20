@@ -24,7 +24,7 @@ describe('presenceStore.removeHost', () => {
     reportAccount('host-a', true, 'tom@example.com');
     reportClaudeSettings('host-a');
     reportFolders('host-a', ['/srv/patch']);
-    reportHost('host-b', { hostName: 'beta', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
     const before = usePresenceStore.getState().hosts['host-b'];
 
     usePresenceStore.getState().removeHost('host-a');
@@ -49,7 +49,7 @@ describe('presenceStore.removeHost', () => {
 
   it('recomputes hostOnline: false once the only online host is gone', () => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
     expect(usePresenceStore.getState().hostOnline).toBe(true);
     usePresenceStore.getState().removeHost('host-a');
@@ -58,7 +58,7 @@ describe('presenceStore.removeHost', () => {
 
   it('recomputes hostOnline: still true while another host is online', () => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
     usePresenceStore.getState().setHostOnline('host-b', true);
     usePresenceStore.getState().removeHost('host-a');
@@ -80,7 +80,7 @@ describe('presenceStore.removeHost', () => {
   it('a host missing from a fresh auth.ok roster is dropped with its reports', () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportClaudeSettings('host-a');
-    reportHost('host-b', { hostName: 'beta', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
 
     // The server removed host-a while this surface was disconnected: the
     // reconnect greeting names only host-b.

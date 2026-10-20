@@ -85,7 +85,7 @@ describe('PatchWs dispatch — host.removed', () => {
   it('drops that host from the presence store and leaves the others', async () => {
     const { ws, fake } = await connectAndOpen();
     reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
     fake.receive({ type: 'host.online', hostId: 'host-a' });
     expect(usePresenceStore.getState().hostOnline).toBe(true);
 

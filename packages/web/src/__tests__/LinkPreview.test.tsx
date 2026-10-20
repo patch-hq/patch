@@ -6,8 +6,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LinkPreviewToggle } from '../components/LinkPreview.js';
-import { api } from '../api/rest.js';
-import { ApiError } from '../api/rest.js';
+import { api, ApiError } from '../api/rest.js';
 
 vi.mock('../api/rest.js', async () => {
   const actual = await vi.importActual<typeof import('../api/rest.js')>('../api/rest.js');
@@ -22,9 +21,6 @@ function renderToggle(url: string) {
     </QueryClientProvider>,
   );
 }
-
-let createObjectURLSpy: ReturnType<typeof vi.fn>;
-let revokeObjectURLSpy: ReturnType<typeof vi.fn>;
 
 afterEach(() => {
   cleanup();
@@ -84,9 +80,7 @@ describe('LinkPreviewToggle (Summarise)', () => {
     expect(link.rel).toContain('noopener');
   });
 
-  // Todoist: "patch open in browser is not copying over the query string" —
-  // the desktop panel's half was fixed in the shell; this is the message
-  // link's own open-in-browser icon.
+  // Todoist: "patch open in browser is not copying over the query string".
   it('"open in browser" keeps the query string and fragment', () => {
     renderToggle('https://example.com/app/chats/c1?sidebar=hidden&seq=4#m4');
     const link = screen.getByTestId('link-preview-external') as HTMLAnchorElement;

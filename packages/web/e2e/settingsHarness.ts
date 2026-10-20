@@ -213,7 +213,7 @@ export async function addSecondHost(
   page: Page,
   patch: Record<string, unknown> = {},
 ): Promise<void> {
-  await reportHost(page, { hostName: 'mac', isHomeHost: false, ...patch }, 'd2');
+  await reportHost(page, { hostName: 'mac', runsManager: false, ...patch }, 'd2');
   await page.evaluate(() =>
     (window as unknown as { __presenceStore: Store }).__presenceStore
       .getState()

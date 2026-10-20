@@ -52,7 +52,7 @@ beforeEach(() => {
     }));
   vi.mocked(api.models).mockReset().mockResolvedValue({ models: CATALOGUE });
   resetHosts();
-  reportHost('home', { hostName: 'laptop', isHomeHost: true });
+  reportHost('home', { hostName: 'laptop', runsManager: true });
   seedSettings();
 });
 

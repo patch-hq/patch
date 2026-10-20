@@ -2,9 +2,9 @@
 //
 // POST /api/link-summary {url} — fetches the linked page server-side (same
 // SSRF-checked fetch as the link preview), then round-trips one
-// `patch.link_summary.request` to the account's home machine, which holds the
+// `patch.link_summary.request` to the machine running the Manager, which holds the
 // Claude credential and runs the account's `linkSummaryPrompt` over the page
-// text. NO FALLBACK: an unfetchable page is a 4xx/502, an offline home machine
+// text. NO FALLBACK: an unfetchable page is a 4xx/502, an offline Manager machine
 // is a 503, a timeout is a 504, and a failed model call is a 502 carrying its
 // reason — never an empty summary.
 
@@ -38,12 +38,12 @@ export const LINK_SUMMARY_TIMEOUT_MS = 60_000;
 
 const Body = z.object({ url: z.string().min(1) }).strict();
 
-type SummaryResponse = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
+type Response = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
 
 export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummaryRoutesDeps): void {
   const pending = new Map<
     string,
-    { resolve: (ev: SummaryResponse) => void; timeout: NodeJS.Timeout; hostId: string }
+    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
   >();
   deps.hostLink.onEvent((event: WireEvent, from) => {
     if (event.type !== 'patch.link_summary.response') return;
@@ -90,7 +90,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
         .code(400)
         .send({ error: 'blocked_host', message: 'this host cannot be summarised' });
     }
-    const hostId = deps.registry.homeHostId();
+    const hostId = deps.registry.managerHostId();
     if (hostId === null || !deps.hostLink.isOnline(hostId)) {
       return reply.code(503).send({
         error: 'host_offline',
@@ -142,7 +142,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
     }
 
     const requestId = deps.idGenerator();
-    const result = await new Promise<SummaryResponse | 'timeout'>((resolve) => {
+    const result = await new Promise<Response | 'timeout'>((resolve) => {
       const timeout = setTimeout(() => {
         pending.delete(requestId);
         resolve('timeout');

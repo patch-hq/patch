@@ -60,13 +60,14 @@ export function canonicalizeHostNames(value: unknown): unknown {
       if (k === 'daemonId' && !('hostId' in (v as object))) out.hostId = walk(child);
       else if (k === 'daemonVersion' && !('hostVersion' in (v as object)))
         out.hostVersion = walk(child);
-      // The account's home machine. Easy to miss because it is the one legacy
-      // name that is not a bare `daemonId`, and missing it took production
-      // down: `parsePersisted` left `homeDaemonId` in registry.json, the
-      // `.strict()` RegistryFile rejected it AND found no `homeHostId`, and
-      // the server crash-looped on boot.
-      else if (k === 'homeDaemonId' && !('homeHostId' in (v as object)))
-        out.homeHostId = walk(child);
+      // The Manager's machine, once called the home machine. Persisted
+      // registries still carry `homeHostId` / `homeDaemonId`; the `.strict()`
+      // RegistryFile would reject either and the server would crash-loop on boot.
+      else if ((k === 'homeDaemonId' || k === 'homeHostId') && !('managerHostId' in (v as object)))
+        out.managerHostId = walk(child);
+      // An older host's `host.info` still says `isHomeHost`.
+      else if (k === 'isHomeHost' && !('runsManager' in (v as object)))
+        out.runsManager = walk(child);
       else out[k] = walk(child);
     }
     return out;

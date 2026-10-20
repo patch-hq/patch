@@ -49,7 +49,7 @@ describe('HostProviderKey', () => {
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
-      isHomeHost: true,
+      runsManager: true,
       audioRelayHost: '127.0.0.1:3003',
       backends: [],
       components: [],

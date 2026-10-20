@@ -116,7 +116,7 @@ describe('mobile Settings → Usage — the shared accounts', () => {
 
   it('shows the freshest usage reading any host took', async () => {
     reportHost('h1', { hostName: 'hetzner' });
-    reportHost('h2', { hostName: 'mac', isHomeHost: false });
+    reportHost('h2', { hostName: 'mac', runsManager: false });
     const report = (hostId: string, utilization: number, at: number) =>
       usePresenceStore.getState().setHostAccount({
         type: 'host.account',

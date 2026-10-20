@@ -26,18 +26,20 @@ Each thread is a single chat. Each grows forever (session resume preserves histo
 
 ## Where special threads run
 
-The two special threads are singletons, and live on the account's home host.
-The home host is set when the first host registers and is changeable from every
-surface — Settings → Hosts on web and mobile, `patch hosts set-home` on the
-command line (`17-cli.md` § Commands). Only the home host creates the thread folders and announces the threads: a host that
-is not home has none, and the server passes on nothing a non-home host says about
-them. Changing the home host creates the threads on the new host, leaving the old
-transcripts readable on the previous one.
+The two special threads are singletons, and live on one host, the Manager host.
+The server chooses it: the first host that registers, and after that whichever
+host the server moves it to (§ Manager failover). No host is special and none is
+marked, and no surface or command line sets it: hosts come and go, and the user
+deals with the server. Only the Manager host creates the thread folders and
+announces the threads: a host that is not running the Manager has none, and the
+server passes on nothing such a host says about them. When the Manager moves, the
+new host creates the threads, leaving the old transcripts readable on the previous
+one.
 
 Through the cross-chat tools the Manager reaches any host: `patch_spawn` takes a
 host alongside the folder.
 
-Each special thread has a folder in the home host's state directory, under
+Each special thread has a folder in the Manager host's state directory, under
 the home directory of the user that host runs as:
 
 ```
@@ -45,7 +47,7 @@ the home directory of the user that host runs as:
 ~/.patch/threads/speakers/
 ```
 
-These are absolute paths on the home host, resolved from that user's `HOME` and
+These are absolute paths on the Manager host, resolved from that user's `HOME` and
 nothing else. They sit beside the host's other host-local state (`~/.patch/chats/`,
 `~/.patch/daemon.sock` — `02-daemon.md` § Stack), so the host needs no notion of
 a startup directory, a base directory or a configured root to find them, and an
@@ -74,7 +76,7 @@ touching general project conversations.
 To give a thread more than that, write it into the thread's own `CLAUDE.md`, which is
 the file patch creates for exactly this and never edits.
 
-What sits in these folders is the thread's own working state: its `CLAUDE.md`, and whatever the agent writes while it runs. The broadcast records the Speakers thread reads when the user replies are server state instead (`09-notifications.md` § The broadcast log), because the machine that delivers an announcement is often not the home machine and no host writes to another host's disk.
+What sits in these folders is the thread's own working state: its `CLAUDE.md`, and whatever the agent writes while it runs. The broadcast records the Speakers thread reads when the user replies are server state instead (`09-notifications.md` § The broadcast log), because the machine that delivers an announcement is often not the Manager host and no host writes to another host's disk.
 
 ## Cross-chat toolset
 
@@ -202,9 +204,9 @@ This is the equivalent of "reply-all goes to the sender" in email. It removes th
 
 ## Manager failover
 
-When the home host has been offline for two minutes and another host is online, the server asks that host to run the Manager for the time being It sends `host.manager_adopt` with the recent conversation from the server's own copy (the last `managerContextWindow` messages) and the seq the Manager carries on from, so the thread keeps one sequence across hosts. The stand-in creates the thread, and gives the conversation to the Manager once, with its next message, as a disclosed system reminder. From then on the server takes the Manager's and Speakers' events from the stand-in and runs the sweep there; frames from the home host are ignored.
+When the Manager host has been offline for two minutes and another host is online, the server moves the Manager to that host for good. It sends `host.manager_adopt` with the recent conversation from the server's own copy (the last `managerContextWindow` messages) and the seq the Manager carries on from, so the thread keeps one sequence across hosts, and `host.set_manager` naming the new host to every machine. The new host creates the thread, and gives the conversation to the Manager once, with its next message, as a disclosed system reminder. From then on the server takes the Manager's and Speakers' events from the new host and runs the sweep there; frames from any other host are ignored.
 
-When the home host returns, the server sends `host.manager_release` to the stand-in and, if anything was said meanwhile, a `host.manager_adopt` to the home host with that stretch and the seq to continue from. A replay of the Manager is answered by the home host from its own log and the server adds the stretch that log is missing. A host that was away when it was told is told again when it attaches, and acts on each takeover once (`epoch`). If the stand-in goes offline another host is chosen. With no other host online the Manager stays unavailable, readable from the server's copy, and takes messages for when the home host is back.
+The host that was running it is sent `host.manager_release` and lets go whenever it next attaches; it is not handed the Manager back on return. A replay of the Manager is answered by the current Manager host from its own log and the server adds the stretches that log is missing (those other hosts ran). A host that was away when it was told is told again when it attaches, and acts on each order once (`epoch`). If the new host goes offline too, another is chosen. With no other host online the Manager stays unavailable, readable from the server's copy, and takes messages for when a host is back.
 
 ## Disabled
 
@@ -272,7 +274,7 @@ Nothing changed since the last sweep means no model call, full stop — the gate
 - **Event-woken.** A `task-ended` or `job-failed` edge also wakes a sweep early, rather than waiting out the rest of the interval — but never sooner than 2 minutes after the previous early wake or the previous sweep, so a burst of endings doesn't fire a sweep per event. Still gated: the early wake only matters if something is actually pending.
 - **Check now.** A button in the Manager view (`14-design-web.md` § Manager view), and `patch threads sweep-now` on the CLI (`17-cli.md`). Forces an attempt immediately, bypassing the interval — but NOT the gate: nothing pending is still no model call, reported back as "nothing changed."
 
-**The run.** A due sweep is a fresh, short, isolated decision — a one-shot model call on the account's home host, not a turn in the Manager's own conversation and not visible in its transcript. It is handed a compact digest: the chats that changed, each with its host/folder, how long idle, and its last `sweepMessagesPerChat` (default 3) messages. For each changed chat it picks exactly one action:
+**The run.** A due sweep is a fresh, short, isolated decision — a one-shot model call on the Manager host, not a turn in the Manager's own conversation and not visible in its transcript. It is handed a compact digest: the chats that changed, each with its host/folder, how long idle, and its last `sweepMessagesPerChat` (default 3) messages. For each changed chat it picks exactly one action:
 
 - **nudge** — the chat is idle and plainly just asking permission to continue ("shall I do the next part?"). Delivered as an ordinary machine turn into that chat (the same mechanism `patch_send_to` uses).
 - **wake** — the chat has stalled; a short message checking it's still working, delivered the same way.

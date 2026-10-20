@@ -34,7 +34,7 @@ export function attachJobsRpcBridge(opts: AttachOptions): () => void {
     if (event.type !== 'patch.jobs.request') return;
     // The response MUST go back to the machine that asked. `patch.jobs.response`
     // carries neither `hostId` nor `chatId`, so `HostLink.routeOf()` would
-    // fall through to the account's HOME machine — every request from any other
+    // fall through to the Manager machine — every request from any other
     // host then hung until its 10s client timeout. `fromHostId` is the
     // requester, and `sendTo` addresses it directly.
     if (fromHostId === null) {

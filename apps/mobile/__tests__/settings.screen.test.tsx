@@ -88,7 +88,7 @@ beforeEach(() => {
   vi.mocked(api.listSecrets).mockReset().mockResolvedValue({ secrets: [] });
   useSettingsStore.getState()._reset();
   resetHosts();
-  reportHost('d1', { hostName: 'laptop', isHomeHost: true });
+  reportHost('d1', { hostName: 'laptop', runsManager: true });
 });
 
 afterEach(() => {
@@ -348,7 +348,7 @@ describe('/settings/[page]', () => {
 
 describe('the pages’ own routes', () => {
   it('layer, memory, mcp-server and a host page render their screens from params', async () => {
-    reportHost('d1', { hostName: 'laptop', isHomeHost: true, harnessMcpServers: [] });
+    reportHost('d1', { hostName: 'laptop', runsManager: true, harnessMcpServers: [] });
     __setLocalSearchParams({ layer: 'system' });
     let r = render(<LayerEditorScreen />);
     expect(findHost(r.root, byTestId('settings-layer-editor'))).toBeTruthy();

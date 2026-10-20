@@ -2654,7 +2654,7 @@ usePresenceStore.getState().setHosts([
       permissionModeDefault: 'auto',
       permissionOverrides: 0,
       defaultModel: 'claude-opus-5',
-      isHomeHost: true,
+      runsManager: true,
       audioRelayHost: '127.0.0.1:3003',
       backends: [],
       components: [],
@@ -2711,7 +2711,7 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
       hostId: 'd2',
       online: true,
       lastSeenAt: Date.now(),
-      host: home?.host ? { ...home.host, hostId: 'd2', hostName: 'mac', isHomeHost: false } : null,
+      host: home?.host ? { ...home.host, hostId: 'd2', hostName: 'mac', runsManager: false } : null,
       accounts: [
         {
           hostId: 'd2',
