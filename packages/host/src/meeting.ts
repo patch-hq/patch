@@ -345,6 +345,15 @@ export class MeetingManager {
     this.commit(chatId, rt);
   }
 
+  /** Stores the user's My notes text with the meeting; it is theirs, so analysis never touches it. */
+  setMyNotes(chatId: string, text: string): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if ((rt.state.myNotes ?? '') === text) return;
+    rt.state.myNotes = text;
+    this.commit(chatId, rt);
+  }
+
   // ---- actions ----
 
   async decide(chatId: string, actionId: string, decision: 'do' | 'dismiss'): Promise<void> {

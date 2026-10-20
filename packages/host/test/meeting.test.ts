@@ -274,6 +274,24 @@ describe('MeetingManager', () => {
     expect(analyse.mock.calls[1]![0].newLines).toHaveLength(1);
   });
 
+  it('stores My notes with the meeting, broadcasts it, reloads it and leaves it alone through analysis', async () => {
+    const m = make();
+    m.start('c1');
+    m.setMyNotes('c1', 'Ask Priya about the rollout');
+    expect(m.get('c1')!.myNotes).toBe('Ask Priya about the rollout');
+    const last = events.filter((e) => e.type === 'meeting.state').at(-1) as {
+      meeting: { myNotes?: string };
+    };
+    expect(last.meeting.myNotes).toBe('Ask Priya about the rollout');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1');
+    expect(m.get('c1')!.myNotes).toBe('Ask Priya about the rollout');
+    await m.end('c1');
+    m.setMyNotes('c1', 'Ask Priya about the rollout\nFollow up Friday');
+    expect(make().get('c1')!.myNotes).toBe('Ask Priya about the rollout\nFollow up Friday');
+    expect(() => m.setMyNotes('nope', 'x')).toThrow(/no meeting/);
+  });
+
   it('an edited point survives a later analysis pass that tries to rewrite it', async () => {
     const m = make();
     m.start('c1');

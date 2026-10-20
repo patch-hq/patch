@@ -44,6 +44,7 @@ describe('meeting wire', () => {
         chatId: 'c',
         edit: { op: 'insert', aboveTopicId: 't', id: 'n' },
       },
+      { type: 'meeting.my_notes_request', chatId: 'c', text: 'Ask Priya about the rollout' },
       { type: 'meeting.state', chatId: 'c', meeting: state },
       { type: 'meeting.state', chatId: 'c', meeting: null },
     ];

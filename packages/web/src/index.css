@@ -13584,6 +13584,22 @@ select.new-chat-account:focus-visible {
 .mm-wait {
   color: var(--ink-3);
 }
+/* My notes: Tom's own words, in the darkest ink. */
+.mm-mynotes {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
 .mm-drawer {
   position: relative;
   min-width: 0;

@@ -221,6 +221,11 @@ export function editMeetingNotes(chatId: string, edit: MeetingNotesOp): void {
   ws().send({ type: 'meeting.notes_request', chatId, edit });
 }
 
+/** The My notes text; the host stores it with the meeting and answers with `meeting.state`. */
+export function saveMyNotes(chatId: string, text: string): void {
+  ws().send({ type: 'meeting.my_notes_request', chatId, text });
+}
+
 export function requestMeeting(chatId: string): void {
   getActiveWs()?.send({ type: 'meeting.get_request', chatId });
 }
