@@ -141,4 +141,20 @@ describe('ChatRoute — composer focus on chat open', () => {
     renderAt('c-a');
     expect(document.activeElement).not.toBe(composer());
   });
+
+  // A touch device has no cursor to save and focusing raises the soft
+  // keyboard over the transcript the user opened the chat to read.
+  it('leaves the field unfocused on a touch device', () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((q: string) => ({
+      matches: q === '(pointer: coarse)',
+    })) as unknown as typeof window.matchMedia;
+    try {
+      seed(['c-a']);
+      renderAt('c-a');
+      expect(document.activeElement).not.toBe(composer());
+    } finally {
+      window.matchMedia = original;
+    }
+  });
 });

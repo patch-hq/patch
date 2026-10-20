@@ -1515,6 +1515,9 @@ export const Composer = forwardRef(function Composer(
     // Focus on the autoFocus→ready transition (not on every keystroke — value
     // is intentionally not a dependency).
     if (!autoFocus || offline) return;
+    // Touch devices: focusing raises the soft keyboard over the transcript.
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+      return;
     // At most once per mount. `offline` has to stay a dependency (the composer
     // routinely mounts before the socket connects), but a LATER reconnect must
     // not yank the cursor back out of wherever the user has since moved it.
