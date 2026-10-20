@@ -192,6 +192,50 @@ describe('MeetingManager', () => {
     expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you']);
   });
 
+  it('drops system lines when one mic line spans two of them (different clip boundaries)', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockResolvedValueOnce(
+      'so we should move the ledger split to January because of Black Friday',
+    );
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    clock += 1000;
+    transcribe.mockResolvedValueOnce('so we should move the ledger spit to Janary');
+    await m.ingestAudio('c1', 'system', Buffer.from('b'));
+    clock += 1000;
+    transcribe.mockResolvedValueOnce('becuse of Black Friday');
+    await m.ingestAudio('c1', 'system', Buffer.from('c'));
+    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you']);
+  });
+
+  it('drops system lines that arrived before the mic line that covers them', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockResolvedValueOnce('so we should move the ledger spit to Janary');
+    await m.ingestAudio('c1', 'system', Buffer.from('b'));
+    clock += 1000;
+    transcribe.mockResolvedValueOnce('becuse of Black Friday');
+    await m.ingestAudio('c1', 'system', Buffer.from('c'));
+    clock += 1000;
+    transcribe.mockResolvedValueOnce(
+      'so we should move the ledger split to January because of Black Friday',
+    );
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you']);
+  });
+
+  it('flags echoDetected once an echo is dropped, not before', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockResolvedValueOnce('So we should move the ledger split to January');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    expect(m.get('c1')?.echoDetected).toBeFalsy();
+    clock += 1000;
+    transcribe.mockResolvedValueOnce('so we should move the ledger split to Janua');
+    await m.ingestAudio('c1', 'system', Buffer.from('b'));
+    expect(m.get('c1')?.echoDetected).toBe(true);
+  });
+
   it('keeps a Them line that is different speech, or an echo long after', async () => {
     const m = make();
     m.start('c1');

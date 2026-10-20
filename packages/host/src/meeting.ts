@@ -69,6 +69,22 @@ export function speechSimilarity(a: string, b: string): number {
   return (2 * shared) / (Math.max(x.length - 1, 0) + Math.max(y.length - 1, 0));
 }
 
+/** Shortest system line judged for echo; "yes" and "ok" are too common to call. */
+const ECHO_MIN_CHARS = 12;
+
+/** Share of `line`'s character bigrams that also appear in `pool`. */
+export function speechCoverage(line: string, pool: string): number {
+  const bl = bigrams(normSpeech(line));
+  const bp = bigrams(normSpeech(pool));
+  let total = 0;
+  let shared = 0;
+  for (const [g, n] of bl) {
+    total += n;
+    shared += Math.min(n, bp.get(g) ?? 0);
+  }
+  return total === 0 ? 0 : shared / total;
+}
+
 export const MeetingAnalysis = z
   .object({
     now: z.object({ headline: z.string(), bullets: z.array(z.string()), who: z.string() }),
@@ -322,26 +338,11 @@ export class MeetingManager {
       let added = false;
       for (const { text, voice } of pieces) {
         if (text === '') continue;
-        const isEcho = (l: { at: number; speaker: string; text: string }): boolean =>
-          l.speaker !== speaker &&
-          Math.abs(l.at - at) <= ECHO_WINDOW_MS &&
-          speechSimilarity(l.text, text) >= ECHO_SIMILARITY;
-        // In a room the mic and the call audio carry the same speech. The mic
-        // copy is the clean one; the system copy is the echo and is dropped.
-        if (
-          speaker === 'them' &&
-          rt.state.transcript.some((l) => l.speaker === 'you' && isEcho(l))
-        ) {
-          continue;
-        }
-        if (speaker === 'you') {
-          const echoed = rt.state.transcript.findIndex((l) => l.speaker === 'them' && isEcho(l));
-          if (echoed >= 0 && echoed >= rt.analysedUpTo) rt.state.transcript.splice(echoed, 1);
-        }
         rt.state.transcript.push({ at, speaker, ...(voice !== undefined ? { voice } : {}), text });
         added = true;
       }
       if (!added) return;
+      this.dropEchoes(rt);
       if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
         const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
         rt.state.transcript.splice(0, drop);
@@ -554,6 +555,34 @@ export class MeetingManager {
     if (final) {
       if (!a.summary) throw new MeetingError('final analysis returned no summary');
       s.summary = a.summary as MeetingSummary;
+    }
+  }
+
+  /**
+   * In a room the mic and the call audio carry the same speech, cut at
+   * different clip boundaries, so one line can span two on the other channel.
+   * Each not-yet-analysed system line is checked against ALL the mic text
+   * within the window; if that text covers it, it is an echo and is dropped.
+   * The mic copy is kept: it is the cleaner one.
+   */
+  private dropEchoes(rt: Runtime): void {
+    const t = rt.state.transcript;
+    let dropped = 0;
+    for (let i = t.length - 1; i >= rt.analysedUpTo; i--) {
+      const line = t[i]!;
+      if (line.speaker !== 'them' || normSpeech(line.text).length < ECHO_MIN_CHARS) continue;
+      const mic = t
+        .filter((l) => l.speaker === 'you' && Math.abs(l.at - line.at) <= ECHO_WINDOW_MS)
+        .map((l) => l.text)
+        .join(' ');
+      if (speechCoverage(line.text, mic) >= ECHO_SIMILARITY) {
+        t.splice(i, 1);
+        dropped++;
+      }
+    }
+    if (dropped > 0) {
+      rt.state.echoDetected = true;
+      if (rt.deliveredUpTo > t.length) rt.deliveredUpTo = t.length;
     }
   }
 

@@ -234,6 +234,12 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
           {meeting.error}
         </div>
       ) : null}
+      {meeting.status === 'live' && meeting.echoDetected ? (
+        <div className="mm-error" data-testid="meeting-echo-hint">
+          The mic is picking up the call through your speakers. Use headphones to keep your voice
+          separate from everyone else.
+        </div>
+      ) : null}
       {meeting.status === 'live' && !capturing ? (
         <div className="mm-error" data-testid="meeting-not-listening">
           This device is not listening.{' '}
