@@ -58,7 +58,9 @@ describe('SignInApprovalPrompt', () => {
       requests: [{ id: 'r3', label: 'Safari on iOS', expiresAt: soon() }],
     });
     render(<SignInApprovalPrompt />);
-    expect((await screen.findByTestId('signin-prompt')).textContent).toMatch(/Safari on iOS/);
+    expect((await screen.findByTestId('signin-prompt')).textContent).toContain(
+      'Safari on an iOS device',
+    );
   });
 
   it('shows a failed answer instead of swallowing it', async () => {
