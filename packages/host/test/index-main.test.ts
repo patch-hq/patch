@@ -1805,6 +1805,18 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
+  it('with no healthz port configured the host opens no TCP listener and answers on its socket', async () => {
+    const boot = await bootMain({ PATCH_DAEMON_HEALTHZ_PORT: undefined });
+    try {
+      const res = await boot.ready.app.inject({ method: 'GET', url: '/healthz' });
+      expect(res.statusCode).toBe(200);
+      // The port bootMain reserved for this host stays unbound.
+      await expect(httpGet(boot.healthzPort, '/healthz')).rejects.toThrow(/ECONNREFUSED/);
+    } finally {
+      await boot.cleanup();
+    }
+  });
+
   it('a malformed daemon.key (no payload segment / missing sub) rejects boot before any listener starts', async () => {
     // Both cases fail inside main() BEFORE any socket/port is bound, so there
     // is nothing to clean up beyond the temp dirs bootMain itself made before

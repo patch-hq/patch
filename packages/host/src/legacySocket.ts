@@ -7,7 +7,13 @@ import { lstatSync, symlinkSync, unlinkSync } from 'node:fs';
  * `daemon.sock` symlink beside it so those keep reaching it. Removed with the
  * old name once every host has updated.
  */
+/** A Windows named pipe path (`\\.\pipe\name`), which lives in no directory. */
+export function isNamedPipe(socketPath: string): boolean {
+  return socketPath.startsWith('\\\\.\\pipe\\');
+}
+
 export function linkLegacySocket(socketPath: string): void {
+  if (isNamedPipe(socketPath)) return;
   if (basename(socketPath) !== 'host.sock') return;
   const legacy = join(dirname(socketPath), 'daemon.sock');
   let st;
