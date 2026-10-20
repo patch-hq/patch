@@ -26,7 +26,7 @@ import { AGENT_SDK_PACKAGE } from './installPaths.js';
 import { encodeFolder, translateAttachment } from './history.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { isAccountExhaustedError } from './accountFailover.js';
-import { skillsReloader } from './projectSkills.js';
+import { discoverSkills, skillsReloader } from './projectSkills.js';
 import { McpSupervisor, MCP_START_TIMEOUT_MS, supervisorHooks } from './mcpSupervisor.js';
 import { createClaudeSessionStore } from './claudeSessionStore.js';
 import { readSidecar, type DocMode } from './docSidecar.js';
@@ -1812,6 +1812,22 @@ function oneShotPrompt(opts: SdkRunOptions): string | AsyncIterable<SDKUserMessa
   })();
 }
 
+/**
+ * The skills on disk that the process's `init` message does not list as slash
+ * commands: a process that read its skill list before a skill was added. Empty
+ * when the message is not an `init` or carries no `slash_commands`.
+ */
+export function skillsMissingFromInit(msg: unknown, cwd: string): string[] {
+  if (typeof msg !== 'object' || msg === null) return [];
+  const m = msg as Record<string, unknown>;
+  if (m['type'] !== 'system' || m['subtype'] !== 'init') return [];
+  const listed = m['slash_commands'];
+  if (!Array.isArray(listed)) return [];
+  return discoverSkills(cwd)
+    .map((s) => s.name)
+    .filter((n) => !listed.includes(n));
+}
+
 async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { query } = await loadSdk();
   const { env, mcpServers } = buildSdkEnv(opts);
@@ -1865,6 +1881,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const toolNames = new Map<string, string>();
   try {
     for await (const msg of q) {
+      // A process that listed its skills before one was added would answer
+      // "unknown command" for it; reload now, before the prompt is handled.
+      if (skillsMissingFromInit(msg, opts.cwd).length > 0) await q.reloadPlugins();
       const mismatch = permissionModeMismatch(msg, live.mode);
       assertResultNotAnError(msg);
       if (mismatch !== undefined) yield permissionModeMismatchEnvelope(live.mode, mismatch);
