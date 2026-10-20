@@ -56,6 +56,17 @@ describe('Settings → Prompts', () => {
     expect(screen.getByTestId('prompt-system')).toBeTruthy();
   });
 
+  it('writes the check-in interval, and ignores a value that is not a positive whole number', async () => {
+    const server = serve();
+    renderSettings('/settings/prompts');
+    const input = (await screen.findByTestId('watch-check-in-minutes')) as HTMLInputElement;
+    expect(input.value).toBe('60');
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.change(input, { target: { value: '2.5' } });
+    fireEvent.change(input, { target: { value: '15' } });
+    await waitFor(() => expect(server.writes).toEqual([{ watchCheckInMinutes: 15 }]));
+  });
+
   it('switches to Custom seeded with the default, saves, then goes back to the default', async () => {
     const server = serve();
     renderSettings('/settings/prompts');

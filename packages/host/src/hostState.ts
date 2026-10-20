@@ -112,6 +112,7 @@ const HostStateFile = z
      */
     goalEvalPrompt: z.string().min(1).optional(),
     watchCheckInPrompt: z.string().min(1).optional(),
+    watchCheckInMinutes: z.number().int().positive().optional(),
     goalModel: z.string().min(1).optional(),
     goalRefusalLimit: z.number().int().positive().optional(),
     /**

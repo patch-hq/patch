@@ -18,7 +18,10 @@ import {
 import { MeetingState } from './meeting.js';
 import { SnoozeRecord } from './snooze.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
-import { DEFAULT_WATCH_CHECK_IN_PROMPT } from './watch-check-in-prompt.js';
+import {
+  DEFAULT_WATCH_CHECK_IN_MINUTES,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
+} from './watch-check-in-prompt.js';
 import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
 import { PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
@@ -2043,6 +2046,8 @@ export const SharedSettings = z
     goalEvalPrompt: z.string().min(1),
     /** The check-in a running background task sends its agent; "Back to default" writes `DEFAULT_WATCH_CHECK_IN_PROMPT` back. */
     watchCheckInPrompt: z.string().min(1),
+    /** Minutes between check-ins for a background task that has not set its own. */
+    watchCheckInMinutes: z.number().int().positive(),
     /** The model that judges every chat's goal, whichever provider the chat runs on. */
     goalModel: z.string().min(1),
     /** Consecutive refusals after which a goal stops pushing the agent. */
@@ -2141,6 +2146,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
   goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT,
   watchCheckInPrompt: DEFAULT_WATCH_CHECK_IN_PROMPT,
+  watchCheckInMinutes: DEFAULT_WATCH_CHECK_IN_MINUTES,
   goalModel: DEFAULT_GOAL_MODEL,
   goalRefusalLimit: DEFAULT_GOAL_REFUSAL_LIMIT,
   quietHoursStart: '23:00',

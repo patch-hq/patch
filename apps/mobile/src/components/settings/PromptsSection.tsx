@@ -8,7 +8,44 @@ import { SettingsSection } from '../SettingsSection';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { LAYER_TITLE, TEXT_PROMPTS, type Layer } from './AgentBehaviorSection';
 import { SettingsPage } from './SettingsPage';
-import { Row, SettingsButton, WithSettings } from './ui';
+import { writePreferences } from './PreferenceSections';
+import { Field, Muted, Row, SettingsButton, WithSettings } from './ui';
+import type { AccountPreferences } from '../../api/rest';
+
+function CheckInInterval({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
+  const [minutes, setMinutes] = React.useState(String(preferences.watchCheckInMinutes));
+  React.useEffect(
+    () => setMinutes(String(preferences.watchCheckInMinutes)),
+    [preferences.watchCheckInMinutes],
+  );
+  return (
+    <Row
+      title="Background task check-in every"
+      right={
+        <>
+          <Field
+            testID="watch-check-in-minutes"
+            accessibilityLabel="Minutes between background task check-ins"
+            value={minutes}
+            onChangeText={setMinutes}
+            keyboardType="number-pad"
+            style={{ width: 56, textAlign: 'center' }}
+            onBlur={() => {
+              const next = Number(minutes.trim());
+              if (!Number.isInteger(next) || next < 1) {
+                setMinutes(String(preferences.watchCheckInMinutes));
+                return;
+              }
+              if (next !== preferences.watchCheckInMinutes)
+                writePreferences({ watchCheckInMinutes: next });
+            }}
+          />
+          <Muted>minutes</Muted>
+        </>
+      }
+    />
+  );
+}
 
 export function PromptsPage(): React.ReactElement {
   const router = useRouter();
@@ -43,6 +80,7 @@ export function PromptsPage(): React.ReactElement {
             (toolsDefault === '' || p.harnessToolsPrompt !== toolsDefault);
           return (
             <SettingsSection title="Prompts" testID="settings-prompts">
+              <CheckInInterval preferences={p} />
               {(Object.keys(TEXT_PROMPTS) as (keyof typeof TEXT_PROMPTS)[]).map((layer) =>
                 row(layer, p[TEXT_PROMPTS[layer].key] !== TEXT_PROMPTS[layer].fallback),
               )}

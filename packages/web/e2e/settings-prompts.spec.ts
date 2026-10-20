@@ -20,3 +20,10 @@ test('Prompts page: switch the check-in to Custom, save, and go back to the defa
     await expect(page.getByTestId(`prompt-${id}`)).toBeVisible();
   }
 });
+
+test('Prompts page: the check-in interval is written in minutes', async ({ page }) => {
+  const server = await stubSettingsApi(page);
+  await page.goto(settingsUrl('prompts'));
+  await page.getByTestId('watch-check-in-minutes').fill('15');
+  await expect.poll(() => server.patches).toContainEqual({ watchCheckInMinutes: 15 });
+});

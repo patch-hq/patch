@@ -627,6 +627,10 @@ describe('shared settings routes', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().preferences.watchCheckInPrompt).toBe('Still alive?');
       expect((await patch({ watchCheckInPrompt: '' })).statusCode).toBe(400);
+      expect(before.json().preferences.watchCheckInMinutes).toBe(60);
+      const mins = await patch({ watchCheckInMinutes: 15 });
+      expect(mins.json().preferences.watchCheckInMinutes).toBe(15);
+      expect((await patch({ watchCheckInMinutes: 0 })).statusCode).toBe(400);
     } finally {
       await built.app.close();
     }

@@ -86,6 +86,21 @@ describe('Settings → Prompts', () => {
     });
   });
 
+  it('writes the check-in interval, and ignores a value that is not a positive whole number', async () => {
+    const r = mount(<PromptsPage />);
+    await flush();
+    expect(get(r, 'watch-check-in-minutes').props.value).toBe('60');
+    await actAsync(() => get(r, 'watch-check-in-minutes').props.onChangeText('0'));
+    await actAsync(() => get(r, 'watch-check-in-minutes').props.onBlur());
+    expect(api.setPreferences).not.toHaveBeenCalled();
+    await actAsync(() => get(r, 'watch-check-in-minutes').props.onChangeText('15'));
+    await actAsync(async () => {
+      get(r, 'watch-check-in-minutes').props.onBlur();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ watchCheckInMinutes: 15 });
+  });
+
   it('marks an edited prompt Custom', async () => {
     seedSettings({
       preferences: { ...settingsFixture().preferences, watchCheckInPrompt: 'Mine.' },

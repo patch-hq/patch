@@ -14,7 +14,8 @@ import {
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
-import { Group, Pills, SettingsPage } from './ui.js';
+import { Group, Pills, Row, SettingsPage } from './ui.js';
+import { PositiveNumberInput } from './PositiveNumberInput.js';
 import { patchShared } from './sharedWrite.js';
 
 type Mode = 'default' | 'custom';
@@ -125,6 +126,18 @@ export function PromptsPage(): JSX.Element {
   return (
     <SettingsPage title="Prompts" testid="settings-prompts-page">
       <Group label="Prompts" testid="settings-prompts-group">
+        <Row title="Background task check-in every">
+          <PositiveNumberInput
+            integer
+            ariaLabel="Minutes between background task check-ins"
+            value={p.watchCheckInMinutes}
+            testid="watch-check-in-minutes"
+            onCommit={(next) =>
+              void patchShared('check-in interval', { watchCheckInMinutes: next })
+            }
+          />
+          <span className="set-unit">minutes</span>
+        </Row>
         <PromptRow
           id="watch-check-in"
           title="Background task check-in"

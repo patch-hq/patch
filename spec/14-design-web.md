@@ -1137,7 +1137,7 @@ nothing with no explanation.
 
 #### Prompts
 
-Its own page, right after Goals in the Agents group, listing every prompt Patch sends to an agent: the background-task check-in (`watchCheckInPrompt`, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in per task), the Manager sweep, the goal judge, link summary, job autonomy, the Patch tools guidance and the system prompt override. Each row says whether the text in force is the Default or a Custom version and shows it. Custom opens an editor seeded with the text in force; Save writes the shared setting; Default writes the built-in text back (`null` for tools guidance, `''` for the system prompt). The existing per-feature editors remain as shortcuts to the same settings. Mobile has the same page, opening the shared full-screen layer editor.
+Its own page, right after Goals in the Agents group, listing every prompt Patch sends to an agent: the background-task check-in (`watchCheckInPrompt`, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in per task), and above the list the minutes between check-ins (`watchCheckInMinutes`, default 60; a task that sets its own interval keeps it), the Manager sweep, the goal judge, link summary, job autonomy, the Patch tools guidance and the system prompt override. Each row says whether the text in force is the Default or a Custom version and shows it. Custom opens an editor seeded with the text in force; Save writes the shared setting; Default writes the built-in text back (`null` for tools guidance, `''` for the system prompt). The existing per-feature editors remain as shortcuts to the same settings. Mobile has the same page, opening the shared full-screen layer editor.
 
 #### Goals
 
