@@ -16,6 +16,14 @@ describe('stripWrappingQuotes', () => {
     expect(stripWrappingQuotes('“Foo” vs “Bar”')).toBe('“Foo” vs “Bar”');
   });
 
+  it('only treats an apostrophe-shaped mark between letters as an apostrophe', () => {
+    // A straight or curly double quote inside a word is still a quote mark,
+    // so the outer pair is not the only one and stays.
+    expect(stripWrappingQuotes('"a"b"')).toBe('"a"b"');
+    expect(stripWrappingQuotes('“Re”quote”')).toBe('“Re”quote”');
+    expect(stripWrappingQuotes('`x`y`')).toBe('`x`y`');
+  });
+
   it('strips wrapping quotes around text with an apostrophe in a word', () => {
     expect(stripWrappingQuotes("'It's fine'")).toBe("It's fine");
     expect(stripWrappingQuotes('‘Don’t panic’')).toBe('Don’t panic');
