@@ -68,3 +68,22 @@ describe('skillsReloader', () => {
     expect(reloads).toBe(2);
   });
 });
+
+describe('skillsMissingFromInit', () => {
+  it('names disk skills the init message does not list', async () => {
+    const { skillsMissingFromInit } = await import('../src/sdkBackend.js');
+    const init = { type: 'system', subtype: 'init', slash_commands: ['a'] };
+    const cwd = mkdtempSync(join(tmpdir(), 'patch-init-'));
+    expect(skillsMissingFromInit({ type: 'assistant' }, cwd)).toEqual([]);
+    expect(skillsMissingFromInit({ type: 'system', subtype: 'init' }, cwd)).toEqual([]);
+    const prev = process.env['HOME'];
+    process.env['HOME'] = home;
+    try {
+      write('a', '# a\n');
+      write('b', '# b\n');
+      expect(skillsMissingFromInit(init, cwd)).toEqual(['b']);
+    } finally {
+      process.env['HOME'] = prev;
+    }
+  });
+});
