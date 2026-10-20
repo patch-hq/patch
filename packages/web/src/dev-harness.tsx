@@ -2497,6 +2497,12 @@ const harnessSend = (event: WireEvent): void => {
     useMeetingStore.getState().apply(event.chatId, next);
     return;
   }
+  if (event.type === 'meeting.writeup_request') {
+    const cur = useMeetingStore.getState().byChat[event.chatId];
+    if (cur && event.writeup)
+      useMeetingStore.getState().apply(event.chatId, { ...cur, writeup: event.writeup });
+    return;
+  }
   if (event.type === 'meeting.research_request') {
     const cur = useMeetingStore.getState().byChat[event.chatId];
     if (cur) useMeetingStore.getState().apply(event.chatId, { ...cur, researchOn: event.on });
@@ -3319,6 +3325,27 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
             bullets: ['3 decisions · 5 actions'],
           }
         : null,
+    ...(meetingParam === 'ended'
+      ? {
+          nameFixes: [{ from: 'Weka', to: 'WECA' }],
+          writeup: {
+            title: 'Bus fund planning call',
+            sections: [
+              {
+                heading: 'Where we landed',
+                items: [
+                  { text: 'Go in positive and aligned with what WECA wants', mine: true },
+                  { text: 'Main lever is the capital pipeline, set in the next year' },
+                ],
+              },
+              {
+                heading: 'Open questions',
+                items: [{ text: 'How the forum sits alongside the bus users group' }],
+              },
+            ],
+          },
+        }
+      : {}),
     topics: [
       {
         id: 't1',

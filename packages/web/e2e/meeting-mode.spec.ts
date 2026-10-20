@@ -694,21 +694,163 @@ test.describe('meeting mode — live', () => {
 });
 
 test.describe('meeting mode — after', () => {
-  test('shows Ended + duration and a Summary in place of Now; pending actions stay; chat carries on', async ({
+  const URL_ENDED = '/app/dev-harness.html?chat=chat_tools&meeting=ended';
+
+  test('same layout as live: duration pill without Ended wording, people chip, Resume; chat stays open', async ({
     page,
   }) => {
-    await page.goto('/app/dev-harness.html?chat=chat_tools&meeting=ended');
-    await expect(page.getByTestId('meeting-pill')).toHaveText('Ended · 52 min');
-    await expect(page.getByTestId('meeting-now')).toContainText('Summary');
-    await expect(page.getByTestId('meeting-now')).toContainText(
-      'Ledger split goes ahead in November',
-    );
+    await page.goto(URL_ENDED);
+    await expect(page.getByTestId('meeting-pill')).toHaveText('52:00');
+    await expect(page.getByTestId('meeting-bar')).not.toContainText('Ended');
+    await expect(page.getByTestId('meeting-people')).toBeVisible();
+    await expect(page.getByTestId('meeting-resume')).toBeVisible();
     await expect(page.getByTestId('meeting-pause')).toHaveCount(0);
     await expect(page.getByTestId('meeting-end')).toHaveCount(0);
-    await expect(page.getByTestId('meeting-action')).toHaveCount(3);
+    await expect(page.getByTestId('meeting-drawer')).toHaveCount(0);
+    await expect(page.getByTestId('meeting-now')).toHaveCount(0);
     await expect(page.getByTestId('composer-input')).toBeEnabled();
-    // Ended: the button offers a new meeting, not End.
-    await expect(page.getByTestId('meeting-btn')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('meeting-card')).toHaveCount(3);
+  });
+
+  test('tabs are Summary, Points, My notes, Transcript plus the cog; Summary is first and open', async ({
+    page,
+  }) => {
+    await page.goto(URL_ENDED);
+    await expect(page.getByRole('tab')).toHaveText(['Summary', 'Points', 'My notes', 'Transcript']);
+    await expect(page.getByTestId('meeting-tab-summary')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('meeting-cog')).toBeVisible();
+    await page.getByTestId('meeting-tab-transcript').click();
+    await expect(
+      page.getByTestId('meeting-transcript').getByTestId('meeting-line').first(),
+    ).toBeVisible();
+    await page.getByTestId('meeting-tab-points').click();
+    await expect(page.getByTestId('meeting-points')).toBeVisible();
+  });
+
+  test('the actions tray is grouped Agent did / My actions / Other actions, others show the owner name', async ({
+    page,
+  }) => {
+    await page.goto(URL_ENDED);
+    await expect(page.getByTestId('meeting-actions-count')).toHaveText(
+      '1 agent did · 1 mine · 1 others',
+    );
+    const tray = page.getByTestId('meeting-actions');
+    await expect(tray.locator('.mm-tray-grp')).toHaveText([
+      'Agent did',
+      'My actions',
+      'Other actions',
+    ]);
+    await expect(page.getByTestId('meeting-action-owner-name')).toHaveText('Priya');
+    await expect(page.getByTestId('meeting-action-owner')).toHaveCount(0);
+    await expect(page.getByTestId('meeting-action-chat')).toHaveCount(1);
+    await expect(page.getByTestId('meeting-action-dismiss')).toHaveCount(1);
+  });
+
+  test('the Summary is the write-up: title, date and duration, Regenerate, Copy, headings', async ({
+    page,
+  }) => {
+    await page.goto(URL_ENDED);
+    await expect(page.getByTestId('meeting-writeup-title')).toHaveText('Bus fund planning call');
+    await expect(page.getByTestId('meeting-writeup-meta')).toContainText('52 min');
+    await expect(page.getByTestId('meeting-regenerate')).toBeVisible();
+    await expect(page.getByTestId('meeting-copy')).toBeVisible();
+    await expect(page.getByTestId('meeting-writeup-body').locator('h2')).toHaveText([
+      'Where we landed',
+      'Open questions',
+    ]);
+  });
+
+  test("Tom's notes are darker than generated text, and fixed names are underlined with the original", async ({
+    page,
+  }) => {
+    await page.goto(URL_ENDED);
+    const li = page.getByTestId('meeting-writeup-body').locator('li');
+    const ink = (i: number) => li.nth(i).evaluate((e) => getComputedStyle(e).color);
+    expect(await ink(0)).not.toBe(await ink(1));
+    const fixed = page.getByTestId('meeting-writeup-body').locator('.fixed');
+    await expect(fixed).toHaveText('WECA');
+    await expect(fixed).toHaveAttribute('title', 'was: Weka');
+    expect(await fixed.evaluate((e) => getComputedStyle(e).borderBottomStyle)).toBe('dotted');
+  });
+
+  test("editing the write-up saves it, and an edited line becomes Tom's", async ({ page }) => {
+    await page.goto(URL_ENDED);
+    await page.getByTestId('meeting-writeup-title').fill('Renamed call');
+    await page.getByTestId('meeting-writeup-body').locator('li').nth(1).click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' by March');
+    await page.getByTestId('meeting-writeup-title').click();
+    await expect
+      .poll(async () => (await sent(page, 'meeting.writeup_request')).length)
+      .toBeGreaterThan(0);
+    const last = (await sent(page, 'meeting.writeup_request')).at(-1) as unknown as {
+      writeup: { title: string; sections: { items: { text: string; mine?: boolean }[] }[] };
+    };
+    expect(last.writeup.title).toBe('Renamed call');
+    expect(last.writeup.sections[0]!.items[1]).toEqual({
+      text: 'Main lever is the capital pipeline, set in the next year by March',
+      mine: true,
+    });
+    expect(last.writeup.sections[1]!.items[0]).toEqual({
+      text: 'How the forum sits alongside the bus users group',
+    });
+  });
+
+  test('Regenerate asks the host to write it again and waits for the answer', async ({ page }) => {
+    await page.goto(URL_ENDED);
+    await page.getByTestId('meeting-regenerate').click();
+    expect(await sent(page, 'meeting.writeup_request')).toMatchObject([
+      { chatId: 'chat_tools', regenerate: true },
+    ]);
+    await expect(page.getByTestId('meeting-regenerate')).toHaveText('Writing…');
+    await page.evaluate(() => {
+      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+      const m = store.getState().byChat['chat_tools'];
+      store.getState().apply('chat_tools', { ...m, writeup: { title: 'Second go', sections: [] } });
+    });
+    await expect(page.getByTestId('meeting-regenerate')).toHaveText('Regenerate');
+    await expect(page.getByTestId('meeting-writeup-title')).toHaveText('Second go');
+  });
+
+  test('a failed write-up says so, and a missing one says it is being written', async ({
+    page,
+  }) => {
+    await page.goto(URL_ENDED);
+    await page.evaluate(() => {
+      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+      const m = store.getState().byChat['chat_tools'];
+      store.getState().apply('chat_tools', { ...m, writeup: null });
+    });
+    await expect(page.getByTestId('meeting-writeup-wait')).toBeVisible();
+    await page.evaluate(() => {
+      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+      const m = store.getState().byChat['chat_tools'];
+      store.getState().apply('chat_tools', { ...m, writeupError: 'write-up failed: model down' });
+    });
+    await expect(page.getByTestId('meeting-writeup-error')).toContainText('model down');
+    await expect(page.getByTestId('meeting-writeup-wait')).toHaveCount(0);
+  });
+
+  test('a meeting that just ended opens on the Summary', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await page.evaluate(() => {
+      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+      const m = store.getState().byChat['chat_tools'];
+      store.getState().apply('chat_tools', { ...m, status: 'ended', writeup: null });
+    });
+    await expect(page.getByTestId('meeting-tab-summary')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('meeting-writeup-wait')).toBeVisible();
+  });
+
+  test('Resume starts listening again and asks the host to resume', async ({ page }) => {
+    await page.goto(URL_ENDED);
+    await page.getByTestId('meeting-resume').click();
+    await expect
+      .poll(async () => (await sent(page, 'meeting.control_request')).length)
+      .toBeGreaterThan(0);
+    expect((await sent(page, 'meeting.control_request')).at(-1)).toMatchObject({
+      action: 'resume',
+    });
   });
 });
 

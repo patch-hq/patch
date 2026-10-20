@@ -27,6 +27,7 @@ import {
   MeetingNotesOp,
   MeetingSettings,
   MeetingState,
+  MeetingWriteup,
 } from './meeting.js';
 import { SnoozeRecord } from './snooze.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
@@ -3761,6 +3762,17 @@ export const MeetingMyNotesRequestEvent = z
   })
   .strict();
 export type MeetingMyNotesRequestEvent = z.infer<typeof MeetingMyNotesRequestEvent>;
+
+/** Surface → host: edit the final write-up (`writeup` replaces it) or write it again (`regenerate`). Exactly one. */
+export const MeetingWriteupRequestEvent = z
+  .object({
+    type: z.literal('meeting.writeup_request'),
+    chatId: z.string().min(1),
+    writeup: MeetingWriteup.optional(),
+    regenerate: z.literal(true).optional(),
+  })
+  .strict();
+export type MeetingWriteupRequestEvent = z.infer<typeof MeetingWriteupRequestEvent>;
 
 /** Host → surfaces: the chat's full meeting state (`null` = no meeting). */
 export const MeetingStateEvent = z
@@ -8529,6 +8541,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   MeetingActionRequestEvent,
   MeetingNotesRequestEvent,
   MeetingMyNotesRequestEvent,
+  MeetingWriteupRequestEvent,
   MeetingResearchRequestEvent,
   MeetingStateEvent,
   ChatArchiveRequestEvent,
@@ -8817,6 +8830,7 @@ export const EVENT_SCHEMAS = {
   'meeting.action_request': MeetingActionRequestEvent,
   'meeting.notes_request': MeetingNotesRequestEvent,
   'meeting.my_notes_request': MeetingMyNotesRequestEvent,
+  'meeting.writeup_request': MeetingWriteupRequestEvent,
   'meeting.research_request': MeetingResearchRequestEvent,
   'meeting.state': MeetingStateEvent,
   'chat.archive_request': ChatArchiveRequestEvent,

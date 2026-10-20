@@ -13624,6 +13624,66 @@ select.new-chat-account:focus-visible {
 .mm-wait {
   color: var(--ink-3);
 }
+/* The final write-up: Tom's words in --ink, generated text in --ink-2. */
+.mm-sum {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 14px 18px;
+  background: var(--bg-elevated);
+}
+.mm-sum * {
+  overflow-wrap: anywhere;
+}
+.mm-sum h1 {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 500;
+  font-size: 20px;
+  margin: 0 0 2px;
+  outline: 0;
+}
+.mm-sum .meta {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.mm-sum .tools {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.mm-sum .body {
+  outline: 0;
+}
+.mm-sum h2 {
+  font-size: 14px;
+  margin: 14px 0 4px;
+}
+.mm-sum ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+  font-size: 14px;
+  list-style: disc;
+}
+.mm-sum li {
+  display: list-item;
+}
+.mm-sum li.mine {
+  color: var(--ink);
+}
+.mm-sum .fixed {
+  border-bottom: 1px dotted var(--accent);
+}
+.mm-act-owner-name {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.mm-transcript {
+  flex: 1;
+  padding: 14px 18px;
+  overflow-y: auto;
+}
 /* My notes: Tom's own words, in the darkest ink. */
 .mm-mynotes {
   flex: 1;

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import {
   learnedTerms,
+  nameFixes,
   termsFromTranscript,
   uniqueTerms,
   vocabularyPrompt,
@@ -38,6 +39,7 @@ import {
   DEFAULT_MEETING_RESEARCH_SECONDS,
   type MeetingNow,
   MeetingState,
+  MeetingWriteup,
   type MeetingSummary,
   type MeetingTopic,
   type WireEvent,
@@ -48,6 +50,8 @@ export const MEETING_ANALYSE_INTERVAL_MS = DEFAULT_MEETING_SETTINGS.analyseSecon
 const MAX_LIVE_CHARS = 300;
 /** Transcript kept on the state; the oldest lines roll off past this. */
 const MAX_TRANSCRIPT_LINES = 4000;
+/** Most name corrections kept for the write-up's tooltips. */
+const NAME_FIX_LIMIT = 200;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
@@ -131,6 +135,20 @@ export interface AnalyseInput {
   prompts: MeetingPrompts;
 }
 
+export interface WriteupInput {
+  chatId: string;
+  /** Meeting date, e.g. "20 Oct". */
+  date: string;
+  durationMinutes: number;
+  /** The whole cleaned transcript. */
+  lines: { clock: string; speaker: string; text: string }[];
+  /** Tom's own notes, verbatim; the write-up keeps his words and marks them `mine`. */
+  myNotes: string;
+  /** The points the live pass built, for emphasis only; the transcript is the source. */
+  points: string[];
+  prompts: MeetingPrompts;
+}
+
 export interface CorrectInput {
   chatId: string;
   /** Terms the user wants spelt a particular way; each entry may list mishearings after a colon. */
@@ -174,6 +192,11 @@ export interface MeetingDeps {
    * Omitted: transcripts go to analysis as transcribed.
    */
   correct?: (input: CorrectInput) => Promise<string[]>;
+  /**
+   * The final write-up, written when the meeting ends and on Regenerate.
+   * Omitted: no write-up is made and the Summary tab says so.
+   */
+  writeup?: (input: WriteupInput) => Promise<MeetingWriteup>;
   /** Live research: one model plus web search over new transcript. Omitted: no research. */
   research?: (input: ResearchInput) => Promise<MeetingResearchResult>;
   /** Least seconds between research passes, read fresh so a Settings change applies mid-meeting. */
@@ -329,8 +352,14 @@ export class MeetingManager {
     this.commit(chatId, rt);
   }
 
+  /** Resumes a paused meeting, or reopens one that has ended (its write-up stays until it ends again). */
   resume(chatId: string): void {
-    const rt = this.requireStatus(chatId, 'paused');
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (rt.state.status === 'live') {
+      throw new MeetingError(`chat ${chatId}'s meeting is live, not paused or ended`);
+    }
+    delete rt.state.endedAt;
     rt.state.status = 'live';
     rt.state.resumedAt = this.now();
     this.armTimer(chatId, rt);
@@ -350,7 +379,61 @@ export class MeetingManager {
     rt.state.endedAt = t;
     this.disarmTimer(rt);
     this.commit(chatId, rt);
-    await this.enqueue(rt, () => this.analyse(chatId, rt, true));
+    await this.enqueue(rt, async () => {
+      await this.analyse(chatId, rt, true);
+      await this.writeUp(chatId, rt);
+    });
+  }
+
+  /** Writes the final write-up again from the transcript and My notes as they are now. */
+  async regenerateWriteup(chatId: string): Promise<void> {
+    const rt = this.requireStatus(chatId, 'ended');
+    await this.enqueue(rt, () => this.writeUp(chatId, rt));
+  }
+
+  /** Stores the user's edited write-up. Their wording is theirs: it is marked `mine`. */
+  setWriteup(chatId: string, writeup: MeetingWriteup): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    rt.state.writeup = MeetingWriteup.parse(writeup);
+    this.commit(chatId, rt);
+  }
+
+  private async writeUp(chatId: string, rt: Runtime): Promise<void> {
+    if (!this.deps.writeup) {
+      rt.state.writeupError = 'no write-up generator is configured on this host';
+      this.commit(chatId, rt);
+      return;
+    }
+    const s = rt.state;
+    try {
+      const w = await this.deps.writeup({
+        chatId,
+        date: new Date(s.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+        durationMinutes: Math.max(1, Math.round(s.elapsedBaseMs / 60_000)),
+        lines: s.transcript.map((l) => ({
+          clock: formatMeetingClock(l.at),
+          speaker: meetingSpeakerLabel(l, s.voices),
+          text: l.text,
+        })),
+        myNotes: s.myNotes ?? '',
+        points: s.topics.map((t) => t.title),
+        prompts: this.deps.prompts(),
+      });
+      const parsed = MeetingWriteup.parse(w);
+      if (
+        META_TEXT.test(
+          `${parsed.title} ${parsed.sections.flatMap((x) => x.items.map((i) => i.text)).join(' ')}`,
+        )
+      )
+        throw new MeetingError(`write-up returned model commentary: ${parsed.title}`);
+      s.writeup = parsed;
+      s.writeupError = null;
+    } catch (err) {
+      s.writeupError = `write-up failed: ${(err as Error).message}`;
+      this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: write-up failed');
+    }
+    this.commit(chatId, rt);
   }
 
   // ---- audio ----
@@ -880,6 +963,13 @@ export class MeetingManager {
       rt.vocab.learned = uniqueTerms([...rt.vocab.learned, ...learnedTerms(l.text, fixed)]).slice(
         -LEARNED_LIMIT,
       );
+      const found = nameFixes(l.text, fixed);
+      if (found.length > 0) {
+        const have = rt.state.nameFixes ?? [];
+        for (const f of found)
+          if (!have.some((x) => x.from === f.from && x.to === f.to)) have.push(f);
+        rt.state.nameFixes = have.slice(-NAME_FIX_LIMIT);
+      }
       l.text = fixed;
     });
     rt.correctedUpTo = rt.state.transcript.length;

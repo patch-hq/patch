@@ -33,7 +33,11 @@ import {
   pauseMeeting,
   requestMeeting,
   resumeMeeting,
+  resumeEndedMeeting,
+  saveWriteup,
+  regenerateWriteup,
 } from '../lib/meetingControl.js';
+import { writeupBodyHtml, writeupFromBody, writeupText } from '../lib/meetingWriteup.js';
 import { useMeetingStore, type MeetingPromptKey } from '../stores/meetingStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import type { AccountPreferences } from '../api/rest.js';
@@ -160,6 +164,33 @@ function participantsOf(meeting: MeetingState): string[] {
   return names;
 }
 
+/** A line's speaker; an unnamed voice is a button that asks who it is. */
+function SpeakerName({
+  chatId,
+  meeting,
+  line: l,
+}: {
+  chatId: string;
+  meeting: MeetingState;
+  line: MeetingState['transcript'][number];
+}) {
+  if (l.voice === undefined || l.name !== undefined)
+    return <b>{meetingSpeakerLabel(l, meeting.voices)}</b>;
+  return (
+    <button
+      type="button"
+      className="mm-voice"
+      data-testid="meeting-voice"
+      onClick={() => {
+        const name = window.prompt('Who is this?', meeting.voices?.[String(l.voice)] ?? '');
+        if (name && name.trim() !== '') nameMeetingVoice(chatId, l.voice!, name.trim());
+      }}
+    >
+      <b>{meetingSpeakerLabel(l, meeting.voices)}</b>
+    </button>
+  );
+}
+
 const TAP_PX = 4;
 const MAX_DRAWER = 0.75;
 
@@ -185,7 +216,6 @@ function TranscriptDrawer({
   const open = height !== null;
   const last = meeting.transcript.at(-1);
   const speaker = last ? meetingSpeakerLabel(last, meeting.voices) : null;
-  const ended = meeting.status === 'ended';
   const liveText = meeting.live ?? last?.text ?? null;
 
   /** Tallest the drawer may be, so the whole bar stays within 75% of the window. */
@@ -238,7 +268,7 @@ function TranscriptDrawer({
   return (
     <div className="mm-drawer" data-testid="meeting-drawer" data-open={open}>
       <div className="mm-label" data-testid="meeting-now-label">
-        {ended ? 'Transcript' : speaker ? `Now · ${speaker}` : 'Now'}
+        {speaker ? `Now · ${speaker}` : 'Now'}
       </div>
       {open ? (
         <div
@@ -256,26 +286,7 @@ function TranscriptDrawer({
             >
               <span className="tm">{formatMeetingClock(l.at)}</span>
               <span>
-                {l.voice !== undefined && l.name === undefined ? (
-                  <button
-                    type="button"
-                    className="mm-voice"
-                    data-testid="meeting-voice"
-                    onClick={() => {
-                      const name = window.prompt(
-                        'Who is this?',
-                        meeting.voices?.[String(l.voice)] ?? '',
-                      );
-                      if (name && name.trim() !== '')
-                        nameMeetingVoice(chatId, l.voice!, name.trim());
-                    }}
-                  >
-                    <b>{meetingSpeakerLabel(l, meeting.voices)}</b>
-                  </button>
-                ) : (
-                  <b>{meetingSpeakerLabel(l, meeting.voices)}</b>
-                )}{' '}
-                {l.text}
+                <SpeakerName chatId={chatId} meeting={meeting} line={l} /> {l.text}
               </span>
             </div>
           ))}
@@ -286,7 +297,7 @@ function TranscriptDrawer({
             <>
               {speaker ? <b>{speaker}</b> : null} {liveText}
             </>
-          ) : ended ? null : (
+          ) : (
             <span className="mm-wait">Listening…</span>
           )}
         </div>
@@ -322,7 +333,7 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
       <div className="mm-head">
         {meeting.status === 'ended' ? (
           <span className="mm-pill ended" data-testid="meeting-pill">
-            Ended · {Math.max(1, Math.round(elapsed / 60_000))} min
+            {formatMeetingClock(elapsed)}
           </span>
         ) : (
           <span className="mm-pill" data-testid="meeting-pill">
@@ -346,12 +357,14 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
             Pause
           </button>
         ) : null}
-        {meeting.status === 'paused' ? (
+        {meeting.status !== 'live' ? (
           <button
             type="button"
             className="mm-btn"
             data-testid="meeting-resume"
-            onClick={() => resumeMeeting(chatId)}
+            onClick={() =>
+              meeting.status === 'ended' ? void resumeEndedMeeting(chatId) : resumeMeeting(chatId)
+            }
           >
             Resume
           </button>
@@ -387,24 +400,9 @@ export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: Meeti
         </div>
       ) : null}
 
-      <TranscriptDrawer chatId={chatId} meeting={meeting} barRef={barRef} />
-      {meeting.status === 'ended' ? (
-        <div className="mm-now" data-testid="meeting-now">
-          <div className="mm-label">Summary</div>
-          {meeting.summary ? (
-            <>
-              <h4>{meeting.summary.headline}</h4>
-              <ul>
-                {meeting.summary.bullets.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <h4 className="mm-wait">No summary</h4>
-          )}
-        </div>
-      ) : null}
+      {meeting.status === 'ended' ? null : (
+        <TranscriptDrawer chatId={chatId} meeting={meeting} barRef={barRef} />
+      )}
     </section>
   );
 }
@@ -456,7 +454,14 @@ function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: Mee
   );
 }
 
-type PanelTab = 'points' | 'notes';
+type PanelTab = 'summary' | 'points' | 'notes' | 'transcript';
+
+const TAB_LABEL: Record<PanelTab, string> = {
+  summary: 'Summary',
+  points: 'Points',
+  notes: 'My notes',
+  transcript: 'Transcript',
+};
 
 /** Newest point is level 0, then the next three, then older ones fade to a single line. */
 function taperLevel(i: number): 0 | 1 | 2 | 3 {
@@ -713,9 +718,158 @@ function MyNotes({ chatId, saved }: { chatId: string; saved: string }) {
   );
 }
 
+/** The whole transcript, earliest first: the one place to read it once the call is over. */
+function TranscriptList({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  return (
+    <div className="mm-lines mm-transcript" data-testid="meeting-transcript">
+      {meeting.transcript.length === 0 ? <div className="mm-wait">No transcript</div> : null}
+      {meeting.transcript.map((l, i) => (
+        <div key={i} data-testid="meeting-line" className="mm-ln">
+          <span className="tm">{formatMeetingClock(l.at)}</span>
+          <span>
+            <SpeakerName chatId={chatId} meeting={meeting} line={l} /> {l.text}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The final write-up: editable title, date and duration, Regenerate and Copy,
+ * and a body of short headings. Tom's words are dark ink, generated text is
+ * softer, and names the clean-up pass fixed are underlined with the original on hover.
+ */
+function WriteupView({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const w = meeting.writeup ?? null;
+  const fixes = meeting.nameFixes ?? [];
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [waiting, setWaiting] = useState(false);
+  const meta = `${new Date(meeting.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · ${Math.max(1, Math.round(meeting.elapsedBaseMs / 60_000))} min`;
+  const html = useMemo(() => (w ? writeupBodyHtml(w, fixes) : ''), [w, fixes]);
+
+  // A new write-up from the host ends the wait; so does a failure.
+  useEffect(() => setWaiting(false), [meeting.writeup, meeting.writeupError]);
+  // Draw the host's version unless Tom is typing in it.
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (body && !body.contains(document.activeElement) && body.innerHTML !== html)
+      body.innerHTML = html;
+    const title = titleRef.current;
+    if (title && document.activeElement !== title && title.textContent !== (w?.title ?? ''))
+      title.textContent = w?.title ?? '';
+  }, [html, w]);
+
+  const read = () =>
+    writeupFromBody(
+      titleRef.current?.textContent ?? '',
+      bodyRef.current ?? document.createElement('div'),
+    );
+  const flush = () => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    if (w) saveWriteup(chatId, read());
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const later = () => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 600);
+  };
+
+  const failure = meeting.writeupError;
+  return (
+    <div className="mm-sum" data-testid="meeting-summary">
+      {failure ? (
+        <div className="mm-error" role="alert" data-testid="meeting-writeup-error">
+          {failure}
+        </div>
+      ) : null}
+      {w ? (
+        <>
+          <h1
+            ref={titleRef}
+            data-testid="meeting-writeup-title"
+            role="textbox"
+            aria-label="Title"
+            contentEditable="plaintext-only"
+            suppressContentEditableWarning
+            onInput={later}
+            onBlur={flush}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
+          />
+          <div className="meta" data-testid="meeting-writeup-meta">
+            {meta}
+          </div>
+        </>
+      ) : null}
+      <div className="tools">
+        <button
+          type="button"
+          className="mm-btn"
+          data-testid="meeting-regenerate"
+          disabled={waiting}
+          onClick={() => {
+            setWaiting(true);
+            regenerateWriteup(chatId);
+          }}
+        >
+          {waiting ? 'Writing…' : 'Regenerate'}
+        </button>
+        {w ? (
+          <button
+            type="button"
+            className="mm-btn"
+            data-testid="meeting-copy"
+            onClick={() => void navigator.clipboard.writeText(writeupText(read(), meta))}
+          >
+            Copy
+          </button>
+        ) : null}
+      </div>
+      {w ? (
+        <div
+          ref={bodyRef}
+          className="body"
+          data-testid="meeting-writeup-body"
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Write-up"
+          contentEditable
+          suppressContentEditableWarning
+          spellCheck
+          onInput={later}
+          onBlur={flush}
+        />
+      ) : failure ? null : (
+        <div className="mm-wait" data-testid="meeting-writeup-wait">
+          Writing the summary…
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Right-hand panel: Points and My notes, with a cog for the meeting's settings. */
 export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const [tab, setTab] = useState<PanelTab>('points');
+  const ended = meeting.status === 'ended';
+  const [tab, setTab] = useState<PanelTab>(ended ? 'summary' : 'points');
+  // The write-up is what Tom wants when a meeting ends; resuming goes back to the live tabs.
+  const wasEnded = useRef(ended);
+  useEffect(() => {
+    if (ended === wasEnded.current) return;
+    wasEnded.current = ended;
+    setTab(ended ? 'summary' : 'points');
+  }, [ended]);
+  const tabs: PanelTab[] = ended
+    ? ['summary', 'points', 'notes', 'transcript']
+    : ['points', 'notes'];
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
   const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
   const topics = useMemo(() => [...meeting.topics].sort((a, b) => b.at - a.at), [meeting.topics]);
@@ -724,7 +878,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
   return (
     <aside className="mm-panel" data-testid="meeting-panel" data-status={meeting.status}>
       <div className="mm-tabs" role="tablist">
-        {(['points', 'notes'] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             type="button"
@@ -737,7 +891,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
               setSettingsOpen(false);
             }}
           >
-            {t === 'points' ? 'Points' : 'My notes'}
+            {TAB_LABEL[t]}
           </button>
         ))}
         <span style={{ flex: 1 }} />
@@ -769,6 +923,10 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
 
       {settingsOpen ? (
         <MeetingSettingsPane chatId={chatId} meeting={meeting} />
+      ) : tab === 'summary' && ended ? (
+        <WriteupView chatId={chatId} meeting={meeting} />
+      ) : tab === 'transcript' && ended ? (
+        <TranscriptList chatId={chatId} meeting={meeting} />
       ) : tab === 'points' ? (
         <div className="mm-points" data-testid="meeting-points">
           {topics.length === 0 ? <div className="mm-wait">No points yet</div> : null}
@@ -934,11 +1092,14 @@ function ActionRow({
   action,
   speakers,
   agentRuns,
+  ended,
 }: {
   chatId: string;
   action: MeetingAction;
   speakers: string[];
   agentRuns: boolean;
+  /** After the meeting: others' actions show the owner's name, and nothing but Tom's can be dismissed. */
+  ended: boolean;
 }) {
   const owners =
     action.owner && !speakers.includes(action.owner) ? [action.owner, ...speakers] : speakers;
@@ -952,7 +1113,11 @@ function ActionRow({
       <span className="mm-act-t" title={action.why !== '' ? action.why : undefined}>
         {action.title}
       </span>
-      {action.kind === 'other' ? (
+      {action.kind === 'other' && ended ? (
+        <span className="mm-act-owner-name" data-testid="meeting-action-owner-name">
+          {action.owner}
+        </span>
+      ) : action.kind === 'other' ? (
         <select
           className="mm-act-owner"
           data-testid="meeting-action-owner"
@@ -985,7 +1150,7 @@ function ActionRow({
         >
           Start chat
         </button>
-      ) : action.kind === 'agent' && !agentRuns ? (
+      ) : action.kind === 'agent' && !agentRuns && !ended ? (
         <button
           type="button"
           className="mm-act-btn"
@@ -995,16 +1160,18 @@ function ActionRow({
           Run
         </button>
       ) : null}
-      <button
-        type="button"
-        className="mm-act-x"
-        data-testid="meeting-action-dismiss"
-        aria-label="Dismiss"
-        title="Dismiss"
-        onClick={() => decideAction(chatId, action.id, 'dismiss')}
-      >
-        ✕
-      </button>
+      {ended && action.kind !== 'mine' ? null : (
+        <button
+          type="button"
+          className="mm-act-x"
+          data-testid="meeting-action-dismiss"
+          aria-label="Dismiss"
+          title="Dismiss"
+          onClick={() => decideAction(chatId, action.id, 'dismiss')}
+        >
+          ✕
+        </button>
+      )}
     </div>
   );
 }
@@ -1047,7 +1214,17 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
         >
           <span className="mm-tray-label">Actions</span>
           <span className="mm-tray-count" data-testid="meeting-actions-count">
-            <b>{mine.length}</b> mine · <b>{others.length}</b> others · <b>{agent.length}</b> agent
+            {ended ? (
+              <>
+                <b>{agent.length}</b> agent did · <b>{mine.length}</b> mine · <b>{others.length}</b>{' '}
+                others
+              </>
+            ) : (
+              <>
+                <b>{mine.length}</b> mine · <b>{others.length}</b> others · <b>{agent.length}</b>{' '}
+                agent
+              </>
+            )}
           </span>
         </button>
         <input
@@ -1080,6 +1257,7 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
                     action={a}
                     speakers={speakers}
                     agentRuns={agentRuns}
+                    ended={ended}
                   />
                 ))}
               </div>
