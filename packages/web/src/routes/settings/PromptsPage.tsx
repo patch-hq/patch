@@ -119,6 +119,86 @@ function PromptRow({
   );
 }
 
+/** The meeting's models and timing, shared by this page and the in-meeting cog. */
+export function MeetingModelRows(): JSX.Element {
+  const p = usePreferencesStore((s) => s.preferences);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const update = usePreferencesStore((s) => s.update);
+  const pushError = useUiStore((s) => s.pushError);
+  const analysisModel = useModelOptions(p.meetingAnalysisModel);
+  const cleanupModel = useModelOptions(p.meetingCleanupModel);
+  const write = (patch: Parameters<typeof update>[0]): void => {
+    void update(patch).catch((e: Error) => pushError(failed('settings'), undefined, e.message));
+  };
+  return (
+    <>
+      <Row title="Analysis model">
+        <select
+          aria-label="Meeting analysis model"
+          value={p.meetingAnalysisModel}
+          disabled={!loaded}
+          data-testid="meeting-analysis-model"
+          onChange={(e) => write({ meetingAnalysisModel: e.target.value })}
+        >
+          {analysisModel.options.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <span className="set-unit">writes the live notes</span>
+      </Row>
+      <Row title="Clean-up model">
+        <select
+          aria-label="Meeting clean-up model"
+          value={p.meetingCleanupModel}
+          disabled={!loaded}
+          data-testid="meeting-cleanup-model"
+          onChange={(e) => write({ meetingCleanupModel: e.target.value })}
+        >
+          {cleanupModel.options.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <span className="set-unit">repairs mis-heard names before the notes</span>
+      </Row>
+      <Row title="Transcription model">
+        <input
+          type="text"
+          aria-label="Meeting transcription model"
+          key={p.meetingTranscriptionModel}
+          defaultValue={p.meetingTranscriptionModel}
+          placeholder="Host default"
+          disabled={!loaded}
+          data-testid="meeting-transcription-model"
+          onBlur={(e) => {
+            const next = e.target.value.trim();
+            if (next !== p.meetingTranscriptionModel) write({ meetingTranscriptionModel: next });
+          }}
+        />
+        <span className="set-unit">
+          model directory (local) or Groq model name; empty is the host's
+        </span>
+      </Row>
+      <Row title="Analyse every">
+        <PositiveNumberInput
+          integer
+          ariaLabel="Seconds between meeting analysis passes at Normal speed"
+          value={p.meetingAnalyseSeconds}
+          disabled={!loaded}
+          testid="meeting-analyse-seconds"
+          onCommit={(next) => {
+            if (next >= 5 && next <= 300) write({ meetingAnalyseSeconds: next });
+          }}
+        />
+        <span className="set-unit">seconds, at Normal speed (5–300)</span>
+      </Row>
+    </>
+  );
+}
+
 export function PromptsPage(): JSX.Element {
   const p = usePreferencesStore((s) => s.preferences);
   // The tools guidance default is the host's own text.
@@ -128,14 +208,6 @@ export function PromptsPage(): JSX.Element {
         ?.harnessToolsPromptDefault ?? '',
   );
   const tools = p.harnessToolsPrompt ?? toolsDefault;
-  const loaded = usePreferencesStore((s) => s.loaded);
-  const update = usePreferencesStore((s) => s.update);
-  const pushError = useUiStore((s) => s.pushError);
-  const analysisModel = useModelOptions(p.meetingAnalysisModel);
-  const cleanupModel = useModelOptions(p.meetingCleanupModel);
-  const write = (patch: Parameters<typeof update>[0]): void => {
-    void update(patch).catch((e: Error) => pushError(failed('settings'), undefined, e.message));
-  };
 
   return (
     <SettingsPage title="Prompts" testid="settings-prompts-page">
@@ -213,69 +285,7 @@ export function PromptsPage(): JSX.Element {
         />
       </Group>
       <Group label="Meetings" testid="settings-prompts-meetings">
-        <Row title="Analysis model">
-          <select
-            aria-label="Meeting analysis model"
-            value={p.meetingAnalysisModel}
-            disabled={!loaded}
-            data-testid="meeting-analysis-model"
-            onChange={(e) => write({ meetingAnalysisModel: e.target.value })}
-          >
-            {analysisModel.options.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <span className="set-unit">writes the live notes</span>
-        </Row>
-        <Row title="Clean-up model">
-          <select
-            aria-label="Meeting clean-up model"
-            value={p.meetingCleanupModel}
-            disabled={!loaded}
-            data-testid="meeting-cleanup-model"
-            onChange={(e) => write({ meetingCleanupModel: e.target.value })}
-          >
-            {cleanupModel.options.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <span className="set-unit">repairs mis-heard names before the notes</span>
-        </Row>
-        <Row title="Transcription model">
-          <input
-            type="text"
-            aria-label="Meeting transcription model"
-            key={p.meetingTranscriptionModel}
-            defaultValue={p.meetingTranscriptionModel}
-            placeholder="Host default"
-            disabled={!loaded}
-            data-testid="meeting-transcription-model"
-            onBlur={(e) => {
-              const next = e.target.value.trim();
-              if (next !== p.meetingTranscriptionModel) write({ meetingTranscriptionModel: next });
-            }}
-          />
-          <span className="set-unit">
-            model directory (local) or Groq model name; empty is the host's
-          </span>
-        </Row>
-        <Row title="Analyse every">
-          <PositiveNumberInput
-            integer
-            ariaLabel="Seconds between meeting analysis passes at Normal speed"
-            value={p.meetingAnalyseSeconds}
-            disabled={!loaded}
-            testid="meeting-analyse-seconds"
-            onCommit={(next) => {
-              if (next >= 5 && next <= 300) write({ meetingAnalyseSeconds: next });
-            }}
-          />
-          <span className="set-unit">seconds, at Normal speed (5–300)</span>
-        </Row>
+        <MeetingModelRows />
         <PromptRow
           id="meeting-now"
           title="Meeting: Now"

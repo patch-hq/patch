@@ -13,6 +13,10 @@ interface MeetingStoreState {
   capturingChatId: string | null;
   /** Which meeting prompt the in-call editor is open on, if any. */
   promptEditor: MeetingPromptKey | null;
+  /** Whether the right panel shows the meeting's settings (the cog) instead of its tab. */
+  settingsOpen: boolean;
+  setSettingsOpen(open: boolean): void;
+  /** Opens the settings on one prompt; null closes the prompt editor and leaves the settings open. */
   openPromptEditor(key: MeetingPromptKey | null): void;
   apply(chatId: string, meeting: MeetingState | null): void;
   setCapturing(chatId: string | null): void;
@@ -23,10 +27,13 @@ export const useMeetingStore = create<MeetingStoreState>((set) => ({
   byChat: {},
   capturingChatId: null,
   promptEditor: null,
-  openPromptEditor: (promptEditor) => set({ promptEditor }),
+  settingsOpen: false,
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  openPromptEditor: (promptEditor) =>
+    set(promptEditor ? { promptEditor, settingsOpen: true } : { promptEditor }),
   apply: (chatId, meeting) => set((s) => ({ byChat: { ...s.byChat, [chatId]: meeting } })),
   setCapturing: (capturingChatId) => set({ capturingChatId }),
-  reset: () => set({ byChat: {}, capturingChatId: null, promptEditor: null }),
+  reset: () => set({ byChat: {}, capturingChatId: null, promptEditor: null, settingsOpen: false }),
 }));
 
 /** A meeting that is still running (live or paused). */

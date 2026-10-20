@@ -13461,11 +13461,11 @@ select.new-chat-account:focus-visible {
 }
 .mm-bar {
   flex: none;
-  max-height: 40%;
-  overflow: auto;
+  position: relative;
+  z-index: 5;
   border-bottom: 1px solid var(--line-soft);
   background: var(--bg-panel);
-  padding: 12px 20px;
+  padding: 12px 20px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -13492,8 +13492,8 @@ select.new-chat-account:focus-visible {
   min-height: 0;
 }
 .mm-points {
-  flex: none;
-  max-height: 45%;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 @media (max-width: 800px) {
@@ -13511,7 +13511,7 @@ select.new-chat-account:focus-visible {
   }
 }
 .mm-label {
-  font-size: var(--text-min);
+  font-size: 11px;
   font-weight: 600;
   color: var(--ink-3);
   text-transform: uppercase;
@@ -13538,7 +13538,7 @@ select.new-chat-account:focus-visible {
 .mm-prompt textarea {
   width: 100%;
   font: inherit;
-  font-size: var(--text-min);
+  font-size: 14px;
 }
 .mm-prompt-tabs,
 .mm-prompt-actions {
@@ -13560,9 +13560,8 @@ select.new-chat-account:focus-visible {
   box-shadow: var(--shadow-sm);
 }
 .mm-now h4 {
-  font-family: Fraunces, Georgia, serif;
-  font-weight: 500;
-  font-size: 20px;
+  font-weight: 600;
+  font-size: 15px;
   line-height: 1.3;
   margin: 0 0 8px;
 }
@@ -13581,22 +13580,139 @@ select.new-chat-account:focus-visible {
 .mm-topic li {
   display: list-item;
 }
+.mm-wait {
+  color: var(--ink-3);
+}
+.mm-drawer {
+  position: relative;
+  min-width: 0;
+}
+.mm-drawer .mm-label {
+  margin-bottom: 4px;
+}
+/* The live line: speaker bold, words provisional and italic. */
 .mm-live {
-  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink);
   font-style: italic;
-  margin: 0 0 10px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.mm-live b {
+  font-style: normal;
+}
+.mm-lines {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+/* The divider is the bar's bottom border, with a grab area straddling it. */
+.mm-grip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -18px;
+  height: 18px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 6;
+}
+.mm-grip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  width: 44px;
+  height: 5px;
+  margin-left: -22px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.mm-grip:hover::after,
+.mm-grip:focus-visible::after {
+  background: var(--ink-faint);
+}
+.mm-ln {
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.mm-ln .tm {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.mm-ln.newest {
+  font-size: 15px;
+  color: var(--ink);
+}
+.mm-people {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 5px 12px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.mm-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+  margin: -4px 0 0;
+  overflow-x: auto;
+}
+.mm-tab {
+  all: unset;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-3);
+  white-space: nowrap;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.mm-tab[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+.mm-cog {
+  all: unset;
+  display: flex;
+  padding: 6px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.mm-cog:hover,
+.mm-cog[aria-pressed='true'] {
+  color: var(--ink);
+}
+.mm-settings {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 .mm-speed {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--ink-3);
-  font-size: var(--text-min);
-}
-.mm-who {
-  color: var(--ink-3);
-  font-size: var(--text-min);
-  margin-top: 8px;
+  font-size: 12px;
 }
 .mm-topic {
   padding: 10px 2px;
@@ -13609,13 +13725,17 @@ select.new-chat-account:focus-visible {
 }
 .mm-topic .tm {
   color: var(--ink-faint);
-  font-size: var(--text-min);
+  font-size: 12px;
   width: 38px;
   flex: none;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 .mm-topic .nm {
   font-weight: 600;
+  font-size: 14px;
+}
+.mm-topic:first-child .nm {
+  font-size: 15px;
 }
 .mm-topic ul {
   margin-left: 48px;
@@ -13623,43 +13743,12 @@ select.new-chat-account:focus-visible {
 }
 .mm-dec {
   margin-left: 8px;
-  font-size: var(--text-min);
+  font-size: 12px;
   font-weight: 600;
   color: var(--accent-strong);
   background: var(--accent-tint);
   border-radius: var(--radius-pill);
   padding: 1px 8px;
-}
-.mm-tx {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.mm-search {
-  margin: 0 0 8px;
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font: inherit;
-  background: var(--bg-elevated);
-  color: var(--ink);
-}
-.mm-tx .ln {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  font-size: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.mm-tx .ln span {
-  color: var(--ink-faint);
-  font-size: var(--text-min);
-  margin-right: 6px;
 }
 .mm-actions {
   border-top: 1px solid var(--line-soft);
@@ -13694,7 +13783,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-card .y {
   color: var(--ink-3);
-  font-size: var(--text-min);
+  font-size: 12px;
 }
 .mm-do {
   flex: none;
@@ -13737,6 +13826,7 @@ select.new-chat-account:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .mm-pill {
   display: inline-flex;
@@ -13748,7 +13838,8 @@ select.new-chat-account:focus-visible {
   border-radius: var(--radius-pill);
   padding: 4px 12px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
+  padding: 5px 14px;
 }
 .mm-pill.ended {
   background: var(--bg-soft);
@@ -13760,6 +13851,7 @@ select.new-chat-account:focus-visible {
   height: 8px;
   border-radius: 50%;
   background: var(--voice);
+  flex: none;
   animation: mm-pulse 1.6s infinite;
 }
 @keyframes mm-pulse {
@@ -13773,7 +13865,7 @@ select.new-chat-account:focus-visible {
   background: var(--bg-elevated);
   color: var(--ink-2);
   border-radius: var(--radius-pill);
-  padding: 4px 12px;
+  padding: 5px 15px;
   font: inherit;
   font-size: 14px;
   cursor: pointer;
@@ -13785,7 +13877,7 @@ select.new-chat-account:focus-visible {
   /* --on-accent, not #fff: dark mode's lighter --voice left white at 2.9:1. */
   color: var(--on-accent);
   border-radius: var(--radius-pill);
-  padding: 4px 14px;
+  padding: 5px 16px;
   font: inherit;
   font-size: 14px;
   font-weight: 600;
