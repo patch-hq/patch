@@ -246,7 +246,8 @@ export interface DesktopEvent {
     | 'window:load-retry'
     | 'window:load-failed'
     | 'window:render-process-gone'
-    | 'meeting:detection-off';
+    | 'meeting:detection-off'
+    | 'meeting:auto-ended';
   ts: number;
   payload?: Record<string, unknown>;
 }
@@ -807,10 +808,10 @@ let stopMicWatch: (() => void) | null = null;
 /** Held while shown: an unreferenced Notification can be collected before it is clicked. */
 const meetingToasts = new Set<Notification>();
 
-function showMeetingToast(phase: 'started' | 'ended', appName: string): void {
+function showMeetingToast(phase: 'started', appName: string): void {
   const n = new Notification({
-    title: phase === 'started' ? `Meeting started — ${appName}` : `Meeting ended — ${appName}`,
-    body: phase === 'started' ? 'Click to start a Patch meeting' : 'Click to end the Patch meeting',
+    title: `Meeting started — ${appName}`,
+    body: 'Click to start a Patch meeting',
     ...toastSound('normal'),
   });
   n.on('click', () => {
@@ -825,6 +826,16 @@ function showMeetingToast(phase: 'started' | 'ended', appName: string): void {
   n.show();
 }
 
+/** The call is over: end the meeting Patch is capturing, no click needed. The
+ *  renderer's `ended` handler stops capture and tells the host. */
+function endMeetingForCall(appName: string): void {
+  if (!systemAudio.running) return;
+  if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createMainWindow();
+  sendWhenReady(mainWindow, 'patch:meeting-signal', { phase: 'ended', app: appName });
+  logDesktopEvent({ type: 'meeting:auto-ended', payload: { app: appName } });
+  new Notification({ title: `Meeting ended — ${appName}`, body: 'Patch ended the meeting' }).show();
+}
+
 /** NO FALLBACK: detection that cannot run says so, once, instead of going quiet. */
 function startMeetingDetection(): void {
   const detector = new MeetingDetector({
@@ -833,9 +844,7 @@ function startMeetingDetection(): void {
     started: (appName) => {
       if (!systemAudio.running) showMeetingToast('started', appName);
     },
-    ended: (appName) => {
-      if (systemAudio.running) showMeetingToast('ended', appName);
-    },
+    ended: (appName) => endMeetingForCall(appName),
   });
   try {
     const binary = helperPath({
