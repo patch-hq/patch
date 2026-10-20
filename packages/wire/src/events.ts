@@ -22,6 +22,7 @@ import {
   DEFAULT_GOAL_REFUSAL_LIMIT,
 } from './goal-prompt.js';
 import {
+  DEFAULT_MEETING_RESEARCH_SECONDS,
   DEFAULT_MEETING_SETTINGS,
   MeetingNotesOp,
   MeetingSettings,
@@ -2066,6 +2067,10 @@ export const SharedSettings = z
     meetingTranscriptionModel: z.string(),
     /** Seconds between analysis passes at the Normal meeting speed. */
     meetingAnalyseSeconds: z.number().int().min(5).max(300),
+    /** The model the live research pass (web search) runs on. */
+    meetingResearchModel: z.string().min(1),
+    /** The least number of seconds between live research passes: each one is a model plus web search. */
+    meetingResearchSeconds: z.number().int().min(15).max(900),
     // ---- goals (spec/04 § Goals), applied on every host ----
     /** The goal judge's instructions; "Reset to default" writes `DEFAULT_GOAL_EVAL_PROMPT` back. */
     goalEvalPrompt: z.string().min(1),
@@ -2176,6 +2181,8 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   meetingCleanupModel: DEFAULT_MEETING_MODEL,
   meetingTranscriptionModel: '',
   meetingAnalyseSeconds: DEFAULT_MEETING_SETTINGS.analyseSeconds,
+  meetingResearchModel: DEFAULT_MEETING_MODEL,
+  meetingResearchSeconds: DEFAULT_MEETING_RESEARCH_SECONDS,
   goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT,
   watchCheckInPrompt: DEFAULT_WATCH_CHECK_IN_PROMPT,
   watchCheckInMinutes: DEFAULT_WATCH_CHECK_IN_MINUTES,
@@ -3734,6 +3741,16 @@ export const MeetingNotesRequestEvent = z
   })
   .strict();
 export type MeetingNotesRequestEvent = z.infer<typeof MeetingNotesRequestEvent>;
+
+/** Surface → host: the "Research as we go" checkbox. */
+export const MeetingResearchRequestEvent = z
+  .object({
+    type: z.literal('meeting.research_request'),
+    chatId: z.string().min(1),
+    on: z.boolean(),
+  })
+  .strict();
+export type MeetingResearchRequestEvent = z.infer<typeof MeetingResearchRequestEvent>;
 
 /** Surface → host: the user's My notes text, replacing what was stored. */
 export const MeetingMyNotesRequestEvent = z
@@ -8512,6 +8529,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   MeetingActionRequestEvent,
   MeetingNotesRequestEvent,
   MeetingMyNotesRequestEvent,
+  MeetingResearchRequestEvent,
   MeetingStateEvent,
   ChatArchiveRequestEvent,
   ChatDisableRequestEvent,
@@ -8799,6 +8817,7 @@ export const EVENT_SCHEMAS = {
   'meeting.action_request': MeetingActionRequestEvent,
   'meeting.notes_request': MeetingNotesRequestEvent,
   'meeting.my_notes_request': MeetingMyNotesRequestEvent,
+  'meeting.research_request': MeetingResearchRequestEvent,
   'meeting.state': MeetingStateEvent,
   'chat.archive_request': ChatArchiveRequestEvent,
   'chat.disable_request': ChatDisableRequestEvent,

@@ -7,7 +7,13 @@ import { z } from 'zod';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { DEFAULT_MEETING_MODEL, formatMeetingClock } from '@patch/wire';
-import { MeetingAnalysis, type AnalyseInput, type CorrectInput } from './meeting.js';
+import {
+  MeetingAnalysis,
+  MeetingResearchResult,
+  type AnalyseInput,
+  type CorrectInput,
+  type ResearchInput,
+} from './meeting.js';
 
 export const MEETING_MODEL = DEFAULT_MEETING_MODEL;
 const MEETING_TIMEOUT_MS = 60_000;
@@ -194,5 +200,82 @@ export function makeMeetingCorrector(opts: {
     if (result === null || result === undefined)
       throw new Error('no account could run the meeting correction');
     return parseCorrections(result, input.lines.length);
+  };
+}
+
+const RESEARCH_TIMEOUT_MS = 180_000;
+
+export function buildResearchPrompt(input: ResearchInput): string {
+  const transcript = input.lines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
+  return [
+    'You are a research aide sitting in on a meeting. Read the NEW transcript and decide what is worth looking up for the people in the room.',
+    "Transcripts are machine-made and can contain mistakes. Use web search for anything you state, and prefer the original publisher (a government site, a company's own page, the authority's papers).",
+    '',
+    `Meeting so far: ${input.context.now ?? '(not yet known)'}`,
+    `Already researched (do not repeat these): ${input.existing.join('; ') || '(none)'}`,
+    '',
+    'NEW transcript:',
+    transcript,
+    '',
+    'Make a card only for something that earns one. The three kinds:',
+    '"explained": a term, acronym or programme someone used that a newcomer would not know. title is the term. Say what it is in plain words.',
+    '"fact": a figure or factual claim somebody quoted. title is the claim in quotes. verdict is "correct", "off" or "unclear". Say what the published source says and, if off, by how much. Include source {name,url} for the page you read.',
+    '"answer": a question asked in the room that can be looked up (e.g. how does a service work). title is the question.',
+    'Rules: 1 to 3 short bullets per card, readable at a glance. NEVER state a figure (any number) without a source {name,url} from a page you actually read. If a claim cannot be checked, set verdict "unclear", say why in a bullet, and state no figure of your own. Never invent a source or a URL.',
+    'Return [] when nothing is worth a card: most stretches of a meeting need none. At most 3 cards.',
+    '',
+    'Reply with ONE JSON object and nothing else:',
+    '{"cards":[{"kind":"explained | fact | answer","title":"","atSeconds":0,"bullets":[""],"verdict":"fact only","source":{"name":"","url":""}}]}',
+    'atSeconds is the transcript time in seconds that prompted the card.',
+  ].join('\n');
+}
+
+export function parseResearch(raw: string): MeetingResearchResult {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start)
+    throw new Error(`no JSON object in research reply: ${raw.slice(0, 120)}`);
+  return MeetingResearchResult.parse(JSON.parse(raw.slice(start, end + 1)));
+}
+
+export function makeMeetingResearcher(opts: {
+  sdkBackend: SdkBackend;
+  runOnAccountWithCredit: RunOnAccountWithCredit;
+  cwd: string;
+  /** Read fresh each pass so a Settings change applies mid-meeting. */
+  model: () => string;
+}): (input: ResearchInput) => Promise<MeetingResearchResult> {
+  return async function research(input) {
+    const result = await opts.runOnAccountWithCredit(
+      `meeting research ${input.chatId}`,
+      async (accessToken) => {
+        const abortController = new AbortController();
+        const timer = setTimeout(() => abortController.abort(), RESEARCH_TIMEOUT_MS);
+        try {
+          // Searching takes several turns: only the last message is the answer.
+          let last = '';
+          for await (const env of opts.sdkBackend.run({
+            prompt: buildResearchPrompt(input),
+            inferenceProfile: 'research',
+            cwd: opts.cwd,
+            resumeSessionId: undefined,
+            abortController,
+            oauthAccessToken: accessToken,
+            model: opts.model(),
+            permissionMode: 'bypassPermissions',
+          })) {
+            if (env.type === 'assistant' && env.content) last = env.content;
+            else if (env.type === 'error')
+              throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
+          }
+          return last;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    );
+    if (result === null || result === undefined)
+      throw new Error('no account could run the meeting research');
+    return parseResearch(result);
   };
 }

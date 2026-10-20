@@ -647,12 +647,16 @@ describe('shared settings routes', () => {
         meetingCleanupModel: 'claude-haiku-4-5-20251001',
         meetingTranscriptionModel: '',
         meetingAnalyseSeconds: 15,
+        meetingResearchModel: 'claude-haiku-4-5-20251001',
+        meetingResearchSeconds: 60,
       });
       const res = await patch({
         meetingAnalysisModel: 'claude-sonnet-5',
         meetingCleanupModel: 'claude-haiku-4-5-20251001',
         meetingTranscriptionModel: '/models/whisper/small.en',
         meetingAnalyseSeconds: 40,
+        meetingResearchModel: 'claude-sonnet-5',
+        meetingResearchSeconds: 120,
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().preferences).toMatchObject({
@@ -663,6 +667,9 @@ describe('shared settings routes', () => {
       expect((await patch({ meetingAnalysisModel: '' })).statusCode).toBe(400);
       expect((await patch({ meetingAnalyseSeconds: 4 })).statusCode).toBe(400);
       expect((await patch({ meetingAnalyseSeconds: 301 })).statusCode).toBe(400);
+      expect((await patch({ meetingResearchSeconds: 14 })).statusCode).toBe(400);
+      expect((await patch({ meetingResearchSeconds: 901 })).statusCode).toBe(400);
+      expect((await patch({ meetingResearchModel: '' })).statusCode).toBe(400);
       expect((await patch({ meetingTranscriptionModel: '' })).statusCode).toBe(200);
     } finally {
       await built.app.close();

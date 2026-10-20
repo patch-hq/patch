@@ -411,6 +411,34 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
     });
   });
 
+  it('gives research calls web search and nothing else of the coding agent', async () => {
+    const calls: Array<{ options: Record<string, unknown> }> = [];
+    const { createRealSdkBackend } = await loadRealBackend((args) => {
+      calls.push(args as { options: Record<string, unknown> });
+      return (async function* () {
+        yield { type: 'result', session_id: 's' };
+      })();
+    });
+    await drain(
+      createRealSdkBackend().run({
+        prompt: 'Check this',
+        inferenceProfile: 'research',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+        permissionMode: 'bypassPermissions',
+      }),
+    );
+    expect(calls[0]!.options).toMatchObject({
+      tools: ['WebSearch', 'WebFetch'],
+      skills: [],
+      settingSources: [],
+      persistSession: false,
+      mcpServers: {},
+    });
+    expect(calls[0]!.options['maxTurns']).toBeGreaterThan(1);
+  });
+
   it('omits model + mcpServers when unset and defaults permissionMode; includes them when set', async () => {
     const calls: Array<{ prompt: unknown; options: Record<string, unknown> }> = [];
     const { createRealSdkBackend } = await loadRealBackend((args) => {

@@ -1386,6 +1386,31 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   );
 
   server.registerTool(
+    'patch_meeting_notes',
+    {
+      description:
+        'Change the notes of the meeting running in this chat, when the user asks you to. op "add_point" adds a point (title is "<Speaker>: the main thrust", optional bullets, decided); op "edit_point" rewrites a point by topicId (the id in the meeting context); op "add_research" appends researched bullets to a point, with source {name,url}; op "set_summary" rewrites the summary. Any figure must carry the source you read it from: without one the call is refused. The user sees a chip on your reply saying what changed, so say it in a line too. Fails when this chat has no meeting or the point does not exist.',
+      inputSchema: {
+        op: z.enum(['add_point', 'edit_point', 'add_research', 'set_summary']),
+        title: z.string().min(1).optional(),
+        topicId: z.string().min(1).optional(),
+        bullets: z.array(z.string().min(1)).max(3).optional(),
+        decided: z.boolean().optional(),
+        headline: z.string().min(1).optional(),
+        source: z.object({ name: z.string().min(1), url: z.string().url() }).optional(),
+      },
+    },
+    async (args) =>
+      toolResult(
+        await uds({
+          method: 'POST',
+          path: '/internal/meeting-notes',
+          body: { callerChatId, edit: definedOnly(args) },
+        }),
+      ),
+  );
+
+  server.registerTool(
     'patch_pad_list',
     {
       description:

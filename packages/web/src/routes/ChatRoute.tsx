@@ -91,7 +91,7 @@ import { addToTodoList } from '../lib/addToTodo.js';
 import { discardUpload, retryUpload, sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import type { PatchWs } from '../api/ws.js';
 import { getActiveWs } from '../api/ws.js';
-import { MeetingActions, MeetingLayout } from '../components/MeetingPanel.js';
+import { MeetingActions, MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
 import {
   EXTRA_USAGE_URL,
@@ -2858,6 +2858,9 @@ function MessageEntry({
               {entry.streaming ? <span className="stream-caret" aria-hidden="true" /> : null}
             </div>
           </div>
+          {entry.role === 'assistant' && !entry.streaming ? (
+            <MeetingEditChips chatId={chatId} seq={entry.seq} messageAt={entry.messageAt} />
+          ) : null}
           {/* spec/14 § Messages — Long user messages collapse (accordion).
               Icon-only, no label — the content itself (truncated or not) is
               the summary, unlike `ToolDisclosure`'s one-line stand-in text. */}

@@ -25,6 +25,7 @@ import Fastify, {
 } from 'fastify';
 import { z } from 'zod';
 import { imageSize } from './imageSize.js';
+import { MeetingAgentNotesEdit } from '@patch/wire';
 import type {
   HostAccountEvent,
   ClaudeMemoryEntry,
@@ -252,6 +253,8 @@ export interface BuildOptions {
    * server link. Production wires `PadClient.request`; unset, the endpoint 503s.
    */
   padRequest?: PadRequest;
+  /** Backs `patch_meeting_notes`: the chat agent changing its meeting's notes. Returns the chip label. Unset, the endpoint 503s. */
+  meetingAgentEdit?: (chatId: string, edit: MeetingAgentNotesEdit) => string;
   /** Test hook for the rate limiter. */
   rateLimiter?: RateLimiter;
   /** Structured logger for tool-call accounting. */
@@ -3215,6 +3218,49 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
     toolLog({ tool: `patch_pad_${op}`, callerChatId, durationMs: Date.now() - start, ok: true });
     return result;
+  });
+
+  // patch_meeting_notes — the agent adds to or edits the notes of the meeting
+  // running in its own chat. A refusal (no meeting, unknown point, a figure with
+  // no source) goes back to the agent as the error.
+  app.post('/internal/meeting-notes', async (req, reply) => {
+    if (require503(reply)) return;
+    const body = req.body as { callerChatId?: unknown; edit?: unknown };
+    const parsed = MeetingAgentNotesEdit.safeParse(body?.edit);
+    if (typeof body?.callerChatId !== 'string' || !parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: parsed.success ? 'callerChatId is required' : parsed.error.message,
+      } satisfies ErrorEnvelope);
+    }
+    if (!opts.meetingAgentEdit) {
+      return reply.code(503).send({
+        error: 'meetings_unavailable',
+        message: 'meeting mode is not wired on this host',
+      } satisfies ErrorEnvelope);
+    }
+    try {
+      const label = opts.meetingAgentEdit(body.callerChatId, parsed.data);
+      toolLog({
+        tool: 'patch_meeting_notes',
+        callerChatId: body.callerChatId,
+        durationMs: 0,
+        ok: true,
+      });
+      return { ok: true, changed: label };
+    } catch (err) {
+      toolLog({
+        tool: 'patch_meeting_notes',
+        callerChatId: body.callerChatId,
+        durationMs: 0,
+        ok: false,
+        err: 'meeting_edit_failed',
+      });
+      return reply.code(409).send({
+        error: 'meeting_edit_failed',
+        message: (err as Error).message,
+      } satisfies ErrorEnvelope);
+    }
   });
 
   // view_file — put a file on the USER's screen (spec/14 § Tool calls).

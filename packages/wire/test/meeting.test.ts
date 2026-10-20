@@ -4,6 +4,7 @@ import {
   formatMeetingClock,
   meetingElapsedMs,
   meetingSpeakerLabel,
+  MeetingCard,
   MeetingState,
 } from '../src/index.js';
 
@@ -103,5 +104,35 @@ describe('meetingSpeakerLabel', () => {
   it('a transcript line may carry a name', () => {
     const line = { at: 1, speaker: 'them', text: 'hi', name: 'Priya' };
     expect(MeetingState.safeParse({ ...state, transcript: [line] }).success).toBe(true);
+  });
+});
+
+describe('research cards', () => {
+  const src = { name: 'Authority', url: 'https://example.org/p' };
+  const base = { id: 'k', key: 'k', at: 0 };
+  it('accepts a sourced fact check and rejects an unsourced figure or a non-http link', () => {
+    expect(
+      MeetingCard.safeParse({
+        ...base,
+        kind: 'fact',
+        title: '"40 cars"',
+        verdict: 'correct',
+        bullets: ['Deck holds 40 cars'],
+        source: src,
+      }).success,
+    ).toBe(true);
+    expect(
+      MeetingCard.safeParse({ ...base, kind: 'answer', title: 'q', bullets: ['It takes 5 min'] })
+        .success,
+    ).toBe(false);
+    expect(
+      MeetingCard.safeParse({
+        ...base,
+        kind: 'answer',
+        title: 'q',
+        bullets: ['x'],
+        source: { name: 'n', url: 'javascript:alert(1)' },
+      }).success,
+    ).toBe(false);
   });
 });

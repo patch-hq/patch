@@ -830,3 +830,135 @@ test.describe('meeting mode — editing prompts mid-call', () => {
     expect(Object.keys(writes[1]!)).toEqual(['meetingActionsPrompt']);
   });
 });
+
+test.describe('meeting mode — agent feed', () => {
+  test('sits at the top of the left column: header with the checkbox, cards, then the chat and composer', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const feed = page.getByTestId('meeting-feed');
+    await expect(feed).toBeVisible();
+    await expect(feed).toContainText('Agent');
+    await expect(page.getByTestId('meeting-research-on')).toBeChecked();
+    await expect(feed).toContainText('Research as we go');
+    const [f, stream, composer, panel] = await Promise.all([
+      feed.boundingBox(),
+      page.getByTestId('chat-stream').boundingBox(),
+      page.getByTestId('composer').boundingBox(),
+      page.getByTestId('meeting-panel').boundingBox(),
+    ]);
+    expect(f!.y + f!.height).toBeLessThanOrEqual(stream!.y + 1);
+    expect(stream!.y + stream!.height).toBeLessThanOrEqual(composer!.y + 1);
+    expect(f!.x + f!.width).toBeLessThanOrEqual(panel!.x + 1);
+  });
+
+  test('shows the three card types by a coloured label, with title, time, bullets and no left bar', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const cards = page.getByTestId('meeting-card');
+    await expect(cards).toHaveCount(3);
+    // newest first
+    await expect(cards.nth(0).getByTestId('meeting-card-title')).toHaveText('Harbour levy');
+    await expect(cards.nth(0).getByTestId('meeting-card-kind')).toHaveText('Explained');
+    await expect(cards.nth(0)).toContainText('24:46');
+    await expect(cards.nth(1).getByTestId('meeting-card-kind')).toHaveText('Fact check');
+    await expect(cards.nth(2).getByTestId('meeting-card-kind')).toHaveText('Answer');
+    const colours = await cards.evaluateAll((els) =>
+      els.map((el) => getComputedStyle(el.querySelector('[data-testid=meeting-card-kind]')!).color),
+    );
+    expect(new Set(colours).size).toBe(3);
+    for (const c of await cards.all()) {
+      expect(await c.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe('1px');
+      const n = await c.locator('li').count();
+      expect(n).toBeGreaterThanOrEqual(1);
+      expect(n).toBeLessThanOrEqual(3);
+    }
+  });
+
+  test('a fact check carries its quoted claim, a verdict chip and a source link', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const fact = page.getByTestId('meeting-card').nth(1);
+    await expect(fact.getByTestId('meeting-card-title')).toHaveText(
+      '"The ferry carries about fifty cars"',
+    );
+    await expect(fact.getByTestId('meeting-card-verdict')).toHaveText('Off');
+    const link = fact.getByTestId('meeting-card-source');
+    await expect(link).toHaveText('Operator fleet page');
+    await expect(link).toHaveAttribute('href', 'https://example.org/fleet');
+    await expect(link).toHaveAttribute('target', '_blank');
+    // other kinds have no verdict
+    await expect(page.getByTestId('meeting-card-verdict')).toHaveCount(1);
+  });
+
+  test('the checkbox tells the host, and the host says research failed where the cards are', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await page.getByTestId('meeting-research-on').uncheck();
+    await expect.poll(async () => (await sent(page, 'meeting.research_request')).length).toBe(1);
+    expect((await sent(page, 'meeting.research_request'))[0]).toMatchObject({ on: false });
+    await expect(page.getByTestId('meeting-research-on')).not.toBeChecked();
+    await expect(page.getByTestId('meeting-research-error')).toHaveCount(0);
+    await page.evaluate(() => {
+      const st = (
+        window as unknown as {
+          __meetingStore: {
+            getState(): {
+              byChat: Record<string, object>;
+              apply(id: string, m: object): void;
+            };
+          };
+        }
+      ).__meetingStore.getState();
+      const [id, m] = Object.entries(st.byChat)[0]!;
+      st.apply(id, { ...m, researchError: 'research failed: search is down' });
+    });
+    await expect(page.getByTestId('meeting-research-error')).toHaveText(
+      'research failed: search is down',
+    );
+  });
+
+  test('a reply that changed the notes carries a chip, and only that reply', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-edit-chip')).toHaveCount(0);
+    await page.evaluate(() => {
+      const st = (
+        window as unknown as {
+          __meetingStore: {
+            getState(): {
+              byChat: Record<string, object>;
+              apply(id: string, m: object): void;
+            };
+          };
+        }
+      ).__meetingStore.getState();
+      const [id, m] = Object.entries(st.byChat)[0]!;
+      st.apply(id, {
+        ...m,
+        agentEdits: [{ id: 'e1', at: 1760000000000 + 5000, label: 'Added to points' }],
+      });
+    });
+    const chips = page.getByTestId('meeting-edit-chip');
+    await expect(chips).toHaveCount(1);
+    await expect(chips.first()).toHaveText('✓ Added to points');
+    // inside the first agent reply, not a later one
+    const first = page.getByTestId('msg').filter({ has: chips }).first();
+    await expect(first).toHaveAttribute('data-message-at', String(1760000000000 + 14_000));
+  });
+
+  test('an ended meeting keeps its cards but the checkbox is locked', async ({ page }) => {
+    await page.goto('/app/dev-harness.html?chat=chat_tools&meeting=ended');
+    await expect(page.getByTestId('meeting-card')).toHaveCount(3);
+    await expect(page.getByTestId('meeting-research-on')).toBeDisabled();
+  });
+
+  test('the cog holds the research model and the least gap between passes', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await page.getByTestId('meeting-cog').click();
+    await expect(page.getByTestId('meeting-research-model')).toBeVisible();
+    await expect(page.getByTestId('meeting-research-seconds')).toHaveValue('60');
+  });
+});

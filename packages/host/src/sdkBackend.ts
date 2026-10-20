@@ -147,7 +147,7 @@ export interface SdkRunOptions {
    * Keeping this as one profile prevents every cosmetic caller from having to
    * remember the same cost-sensitive set of SDK options.
    */
-  inferenceProfile?: 'classifier' | undefined;
+  inferenceProfile?: 'classifier' | 'research' | undefined;
   /** Images sent alongside `prompt` as content blocks. One-shot path only. */
   images?: Array<{ mediaType: string; data: string }> | undefined;
   cwd: string;
@@ -1185,7 +1185,25 @@ const SHARED_OPTS = {
 const CLASSIFIER_SYSTEM_PROMPT =
   'Follow the user instruction exactly. Return only the requested answer. Do not use tools.';
 
+const RESEARCH_SYSTEM_PROMPT =
+  'Follow the user instruction exactly. Use web search to check what you are asked about, then return only the requested answer.';
+
 function inferenceProfileOptions(opts: SdkRunOptions): Partial<Options> {
+  // Same bare run as a classifier, plus web search and a few turns to use it.
+  if (opts.inferenceProfile === 'research') {
+    return {
+      tools: ['WebSearch', 'WebFetch'],
+      skills: [],
+      settingSources: [],
+      systemPrompt: RESEARCH_SYSTEM_PROMPT,
+      thinking: { type: 'disabled' },
+      effort: 'low',
+      maxTurns: 8,
+      persistSession: false,
+      includePartialMessages: false,
+      mcpServers: {},
+    };
+  }
   if (opts.inferenceProfile !== 'classifier') return {};
   return {
     tools: [],

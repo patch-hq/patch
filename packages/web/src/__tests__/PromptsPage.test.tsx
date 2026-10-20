@@ -151,5 +151,13 @@ describe('Settings → Prompts', () => {
     // Out of range is never sent.
     fireEvent.change(screen.getByTestId('meeting-analyse-seconds'), { target: { value: '2' } });
     expect(server.writes).not.toContainEqual({ meetingAnalyseSeconds: 2 });
+    // The research pass: its own model, and a floor on how often it runs.
+    expect((screen.getByTestId('meeting-research-model') as HTMLSelectElement).value).toBe(
+      DEFAULT_MEETING_MODEL,
+    );
+    fireEvent.change(screen.getByTestId('meeting-research-seconds'), { target: { value: '120' } });
+    await waitFor(() => expect(server.writes).toContainEqual({ meetingResearchSeconds: 120 }));
+    fireEvent.change(screen.getByTestId('meeting-research-seconds'), { target: { value: '5' } });
+    expect(server.writes).not.toContainEqual({ meetingResearchSeconds: 5 });
   });
 });

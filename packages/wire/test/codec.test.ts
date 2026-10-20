@@ -436,6 +436,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     actionId: 'a1',
     decision: 'do',
   },
+  'meeting.research_request': { type: 'meeting.research_request', chatId: 'c1', on: true },
   'meeting.state': { type: 'meeting.state', chatId: 'c1', meeting: null },
   'patch.browser_view.frame': {
     type: 'patch.browser_view.frame',
