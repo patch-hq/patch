@@ -28,7 +28,7 @@ After=network-online.target
 Type=simple
 Environment=PORT=8787 HOST=127.0.0.1
 ExecStart=${node} ${home}/current/dist/cli.js
-Restart=on-failure
+Restart=always
 RestartSec=3s
 
 [Install]

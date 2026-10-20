@@ -245,7 +245,7 @@ Environment=XDG_DATA_HOME=/var/lib/caddy XDG_CONFIG_HOME=/var/lib/caddy
 ExecStart=/usr/local/bin/caddy run --config /etc/patch/Caddyfile --adapter caddyfile
 ExecReload=/usr/local/bin/caddy reload --config /etc/patch/Caddyfile --adapter caddyfile
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-Restart=on-failure
+Restart=always
 
 [Install]
 WantedBy=multi-user.target

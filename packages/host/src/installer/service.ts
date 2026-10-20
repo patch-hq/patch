@@ -106,9 +106,9 @@ function xmlEscape(s: string): string {
 }
 
 /**
- * launchd job. `RunAtLoad` is start-at-boot; `KeepAlive.SuccessfulExit=false`
- * is restart-on-failure (a clean `patch host stop` stays stopped, a crash
- * comes back). Deliberately NO `WorkingDirectory`.
+ * launchd job. `RunAtLoad` is start-at-boot; `KeepAlive=true`
+ * is always-restart (whatever stopped it, including SIGTERM from another
+ * process, it comes back; `launchctl bootout` still stops it). Deliberately NO `WorkingDirectory`.
  */
 export function launchdPlist(def: ServiceDefinition, systemHost = false): string {
   const envEntries = Object.entries({ ...def.env, ...def.secretEnv })
@@ -136,10 +136,7 @@ ${asUser}  <key>ProgramArguments</key>
 ${envEntries}
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key><false/>
-  </dict>
+  <key>KeepAlive</key><true/>
   <key>AbandonProcessGroup</key><true/>
   <key>StandardOutPath</key><string>${xmlEscape(join(logDir, 'daemon.log'))}</string>
   <key>StandardErrorPath</key><string>${xmlEscape(join(logDir, 'daemon.log'))}</string>
@@ -149,8 +146,8 @@ ${envEntries}
 }
 
 /**
- * systemd user unit. `Restart=on-failure` and `WantedBy=default.target` are the
- * restart-on-failure / start-at-boot pair; lingering (enabled separately) is
+ * systemd user unit. `Restart=always` and `WantedBy=default.target` are the
+ * always-restart / start-at-boot pair; lingering (enabled separately) is
  * what carries it through logout. Deliberately NO `WorkingDirectory=`.
  */
 export function systemdUnit(def: ServiceDefinition): string {
@@ -175,7 +172,7 @@ After=network-online.target
 Type=simple
 ExecStart=${def.nodePath} ${def.programPath}
 ${env}
-${secrets}Restart=on-failure
+${secrets}Restart=always
 RestartSec=5
 OOMPolicy=continue
 KillMode=process
@@ -397,7 +394,7 @@ export const launchdOps: ServiceOps = {
     const notes = [
       ...otherDomainNotes,
       `launchd job ${SERVICE_LABEL} registered in domain ${mode.domain} (${mode.plistPath})`,
-      'start-at-boot: RunAtLoad; restart-on-failure: KeepAlive/SuccessfulExit=false',
+      'start-at-boot: RunAtLoad; always-restart: KeepAlive=true',
       mode.survivesLogout
         ? 'a system job running as this user: it starts at boot and runs through logout'
         : `NOTE: ${mode.domain} ends with your login session, so the host stops at logout and ` +
@@ -474,7 +471,7 @@ export const systemdOps: ServiceOps = {
     }
     const notes = [
       `systemd user unit ${SYSTEMD_UNIT} registered at ${unitPath}`,
-      'start-at-boot: WantedBy=default.target; restart-on-failure: Restart=on-failure',
+      'start-at-boot: WantedBy=default.target; always-restart: Restart=always',
     ];
     notes.push(await ensureLinger(def));
     return { unitPath, notes };
