@@ -449,6 +449,21 @@ describe('meetingGen', () => {
   });
 });
 
+describe('meeting action restraint', () => {
+  it("only raises actions that are the user's to do or an assistant could do for them", () => {
+    const p = buildMeetingPrompt({
+      chatId: 'c',
+      previous: { now: null, topics: [], actions: [] },
+      newLines: [{ clock: '00:05', speaker: 'Them', text: 'x' }],
+      final: false,
+      elapsedMs: 5000,
+    });
+    expect(p).toMatch(/genuinely the\suser's to do/i);
+    expect(p).toMatch(/not every mention/i);
+    expect(p).toMatch(/someone else's/i);
+  });
+});
+
 describe('makeMeetingAnalyser', () => {
   const input: AnalyseInput = {
     chatId: 'c',
