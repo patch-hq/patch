@@ -21,7 +21,12 @@ import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
 } from './goal-prompt.js';
-import { DEFAULT_MEETING_SETTINGS, MeetingSettings, MeetingState } from './meeting.js';
+import {
+  DEFAULT_MEETING_SETTINGS,
+  MeetingNotesOp,
+  MeetingSettings,
+  MeetingState,
+} from './meeting.js';
 import { SnoozeRecord } from './snooze.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
 import {
@@ -3712,6 +3717,16 @@ export const MeetingActionRequestEvent = z
   })
   .strict();
 export type MeetingActionRequestEvent = z.infer<typeof MeetingActionRequestEvent>;
+
+/** Surface → host: the user edited the points panel (edit a point or bullet, insert a point). */
+export const MeetingNotesRequestEvent = z
+  .object({
+    type: z.literal('meeting.notes_request'),
+    chatId: z.string().min(1),
+    edit: MeetingNotesOp,
+  })
+  .strict();
+export type MeetingNotesRequestEvent = z.infer<typeof MeetingNotesRequestEvent>;
 
 /** Host → surfaces: the chat's full meeting state (`null` = no meeting). */
 export const MeetingStateEvent = z
@@ -8478,6 +8493,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   MeetingGetRequestEvent,
   MeetingAudioEvent,
   MeetingActionRequestEvent,
+  MeetingNotesRequestEvent,
   MeetingStateEvent,
   ChatArchiveRequestEvent,
   ChatDisableRequestEvent,
@@ -8763,6 +8779,7 @@ export const EVENT_SCHEMAS = {
   'meeting.get_request': MeetingGetRequestEvent,
   'meeting.audio': MeetingAudioEvent,
   'meeting.action_request': MeetingActionRequestEvent,
+  'meeting.notes_request': MeetingNotesRequestEvent,
   'meeting.state': MeetingStateEvent,
   'chat.archive_request': ChatArchiveRequestEvent,
   'chat.disable_request': ChatDisableRequestEvent,

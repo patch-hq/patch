@@ -46,9 +46,120 @@ export const MeetingTopic = z
     title: z.string(),
     points: z.array(z.string()),
     decided: z.boolean(),
+    /** Written or edited by the user: later analysis passes must leave it alone. */
+    fixed: z.boolean().optional(),
   })
   .strict();
 export type MeetingTopic = z.infer<typeof MeetingTopic>;
+
+/**
+ * A user edit to the points panel. A point is a topic: its `title` is the
+ * "Speaker: main thrust" line and `points` are its bullets.
+ */
+export const MeetingNotesOp = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('set_title'), topicId: z.string().min(1), text: z.string() }).strict(),
+  z
+    .object({
+      op: z.literal('set_bullet'),
+      topicId: z.string().min(1),
+      index: z.number().int().min(0),
+      text: z.string(),
+    })
+    .strict(),
+  /** Inserts an empty bullet so that it sits at `index`. */
+  z
+    .object({
+      op: z.literal('add_bullet'),
+      topicId: z.string().min(1),
+      index: z.number().int().min(0),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('remove_bullet'),
+      topicId: z.string().min(1),
+      index: z.number().int().min(0),
+    })
+    .strict(),
+  /** A new empty point directly above (newer than) `aboveTopicId`; the surface picks `id` so it can focus it. */
+  z
+    .object({
+      op: z.literal('insert'),
+      aboveTopicId: z.string().min(1),
+      id: z.string().min(1),
+    })
+    .strict(),
+  /** Drops a point that is still completely empty. */
+  z.object({ op: z.literal('remove'), topicId: z.string().min(1) }).strict(),
+]);
+export type MeetingNotesOp = z.infer<typeof MeetingNotesOp>;
+
+/** Applies a user edit to the topics in place. Throws on an unknown point or bullet. */
+export function applyMeetingNotesOp(topics: MeetingTopic[], op: MeetingNotesOp): void {
+  const find = (id: string): MeetingTopic => {
+    const t = topics.find((x) => x.id === id);
+    if (!t) throw new Error(`no point ${id}`);
+    return t;
+  };
+  const bullet = (t: MeetingTopic, i: number): void => {
+    if (i >= t.points.length) throw new Error(`point ${t.id} has no bullet ${i}`);
+  };
+  switch (op.op) {
+    case 'set_title': {
+      const t = find(op.topicId);
+      if (t.title !== op.text) {
+        t.title = op.text;
+        t.fixed = true;
+      }
+      return;
+    }
+    case 'set_bullet': {
+      const t = find(op.topicId);
+      bullet(t, op.index);
+      if (t.points[op.index] !== op.text) {
+        t.points[op.index] = op.text;
+        t.fixed = true;
+      }
+      return;
+    }
+    case 'add_bullet': {
+      const t = find(op.topicId);
+      if (op.index > t.points.length) throw new Error(`point ${t.id} has no slot ${op.index}`);
+      t.points.splice(op.index, 0, '');
+      t.fixed = true;
+      return;
+    }
+    case 'remove_bullet': {
+      const t = find(op.topicId);
+      bullet(t, op.index);
+      t.points.splice(op.index, 1);
+      t.fixed = true;
+      return;
+    }
+    case 'insert': {
+      if (topics.some((x) => x.id === op.id)) throw new Error(`point ${op.id} already exists`);
+      const above = find(op.aboveTopicId);
+      const newer = topics.filter((x) => x.at > above.at).map((x) => x.at);
+      const next = newer.length ? Math.min(...newer) : above.at + 2;
+      topics.push({
+        id: op.id,
+        at: Math.max(above.at + 1, Math.floor((above.at + next) / 2)),
+        title: '',
+        points: [],
+        decided: false,
+        fixed: true,
+      });
+      return;
+    }
+    case 'remove': {
+      const t = find(op.topicId);
+      if (t.title.trim() !== '' || t.points.some((p) => p.trim() !== ''))
+        throw new Error(`point ${t.id} is not empty`);
+      topics.splice(topics.indexOf(t), 1);
+      return;
+    }
+  }
+}
 
 export const MeetingActionStatus = z.enum(['pending', 'done', 'dismissed']);
 export type MeetingActionStatus = z.infer<typeof MeetingActionStatus>;

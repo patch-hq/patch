@@ -35,6 +35,16 @@ describe('meeting wire', () => {
         speakerName: 'Priya',
       },
       { type: 'meeting.action_request', chatId: 'c', actionId: 'a', decision: 'do' },
+      {
+        type: 'meeting.notes_request',
+        chatId: 'c',
+        edit: { op: 'set_title', topicId: 't', text: 'x' },
+      },
+      {
+        type: 'meeting.notes_request',
+        chatId: 'c',
+        edit: { op: 'insert', aboveTopicId: 't', id: 'n' },
+      },
       { type: 'meeting.state', chatId: 'c', meeting: state },
       { type: 'meeting.state', chatId: 'c', meeting: null },
     ];

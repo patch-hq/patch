@@ -285,8 +285,8 @@
     --amber: #e0a43a;
     --goal-working: #f0903a;
     --goal-met: #5cb877;
-  --goal-working: #f0903a;
-  --goal-met: #5cb877;
+    --goal-working: #f0903a;
+    --goal-met: #5cb877;
     --amber-tint: rgba(224, 164, 58, 0.16);
     --leaf: #77a966;
     --voice-tint: #3a2b22;
@@ -13520,6 +13520,7 @@ select.new-chat-account:focus-visible {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  padding-top: 8px;
 }
 @media (max-width: 800px) {
   .mm-bar {
@@ -13745,7 +13746,8 @@ select.new-chat-account:focus-visible {
   font-size: 12px;
 }
 .mm-topic {
-  padding: 10px 2px;
+  position: relative;
+  padding: 8px 2px;
   border-bottom: 1px solid var(--line-soft);
 }
 .mm-topic .r {
@@ -13754,31 +13756,102 @@ select.new-chat-account:focus-visible {
   align-items: baseline;
 }
 .mm-topic .tm {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
   color: var(--ink-faint);
   font-size: 12px;
   width: 38px;
   flex: none;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
+.mm-topic .tm:hover,
+.mm-topic .tm[aria-expanded='true'] {
+  color: var(--ink-2);
+}
 .mm-topic .nm {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   font-size: 14px;
 }
-.mm-topic:first-child .nm {
+.mm-topic.l0 .nm {
   font-size: 15px;
 }
+.mm-topic.l2 .nm,
+.mm-topic.l3 .nm {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+.mm-topic.l3 .nm {
+  font-size: 12px;
+  color: var(--ink-3);
+}
 .mm-topic ul {
-  margin-left: 48px;
+  margin: 4px 0 0 48px;
   font-size: 14px;
 }
-.mm-dec {
-  margin-left: 8px;
-  font-size: 12px;
-  font-weight: 600;
+/* Older points are a single line; their bullets show only while being edited. */
+.mm-topic.l2 ul,
+.mm-topic.l3 ul {
+  display: none;
+}
+.mm-topic.l2:focus-within ul,
+.mm-topic.l3:focus-within ul {
+  display: block;
+}
+.mm-topic [contenteditable] {
+  outline: none;
+  cursor: text;
+  border-radius: var(--radius-sm, 4px);
+}
+.mm-topic [contenteditable]:focus {
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.mm-topic [contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+.mm-topic .decw {
   color: var(--accent-strong);
-  background: var(--accent-tint);
-  border-radius: var(--radius-pill);
-  padding: 1px 8px;
+  font-weight: 700;
+}
+.mm-ins {
+  appearance: none;
+  position: absolute;
+  left: -2px;
+  top: -11px;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  padding: 0;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 2;
+}
+.mm-topic:hover .mm-ins,
+.mm-ins:focus-visible {
+  opacity: 1;
+}
+.mm-tx {
+  margin: 6px 0 0 48px;
+  font-size: 12px;
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .mm-actions {
   border-top: 1px solid var(--line-soft);
@@ -15228,7 +15301,12 @@ select.new-chat-account:focus-visible {
   border: 1px solid var(--line);
   border-radius: var(--radius-md, 12px);
   background: var(--bg-elevated);
-  font-family: 'Figtree Variable', 'Inter Variable', -apple-system, system-ui, sans-serif;
+  font-family:
+    'Figtree Variable',
+    'Inter Variable',
+    -apple-system,
+    system-ui,
+    sans-serif;
   font-size: 15px;
   color: var(--ink);
   display: flex;

@@ -282,14 +282,177 @@ test.describe('meeting mode — live', () => {
     await expect(voices).toHaveText(['Them 1', 'Priya']);
   });
 
-  test('shows Live + timer and topics newest first with Decided badges', async ({ page }) => {
+  test('shows Live + timer and points newest first, decisions marked in the text with no chips', async ({
+    page,
+  }) => {
     await page.goto(URL_LIVE);
     await expect(page.getByTestId('meeting-pill')).toContainText(/Live · 3\d:\d\d/);
     const topics = page.getByTestId('meeting-topic');
     await expect(topics).toHaveCount(3);
-    await expect(topics.first()).toContainText("Sam's failing tests");
-    await expect(topics.last()).toContainText('Release 4.2');
-    await expect(page.locator('.mm-dec')).toHaveCount(2);
+    await expect(topics.first()).toContainText('failing tests');
+    await expect(topics.last()).toContainText('release 4.2');
+    await expect(topics.locator('.decw')).toHaveCount(2);
+    await expect(topics.locator('.decw').first()).toHaveText('Decision:');
+    await expect(page.locator('.mm-dec')).toHaveCount(0);
+    await expect(
+      page.getByTestId('meeting-panel').getByRole('button', { name: /^(Edit|Add bullet)$/ }),
+    ).toHaveCount(0);
+  });
+
+  test('points taper: newest 15px with bullets, recent 14px with bullets, older one line', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await page.evaluate(() => {
+      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+      const cur = store.getState().byChat['chat_tools'];
+      const extra = Array.from({ length: 5 }, (_, i) => ({
+        id: `x${i}`,
+        at: 40 * 60_000 + i * 60_000,
+        title: `Speaker ${i}: argument ${i}`,
+        points: ['detail'],
+        decided: false,
+      }));
+      store.getState().apply('chat_tools', { ...cur, topics: [...cur.topics, ...extra] });
+    });
+    const topics = page.getByTestId('meeting-topic');
+    const size = (i: number) =>
+      topics
+        .nth(i)
+        .locator('.nm')
+        .evaluate((el) => getComputedStyle(el).fontSize);
+    const weight = (i: number) =>
+      topics
+        .nth(i)
+        .locator('.nm')
+        .evaluate((el) => getComputedStyle(el).fontWeight);
+    await expect(topics).toHaveCount(8);
+    expect(await size(0)).toBe('15px');
+    expect(await size(1)).toBe('14px');
+    expect(await weight(1)).toBe('600');
+    await expect(topics.nth(0).locator('li').first()).toBeVisible();
+    await expect(topics.nth(1).locator('li').first()).toBeVisible();
+    await expect(topics.nth(5).locator('li').first()).toBeHidden();
+    expect(await size(7)).toBe('12px');
+  });
+
+  test('clicking a point title edits it in place and sends the edit', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const title = page.getByTestId('meeting-point-title').first();
+    await title.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('Sam: the tests fail because the sandbox has no credit');
+    await page.keyboard.press('Tab');
+    const reqs = (await sent(page, 'meeting.notes_request')) as Array<{ edit: unknown }>;
+    expect(reqs.at(-1)!.edit).toMatchObject({
+      op: 'set_title',
+      text: 'Sam: the tests fail because the sandbox has no credit',
+    });
+    await expect(page.getByTestId('meeting-point-title').first()).toHaveText(
+      'Sam: the tests fail because the sandbox has no credit',
+    );
+  });
+
+  test('editing a decision keeps its Decision: prefix', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const t = page.getByTestId('meeting-topic').last();
+    await t.getByTestId('meeting-point-title').click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('Priya: release 4.2 ships on Tuesday');
+    await page.keyboard.press('Tab');
+    const reqs = (await sent(page, 'meeting.notes_request')) as Array<{ edit: { text: string } }>;
+    expect(reqs.at(-1)!.edit.text).toBe('Decision: Priya: release 4.2 ships on Tuesday');
+  });
+
+  test('Enter in a bullet starts a new bullet and the caret lands in it', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const first = page.getByTestId('meeting-topic').first();
+    await first.getByTestId('meeting-point-bullet').first().click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    const bullets = first.getByTestId('meeting-point-bullet');
+    await expect(bullets).toHaveCount(2);
+    await expect(bullets.nth(1)).toBeFocused();
+    await page.keyboard.type('A second detail');
+    await page.keyboard.press('Tab');
+    const edits = (
+      (await sent(page, 'meeting.notes_request')) as Array<{ edit: { op: string } }>
+    ).map((r) => r.edit.op);
+    expect(edits).toContain('add_bullet');
+    await expect(bullets.nth(1)).toHaveText('A second detail');
+  });
+
+  test('Enter in a title adds its first bullet; an empty bullet left behind is dropped', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const last = page.getByTestId('meeting-topic').nth(2);
+    await last.getByTestId('meeting-point-title').click();
+    await page.keyboard.press('Enter');
+    await expect(last.getByTestId('meeting-point-bullet').first()).toBeFocused();
+    await expect(last.getByTestId('meeting-point-bullet')).toHaveCount(2);
+    await page.keyboard.press('Enter');
+    await expect(last.getByTestId('meeting-point-bullet')).toHaveCount(1);
+    await expect(last.getByTestId('meeting-point-bullet').first()).toHaveText('Ships Monday');
+  });
+
+  test('hovering a point shows a round + above it that inserts a new point there', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const topics = page.getByTestId('meeting-topic');
+    const target = topics.nth(1);
+    const plus = target.getByTestId('meeting-point-insert');
+    await expect(plus).toHaveCSS('opacity', '0');
+    await target.hover();
+    await expect(plus).toHaveCSS('opacity', '1');
+    const [pb, tb] = await Promise.all([plus.boundingBox(), target.boundingBox()]);
+    expect(pb!.y).toBeLessThan(tb!.y + 4);
+    expect(pb!.width).toBe(pb!.height);
+    await plus.click();
+    await expect(topics).toHaveCount(4);
+    // the new point sits above the one it was inserted at, and takes the caret
+    await expect(topics.nth(1).getByTestId('meeting-point-title')).toBeFocused();
+    await expect(topics.nth(2)).toContainText('split the points ledger');
+    await page.keyboard.type('Tom: ship it on Friday');
+    await page.keyboard.press('Tab');
+    await expect(topics.nth(1).getByTestId('meeting-point-title')).toHaveText(
+      'Tom: ship it on Friday',
+    );
+    const ops = (
+      (await sent(page, 'meeting.notes_request')) as Array<{ edit: { op: string } }>
+    ).map((r) => r.edit.op);
+    expect(ops).toEqual(['insert', 'set_title']);
+  });
+
+  test('an inserted point left empty is removed again', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const topics = page.getByTestId('meeting-topic');
+    await topics.first().hover();
+    await topics.first().getByTestId('meeting-point-insert').click();
+    await expect(topics).toHaveCount(4);
+    await page.getByTestId('meeting-tab-notes').click();
+    await page.getByTestId('meeting-tab-points').click();
+    await expect(topics).toHaveCount(3);
+  });
+
+  test("clicking a point's time shows the transcript lines it came from, indented under it", async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const newest = page.getByTestId('meeting-topic').first();
+    await expect(newest.getByTestId('meeting-point-lines')).toHaveCount(0);
+    await newest.getByTestId('meeting-point-time').click();
+    const lines = newest.getByTestId('meeting-point-line');
+    await expect(lines).toHaveCount(2);
+    await expect(lines.first()).toContainText('busiest week of the year');
+    const [title, line] = await Promise.all([
+      newest.getByTestId('meeting-point-title').boundingBox(),
+      lines.first().boundingBox(),
+    ]);
+    expect(line!.x).toBeGreaterThanOrEqual(title!.x - 1);
+    await newest.getByTestId('meeting-point-time').click();
+    await expect(newest.getByTestId('meeting-point-lines')).toHaveCount(0);
   });
 
   test('the live line shows what is being said, and the speed option tunes the host', async ({

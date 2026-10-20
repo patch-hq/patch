@@ -114,6 +114,11 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
         { type: 'meeting.get_request', chatId: 'chat-mtg' },
         { type: 'meeting.audio', chatId: 'chat-mtg', source: 'mic', audioBase64: 'AA==' },
         { type: 'meeting.action_request', chatId: 'chat-mtg', actionId: 'a1', decision: 'do' },
+        {
+          type: 'meeting.notes_request',
+          chatId: 'chat-mtg',
+          edit: { op: 'set_title', topicId: 't1', text: 'x' },
+        },
         { type: 'chat.archive_request', chatId: 'chat-arc', archived: true },
         { type: 'chat.stop_request', chatId: 'chat-stop' },
         { type: 'chat.unqueue_request', chatId: 'chat-unq', localId: 'L1' },

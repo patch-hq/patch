@@ -6405,6 +6405,10 @@ export async function handleServerEvent(
         await requireMeetings(accounts).decide(event.chatId, event.actionId, event.decision);
         return;
       }
+      case 'meeting.notes_request': {
+        requireMeetings(accounts).editNotes(event.chatId, event.edit);
+        return;
+      }
       case 'chat.pin_request': {
         await daemon.setPinned(event.chatId, event.pinned);
         return;

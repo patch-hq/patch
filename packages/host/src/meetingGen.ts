@@ -25,6 +25,8 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
     '',
     `Meeting time so far: ${formatMeetingClock(input.elapsedMs)}`,
     '',
+    'Notes so far (JSON). A topic with "fixed":true was written or edited by Tom: treat it as given. Never return it',
+    '(no update, no condensing) and do not repeat its content in any other topic.',
     'Notes so far (JSON):',
     JSON.stringify({
       now: input.previous.now,
@@ -34,6 +36,7 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
         title: t.title,
         points: t.points,
         decided: t.decided,
+        ...(t.fixed ? { fixed: true } : {}),
       })),
       actions: input.previous.actions.map((a) => ({ title: a.title, status: a.status })),
     }),

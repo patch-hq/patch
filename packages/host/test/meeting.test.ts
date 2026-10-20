@@ -437,6 +437,112 @@ describe('MeetingManager', () => {
     expect(analyse.mock.calls[1]![0].newLines).toHaveLength(1);
   });
 
+  it('an edited point survives a later analysis pass that tries to rewrite it', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1');
+    m.editNotes('c1', {
+      op: 'set_title',
+      topicId: 'id1',
+      text: 'Priya: split the ledger in January',
+    });
+    m.editNotes('c1', { op: 'set_bullet', topicId: 'id1', index: 0, text: 'Own team owns it' });
+    expect(m.get('c1')!.topics[0]).toMatchObject({
+      fixed: true,
+      title: 'Priya: split the ledger in January',
+    });
+
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          { id: 'id1', title: 'Rewritten by model', points: ['x'], decided: false },
+          {
+            id: null,
+            title: 'Dev: wait until November',
+            points: ['Peak traffic'],
+            decided: false,
+            atSeconds: 9,
+          },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    const topics = m.get('c1')!.topics;
+    expect(topics).toHaveLength(2);
+    expect(topics[0]).toMatchObject({
+      title: 'Priya: split the ledger in January',
+      points: ['Own team owns it'],
+    });
+    expect(topics[1]!.title).toBe('Dev: wait until November');
+    // the model is told the point is fixed
+    expect(analyse.mock.calls[1]![0].previous.topics[0]).toMatchObject({ fixed: true });
+    expect(buildMeetingPrompt(analyse.mock.calls[1]![0])).toContain('"fixed":true');
+  });
+
+  it('an edit made while analysis is running still wins', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    analyse.mockImplementationOnce(async () => {
+      m.editNotes('c1', { op: 'set_title', topicId: 'id1', text: 'Tom was here' });
+      return analysis({ topics: [{ id: 'id1', title: 'Model', points: [], decided: false }] });
+    });
+    await m.tick('c1');
+    expect(m.get('c1')!.topics[0]!.title).toBe('Tom was here');
+  });
+
+  it('inserts a point above another, keeps it through analysis, and removes it only if empty', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1');
+    m.editNotes('c1', { op: 'insert', aboveTopicId: 'id1', id: 'mine' });
+    const s = m.get('c1')!;
+    expect(s.topics.map((t) => t.id)).toEqual(['id1', 'mine']);
+    expect(s.topics[1]!.at).toBeGreaterThan(s.topics[0]!.at);
+    m.editNotes('c1', { op: 'set_title', topicId: 'mine', text: 'Tom: ship it' });
+    expect(() => m.editNotes('c1', { op: 'remove', topicId: 'mine' })).toThrow(/not empty/);
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    analyse.mockResolvedValueOnce(
+      analysis({ topics: [{ id: 'mine', title: 'x', points: [], decided: false }] }),
+    );
+    await m.tick('c1');
+    expect(m.get('c1')!.topics.find((t) => t.id === 'mine')!.title).toBe('Tom: ship it');
+    m.editNotes('c1', { op: 'insert', aboveTopicId: 'mine', id: 'blank' });
+    m.editNotes('c1', { op: 'remove', topicId: 'blank' });
+    expect(m.get('c1')!.topics.map((t) => t.id)).toEqual(['id1', 'mine']);
+  });
+
+  it('adds, edits and removes bullets, and rejects an unknown point', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1');
+    m.editNotes('c1', { op: 'add_bullet', topicId: 'id1', index: 1 });
+    m.editNotes('c1', { op: 'set_bullet', topicId: 'id1', index: 1, text: 'Second' });
+    m.editNotes('c1', { op: 'add_bullet', topicId: 'id1', index: 1 });
+    expect(m.get('c1')!.topics[0]!.points).toEqual(['Own service', '', 'Second']);
+    m.editNotes('c1', { op: 'remove_bullet', topicId: 'id1', index: 1 });
+    expect(m.get('c1')!.topics[0]!.points).toEqual(['Own service', 'Second']);
+    expect(() => m.editNotes('c1', { op: 'set_title', topicId: 'nope', text: 'x' })).toThrow(
+      /no point nope/,
+    );
+    expect(() =>
+      m.editNotes('c1', { op: 'set_bullet', topicId: 'id1', index: 9, text: 'x' }),
+    ).toThrow(/no bullet 9/);
+  });
+
+  it('the default notes prompt asks for speaker-led, plain-language points that spell out acronyms', () => {
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/<Speaker>: <the main thrust/);
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/plain language/);
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/spell out acronyms/);
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/Decision: /);
+  });
+
   it('the interval timer drives analysis', async () => {
     const m = make();
     m.start('c1');
