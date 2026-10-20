@@ -170,6 +170,21 @@ describe('groupChats — hidden', () => {
     expect(g.folders.flatMap((f) => f.rows).map((c) => c.chatId)).toEqual(['plain']);
   });
 
+  it('orders hidden: running first (oldest first), then settled newest first', () => {
+    const chats = [
+      row({ chatId: 'old-idle', hidden: true, activity: 'idle', lastUpdated: 100 }),
+      row({ chatId: 'new-idle', hidden: true, activity: 'idle', lastUpdated: 300 }),
+      row({ chatId: 'run-b', hidden: true, activity: 'running', lastUpdated: 250 }),
+      row({ chatId: 'run-a', hidden: true, activity: 'running', lastUpdated: 200 }),
+    ];
+    expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual([
+      'run-a',
+      'run-b',
+      'new-idle',
+      'old-idle',
+    ]);
+  });
+
   it('draws a chat that is both hidden and snoozed once, under hidden', () => {
     const chats = [row({ chatId: 'both', hidden: true, snoozedUntil: Date.now() + 60_000 })];
     const g = groupChats(chats);
@@ -196,10 +211,10 @@ describe('groupChats — hidden', () => {
     ).toEqual(['shown', 'unknown']);
   });
 
-  it('orders hidden chats oldest first, so a run updating settles at the bottom', () => {
+  it('orders running hidden chats oldest first, so a run updating settles at the bottom', () => {
     const chats = [
-      row({ chatId: 'newer', hidden: true, lastUpdated: 300 }),
-      row({ chatId: 'older', hidden: true, lastUpdated: 100 }),
+      row({ chatId: 'newer', hidden: true, activity: 'running', lastUpdated: 300 }),
+      row({ chatId: 'older', hidden: true, activity: 'running', lastUpdated: 100 }),
     ];
     expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual(['older', 'newer']);
   });
