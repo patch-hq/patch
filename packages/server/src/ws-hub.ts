@@ -1486,6 +1486,7 @@ export class WsHub {
       case 'patch.browser_handoff.input':
       case 'patch.browser_handoff.control':
       case 'meeting.action_request':
+      case 'meeting.notes_request':
       case 'chat.archive_request':
       case 'chat.snooze_request':
       case 'chat.snooze_back_clear_request':

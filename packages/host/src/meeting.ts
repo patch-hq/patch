@@ -19,6 +19,8 @@ import {
   meetingSpeakerLabel,
   DEFAULT_MEETING_SETTINGS,
   MeetingSettings,
+  applyMeetingNotesOp,
+  type MeetingNotesOp,
   type MeetingAction,
   type MeetingNow,
   MeetingState,
@@ -329,6 +331,20 @@ export class MeetingManager {
     });
   }
 
+  // ---- points ----
+
+  /** A user edit to a point or bullet, or a new point. Marks the point fixed so analysis leaves it. */
+  editNotes(chatId: string, edit: MeetingNotesOp): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    try {
+      applyMeetingNotesOp(rt.state.topics, edit);
+    } catch (err) {
+      throw new MeetingError(`cannot edit points in chat ${chatId}: ${(err as Error).message}`);
+    }
+    this.commit(chatId, rt);
+  }
+
   // ---- actions ----
 
   async decide(chatId: string, actionId: string, decision: 'do' | 'dismiss'): Promise<void> {
@@ -486,6 +502,8 @@ export class MeetingManager {
     for (const t of a.topics) {
       const existing = t.id ? s.topics.find((x) => x.id === t.id) : undefined;
       const at = t.atSeconds !== undefined ? t.atSeconds * 1000 : meetingElapsedMs(s, this.now());
+      // Tom's own words are fixed input: a later pass never rewrites them.
+      if (existing?.fixed) continue;
       if (existing) {
         existing.title = t.title;
         existing.points = t.points;

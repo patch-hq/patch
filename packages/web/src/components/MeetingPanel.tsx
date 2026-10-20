@@ -11,9 +11,11 @@ import {
   meetingSpeakerLabel,
   meetingElapsedMs,
   type MeetingState,
+  type MeetingTopic,
 } from '@patch/wire';
 import {
   decideAction,
+  editMeetingNotes,
   endMeeting,
   getMeetingSpeed,
   listenHere,
@@ -32,6 +34,8 @@ import { MeetingModelRows } from '../routes/settings/PromptsPage.js';
 import { Group } from '../routes/settings/ui.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import type { ReactNode } from 'react';
+
+const DECISION = /^Decision:\s*/;
 
 function useNow(running: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -439,12 +443,225 @@ function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: Mee
 
 type PanelTab = 'points' | 'notes';
 
+/** Newest point is level 0, then the next three, then older ones fade to a single line. */
+function taperLevel(i: number): 0 | 1 | 2 | 3 {
+  return i === 0 ? 0 : i <= 3 ? 1 : i <= 6 ? 2 : 3;
+}
+
+const MAX_LINES_BEHIND = 12;
+
+/** The transcript lines a point came from: from its time up to the next newer point's. */
+function linesBehind(meeting: MeetingState, t: MeetingTopic, newer: MeetingTopic | undefined) {
+  const end = newer ? newer.at : Infinity;
+  return meeting.transcript.filter((l) => l.at >= t.at && l.at < end).slice(0, MAX_LINES_BEHIND);
+}
+
+/** Which editable field should take the caret once it has rendered. */
+interface PointFocus {
+  topicId: string;
+  /** `null` is the point's title; a number is a bullet. */
+  bullet: number | null;
+}
+
+/**
+ * Text that is edited where it stands. It commits on blur; Enter commits and
+ * calls `onEnter`; Escape puts the old text back. Plain text only.
+ */
+function Editable({
+  value,
+  onCommit,
+  onEnter,
+  autoFocus,
+  onFocused,
+  testid,
+  className,
+  placeholder,
+  label,
+}: {
+  value: string;
+  /** Called on blur with the trimmed text, changed or not. */
+  onCommit: (text: string) => void;
+  onEnter?: (text: string) => void;
+  autoFocus: boolean;
+  onFocused: () => void;
+  testid: string;
+  className?: string;
+  placeholder: string;
+  label: string;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && document.activeElement !== el && el.textContent !== value) el.textContent = value;
+  }, [value]);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !autoFocus) return;
+    el.focus();
+    const sel = window.getSelection();
+    sel?.selectAllChildren(el);
+    sel?.collapseToEnd();
+    onFocused();
+    // Focus once when asked, not on every render while it is still asked for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFocus]);
+  return (
+    <span
+      ref={ref}
+      className={className}
+      data-testid={testid}
+      data-placeholder={placeholder}
+      aria-label={label}
+      role="textbox"
+      contentEditable="plaintext-only"
+      suppressContentEditableWarning
+      spellCheck
+      onBlur={(e) => onCommit((e.currentTarget.textContent ?? '').trim())}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          onEnter?.((e.currentTarget.textContent ?? '').trim());
+        } else if (e.key === 'Escape') {
+          e.currentTarget.textContent = value;
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+/** One point: time, "Speaker: main thrust", bullets. Every piece is edited in place. */
+function PointRow({
+  chatId,
+  topic: t,
+  level,
+  lines,
+  focus,
+  setFocus,
+}: {
+  chatId: string;
+  topic: MeetingTopic;
+  level: 0 | 1 | 2 | 3;
+  lines: MeetingState['transcript'];
+  focus: PointFocus | null;
+  setFocus: (f: PointFocus | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const decision = DECISION.exec(t.title);
+  const titleText = decision ? t.title.slice(decision[0].length) : t.title;
+  const wants = (bullet: number | null) =>
+    focus !== null && focus.topicId === t.id && focus.bullet === bullet;
+  const edit = (e: Parameters<typeof editMeetingNotes>[1]) => editMeetingNotes(chatId, e);
+
+  const commitTitle = (text: string) => {
+    const full = decision ? `Decision: ${text}`.trim() : text;
+    if (full !== t.title) edit({ op: 'set_title', topicId: t.id, text: full });
+    if (text === '' && t.points.every((p) => p.trim() === '') && !decision)
+      edit({ op: 'remove', topicId: t.id });
+  };
+  const commitBullet = (i: number, text: string) => {
+    if (text === '') edit({ op: 'remove_bullet', topicId: t.id, index: i });
+    else if (text !== t.points[i]) edit({ op: 'set_bullet', topicId: t.id, index: i, text });
+  };
+
+  return (
+    <div
+      className={`mm-topic l${level}`}
+      data-testid="meeting-topic"
+      data-level={level}
+      data-decided={decision ? 'true' : undefined}
+    >
+      <button
+        type="button"
+        className="mm-ins"
+        data-testid="meeting-point-insert"
+        aria-label="Add a point here"
+        title="Add a point here"
+        onClick={() => {
+          const id = `pt_${Math.random().toString(36).slice(2, 10)}`;
+          edit({ op: 'insert', aboveTopicId: t.id, id });
+          setFocus({ topicId: id, bullet: null });
+        }}
+      >
+        +
+      </button>
+      <div className="r">
+        <button
+          type="button"
+          className="tm"
+          data-testid="meeting-point-time"
+          aria-expanded={open}
+          title="Show what was said"
+          onClick={() => setOpen(!open)}
+        >
+          {formatMeetingClock(t.at)}
+        </button>
+        <span className="nm">
+          {decision ? <span className="decw">Decision:</span> : null}
+          {decision ? ' ' : null}
+          <Editable
+            value={titleText}
+            testid="meeting-point-title"
+            label="Point"
+            placeholder="Speaker: what they argued"
+            autoFocus={wants(null)}
+            onFocused={() => setFocus(null)}
+            onCommit={commitTitle}
+            onEnter={(text) => {
+              if (text === '') return (document.activeElement as HTMLElement | null)?.blur();
+              commitTitle(text);
+              edit({ op: 'add_bullet', topicId: t.id, index: 0 });
+              setFocus({ topicId: t.id, bullet: 0 });
+            }}
+          />
+        </span>
+      </div>
+      {t.points.length > 0 ? (
+        <ul>
+          {t.points.map((p, i) => (
+            <li key={i}>
+              <Editable
+                value={p}
+                testid="meeting-point-bullet"
+                label="Bullet"
+                placeholder="Detail"
+                autoFocus={wants(i)}
+                onFocused={() => setFocus(null)}
+                onCommit={(text) => commitBullet(i, text)}
+                onEnter={(text) => {
+                  if (text === '') return (document.activeElement as HTMLElement | null)?.blur();
+                  commitBullet(i, text);
+                  edit({ op: 'add_bullet', topicId: t.id, index: i + 1 });
+                  setFocus({ topicId: t.id, bullet: i + 1 });
+                }}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {open ? (
+        <div className="mm-tx" data-testid="meeting-point-lines">
+          {lines.length === 0 ? (
+            <span className="mm-wait">No transcript for this point</span>
+          ) : null}
+          {lines.map((l, i) => (
+            <div key={i} data-testid="meeting-point-line">
+              <b>{meetingSpeakerLabel(l)}</b> {l.text}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Right-hand panel: Points and My notes, with a cog for the meeting's settings. */
 export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const [tab, setTab] = useState<PanelTab>('points');
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
   const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
   const topics = useMemo(() => [...meeting.topics].sort((a, b) => b.at - a.at), [meeting.topics]);
+  const [focus, setFocus] = useState<PointFocus | null>(null);
 
   return (
     <aside className="mm-panel" data-testid="meeting-panel" data-status={meeting.status}>
@@ -497,19 +714,16 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
       ) : tab === 'points' ? (
         <div className="mm-points" data-testid="meeting-points">
           {topics.length === 0 ? <div className="mm-wait">No points yet</div> : null}
-          {topics.map((t) => (
-            <div className="mm-topic" key={t.id} data-testid="meeting-topic">
-              <div className="r">
-                <span className="tm">{formatMeetingClock(t.at)}</span>
-                <span className="nm">{t.title}</span>
-                {t.decided ? <span className="mm-dec">Decided</span> : null}
-              </div>
-              <ul>
-                {t.points.map((p, i) => (
-                  <li key={i}>{p}</li>
-                ))}
-              </ul>
-            </div>
+          {topics.map((t, i) => (
+            <PointRow
+              key={t.id}
+              chatId={chatId}
+              topic={t}
+              level={taperLevel(i)}
+              lines={linesBehind(meeting, t, topics[i - 1])}
+              focus={focus}
+              setFocus={setFocus}
+            />
           ))}
         </div>
       ) : (

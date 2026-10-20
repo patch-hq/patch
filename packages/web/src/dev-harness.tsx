@@ -51,7 +51,7 @@ import { usePreferencesStore } from './stores/preferencesStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
 import { useBrowserHandoffStore } from './stores/browserHandoffStore.js';
-import type { MeetingState } from '@patch/wire';
+import { applyMeetingNotesOp, type MeetingState } from '@patch/wire';
 import { useDraftStore } from './stores/draftStore.js';
 import { useComposerDraftStore } from './stores/composerDraftStore.js';
 import type { ChatEventEntry } from './stores/chatStore.js';
@@ -2462,9 +2462,20 @@ Object.assign(window, { __startVoiceNote: startVoiceNote, __cancelVoiceNote: can
 // throughout), which is why nothing captured outbound sends before.
 const wsSent: WireEvent[] = [];
 (window as unknown as { __wsSent: WireEvent[] }).__wsSent = wsSent;
+// The harness has no host, so a points edit is applied here with the same
+// reducer the host runs, and answered the way the host does (`meeting.state`).
+const harnessSend = (event: WireEvent): void => {
+  wsSent.push(event);
+  if (event.type !== 'meeting.notes_request') return;
+  const cur = useMeetingStore.getState().byChat[event.chatId];
+  if (!cur) return;
+  const next = structuredClone(cur);
+  applyMeetingNotesOp(next.topics, event.edit);
+  useMeetingStore.getState().apply(event.chatId, next);
+};
 setActiveWs({
-  send: (event: WireEvent) => wsSent.push(event),
-  safeSend: (event: WireEvent) => wsSent.push(event),
+  send: harnessSend,
+  safeSend: harnessSend,
 } as unknown as PatchWs);
 // The model catalogue (spec/14 § Model selector). Seeded, not fetched: the
 // harness has no backend, and the chat header's model crumb is a live control —
@@ -3241,18 +3252,24 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
       {
         id: 't1',
         at: 22 * 60_000 + 5000,
-        title: 'Points ledger split',
+        title: 'Decision: Dev: split the points ledger into its own service',
         points: ['Own service'],
         decided: true,
       },
       {
         id: 't2',
         at: 31 * 60_000 + 40_000,
-        title: "Sam's failing tests",
+        title: 'Sam: the failing tests are down to an empty sandbox credit balance',
         points: ['Sandbox out of credit'],
         decided: false,
       },
-      { id: 't3', at: 30_000, title: 'Release 4.2', points: ['Ships Monday'], decided: true },
+      {
+        id: 't3',
+        at: 30_000,
+        title: 'Decision: Priya: release 4.2 ships on Monday',
+        points: ['Ships Monday'],
+        decided: true,
+      },
     ],
     actions: [
       {

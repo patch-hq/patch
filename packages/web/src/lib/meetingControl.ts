@@ -3,7 +3,7 @@
 // leaves a live meeting that hears nothing.
 
 import { SpeakerLog } from './speakerLog.js';
-import { DEFAULT_MEETING_SETTINGS, type MeetingSettings } from '@patch/wire';
+import { DEFAULT_MEETING_SETTINGS, type MeetingNotesOp, type MeetingSettings } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -214,6 +214,11 @@ export function endMeeting(chatId: string): void {
 
 export function decideAction(chatId: string, actionId: string, decision: 'do' | 'dismiss'): void {
   ws().send({ type: 'meeting.action_request', chatId, actionId, decision });
+}
+
+/** An edit to the points panel; the host stores it as fixed input and answers with `meeting.state`. */
+export function editMeetingNotes(chatId: string, edit: MeetingNotesOp): void {
+  ws().send({ type: 'meeting.notes_request', chatId, edit });
 }
 
 export function requestMeeting(chatId: string): void {

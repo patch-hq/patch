@@ -419,6 +419,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'meeting.control_request': { type: 'meeting.control_request', chatId: 'c1', action: 'start' },
   'meeting.get_request': { type: 'meeting.get_request', chatId: 'c1' },
   'meeting.audio': { type: 'meeting.audio', chatId: 'c1', source: 'mic', audioBase64: 'AA==' },
+  'meeting.notes_request': {
+    type: 'meeting.notes_request',
+    chatId: 'c',
+    edit: { op: 'remove', topicId: 't' },
+  },
   'meeting.action_request': {
     type: 'meeting.action_request',
     chatId: 'c1',
