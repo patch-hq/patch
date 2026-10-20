@@ -158,7 +158,7 @@ describe('artifacts', () => {
     }
   });
 
-  it('serves a `raw` publish with its own content-type and exact bytes, no CSP', async () => {
+  it('serves a `raw` publish with its own content-type and exact bytes, still sandboxed', async () => {
     const { built, hostLink } = await makeApp();
     try {
       const png = Buffer.from(
@@ -179,8 +179,50 @@ describe('artifacts', () => {
       const get = await built.app.inject({ method: 'GET', url: res.url! });
       expect(get.statusCode).toBe(200);
       expect(get.headers['content-type']).toBe('image/png');
-      expect(get.headers['content-security-policy']).toBeUndefined();
+      expect(get.headers['content-security-policy']).toBe(
+        'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox',
+      );
+      expect(get.headers['x-content-type-options']).toBe('nosniff');
       expect(get.rawPayload.equals(png)).toBe(true);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  // A raw publish carries an agent-chosen content-type. Served bare, a
+  // `text/html` one would run script in the SPA's own origin and could read the
+  // stored credential, so every response is sandboxed regardless of type.
+  it('sandboxes a raw publish that claims to be html, and never lets a type be sniffed', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab02',
+          html: undefined,
+          raw: {
+            contentType: 'text/html',
+            base64: Buffer.from('<script>1</script>').toString('base64'),
+          },
+        }),
+      );
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.statusCode).toBe(200);
+      expect(get.headers['content-security-policy']).toContain('sandbox');
+      expect(get.headers['x-content-type-options']).toBe('nosniff');
+      expect(get.headers['referrer-policy']).toBe('no-referrer');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('serves a html page with nosniff and no-referrer so the signed URL is not leaked', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const res = await publish(hostLink, publishRequest());
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.headers['x-content-type-options']).toBe('nosniff');
+      expect(get.headers['referrer-policy']).toBe('no-referrer');
     } finally {
       await built.app.close();
     }
