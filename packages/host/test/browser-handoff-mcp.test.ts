@@ -158,4 +158,44 @@ describeRealBrowser('patch_browser_handoff — MCP to Chromium', () => {
     const read = JSON.parse((await call('patch_browser_read', { tabId })).text);
     expect(read.title).toBe('Welcome tom');
   });
+
+  it('share returns at once, leaves the tab with the agent, and ends when the user taps Done', async () => {
+    const opened = JSON.parse(
+      (await call('patch_browser_open', { url: baseUrl + '/', profile: 'logged-out' })).text,
+    );
+    const tabId = opened.tabId as string;
+    type State = Extract<WireEvent, { type: 'patch.browser_handoff.state' }>;
+    const states = (): State[] =>
+      events.filter(
+        (e): e is State => e.type === 'patch.browser_handoff.state' && e.tabId === tabId,
+      );
+
+    const shared = await call('patch_browser_handoff', { tabId, reason: 'Review it', share: true });
+    expect(shared.isError).toBe(false);
+    const body = JSON.parse(shared.text);
+    expect(body).toMatchObject({ ok: true, shared: true, url: baseUrl + '/' });
+    expect(states()[0]).toMatchObject({ status: 'waiting', reason: 'Review it', shared: true });
+
+    // The agent keeps the tab and sees its content.
+    const read = await call('patch_browser_read', { tabId });
+    expect(read.isError).toBe(false);
+    expect(JSON.parse(read.text).title).toBe('Sign in');
+
+    // A second share of the same tab is refused, not silently doubled.
+    const again = await call('patch_browser_handoff', { tabId, reason: 'x', share: true });
+    expect(again.isError).toBe(true);
+
+    // share does not mix with a blocking hand-off's options.
+    const mixed = await call('patch_browser_handoff', {
+      tabId,
+      reason: 'x',
+      share: true,
+      timeoutSeconds: 60,
+    });
+    expect(mixed.isError).toBe(true);
+
+    daemon.browserHandoffControl('caller-1', 'done', body.handoffId as string);
+    await until(() => states().some((e) => e.status === 'ended'), 'the share to end');
+    expect(states().at(-1)).toMatchObject({ status: 'ended', outcome: 'done', shared: true });
+  });
 });

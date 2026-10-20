@@ -4249,6 +4249,8 @@ export const PatchBrowserHandoffStateEvent = z
     reason: z.string(),
     startedAt: z.number().int().nonnegative(),
     outcome: BrowserHandoffOutcome.optional(),
+    /** A shared view for review: the agent was not blocked and still has the tab. */
+    shared: z.boolean().optional(),
   })
   .strict();
 export type PatchBrowserHandoffStateEvent = z.infer<typeof PatchBrowserHandoffStateEvent>;

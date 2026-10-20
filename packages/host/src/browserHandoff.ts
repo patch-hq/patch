@@ -24,6 +24,14 @@ export interface HandoffResult {
   callbackStatus?: number;
 }
 
+/** What a `share` returns at once: the view is open and the agent carries on. */
+export interface ShareResult {
+  shared: true;
+  handoffId: string;
+  /** Address without query or fragment. */
+  url: string;
+}
+
 export interface BrowserHandoffOptions {
   browser: BrowserManager;
   emit: (event: WireEvent) => void;
@@ -46,6 +54,7 @@ interface Active {
   chatId: string;
   tabId: string;
   reason: string;
+  shared: boolean;
   startedAt: number;
   lastStateAt: number;
   settle: (outcome: BrowserHandoffOutcome) => void;
@@ -116,6 +125,7 @@ export class BrowserHandoff {
       chatId,
       tabId,
       reason,
+      shared: false,
       startedAt,
       lastStateAt: startedAt,
       settle,
@@ -151,6 +161,65 @@ export class BrowserHandoff {
       url: browser.redactedUrl(tabId),
       ...(callbackStatus !== undefined ? { callbackStatus } : {}),
     };
+  }
+
+  /**
+   * `patch_browser_handoff` with `share`: put the tab in front of the user for
+   * review and return at once. Unlike a hand-off the agent keeps the tab (no
+   * lock, no redaction: there is no secret in a page being reviewed), nothing
+   * times out, and the user's feedback arrives as ordinary chat messages. It
+   * ends when the user closes the view, the tab closes, or the host stops.
+   */
+  async share(args: { chatId: string; tabId: string; reason: string }): Promise<ShareResult> {
+    const { browser } = this.opts;
+    const { chatId, tabId, reason } = args;
+    browser.requireTab(tabId);
+    for (const h of this.active.values()) {
+      if (h.chatId === chatId && h.tabId === tabId) {
+        throw new Error(`tab ${tabId} is already open to the user`);
+      }
+    }
+    const handoffId = randomUUID();
+    const startedAt = this.now();
+    let settle!: (o: BrowserHandoffOutcome) => void;
+    const decided = new Promise<BrowserHandoffOutcome>((resolve) => {
+      settle = resolve;
+    });
+    this.active.set(handoffId, {
+      handoffId,
+      chatId,
+      tabId,
+      reason,
+      shared: true,
+      startedAt,
+      lastStateAt: startedAt,
+      settle,
+    });
+    this.emitState({
+      chatId,
+      handoffId,
+      tabId,
+      reason,
+      startedAt,
+      status: 'waiting',
+      shared: true,
+    });
+    this.touchStream(chatId, tabId);
+    void decided.then((outcome) => {
+      this.active.delete(handoffId);
+      this.inputs.delete(handoffId);
+      this.emitState({
+        chatId,
+        handoffId,
+        tabId,
+        reason,
+        startedAt,
+        status: 'ended',
+        outcome,
+        shared: true,
+      });
+    });
+    return { shared: true, handoffId, url: browser.redactedUrl(tabId) };
   }
 
   /** `patch.browser_view.watch`. */
@@ -230,6 +299,7 @@ export class BrowserHandoff {
     startedAt: number;
     status: 'waiting' | 'ended';
     outcome?: BrowserHandoffOutcome;
+    shared?: boolean;
   }): void {
     this.opts.emit({
       type: 'patch.browser_handoff.state',
@@ -240,6 +310,7 @@ export class BrowserHandoff {
       reason: s.reason,
       startedAt: s.startedAt,
       ...(s.outcome ? { outcome: s.outcome } : {}),
+      ...(s.shared ? { shared: true } : {}),
     });
   }
 
@@ -304,7 +375,9 @@ export class BrowserHandoff {
   private check(tabId: string): void {
     const stream = this.streams.get(tabId);
     if (!stream) return;
-    const handedOff = this.opts.browser.isHandedOff(tabId);
+    const handedOff =
+      this.opts.browser.isHandedOff(tabId) ||
+      [...this.active.values()].some((h) => h.tabId === tabId);
     if (!handedOff && this.now() - stream.lastAsk > this.watchTtlMs) {
       this.stopStream(tabId);
       return;
@@ -313,7 +386,7 @@ export class BrowserHandoff {
     for (const h of this.active.values()) {
       if (h.tabId !== tabId || this.now() - h.lastStateAt < this.stateRepeatMs) continue;
       h.lastStateAt = this.now();
-      this.emitState({ ...h, status: 'waiting' });
+      this.emitState({ ...h, status: 'waiting', ...(h.shared ? { shared: true } : {}) });
     }
     this.schedule(tabId, stream);
   }

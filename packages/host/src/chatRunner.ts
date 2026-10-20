@@ -219,7 +219,7 @@ import type {
   ChatInputEvent,
   DocExportFormat,
 } from '@patch/wire';
-import { BrowserHandoff, type HandoffResult } from './browserHandoff.js';
+import { BrowserHandoff, type HandoffResult, type ShareResult } from './browserHandoff.js';
 import { voicePrefixForSource } from './specialThreads.js';
 
 /**
@@ -3884,6 +3884,11 @@ export class Daemon {
     timeoutMs?: number;
   }): Promise<HandoffResult> {
     return this.browserHandoff_.request(args);
+  }
+
+  /** `patch_browser_handoff` with `share`: the user reviews the tab; the agent is not blocked. */
+  browserShare(args: { chatId: string; tabId: string; reason: string }): Promise<ShareResult> {
+    return this.browserHandoff_.share(args);
   }
 
   /** `patch.browser_view.watch` from a surface. */
