@@ -16,6 +16,7 @@ import type { Logger } from 'pino';
 import {
   canonicalizeHostNames,
   DEFAULT_SHARED_SETTINGS,
+  signInQuestion,
   type ChatInputEvent,
   type HealthzResponse,
   type WireEvent,
@@ -1923,7 +1924,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         type: 'notify',
         chatId: 'signin-request',
         channel: 'push',
-        message: `${label} wants to sign in to Patch. Open Patch to allow it.`,
+        message: `${signInQuestion(label)} Open Patch to answer.`,
         priority: 'urgent',
       }),
     ...(hostLink instanceof InboundHostLink

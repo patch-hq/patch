@@ -38,7 +38,7 @@ describe('SignInApprovalSheet', () => {
     actSync(() =>
       useSignInStore.getState().add({ id: 'r1', label: 'Chrome on Mac', expiresAt: soon() }),
     );
-    expect(hasText(r.root, 'Chrome on Mac wants to sign in')).toBe(true);
+    expect(hasText(r.root, 'Approve a Patch sign-in from Chrome on a Mac?')).toBe(true);
     await actAsync(async () => {
       findHost(r.root, byLabel('Allow')).props.onPress();
     });

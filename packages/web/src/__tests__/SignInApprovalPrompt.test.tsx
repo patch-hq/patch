@@ -32,7 +32,9 @@ describe('SignInApprovalPrompt', () => {
     act(() =>
       useSignInStore.getState().add({ id: 'r1', label: 'Chrome on Mac', expiresAt: soon() }),
     );
-    expect((await screen.findByTestId('signin-prompt')).textContent).toMatch(/Chrome on Mac/);
+    expect((await screen.findByTestId('signin-prompt')).textContent).toContain(
+      'Approve a Patch sign-in from Chrome on a Mac?',
+    );
     fireEvent.click(screen.getByTestId('signin-allow'));
     expect((await screen.findByTestId('signin-code-value')).textContent).toBe('482913');
     expect(approve).toHaveBeenCalledWith('r1');
