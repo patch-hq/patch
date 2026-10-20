@@ -9,11 +9,13 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 export interface ServerConfig {
   port: number;
   host: string;
+  /** When set, listen on this Unix socket instead of port/host. */
+  socketPath?: string;
   /**
    * HMAC secret for voice session tokens (spec/13). Surfaces present a minted
    * token to a host's audio WSS, which verifies it with the same secret — so
@@ -86,6 +88,10 @@ export function loadConfig(opts: LoadConfigOptions = {}): ServerConfig {
     throw new Error(`Invalid PORT: ${process.env.PORT}`);
   }
   const host = process.env.HOST ?? '0.0.0.0';
+  const socketPath = process.env.PATCH_SOCKET || undefined;
+  if (socketPath !== undefined && !isAbsolute(socketPath)) {
+    throw new Error(`PATCH_SOCKET must be an absolute path, got ${socketPath}`);
+  }
 
   const dataDirEnv = process.env.PATCH_DATA_DIR;
   let dataDir: string;
@@ -110,9 +116,15 @@ export function loadConfig(opts: LoadConfigOptions = {}): ServerConfig {
   if (relayUrl !== undefined && !/^wss?:\/\//.test(relayUrl)) {
     throw new Error(`PATCH_RELAY_URL must be a ws:// or wss:// address, got ${relayUrl}`);
   }
+  if (socketPath !== undefined && relayUrl) {
+    throw new Error(
+      'PATCH_SOCKET cannot be combined with PATCH_RELAY_URL: the relay tunnel needs a TCP port.',
+    );
+  }
   return {
     port,
     host,
+    ...(socketPath ? { socketPath } : {}),
     internalToken: internalTokenFor(dataDir),
     dataDir,
     ...(relayUrl ? { relayUrl } : {}),

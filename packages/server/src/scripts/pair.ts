@@ -30,7 +30,9 @@ async function main(): Promise<void> {
   const dataDir = process.env['PATCH_DATA_DIR'] ?? join(defaultServerHome(), 'data');
 
   const out = await pairNewSurface({
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl: process.env['PATCH_SOCKET']
+      ? `unix:${process.env['PATCH_SOCKET']}`
+      : `http://127.0.0.1:${port}`,
     dataDir,
     ...(publicUrl ? { publicUrl } : {}),
   }).catch((err: Error) => fail(err.message));

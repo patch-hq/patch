@@ -20,6 +20,9 @@
 # Options
 #   --domain NAME        the name the server answers to (DNS must already point here)
 #   --email ADDR         where Let's Encrypt may write about the certificate
+#   --socket [PATH]      have the server listen on a Unix socket (default
+#                        /run/patch/server.sock) that Caddy proxies to, instead
+#                        of a port. Needs HTTPS; nothing can find it by port.
 #   --no-https           serve plain HTTP on :3970 instead — a LAN or a tunnel
 #   --user-mode          no root: install under ~/.patch-server as your own user
 #                        service, plain HTTP. For trying it out.
@@ -42,6 +45,7 @@ PRINT_CADDYFILE=0
 SERVICE=1
 HOME_DIR=""
 PORT=3970
+SOCKET=""
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
@@ -52,6 +56,8 @@ while [ $# -gt 0 ]; do
     --domain=*) DOMAIN="${1#--domain=}"; shift ;;
     --email) EMAIL="$2"; shift 2 ;;
     --email=*) EMAIL="${1#--email=}"; shift ;;
+    --socket) case "${2:-}" in /*) SOCKET="$2"; shift 2 ;; *) SOCKET=/run/patch/server.sock; shift ;; esac ;;
+    --socket=*) SOCKET="${1#--socket=}"; shift ;;
     --no-https) HTTPS=0; shift ;;
     --user-mode) USER_MODE=1; HTTPS=0; shift ;;
     --release-url) RELEASE_URL="$2"; shift 2 ;;
@@ -91,7 +97,11 @@ caddyfile() {
   # host's audio WSS).
   printf '\t@device path /device/*\n'
   printf '\treverse_proxy @device 127.0.0.1:3003\n'
-  printf '\treverse_proxy 127.0.0.1:%s\n' "${PORT}"
+  if [ -n "${SOCKET}" ]; then
+    printf '\treverse_proxy unix/%s\n' "${SOCKET}"
+  else
+    printf '\treverse_proxy 127.0.0.1:%s\n' "${PORT}"
+  fi
   printf '}\n'
 }
 
@@ -102,6 +112,11 @@ if [ "${PRINT_CADDYFILE}" = 1 ]; then
 fi
 
 # --- This box ---------------------------------------------------------------------
+
+if [ -n "${SOCKET}" ]; then
+  case "${SOCKET}" in /run/*/*) ;; *) die "--socket must be /run/<dir>/<name>.sock so systemd can create the directory (got ${SOCKET})" ;; esac
+  [ "${HTTPS}" = 1 ] || die "--socket is for a reverse proxy on this box; it needs HTTPS (drop --no-https/--user-mode/--no-service)"
+fi
 
 [ "$(uname -s)" = Linux ] || die "this installs onto Linux; this is $(uname -s)"
 case "${PATCH_INSTALL_UNAME_M:-$(uname -m)}" in
@@ -198,7 +213,9 @@ else
   HOST_BIND=127.0.0.1
   # Without HTTPS nothing sits in front of it, so it has to listen for itself.
   [ "${HTTPS}" = 1 ] || HOST_BIND=0.0.0.0
-  sh "${REL_DIR}/install" --system --user "${SERVER_USER}" --home "${HOME_DIR}" \
+  SOCKET_FLAG=""
+  [ -z "${SOCKET}" ] || SOCKET_FLAG="--socket ${SOCKET}"
+  sh "${REL_DIR}/install" ${SOCKET_FLAG} --system --user "${SERVER_USER}" --home "${HOME_DIR}" \
     --public-url "${PUBLIC_URL}" --host "${HOST_BIND}" ${NO_SERVICE_FLAG}
   # `patch-server pair` must run as the server's user: the credential it keeps is
   # that user's, and root-owned files in the data directory would stop the server.
@@ -232,6 +249,8 @@ if [ "${HTTPS}" = 1 ]; then
   fi
   id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --create-home --shell /usr/sbin/nologin caddy
   mkdir -p /etc/patch
+  # The socket is group-readable by the server's group; Caddy must be in it.
+  [ -z "${SOCKET}" ] || usermod -aG "${SERVER_USER}" caddy
   caddyfile > /etc/patch/Caddyfile
   cat > /etc/systemd/system/patch-caddy.service <<UNIT
 # Written by the Patch server installer. Re-running it rewrites this file.

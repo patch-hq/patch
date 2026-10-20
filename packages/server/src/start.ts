@@ -1,6 +1,7 @@
 // Starting the server from a loaded config: the app, listening, and — when a relay
 // is configured — the tunnel that makes it reachable through it (spec/10 § Relay).
 
+import { chmodSync, rmSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { buildAll } from './app.js';
 import type { ServerConfig } from './config.js';
@@ -28,7 +29,15 @@ export async function startServer(
   let stopMirror: (() => void) | undefined;
   app.addHook('onClose', async () => stopMirror?.());
   try {
-    await app.listen({ port: config.port, host: config.host });
+    if (config.socketPath) {
+      // A socket file left by a previous run would make listen fail with EADDRINUSE.
+      rmSync(config.socketPath, { force: true });
+      await app.listen({ path: config.socketPath });
+      // Group-accessible so the reverse proxy (a different user) can connect.
+      chmodSync(config.socketPath, 0o660);
+    } else {
+      await app.listen({ port: config.port, host: config.host });
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
       throw new Error(portInUseMessage(config.port), { cause: err });
@@ -37,7 +46,8 @@ export async function startServer(
   }
   const address = app.server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
-  app.log.info({ port, host: config.host }, 'patch-server listening');
+  if (config.socketPath) app.log.info({ socket: config.socketPath }, 'patch-server listening');
+  else app.log.info({ port, host: config.host }, 'patch-server listening');
   if (relay) {
     // The tunnel ends on this process's own loopback, so it starts once that listens.
     relay.start(`http://127.0.0.1:${port}`);
