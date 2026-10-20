@@ -81,7 +81,7 @@ beforeEach(() => {
   __resetRouterMock();
   useHostRefusalStore.getState()._reset();
   resetHosts();
-  reportHost('d1', { hostName: 'laptop', isHomeHost: true, harnessMemoryEnabled: true });
+  reportHost('d1', { hostName: 'laptop', runsManager: true, harnessMemoryEnabled: true });
   seed([nav, phone, deploy]);
 });
 afterEach(() => {

@@ -287,7 +287,7 @@ export interface BuildOptions {
    * those routes 503 rather than pretending the control does not exist.
    *
    * The four host controls the SERVER owns (mint a registration code, rename,
-   * set-home, revoke) are deliberately absent: they are HTTP even when the CLI
+   * revoke) are deliberately absent: they are HTTP even when the CLI
    * runs on the host itself.
    */
   host?: {

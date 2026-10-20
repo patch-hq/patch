@@ -419,7 +419,12 @@ async function bootMain(
   } = {},
 ): Promise<Boot> {
   const home = mkdtempSync(join(tmpdir(), 'patch-main-home-'));
-  if (opts.hostJson) writeFileSync(join(home, 'host.json'), JSON.stringify(opts.hostJson));
+  // The server says which machine runs the Manager; a test boots as that machine
+  // (remembered from an earlier `host.set_manager`) unless it asks not to.
+  const runsManager = envOverrides['__NOT_MANAGER__'] === undefined;
+  if (opts.hostJson || runsManager) {
+    writeFileSync(join(home, 'host.json'), JSON.stringify({ runsManager, ...opts.hostJson }));
+  }
   if (opts.claudeStore) {
     writeFileSync(join(home, 'claude-oauth.json'), JSON.stringify(opts.claudeStore), {
       mode: 0o600,
@@ -454,8 +459,6 @@ async function bootMain(
   const savedEnv: Record<string, string | undefined> = {};
   const env: Record<string, string | undefined> = {
     PATCH_HOME: home,
-    // The Manager and Speakers exist only on the home machine (spec/06).
-    PATCH_IS_HOME_HOST: '1',
     PATCH_DAEMON_SOCKET: join(home, 'daemon.sock'),
     PATCH_DAEMON_HEALTHZ_PORT: String(healthzPort),
     PATCH_DAEMON_HEALTHZ_HOST: '127.0.0.1',
@@ -494,6 +497,7 @@ async function bootMain(
     ...envOverrides,
   };
   delete env['__NO_DAEMON_KEY__'];
+  delete env['__NOT_MANAGER__'];
   for (const [k, v] of Object.entries(env)) {
     savedEnv[k] = process.env[k];
     if (v === undefined) delete process.env[k];
@@ -2071,14 +2075,14 @@ describe('src/index.ts main() — full host boot', () => {
     rmSync(kokoroModelHome, { recursive: true, force: true });
   });
 
-  it('a machine that is not the home machine creates no Manager or Speakers, and does once it becomes home', async () => {
-    const boot = await bootMain({ PATCH_IS_HOME_HOST: '0' });
+  it('a machine the server has not given the Manager creates no Manager or Speakers, and does once told it runs it', async () => {
+    const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       expect(boot.ready.daemon.chatState.has('thread_manager')).toBe(false);
       expect(boot.ready.daemon.chatState.has('thread_speakers')).toBe(false);
 
-      boot.fakeServer.send({ type: 'host.set_home', hostId: 'd1' });
+      boot.fakeServer.send({ type: 'host.set_manager', hostId: 'd1' });
       await waitFor(() => boot.ready.daemon.chatState.has('thread_manager'));
       expect(boot.ready.daemon.chatState.has('thread_speakers')).toBe(true);
       // The server learns of them, or no surface would ever see the new Manager.
@@ -2159,7 +2163,7 @@ describe('src/index.ts main() — full host boot', () => {
   }, 30_000);
 
   it('a machine told to stand in for the Manager creates it, remembers the takeover once, and lets go on release', async () => {
-    const boot = await bootMain({ PATCH_IS_HOME_HOST: '0' });
+    const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       expect(boot.ready.daemon.chatState.has('thread_manager')).toBe(false);
@@ -2199,7 +2203,7 @@ describe('src/index.ts main() — full host boot', () => {
   }, 30_000);
 
   it('ignores a takeover addressed to another machine', async () => {
-    const boot = await bootMain({ PATCH_IS_HOME_HOST: '0' });
+    const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       boot.fakeServer.send({

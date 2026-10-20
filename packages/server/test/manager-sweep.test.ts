@@ -78,7 +78,7 @@ describe('ManagerSweeper', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeHostId: () => 'd1',
+      managerHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs: memoryRunStore(),
       logger,
@@ -353,7 +353,7 @@ describe('ManagerSweeper', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeHostId: () => undefined,
+      managerHostId: () => undefined,
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs: memoryRunStore(),
       logger,
@@ -383,7 +383,7 @@ describe('ManagerSweeper', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeHostId: () => 'd1',
+      managerHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs,
       logger,

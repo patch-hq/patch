@@ -569,7 +569,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
   beforeEach(() => {
     saveLastNewChat({ hostId: HOST, folder: '/p/one', model: null, permissionMode: null });
     usePresenceStore.setState({
-      hosts: { [HOST]: host(HOST, true, { isHomeHost: true }), [OTHER]: host(OTHER, true) },
+      hosts: { [HOST]: host(HOST, true, { runsManager: true }), [OTHER]: host(OTHER, true) },
     });
     useChatStore.setState({
       chats: {
@@ -604,7 +604,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
 
   it('a folder on an offline host is refused, loudly', async () => {
     usePresenceStore.setState({
-      hosts: { [HOST]: host(HOST, true, { isHomeHost: true }), [OTHER]: host(OTHER, false) },
+      hosts: { [HOST]: host(HOST, true, { runsManager: true }), [OTHER]: host(OTHER, false) },
     });
     const r = await renderReady();
     await openSheet(r);

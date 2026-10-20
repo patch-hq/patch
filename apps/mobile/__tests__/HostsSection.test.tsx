@@ -2,7 +2,7 @@
 // spec/02 § Host identity).
 //
 // Hosts is a page: Add a host in its header, then one row per machine that
-// opens that machine's own page (HostDetail) — its name, Make home, Update,
+// opens that machine's own page (HostDetail) — its name, Update,
 // agent backends with Sign in, optional components, Files and Terminal, and
 // Remove this host. Every edit is addressed to that one machine and refused
 // up front, naming it, when it cannot hear it.
@@ -123,17 +123,15 @@ describe('mobile Settings → Hosts → the list', () => {
     expect(textOf(findHost(r.root, byTestId('host-quiet-status')))).toBe('awaiting first report');
   });
 
-  it('subtitles a row with home, platform, and online or when it was last seen', () => {
+  it('subtitles a row with platform, and online or when it was last seen', () => {
     reportHost('mac', { hostName: 'mac', platform: 'darwin' });
-    reportHost('box', { hostName: 'box', platform: 'linux', isHomeHost: true }, false);
+    reportHost('box', { hostName: 'box', platform: 'linux', runsManager: true }, false);
     usePresenceStore.setState((s) => ({
       hosts: { ...s.hosts, box: { ...s.hosts.box!, lastSeenAt: Date.now() - 3 * HOUR } },
     }));
     const r = render(<HostsSection />);
     expect(textOf(findHost(r.root, byTestId('host-mac-status')))).toBe('macOS · online');
-    expect(textOf(findHost(r.root, byTestId('host-box-status')))).toBe(
-      'home · Linux · seen 3h ago',
-    );
+    expect(textOf(findHost(r.root, byTestId('host-box-status')))).toBe('Linux · seen 3h ago');
   });
 
   it('subtitles a host that reports a battery with its charge and power source', () => {
@@ -432,28 +430,13 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     });
   });
 
-  it('Update and Make home send their frames; the home machine says so instead', async () => {
+  it('Update sends its frame', async () => {
     reportHost('h1', { hostName: 'laptop', updateAvailable: true });
     const r = render(<HostDetail hostId="h1" />);
-    expect(queryHost(r.root, byTestId('host-h1-home'))).toBeNull();
     await actAsync(() => findHost(r.root, byTestId('host-h1-update')).props.onPress());
-    await actAsync(() => findHost(r.root, byTestId('host-h1-set-home')).props.onPress());
     expect(wsMock.send.mock.calls.map((c) => c[0])).toEqual([
       { type: 'host.update', hostId: 'h1' },
-      { type: 'host.set_home', hostId: 'h1' },
     ]);
-    await actAsync(() => reportHost('h1', { hostName: 'laptop', isHomeHost: true }));
-    expect(queryHost(r.root, byTestId('host-h1-set-home'))).toBeNull();
-    expect(textOf(findHost(r.root, byTestId('host-h1-home')))).toBe('This is home');
-  });
-
-  it('Make home on an offline machine is refused, naming it', async () => {
-    reportHost('h1', { hostName: 'laptop' }, false);
-    const r = render(<HostDetail hostId="h1" />);
-    await actAsync(() => findHost(r.root, byTestId('host-h1-set-home')).props.onPress());
-    expect(wsMock.send).not.toHaveBeenCalled();
-    expect(__getLastAlert()?.title).toBe('Make home failed');
-    expect(__getLastAlert()?.message).toMatch(/^laptop is offline/);
   });
 
   describe('Agents', () => {

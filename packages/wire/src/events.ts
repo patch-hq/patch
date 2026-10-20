@@ -2462,8 +2462,8 @@ export const HostInfoEvent = z
      * model on a host with none is an error saying so, never a guess.
      */
     defaultModel: z.string().min(1).optional(),
-    /** The one host running the special threads (spec/06). */
-    isHomeHost: z.boolean(),
+    /** Whether the server has this host running the special threads (spec/06). */
+    runsManager: z.boolean(),
     /**
      * This host can take the messages waiting behind a running turn from the
      * server, at a tool boundary (`patch.queue_pull.*`), when the server is
@@ -3690,7 +3690,7 @@ export type ChatRotateRequestEvent = z.infer<typeof ChatRotateRequestEvent>;
 /**
  * One chat a sweep found changed, and why (spec/06 § Sweep — Gate). Carries no
  * message content — the digest's transcript snippets are assembled on the
- * HOME host (the one component with both local and cross-host read access
+ * Manager host (the one component with both local and cross-host read access
  * via `patch_history`), not here; the server's cross-host view only ever
  * covers chat STATE, never transcripts.
  */
@@ -3706,7 +3706,7 @@ export const ManagerSweepCandidate = z
 export type ManagerSweepCandidate = z.infer<typeof ManagerSweepCandidate>;
 
 /**
- * Server → home host: run a sweep (spec/06 § Sweep). Fire-and-forget, same
+ * Server → Manager host: run a sweep (spec/06 § Sweep). Fire-and-forget, same
  * shape as `chat.rotate_request` — the gate has already decided this is due;
  * the host assembles the digest (fetching each candidate's recent messages,
  * local or cross-host), makes the one decision call, and executes it.
@@ -3733,7 +3733,7 @@ export const ManagerSweepAction = z
 export type ManagerSweepAction = z.infer<typeof ManagerSweepAction>;
 
 /**
- * Home host → server: what a sweep did (spec/06 § Sweep — Visible). Fire-
+ * Manager host → server: what a sweep did (spec/06 § Sweep — Visible). Fire-
  * and-forget report, same direction/shape as a job's run outcome — the
  * server records it for the Manager view's "Last sweep" line and the sweep-
  * runs list, but nothing here blocks on the server's reply.
@@ -4218,9 +4218,9 @@ export type SurfaceHeartbeatAckEvent = z.infer<typeof SurfaceHeartbeatAckEvent>;
 // frame inward. The folder registry was the case that was previously
 // outward-only.
 //
-// Two of these go to the SERVER rather than to a host, because the server owns
-// the registry entry rather than the machine: renaming a host and marking one
-// the home host. The rest are addressed to the named machine.
+// One of these goes to the SERVER rather than to a host, because the server owns
+// the registry entry rather than the machine: renaming a host. The rest are
+// addressed to the named machine.
 
 /** Surface → server: set a host's user-editable label. */
 export const HostRenameEvent = z
@@ -4237,14 +4237,18 @@ export const HostRenameEvent = z
   .strict();
 export type HostRenameEvent = z.infer<typeof HostRenameEvent>;
 
-/** Surface → server: make this host the account's home host (spec/06). */
-export const HostSetHomeEvent = z
+/**
+ * Server → host: this machine does (or does not) run the Manager and Speakers.
+ * The server decides, sent as each machine attaches and when the Manager moves
+ * (spec/06); no surface can send it.
+ */
+export const HostSetManagerEvent = z
   .object({
-    type: z.literal('host.set_home'),
+    type: z.literal('host.set_manager'),
     ...hostIdField,
   })
   .strict();
-export type HostSetHomeEvent = z.infer<typeof HostSetHomeEvent>;
+export type HostSetManagerEvent = z.infer<typeof HostSetManagerEvent>;
 
 /**
  * Server → surfaces: this host was removed from the account
@@ -5859,7 +5863,7 @@ export const ChatCommittedEvent = z
 export type ChatCommittedEvent = z.infer<typeof ChatCommittedEvent>;
 
 /**
- * Server -> host: this host runs the Manager now, because the home host has
+ * Server -> host: this host runs the Manager now, because its previous host has
  * been offline for a while (spec/06 § Manager failover). `handoff` is the
  * recent conversation as the server holds it, given to the Manager with its
  * next message; `nextSeq` is where the Manager's own numbering carries on, so
@@ -5877,7 +5881,7 @@ export const HostManagerAdoptEvent = z
   .strict();
 export type HostManagerAdoptEvent = z.infer<typeof HostManagerAdoptEvent>;
 
-/** Server -> host: the Manager is back on its home host; stop running it here. */
+/** Server -> host: the Manager has moved to another host; stop running it here. */
 export const HostManagerReleaseEvent = z
   .object({
     type: z.literal('host.manager_release'),
@@ -8210,7 +8214,6 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'chat.spawn_request',
   'patch.spawn',
   'host.rename',
-  'host.set_home',
   'host.settings',
   'host.component_install',
   'host.component_remove',
@@ -8288,7 +8291,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   NewChatDraftListEvent,
   // Host controls (spec/03 § Host events)
   HostRenameEvent,
-  HostSetHomeEvent,
+  HostSetManagerEvent,
   HostRemovedEvent,
   SigninRequestedEvent,
   SigninResolvedEvent,
@@ -8571,7 +8574,7 @@ export const EVENT_SCHEMAS = {
   'new_chat_draft.removed': NewChatDraftRemovedEvent,
   'new_chat_draft.list': NewChatDraftListEvent,
   'host.rename': HostRenameEvent,
-  'host.set_home': HostSetHomeEvent,
+  'host.set_manager': HostSetManagerEvent,
   'host.removed': HostRemovedEvent,
   'signin.requested': SigninRequestedEvent,
   'signin.resolved': SigninResolvedEvent,

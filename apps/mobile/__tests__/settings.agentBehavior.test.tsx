@@ -97,7 +97,7 @@ beforeEach(() => {
   resetHosts();
   reportHost('d1', {
     hostName: 'laptop',
-    isHomeHost: true,
+    runsManager: true,
     harnessToolsPromptDefault: 'Use patch tools.',
     harnessSystemPrompt: '',
     questionExpiry: true,
@@ -155,13 +155,15 @@ describe('Agent page: Model for new chats', () => {
     expect(get(r, 'default-model-option-old-model')).toBeTruthy();
   });
 
-  it('with no home machine says where the list would come from', async () => {
+  it('with no single machine says where the list would come from', async () => {
     resetHosts();
     reportHost('a');
     reportHost('b');
     const r = await renderAgent();
     expect(api.models).not.toHaveBeenCalled();
-    expect(textOf(get(r, 'default-model-no-host'))).toBe('Make a host home to list models');
+    expect(textOf(get(r, 'default-model-no-host'))).toBe(
+      'No single machine to read the model list from',
+    );
   });
 
   it('a catalogue failure is shown', async () => {

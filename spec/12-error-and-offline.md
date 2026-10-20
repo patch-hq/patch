@@ -72,7 +72,7 @@ Offline is per host:
   keyed per host and flushed when that host reconnects.
 - A chat, job or voice request stays with its own host, whose folders, tools and
   state are the ones it needs (`04-chats-and-folders.md`).
-- While the home host is offline, Manager and Speakers are unavailable,
+- While the Manager host is offline, Manager and Speakers are unavailable,
   and the surfaces say so (`06-threads-manager-speakers.md`). Announcements
   on the channels those threads mediate still go out from the hosts that own them
   and are still recorded, so the thread has them as context on its next reply

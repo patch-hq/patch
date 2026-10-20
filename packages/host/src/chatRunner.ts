@@ -4797,7 +4797,7 @@ export class Daemon {
     this.threadHandoffs.set(chatId, handoff);
   }
 
-  /** The Manager is back on its home host: whatever handoff was waiting is moot. */
+  /** The Manager has moved off this host: whatever handoff was waiting is moot. */
   dropThreadHandoff(chatId: string): void {
     this.threadHandoffs.delete(chatId);
   }
@@ -7981,7 +7981,10 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
     if (isReservedSpecialThread(chatId)) {
-      throw new ChatMoveError('unsupported', 'a special thread stays on the home host');
+      throw new ChatMoveError(
+        'unsupported',
+        'a special thread stays on the host that runs the Manager',
+      );
     }
     if (
       this.pumping.has(chatId) ||
@@ -8056,7 +8059,10 @@ export class Daemon {
       throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
     }
     if (isReservedSpecialThread(chatId)) {
-      throw new ChatMoveError('unsupported', 'a special thread stays on the home host');
+      throw new ChatMoveError(
+        'unsupported',
+        'a special thread stays on the host that runs the Manager',
+      );
     }
     this.movingOut.add(chatId);
     await this.stopAllWork(chatId);

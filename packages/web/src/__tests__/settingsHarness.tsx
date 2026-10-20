@@ -23,6 +23,7 @@ import { DEFAULT_PREFERENCES, usePreferencesStore } from '../stores/preferencesS
 import { useSettingsHostStore } from '../routes/settings/hostScope.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { clearHosts } from './presenceHelpers.js';
+import { resetModelCatalog } from '../lib/models.js';
 
 export const ME_PAYLOAD = {
   account: { accountId: 'acct-123', userPublicKey: 'acct-123', createdAt: 1 },
@@ -195,6 +196,7 @@ export function resetSettingsState(): void {
   useSettingsHostStore.setState({ selected: null });
   usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES, loaded: true, shared: null });
   clearHosts();
+  resetModelCatalog();
   usePresenceStore.getState().setConnection('connected');
   setActiveWs(null);
 }

@@ -122,7 +122,7 @@ describe('GET /api/hosts', () => {
       // than a fabricated label or the other machine's description.
       expect(hostA.hostName).toBeNull();
       expect(hostA.online).toBe(false);
-      expect(hostA.isHomeHost).toBe(false);
+      expect(hostA.runsManager).toBe(false);
     } finally {
       await app.close();
     }
@@ -211,9 +211,9 @@ describe('GET /api/daemon/install-command', () => {
   });
 });
 
-// spec/17 § Hosts and the CLI: rename and set-home are SERVER-owned even when
-// the command naming them runs on that very machine, because the registry holds
-// both. The routes did not exist, so the CLI's own commands would have 404'd.
+// spec/17 § Hosts and the CLI: rename is SERVER-owned even when the
+// command naming it runs on that very machine, because the registry holds the
+// name. The route did not exist, so the CLI's own command would have 404'd.
 describe('server-owned host controls', () => {
   let dir: string;
   beforeEach(() => {
@@ -281,9 +281,9 @@ describe('server-owned host controls', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/hosts/set-home',
+        url: '/api/hosts/rename',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { hostId: 'host-zzz' },
+        payload: { hostId: 'host-zzz', hostName: 'x' },
       });
       expect(res.statusCode).toBe(404);
       expect(res.json().hostId).toBe('host-zzz');
@@ -292,17 +292,93 @@ describe('server-owned host controls', () => {
     }
   });
 
-  it('marks a machine the home machine', async () => {
+  it('requires a credential', async () => {
+    const { app } = await boot();
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/daemon/install-command?os=macos' });
+      expect(res.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+// spec/17 § Hosts and the CLI: rename is SERVER-owned even when the
+// command naming it runs on that very machine, because the registry holds the
+// name. The route did not exist, so the CLI's own command would have 404'd.
+describe('server-owned host controls', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-hostctl-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function boot() {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(11));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    registry.upsertSurface({ surfaceId: 'srf-c', surfaceKind: 'web', label: 'b', issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'host-a', publicKey: user.publicKey, issuedAt: 1 });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'srf-c',
+      surfaceKind: 'web',
+      label: 'b',
+    });
+    const built = await buildAll({
+      dataDir: dir,
+      registry,
+      hostLink: new InProcessHostLink(),
+      jobsWatch: false,
+    });
+    return { app: built.app, jwt, registry };
+  }
+
+  it('renames a machine and the registry keeps it', async () => {
     const { app, jwt, registry } = await boot();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/hosts/set-home',
+        url: '/api/hosts/rename',
         headers: { authorization: `Bearer ${jwt}` },
-        payload: { hostId: 'host-a' },
+        payload: { hostId: 'host-a', hostName: 'laptop' },
       });
       expect(res.statusCode).toBe(200);
-      expect(registry.homeHostId()).toBe('host-a');
+      expect(registry.hostName('host-a')).toBe('laptop');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses an empty rename rather than leaving a nameless machine', async () => {
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/hosts/rename',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { hostId: 'host-a', hostName: '   ' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_name');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses a machine that is not registered, naming it', async () => {
+    const { app, jwt } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/hosts/rename',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { hostId: 'host-zzz', hostName: 'x' },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().hostId).toBe('host-zzz');
     } finally {
       await app.close();
     }

@@ -245,10 +245,10 @@ describe('Settings host switcher (per-host pages)', () => {
     expect(screen.queryByTestId('settings-host-switch')).toBeNull();
   });
 
-  it('is drawn with two, defaulting to the home host', async () => {
+  it('is drawn with two, defaulting to the only online host', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d1', { hostName: 'mac', isHomeHost: false });
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    reportHost('d1', { hostName: 'mac', runsManager: false });
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
     usePresenceStore.getState().setHostOnline('d2', true);
     renderSettings('/settings/memories');
     const sw = await screen.findByTestId('settings-host-switch');
@@ -264,8 +264,8 @@ describe('Settings host switcher (per-host pages)', () => {
 
   it('switching hosts changes which machine the page shows, and the choice is shared', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d1', { hostName: 'mac', isHomeHost: false });
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    reportHost('d1', { hostName: 'mac', runsManager: false });
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
     renderSettings('/settings/memories');
     fireEvent.click(await screen.findByTestId('settings-host-d1'));
     await waitFor(() =>
@@ -280,16 +280,18 @@ describe('Settings host switcher (per-host pages)', () => {
 
   it('is not drawn on a page of shared settings', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d1', { hostName: 'mac', isHomeHost: false });
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    reportHost('d1', { hostName: 'mac', runsManager: false });
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
     renderSettings('/settings/agent');
     await waitFor(() => expect(screen.getByTestId('permission-default')).toBeInTheDocument());
     expect(screen.queryByTestId('settings-host-switch')).toBeNull();
   });
 
-  it('forgets a chosen host that has gone, falling back to home', async () => {
+  it('forgets a chosen host that has gone, falling back to the only online one', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    usePresenceStore.getState().setHostOnline('d1', false);
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
+    usePresenceStore.getState().setHostOnline('d2', true);
     useSettingsHostStore.setState({ selected: 'gone' });
     renderSettings('/settings/memories');
     await waitFor(() =>
@@ -700,10 +702,10 @@ describe('Settings → Voice', () => {
       reportHost('d1', { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } });
       reportHost('d2', {
         hostName: 'mac',
-        isHomeHost: false,
+        runsManager: false,
         voiceKeys: { gemini: true, openai: false },
       });
-      reportHost('d3', { hostName: 'old-daemon', isHomeHost: false });
+      reportHost('d3', { hostName: 'old-daemon', runsManager: false });
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('voice-dictation-keys')).toBeInTheDocument());
       expect(screen.getByTestId('voice-dictation-keys')).toHaveTextContent(
@@ -1003,7 +1005,7 @@ describe('Settings → Voice', () => {
 
 describe('Settings → Agent', () => {
   describe('Model for new chats (account-wide)', () => {
-    it('offers the home host’s catalogue and writes the pick to the account', async () => {
+    it('offers the default host’s catalogue and writes the pick to the account', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal(
         'fetch',
@@ -1029,14 +1031,12 @@ describe('Settings → Agent', () => {
       await waitFor(() => expect(server.writes).toEqual([{ defaultModel: 'claude-sonnet-5' }]));
     });
 
-    it('says there is no home machine to read the list from, keeping the saved value', async () => {
+    it('says there is no machine to read the list from, keeping the saved value', async () => {
       vi.stubGlobal('fetch', makeFetch());
       clearHosts();
       renderSettings('/settings/agent');
       await waitFor(() =>
-        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent(
-          'Designate a home machine',
-        ),
+        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent('No single machine'),
       );
       expect((screen.getByTestId('default-model') as HTMLSelectElement).value).toBe(
         usePreferencesStore.getState().preferences.defaultModel,

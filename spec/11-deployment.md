@@ -147,7 +147,7 @@ serves plain HTTP on `:3000` for a LAN or an existing proxy; `--user-mode`
 installs for the current user with no root and no HTTPS, to try it out.
 
 Put a TLS reverse proxy in front of `PORT` (Caddy, nginx), sending `/device/*`
-to the host's port and everything else — `/audio/*` included — to the server, which relays each voice session to the host that owns the chat (`07-voice-app.md` § Reaching a non-home host's audio WSS).
+to the host's port and everything else — `/audio/*` included — to the server, which relays each voice session to the host that owns the chat (`07-voice-app.md` § Reaching a non-Manager host's audio WSS).
 
 ## Relay
 

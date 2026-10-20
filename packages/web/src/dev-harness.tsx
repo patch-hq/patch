@@ -1833,21 +1833,27 @@ useChatStore.setState((s) => ({
       },
     ],
     // A long history so the scroll-behaviour spec has something to scroll.
-    chat_scroll: Array.from({ length: 40 }, (_v, i): ChatEventEntry => ({
-      seq: i,
-      kind: 'message',
-      role: i % 2 === 0 ? 'user' : 'assistant',
-      content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
-      at: i,
-    })),
+    chat_scroll: Array.from(
+      { length: 40 },
+      (_v, i): ChatEventEntry => ({
+        seq: i,
+        kind: 'message',
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
+        at: i,
+      }),
+    ),
     // A transcript far longer than the tail window the web panel paints on open.
-    chat_long_history: Array.from({ length: 400 }, (_v, i): ChatEventEntry => ({
-      seq: i,
-      kind: 'message',
-      role: i % 2 === 0 ? 'user' : 'assistant',
-      content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
-      at: i,
-    })),
+    chat_long_history: Array.from(
+      { length: 400 },
+      (_v, i): ChatEventEntry => ({
+        seq: i,
+        kind: 'message',
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
+        at: i,
+      }),
+    ),
     chat_deeplink: [
       {
         seq: 0,
@@ -2648,7 +2654,7 @@ usePresenceStore.getState().setHosts([
       permissionModeDefault: 'auto',
       permissionOverrides: 0,
       defaultModel: 'claude-opus-5',
-      isHomeHost: true,
+      runsManager: true,
       audioRelayHost: '127.0.0.1:3003',
       backends: [],
       components: [],
@@ -2705,7 +2711,7 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
       hostId: 'd2',
       online: true,
       lastSeenAt: Date.now(),
-      host: home?.host ? { ...home.host, hostId: 'd2', hostName: 'mac', isHomeHost: false } : null,
+      host: home?.host ? { ...home.host, hostId: 'd2', hostName: 'mac', runsManager: false } : null,
       accounts: [
         {
           hostId: 'd2',

@@ -642,8 +642,8 @@ async function startHost(
   const persistedHostState = hostStateStore.get();
   /** This machine's user-editable label (`host.rename`). */
   let hostName = persistedHostState.hostName ?? config.hostName;
-  /** Is this the account's home machine (`host.set_home`)? */
-  let isHomeHost = persistedHostState.isHomeHost ?? config.isHomeHost;
+  /** Does the server have this machine running the Manager (`host.set_manager`)? */
+  let runsManager = persistedHostState.runsManager ?? false;
   /** Currently selected Kokoro TTS voice (`host.settings` → `kokoroVoice`). */
   let kokoroVoice: string | undefined = persistedHostState.kokoroVoice;
   /**
@@ -984,7 +984,7 @@ async function startHost(
       permissionModeDefault: daemon.permissionModeDefault(),
       permissionOverrides: daemon.permissionOverrideCount(),
       ...(defaultModel !== undefined ? { defaultModel } : {}),
-      isHomeHost,
+      runsManager,
       // This host can take its queued messages from the server (spec/04).
       serverQueue: true,
       audioRelayHost: config.audio.relayHost,
@@ -2387,14 +2387,14 @@ async function startHost(
         logger.info({ epoch: event.epoch }, 'manager: released');
         return;
       }
-      if (event.type === 'host.set_home') {
-        // Broadcast to every machine: the named one becomes home, the rest lose
-        // it, so exactly one machine reports the flag.
+      if (event.type === 'host.set_manager') {
+        // Sent to a machine as it attaches and whenever the server moves the
+        // Manager: the named machine runs it, the rest do not.
         const nowHome = event.hostId === selfHostId;
-        if (nowHome !== isHomeHost) {
-          isHomeHost = nowHome;
-          hostStateStore.update({ isHomeHost: nowHome });
-          logger.info({ isHomeHost }, 'home-machine flag changed');
+        if (nowHome !== runsManager) {
+          runsManager = nowHome;
+          hostStateStore.update({ runsManager: nowHome });
+          logger.info({ runsManager }, 'manager-machine flag changed');
           if (nowHome) {
             createSpecialThreads();
             for (const state of daemon.list()) {
@@ -3976,7 +3976,7 @@ async function startHost(
     },
     onChange: (registry) => link.send({ type: 'folders.updated', hostId: selfHostId, ...registry }),
   });
-  // The Manager and Speakers are the account's and live on the home machine
+  // The Manager and Speakers are the account's and live on the machine the server has running them
   // (spec/06 § Where special threads run), so only that machine creates them.
   function createSpecialThreads(): void {
     ensureSpecialThreads({
@@ -3988,7 +3988,7 @@ async function startHost(
       permissionModeDefault: daemon.permissionModeDefault(),
     });
   }
-  if (isHomeHost) createSpecialThreads();
+  if (runsManager) createSpecialThreads();
   // A Manager handoff that was waiting when this host last stopped.
   const waitingHandoff = hostStateStore.get().managerHandoff;
   if (waitingHandoff !== undefined && daemon.chatState.has('thread_manager')) {

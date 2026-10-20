@@ -1,5 +1,6 @@
-// Manager failover (spec/06): when the home host stays offline, another host
-// runs the Manager with the recent conversation, and hands back on return.
+// Manager placement (spec/06): when the host running the Manager stays offline,
+// another host takes it over with the recent conversation, for good — the first
+// host is not handed it back on return.
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,10 +23,15 @@ describe('ManagerFailover', () => {
   let sent: Array<{ hostId: string; event: WireEvent }>;
   let log: ChatLogStore;
   let window: number;
+  let manager: string;
 
   const make = (): ManagerFailover => {
     const f = new ManagerFailover({
-      homeHostId: () => 'home',
+      managerHostId: () => manager,
+      setManagerHostId: (id) => {
+        manager = id;
+      },
+      onMoved: () => undefined,
       registeredHostIds: () => ['home', 'other', 'third'],
       isOnline: (id) => online.has(id),
       onHostStatus: (h) => {
@@ -54,6 +60,7 @@ describe('ManagerFailover', () => {
     handlers = [];
     sent = [];
     window = 40;
+    manager = 'home';
     log = new ChatLogStore({ logger });
     log.observe(say(0, 'user', 'first'));
     log.observe(say(1, 'assistant', 'reply one'));
@@ -63,7 +70,7 @@ describe('ManagerFailover', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('does nothing while the home host is up, or only briefly away', () => {
+  test('does nothing while the Manager host is up, or only briefly away', () => {
     const f = make();
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS - 1);
@@ -71,7 +78,6 @@ describe('ManagerFailover', () => {
     status('home', 'online');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS * 2);
     expect(sent).toEqual([]);
-    expect(f.acting()).toBeNull();
     expect(f.specialThreadHost()).toBe('home');
   });
 
@@ -107,7 +113,7 @@ describe('ManagerFailover', () => {
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
 
-    expect(f.acting()).toBe('other');
+    expect(manager).toBe('other');
     expect(f.specialThreadHost()).toBe('other');
     expect(sent).toHaveLength(1);
     expect(sent[0]!.hostId).toBe('other');
@@ -135,71 +141,57 @@ describe('ManagerFailover', () => {
 
   test('waits for a host to be up, and takes over when one is', () => {
     online = new Set(['home']);
-    const f = make();
+    make();
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-    expect(f.acting()).toBeNull();
+    expect(manager).toBe('home');
 
     status('other', 'online');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-    expect(f.acting()).toBe('other');
+    expect(manager).toBe('other');
   });
 
-  test('hands back when the home host returns, telling it what was said meanwhile', () => {
+  test('keeps the new host when the first returns, and tells the first to let go', () => {
     const f = make();
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
     sent.length = 0;
 
-    // The stand-in runs the Manager, numbering from 2.
     log.observe(say(2, 'user', 'while you were gone'));
     log.observe(say(3, 'assistant', 'handled it'));
 
     status('home', 'online');
-    expect(f.acting()).toBeNull();
-    expect(f.specialThreadHost()).toBe('home');
-
-    const release = sent.find((s) => s.hostId === 'other')!.event;
-    expect(release).toMatchObject({ type: 'host.manager_release' });
-    const toHome = sent.find((s) => s.hostId === 'home' && s.event.type === 'host.manager_adopt')!
-      .event as { handoff: string; nextSeq: number; epoch: number };
-    expect(toHome.nextSeq).toBe(4);
-    expect(toHome.handoff).toContain('while you were gone');
-    expect(toHome.handoff).toContain('handled it');
-    expect(toHome.handoff).not.toContain('reply one'); // only the stretch it missed
+    expect(manager).toBe('other');
+    expect(f.specialThreadHost()).toBe('other');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.hostId).toBe('home');
+    expect(sent[0]!.event).toMatchObject({ type: 'host.manager_release', epoch: 1 });
+    vi.advanceTimersByTime(FAILOVER_GRACE_MS * 2);
+    expect(manager).toBe('other');
   });
 
-  test('says nothing to the home host when nothing was said while it was away', () => {
-    make();
-    status('home', 'offline');
-    vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-    sent.length = 0;
-    status('home', 'online');
-    expect(sent.filter((s) => s.hostId === 'home')).toEqual([]);
-  });
-
-  test('answers the missing stretch from the server copy, and only that', () => {
+  test('answers the stretch the current host missed from the server copy, and only that', () => {
     const f = make();
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
     log.observe(say(2, 'user', 'a'));
     log.observe(say(3, 'assistant', 'b'));
-    status('home', 'online');
-    log.observe(say(4, 'user', 'back home'));
 
-    expect(f.gapEvents(-1).map((e) => (e as { seq: number }).seq)).toEqual([2, 3]);
-    expect(f.gapEvents(2).map((e) => (e as { seq: number }).seq)).toEqual([3]);
+    // 'other' ran from 2; 'home' ran 0-1, which its own log holds, not other's.
+    expect(f.gapEvents(-1).map((e) => (e as { seq: number }).seq)).toEqual([0, 1]);
+    expect(f.gapEvents(0).map((e) => (e as { seq: number }).seq)).toEqual([1]);
   });
 
-  test('a different host takes over when the stand-in goes away', () => {
+  test('a different host takes over when the new one goes away too', () => {
     online = new Set(['home', 'other', 'third']);
-    const f = make();
+    make();
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-    expect(f.acting()).toBe('other');
+    expect(manager).toBe('other');
 
     status('other', 'offline');
-    expect(f.acting()).toBe('third');
+    vi.advanceTimersByTime(FAILOVER_GRACE_MS);
+    expect(manager).toBe('third');
     const adopts = sent.filter((s) => s.event.type === 'host.manager_adopt');
     expect(adopts.map((a) => (a.event as { epoch: number }).epoch)).toEqual([1, 2]);
   });
@@ -209,7 +201,7 @@ describe('ManagerFailover', () => {
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
     sent.length = 0;
-    status('other', 'offline'); // third is not up, so nobody stands in
+    status('other', 'offline');
     status('other', 'online');
     expect(sent.some((s) => s.hostId === 'other' && s.event.type === 'host.manager_adopt')).toBe(
       true,
@@ -217,15 +209,15 @@ describe('ManagerFailover', () => {
   });
 
   test('keeps its state across a server restart', () => {
-    const first = make();
+    make();
     status('home', 'offline');
     vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-    expect(first.acting()).toBe('other');
+    expect(manager).toBe('other');
 
     handlers = [];
     const second = make();
-    expect(second.acting()).toBe('other');
     expect(second.specialThreadHost()).toBe('other');
+    expect(second.gapEvents(-1).map((e) => (e as { seq: number }).seq)).toEqual([0, 1]);
   });
 
   describe('odd and failing cases', () => {
@@ -286,64 +278,13 @@ describe('ManagerFailover', () => {
       expect(adopt.nextSeq).toBe(0);
     });
 
-    test('hands back from a state saved without its stretch', () => {
-      writeFileSync(
-        join(dir, 'manager-failover.json'),
-        JSON.stringify({ acting: 'other', epoch: 4, gaps: [], orders: {} }),
-      );
-      const f = make();
-      expect(f.acting()).toBe('other');
-      status('home', 'online');
-      expect(f.acting()).toBeNull();
-      expect(
-        sent.some((s) => s.hostId === 'other' && s.event.type === 'host.manager_release'),
-      ).toBe(true);
-    });
-
-    test('starts clean, and says so, when its saved state is damaged', () => {
-      writeFileSync(join(dir, 'manager-failover.json'), '{not json');
-      const warned: string[] = [];
-      const f = new ManagerFailover({
-        homeHostId: () => 'home',
-        registeredHostIds: () => ['home', 'other'],
-        isOnline: (id) => online.has(id),
-        onHostStatus: () => () => undefined,
-        sendTo: () => undefined,
-        log,
-        contextWindow: () => 40,
-        dataDir: dir,
-        logger: { info: () => undefined, warn: (_o, m) => warned.push(String(m)) },
-      });
-      expect(f.acting()).toBeNull();
-      expect(warned.join(' ')).toContain('could not read its state');
-    });
-
-    test('says so, and carries on, when it cannot write its state', () => {
-      const warned: string[] = [];
-      const f = new ManagerFailover({
-        homeHostId: () => 'home',
-        registeredHostIds: () => ['home', 'other'],
-        isOnline: (id) => online.has(id),
-        onHostStatus: (h) => {
-          handlers.push(h);
-          return () => undefined;
+    const build = (over: object): ManagerFailover =>
+      new ManagerFailover({
+        managerHostId: () => manager,
+        setManagerHostId: (id) => {
+          manager = id;
         },
-        sendTo: (hostId, _s, event) => sent.push({ hostId, event }),
-        log,
-        contextWindow: () => 40,
-        dataDir: join(dir, 'not', 'a', 'directory'),
-        logger: { info: () => undefined, warn: (_o, m) => warned.push(String(m)) },
-      });
-      f.start();
-      status('home', 'offline');
-      vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-      expect(f.acting()).toBe('other');
-      expect(warned.join(' ')).toContain('could not write its state');
-    });
-
-    test('works with no data directory at all, and stops cleanly', () => {
-      const f = new ManagerFailover({
-        homeHostId: () => 'home',
+        onMoved: () => undefined,
         registeredHostIds: () => ['home', 'other'],
         isOnline: (id) => online.has(id),
         onHostStatus: (h) => {
@@ -354,28 +295,61 @@ describe('ManagerFailover', () => {
         log,
         contextWindow: () => 40,
         logger: { info: () => undefined, warn: () => undefined },
+        ...over,
+      });
+
+    test('starts clean, and says so, when its saved state is damaged', () => {
+      writeFileSync(join(dir, 'manager-failover.json'), '{not json');
+      const warned: string[] = [];
+      const f = build({
+        dataDir: dir,
+        logger: {
+          info: () => undefined,
+          warn: (_o: unknown, m: unknown) => warned.push(String(m)),
+        },
+      });
+      expect(f.gapEvents(-1)).toEqual([]);
+      expect(warned.join(' ')).toContain('could not read its state');
+    });
+
+    test('says so, and carries on, when it cannot write its state', () => {
+      const warned: string[] = [];
+      const f = build({
+        dataDir: join(dir, 'not', 'a', 'directory'),
+        logger: {
+          info: () => undefined,
+          warn: (_o: unknown, m: unknown) => warned.push(String(m)),
+        },
       });
       f.start();
       status('home', 'offline');
       vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-      expect(f.acting()).toBe('other');
-      f.stop();
-      f.stop();
+      expect(manager).toBe('other');
+      expect(warned.join(' ')).toContain('could not write its state');
     });
 
-    test('starts the wait at startup when the home host is already down', () => {
-      online = new Set(['other']);
-      const f = make();
-      vi.advanceTimersByTime(FAILOVER_GRACE_MS);
-      expect(f.acting()).toBe('other');
-    });
-
-    test('ignores a host coming back that is not the home host while one is standing in', () => {
-      const f = make();
+    test('works with no data directory at all, and stops cleanly', () => {
+      const f = build({});
+      f.start();
       status('home', 'offline');
       vi.advanceTimersByTime(FAILOVER_GRACE_MS);
+      expect(manager).toBe('other');
+      f.stop();
+      f.stop();
+    });
+
+    test('starts the wait at startup when the Manager host is already down', () => {
+      online = new Set(['other']);
+      make();
+      vi.advanceTimersByTime(FAILOVER_GRACE_MS);
+      expect(manager).toBe('other');
+    });
+
+    test('ignores another host coming up while the Manager host is fine', () => {
+      make();
       status('third', 'online');
-      expect(f.acting()).toBe('other');
+      vi.advanceTimersByTime(FAILOVER_GRACE_MS * 2);
+      expect(manager).toBe('home');
     });
 
     test('does not choose a host twice for one wait', () => {

@@ -9,9 +9,9 @@
 //   - Controls the HOST owns reach this machine over its own local socket, so
 //     they work with no round trip through the server (and while the server is
 //     unreachable).
-//   - Four commands go to the SERVER even when they name this machine, because
-//     the server owns what they change rather than the host: `add`, `rename`,
-//     `set-home` and `remove`.
+//   - Three commands go to the SERVER even when they name this machine, because
+//     the server owns what they change rather than the host: `add`, `rename`
+//     and `remove`.
 //
 // `--host` names another machine and forces the REST path, since another
 // machine's host is not reachable over this one's socket.
@@ -29,7 +29,6 @@ export interface HostSummary {
   hostId: string;
   hostName: string | null;
   online: boolean;
-  isHomeHost: boolean;
   defaultModel?: string;
 }
 
@@ -101,14 +100,14 @@ export function registerHostsCommands(program: Command): void {
           // A machine that has never reported has no name — say so rather than
           // printing an id dressed up as one.
           const name = h.hostName ?? `${h.hostId} (no report yet)`;
-          emitText(`${h.online ? '●' : '○'} ${name}${h.isHomeHost ? '  [home]' : ''}  ${h.hostId}`);
+          emitText(`${h.online ? '●' : '○'} ${name}  ${h.hostId}`);
         }
       });
     });
 
   hosts
     .command('get')
-    .description('One machine: platform, backends, components, home marker')
+    .description('One machine: platform, backends, components')
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
@@ -347,19 +346,6 @@ export function registerHostsCommands(program: Command): void {
             ...(hostId ? { hostId } : {}),
           }),
         );
-      });
-    });
-
-  hosts
-    .command('set-home')
-    .description('Make a machine the account home, where the special threads run')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
-    .option('--json', 'JSON output')
-    .action(async (opts: HostsOpts) => {
-      await run(opts, async () => {
-        const t = getTransport({ ...opts, remote: true });
-        const hostId = opts.host !== undefined ? await resolveHost(opts) : undefined;
-        emitJson(await t.post<unknown>('/api/hosts/set-home', { ...(hostId ? { hostId } : {}) }));
       });
     });
 

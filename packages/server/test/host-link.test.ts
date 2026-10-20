@@ -237,7 +237,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => resolved,
-      homeHostId: () => 'd-home', // registered, but never attached below: offline.
+      managerHostId: () => 'd-home', // registered, but never attached below: offline.
       registeredHostIds: () => ['d-home', 'd-real'], // more than one — a guess can be wrong.
       unknownChatHostWaitMs: 200,
       unknownChatHostPollMs: 10,
@@ -271,7 +271,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: (chatId) => (chatId === 'c-mac' ? 'd-mac' : 'd-home'),
-      homeHostId: () => 'd-home',
+      managerHostId: () => 'd-home',
       registeredHostIds: () => ['d-home', 'd-mac'],
     });
     const mac = await makePair(wss, url);
@@ -299,7 +299,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => null,
-      homeHostId: () => 'd-home', // registered, but never attached: offline throughout.
+      managerHostId: () => 'd-home', // registered, but never attached: offline throughout.
       registeredHostIds: () => ['d-home', 'd-other'], // more than one — a guess can be wrong.
       hostName: (id) => (id === 'd-home' ? 'Hetzner' : 'Tom’s Mac'),
       unknownChatHostWaitMs: 30,
@@ -333,7 +333,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => host,
-      homeHostId: () => 'd-home',
+      managerHostId: () => 'd-home',
       registeredHostIds: () => ['d-home', 'd-other'],
       unknownChatHostWaitMs: 30,
       unknownChatHostPollMs: 10,
@@ -360,7 +360,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => null,
-      homeHostId: () => 'd1',
+      managerHostId: () => 'd1',
       registeredHostIds: () => ['d1'],
       unknownChatHostWaitMs: 50,
       unknownChatHostPollMs: 10,

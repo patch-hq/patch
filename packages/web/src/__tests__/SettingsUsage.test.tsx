@@ -68,7 +68,7 @@ describe('Settings → Usage → accounts', () => {
   it('lists the shared accounts in order, with no host switcher — they are every host’s', () => {
     loadShared({ secrets: TWO });
     reportHost('d1', { hostName: 'hetzner' });
-    reportHost('d2', { hostName: 'mac', isHomeHost: false });
+    reportHost('d2', { hostName: 'mac', runsManager: false });
     renderSettings('/settings/usage');
     expect(order('accounts-rank-claude-code')).toEqual(['acct-a', 'acct-b']);
     expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('work');
@@ -89,7 +89,7 @@ describe('Settings → Usage → accounts', () => {
   it('shows the freshest usage reading any host has taken, naming that host', () => {
     loadShared({ secrets: TWO });
     reportHost('d1', { hostName: 'hetzner' });
-    reportHost('d2', { hostName: 'mac', isHomeHost: false });
+    reportHost('d2', { hostName: 'mac', runsManager: false });
     const older = { at: 1_000, session: { status: 'allowed' as const, utilization: 0.1 } };
     const newer = { at: 2_000, session: { status: 'allowed' as const, utilization: 0.7 } };
     reportAccounts('d1', [{ id: 'acct-a', label: 'work', connected: true, usage: older }]);
@@ -177,7 +177,7 @@ describe('Settings → Usage → changing accounts', () => {
     loadShared();
     reportHost('d1', { hostName: 'hetzner' });
     usePresenceStore.getState().setHostOnline('d1', true);
-    reportHost('d2', { hostName: 'mac', isHomeHost: false });
+    reportHost('d2', { hostName: 'mac', runsManager: false });
     usePresenceStore.getState().setHostOnline('d2', false);
     const adopt = vi.spyOn(api, 'adoptAccount').mockResolvedValue(sharedState({ version: 2 }));
     renderSettings('/settings/usage');

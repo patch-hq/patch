@@ -50,7 +50,7 @@ export interface HostDescriptionInput {
    * so, so this must not be filled in with a guess (spec/04 § Spawn).
    */
   defaultModel?: string | undefined;
-  isHomeHost: boolean;
+  runsManager: boolean;
   /** This host can take its queued messages from the server (spec/04). */
   serverQueue?: boolean | undefined;
   /**
@@ -133,7 +133,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     permissionModeDefault: input.permissionModeDefault,
     permissionOverrides: input.permissionOverrides,
     ...(input.defaultModel !== undefined ? { defaultModel: input.defaultModel } : {}),
-    isHomeHost: input.isHomeHost,
+    runsManager: input.runsManager,
     ...(input.serverQueue !== undefined ? { serverQueue: input.serverQueue } : {}),
     ...(input.audioRelayHost !== undefined ? { audioRelayHost: input.audioRelayHost } : {}),
     backends: input.backends,

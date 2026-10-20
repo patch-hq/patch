@@ -71,13 +71,6 @@ export interface HostConfig {
    * through the server registry.
    */
   hostName: string;
-  /**
-   * Whether this host is the account's home host — the one running the special
-   * threads (spec/06). The server owns the flag; the host reports what it has
-   * been told. Defaults false: claiming to be home when the server disagrees
-   * would give an account two Manager threads.
-   */
-  isHomeHost: boolean;
   /** Home directory for ~/.patch state. PATCH_HOME override, otherwise ~/.patch. */
   patchHome: string;
   /** Unix domain socket path the local control HTTP listens on. */
@@ -318,7 +311,6 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       env['PATCH_HOST_NAME'] !== undefined && env['PATCH_HOST_NAME'] !== ''
         ? env['PATCH_HOST_NAME']
         : defaultHostName(),
-    isHomeHost: env['PATCH_IS_HOME_HOST'] === '1',
     patchHome,
     socketPath,
     healthzPort,

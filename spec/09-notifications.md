@@ -228,13 +228,13 @@ For the thread that mediates a channel (Speakers), the server keeps an append-on
 
 Each entry: `{ ts, sourceChatName, message }`. The server appends one as it routes a notify on that channel, whichever machine goes on to deliver it. Never read by the agent directly.
 
-The log lives on the server because delivery is spread across machines while the thread that reads it is on one: the bot post happens on the server, a speakers announcement on the machine those devices are paired with, and the thread runs on the home machine (`06-threads-manager-speakers.md` § Where special threads run). The server is on the path of every notify (`03-wire-protocol.md` § Notifications), so it is the one machine that can record them all, and an announcement made while the home machine is offline is still context when that machine returns.
+The log lives on the server because delivery is spread across machines while the thread that reads it is on one: the bot post happens on the server, a speakers announcement on the machine those devices are paired with, and the thread runs on the Manager host (`06-threads-manager-speakers.md` § Where special threads run). The server is on the path of every notify (`03-wire-protocol.md` § Notifications), so it is the one machine that can record them all, and an announcement made while the Manager host is offline is still context when that machine returns.
 
 A record is written as the notify is routed rather than on a machine's confirmation that it spoke or posted: an announcement that fell through to voicemail reached the user too, and a reply to it needs the same context.
 
 ### Injection on user reply
 
-When the user sends a real reply into the Speakers thread (transcribed voice utterance), the home machine's host asks the server for that thread's pending broadcasts (`GET /api/broadcasts/:thread`, authed with its `daemonKey`) and constructs the SDK `query()` prompt by prepending a `<system-reminder>` block containing them:
+When the user sends a real reply into the Speakers thread (transcribed voice utterance), the Manager host asks the server for that thread's pending broadcasts (`GET /api/broadcasts/:thread`, authed with its `daemonKey`) and constructs the SDK `query()` prompt by prepending a `<system-reminder>` block containing them:
 
 ```
 <system-reminder>

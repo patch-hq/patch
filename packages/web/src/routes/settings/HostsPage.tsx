@@ -1,7 +1,7 @@
 // Settings → Hosts (spec/02 § Host identity, spec/11 § Host installation).
 //
 // Every machine registered to the account, with its presence, and — for the
-// one selected — its name, whether it is home, what it runs, and removing it.
+// one selected — its name, what it runs, and removing it.
 //
 // State comes from the live host reports. A machine that has not reported yet
 // is shown as awaiting its first report rather than being given a fabricated
@@ -127,11 +127,6 @@ function HostListRow({
               {host.hostId}
             </span>
           )}
-          {report?.isHomeHost ? (
-            <span className="set-chip g" data-testid={`host-${host.hostId}-home`}>
-              home
-            </span>
-          ) : null}
         </>
       }
       sub={
@@ -275,20 +270,6 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 }}
                 title={shortcutTitle('Save', '↵')}
               />
-            </Row>
-            <Row title="Home">
-              {report.isHomeHost ? (
-                <span className="set-val">This is home</span>
-              ) : (
-                <button
-                  type="button"
-                  className="set-btn"
-                  data-testid={`host-${host.hostId}-set-home`}
-                  onClick={() => sendToHost(host, { type: 'host.set_home', hostId: host.hostId })}
-                >
-                  Make home
-                </button>
-              )}
             </Row>
             <Row
               title="Host"

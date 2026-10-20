@@ -5,7 +5,7 @@
 // header. The choice is shared across pages — switching to the Mac on Usage and
 // then opening Agent should still be looking at the Mac.
 //
-// The default is the home host (`defaultHostId`), the same rule every other
+// The default is `defaultHostId`, the same rule every other
 // host-scoped action in the app uses; failing that, the first host by name.
 
 import { create } from 'zustand';

@@ -5,6 +5,7 @@
 // than swallowing it. Voice's Speaking group is per host (the one picked in
 // the switcher) and writes that host with `host.settings`.
 
+import { usePresenceStore } from '../src/stores/presenceStore';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from 'react-test-renderer';
@@ -60,7 +61,7 @@ beforeEach(() => {
   __clearLastAlert();
   useSettingsStore.getState()._reset();
   resetHosts();
-  reportHost('home', { hostName: 'laptop', isHomeHost: true });
+  reportHost('home', { hostName: 'laptop', runsManager: true });
 });
 
 // Every tree is unmounted after its test, so a page left mounted cannot react
@@ -260,7 +261,7 @@ describe('Voice (per-surface config matrix)', () => {
     reportHost('hetzner', { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } });
     reportHost('home', {
       hostName: 'laptop',
-      isHomeHost: true,
+      runsManager: true,
       voiceKeys: { gemini: true, openai: false },
     });
     const base = settingsFixture().preferences;
@@ -439,7 +440,7 @@ describe('Manager page', () => {
     expect(textOf(findHost(r.root, byTestId('special-thread-model')))).toBe('Opus 5');
   });
 
-  it('special threads’ model: no home machine, and a catalogue failure, are each said', async () => {
+  it('special threads’ model: no single machine, and a catalogue failure, are each said', async () => {
     resetHosts();
     reportHost('a');
     reportHost('b');
@@ -449,7 +450,8 @@ describe('Manager page', () => {
     expect(api.models).not.toHaveBeenCalled();
     expect(findHost(r.root, byTestId('special-thread-model-no-host'))).toBeTruthy();
     r.unmount();
-    reportHost('a', { isHomeHost: true });
+    reportHost('a', { runsManager: true });
+    usePresenceStore.getState().setHostOnline('b', false);
     vi.mocked(api.models).mockRejectedValue(new Error('host offline'));
     const r2 = renderRN(<ManagerPage />);
     await flush();

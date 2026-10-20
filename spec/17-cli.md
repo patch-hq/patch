@@ -31,7 +31,6 @@ patch hosts list                          # every registered host: name, status,
 patch hosts get [--host H]                # one host (platform, backends and their versions, components, permission mode, home marker)
 patch hosts add                           # server-minted registration nonce as a QR + short code, for the new machine's installer to redeem, plus the server's install command for the target OS
 patch hosts rename <name> [--host H]
-patch hosts set-home [--host H]           # make this the account's home host, where the special threads run
 patch hosts folders [--host H]            # that host's project-folder registry
 patch hosts folders add <path> [--host H]
 patch hosts folders remove <path> [--host H]
@@ -132,7 +131,7 @@ permission prompt appears and is answered inline.
 
 The `hosts` family covers the host-scoped controls of `03-wire-protocol.md` §
 Host events one for one — rename, permission-mode default, component install
-and remove, host update, home-host marker, folder registry add and remove,
+and remove, host update, folder registry add and remove,
 backend connect and disconnect (`10-auth.md` § Backend credentials), model
 catalogue — together with registration (`10-auth.md` § Host registration) and
 removal (`10-auth.md` § Revocation), which are server routes rather than wire
@@ -173,9 +172,9 @@ through the server rather than the local socket.
 
 A command aimed at this machine reaches its host over that machine's local
 socket, which carries one endpoint per host-scoped control for that reason
-(`02-daemon.md` § Control IPC). Four commands go to the server even when they
+(`02-daemon.md` § Control IPC). Three commands go to the server even when they
 name this machine, because the server owns what they change rather than the
-daemon: `hosts add`, `hosts rename`, `hosts set-home` and `hosts remove`.
+daemon: `hosts add`, `hosts rename` and `hosts remove`.
 
 `--host` accepts a host name or a `hostId` prefix. An ambiguous or unknown
 value is an error listing the candidates.
