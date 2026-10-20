@@ -34,8 +34,15 @@ export function connectionDotColor(conn: ConnectionState, colors: ThemeColors): 
 // disconnect grace while the app was in the foreground. A socket dropped
 // while the app was backgrounded, and the reconnect on opening it again, are
 // the idle phone doing what phones do, not a disconnect (spec/12).
-export function offlineBannerText(conn: ConnectionState, outageVisible: boolean): string | null {
+export function offlineBannerText(
+  conn: ConnectionState,
+  outageVisible: boolean,
+  serverLost = false,
+): string | null {
   if (!outageVisible) return null;
+  if (serverLost && (conn === 'reconnecting' || conn === 'offline')) {
+    return 'Server unreachable. Retrying';
+  }
   if (conn === 'reconnecting') return 'Reconnecting…';
   if (conn === 'offline') return 'Offline';
   return null;

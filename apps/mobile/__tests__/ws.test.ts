@@ -13,6 +13,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
   STORE_BATCH_MS,
   DISCONNECT_GRACE_MS,
+  SERVER_LOST_MS,
 } from '../src/api/ws';
 import { saveCredential, clearCredential } from '../src/lib/credential';
 import { useSettingsStore } from '../src/stores/settingsStore';
@@ -539,6 +540,17 @@ describe('disconnect grace — banner only for a real foreground outage', () => 
     vi.advanceTimersByTime(1);
     expect(bannerShown()).toBe(true);
     expect(usePresenceStore.getState().connection).toBe('reconnecting');
+  });
+
+  it('a foreground outage of a minute marks the server lost; reconnect clears it', () => {
+    connectAndOpen();
+    FakeWebSocket.last().emitClose(1006, '');
+    vi.advanceTimersByTime(SERVER_LOST_MS - 1);
+    expect(usePresenceStore.getState().serverLost).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(usePresenceStore.getState().serverLost).toBe(true);
+    FakeWebSocket.last().emitOpen();
+    expect(usePresenceStore.getState().serverLost).toBe(false);
   });
 
   it('a successful reconnect clears the banner', () => {

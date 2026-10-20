@@ -62,6 +62,14 @@ A surface tracks two independent things and shows them as two indicators: the WS
 - Disconnect grace: idle is not a disconnect. The link state is always reported truthfully and immediately (diagnostics, composer, connection dot), but the reconnecting/offline banner only appears once the app has been in the foreground with the link down for 3s. Mobile OSes drop a backgrounded app's socket, so a close while backgrounded arms nothing, and on returning to the foreground a surface with no live socket dials at once (skipping any pending backoff step) and starts the 3s grace from there — a resume reconnect that lands within it never shows the banner. Backgrounding hides a banner already up; if the link is still down on return, it reappears after a fresh grace. A successful reconnect clears it.
 - The host should dial the server as early as startup allows, and its first reconnect backoff step is short (≤1s) so a transient miss recovers within about a second.
 
+### Server lost
+
+A surface already shows its own dropped link (the banner, after the 3s grace). What it cannot show is that the server has been gone for a while, so two things escalate at one minute:
+
+- The host reports how long its link has been down (`offlineSince` in `/internal/diag/link`: since the loss, or since start if it never connected; `null` while online).
+- The desktop app, on a Mac that runs a host, reads that from the host's control socket every 15s from its main process. Past one minute it sets the tray tooltip to "server unreachable" and raises one native notification, and clears both when the link returns. A host it cannot read is logged, never treated as healthy.
+- The phone's banner, after a minute of foreground outage, changes from "Reconnecting…" to "Server unreachable. Retrying", and reverts on reconnect.
+
 ### Hosts fail independently
 
 Offline is per host:
