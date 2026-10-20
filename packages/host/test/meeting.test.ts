@@ -208,61 +208,6 @@ describe('MeetingManager', () => {
     expect(m.get('c1')?.transcript).toEqual([]);
   });
 
-  it('drops a Them line that is a garbled echo of a recent You line', async () => {
-    const m = make();
-    m.start('c1');
-    transcribe.mockResolvedValueOnce('So we should move the ledger split to January');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    clock += 2000;
-    transcribe.mockResolvedValueOnce('so we should move the ledger split to Janua');
-    await m.ingestAudio('c1', 'system', Buffer.from('b'));
-    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you']);
-  });
-
-  it('drops system lines when one mic line spans two of them (different clip boundaries)', async () => {
-    const m = make();
-    m.start('c1');
-    transcribe.mockResolvedValueOnce(
-      'so we should move the ledger split to January because of Black Friday',
-    );
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    clock += 1000;
-    transcribe.mockResolvedValueOnce('so we should move the ledger spit to Janary');
-    await m.ingestAudio('c1', 'system', Buffer.from('b'));
-    clock += 1000;
-    transcribe.mockResolvedValueOnce('becuse of Black Friday');
-    await m.ingestAudio('c1', 'system', Buffer.from('c'));
-    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you']);
-  });
-
-  it('drops system lines that arrived before the mic line that covers them', async () => {
-    const m = make();
-    m.start('c1');
-    transcribe.mockResolvedValueOnce('so we should move the ledger spit to Janary');
-    await m.ingestAudio('c1', 'system', Buffer.from('b'));
-    clock += 1000;
-    transcribe.mockResolvedValueOnce('becuse of Black Friday');
-    await m.ingestAudio('c1', 'system', Buffer.from('c'));
-    clock += 1000;
-    transcribe.mockResolvedValueOnce(
-      'so we should move the ledger split to January because of Black Friday',
-    );
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you']);
-  });
-
-  it('flags echoDetected once an echo is dropped, not before', async () => {
-    const m = make();
-    m.start('c1');
-    transcribe.mockResolvedValueOnce('So we should move the ledger split to January');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.echoDetected).toBeFalsy();
-    clock += 1000;
-    transcribe.mockResolvedValueOnce('so we should move the ledger split to Janua');
-    await m.ingestAudio('c1', 'system', Buffer.from('b'));
-    expect(m.get('c1')?.echoDetected).toBe(true);
-  });
-
   it('stamps a Them line with the speaker the call app lit up, and never a You line', async () => {
     const m = make();
     m.start('c1');
@@ -279,18 +224,15 @@ describe('MeetingManager', () => {
     ]);
   });
 
-  it('keeps a Them line that is different speech, or an echo long after', async () => {
+  it('does no text matching between sources: echo is removed from the audio before it arrives', async () => {
     const m = make();
     m.start('c1');
     transcribe.mockResolvedValueOnce('So we should move the ledger split to January');
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     clock += 2000;
-    transcribe.mockResolvedValueOnce('I disagree, Black Friday is the risk');
-    await m.ingestAudio('c1', 'system', Buffer.from('b'));
-    clock += 120_000;
     transcribe.mockResolvedValueOnce('So we should move the ledger split to January');
-    await m.ingestAudio('c1', 'system', Buffer.from('c'));
-    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you', 'them', 'them']);
+    await m.ingestAudio('c1', 'system', Buffer.from('b'));
+    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you', 'them']);
   });
 
   it('prompt asks for names and never calls the speaker "the user"', () => {

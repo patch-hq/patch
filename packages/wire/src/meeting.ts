@@ -328,11 +328,6 @@ export const MeetingState = z
      */
     live: z.string().nullable().optional(),
     settings: MeetingSettings.optional(),
-    /**
-     * Set once the system audio was seen to repeat the mic: the mic is hearing
-     * the call through speakers. Absent until then; headphones fix it.
-     */
-    echoDetected: z.boolean().optional(),
     summary: MeetingSummary.nullable(),
     topics: z.array(MeetingTopic),
     /** Free text the user types during or after the call; the final write-up folds it in. */

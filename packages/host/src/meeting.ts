@@ -44,56 +44,6 @@ const MAX_TRANSCRIPT_LINES = 4000;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
-/** A Them line this close in time to a You line can be the room's echo of it. */
-const ECHO_WINDOW_MS = 30_000;
-/** Bigram overlap above which two lines count as the same speech. */
-const ECHO_SIMILARITY = 0.7;
-
-const normSpeech = (x: string): string =>
-  x
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-function bigrams(x: string): Map<string, number> {
-  const out = new Map<string, number>();
-  for (let i = 0; i < x.length - 1; i++) {
-    const g = x.slice(i, i + 2);
-    out.set(g, (out.get(g) ?? 0) + 1);
-  }
-  return out;
-}
-
-/** Dice coefficient on character bigrams: tolerant of a garbled or truncated copy. */
-export function speechSimilarity(a: string, b: string): number {
-  const x = normSpeech(a);
-  const y = normSpeech(b);
-  if (x === '' || y === '') return 0;
-  if (x === y) return 1;
-  const bx = bigrams(x);
-  const by = bigrams(y);
-  let shared = 0;
-  for (const [g, n] of bx) shared += Math.min(n, by.get(g) ?? 0);
-  return (2 * shared) / (Math.max(x.length - 1, 0) + Math.max(y.length - 1, 0));
-}
-
-/** Shortest system line judged for echo; "yes" and "ok" are too common to call. */
-const ECHO_MIN_CHARS = 12;
-
-/** Share of `line`'s character bigrams that also appear in `pool`. */
-export function speechCoverage(line: string, pool: string): number {
-  const bl = bigrams(normSpeech(line));
-  const bp = bigrams(normSpeech(pool));
-  let total = 0;
-  let shared = 0;
-  for (const [g, n] of bl) {
-    total += n;
-    shared += Math.min(n, bp.get(g) ?? 0);
-  }
-  return total === 0 ? 0 : shared / total;
-}
-
 export const MeetingAnalysis = z
   .object({
     now: z.object({ headline: z.string(), bullets: z.array(z.string()), who: z.string() }),
@@ -431,7 +381,6 @@ export class MeetingManager {
         added = true;
       }
       if (!added) return;
-      this.dropEchoes(rt);
       if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
         const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
         rt.state.transcript.splice(0, drop);
@@ -923,34 +872,6 @@ export class MeetingManager {
       if (META_TEXT.test(`${a.summary.headline} ${a.summary.bullets.join(' ')}`))
         throw new MeetingError(`final analysis returned model commentary: ${a.summary.headline}`);
       s.summary = a.summary as MeetingSummary;
-    }
-  }
-
-  /**
-   * In a room the mic and the call audio carry the same speech, cut at
-   * different clip boundaries, so one line can span two on the other channel.
-   * Each not-yet-analysed system line is checked against ALL the mic text
-   * within the window; if that text covers it, it is an echo and is dropped.
-   * The mic copy is kept: it is the cleaner one.
-   */
-  private dropEchoes(rt: Runtime): void {
-    const t = rt.state.transcript;
-    let dropped = 0;
-    for (let i = t.length - 1; i >= rt.analysedUpTo; i--) {
-      const line = t[i]!;
-      if (line.speaker !== 'them' || normSpeech(line.text).length < ECHO_MIN_CHARS) continue;
-      const mic = t
-        .filter((l) => l.speaker === 'you' && Math.abs(l.at - line.at) <= ECHO_WINDOW_MS)
-        .map((l) => l.text)
-        .join(' ');
-      if (speechCoverage(line.text, mic) >= ECHO_SIMILARITY) {
-        t.splice(i, 1);
-        dropped++;
-      }
-    }
-    if (dropped > 0) {
-      rt.state.echoDetected = true;
-      if (rt.deliveredUpTo > t.length) rt.deliveredUpTo = t.length;
     }
   }
 

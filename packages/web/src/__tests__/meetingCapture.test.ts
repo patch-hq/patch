@@ -147,14 +147,14 @@ describe('startMeetingCapture', () => {
   it('cleans the call out of the mic when both are captured, so each utterance is heard once', () => {
     const procs: Array<{ onaudioprocess: ((e: unknown) => void) | null }> = [];
     class RecCtx extends Ctx {
-      createScriptProcessor = () => {
+      override createScriptProcessor = (): never => {
         const p = {
           onaudioprocess: null as ((e: unknown) => void) | null,
           connect() {},
           disconnect() {},
         };
         procs.push(p);
-        return p;
+        return p as never;
       };
     }
     vi.stubGlobal('MediaStream', function () {});
