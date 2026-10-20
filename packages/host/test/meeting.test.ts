@@ -236,6 +236,22 @@ describe('MeetingManager', () => {
     expect(m.get('c1')?.echoDetected).toBe(true);
   });
 
+  it('stamps a Them line with the speaker the call app lit up, and never a You line', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockResolvedValueOnce('Black Friday is the risk');
+    await m.ingestAudio('c1', 'system', Buffer.from('a'), 'Priya');
+    transcribe.mockResolvedValueOnce('I will check the ledger');
+    await m.ingestAudio('c1', 'mic', Buffer.from('b'), 'Priya');
+    transcribe.mockResolvedValueOnce('Anyone else on the call');
+    await m.ingestAudio('c1', 'system', Buffer.from('c'));
+    expect(m.get('c1')?.transcript.map((l) => [l.speaker, l.name])).toEqual([
+      ['them', 'Priya'],
+      ['you', undefined],
+      ['them', undefined],
+    ]);
+  });
+
   it('keeps a Them line that is different speech, or an echo long after', async () => {
     const m = make();
     m.start('c1');

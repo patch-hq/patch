@@ -124,6 +124,23 @@ contextBridge.exposeInMainWorld('patch', {
     ipcRenderer.on('patch:system-audio-failed', handler);
     return () => ipcRenderer.removeListener('patch:system-audio-failed', handler);
   },
+  startMeetingSpeakers(): void {
+    ipcRenderer.send('patch:meeting-speakers:start');
+  },
+  stopMeetingSpeakers(): void {
+    ipcRenderer.send('patch:meeting-speakers:stop');
+  },
+  onMeetingSpeakers(cb: (e: { participants: string[]; speaking: string[] }) => void): () => void {
+    const handler = (_: unknown, payload: { participants: string[]; speaking: string[] }): void =>
+      cb(payload);
+    ipcRenderer.on('patch:meeting-speakers', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-speakers', handler);
+  },
+  onMeetingSpeakersFailed(cb: (e: { message: string }) => void): () => void {
+    const handler = (_: unknown, payload: { message: string }): void => cb(payload);
+    ipcRenderer.on('patch:meeting-speakers-failed', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-speakers-failed', handler);
+  },
   onMeetingSignal(cb: (e: { phase: 'started' | 'ended'; app: string }) => void): () => void {
     const handler = (_: unknown, payload: { phase: 'started' | 'ended'; app: string }): void =>
       cb(payload);

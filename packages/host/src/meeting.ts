@@ -307,7 +307,12 @@ export class MeetingManager {
   // ---- audio ----
 
   /** Resolves once the clip is transcribed and on the state. */
-  ingestAudio(chatId: string, source: 'mic' | 'system', wav: Buffer): Promise<void> {
+  ingestAudio(
+    chatId: string,
+    source: 'mic' | 'system',
+    wav: Buffer,
+    speakerName?: string,
+  ): Promise<void> {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
     // A surface flushes its last clip before sending End; later audio is a bug.
@@ -338,7 +343,13 @@ export class MeetingManager {
       let added = false;
       for (const { text, voice } of pieces) {
         if (text === '') continue;
-        rt.state.transcript.push({ at, speaker, ...(voice !== undefined ? { voice } : {}), text });
+        rt.state.transcript.push({
+          at,
+          speaker,
+          ...(voice !== undefined ? { voice } : {}),
+          ...(speaker === 'them' && speakerName ? { name: speakerName } : {}),
+          text,
+        });
         added = true;
       }
       if (!added) return;

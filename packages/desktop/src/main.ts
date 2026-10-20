@@ -79,6 +79,7 @@ import {
   helperPath,
   watchMicrophone,
 } from './meeting-audio';
+import { watchSpeakers } from './meeting-speakers';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -1361,6 +1362,38 @@ function setupAutoUpdater(): void {
     sender.once('destroyed', () => systemAudio.stop());
   });
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
+  // Meeting mode: who is lit up on the call, read through macOS Accessibility.
+  // A failure (e.g. permission not granted) is sent to the renderer to show.
+  let stopSpeakers: (() => void) | null = null;
+  const endSpeakers = (): void => {
+    stopSpeakers?.();
+    stopSpeakers = null;
+  };
+  ipcMain.on('patch:meeting-speakers:start', (e) => {
+    const sender = e.sender;
+    endSpeakers();
+    try {
+      stopSpeakers = watchSpeakers(
+        helperPath({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          devDir: __dirname,
+        }),
+        {
+          onSnapshot: (snapshot) => {
+            if (!sender.isDestroyed()) sender.send('patch:meeting-speakers', snapshot);
+          },
+          onFailed: (message) => {
+            if (!sender.isDestroyed()) sender.send('patch:meeting-speakers-failed', { message });
+          },
+        },
+      );
+    } catch (err) {
+      sender.send('patch:meeting-speakers-failed', { message: (err as Error).message });
+    }
+    sender.once('destroyed', endSpeakers);
+  });
+  ipcMain.on('patch:meeting-speakers:stop', endSpeakers);
   // spec/02 § Desktop app and the local host — whether this Mac runs a
   // host, and installing one with a pairing code the SPA just minted.
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));

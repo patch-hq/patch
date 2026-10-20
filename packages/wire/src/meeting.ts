@@ -17,6 +17,8 @@ export const MeetingTranscriptLine = z
     speaker: MeetingSpeaker,
     /** Which distinct voice within `them` (1, 2, …) when the host could separate them. */
     voice: z.number().int().min(1).optional(),
+    /** Who the call app lit up as speaking while this was said (desktop Accessibility); `them` lines only. */
+    name: z.string().min(1).optional(),
     text: z.string(),
   })
   .strict();
@@ -113,12 +115,13 @@ export const MeetingState = z
   .strict();
 export type MeetingState = z.infer<typeof MeetingState>;
 
-/** Who a transcript line is from: You, a named voice, "Them 2", or plain "Them". */
+/** Who a transcript line is from: You, the participant the call app lit up, a named voice, "Them 2", or plain "Them". */
 export function meetingSpeakerLabel(
-  line: Pick<MeetingTranscriptLine, 'speaker' | 'voice'>,
+  line: Pick<MeetingTranscriptLine, 'speaker' | 'voice' | 'name'>,
   voices?: Record<string, string>,
 ): string {
   if (line.speaker === 'you') return 'You';
+  if (line.name !== undefined) return line.name;
   if (line.voice === undefined) return 'Them';
   return voices?.[String(line.voice)] ?? `Them ${line.voice}`;
 }

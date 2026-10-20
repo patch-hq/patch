@@ -72,6 +72,15 @@ export interface PatchDesktopBridge {
   onSystemAudio?(cb: (pcm: Uint8Array) => void): () => void;
   /** The tap stopped without being asked to. */
   onSystemAudioFailed?(cb: (e: { message: string }) => void): () => void;
+  /**
+   * Meeting mode: names who is lit up on the call, read from the calling app
+   * through macOS Accessibility. `onMeetingSpeakersFailed` carries the helper's
+   * own message (e.g. Accessibility not allowed). Absent on a shell that predates it.
+   */
+  startMeetingSpeakers?(): void;
+  stopMeetingSpeakers?(): void;
+  onMeetingSpeakers?(cb: (e: { participants: string[]; speaking: string[] }) => void): () => void;
+  onMeetingSpeakersFailed?(cb: (e: { message: string }) => void): () => void;
   /** The shell saw a calling app open (`started`) or let go of (`ended`) the mic. */
   onMeetingSignal?(cb: (e: { phase: 'started' | 'ended'; app: string }) => void): () => void;
   /**

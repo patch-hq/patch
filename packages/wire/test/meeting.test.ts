@@ -27,6 +27,13 @@ describe('meeting wire', () => {
       { type: 'meeting.control_request', chatId: 'c', action: 'name_voice', voice: 2, name: 'P' },
       { type: 'meeting.get_request', chatId: 'c' },
       { type: 'meeting.audio', chatId: 'c', source: 'mic', audioBase64: 'AA==' },
+      {
+        type: 'meeting.audio',
+        chatId: 'c',
+        source: 'system',
+        audioBase64: 'AA==',
+        speakerName: 'Priya',
+      },
       { type: 'meeting.action_request', chatId: 'c', actionId: 'a', decision: 'do' },
       { type: 'meeting.state', chatId: 'c', meeting: state },
       { type: 'meeting.state', chatId: 'c', meeting: null },
@@ -74,5 +81,16 @@ describe('meetingSpeakerLabel', () => {
       voices: { '1': 'Priya' },
     });
     expect(ok.success).toBe(true);
+  });
+
+  it('prefers the name the call app gave over a numbered voice', () => {
+    expect(meetingSpeakerLabel({ speaker: 'them', name: 'Priya' })).toBe('Priya');
+    expect(meetingSpeakerLabel({ speaker: 'them', voice: 2, name: 'Priya' })).toBe('Priya');
+    expect(meetingSpeakerLabel({ speaker: 'you', name: 'Priya' })).toBe('You');
+  });
+
+  it('a transcript line may carry a name', () => {
+    const line = { at: 1, speaker: 'them', text: 'hi', name: 'Priya' };
+    expect(MeetingState.safeParse({ ...state, transcript: [line] }).success).toBe(true);
   });
 });

@@ -7,8 +7,8 @@ import {
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
   formatMeetingClock,
-  meetingElapsedMs,
   meetingSpeakerLabel,
+  meetingElapsedMs,
   type MeetingState,
 } from '@patch/wire';
 import {
@@ -344,7 +344,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
             <div key={i} data-testid="meeting-line">
               <span>
                 {formatMeetingClock(l.at)}{' '}
-                {l.voice !== undefined ? (
+                {l.voice !== undefined && l.name === undefined ? (
                   <button
                     type="button"
                     className="mm-voice"
@@ -361,7 +361,7 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
                     {meetingSpeakerLabel(l, meeting.voices)}
                   </button>
                 ) : (
-                  meetingSpeakerLabel(l)
+                  meetingSpeakerLabel(l, meeting.voices)
                 )}
               </span>
               {l.text}

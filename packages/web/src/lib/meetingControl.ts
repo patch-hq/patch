@@ -2,6 +2,7 @@
 // Capture is acquired BEFORE the host is told to start, so a denied mic never
 // leaves a live meeting that hears nothing.
 
+import { SpeakerLog } from './speakerLog.js';
 import { DEFAULT_MEETING_SETTINGS, type MeetingSettings } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
@@ -62,6 +63,32 @@ function ws(): NonNullable<ReturnType<typeof getActiveWs>> {
   return w;
 }
 
+const speakerLog = new SpeakerLog();
+let stopSpeakerWatch: (() => void) | null = null;
+
+/** Seconds of 16 kHz mono PCM16 in a WAV clip (44-byte header). */
+function wavSeconds(wavBytes: number): number {
+  return Math.max(0, wavBytes - 44) / 2 / 16000;
+}
+
+/** Ask the shell who is lit up on the call. A failure is shown, and the meeting carries on with "Them". */
+function watchSpeakers(bridge: PatchDesktopBridge): void {
+  if (!bridge.startMeetingSpeakers || !bridge.onMeetingSpeakers) return;
+  speakerLog.clear();
+  const offSpeakers = bridge.onMeetingSpeakers(({ speaking }) =>
+    speakerLog.record(speaking, Date.now()),
+  );
+  const offFailed = bridge.onMeetingSpeakersFailed?.(({ message }) =>
+    useUiStore.getState().pushError(`Speaker names unavailable: ${message}`),
+  );
+  stopSpeakerWatch = () => {
+    offSpeakers();
+    offFailed?.();
+    bridge.stopMeetingSpeakers?.();
+  };
+  bridge.startMeetingSpeakers();
+}
+
 /** Mic always; system audio too on the desktop app, through its native helper. */
 export async function acquireSources(): Promise<MeetingSources> {
   const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -72,6 +99,7 @@ export async function acquireSources(): Promise<MeetingSources> {
       throw new Error('this desktop app is too old to hear the call. Update Patch');
     }
     await bridge.startSystemAudio();
+    watchSpeakers(bridge);
     return { mic, system: systemFeed(bridge) };
   } catch (err) {
     for (const t of mic.getTracks()) t.stop();
@@ -113,7 +141,19 @@ async function beginCapture(chatId: string): Promise<void> {
       sources,
       (source, audioBase64) => {
         try {
-          ws().send({ type: 'meeting.audio', chatId, source, audioBase64 });
+          // Who was lit up for most of the stretch this clip covers.
+          const now = Date.now();
+          const speakerName =
+            source === 'system'
+              ? speakerLog.dominant(now - wavSeconds(audioBase64.length * 0.75) * 1000, now)
+              : undefined;
+          ws().send({
+            type: 'meeting.audio',
+            chatId,
+            source,
+            audioBase64,
+            ...(speakerName ? { speakerName } : {}),
+          });
         } catch (err) {
           useUiStore.getState().pushError(`Meeting audio not sent: ${(err as Error).message}`);
         }
@@ -187,6 +227,8 @@ export function requestMeeting(chatId: string): void {
 
 function stopCapture(): void {
   capture?.stop();
+  stopSpeakerWatch?.();
+  stopSpeakerWatch = null;
   capture = null;
   useMeetingStore.getState().setCapturing(null);
 }
