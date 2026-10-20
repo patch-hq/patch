@@ -64,8 +64,8 @@ export const WatchRecord = z
     timeoutSec: z.number().int().positive().optional(),
     /** Set once the host killed the task for exceeding `timeoutSec`. */
     timedOut: z.boolean().optional(),
-    /** When the "no output for a long time" nudge last went to the chat. */
-    stallNotifiedAt: z.number().int().optional(),
+    /** When the periodic check-in last went to the chat. */
+    lastCheckInAt: z.number().int().optional(),
     status: z.enum(['running', 'exited', 'stopped', 'failed']),
     /** Set once the task leaves `running`. Undefined = unknown (e.g. a
      *  restart re-attached to the pid and only ever observed it vanish). */
@@ -92,8 +92,12 @@ export interface WatchSchedulerDeps {
   isAlive?(pid: number): boolean;
   /** How often the resident poll runs. Default 3000ms. */
   pollMs?: number;
-  /** Silence (no new output) after which the chat is nudged once. Default 1h. */
-  stallMs?: number;
+  /**
+   * The periodic check-in, read afresh each tick so a settings change applies
+   * to tasks already running. `prompt` may use {description}, {running},
+   * {lastOutput} and {taskId}. Default: every hour, `DEFAULT_CHECK_IN_PROMPT`.
+   */
+  checkIn?(): { intervalMs: number; prompt: string };
   setIntervalFn?(cb: () => void, ms: number): ReturnType<typeof setInterval>;
   clearIntervalFn?(t: ReturnType<typeof setInterval>): void;
 }
@@ -102,7 +106,10 @@ const WATCH_DIR = 'watch';
 /** Metadata tag on the delivered turn — data not directive, like wake.ts's `[wake]`. */
 export const WATCH_PREFIX = '[watch]';
 const DEFAULT_POLL_MS = 3_000;
-const DEFAULT_STALL_MS = 60 * 60 * 1000;
+export const DEFAULT_CHECK_IN_MS = 60 * 60 * 1000;
+export const DEFAULT_CHECK_IN_PROMPT =
+  'Background task "{description}" has been running for {running}. Last output: {lastOutput}. ' +
+  'Is it still working as intended? Check patch_watch_output("{taskId}") and patch_watch_stop it if it is stuck or failing.';
 
 /** What a running watch last printed: its final non-empty line and when it was written. */
 export interface WatchProgress {
@@ -353,7 +360,7 @@ export class WatchScheduler {
           await this.timeOut(rec);
           continue;
         }
-        await this.nudgeIfStalled(rec);
+        await this.checkInIfDue(rec);
         const handle = this.liveHandles.get(rec.taskId);
         if (handle) {
           // Node tracks a spawned child's exit internally regardless of
@@ -395,18 +402,24 @@ export class WatchScheduler {
     );
   }
 
-  /** One nudge per quiet period: a running watch that has printed nothing for `stallMs`. */
-  private async nudgeIfStalled(rec: WatchRecord): Promise<void> {
+  /** Every `intervalMs` a task is still running, ask the owning agent whether it is healthy. */
+  private async checkInIfDue(rec: WatchRecord): Promise<void> {
     const now = this.deps.now();
-    const lastActivity = Math.max(rec.startedAt, readProgress(rec.outputFile).lastOutputAt ?? 0);
-    if (now - lastActivity < (this.deps.stallMs ?? DEFAULT_STALL_MS)) return;
-    if (rec.stallNotifiedAt !== undefined && rec.stallNotifiedAt >= lastActivity) return;
-    this.writeRecord({ ...rec, stallNotifiedAt: now });
+    const cfg = this.deps.checkIn?.() ?? {
+      intervalMs: DEFAULT_CHECK_IN_MS,
+      prompt: DEFAULT_CHECK_IN_PROMPT,
+    };
+    if (now - (rec.lastCheckInAt ?? rec.startedAt) < cfg.intervalMs) return;
+    this.writeRecord({ ...rec, lastCheckInAt: now });
+    const vars: Record<string, string> = {
+      description: rec.description,
+      running: formatDuration(now - rec.startedAt),
+      lastOutput: readProgress(rec.outputFile).lastLine ?? 'none yet',
+      taskId: rec.taskId,
+    };
     await this.send(
       rec,
-      `${WATCH_PREFIX} "${rec.description}" has printed no output for ${formatDuration(now - lastActivity)} ` +
-        `(running ${formatDuration(now - rec.startedAt)}${rec.timeoutSec !== undefined ? `, killed at ${formatDuration(rec.timeoutSec * 1000)}` : ''}). ` +
-        `Check patch_watch_output("${rec.taskId}") and patch_watch_stop it if it is stuck.`,
+      `${WATCH_PREFIX} ` + cfg.prompt.replace(/\{(\w+)\}/g, (m, k: string) => vars[k] ?? m),
     );
   }
 

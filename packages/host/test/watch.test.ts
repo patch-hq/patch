@@ -375,24 +375,36 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
     expect(readProgress(join(deps.home, 'missing'))).toEqual({});
   });
 
-  it('nudges once when a running task goes silent, again only after new output', async () => {
-    const deps = makeDeps({ stallMs: 200 });
+  it('checks in with the agent every interval while running, filling the prompt template', async () => {
+    let t = 1_000_000;
+    const deps = makeDeps({
+      now: () => t,
+      checkIn: () => ({
+        intervalMs: 3_600_000,
+        prompt: '"{description}" up {running}, last: {lastOutput} ({taskId})',
+      }),
+    });
     const scheduler = mkScheduler(deps);
     try {
       const rec = scheduler.start({
-        chatId: 'c-stall',
-        command: 'sleep 30',
-        description: 'quiet one',
-        timeoutSec: 600,
+        chatId: 'c-ci',
+        command: 'echo step 4; sleep 30',
+        description: 'deploy',
+        timeoutSec: 86_400,
         cwd: deps.home,
       });
+      await flushUntil(() => readProgress(rec.outputFile).lastLine === 'step 4');
+      t += 3_599_000;
+      await new Promise((r) => setTimeout(r, 100));
+      expect(deps.delivered).toHaveLength(0);
+      t += 2_000;
       await flushUntil(() => deps.delivered.length === 1);
-      expect(deps.delivered[0]!.message).toMatch(/has printed no output for/);
-      await new Promise((r) => setTimeout(r, 300));
-      expect(deps.delivered).toHaveLength(1);
-      appendFileSync(rec.outputFile, 'alive\n');
+      expect(deps.delivered[0]!.message).toBe(
+        `[watch] "deploy" up 1h00m, last: step 4 (${rec.taskId})`,
+      );
+      t += 3_600_000;
       await flushUntil(() => deps.delivered.length === 2);
-      scheduler.stop('c-stall', rec.taskId);
+      scheduler.stop('c-ci', rec.taskId);
     } finally {
       scheduler.dispose();
     }
