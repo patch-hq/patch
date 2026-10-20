@@ -160,6 +160,9 @@ interface Runtime {
   chain: Promise<void>;
 }
 
+/** The model complaining about its input instead of writing notes. */
+const META_TEXT = /\bno (new )?transcript\b|nothing (new )?to (process|summari[sz]e)/i;
+
 export class MeetingError extends Error {
   override readonly name = 'MeetingError';
 }
@@ -477,6 +480,8 @@ export class MeetingManager {
 
   private merge(rt: Runtime, a: MeetingAnalysis, final: boolean): void {
     const s = rt.state;
+    if (!final && META_TEXT.test(`${a.now.headline} ${a.now.bullets.join(' ')}`))
+      throw new MeetingError(`analysis returned model commentary: ${a.now.headline}`);
     s.now = final ? s.now : a.now;
     for (const t of a.topics) {
       const existing = t.id ? s.topics.find((x) => x.id === t.id) : undefined;
@@ -508,6 +513,8 @@ export class MeetingManager {
     }
     if (final) {
       if (!a.summary) throw new MeetingError('final analysis returned no summary');
+      if (META_TEXT.test(`${a.summary.headline} ${a.summary.bullets.join(' ')}`))
+        throw new MeetingError(`final analysis returned model commentary: ${a.summary.headline}`);
       s.summary = a.summary as MeetingSummary;
     }
   }

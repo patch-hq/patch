@@ -38,7 +38,9 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
     }),
     '',
     'NEW transcript:',
-    transcript,
+    transcript !== ''
+      ? transcript
+      : '(none: everything said so far is already in the notes above. Do not comment on this; write the reply from the notes.)',
     '',
     'Reply with ONE JSON object and nothing else, with exactly these keys:',
     '{"now":{"headline":"","bullets":[""],"who":""},',
