@@ -36,7 +36,6 @@ const JOB = {
 };
 
 const EDIT_JOB = `/app/dev-harness.html?route=/jobs/${JOB_ID}`;
-const NEW_JOB = '/app/dev-harness.html?route=/jobs/new';
 
 /** Every PATCH body the page sends, in order. */
 type Saved = Array<Record<string, unknown>>;

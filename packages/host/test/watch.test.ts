@@ -10,14 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
-import {
-  appendFileSync,
-  mkdtempSync,
-  mkdirSync,
-  readdirSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';

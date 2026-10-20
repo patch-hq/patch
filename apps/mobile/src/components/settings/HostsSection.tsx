@@ -31,17 +31,7 @@ import { NoticeRow, hostName, sortedHosts, unreportedText, useSettingsHost } fro
 import { ClaudeSettingsRow } from './ClaudeSettingsSection';
 import { SecretsSection } from './SecretsSection';
 import { SettingsPage } from './SettingsPage';
-import {
-  ButtonRow,
-  Chevron,
-  Dot,
-  ErrorLine,
-  Field,
-  Muted,
-  Row,
-  RowValue,
-  SettingsButton,
-} from './ui';
+import { ButtonRow, Chevron, Dot, ErrorLine, Field, Muted, Row, SettingsButton } from './ui';
 
 /** How a host's `platform` reads: macOS, Linux, Windows, else as reported. */
 export function platformLabel(platform: string): string {

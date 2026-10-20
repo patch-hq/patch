@@ -96,7 +96,6 @@ function PromptEditor() {
   useEffect(() => {
     if (key) setDraft(String(prefs[PROMPT_FIELDS[key].field]));
     // Reload the text only when switching prompt, not on every preference push mid-typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   if (!key) return null;
   const { title, field, fallback } = PROMPT_FIELDS[key];
@@ -523,7 +522,6 @@ function Editable({
     sel?.collapseToEnd();
     onFocused();
     // Focus once when asked, not on every render while it is still asked for.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocus]);
   return (
     <span

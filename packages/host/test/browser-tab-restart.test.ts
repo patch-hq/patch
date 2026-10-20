@@ -1,7 +1,7 @@
 // A host restart must not strand the agent's tab ids: a logged-in tab is
 // reopened at its last address on first use, and a closed tab stays closed.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { it, expect, afterEach } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
