@@ -13,7 +13,7 @@ import { generateUserKeypair } from '@patch/auth';
 import { encodePairingUri } from '@patch/wire';
 
 export interface PairAdminOptions {
-  /** The running server, as this machine reaches it (`http://127.0.0.1:3000`). */
+  /** The running server, as this machine reaches it (`http://127.0.0.1:3970`). */
   baseUrl: string;
   dataDir: string;
   /**

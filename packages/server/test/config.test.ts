@@ -126,7 +126,7 @@ describe('loadConfig', () => {
     it('needs no env at all in production', () => {
       process.env.NODE_ENV = 'production';
       const config = loadConfig();
-      expect(config.port).toBe(3000);
+      expect(config.port).toBe(3970);
       expect(config.dataDir).toBe(join(home, '.patch-server', 'data'));
     });
   });

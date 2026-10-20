@@ -37,7 +37,7 @@ machine, and deploy and update independently.
 
 ```
    ┌─────────────────────────────────────┐
-   │  patch-server (deployed)     :443   │  Caddy → :3000
+   │  patch-server (deployed)     :443   │  Caddy → :3970
    │  relay · registry · webhooks        │  the only public component
    └───────▲──────────────────────▲──────┘
            │ outbound WS          │ outbound WS
@@ -143,7 +143,7 @@ first pairing code, and leaves `patch-server` on the path for the next
 
 Every download is checked against its published checksum before anything
 installs, and a failure at any step stops it with the reason. `--no-https`
-serves plain HTTP on `:3000` for a LAN or an existing proxy; `--user-mode`
+serves plain HTTP on `:3970` for a LAN or an existing proxy; `--user-mode`
 installs for the current user with no root and no HTTPS, to try it out.
 
 Put a TLS reverse proxy in front of `PORT` (Caddy, nginx), sending `/device/*`
