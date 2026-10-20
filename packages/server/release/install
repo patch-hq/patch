@@ -191,7 +191,7 @@ Environment="PATCH_SERVER_HOME=${HOME_DIR}"
 Environment="PATCH_NODE=${NODE}"
 Environment="PATH=${PATH}"
 ExecStart=${HOME_DIR}/current/patch-server
-Restart=on-failure
+Restart=always
 RestartSec=3s
 StandardOutput=append:${HOME_DIR}/logs/server.log
 StandardError=append:${HOME_DIR}/logs/server.log

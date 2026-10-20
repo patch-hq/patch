@@ -80,7 +80,7 @@ host, or `patch hosts add`). The installer only ever redeems it; it mints
 nothing. It states what the host will be able to do on the machine before it
 registers anything, installs under the invoking user's own `~/.patch`, writes
 the `patch-cli` skill into `~/.claude/skills/patch-cli/`, registers the service
-(launchd on macOS, a systemd user unit on Linux, restart-on-failure +
+(launchd on macOS, a systemd user unit on Linux, always-restart +
 start-at-boot, no working directory), then pairs and starts.
 
 Exit codes: `64` bad usage, `65` wrong platform / incomplete artifact, `69`

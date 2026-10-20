@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { relayUnit, releasePath, staleReleases } from './install-relay.mjs';
 
-test('the relay unit binds loopback on 8787 and restarts on failure', () => {
+test('the relay unit binds loopback on 8787 and always restarts', () => {
   const u = relayUnit({ home: '/h/.patch-relay', node: '/usr/bin/node' });
   assert.match(u, /Environment=PORT=8787 HOST=127\.0\.0\.1/);
   assert.match(u, /ExecStart=\/usr\/bin\/node \/h\/\.patch-relay\/current\/dist\/cli\.js/);
-  assert.match(u, /Restart=on-failure/);
+  assert.match(u, /Restart=always/);
 });
 
 test('the installer defaults to the latest release the project publishes on GitHub', () => {
