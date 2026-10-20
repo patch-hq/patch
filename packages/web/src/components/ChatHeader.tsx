@@ -43,7 +43,6 @@ import {
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DeleteIcon } from './icons.js';
-import { JobMenuItem } from './JobBar.js';
 import { NavHistoryControls } from './NavHistoryControls.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { folderLabel } from '../lib/folderLabel.js';
@@ -655,9 +654,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 >
                   Terminal
                 </button>
-                {row.jobId ? (
-                  <JobMenuItem jobId={row.jobId} onDone={() => setHamburgerOpen(false)} />
-                ) : null}
                 <button
                   type="button"
                   className="head-menu-item"

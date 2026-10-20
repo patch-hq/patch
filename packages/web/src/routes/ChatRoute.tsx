@@ -75,6 +75,7 @@ import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { ThreadsStrip } from '../components/ThreadsStrip.js';
 import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
+import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
@@ -2012,6 +2013,7 @@ export function ChatRoute({
         contentVersion={timeline.length}
         onOpen={() => expandTo(0, false)}
       />
+      {row.jobId ? <JobBar jobId={row.jobId} /> : null}
       <GoalBanner row={row} />
       <FinishedGoalBanner row={row} />
       <TaskBar key={`tasks-${row.chatId}`} row={row} />

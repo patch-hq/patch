@@ -1,8 +1,8 @@
-// JobMenuItem — the ⋯ menu entry of a chat a job created, opening that job
-// (spec/14 § Main chat panel — Job link). Names the job: `Run by "x" job`.
+// JobBar — the banner under the header of a chat a job created, opening that
+// job (spec/14 § Main chat panel — Job bar). Names the job: `Run by "x" job`.
 //
 // `jobId` is set once at spawn (spec/08 § Action) and never changes. Chats no
-// job created have no entry. A header row of its own was too much chrome.
+// job created have no bar.
 
 import type { JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -11,7 +11,7 @@ import { Zap } from 'lucide-react';
 import type { Job } from '@patch/wire/jobs';
 import { api } from '../api/rest.js';
 
-export function JobMenuItem({ jobId, onDone }: { jobId: string; onDone: () => void }): JSX.Element {
+export function JobBar({ jobId }: { jobId: string }): JSX.Element {
   const navigate = useNavigate();
   const { data, error } = useQuery({
     queryKey: ['job', jobId],
@@ -23,19 +23,20 @@ export function JobMenuItem({ jobId, onDone }: { jobId: string; onDone: () => vo
       ? `Run by "${data.name}" job`
       : 'Loading job…';
   return (
-    <button
-      type="button"
-      className="head-menu-item"
-      data-testid="job-bar-link"
-      role="menuitem"
-      title="Open job"
-      onClick={() => {
-        onDone();
-        navigate(`/jobs/${jobId}`);
-      }}
-    >
-      <Zap size={14} aria-hidden />
-      {label}
-    </button>
+    <div className="archived-banner" data-testid="job-bar" role="status">
+      <span className="archived-banner-label">
+        <Zap size={14} aria-hidden />
+        {label}
+      </span>
+      <button
+        type="button"
+        className="archived-unarchive-btn"
+        data-testid="job-bar-link"
+        title="Open job"
+        onClick={() => navigate(`/jobs/${jobId}`)}
+      >
+        Open job
+      </button>
+    </div>
   );
 }
