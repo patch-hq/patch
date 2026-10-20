@@ -675,7 +675,7 @@ with `Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-t
 opaque origin, so agent-authored script can neither read the SPA's stored
 credential nor make same-origin API calls with it. Popups are allowed and
 escape the sandbox, so a `target=_blank` link opens a working page; without
-them Chromium blocks every such link silently. An unknown id is a 404;
+them Chromium blocks every such link silently. Every response — a page or a `raw` image/file — carries that CSP, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` (the signature is in the URL, so outbound requests must not carry it); the content-type of a `raw` publish is agent-chosen, so it is never served unsandboxed. An unknown id is a 404;
 nothing is generated on the fly. A card published before signing existed
 carries an unsigned URL and 401s until the file is republished.
 

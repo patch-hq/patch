@@ -335,7 +335,14 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         return reply.code(404).send({ error: 'artifact not found' });
       }
       const meta = JSON.parse(readFileSync(metaFile, 'utf8')) as RawArtifactSidecar;
-      reply.code(200).header('content-type', meta.contentType);
+      reply
+        .code(200)
+        .header('content-type', meta.contentType)
+        // The type is agent-chosen: sandbox it like a page so a `text/html`
+        // raw publish cannot run in the SPA's origin.
+        .header('content-security-policy', ARTIFACT_CSP)
+        .header('x-content-type-options', 'nosniff')
+        .header('referrer-policy', 'no-referrer');
       if (meta.filename !== undefined) {
         // RFC 5987 form carries any unicode/quote safely; the plain `filename`
         // is the ASCII-only fallback older clients read.
@@ -360,6 +367,9 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         .code(200)
         .header('content-type', 'text/html; charset=utf-8')
         .header('content-security-policy', ARTIFACT_CSP)
+        .header('x-content-type-options', 'nosniff')
+        // The signature is in the URL; outbound requests must not carry it.
+        .header('referrer-policy', 'no-referrer')
         // A republished page keeps its URL, so a reload must never be answered from cache.
         .header('cache-control', 'no-store')
         .send(injectShim(readFileSync(file, 'utf8'), shim))
