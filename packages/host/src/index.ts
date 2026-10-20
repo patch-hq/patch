@@ -158,6 +158,7 @@ import { rotateLog } from './logRotate.js';
 import { handleHookCheck } from './hookCheck.js';
 import { FolderRegistry } from './folders.js';
 import { ModelCatalog } from './modelCatalog.js';
+import { ModelLimits } from './handoffRun.js';
 import { handleBackgroundTaskStatsRequest } from './backgroundTaskStats.js';
 import { handleWatchListRequest, handleWatchStopRequest } from './watchRequests.js';
 import { HostStateStore } from './hostState.js';
@@ -2997,6 +2998,28 @@ async function startHost(
         );
         return;
       }
+      if (event.type === 'chat.handoff_recover_request') {
+        // spec/04 § Handoff budget — Retry / Switch back / Continue in a linked
+        // fresh chat, offered by a failed provider switch. A refusal is said,
+        // never swallowed.
+        const { chatId, action } = event;
+        void daemon.recoverHandoff(chatId, action).then(
+          () => logger.info({ chatId, action }, 'handoff recovery run'),
+          (err: unknown) => {
+            logger.warn(
+              { chatId, action, err: (err as Error).message },
+              'handoff recovery refused',
+            );
+            sender({
+              type: 'chat.error',
+              chatId,
+              error: { code: 'sdk_error', message: (err as Error).message },
+              seq: OUT_OF_BAND_SEQ,
+            });
+          },
+        );
+        return;
+      }
       if (event.type === 'chat.account_request') {
         // spec/10 § Backend credentials — preferred account, from the chat's
         // next turn. Only an account this host holds for the chat's own
@@ -3630,7 +3653,8 @@ async function startHost(
   // nothing, and would make every test that boots a host hit the network.
   if (config.sdkBackend === 'real') accountUsage.start();
 
-  const modelCatalog = new ModelCatalog({ runOnAccountWithCredit });
+  const modelLimits = new ModelLimits();
+  const modelCatalog = new ModelCatalog({ runOnAccountWithCredit, limits: modelLimits });
   // spec/08 § Recurrence — the job editor's natural-language schedule input.
   // Cheap one-shot Haiku, same gate as the title/status/digest generators.
   const translateRecurrenceRule = makeRecurrenceTranslator({
@@ -3835,6 +3859,7 @@ async function startHost(
     // asks the outgoing special-thread session to write for itself before
     // it's retired.
     generateDigest: makeDigestGenerator({ sdkBackend, runOnAccountWithCredit, logger }),
+    modelLimits,
     // spec/06 § Sweep — the sweep's one decision call, plus the cross-host
     // relays it uses to read a non-local candidate's recent messages and to
     // nudge/wake one (same relays `patch_history`/`patch_send_to` use).

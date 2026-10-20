@@ -143,6 +143,9 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
         // spec/04 § Model — a mid-chat model switch is relayed to the chat's
         // host untouched; the server holds no model of its own to keep in step.
         { type: 'chat.model_request', chatId: 'chat-model', model: 'claude-opus-4-1' },
+        // spec/04 § Handoff budget — the recoveries of a failed provider switch
+        // are relayed to the chat's host untouched.
+        { type: 'chat.handoff_recover_request', chatId: 'chat-handoff', action: 'retry' },
         { type: 'patch.peek.request', sourceChatId: 'chat-src', targetChatId: 'chat-tgt' },
         { type: 'patch.send_to', sourceChatId: 'chat-src', targetChatId: 'chat-tgt', message: 'm' },
         {

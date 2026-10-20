@@ -3503,3 +3503,74 @@ describe('pending message is not swallowed by an older same-text echo', () => {
     expect(tl.filter((e) => e.role === 'user')).toHaveLength(3);
   });
 });
+
+describe('chatStore — provider-switch handoff rows (spec/04 § Handoff budget)', () => {
+  beforeEach(() => {
+    useChatStore.setState({ chats: {}, timelines: {} });
+  });
+  const divider = {
+    type: 'chat.message' as const,
+    chatId: 'c1',
+    seq: 4,
+    role: 'system' as const,
+    content: 'Handed off to openai/gpt-6-astra — carried 12 of 80 entries',
+    sessionChange: {
+      harness: 'codex' as const,
+      model: 'openai/gpt-6-astra',
+      seededMessages: 12,
+      handoff: {
+        carriedEntries: 12,
+        totalEntries: 80,
+        estimatedTokens: 1000,
+        availableTokens: 5000,
+        summary: false,
+      },
+    },
+  };
+
+  it('a handoff divider is furniture carrying the host wording, drawn once on a replay', () => {
+    useChatStore.getState().applyEvent(divider);
+    useChatStore.getState().applyEvent(divider);
+    const entries = useChatStore.getState().timelines['c1']!;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: 'handoff', content: divider.content });
+  });
+
+  it('a switch without a handoff stays the quiet empty divider it was', () => {
+    useChatStore.getState().applyEvent({
+      ...divider,
+      content: '',
+      sessionChange: { harness: 'codex', model: 'x', seededMessages: 2 },
+    });
+    const entries = useChatStore.getState().timelines['c1'] ?? [];
+    expect(entries.some((e) => e.kind === 'handoff')).toBe(false);
+  });
+
+  it('a linked-chat row remembers the chat it points at', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 9,
+      role: 'system',
+      content: 'Continued in a linked fresh chat',
+      handoffLink: { chatId: 'c2' },
+    });
+    expect(useChatStore.getState().timelines['c1']![0]).toMatchObject({
+      kind: 'handoff_link',
+      linkedChatId: 'c2',
+    });
+  });
+
+  it('a handoff error is a standalone row carrying its code', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.error',
+      chatId: 'c1',
+      seq: 5,
+      error: { code: 'handoff_too_large', message: 'too big' },
+    });
+    expect(useChatStore.getState().timelines['c1']![0]).toMatchObject({
+      kind: 'error',
+      errorCode: 'handoff_too_large',
+    });
+  });
+});

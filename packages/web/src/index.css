@@ -3955,6 +3955,11 @@ a.ch-row:hover {
   font-weight: 600;
   text-decoration: underline;
 }
+.turn-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .turn-error-code {
   flex: none;
   opacity: 0.75;

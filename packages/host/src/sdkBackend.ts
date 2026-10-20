@@ -126,6 +126,12 @@ export interface SdkEnvelope {
    * TRACK ENTRIES (not raw Responses items) cut from the front.
    */
   seedTrim?: number;
+  /**
+   * What the harness reported about the request it just ran (spec/04 § Handoff
+   * budget): the model's real context window and the input tokens of the
+   * request. Feeds the model-limits registry and `handoff.verified`.
+   */
+  tokenUsage?: { contextWindow?: number; inputTokens?: number };
   /** Origin marker — useful for tests that want to assert ordering. */
   raw?: unknown;
 }
@@ -308,6 +314,13 @@ export interface SdkRunOptions {
    * turn runs, instead of resuming `resumeSessionId` normally.
    */
   codexReseed?: { events: readonly TrackEntry[] };
+  /**
+   * The seeded track is a budgeted handoff (spec/04 § Handoff budget): the
+   * backend must NOT trim it to fit. A target that rejects it as over its
+   * window before any output is a `HandoffOverflowError`, so the host can
+   * re-plan once rather than resend or silently cut.
+   */
+  handoffStrict?: boolean;
   /**
    * Set only when resuming a track's OWN prior Codex thread after a return
    * trip through another harness (spec/04 § History — preserve the cached
@@ -1648,6 +1661,31 @@ export class TurnFailedError extends Error {
     this.name = 'TurnFailedError';
     this.limit = limit;
   }
+}
+
+/**
+ * The target rejected a budgeted handoff as over its context window, before it
+ * produced any output (so no tool ran and re-planning is safe). `reportedLimit`
+ * is the window the provider named, when it named one.
+ */
+export class HandoffOverflowError extends TurnFailedError {
+  readonly reportedLimit: number | undefined;
+  constructor(message: string, reportedLimit: number | undefined) {
+    super(message, undefined);
+    this.name = 'HandoffOverflowError';
+    this.reportedLimit = reportedLimit;
+  }
+}
+
+/** The window a provider's overflow message names ("maximum context length is 272000 tokens"). */
+export function reportedContextLimit(message: string): number | undefined {
+  const m =
+    /(?:maximum|max(?:imum)?)\s+context\s+(?:length|window)\s+(?:is|of)\s+([\d,]+)/i.exec(
+      message,
+    ) ?? /limit\s+of\s+([\d,]+)\s+tokens/i.exec(message);
+  if (!m) return undefined;
+  const n = Number(m[1]!.replace(/,/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function assertResultNotAnError(msg: unknown): void {

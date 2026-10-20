@@ -1496,6 +1496,7 @@ export class WsHub {
       // switch is relayed untouched and answered by the `chat.state` that host
       // emits. The server holds no model of its own to keep in step.
       case 'chat.model_request':
+      case 'chat.handoff_recover_request':
       case 'chat.account_request':
       case 'patch.peek.request':
       case 'patch.send_to':

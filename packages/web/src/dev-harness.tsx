@@ -236,6 +236,22 @@ useChatStore.getState().hydrate([
   // A chat whose permission mode was changed part-way through (spec/02 §
   // Permission mode) — drives the mode-change line e2e. On its own fixture so
   // the transcript-spacing and markdown specs' chats keep their exact shape.
+  // A chat whose provider switch went through the budgeted handoff and then
+  // failed once (spec/04 § Handoff budget) — drives the divider, the three
+  // recovery actions and the linked-chat row e2e.
+  {
+    chatId: 'chat_handoff',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'long switch',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle' as const,
+    status: 'active' as const,
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 5,
+  },
   {
     chatId: 'chat_perm_mode',
     hostId: 'd1',
@@ -1738,9 +1754,37 @@ const questionStyleEntries: ChatEventEntry[] = [
     at: 5,
   },
 ];
+// A budgeted provider switch (spec/04 § Handoff budget): the divider the host
+// words, the error after a second overflow, and the row left by a linked chat.
+const handoffEntries: ChatEventEntry[] = [
+  { seq: 1, kind: 'message', role: 'user', content: 'carry on with the refactor', at: 1 },
+  {
+    seq: 2,
+    kind: 'handoff',
+    content:
+      'Handed off to openai/gpt-6-astra \u2014 carried 120 of 4,100 entries; older history readable on demand \u00b7 ~38,000 of 190,000 tokens',
+    at: 2,
+  },
+  {
+    seq: 3,
+    kind: 'error',
+    errorCode: 'handoff_overflow',
+    content:
+      'The target model rejected the handoff as too large, even after re-planning it smaller.',
+    at: 3,
+  },
+  {
+    seq: 4,
+    kind: 'handoff_link',
+    content: 'Continued in a linked fresh chat',
+    linkedChatId: 'chat_md',
+    at: 4,
+  },
+];
 useChatStore.setState((s) => ({
   timelines: {
     ...s.timelines,
+    chat_handoff: handoffEntries,
     chat_bus: [...markdownReply, ...monitorEntries],
     chat_md: [...markdownReply, compactionEntry],
     chat_table: wideTableReply,

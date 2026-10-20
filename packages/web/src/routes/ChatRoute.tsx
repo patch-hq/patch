@@ -2399,6 +2399,16 @@ const TimelineEntry = memo(function TimelineEntry({
   if (entry.kind === 'permission_mode') {
     return <PermissionModeLine entry={entry} />;
   }
+  if (entry.kind === 'handoff') {
+    return (
+      <div className="mode-change" data-testid="handoff-divider">
+        <span className="mode-change-label">{entry.content ?? ''}</span>
+      </div>
+    );
+  }
+  if (entry.kind === 'handoff_link') {
+    return <HandoffLinkLine entry={entry} />;
+  }
   // (attachments render inline within the message branch above)
   if (entry.kind === 'tool_result') {
     return <ToolResult entry={entry} />;
@@ -2429,6 +2439,8 @@ const TimelineEntry = memo(function TimelineEntry({
           <Link className="turn-error-action" to="/settings/usage" data-testid="turn-error-sign-in">
             Sign in
           </Link>
+        ) : entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
+          <HandoffActions chatId={chatId} />
         ) : entry.errorCode !== undefined && entry.errorCode !== 'sdk_error' ? (
           <code className="turn-error-code">{entry.errorCode}</code>
         ) : null}
@@ -4957,6 +4969,54 @@ function CompactionLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
         </dl>
       }
     />
+  );
+}
+
+// spec/04 § Handoff budget — what a failed provider switch offers: run the
+// pending message again, go back to the model the chat left, or carry on in a
+// fresh chat linked to this one. The host does the work; each is one frame.
+function HandoffActions({ chatId }: { chatId: string }): JSX.Element {
+  const send = (action: 'retry' | 'switch_back' | 'linked_chat'): void => {
+    getActiveWs()?.send({ type: 'chat.handoff_recover_request', chatId, action });
+  };
+  return (
+    <span className="turn-error-actions">
+      <button
+        type="button"
+        className="turn-error-action"
+        data-testid="handoff-retry"
+        onClick={() => send('retry')}
+      >
+        Retry
+      </button>
+      <button
+        type="button"
+        className="turn-error-action"
+        data-testid="handoff-switch-back"
+        onClick={() => send('switch_back')}
+      >
+        Switch back
+      </button>
+      <button
+        type="button"
+        className="turn-error-action"
+        data-testid="handoff-linked-chat"
+        onClick={() => send('linked_chat')}
+      >
+        Continue in a linked fresh chat
+      </button>
+    </span>
+  );
+}
+
+// The quiet row left behind when a chat was continued in a linked fresh chat.
+function HandoffLinkLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
+  return (
+    <div className="mode-change" data-testid="handoff-link">
+      <Link className="mode-change-label" to={`/chats/${entry.linkedChatId ?? ''}`}>
+        {entry.content ?? ''}
+      </Link>
+    </div>
   );
 }
 
