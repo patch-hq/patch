@@ -389,7 +389,20 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
 function TabSlot({ tabId }: { tabId: string }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    ref.current?.appendChild(tabHostEl(tabId));
+    const slot = ref.current;
+    const host = tabHostEl(tabId);
+    // Moving an element out of the document drops focus inside it: never re-append
+    // one that is already here, and give the cursor back when it really moves panes.
+    if (!slot || host.parentElement === slot) return;
+    const focused = document.activeElement;
+    slot.appendChild(host);
+    if (
+      focused instanceof HTMLElement &&
+      focused !== document.activeElement &&
+      host.contains(focused)
+    ) {
+      focused.focus({ preventScroll: true });
+    }
   }, [tabId]);
   return <div ref={ref} className="tab-slot" style={{ display: 'contents' }} />;
 }
