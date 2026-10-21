@@ -205,6 +205,8 @@ export interface ChatRow {
    * every row the app actually builds carries it.
    */
   limitBlock?: ChatStateEvent['limitBlock'] | null;
+  /** Why the chat's last turn failed (`chat.state` while errored); `null` otherwise. */
+  lastError?: ChatStateEvent['lastError'] | null;
   /**
    * The account the chat's latest turn ran on (`chat.state`, spec/10 § Backend
    * credentials). Null until a turn has run on the host holding the chat.

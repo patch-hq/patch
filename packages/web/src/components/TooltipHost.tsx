@@ -158,6 +158,27 @@ export function TooltipHost(): JSX.Element | null {
     };
   }, []);
 
+  // A shown control whose `title` is rewritten while its bubble is up (the
+  // monitoring badge's countdown ticks every second) would get its native
+  // tooltip back next to ours — two tooltips at once. Take the new text, blank
+  // the attribute again, and keep the one bubble current.
+  useEffect(() => {
+    if (!shown) return;
+    const el = shown.el;
+    const stash = stashRef.current;
+    const observer = new MutationObserver(() => {
+      const next = el.getAttribute('title');
+      if (next === null) return;
+      el.removeAttribute('title');
+      stash.set(el, next);
+      setShown((cur) =>
+        cur !== null && cur.el === el && cur.text !== next ? { ...cur, text: next } : cur,
+      );
+    });
+    observer.observe(el, { attributes: true, attributeFilter: ['title'] });
+    return () => observer.disconnect();
+  }, [shown?.el]);
+
   // Two-phase: paint invisibly first so the bubble can be measured, then
   // place it — avoids guessing its width up front to centre it under a
   // control that ellipsises to very different widths.

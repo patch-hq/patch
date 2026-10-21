@@ -90,6 +90,7 @@ describe('pads', () => {
       expect(editor.body).toContain('id="frame"');
       const js = await built.app.inject({ method: 'GET', url: `${pad.frameUrl}editor.js` });
       expect(js.statusCode).toBe(200);
+      expect(js.body).toContain('pad-tooltip');
       const file = await built.app.inject({ method: 'GET', url: `${pad.frameUrl}f/index.html` });
       expect(file.body).toContain('Credit');
       const state = await built.app.inject({ method: 'GET', url: `${pad.frameUrl}api` });

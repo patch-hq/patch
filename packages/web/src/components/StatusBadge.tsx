@@ -50,8 +50,11 @@ const BADGE_TITLE: Record<DisplayBadge, string> = {
 export function StatusBadge({
   badge,
   pendingWake,
+  failureReason,
 }: {
   badge: DisplayBadge;
+  /** Only meaningful when `badge === 'errored'` — the tooltip says why instead of "Failed". */
+  failureReason?: string | null;
   /** Only meaningful when `badge === 'monitoring'` — powers the hover countdown. */
   pendingWake?: PendingWake | null;
 }): JSX.Element {
@@ -114,7 +117,8 @@ export function StatusBadge({
         className="badge badge-errored"
         data-testid="badge-errored"
         aria-label="failed"
-        title={title}
+        title={failureReason || title}
+        data-tooltip-full={failureReason ? '' : undefined}
       >
         <TriangleAlert size={14} strokeWidth={2.25} aria-hidden />
       </span>

@@ -37,5 +37,11 @@ export function ChatStatusBadge({
   row: ChatRow & { pendingWake?: PendingWake | null };
 }): JSX.Element {
   const badge = useChatBadge(row)!;
-  return <StatusBadge badge={badge} pendingWake={row.pendingWake} />;
+  return (
+    <StatusBadge
+      badge={badge}
+      pendingWake={row.pendingWake}
+      failureReason={row.lastError?.message ?? null}
+    />
+  );
 }

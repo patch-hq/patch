@@ -1371,7 +1371,11 @@ function ChannelRow({
     .join(' ');
   return (
     <Link to={`/chats/${row.chatId}`} className={cls} data-testid={`channel-row-${chatId}`}>
-      <StatusBadge badge={badge} pendingWake={row.pendingWake} />
+      <StatusBadge
+        badge={badge}
+        pendingWake={row.pendingWake}
+        failureReason={row.lastError?.message ?? null}
+      />
       <span className="ch-name">{label}</span>
       {pill}
     </Link>
@@ -2205,7 +2209,11 @@ function ChatRowView({
         {special ? (
           <Compass className="manager-glyph" data-testid="manager-glyph" size={16} aria-hidden />
         ) : (
-          <StatusBadge badge={badge} pendingWake={row.pendingWake} />
+          <StatusBadge
+            badge={badge}
+            pendingWake={row.pendingWake}
+            failureReason={row.lastError?.message ?? null}
+          />
         )}
         {/* spec/04 § Goals, spec/14 § Sidebar § Row marks — the goal marker is
           the ONLY mark that sits beside the title. The status column already

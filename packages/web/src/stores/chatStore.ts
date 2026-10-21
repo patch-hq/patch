@@ -1722,6 +1722,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // full, when it clears. Same absent/null rule as the two above.
             limitBlock:
               event.limitBlock !== undefined ? event.limitBlock : (row.limitBlock ?? null),
+            // Why the chat failed, for the failed badge's tooltip. Only meaningful
+            // while errored, so it never outlives the failure.
+            lastError:
+              event.activity !== 'errored'
+                ? null
+                : event.lastError !== undefined
+                  ? event.lastError
+                  : (row.lastError ?? null),
             // spec/04 § Model — a chat's model can change mid-chat, and this is
             // how the change reaches every surface holding the chat, including
             // the ones that did not ask for it. It is also the acknowledgement of

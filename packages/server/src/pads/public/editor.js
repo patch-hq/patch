@@ -1050,3 +1050,41 @@
     });
   }, 1500);
 })();
+
+// Pad's own tooltip in place of the browser's: one bubble, drawn from any
+// element's `title`, which is blanked while it shows so only one ever appears
+// and put back (or kept, if rewritten meanwhile) when the pointer leaves.
+(function () {
+  var tip = null, src = null, text = '', timer = null;
+  function hide() {
+    clearTimeout(timer);
+    if (src && text && !src.getAttribute('title')) src.setAttribute('title', text);
+    if (tip) { tip.remove(); tip = null; }
+    src = null;
+  }
+  document.addEventListener('mouseover', function (e) {
+    var el = e.target.closest && e.target.closest('[title]');
+    if (!el || el === src) return;
+    hide();
+    src = el; text = el.getAttribute('title');
+    timer = setTimeout(function () {
+      if (src !== el || !el.isConnected) return;
+      el.removeAttribute('title');
+      tip = document.createElement('div');
+      tip.className = 'pad-tooltip';
+      tip.setAttribute('role', 'tooltip');
+      tip.textContent = text;
+      document.body.appendChild(tip);
+      var r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+      var left = Math.max(4, Math.min(innerWidth - t.width - 4, r.left + r.width / 2 - t.width / 2));
+      var top = r.bottom + 6 + t.height > innerHeight ? r.top - t.height - 6 : r.bottom + 6;
+      tip.style.left = left + 'px';
+      tip.style.top = Math.max(4, top) + 'px';
+    }, 350);
+  });
+  document.addEventListener('mouseout', function (e) {
+    if (src && !(e.relatedTarget instanceof Node && src.contains(e.relatedTarget))) hide();
+  });
+  document.addEventListener('mousedown', hide);
+  document.addEventListener('scroll', hide, true);
+})();

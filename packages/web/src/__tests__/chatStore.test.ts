@@ -462,6 +462,28 @@ describe('chatStore reducer', () => {
     expect(deriveBadge(row!)).toBe('permission');
   });
 
+  it('chat.state keeps why a chat failed, and drops it once the chat is no longer errored', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions' as const,
+      chatId: 'c1',
+      activity: 'errored',
+      lastUpdated: 10,
+      lastError: { code: 'sdk_error', message: 'Out of credit', at: 10 },
+    });
+    expect(useChatStore.getState().chats['c1']?.lastError?.message).toBe('Out of credit');
+    s.applyEvent({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions' as const,
+      chatId: 'c1',
+      activity: 'running',
+      lastUpdated: 11,
+    });
+    expect(useChatStore.getState().chats['c1']?.lastError).toBeNull();
+  });
+
   it('chat.state carries the current-status summary + kind, and only an OMITTED field is preserved', () => {
     const s = useChatStore.getState();
     s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });

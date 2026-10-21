@@ -653,7 +653,11 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
       onDragEnd={on.onDragEnd}
     >
       {badge ? (
-        <StatusBadge badge={badge} pendingWake={row?.pendingWake ?? null} />
+        <StatusBadge
+          badge={badge}
+          pendingWake={row?.pendingWake ?? null}
+          failureReason={row?.lastError?.message ?? null}
+        />
       ) : (
         tabIcon(tab.descriptor)
       )}

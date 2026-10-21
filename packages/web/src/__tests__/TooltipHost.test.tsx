@@ -122,6 +122,29 @@ describe('TooltipHost', () => {
     expect(btn.getAttribute('title')).toBe('Archive');
   });
 
+  it('keeps ONE tooltip when the title is rewritten while shown', async () => {
+    render(
+      <>
+        <Fixture />
+        <TooltipHost />
+      </>,
+    );
+    const btn = screen.getByTestId('plain-btn');
+    fireEvent.mouseOver(btn);
+    act(() => {
+      vi.runAllTimers();
+    });
+    await act(async () => {
+      btn.setAttribute('title', 'Archive 2');
+      await Promise.resolve();
+    });
+    expect(btn.getAttribute('title')).toBeNull();
+    expect(screen.getAllByTestId('app-tooltip')).toHaveLength(1);
+    expect(screen.getByTestId('app-tooltip').textContent).toBe('Archive 2');
+    fireEvent.mouseOut(btn, { relatedTarget: document.body });
+    expect(btn.getAttribute('title')).toBe('Archive 2');
+  });
+
   it('hides on Escape', () => {
     render(
       <>
