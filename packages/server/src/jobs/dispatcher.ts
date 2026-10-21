@@ -597,7 +597,10 @@ export class JobDispatcher {
           .find((r) => r.action?.chatId === chatId && r.status !== 'chat-error') ?? null
       );
     } catch (err) {
-      this.logger.warn({ jobId, chatId, err }, 'jobs: could not read the run log for a failed chat');
+      this.logger.warn(
+        { jobId, chatId, err },
+        'jobs: could not read the run log for a failed chat',
+      );
       return null;
     }
   }
