@@ -67,6 +67,24 @@ vi.mock('../lib/newWindow.js', async (orig) => ({
   openTabInNewWindow,
 }));
 
+describe('PaneArea — close pane', () => {
+  it('a pane in a split has a close-pane control that removes the whole pane; a lone pane has none', () => {
+    seedChats(['c1', 'c2']);
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' });
+    useLayoutStore
+      .getState()
+      .openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
+    const split = useLayoutStore.getState().root as SplitPane;
+    const rightId = split.children[1]!.pane.id;
+    renderPanes();
+    fireEvent.click(screen.getByTestId(`pane-close-${rightId}`));
+    const root = useLayoutStore.getState().root as LeafPane;
+    expect(root.type).toBe('leaf');
+    expect(root.tabs.map((t) => cid(t.descriptor))).toEqual(['c1']);
+    expect(screen.queryByLabelText('Close pane')).toBeNull();
+  });
+});
+
 describe('PaneArea — single pane, single tab', () => {
   it('draws no tab bar at all (the plain, pre-existing chat view)', () => {
     seedChats(['c1']);
