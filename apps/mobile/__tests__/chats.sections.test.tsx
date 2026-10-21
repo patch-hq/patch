@@ -92,7 +92,7 @@ beforeEach(() => {
     deleted: 0,
     automations: 0,
   });
-  listArchivedSpy.mockReset().mockResolvedValue({ chats: [] });
+  listArchivedSpy.mockReset().mockResolvedValue({ chats: [], nextOffset: null });
   listHiddenSpy.mockReset().mockResolvedValue({ chats: [] });
   useChatStore.getState()._reset();
   usePresenceStore.setState({
@@ -334,6 +334,7 @@ describe('Archived — rows fetched on open', () => {
           snoozedUntil: null,
         },
       ],
+      nextOffset: null,
     });
     const r = renderRN(<ChatsScreen />);
     await actAsync(async () => {});
