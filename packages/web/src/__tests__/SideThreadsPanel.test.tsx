@@ -382,6 +382,21 @@ describe('SideThreadsPanel — alongside tabs', () => {
     expect(screen.queryByTestId('side-threads-panel')).toBeNull();
   });
 
+  it('docked, it closes when focus moves to another chat, so it does not reappear on return', () => {
+    seedBranches('c1');
+    openSideThreadDraft('c1', 4, 'the original message');
+    renderPanel('c1');
+    expect(screen.getByTestId('side-threads-panel')).toBeTruthy();
+    act(() => {
+      useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c2' });
+    });
+    expect(useSideThreadsStore.getState().panelChatId).toBeNull();
+    act(() => {
+      useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' });
+    });
+    expect(screen.queryByTestId('side-threads-panel')).toBeNull();
+  });
+
   it('popped out, it is a floating window that does not depend on the focused chat', () => {
     seedBranches('c1');
     seedBranches('c2');
