@@ -1174,11 +1174,43 @@ function ActionRow({
   );
 }
 
+const TRAY_HEIGHT_KEY = 'patch.meetingTrayHeight';
+const TRAY_DEFAULT = 170;
+const TRAY_MIN = 40;
+const readTrayHeight = (): number => {
+  const n = Number(localStorage.getItem(TRAY_HEIGHT_KEY));
+  return Number.isFinite(n) && n >= TRAY_MIN ? n : TRAY_DEFAULT;
+};
+
 /** The actions tray above the composer: Tom's, other people's, and the agent's. */
 export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const [open, setOpen] = useState(true);
+  const [bodyMax, setBodyMax] = useState(readTrayHeight);
   const live = meeting.actions.filter((a) => a.status !== 'dismissed');
   if (live.length === 0) return null;
+  const onGripDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const startY = e.clientY;
+    const startH = bodyMax;
+    let latest = startH;
+    const move = (ev: PointerEvent) => {
+      // The tray sits at the bottom: dragging up grows it.
+      latest = Math.round(
+        Math.min(window.innerHeight * 0.6, Math.max(TRAY_MIN, startH + startY - ev.clientY)),
+      );
+      setBodyMax(latest);
+    };
+    const up = (ev: PointerEvent) => {
+      target.releasePointerCapture(ev.pointerId);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      localStorage.setItem(TRAY_HEIGHT_KEY, String(latest));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const of = (k: MeetingAction['kind']) => live.filter((a) => a.kind === k);
   const mine = of('mine');
   const others = of('other');
@@ -1202,6 +1234,16 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
       ];
   return (
     <div className="mm-tray" data-testid="meeting-actions">
+      {open ? (
+        <div
+          className="mm-tray-grip"
+          data-testid="meeting-actions-grip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize actions"
+          onPointerDown={onGripDown}
+        />
+      ) : null}
       <div className="mm-tray-head">
         <button
           type="button"
@@ -1243,7 +1285,11 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
         </button>
       </div>
       {open ? (
-        <div className="mm-tray-body" data-testid="meeting-actions-body">
+        <div
+          className="mm-tray-body"
+          data-testid="meeting-actions-body"
+          style={{ maxHeight: bodyMax }}
+        >
           {groups.map(([label, rows]) =>
             rows.length === 0 ? null : (
               <div key={label}>

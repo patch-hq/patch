@@ -656,6 +656,35 @@ test.describe('meeting mode — live', () => {
     await expect(page.getByTestId('meeting-actions-count')).toBeVisible();
   });
 
+  test('dragging the tray divider up makes the actions list taller, and it is kept', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const maxH = () =>
+      page
+        .getByTestId('meeting-actions-body')
+        .evaluate((el) => parseFloat(getComputedStyle(el).maxHeight));
+    expect(await maxH()).toBe(170);
+    const grip = page.getByTestId('meeting-actions-grip');
+    const g = (await grip.boundingBox())!;
+    const x = g.x + g.width / 2;
+    const y = g.y + g.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y - 100, { steps: 5 });
+    await page.mouse.up();
+    expect(await maxH()).toBeCloseTo(270, -1);
+    await page.reload();
+    expect(await maxH()).toBeCloseTo(270, -1);
+    const g2 = (await page.getByTestId('meeting-actions-grip').boundingBox())!;
+    await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g2.x + g2.width / 2, g2.y + 600, { steps: 5 });
+    await page.mouse.up();
+    expect(await maxH()).toBeGreaterThanOrEqual(40);
+    expect(await maxH()).toBeLessThan(100);
+  });
+
   test('Pause, Resume and End send the controls', async ({ page }) => {
     await page.goto(URL_LIVE);
     await page.getByTestId('meeting-pause').click();

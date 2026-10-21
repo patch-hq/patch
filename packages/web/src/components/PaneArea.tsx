@@ -209,13 +209,20 @@ function HostedTab({
   ws: PatchWs | null;
 }): JSX.Element {
   const el = tabHostEl(tab.id);
-  useLayoutEffect(
-    () => () => {
-      el.remove();
-      tabHostEls.delete(tab.id);
-    },
-    [el, tab.id],
-  );
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // Deferred so StrictMode's simulated unmount/remount, which runs in the
+      // same task, doesn't tear down the host the portal is still rendering into.
+      queueMicrotask(() => {
+        if (mounted.current) return;
+        el.remove();
+        if (tabHostEls.get(tab.id) === el) tabHostEls.delete(tab.id);
+      });
+    };
+  }, [el, tab.id]);
   return createPortal(<TabContent tab={tab} focused={focused} ws={ws} />, el);
 }
 
