@@ -407,12 +407,12 @@ export class AccountRotation {
   }
 
   /** Record that an account has no credit, and when it comes back if known. */
-  markExhausted(accountId: string, reason: string, until?: number): void {
+  markExhausted(accountId: string, reason: string, until?: number, at?: number): void {
     // A refusal that states no reset must not erase one an earlier refusal did
     // state: with no instant the account arms no retry, and waits on a probe.
     const known = this.exhausted.get(accountId)?.until;
     const kept = until ?? (known !== undefined && known > this.now() ? known : undefined);
-    this.exhausted.set(accountId, { until: kept, reason, at: this.now() });
+    this.exhausted.set(accountId, { until: kept, reason, at: at ?? this.now() });
     this.changed();
   }
 
