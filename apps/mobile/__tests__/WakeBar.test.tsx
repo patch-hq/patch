@@ -69,6 +69,20 @@ describe('WakeBar', () => {
     );
   });
 
+  it('warns when the chat is out of credit, naming when it comes back', () => {
+    const r = renderRN(
+      <WakeBar
+        row={{
+          ...row({ message: 'check', fireAt: NOW + 9 * 60_000 }),
+          limitBlock: { resetsAt: NOW + 3_600_000 },
+        }}
+      />,
+    );
+    expect(textOf(queryHost(r.root, byTestId('wake-bar-countdown'))!)).toMatch(
+      /Wakes in 9m · out of credit until /,
+    );
+  });
+
   it('renders nothing when the chat has no pending wake', () => {
     const r = renderRN(<WakeBar row={row(null)} />);
     expect(queryHost(r.root, byTestId('wake-bar'))).toBeNull();

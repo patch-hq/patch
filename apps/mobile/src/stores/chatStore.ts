@@ -813,6 +813,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // (older host, or a `chat.state` not about the wake) preserves
             // what the row already had — matches the web chatStore.
             pendingWake: event.pendingWake !== undefined ? event.pendingWake : row.pendingWake,
+            // Out-of-credit pause: same "omitted is unchanged, null clears" rule.
+            rateLimitResumingAt:
+              event.rateLimitResumingAt !== undefined
+                ? event.rateLimitResumingAt
+                : row.rateLimitResumingAt,
+            resumeKind: event.resumeKind !== undefined ? event.resumeKind : row.resumeKind,
+            limitBlock: event.limitBlock !== undefined ? event.limitBlock : row.limitBlock,
             // Same rule as `pendingWake`: an explicit `null` is the host WAKING
             // the chat (spec/04 § Snooze), so it must land; an omitted field is a
             // `chat.state` about something else and preserves the known wake time.

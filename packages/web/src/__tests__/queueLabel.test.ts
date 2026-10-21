@@ -3,7 +3,7 @@
 // and each names the event that releases it.
 
 import { describe, it, expect } from 'vitest';
-import { queueChipLabel, queueChipTitle, queueRelease } from '../lib/queueLabel';
+import { queueChipLabel, queueChipTitle, queueRelease, creditPause } from '../lib/queueLabel';
 
 describe('queueChipLabel', () => {
   it('reads "Queued" at the head of the queue', () => {
@@ -71,5 +71,33 @@ describe('release event', () => {
     expect(queueRelease(block, 0)).toBe('tool');
     expect(queueRelease(block, 1)).toBe('turn');
     expect(queueRelease(block, 2)).toBe('turn');
+  });
+});
+
+describe('out of credit', () => {
+  it('says paused, not just Queued, and when it resumes', () => {
+    const at = new Date(2026, 9, 21, 20, 0).getTime();
+    const label = queueChipLabel(1, true, 'tool', { resetsAt: at });
+    expect(label).toMatch(/^Paused · out of credit · resumes /);
+    expect(label).not.toContain('next tool call');
+    expect(label).toMatch(/8:00|20:00/);
+  });
+
+  it('omits the time when the limit stated none', () => {
+    expect(queueChipLabel(2, true, 'tool', { resetsAt: null })).toBe('Paused · out of credit');
+  });
+
+  it('host offline still wins', () => {
+    expect(queueChipLabel(1, false, 'tool', { resetsAt: null })).toBe('Machine offline');
+  });
+
+  it('derives the pause from a row: limit block or armed resume, not an overload', () => {
+    expect(creditPause({})).toBeNull();
+    expect(creditPause({ rateLimitResumingAt: 5000, resumeKind: 'overloaded' })).toBeNull();
+    expect(creditPause({ limitBlock: { resetsAt: 7000 } })).toEqual({ resetsAt: 7000 });
+    expect(creditPause({ limitBlock: {} })).toEqual({ resetsAt: null });
+    expect(creditPause({ rateLimitResumingAt: 9000, resumeKind: 'rate_limit' })).toEqual({
+      resetsAt: 9000,
+    });
   });
 });

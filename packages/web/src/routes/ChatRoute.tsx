@@ -126,6 +126,7 @@ import {
   queueChipLabel,
   queueChipTitle,
   queueRelease,
+  creditPause,
   type QueueRelease,
 } from '../lib/queueLabel.js';
 import { attemptPaging } from '../lib/turnAttempts.js';
@@ -2654,6 +2655,13 @@ function MessageEntry({
   attemptAt?: number;
   onAttemptAt?(seq: number, idx: number): void;
 }): JSX.Element {
+  // spec/04 ## Message queueing — a queued entry on a chat paused for credit
+  // says so. Selected as a primitive so the selector never returns a fresh object.
+  const pauseAt = useChatStore((s) => {
+    const p = entry.queued ? creditPause(s.chats[chatId] ?? {}) : null;
+    return p === null ? undefined : (p.resetsAt ?? 0);
+  });
+  const pause = pauseAt === undefined ? null : { resetsAt: pauseAt || null };
   // spec/14 § Side threads panel TRIGGER — hover button + right-click "Open
   // side thread" on ANY message, user or agent.
   const sideThreadMenu = useContextMenu();
@@ -2999,9 +3007,10 @@ function MessageEntry({
           <span
             className="queued-badge"
             data-testid="queued-badge"
-            title={queueChipTitle(queuePos!, hostOnline, release)}
+            title={queueChipTitle(queuePos!, hostOnline, release, pause)}
+            data-paused={pause ? 'true' : undefined}
           >
-            {queueChipLabel(queuePos!, hostOnline, release)}
+            {queueChipLabel(queuePos!, hostOnline, release, pause)}
           </span>
           {entry.localId && onPromote ? (
             <button

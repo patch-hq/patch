@@ -10485,6 +10485,9 @@ main.empty-state p {
   font-size: var(--text-min);
   border-bottom: 1px solid var(--line-soft);
 }
+.wake-bar-warn .wake-bar-label {
+  color: var(--amber);
+}
 .wake-bar-label {
   display: inline-flex;
   align-items: center;

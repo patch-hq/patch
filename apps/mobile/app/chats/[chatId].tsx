@@ -77,6 +77,7 @@ import {
   queueChipLabel,
   queueChipTitle,
   queueRelease,
+  creditPause,
   type QueueRelease,
 } from '../../src/lib/queueLabel';
 import {
@@ -2450,6 +2451,12 @@ const TimelineItem = React.memo(function TimelineItem({
   const hostOnline = usePresenceStore((s) => s.daemon === 'online');
   // Sources the `/` skill menu in an open queued-message editor.
   const chatFolder = useChatStore((s) => s.chats[chatId]?.folder);
+  // spec/04 ## Message queueing — a queued entry on a chat out of credit says so.
+  const pauseAt = useChatStore((s) => {
+    const p = entry.queued ? creditPause(s.chats[chatId]) : null;
+    return p === null ? undefined : (p.resetsAt ?? 0);
+  });
+  const pause = pauseAt === undefined ? null : { resetsAt: pauseAt || null };
   // spec/15 ## Chat detail, spec/02 § Background task completions — a
   // completion that arrived still wrapped in its raw block (replay, or a host
   // on a pre-lifting host) is not a turn anyone typed and none of its
@@ -2651,10 +2658,10 @@ const TimelineItem = React.memo(function TimelineItem({
           >
             <Text
               testID="queued-badge"
-              accessibilityLabel={`${queueChipLabel(queuePos, hostOnline, release)}. ${queueChipTitle(queuePos, hostOnline, release)}`}
+              accessibilityLabel={`${queueChipLabel(queuePos, hostOnline, release, pause)}. ${queueChipTitle(queuePos, hostOnline, release, pause)}`}
               style={{ color: colors.ink3, fontSize: textMin }}
             >
-              {queueChipLabel(queuePos, hostOnline, release)}
+              {queueChipLabel(queuePos, hostOnline, release, pause)}
             </Text>
             {entry.localId ? (
               <Pressable

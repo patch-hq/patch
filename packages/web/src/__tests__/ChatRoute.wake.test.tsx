@@ -236,4 +236,46 @@ describe('ChatRoute — pending self-wake bar', () => {
     });
     expect(screen.queryByTestId('wake-bar')).not.toBeInTheDocument();
   });
+
+  it('warns when the chat is out of credit, naming when it comes back', () => {
+    seed({ message: 'check the bus', fireAt: NOW + 9 * 60_000 });
+    useChatStore.setState((st) => ({
+      chats: {
+        ...st.chats,
+        c1: { ...st.chats['c1']!, limitBlock: { scope: 'session', resetsAt: NOW + 3_600_000 } },
+      },
+    }));
+    renderChat();
+    expect(screen.getByTestId('wake-bar')).toHaveAttribute('data-paused', 'true');
+    expect(screen.getByTestId('wake-bar')).toHaveClass('wake-bar-warn');
+    expect(screen.getByTestId('wake-bar-countdown')).toHaveTextContent(
+      /Wakes in 9m · out of credit until /,
+    );
+  });
+
+  it('shows the queued chip as paused when the chat is out of credit', () => {
+    seed(null);
+    useChatStore.setState((st) => ({
+      chats: {
+        ...st.chats,
+        c1: { ...st.chats['c1']!, activity: 'running', limitBlock: { scope: 'session' } },
+      },
+      timelines: {
+        ...st.timelines,
+        c1: [
+          {
+            seq: 1,
+            kind: 'message',
+            role: 'user',
+            content: 'hi',
+            queued: true,
+            localId: 'L1',
+            at: 0,
+          },
+        ],
+      },
+    }));
+    renderChat();
+    expect(screen.getByTestId('queued-badge')).toHaveTextContent('Paused · out of credit');
+  });
 });

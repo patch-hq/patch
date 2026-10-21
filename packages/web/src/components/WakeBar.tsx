@@ -19,6 +19,8 @@ import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
 import type { ChatRow } from '../stores/types.js';
 import { failed } from '../lib/errorCopy.js';
+import { creditPause } from '../lib/queueLabel.js';
+import { formatReset } from '../lib/usage.js';
 import { WakeEditModal } from './WakeEditModal.js';
 
 /**
@@ -78,6 +80,15 @@ export function WakeBar({ row }: { row: ChatRow }): JSX.Element | null {
   const countdown = formatWakeCountdown(wake.fireAt - now);
   const isLoop = wake.every !== undefined;
   const waiting = wake.waiting === true;
+  // A wake is a turn; with the chat out of credit it cannot run, so the bar
+  // warns instead of promising a time it cannot keep.
+  const pause = creditPause(row);
+  const pauseNote =
+    pause === null
+      ? ''
+      : pause.resetsAt === null
+        ? ' · out of credit'
+        : ` · out of credit until ${formatReset(pause.resetsAt, now)}`;
 
   function dismiss(): void {
     void api.setLoop(row.chatId, null).catch((err) => {
@@ -90,15 +101,20 @@ export function WakeBar({ row }: { row: ChatRow }): JSX.Element | null {
   }
 
   return (
-    <div className="wake-bar" data-testid="wake-bar" role="status">
+    <div
+      className={pause ? 'wake-bar wake-bar-warn' : 'wake-bar'}
+      data-testid="wake-bar"
+      data-paused={pause ? 'true' : undefined}
+      role="status"
+    >
       <span className="wake-bar-label">
         <AlarmClock size={14} aria-hidden />
         <span className="wake-bar-countdown" data-testid="wake-bar-countdown">
           {isLoop
             ? waiting
-              ? `Loops every ${formatEvery(wake.every!)} · waiting for current turn`
-              : `Loops every ${formatEvery(wake.every!)} · next ${countdown}`
-            : `Wakes ${countdown}`}
+              ? `Loops every ${formatEvery(wake.every!)} · waiting for current turn${pauseNote}`
+              : `Loops every ${formatEvery(wake.every!)} · next ${countdown}${pauseNote}`
+            : `Wakes ${countdown}${pauseNote}`}
         </span>
       </span>
       <span className="wake-bar-message" data-testid="wake-bar-message" title={wake.message}>

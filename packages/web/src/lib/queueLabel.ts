@@ -3,6 +3,8 @@
 // block as currently rendered, so promoting or removing an entry renumbers the
 // block and the chip never contradicts the order on screen.
 
+import { formatReset } from './usage.js';
+
 function ordinal(n: number): string {
   // 11/12/13 take "th" despite ending 1/2/3 — and so do 111/112/113.
   const teen = n % 100;
@@ -32,16 +34,53 @@ export function queueRelease(
   return 'tool';
 }
 
-export function queueChipLabel(pos: number, hostOnline = true, release?: QueueRelease): string {
+/**
+ * The chat is out of credit: nothing queued behind its parked turn runs until
+ * the limit lifts, so "Queued · next tool call" would promise a delivery that
+ * is not coming. `resetsAt` is the stated return, ms-epoch, or null when the
+ * limit named none.
+ */
+export interface CreditPause {
+  resetsAt: number | null;
+}
+
+/** The credit pause a chat row is in, or null. A transient overload is not a lack of credit. */
+export function creditPause(row: {
+  rateLimitResumingAt?: number | null;
+  resumeKind?: 'rate_limit' | 'overloaded' | null;
+  limitBlock?: { resetsAt?: number } | null;
+}): CreditPause | null {
+  if (row.resumeKind === 'overloaded' && !row.limitBlock) return null;
+  if (!row.rateLimitResumingAt && !row.limitBlock) return null;
+  const at = row.limitBlock?.resetsAt ?? row.rateLimitResumingAt ?? null;
+  return { resetsAt: at !== null && at > 0 ? at : null };
+}
+
+export function queueChipLabel(
+  pos: number,
+  hostOnline = true,
+  release?: QueueRelease,
+  pause?: CreditPause | null,
+): string {
   if (!hostOnline) return 'Machine offline';
+  if (pause) {
+    const base = 'Paused · out of credit';
+    return pause.resetsAt === null ? base : `${base} · resumes ${formatReset(pause.resetsAt)}`;
+  }
   const base = pos === 1 ? 'Queued' : `${ordinal(pos)} in queue`;
   if (release === undefined) return base;
   return `${base} · ${release === 'tool' ? 'next tool call' : 'end of turn'}`;
 }
 
 /** The event that releases this turn — the half of the mental model a bare position can't carry. */
-export function queueChipTitle(pos: number, hostOnline = true, release?: QueueRelease): string {
+export function queueChipTitle(
+  pos: number,
+  hostOnline = true,
+  release?: QueueRelease,
+  pause?: CreditPause | null,
+): string {
   if (!hostOnline) return 'Waiting for the machine to come back online';
+  if (pause) return 'Every account is out of credit; this runs once the limit resets';
   if (release === 'tool') return 'Goes in when the agent finishes its current tool call';
   if (pos === 1) return 'Runs when the current turn finishes';
   const ahead = pos - 1;

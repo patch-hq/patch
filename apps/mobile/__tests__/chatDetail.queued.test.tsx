@@ -80,6 +80,22 @@ describe('queued messages on the chat screen', () => {
     ]);
   });
 
+  it('reads "Paused · out of credit" on the chip while the chat is out of credit', () => {
+    apply({
+      type: 'chat.state',
+      chatId: 'c1',
+      activity: 'running',
+      permissionMode: 'bypassPermissions',
+      lastUpdated: 1,
+      limitBlock: { scope: 'session' },
+    } as never);
+    queue('A', 'first queued');
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('queued-badge')).map((b) => b.props.children)).toEqual([
+      'Paused · out of credit',
+    ]);
+  });
+
   it('renumbers when the head is removed', () => {
     queue('A', 'first queued');
     queue('B', 'second queued');

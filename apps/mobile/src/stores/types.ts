@@ -59,6 +59,14 @@ export interface ChatRow {
    */
   pendingWake: PendingWake | null;
   /**
+   * Out-of-credit pause (`chat.state`, spec/04 § Message queueing): when a limit
+   * parked the turn, the resume instant, the pause kind and the block's own reset.
+   * Optional so the row fixtures that say nothing about it need not declare them.
+   */
+  rateLimitResumingAt?: number | null;
+  resumeKind?: 'rate_limit' | 'overloaded' | null;
+  limitBlock?: { resetsAt?: number } | null;
+  /**
    * The chat's wake time (spec/04 § Snooze), ms epoch, or `null` when it is not
    * snoozed. Never read as a boolean — snoozed is `snoozedUntil > now`, derived
    * at render (see `isSnoozed`), so a phone that was asleep through the wake

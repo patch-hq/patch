@@ -32,16 +32,61 @@ export function queueRelease(
   return 'tool';
 }
 
-export function queueChipLabel(pos: number, hostOnline = true, release?: QueueRelease): string {
+/** The chat is out of credit: a queued turn waits on the limit, not on the agent. `resetsAt` ms-epoch or null. */
+export interface CreditPause {
+  resetsAt: number | null;
+}
+
+/** The credit pause a chat row is in, or null. A transient overload is not a lack of credit. */
+export function creditPause(
+  row:
+    | {
+        rateLimitResumingAt?: number | null;
+        resumeKind?: 'rate_limit' | 'overloaded' | null;
+        limitBlock?: { resetsAt?: number } | null;
+      }
+    | undefined,
+): CreditPause | null {
+  if (!row) return null;
+  if (row.resumeKind === 'overloaded' && !row.limitBlock) return null;
+  if (!row.rateLimitResumingAt && !row.limitBlock) return null;
+  const at = row.limitBlock?.resetsAt ?? row.rateLimitResumingAt ?? null;
+  return { resetsAt: at !== null && at > 0 ? at : null };
+}
+
+/** `10:40`, or `Wed 17:58` when not today. */
+export function formatResume(at: number, now: number = Date.now()): string {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  if (new Date(now).toDateString() === d.toDateString()) return time;
+  return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+}
+
+export function queueChipLabel(
+  pos: number,
+  hostOnline = true,
+  release?: QueueRelease,
+  pause?: CreditPause | null,
+): string {
   if (!hostOnline) return 'Machine offline';
+  if (pause) {
+    const base = 'Paused · out of credit';
+    return pause.resetsAt === null ? base : `${base} · resumes ${formatResume(pause.resetsAt)}`;
+  }
   const base = pos === 1 ? 'Queued' : `${ordinal(pos)} in queue`;
   if (release === undefined) return base;
   return `${base} · ${release === 'tool' ? 'next tool call' : 'end of turn'}`;
 }
 
 /** The event that releases this turn — the half of the mental model a bare position can't carry. */
-export function queueChipTitle(pos: number, hostOnline = true, release?: QueueRelease): string {
+export function queueChipTitle(
+  pos: number,
+  hostOnline = true,
+  release?: QueueRelease,
+  pause?: CreditPause | null,
+): string {
   if (!hostOnline) return 'Waiting for the machine to come back online';
+  if (pause) return 'Every account is out of credit; this runs once the limit resets';
   if (release === 'tool') return 'Goes in when the agent finishes its current tool call';
   if (pos === 1) return 'Runs when the current turn finishes';
   const ahead = pos - 1;
