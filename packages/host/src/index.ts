@@ -1,5 +1,6 @@
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
+import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
 import { CodexHistory } from './codexHistory.js';
 import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
@@ -4001,6 +4002,7 @@ async function startHost(
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
     sleepGuard: createSleepGuard({ logger }),
+    sleepWatch: createSleepWatch({ logger }),
     onTurnCommitted: (chatId) => {
       if (!(SPECIAL_THREAD_IDS as readonly string[]).includes(chatId)) return;
       const threadId = chatId as SpecialThreadId;
