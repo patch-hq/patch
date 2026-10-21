@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {
   diagnoseUpdater,
   createInstaller,
+  createLatestInstaller,
   installDownloaded,
   conciseReason,
   shouldPollFeed,
@@ -921,4 +922,76 @@ test('a Squirrel error during the wait is what the stall reports, not that the i
   assert.equal(killed, 0);
   assert.equal(app.isQuitting, false);
   assert.equal(errors[0]?.message, conciseReason(SQUIRREL));
+});
+
+// --- Update Patch goes to the newest build, not the staged one ---------------
+
+test('createLatestInstaller: a newer deploy than the staged build is downloaded before installing', async () => {
+  let current = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
+  const installed: string[] = [];
+  const errors: string[] = [];
+  const go = createLatestInstaller({
+    // The re-check finds 0.1.319; its download lands a moment later.
+    check: async () => {
+      current = reduceUpdater(current, { type: 'available', version: '0.1.319', at: AT });
+      setTimeout(() => {
+        current = reduceUpdater(current, { type: 'downloaded', version: '0.1.319', at: AT });
+      }, 10);
+    },
+    getState: () => current,
+    install: (s) => installed.push(s.availableVersion ?? ''),
+    onError: (e) => errors.push(e.message),
+    pollMs: 2,
+  });
+  await go();
+  assert.deepEqual(installed, ['0.1.319'], 'installs the newest build, once');
+  assert.deepEqual(errors, []);
+});
+
+test('createLatestInstaller: nothing newer installs what is staged', async () => {
+  let current = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
+  const installed: string[] = [];
+  await createLatestInstaller({
+    check: async () => {
+      current = reduceUpdater(current, { type: 'downloaded', version: '0.1.318', at: AT });
+    },
+    getState: () => current,
+    install: (s) => installed.push(s.availableVersion ?? ''),
+    onError: () => assert.fail('no error expected'),
+  })();
+  assert.deepEqual(installed, ['0.1.318']);
+});
+
+test('createLatestInstaller: a download that never lands is reported, not installed over', async () => {
+  let current = reduceUpdater(state(), { type: 'available', version: '0.1.319', at: AT });
+  const errors: string[] = [];
+  await createLatestInstaller({
+    check: async () => {},
+    getState: () => current,
+    install: () => assert.fail('must not install'),
+    onError: (e) => errors.push(e.message),
+    waitMs: 20,
+    pollMs: 2,
+  })();
+  assert.equal(errors.length, 1);
+  void current;
+});
+
+test('createLatestInstaller: a failed check is reported and nothing installs', async () => {
+  let current = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
+  const errors: string[] = [];
+  await createLatestInstaller({
+    check: async () => {
+      current = reduceUpdater(current, {
+        type: 'error',
+        kind: 'check',
+        message: 'feed down',
+        at: AT,
+      });
+    },
+    getState: () => current,
+    install: () => assert.fail('must not install'),
+    onError: (e) => errors.push(e.message),
+  })();
+  assert.deepEqual(errors, ['feed down']);
 });

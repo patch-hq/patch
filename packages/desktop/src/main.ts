@@ -47,6 +47,7 @@ import {
   diagnoseUpdater,
   emptyPersisted,
   createInstaller,
+  createLatestInstaller,
   initialUpdaterState,
   parsePersisted,
   persistedOf,
@@ -1329,6 +1330,19 @@ const installUpdate = createInstaller({
     }),
 });
 
+const installLatest = createLatestInstaller({
+  check: () => checkForUpdates(),
+  getState: () => updaterState as UpdaterState,
+  install: installUpdate,
+  onError: (err) =>
+    applyUpdaterEvent({
+      type: 'error',
+      kind: 'install',
+      message: err.message,
+      at: new Date().toISOString(),
+    }),
+});
+
 function setupAutoUpdater(): void {
   const build = readDesktopBuildInfo();
   const updateConfig = join(process.resourcesPath, 'app-update.yml');
@@ -1464,7 +1478,7 @@ function setupAutoUpdater(): void {
   // an update; everything else waits for an ordinary quit
   // (autoInstallOnAppQuit, left at its default true).
   ipcMain.on('patch:updater:install', () => {
-    if (updaterState) installUpdate(updaterState);
+    void installLatest();
   });
 
   // An unusable updater is wired for reporting but never asked to check — calling
