@@ -27,6 +27,9 @@ export const MIN_TAIL_SECONDS = 1;
 /** RMS (0..1 of full scale) below which a clip is treated as silence. */
 export const SILENCE_RMS = 0.004;
 
+/** The far end saying nothing for this long means the call is over: the meeting ends itself. */
+export const AUTO_END_SILENCE_SECONDS = 300;
+
 export type MeetingSource = 'mic' | 'system';
 
 export function rmsOfPcm16(pcm: Int16Array): number {
@@ -78,6 +81,7 @@ export class ClipBuilder {
   constructor(
     private readonly onClip: (wav: Uint8Array) => void,
     private clipSeconds: number = CLIP_SECONDS,
+    private readonly onQuiet?: (seconds: number) => void,
   ) {}
 
   setClipSeconds(seconds: number): void {
@@ -110,7 +114,10 @@ export class ClipBuilder {
       o += p.length;
     }
     this.discard();
-    if (rmsOfPcm16(all) < SILENCE_RMS) return;
+    if (rmsOfPcm16(all) < SILENCE_RMS) {
+      this.onQuiet?.(all.length / MIC_SAMPLE_RATE);
+      return;
+    }
     this.onClip(pcm16ToWav(all));
   }
 }
@@ -118,6 +125,9 @@ export class ClipBuilder {
 export interface MeetingCaptureDeps {
   AudioContextImpl?: typeof AudioContext;
   clipSeconds?: number;
+  /** Called once when the far end (system audio, else the mic) has been silent for AUTO_END_SILENCE_SECONDS. */
+  onSilence?: () => void;
+  silenceSeconds?: number;
 }
 
 /** Audio that is already 16 kHz mono PCM16, e.g. the desktop shell's system-audio tap. */
@@ -158,6 +168,27 @@ export function startMeetingCapture(
   if (!AudioCtx) throw new Error('Web Audio API unavailable');
 
   let paused = false;
+  // Silence is counted in captured audio, not wall time: the audio clock keeps
+  // running in a hidden window and nothing is counted while paused. The far end
+  // is watched when there is one; a mic-only meeting watches the mic.
+  const silenceLimit = deps.silenceSeconds ?? AUTO_END_SILENCE_SECONDS;
+  const watched: MeetingSource = sources.system ? 'system' : 'mic';
+  let quietSeconds = 0;
+  let silenceFired = false;
+  const quietFor =
+    (source: MeetingSource) =>
+    (seconds: number): void => {
+      if (source !== watched || silenceFired) return;
+      quietSeconds += seconds;
+      if (quietSeconds >= silenceLimit) {
+        silenceFired = true;
+        deps.onSilence?.();
+      }
+    };
+  const heard = (source: MeetingSource, wav: Uint8Array): void => {
+    if (source === watched) quietSeconds = 0;
+    onClip(source, bytesToBase64(wav));
+  };
   // The system audio is the far-end reference for the mic. Alone, either needs no canceller.
   const aec = sources.mic && sources.system ? new EchoCanceller() : null;
   const lanes: { builder: ClipBuilder; drain?: () => void; teardown: () => void }[] = [];
@@ -176,7 +207,7 @@ export function startMeetingCapture(
     const sink = ctx.createGain();
     sink.gain.value = 0;
     const downsample = createPcm16Downsampler(ctx.sampleRate);
-    const builder = new ClipBuilder((wav) => onClip('mic', bytesToBase64(wav)), deps.clipSeconds);
+    const builder = new ClipBuilder((wav) => heard('mic', wav), deps.clipSeconds, quietFor('mic'));
     processor.onaudioprocess = (e: AudioProcessingEvent): void => {
       const raw = downsample(e.inputBuffer.getChannelData(0));
       // While paused the canceller still sees the mic, to keep it in step with the reference.
@@ -207,8 +238,9 @@ export function startMeetingCapture(
   if (sources.system) {
     const feed = sources.system;
     const builder = new ClipBuilder(
-      (wav) => onClip('system', bytesToBase64(wav)),
+      (wav) => heard('system', wav),
       deps.clipSeconds,
+      quietFor('system'),
     );
     const unsubscribe = feed.subscribe((pcm) => {
       // The reference runs while paused too, so the canceller's timeline stays continuous.

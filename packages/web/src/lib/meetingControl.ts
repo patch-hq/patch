@@ -170,7 +170,11 @@ async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Pro
           useUiStore.getState().pushError(`Meeting audio not sent: ${(err as Error).message}`);
         }
       },
-      { clipSeconds: speedSettings(getMeetingSpeed()).clipSeconds },
+      {
+        clipSeconds: speedSettings(getMeetingSpeed()).clipSeconds,
+        // A long silence from the far end: the call is over.
+        onSilence: () => endMeeting(chatId),
+      },
     );
   } catch (err) {
     sources.mic?.getTracks().forEach((t) => t.stop());

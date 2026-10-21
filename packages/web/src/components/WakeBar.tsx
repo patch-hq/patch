@@ -9,20 +9,17 @@
 // it must never be invisible — this bar is the readout: a live countdown to
 // `fireAt` plus the message the wake will deliver.
 //
-// A plain one-shot wake stays READ-ONLY by design: the agent owns its own
-// timer (it re-arms or stops on each fire), so there is no clear (×) for it —
-// unlike the goal/reminder banners, which are user-owned state. A RECURRING
-// loop (`pendingWake.every` set) is different: it is very often armed by the
-// USER via `/loop`, so this bar shows a stop (×) control for it — stopping
-// goes through the same `chat.loop_request`/`patch_cancel_wake` path either
-// way, whichever surface armed it.
+// Every wake carries a dismiss (×) and an edit (pencil → roomy modal). Both go
+// through the same `chat.loop_request`/`patch_cancel_wake` path whichever
+// surface armed it; editing re-arms, replacing the pending wake.
 
 import { useEffect, useState, type JSX } from 'react';
-import { AlarmClock, X } from 'lucide-react';
+import { AlarmClock, Pencil, X } from 'lucide-react';
 import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
 import type { ChatRow } from '../stores/types.js';
 import { failed } from '../lib/errorCopy.js';
+import { WakeEditModal } from './WakeEditModal.js';
 
 /**
  * Humanise the wait until `fireAt`. Coarse-to-fine so the bar reads naturally at
@@ -65,6 +62,7 @@ export function WakeBar({ row }: { row: ChatRow }): JSX.Element | null {
   const fireAt = wake?.fireAt ?? null;
   const [now, setNow] = useState(() => Date.now());
   const pushError = useUiStore((s) => s.pushError);
+  const [editing, setEditing] = useState(false);
 
   // Tick every second so the countdown is live. Only while a wake is armed —
   // no timer runs for the (overwhelmingly common) chat with nothing pending.
@@ -81,9 +79,13 @@ export function WakeBar({ row }: { row: ChatRow }): JSX.Element | null {
   const isLoop = wake.every !== undefined;
   const waiting = wake.waiting === true;
 
-  function stopLoop(): void {
+  function dismiss(): void {
     void api.setLoop(row.chatId, null).catch((err) => {
-      pushError(failed('stopping loop'), undefined, (err as Error).message);
+      pushError(
+        failed(isLoop ? 'stopping loop' : 'dismissing wake'),
+        undefined,
+        (err as Error).message,
+      );
     });
   }
 
@@ -102,17 +104,28 @@ export function WakeBar({ row }: { row: ChatRow }): JSX.Element | null {
       <span className="wake-bar-message" data-testid="wake-bar-message" title={wake.message}>
         {wake.message}
       </span>
-      {isLoop && (
-        <button
-          type="button"
-          className="wake-bar-stop-btn"
-          data-testid="wake-bar-stop-btn"
-          aria-label="Stop loop"
-          title="Stop loop"
-          onClick={stopLoop}
-        >
-          <X size={14} aria-hidden />
-        </button>
+      <button
+        type="button"
+        className="wake-bar-stop-btn"
+        data-testid="wake-bar-edit-btn"
+        aria-label="Edit wake"
+        title="Edit wake"
+        onClick={() => setEditing(true)}
+      >
+        <Pencil size={14} aria-hidden />
+      </button>
+      <button
+        type="button"
+        className="wake-bar-stop-btn"
+        data-testid="wake-bar-stop-btn"
+        aria-label={isLoop ? 'Stop loop' : 'Dismiss wake'}
+        title={isLoop ? 'Stop loop' : 'Dismiss wake'}
+        onClick={dismiss}
+      >
+        <X size={14} aria-hidden />
+      </button>
+      {editing && (
+        <WakeEditModal chatId={row.chatId} wake={wake} onClose={() => setEditing(false)} />
       )}
     </div>
   );

@@ -7,6 +7,7 @@ import {
   pcm16ToWav,
   rmsOfPcm16,
   startMeetingCapture,
+  AUTO_END_SILENCE_SECONDS,
 } from '../lib/meetingCapture.js';
 
 const loud = (n: number): Int16Array => new Int16Array(n).fill(8000);
@@ -204,5 +205,52 @@ describe('startMeetingCapture', () => {
     expect(() => startMeetingCapture({}, () => {}, { AudioContextImpl: Ctx as never })).toThrow(
       /no audio sources/,
     );
+  });
+});
+
+describe('auto-end on a long silence', () => {
+  const feed = () => {
+    let cb: ((p: Int16Array) => void) | null = null;
+    return {
+      push: (p: Int16Array) => cb!(p),
+      src: {
+        subscribe: (f: (p: Int16Array) => void) => {
+          cb = f;
+          return () => {};
+        },
+        stop: () => {},
+      },
+    };
+  };
+  const quiet = (s: number): Int16Array => new Int16Array(16000 * s);
+
+  it('fires once when the far end has said nothing for the whole window', () => {
+    const f = feed();
+    const onSilence = vi.fn();
+    startMeetingCapture({ system: f.src }, () => {}, {
+      AudioContextImpl: class {} as never,
+      clipSeconds: 10,
+      onSilence,
+    });
+    for (let i = 0; i < AUTO_END_SILENCE_SECONDS / 10 - 1; i++) f.push(quiet(10));
+    expect(onSilence).not.toHaveBeenCalled();
+    f.push(quiet(10));
+    f.push(quiet(10));
+    f.push(quiet(10));
+    expect(onSilence).toHaveBeenCalledTimes(1);
+  });
+
+  it('speech resets the window', () => {
+    const f = feed();
+    const onSilence = vi.fn();
+    startMeetingCapture({ system: f.src }, () => {}, {
+      AudioContextImpl: class {} as never,
+      clipSeconds: 10,
+      onSilence,
+    });
+    for (let i = 0; i < 25; i++) f.push(quiet(10));
+    f.push(loud(16000 * 10));
+    for (let i = 0; i < 25; i++) f.push(quiet(10));
+    expect(onSilence).not.toHaveBeenCalled();
   });
 });

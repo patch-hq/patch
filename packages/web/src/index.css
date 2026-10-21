@@ -10512,6 +10512,27 @@ main.empty-state p {
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
+.wake-edit-modal {
+  max-width: 640px;
+}
+.wake-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.wake-edit-textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--ink-2);
+  background: var(--bg-1, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
 .wake-bar-stop-btn:hover {
   color: var(--ink-1, var(--ink-2));
   background: var(--bg-elevated);

@@ -70,6 +70,7 @@ describe('ChatRoute — pending self-wake bar', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
+    vi.mocked(api.setLoop).mockClear();
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
     usePresenceStore.getState().setConnection('connected');
@@ -143,11 +144,52 @@ describe('ChatRoute — pending self-wake bar', () => {
     expect(screen.getByTestId('wake-bar-countdown')).not.toHaveTextContent('now');
   });
 
-  it('does NOT show a stop control for a plain one-shot wake (read-only, agent-owned)', () => {
+  it('dismissing a one-shot wake calls api.setLoop(chatId, null)', async () => {
     seed({ message: 'check whether the bus has left', fireAt: NOW + 9 * 60_000 });
     renderChat();
-    expect(screen.getByTestId('wake-bar')).toBeInTheDocument();
-    expect(screen.queryByTestId('wake-bar-stop-btn')).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('wake-bar-stop-btn'));
+      await Promise.resolve();
+    });
+    expect(api.setLoop).toHaveBeenCalledWith('c1', null);
+  });
+
+  it('the edit modal re-arms a one-shot wake with the new message at its fire time', async () => {
+    const fireAt = NOW + 9 * 60_000;
+    seed({ message: 'old', fireAt });
+    renderChat();
+    fireEvent.click(screen.getByTestId('wake-bar-edit-btn'));
+    fireEvent.change(screen.getByTestId('wake-edit-message'), { target: { value: 'new text' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('wake-edit-save'));
+      await Promise.resolve();
+    });
+    expect(api.setLoop).toHaveBeenCalledWith('c1', {
+      message: 'new text',
+      at: new Date(fireAt).toISOString(),
+    });
+    expect(screen.queryByTestId('wake-edit-modal')).not.toBeInTheDocument();
+  });
+
+  it('the edit modal re-arms a loop with a new interval', async () => {
+    seed({ message: 'build', fireAt: NOW + 5 * 60_000, every: 5 * 60_000 });
+    renderChat();
+    fireEvent.click(screen.getByTestId('wake-bar-edit-btn'));
+    fireEvent.change(screen.getByTestId('wake-edit-every'), { target: { value: '10m' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('wake-edit-save'));
+      await Promise.resolve();
+    });
+    expect(api.setLoop).toHaveBeenCalledWith('c1', { message: 'build', every: '10m' });
+  });
+
+  it('cancel closes the edit modal without calling the API', () => {
+    seed({ message: 'old', fireAt: NOW + 60_000 });
+    renderChat();
+    fireEvent.click(screen.getByTestId('wake-bar-edit-btn'));
+    fireEvent.click(screen.getByTestId('wake-edit-cancel'));
+    expect(screen.queryByTestId('wake-edit-modal')).not.toBeInTheDocument();
+    expect(api.setLoop).not.toHaveBeenCalled();
   });
 
   // NOTE: this describe block runs under `vi.useFakeTimers()` (for the live
