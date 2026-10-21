@@ -54,7 +54,6 @@ import {
   PanelRightOpen,
   Target,
   Layers,
-  Bell,
 } from 'lucide-react';
 import { CloseIcon, DeleteIcon } from './icons.js';
 import {
@@ -1817,8 +1816,18 @@ function ChatRowView({
    */
   automations?: boolean;
 }): JSX.Element {
-  const badge = useSettledBadge(row);
+  const settled = useSettledBadge(row);
+  // spec/09 § Notification log: an unread notification is unread output. It
+  // used to draw its own bell beside the title, next to the status badge and
+  // the pin — three marks in a line on a busy row — when the badge column
+  // already has a state for exactly this fact. Reading the chat clears both,
+  // so they are one signal: a quiet row with an unread entry draws the unread
+  // dot. A stronger state (`working`, `permission`, `errored`) keeps its own.
   const hasUnreadNotif = useChatHasUnread(row.chatId);
+  const badge: DisplayBadge =
+    hasUnreadNotif && (settled === 'read' || settled === 'background' || settled === 'monitoring')
+      ? 'done'
+      : settled;
   const goalMet = row.goal === null && row.lastGoal?.outcome === 'met';
   const hostLabel = useAmbiguousHostLabel(row);
   const navigate = useNavigate();
@@ -2196,52 +2205,25 @@ function ChatRowView({
         ) : (
           <StatusBadge badge={badge} pendingWake={row.pendingWake} />
         )}
-        {/* spec/04 § Goals, spec/14 § Sidebar — a chat working toward a goal
-          carries a marker beside its badge, not instead of it: the badge
-          still says what the TURN is doing, this says the chat is
-          additionally being held to a condition across turns. Purely
-          informational — it never affects sort or filter.
-
-          A pinned row carries its state as a glyph beside the title too
-          (spec/14 § Sidebar §3). Both marks have to render INSIDE `.name`'s
-          own cell: the row is a 3-column grid (badge · name · top-right
-          slot) with no column reserved for an extra sibling, so a marker
-          rendered as a sibling of `.name` has nowhere of its own to go —
-          grid auto-placement drops it into the name's cell and shoves
-          `.name` itself into an implicit next row, cramming the title into
-          the 18px badge column (it read as "H…"). The tools stay
-          hover-only, as on every other row, so the title keeps its full
-          width and the relative time stays readable. Only a pinned-or-goal
-          row takes the nested shape — an ordinary row keeps the plain text
-          node. */}
-        {pinned || row.goal !== null || goalMet || hasUnreadNotif ? (
+        {/* spec/04 § Goals, spec/14 § Sidebar § Row marks — the goal marker is
+          the ONLY mark that sits beside the title. The status column already
+          says what the turn is doing, and the pin is read from the top-right
+          slot (`.when-pin`), so a row never stacks more than one glyph before
+          its name. The marker renders INSIDE `.name`'s own cell: the row is a
+          3-column grid (badge · name · top-right slot) with no column for an
+          extra sibling, so a sibling marker gets auto-placed into the name's
+          cell and shoves `.name` into an implicit next row. Only a goal row
+          takes the nested shape — an ordinary row keeps the plain text node. */}
+        {row.goal !== null || goalMet ? (
           <span className="name has-marks">
-            {hasUnreadNotif && (
-              <Bell
-                className="name-bell"
-                data-testid={`name-bell-${row.chatId}`}
-                size={11}
-                aria-label="unread notification"
-              />
-            )}
-            {pinned && (
-              <Pin
-                className="name-pin"
-                data-testid={`name-pin-${row.chatId}`}
-                size={11}
-                aria-label="pinned"
-              />
-            )}
-            {(row.goal !== null || goalMet) && (
-              <span
-                className={goalMet ? 'goal-marker is-met' : 'goal-marker'}
-                data-testid={`goal-marker-${row.chatId}`}
-                data-goal-state={goalMet ? 'met' : 'working'}
-                title={goalMet ? `Goal met: ${row.lastGoal?.condition}` : `Goal: ${row.goal}`}
-              >
-                <Target size={11} aria-label={goalMet ? 'goal met' : 'working toward a goal'} />
-              </span>
-            )}
+            <span
+              className={goalMet ? 'goal-marker is-met' : 'goal-marker'}
+              data-testid={`goal-marker-${row.chatId}`}
+              data-goal-state={goalMet ? 'met' : 'working'}
+              title={goalMet ? `Goal met: ${row.lastGoal?.condition}` : `Goal: ${row.goal}`}
+            >
+              <Target size={12} aria-label={goalMet ? 'goal met' : 'working toward a goal'} />
+            </span>
             <span className="name-text">{title}</span>
           </span>
         ) : (
@@ -2356,6 +2338,21 @@ function ChatRowView({
           </span>
         ) : !special ? (
           <span className="row-when" data-testid={`row-when-${row.chatId}`}>
+            {/* spec/14 § Sidebar §3 — a pinned row marks its state at rest
+              with a small grey pin beside the time, in the slot the pin BUTTON
+              takes over on hover, so the state is read in the same place it
+              is changed. Beside the time rather than the title: the title
+              line carries at most one mark (the goal marker), and a pin
+              stacked in front of it next to the status badge was the third
+              glyph in a line on a pinned goal row. */}
+            {row.pinned ? (
+              <Pin
+                className="when-pin"
+                data-testid={`row-pin-${row.chatId}`}
+                size={11}
+                aria-label="pinned"
+              />
+            ) : null}
             <span className="when-time mono">
               {archived ? formatArchivedAt(row.lastUpdated) : formatWhen(row.lastUpdated)}
             </span>

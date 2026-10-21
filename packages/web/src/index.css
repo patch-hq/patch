@@ -1192,7 +1192,7 @@ body {
    it is shaped that way) — the time has to step aside for a keyboard-revealed
    cluster exactly as it does for a hovered one.
    A PINNED row is NOT exempt and is not held open either: it reads its state
-   from `.name-pin` beside the title (spec/14 § Sidebar §3), so it keeps the
+   from `.when-pin` beside the time (spec/14 § Sidebar §3), so it keeps the
    time at rest and yields the slot on hover like any ordinary row. */
 .sb-row:hover:not(.deleted):not(.draft-row) .row-when,
 .sb-row:focus-within:not(:focus:not(:focus-visible)):not(.deleted):not(.draft-row) .row-when {
@@ -1299,14 +1299,14 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A pinned or goal-bearing row marks its state next to the title (spec/14 §
-   Sidebar §3, spec/04 § Goals) rather than as a sibling of `.name` — the row
-   is a 3-column grid (badge · name · top-right slot) with no column of its
-   own for an extra marker, so a sibling marker gets auto-placed into the
-   name's cell and shoves `.name` itself into an implicit next row, cramming
-   the title into the 18px badge column. Nesting the marker(s) inside `.name`
-   instead keeps the title at full width and the relative time on screen.
-   Only a pinned-or-goal row takes this shape: the glyph turns `.name` into a
+/* Row marks (spec/14 § Sidebar § Row marks). The goal marker is the ONE mark
+   that sits beside the title: the status column carries the turn's state and
+   the top-right slot carries the pin, so no row stacks glyphs before its name.
+   It nests inside `.name` rather than as a sibling — the row is a 3-column
+   grid (badge · name · top-right slot) with no column of its own for an extra
+   marker, so a sibling gets auto-placed into the name's cell and shoves
+   `.name` into an implicit next row, cramming the title into the 18px badge
+   column. Only a goal row takes this shape: the glyph turns `.name` into a
    flex container, and a bare text node in a flex container is an anonymous
    item that cannot be ellipsised, so the title moves into `.name-text` and
    carries the clipping itself. */
@@ -1316,13 +1316,13 @@ body {
   gap: 5px;
   min-width: 0;
 }
-.name-pin {
+/* The pin at rest: a small grey glyph beside the time in the top-right slot.
+   Grey, not accent — it is a property of the row, not a state that needs
+   attention. On hover the tools cover the slot and the accent pin button
+   (`.pin-btn.is-pinned`) stands in the same place. */
+.when-pin {
   flex: 0 0 auto;
-  color: var(--accent-strong);
-}
-.name-bell {
-  flex: 0 0 auto;
-  color: var(--accent-strong);
+  color: var(--ink-3);
 }
 .goal-marker {
   display: inline-flex;
@@ -1584,7 +1584,7 @@ body {
   cursor: pointer;
 }
 /* A pinned row's pin control reads as active (accent-filled) once hover brings
-   the tools out. The state itself is carried at rest by `.name-pin`, not by
+   the tools out. The state itself is carried at rest by `.when-pin`, not by
    this button. */
 .pin-btn.is-pinned {
   color: var(--accent-strong);
@@ -2550,16 +2550,32 @@ a.ch-row:hover {
    Keep the `badge-` prefix so a future bare `.working`/`.done`/`.read` rule
    cannot do the same. Guarded by e2e/status-badge-size.spec.ts. */
 .badge {
-  /* Unread: a clean solid accent dot with a soft tint halo. The old double
+  /* ONE FOOTPRINT (spec/14 § Status badges). Every state occupies the same
+     16px box, so the sidebar's status column reads as a line of equal marks
+     that differ by hue and shape only. The three dot states are a 10px disc
+     (the element itself — `width`/`height` here, measured by
+     e2e/status-badge-size.spec.ts); the drawn states override to the full box
+     and centre a glyph whose outer size matches the disc. A badge that grows
+     its own box pushes the row title out of place and stops reading as a
+     status marker, which is how the sidebar came to show dots at four sizes.
+     Unread: a clean solid accent dot with a soft tint halo. The old double
      box-shadow (panel gap + accent ring) rendered as a hollow target that read
      as "broken". */
+  --badge-box: 16px;
+  --badge-dot: 10px;
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  flex: none;
+  width: var(--badge-dot);
+  height: var(--badge-dot);
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-tint);
   vertical-align: middle;
+}
+/* In the sidebar grid the badge track is 18px; centre every state in it so a
+   10px disc and a 16px glyph box share the same axis. */
+.sb-row > .badge {
+  justify-self: center;
 }
 .badge.badge-working {
   /* Orange, no glow — a plain dot that fades via opacity (`pulse`). Used to
@@ -2571,19 +2587,19 @@ a.ch-row:hover {
   /* Overrides the base `.badge` tint-halo shadow — that halo is sized/coloured
      for the accent (green) dot and would otherwise leak through here. */
   box-shadow: none;
-  width: 9px;
-  height: 9px;
   animation: pulse 1.6s ease-in-out infinite;
 }
 .badge.badge-permission {
   /* Its own indigo, not the `working` orange. The crisp hard ring stays — shape
      and colour now both separate the two — but the ring alone was carrying the
-     distinction, and at 8-9px a 2px ring against a slow opacity fade is the
-     weakest signal in the sidebar for the state that most needs you to act. */
+     distinction, and at dot size a 2px ring against a slow opacity fade is the
+     weakest signal in the sidebar for the state that most needs you to act.
+     The ring is sized to stay inside the 16px footprint (10px disc + 1px gap +
+     2px ring) rather than spilling past the drawn states beside it. */
   background: var(--permission);
   box-shadow:
-    0 0 0 2px var(--bg-panel),
-    0 0 0 5px var(--permission);
+    0 0 0 1px var(--bg-panel),
+    0 0 0 3px var(--permission);
 }
 /* A FAILED chat. A drawn glyph, not a tinted dot: the dots differ only by
    colour, which is the weakest possible signal for the one state that means the
@@ -2593,12 +2609,14 @@ a.ch-row:hover {
 .badge.badge-errored {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--danger);
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
   line-height: 1;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
 }
 /* An idle chat with a background command or sub-agent still running. A drawn,
    STATIC glyph rather than another tinted dot: it stands in for the `done` dot
@@ -2610,9 +2628,10 @@ a.ch-row:hover {
 .badge.badge-background {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--ink-3);
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -2626,9 +2645,10 @@ a.ch-row:hover {
 .badge.badge-monitoring {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--ink-3);
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -2637,11 +2657,12 @@ a.ch-row:hover {
 .badge.badge-read {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--ink-3);
   font-size: 14px;
   line-height: 1;
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
 }
 @keyframes pulse {
   0%,
@@ -13512,8 +13533,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-main {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(300px, 34%, 400px);
+  display: flex;
   min-height: 0;
 }
 .mm-bar {
@@ -13528,25 +13548,25 @@ select.new-chat-account:focus-visible {
   gap: 10px;
 }
 .mm-left {
+  flex: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
 }
+/* The meeting is the chat: the stream stays mounted but hidden. */
 .mm-left .chat-stream {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  display: none;
 }
 .mm-panel {
-  border-left: 1px solid var(--line-soft);
+  flex: 1;
   background: var(--bg-panel);
   overflow: hidden;
-  padding: 16px 20px;
+  padding: 8px 20px 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-height: 0;
 }
 .mm-points {
@@ -13555,22 +13575,88 @@ select.new-chat-account:focus-visible {
   overflow: auto;
   padding-top: 8px;
 }
+.mm-summary-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.mm-summary-tab .mm-mynotes {
+  flex: none;
+  min-height: 120px;
+  margin-bottom: 12px;
+}
+.mm-summary-tab .mm-sum {
+  flex: none;
+  overflow: visible;
+}
+.mm-icon {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.mm-icon:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.mm-icon:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.mm-spin {
+  animation: mm-rotate 1s linear infinite;
+}
+@keyframes mm-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.mm-sticky {
+  position: sticky;
+  top: -14px;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  margin: -14px -18px 0;
+  padding: 6px 12px 0;
+  pointer-events: none;
+}
+.mm-sticky .mm-icon {
+  pointer-events: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+}
+.mm-nowchip {
+  flex: none;
+  color: var(--accent-strong);
+  background: var(--accent-tint);
+  border-radius: var(--radius-pill);
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mm-topic.now {
+  background: var(--accent-tint);
+  border-radius: var(--radius-sm, 4px);
+}
 @media (max-width: 800px) {
   .mm-bar {
     padding: 10px 16px;
   }
-  .mm-main {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
-  }
   .mm-panel {
-    border-left: none;
-    border-top: 1px solid var(--line-soft);
-    padding: 12px 16px;
+    padding: 8px 16px 0;
   }
 }
 .mm-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink-3);
   text-transform: uppercase;
@@ -13662,7 +13748,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-sum .meta {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: 13px;
   margin-bottom: 10px;
 }
 .mm-sum .tools {
@@ -13694,7 +13780,7 @@ select.new-chat-account:focus-visible {
   border-bottom: 1px dotted var(--accent);
 }
 .mm-act-owner-name {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-3);
 }
 .mm-transcript {
@@ -13715,15 +13801,8 @@ select.new-chat-account:focus-visible {
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.5;
-}
-.mm-drawer {
-  position: relative;
-  min-width: 0;
-}
-.mm-drawer .mm-label {
-  margin-bottom: 4px;
 }
 /* The live line: speaker bold, words provisional and italic. */
 .mm-live {
@@ -13733,7 +13812,7 @@ select.new-chat-account:focus-visible {
   font-style: italic;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
@@ -13747,32 +13826,6 @@ select.new-chat-account:focus-visible {
   gap: 6px;
   min-height: 0;
 }
-/* The divider is the bar's bottom border, with a grab area straddling it. */
-.mm-grip {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -18px;
-  height: 18px;
-  cursor: ns-resize;
-  touch-action: none;
-  z-index: 6;
-}
-.mm-grip::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 11px;
-  width: 44px;
-  height: 5px;
-  margin-left: -22px;
-  border-radius: 3px;
-  background: var(--line);
-}
-.mm-grip:hover::after,
-.mm-grip:focus-visible::after {
-  background: var(--ink-faint);
-}
 .mm-ln {
   display: flex;
   gap: 8px;
@@ -13782,12 +13835,8 @@ select.new-chat-account:focus-visible {
 }
 .mm-ln .tm {
   flex: none;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-faint);
-}
-.mm-ln.newest {
-  font-size: 15px;
-  color: var(--ink);
 }
 .mm-people {
   min-width: 0;
@@ -13847,7 +13896,7 @@ select.new-chat-account:focus-visible {
   align-items: center;
   gap: 8px;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 .mm-topic {
   position: relative;
@@ -13867,7 +13916,7 @@ select.new-chat-account:focus-visible {
   text-align: left;
   cursor: pointer;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: 13px;
   width: 38px;
   flex: none;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -13880,32 +13929,11 @@ select.new-chat-account:focus-visible {
   flex: 1;
   min-width: 0;
   font-weight: 600;
-  font-size: 14px;
-}
-.mm-topic.l0 .nm {
   font-size: 15px;
-}
-.mm-topic.l2 .nm,
-.mm-topic.l3 .nm {
-  font-weight: 400;
-  color: var(--ink-2);
-}
-.mm-topic.l3 .nm {
-  font-size: 12px;
-  color: var(--ink-3);
 }
 .mm-topic ul {
   margin: 4px 0 0 48px;
   font-size: 14px;
-}
-/* Older points are a single line; their bullets show only while being edited. */
-.mm-topic.l2 ul,
-.mm-topic.l3 ul {
-  display: none;
-}
-.mm-topic.l2:focus-within ul,
-.mm-topic.l3:focus-within ul {
-  display: block;
 }
 .mm-topic [contenteditable] {
   outline: none;
@@ -13925,33 +13953,9 @@ select.new-chat-account:focus-visible {
   color: var(--accent-strong);
   font-weight: 700;
 }
-.mm-ins {
-  appearance: none;
-  position: absolute;
-  left: -2px;
-  top: -11px;
-  width: 20px;
-  height: 20px;
-  line-height: 18px;
-  padding: 0;
-  text-align: center;
-  border-radius: 50%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  color: var(--ink-3);
-  font-size: 14px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.1s;
-  z-index: 2;
-}
-.mm-topic:hover .mm-ins,
-.mm-ins:focus-visible {
-  opacity: 1;
-}
 .mm-tx {
   margin: 6px 0 0 48px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-2);
   display: flex;
   flex-direction: column;
@@ -13969,9 +13973,20 @@ select.new-chat-account:focus-visible {
   cursor: pointer;
 }
 .mm-tray {
+  position: relative;
   flex: none;
   border-top: 1px solid var(--line-soft);
   background: var(--bg-panel);
+}
+.mm-tray-grip {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: row-resize;
+  touch-action: none;
+  z-index: 1;
 }
 .mm-tray-head {
   display: flex;
@@ -13994,7 +14009,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-tray-label,
 .mm-tray-grp {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink-3);
   text-transform: uppercase;
@@ -14004,7 +14019,7 @@ select.new-chat-account:focus-visible {
   margin: 6px 0 2px;
 }
 .mm-tray-count {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-3);
 }
 .mm-tray-count b {
@@ -14039,7 +14054,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-act-owner {
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   padding: 1px 6px;
@@ -14047,7 +14062,7 @@ select.new-chat-account:focus-visible {
   color: var(--ink-2);
 }
 .mm-act-st {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent-strong);
 }
 .mm-act-btn {
@@ -14056,7 +14071,7 @@ select.new-chat-account:focus-visible {
   background: none;
   padding: 2px 6px;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent-strong);
   cursor: pointer;
   text-decoration: none;
@@ -15364,7 +15379,7 @@ select.new-chat-account:focus-visible {
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 1;
   overflow: hidden;
 }
 .composer-quote-remove {
@@ -15629,14 +15644,14 @@ select.new-chat-account:focus-visible {
   margin-bottom: 0;
 }
 .mm-feed-auto {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-3);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 .mm-feed-err {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--danger);
   margin-bottom: 6px;
 }
@@ -15661,7 +15676,7 @@ select.new-chat-account:focus-visible {
   margin-bottom: 3px;
 }
 .mm-card-k {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -15680,7 +15695,7 @@ select.new-chat-account:focus-visible {
   overflow-wrap: anywhere;
 }
 .mm-card-t {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-3);
 }
 .mm-card ul {
@@ -15689,7 +15704,7 @@ select.new-chat-account:focus-visible {
   color: var(--ink-2);
 }
 .mm-verdict {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   border-radius: var(--radius-pill);
   padding: 0 7px;
@@ -15704,7 +15719,7 @@ select.new-chat-account:focus-visible {
 }
 .mm-card-src {
   display: inline-block;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent-strong);
   margin-top: 3px;
 }
@@ -15715,7 +15730,7 @@ select.new-chat-account:focus-visible {
   margin-top: 6px;
 }
 .mm-edit-chip {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--accent-strong);
   background: var(--accent-tint);
@@ -15727,4 +15742,86 @@ select.new-chat-account:focus-visible {
     max-height: 30%;
     padding: 8px 16px 2px;
   }
+}
+
+/* ---- Meeting setup popover (design/meeting-mode-v3 Setup screens) ---- */
+.mm-setup-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.mm-setup {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 12px);
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px rgba(40, 30, 15, 0.16);
+  padding: 12px 16px;
+  z-index: 20;
+  text-align: left;
+}
+.mm-setup-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.mm-setup-head b {
+  flex: 1;
+}
+.mm-setup-x {
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.mm-setup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.mm-setup-name {
+  flex: 1;
+}
+.mm-setup-name small {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.mm-setup-name small.warn {
+  color: var(--waiting);
+}
+.mm-setup-ok {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+.mm-setup-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.mm-setup-btn {
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 4px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mm-setup-btn.pri {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.mm-setup-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }

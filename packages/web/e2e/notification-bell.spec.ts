@@ -93,7 +93,7 @@ test.describe('notifications bell', () => {
     const items = [
       {
         id: 'n1',
-        chatId: 'chat_md',
+        chatId: 'chat_monitoring',
         message: 'Washing done',
         importance: 'normal',
         sentAt: Date.now(),
@@ -112,13 +112,19 @@ test.describe('notifications bell', () => {
         body: JSON.stringify(snap()),
       });
     });
+    // spec/09 § Bell → chat row: an unread entry draws as the row's ordinary
+    // unread dot, not a second glyph. `chat_monitoring` is read and quiet at
+    // rest (the harness marks it read), so the dot is the entry's doing.
     await page.goto(HARNESS);
-    await expect(page.getByTestId('name-bell-chat_md')).toBeVisible();
-    await expect(page.getByTestId('name-bell-chat_bus')).toHaveCount(0);
+    const row = page.getByTestId('chat-row-chat_monitoring');
+    await expect(row.getByTestId('badge-done')).toBeVisible();
+    await expect(row.locator('[data-testid^="name-"]')).toHaveCount(0);
 
-    await page.getByTestId('chat-row-chat_md').click();
+    // Opening the chat reads the entry, and the row settles back to its quiet
+    // monitoring state.
+    await row.click();
     await expect(page.getByTestId('notif-badge')).toHaveCount(0);
-    await expect(page.getByTestId('name-bell-chat_md')).toHaveCount(0);
+    await expect(row.getByTestId('badge-monitoring')).toBeVisible();
   });
 
   test('empty log says so and shows no badge', async ({ page }) => {
