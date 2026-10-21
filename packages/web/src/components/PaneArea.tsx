@@ -7,7 +7,7 @@
 // terminals and pages join as later stages extend `TabDescriptor`
 // (`stores/layoutStore.ts`) and the `TabContent` switch below.
 
-import { Fragment, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DragEvent as ReactDragEvent, JSX, MouseEvent as ReactMouseEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -66,7 +66,7 @@ interface DragPayload {
   tabId: string;
 }
 
-function readDragPayload(e: ReactDragEvent): DragPayload | null {
+function readDragPayload(e: { dataTransfer: DataTransfer | null }): DragPayload | null {
   const raw = e.dataTransfer?.getData(TAB_DRAG_TYPE);
   if (!raw) return null;
   try {
@@ -298,10 +298,14 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
   // only to drive the visible highlight — `.pane-dropzone` below.
   const dropEdgeRef = useRef<SplitEdge | 'center' | null>(null);
 
-  const onContentDragOver = useCallback((e: ReactDragEvent<HTMLDivElement>): void => {
+  // NATIVE listeners, not React's: the tab's content is portalled in
+  // (`HostedTab`), so a drop on it bubbles through the DOM to this pane but
+  // through React to `PaneArea`, and a React `onDrop` here never heard it.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const onContentDragOver = useCallback((e: DragEvent): void => {
     if (!e.dataTransfer?.types.includes(TAB_DRAG_TYPE)) return;
     e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     const EDGE = 0.25;
@@ -314,14 +318,14 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
     setDropEdge(zone);
   }, []);
 
-  const onContentDragLeave = useCallback((e: ReactDragEvent<HTMLDivElement>): void => {
-    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+  const onContentDragLeave = useCallback((e: DragEvent): void => {
+    if ((e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) return;
     dropEdgeRef.current = null;
     setDropEdge(null);
   }, []);
 
   const onContentDrop = useCallback(
-    (e: ReactDragEvent<HTMLDivElement>): void => {
+    (e: DragEvent): void => {
       const payload = readDragPayload(e);
       const edge = dropEdgeRef.current;
       dropEdgeRef.current = null;
@@ -336,6 +340,18 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
     },
     [moveTab, splitWithTab, pane.id, pane.tabs.length],
   );
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.addEventListener('dragover', onContentDragOver);
+    el.addEventListener('dragleave', onContentDragLeave);
+    el.addEventListener('drop', onContentDrop);
+    return () => {
+      el.removeEventListener('dragover', onContentDragOver);
+      el.removeEventListener('dragleave', onContentDragLeave);
+      el.removeEventListener('drop', onContentDrop);
+    };
+  }, [onContentDragOver, onContentDragLeave, onContentDrop]);
 
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
   // A single pane holding a single tab is the common case — today's plain
@@ -353,13 +369,7 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
       }}
     >
       {showTabBar ? <TabBar pane={pane} focused={focused} /> : null}
-      <div
-        className="pane-content"
-        data-testid={`pane-content-${pane.id}`}
-        onDragOver={onContentDragOver}
-        onDragLeave={onContentDragLeave}
-        onDrop={onContentDrop}
-      >
+      <div ref={contentRef} className="pane-content" data-testid={`pane-content-${pane.id}`}>
         {dropEdge ? (
           <div className={`pane-dropzone pane-dropzone-${dropEdge}`} data-testid="pane-dropzone" />
         ) : null}
