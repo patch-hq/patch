@@ -9,13 +9,13 @@
 // is properly awake.
 
 export const SLEPT_THROUGH_MESSAGE =
-  'This machine went to sleep during the turn, so it did not finish. It runs again once the machine has been awake for a few minutes.';
+  "Machine went to sleep mid-turn. Runs again once it's been awake a few minutes.";
 
 const SESSION_CRASH = /\[session_crash\]\s*error_name=([A-Za-z_]+)/;
 
 export function describeTurnFailure(errMsg: string, opts: { sleptThrough: boolean }): string {
   if (opts.sleptThrough) return SLEPT_THROUGH_MESSAGE;
   const crash = SESSION_CRASH.exec(errMsg);
-  if (crash) return `Claude Code's session crashed before the turn finished (${crash[1]}).`;
+  if (crash) return `Claude Code crashed mid-turn (${crash[1]}).`;
   return errMsg;
 }

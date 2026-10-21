@@ -992,7 +992,7 @@ export class JobDispatcher {
       if (linkedJobId !== null) {
         // The fire that made this chat wrote its own `ok` row when the spawn
         // landed, so its trigger and action are read back off that rather
-        // than guessed — a 03:00 cron fire was being logged as `manual`.
+        // than guessed, since a 03:00 cron fire was being logged as `manual`.
         const own = this.fireRowFor(linkedJobId, chatId);
         attributions.push({
           jobId: linkedJobId,

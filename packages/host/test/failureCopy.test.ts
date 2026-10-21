@@ -11,7 +11,7 @@ describe('describeTurnFailure', () => {
 
   it('names a session crash by its error, not its field dump', () => {
     expect(describeTurnFailure(CRASH, { sleptThrough: false })).toBe(
-      "Claude Code's session crashed before the turn finished (AbortError).",
+      'Claude Code crashed mid-turn (AbortError).',
     );
   });
 
