@@ -8,6 +8,7 @@ import type { JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Zap } from 'lucide-react';
+import { OpenableButton } from './OpenableLink.js';
 import type { Job } from '@patch/wire/jobs';
 import { api } from '../api/rest.js';
 import { formatDateTime } from '../lib/formatDateTime.js';
@@ -29,15 +30,15 @@ export function JobBar({ jobId, at }: { jobId: string; at: number }): JSX.Elemen
         <Zap size={14} aria-hidden />
         {label}
       </span>
-      <button
-        type="button"
+      <OpenableButton
+        opens={{ kind: 'page', page: 'job', jobId }}
         className="archived-unarchive-btn"
         data-testid="job-bar-link"
         title="Open job"
-        onClick={() => navigate(`/jobs/${jobId}`)}
+        onOpen={() => navigate(`/jobs/${jobId}`)}
       >
         Open job
-      </button>
+      </OpenableButton>
     </div>
   );
 }

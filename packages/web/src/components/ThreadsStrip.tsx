@@ -23,6 +23,7 @@ import { deriveChatTitle } from '../lib/chatTitle.js';
 import { nudgeContinue } from '../lib/carryOn.js';
 import { parseAskUserQuestion, ASK_USER_QUESTION } from '../lib/askUserQuestion.js';
 import { ChatStatusBadge } from './ChatStatusBadge.js';
+import { OpenableButton } from './OpenableLink.js';
 import { ReachSwitch } from './ReachSwitch.js';
 import { SweepStatusLine } from './SweepStatusLine.js';
 import type { ChatRow, PendingPermission } from '../stores/types.js';
@@ -233,15 +234,15 @@ export function ThreadsStrip(): JSX.Element {
                       <Square size={12} aria-hidden /> Stop
                     </button>
                   ) : null}
-                  <button
-                    type="button"
+                  <OpenableButton
+                    opens={{ kind: 'chat', chatId: row.chatId }}
                     className="thread-btn ghost"
                     data-testid={`thread-open-${row.chatId}`}
                     aria-label={`open ${deriveChatTitle(row.name)}`}
-                    onClick={() => navigate(`/chats/${row.chatId}`)}
+                    onOpen={() => navigate(`/chats/${row.chatId}`)}
                   >
                     <ExternalLink size={14} aria-hidden />
-                  </button>
+                  </OpenableButton>
                 </div>
               </div>
             );

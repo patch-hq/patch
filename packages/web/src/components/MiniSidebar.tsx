@@ -5,13 +5,14 @@
 // its tooltip; the expand control at the top restores the full sidebar.
 
 import { useMemo, type JSX } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { ChevronRight, Compass } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { groupChats } from '../lib/chatGroups.js';
 import type { ChatRow } from '../stores/types.js';
+import { OpenableLink } from './OpenableLink.js';
 import { ChatStatusBadge } from './ChatStatusBadge.js';
 
 export function MiniSidebar(): JSX.Element {
@@ -52,9 +53,10 @@ export function MiniSidebar(): JSX.Element {
         {groups.map((rows, i) => (
           <div className="mini-group" key={i}>
             {rows.map((row) => (
-              <Link
+              <OpenableLink
                 key={row.chatId}
                 to={`/chats/${row.chatId}`}
+                opens={{ kind: 'chat', chatId: row.chatId }}
                 className={`mini-row ${highlighted === row.chatId ? 'active' : ''}`}
                 data-testid={`mini-row-${row.chatId}`}
                 title={row.name ?? 'New chat'}
@@ -67,7 +69,7 @@ export function MiniSidebar(): JSX.Element {
                 ) : (
                   <ChatStatusBadge row={row} />
                 )}
-              </Link>
+              </OpenableLink>
             ))}
           </div>
         ))}

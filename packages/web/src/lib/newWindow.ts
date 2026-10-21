@@ -78,3 +78,9 @@ export function openSidebarInNewWindow(): void {
 export function openTabInNewWindow(descriptor: TabDescriptor): void {
   openWindow(`/tab-window?tabWindow=1&tab=${encodeURIComponent(JSON.stringify(descriptor))}`);
 }
+
+/** Open whatever a tab descriptor names in its own window — a chat as a chat window, anything else detached as a tab. */
+export function openDescriptorInNewWindow(descriptor: TabDescriptor): void {
+  if (descriptor.kind === 'chat') openChatInNewWindow(descriptor.chatId);
+  else openTabInNewWindow(descriptor);
+}

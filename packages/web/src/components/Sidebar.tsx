@@ -111,6 +111,7 @@ import {
   startVoiceCall,
   endVoiceCall,
 } from '../lib/voiceController.js';
+import { OpenableLink } from './OpenableLink.js';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { DevSourceBadge } from './DevSourceBadge.js';
 import { NotificationBell } from './NotificationBell.js';
@@ -990,24 +991,35 @@ function BottomNav(): JSX.Element {
     <>
       <JobAlerts />
       <nav className="sb-bottom" data-testid="bottom-nav">
-        <Link to="/pads" className={`nav-row ${onPads ? 'active' : ''}`} data-testid="nav-pads">
+        <OpenableLink
+          to="/pads"
+          opens={{ kind: 'page', page: 'pads' }}
+          className={`nav-row ${onPads ? 'active' : ''}`}
+          data-testid="nav-pads"
+        >
           <Layers size={16} aria-hidden className="nav-icon" /> Pads
           {pending > 0 ? (
             <span className="pads-navcount" data-testid="nav-pads-count">
               {pending}
             </span>
           ) : null}
-        </Link>
-        <Link to="/jobs" className={`nav-row ${onJobs ? 'active' : ''}`} data-testid="nav-jobs">
+        </OpenableLink>
+        <OpenableLink
+          to="/jobs"
+          opens={{ kind: 'page', page: 'jobs' }}
+          className={`nav-row ${onJobs ? 'active' : ''}`}
+          data-testid="nav-jobs"
+        >
           <Calendar size={16} aria-hidden className="nav-icon" /> Jobs
-        </Link>
-        <Link
+        </OpenableLink>
+        <OpenableLink
           to="/settings"
+          opens={{ kind: 'page', page: 'settings' }}
           className={`nav-row ${onSettings ? 'active' : ''}`}
           data-testid="nav-settings"
         >
           <Settings size={16} aria-hidden className="nav-icon" /> Settings
-        </Link>
+        </OpenableLink>
       </nav>
     </>
   );
@@ -1350,14 +1362,15 @@ function ChannelRow({
     // loaded yet. Still render a LINK to the known stable chatId so the channel
     // is clickable rather than dead text.
     return (
-      <Link
+      <OpenableLink
         to={`/chats/${chatId}`}
+        opens={{ kind: 'chat', chatId }}
         className={`ch-row ${active === chatId ? 'active' : ''}`}
         data-testid={`channel-row-${chatId}`}
       >
         <span className="ch-name">{label}</span>
         {pill}
-      </Link>
+      </OpenableLink>
     );
   }
   const badge = deriveBadge(row);
@@ -1370,7 +1383,12 @@ function ChannelRow({
     .filter(Boolean)
     .join(' ');
   return (
-    <Link to={`/chats/${row.chatId}`} className={cls} data-testid={`channel-row-${chatId}`}>
+    <OpenableLink
+      to={`/chats/${row.chatId}`}
+      opens={{ kind: 'chat', chatId: row.chatId }}
+      className={cls}
+      data-testid={`channel-row-${chatId}`}
+    >
       <StatusBadge
         badge={badge}
         pendingWake={row.pendingWake}
@@ -1378,7 +1396,7 @@ function ChannelRow({
       />
       <span className="ch-name">{label}</span>
       {pill}
-    </Link>
+    </OpenableLink>
   );
 }
 
@@ -2153,6 +2171,12 @@ function ChatRowView({
   // anchor. `preventDefault` here is what stops the router (and, without the
   // app-wide guard, the browser's own same-origin page load) acting on it.
   function handleRowClick(e: ReactMouseEvent): void {
+    // ⌘/Ctrl-click opens the chat in a new window and leaves this one alone.
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      openChatInNewWindow(row.chatId);
+      return;
+    }
     if (e.shiftKey) {
       e.preventDefault();
       if (selectable) useSelectionStore.getState().extendTo(row.chatId);

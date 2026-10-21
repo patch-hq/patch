@@ -6,6 +6,7 @@
 import { useEffect } from 'react';
 import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
+import { OpenableLink } from './OpenableLink.js';
 import { startJobAlertsPolling, useJobAlertsStore } from '../stores/jobAlertsStore.js';
 import { CloseIcon } from './icons.js';
 
@@ -26,9 +27,14 @@ export function JobAlerts(): JSX.Element | null {
       {alerts.map((a) => (
         <div className="job-alert" role="alert" key={a.jobId} data-testid="job-alert">
           <div className="job-alert-body">
-            <Link to={`/jobs/${a.jobId}`} className="job-alert-name" data-testid="job-alert-name">
+            <OpenableLink
+              to={`/jobs/${a.jobId}`}
+              opens={{ kind: 'page', page: 'job', jobId: a.jobId }}
+              className="job-alert-name"
+              data-testid="job-alert-name"
+            >
               {a.jobName}
-            </Link>
+            </OpenableLink>
             <div className="job-alert-reason" data-testid="job-alert-reason">
               {a.reason}
             </div>
