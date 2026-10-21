@@ -3175,13 +3175,50 @@ function MessageEntry({
           entirely when the daemon/transcript carried no real time: showing
           nothing beats inventing one. The retry marker follows it.
 
+          The message's own tools (side thread, copy, retry) sit in the same
+          strip, first, so they reveal together with the time instead of
+          hanging in the gutter. Tom: "put these chat tools next to the rest of
+          the hover state below the chat, in line".
+
           Host and model follow the time on agent messages only: they are the
           chat's current ones, which says nothing about a message Tom typed. */}
-      {entry.messageAt !== undefined ||
+      {canSideThread ||
+      canCopy ||
+      canRetry ||
+      entry.messageAt !== undefined ||
       attemptCount > 1 ||
       entry.midTurn === true ||
       entry.sentNow === true ? (
         <div className="msg-meta" data-testid="msg-meta">
+          {canSideThread || canCopy || canRetry ? (
+            <span className="msg-tools" data-testid="msg-tools">
+              {canSideThread ? (
+                <button
+                  type="button"
+                  className="msg-side-thread"
+                  data-testid="msg-side-thread-trigger"
+                  aria-label="Open side thread"
+                  title="Open side thread"
+                  onClick={() => openSideThreadDraft(chatId, entry.seq, text)}
+                >
+                  <GitFork size={14} aria-hidden="true" />
+                </button>
+              ) : null}
+              {canCopy ? <MessageCopyButton text={text} /> : null}
+              {canRetry ? (
+                <button
+                  type="button"
+                  className="msg-retry"
+                  data-testid="msg-retry-trigger"
+                  aria-label="Retry"
+                  title="Retry"
+                  onClick={() => onRetryTurn(entry)}
+                >
+                  <RotateCcw size={14} aria-hidden="true" />
+                </button>
+              ) : null}
+            </span>
+          ) : null}
           {entry.messageAt !== undefined ? (
             <span data-testid="msg-time">{formatMessageTime(entry.messageAt)}</span>
           ) : null}
@@ -3204,34 +3241,6 @@ function MessageEntry({
       ) : null}
       {entry.systemContext && entry.systemContext.length > 0 ? (
         <SystemContextDisclosures items={entry.systemContext} />
-      ) : null}
-      {/* spec/14 § Side threads panel TRIGGER — hover-revealed on every
-          settled message (user or agent), mirroring the edit pencil's reveal.
-          Right-click offers the same action via the context menu. */}
-      {canSideThread ? (
-        <button
-          type="button"
-          className="msg-side-thread"
-          data-testid="msg-side-thread-trigger"
-          aria-label="Open side thread"
-          title="Open side thread"
-          onClick={() => openSideThreadDraft(chatId, entry.seq, text)}
-        >
-          <GitFork size={14} aria-hidden="true" />
-        </button>
-      ) : null}
-      {canCopy ? <MessageCopyButton text={text} /> : null}
-      {canRetry ? (
-        <button
-          type="button"
-          className="msg-retry"
-          data-testid="msg-retry-trigger"
-          aria-label="Retry"
-          title="Retry"
-          onClick={() => onRetryTurn(entry)}
-        >
-          <RotateCcw size={14} aria-hidden="true" />
-        </button>
       ) : null}
       {canSideThread ? (
         <ContextMenu

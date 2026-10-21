@@ -3291,145 +3291,39 @@ a.ch-row:hover {
 .msg > * {
   pointer-events: auto;
 }
-/* spec/14 § Side threads panel TRIGGER — hover button in the gutter beside
-   the turn, same reveal rule as `.msg-edit` (invisible at rest, shown on
-   hover/focus, always visible under `hover: none`). Sits opposite the
-   pencil's side — right of a user bubble, left of assistant prose — since a
-   USER turn carries both. */
-.msg-side-thread {
-  position: absolute;
-  top: 2px;
+/* spec/14 § Messages — the side-thread, copy and retry buttons live INSIDE the
+   per-message meta strip (`.msg-meta`), in line with the time, so they reveal
+   with it (hover/focus, always visible under `hover: none`) and need no gutter
+   or hover bridge of their own. */
+.msg-tools {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  background: transparent;
-  color: var(--ink-faint);
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease;
+  gap: 2px;
 }
-.msg-user .msg-side-thread {
-  right: calc(var(--measure-slack, 0px) - 26px);
-}
-.msg-assistant .msg-side-thread {
-  left: calc(var(--measure-slack, 0px) - 26px);
-}
-/* The button sits in the gutter, which no longer holds the hover, so a short
-   transparent bridge to the message keeps it reachable on the way across. */
-.msg-side-thread::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-}
-.msg-user .msg-side-thread::after {
-  right: 100%;
-}
-.msg-assistant .msg-side-thread::after {
-  left: 100%;
-}
-.msg:hover .msg-side-thread,
-.msg-side-thread:focus-visible {
-  opacity: 1;
-}
-@media (hover: none) {
-  .msg-side-thread {
-    opacity: 1;
-  }
-}
-.msg-side-thread:hover {
-  background: var(--bg-soft);
-  color: var(--ink);
-}
-/* Retry button: second row of the user turn's side-thread gutter, same reveal. */
+.msg-side-thread,
+.msg-copy,
 .msg-retry {
-  position: absolute;
-  top: 26px;
-  right: calc(var(--measure-slack, 0px) - 26px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--ink-faint);
   border-radius: 4px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease;
 }
-.msg-assistant .msg-retry {
-  right: auto;
-  left: calc(var(--measure-slack, 0px) - 26px);
+.msg-side-thread svg,
+.msg-copy svg,
+.msg-retry svg {
+  width: 12px;
+  height: 12px;
 }
-.msg:hover .msg-retry,
-.msg-retry:focus-visible {
-  opacity: 1;
-}
-@media (hover: none) {
-  .msg-retry {
-    opacity: 1;
-  }
-}
+.msg-side-thread:hover,
+.msg-copy:hover,
 .msg-retry:hover {
-  background: var(--bg-soft);
-  color: var(--ink);
-}
-/* Copy button: first row of the gutter OPPOSITE the side-thread and retry
-   buttons (left of a user bubble, right of assistant prose), so it fits a
-   one-line message. Same reveal rule and hover bridge as `.msg-side-thread`. */
-.msg-copy {
-  position: absolute;
-  top: 2px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  background: transparent;
-  color: var(--ink-faint);
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.msg-user .msg-copy {
-  left: calc(var(--measure-slack, 0px) - 26px);
-}
-.msg-assistant .msg-copy {
-  right: calc(var(--measure-slack, 0px) - 26px);
-}
-.msg-copy::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-}
-.msg-user .msg-copy::after {
-  left: 100%;
-}
-.msg-assistant .msg-copy::after {
-  right: 100%;
-}
-.msg:hover .msg-copy,
-.msg-copy:focus-visible,
-.msg-copy:not([data-state='idle']) {
-  opacity: 1;
-}
-@media (hover: none) {
-  .msg-copy {
-    opacity: 1;
-  }
-}
-.msg-copy:hover {
   background: var(--bg-soft);
   color: var(--ink);
 }
@@ -4025,7 +3919,7 @@ a.ch-row:hover {
   height: calc(var(--msg-tail) - 2px);
   line-height: 1;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   color: var(--ink-faint);
   font-size: var(--text-min);
@@ -4037,18 +3931,18 @@ a.ch-row:hover {
   inset-inline-end: var(--measure-slack, 0px);
 }
 .msg:hover .msg-meta,
-.msg:focus-within .msg-meta {
+.msg:focus-within .msg-meta,
+.msg-meta:has(.msg-copy:not([data-state='idle'])) {
   opacity: 1;
 }
 /* Wide panel: the strip moves out of the 16px tail into the right-hand gutter,
    stacked and top-aligned with the turn, so the message keeps its padding and
-   time / host / model get room to read. It starts past the side-thread button
-   (which occupies 6–26px beyond the measure edge on a user turn). Narrower
+   time / host / model get room to read. It starts just past the measure edge. Narrower
    panels have no gutter to lend and keep the strip in the tail. */
 @container (min-width: 1100px) {
   .msg-meta,
   .msg-user .msg-meta {
-    top: 30px;
+    top: 2px;
     bottom: auto;
     inset-inline-start: auto;
     inset-inline-end: auto;

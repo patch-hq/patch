@@ -46,12 +46,11 @@ test.describe('message hover extent', () => {
     // Blank row to the left of the bubble.
     await page.mouse.move(box.x + 20, y);
     await expect(meta).toHaveCSS('opacity', '0');
-    await expect(trigger).toHaveCSS('opacity', '0');
 
     // Over the bubble.
     await page.mouse.move(content.x + content.width / 2, y);
     await expect(meta).toHaveCSS('opacity', '1');
-    await expect(trigger).toHaveCSS('opacity', '1');
+    await expect(trigger).toBeVisible();
 
     // Back out into the blank row: cancelled again.
     await page.mouse.move(box.x + 20, y);
