@@ -1,7 +1,7 @@
 // Render coverage for the app-level daemon-offline banner (spec/12 §
 // Daemon-offline UX; spec/15 § Offline / error states). Distinct from the WS
 // OfflineBanner — this one is keyed on host presence, not the WS link, and
-// taps through to Settings → Hosts.
+// taps through to Settings → Machines.
 
 import React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
@@ -31,12 +31,12 @@ describe('HostOfflineBanner — quiet states render nothing', () => {
 });
 
 describe('HostOfflineBanner — host offline', () => {
-  it('renders the self-explaining banner text and taps through to Settings → Hosts', () => {
+  it('renders the self-explaining banner text and taps through to Settings → Machines', () => {
     usePresenceStore.setState({ daemon: 'offline' });
     const r = renderRN(<HostOfflineBanner />);
     const banner = findHost(r.root, byTestId('daemon-offline-banner'));
     expect(banner.props.accessibilityLabel).toBe(
-      'Host offline — open Settings to see the host status',
+      'Machine offline — open Settings to see the machine status',
     );
     banner.props.onPress();
     expect(routerMock.push).toHaveBeenCalledWith('/(tabs)/settings');
