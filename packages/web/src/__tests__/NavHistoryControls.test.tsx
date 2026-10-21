@@ -137,6 +137,25 @@ describe('NavHistoryControls', () => {
     expect(back()).not.toBeDisabled();
   });
 
+  it('leaves ⌘←/⌘→ alone in contenteditable and terminal widgets, and with ctrl/alt/shift', () => {
+    render(
+      <>
+        <Harness />
+        <div data-testid="rich" contentEditable="plaintext-only" />
+        <div className="xterm">
+          <span data-testid="term" />
+        </div>
+      </>,
+    );
+    fireEvent.click(screen.getByText('go b'));
+    fireEvent.keyDown(screen.getByTestId('rich'), { key: 'ArrowLeft', metaKey: true });
+    fireEvent.keyDown(screen.getByTestId('term'), { key: 'ArrowLeft', metaKey: true });
+    fireEvent.keyDown(window, { key: 'ArrowLeft', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'ArrowLeft', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: 'ArrowLeft', metaKey: true, altKey: true });
+    expect(current()).toBe('/chats/b');
+  });
+
   it('keeps history across routes, each of which mounts its own controls (Settings → Back)', () => {
     render(
       <MemoryRouter initialEntries={['/chats/a']}>

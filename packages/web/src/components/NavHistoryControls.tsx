@@ -21,6 +21,11 @@ const ICON = 16;
 // The stack is module-level, not per-instance: every route renders its own
 // NavHistoryControls, so an instance-owned stack was thrown away on each route
 // change and Back from Settings had nowhere to go.
+// Anywhere ⌘←/⌘→ already mean something to the OS or the widget: text fields,
+// rich-text editors and the terminal.
+const TEXT_EDITING_SELECTOR =
+  'input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .xterm';
+
 const navHistory: { stack: string[]; index: number } = { stack: [], index: -1 };
 
 /** Forget all visited locations (tests). */
@@ -97,10 +102,10 @@ export function NavHistoryControls(): JSX.Element {
   // them would make it impossible to jump within a line of composer text.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.(TEXT_EDITING_SELECTOR)) return;
       e.preventDefault();
       if (e.key === 'ArrowLeft') goBack();
       else goForward();
