@@ -1,4 +1,4 @@
-// openPadBesideChat — open a Pad in the pane directly to the left of its owning
+// openPadBesideChat — open a Pad in the pane directly to the right of its owning
 // chat (spec/14 § Pads — "A Pad opens beside its chat"), so the user edits the design
 // with the conversation that will act on it in view. The chat is opened first if
 // it is not already in the layout; a Pad that is already open is only focused.
@@ -21,7 +21,7 @@ export function openPadBesideChat(padId: string, chatId: string): void {
   if (chat) {
     useLayoutStore
       .getState()
-      .openTab(padTab, { paneId: chat.pane.id, placement: 'split', edge: 'left' });
+      .openTab(padTab, { paneId: chat.pane.id, placement: 'split', edge: 'right' });
   } else {
     useLayoutStore.getState().openTab(padTab);
   }

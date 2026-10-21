@@ -70,15 +70,15 @@ describe('layout: Pad tabs', () => {
 });
 
 describe('openPadBesideChat', () => {
-  it('opens the chat if needed and puts the pad in its own pane to the left', () => {
+  it('opens the chat if needed and puts the pad in its own pane to the right', () => {
     openPadBesideChat('care', 'c1');
     const { root } = useLayoutStore.getState();
     expect(root.type).toBe('split');
     if (root.type !== 'split') return;
     expect(root.direction).toBe('row');
     const [left, right] = root.children.map((c) => c.pane);
-    expect(left?.type === 'leaf' && left.tabs[0]?.id).toBe('page:pad:care');
-    expect(right?.type === 'leaf' && right.tabs[0]?.id).toBe('chat:c1');
+    expect(left?.type === 'leaf' && left.tabs[0]?.id).toBe('chat:c1');
+    expect(right?.type === 'leaf' && right.tabs[0]?.id).toBe('page:pad:care');
   });
   it('focuses a pad that is already open instead of opening it twice', () => {
     openPadBesideChat('care', 'c1');
