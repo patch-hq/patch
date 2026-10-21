@@ -37,6 +37,7 @@ import {
   dialog,
   screen,
   shell,
+  systemPreferences,
   autoUpdater as squirrel,
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
@@ -80,8 +81,15 @@ import {
   SystemAudio,
   callingAppsIn,
   helperPath,
+  probeSystemAudio,
   watchMicrophone,
 } from './meeting-audio';
+import {
+  readMeetingPermissions,
+  requestMeetingPermission,
+  type MeetingPermissionDeps,
+  type MeetingPermissionKind,
+} from './meeting-permissions';
 import { watchSpeakers } from './meeting-speakers';
 import {
   buildNotificationExtras,
@@ -1455,8 +1463,33 @@ function setupAutoUpdater(): void {
         if (!sender.isDestroyed()) sender.send('patch:system-audio-failed', { message });
       },
     });
+    meetingPermissionDeps.rememberCallAudio();
     sender.once('destroyed', () => systemAudio.stop());
   });
+  // Meeting mode: where the three macOS permissions stand, and asking for one.
+  // Null off macOS, where there is nothing to set up.
+  const callAudioMark = join(app.getPath('userData'), 'call-audio-allowed');
+  const meetingPermissionDeps: MeetingPermissionDeps = {
+    micStatus: () => systemPreferences.getMediaAccessStatus('microphone'),
+    askMic: () => systemPreferences.askForMediaAccess('microphone'),
+    accessibilityTrusted: (prompt) => systemPreferences.isTrustedAccessibilityClient(prompt),
+    probeCallAudio: () =>
+      probeSystemAudio(
+        helperPath({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          devDir: __dirname,
+        }),
+      ),
+    callAudioKnown: () => existsSync(callAudioMark),
+    rememberCallAudio: () => writeFileSync(callAudioMark, ''),
+  };
+  ipcMain.handle('patch:meeting-permissions', () =>
+    process.platform === 'darwin' ? readMeetingPermissions(meetingPermissionDeps) : null,
+  );
+  ipcMain.handle('patch:meeting-permission:request', (_e, kind: MeetingPermissionKind) =>
+    requestMeetingPermission(kind, meetingPermissionDeps),
+  );
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
   // Meeting mode: who is lit up on the call, read through macOS Accessibility.
   // A failure (e.g. permission not granted) is sent to the renderer to show.

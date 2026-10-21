@@ -14184,6 +14184,97 @@ select.new-chat-account:focus-visible {
   }
 }
 
+/* Meeting permissions popover on the Meeting button (components/MeetingSetup.tsx). */
+.mm-setup-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.mm-setup {
+  position: absolute;
+  left: -12px;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px rgba(40, 30, 15, 0.16);
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--ink);
+  text-align: left;
+}
+.mm-setup::after {
+  content: '';
+  position: absolute;
+  left: 24px;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+.mm-setup-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.mm-setup-head b {
+  flex: 1;
+}
+.mm-setup-x {
+  all: unset;
+  cursor: pointer;
+  color: var(--ink-faint);
+  display: inline-flex;
+  padding: 2px;
+}
+.mm-perm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.mm-perm .n {
+  flex: 1;
+  min-width: 0;
+}
+.mm-perm small {
+  display: block;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.mm-perm small.warn {
+  color: var(--waiting);
+}
+.mm-perm .ok {
+  font-size: var(--text-min);
+  font-weight: 600;
+  color: var(--accent-strong);
+  white-space: nowrap;
+}
+.mm-btn.pri {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.mm-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mm-setup-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 /* ---- Pads (spec/14 § Pads) ---- */
 .pads-flex {
   flex: 1;

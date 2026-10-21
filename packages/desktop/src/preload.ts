@@ -133,6 +133,19 @@ contextBridge.exposeInMainWorld('patch', {
   stopSystemAudio(): void {
     ipcRenderer.send('patch:system-audio:stop');
   },
+  /** Where meeting mode's macOS permissions stand; null off macOS. */
+  getMeetingPermissions(): Promise<Record<
+    'microphone' | 'callAudio' | 'accessibility',
+    'granted' | 'missing' | 'unknown'
+  > | null> {
+    return ipcRenderer.invoke('patch:meeting-permissions');
+  },
+  /** Ask macOS for one of them; rejects with the helper's message when call audio is refused. */
+  requestMeetingPermission(
+    kind: 'microphone' | 'callAudio' | 'accessibility',
+  ): Promise<'granted' | 'missing' | 'unknown'> {
+    return ipcRenderer.invoke('patch:meeting-permission:request', kind);
+  },
   onSystemAudio(cb: (pcm: Uint8Array) => void): () => void {
     const handler = (_: unknown, pcm: Uint8Array): void => cb(pcm);
     ipcRenderer.on('patch:system-audio', handler);

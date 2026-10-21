@@ -56,7 +56,9 @@ import {
   Clock,
   Zap,
 } from 'lucide-react';
-import { endMeeting, startMeeting } from '../lib/meetingControl.js';
+import { endMeeting } from '../lib/meetingControl.js';
+import { beginMeeting, maybeIntroduceMeetings } from '../lib/meetingSetup.js';
+import { MeetingSetupPopover } from './MeetingSetup.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
 import { EffortControl } from './EffortControl.js';
 import { CloseIcon } from './icons.js';
@@ -1050,6 +1052,16 @@ export const Composer = forwardRef(function Composer(
   const noteActive = useVoiceStore((s) => s.note !== null);
   const onCall = useVoiceStore((s) => s.call !== null && s.call.chatId === chatId);
   const inMeeting = useMeetingStore((s) => isMeetingOpen(s.byChat[chatId]));
+  // Once ever: introduce what a meeting needs on this Mac, on the Meeting button.
+  const hasMeetingButton = !edit && (chatId !== 'new' || onStartMeeting !== undefined);
+  useEffect(() => {
+    if (!hasMeetingButton) return;
+    maybeIntroduceMeetings(chatId).catch((err: unknown) =>
+      useUiStore
+        .getState()
+        .pushError(`Could not check meeting permissions: ${(err as Error).message}`),
+    );
+  }, [chatId, hasMeetingButton]);
   // A note that failed or was cancelled hands back the text it lifted out of a
   // composer when it started (voiceStore § composerRestore). Take it back into
   // the input so the user can retry or send it by hand — NO FALLBACK: a note
@@ -2300,24 +2312,27 @@ export const Composer = forwardRef(function Composer(
               {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
               {chatId === 'new' && !onStartMeeting ? null : (
-                <button
-                  type="button"
-                  className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
-                  data-testid="meeting-btn"
-                  aria-pressed={inMeeting}
-                  aria-label={inMeeting ? 'end meeting' : 'meeting'}
-                  title={inMeeting ? 'End meeting' : 'Meeting'}
-                  onClick={() =>
-                    onStartMeeting
-                      ? onStartMeeting()
-                      : inMeeting
-                        ? endMeeting(chatId)
-                        : void startMeeting(chatId)
-                  }
-                  disabled={voiceDisabled && !inMeeting}
-                >
-                  <AudioLines size={ICON_SIZE} aria-hidden />
-                </button>
+                <span className="mm-setup-anchor">
+                  <button
+                    type="button"
+                    className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
+                    data-testid="meeting-btn"
+                    aria-pressed={inMeeting}
+                    aria-label={inMeeting ? 'end meeting' : 'meeting'}
+                    title={inMeeting ? 'End meeting' : 'Meeting'}
+                    onClick={() =>
+                      onStartMeeting
+                        ? onStartMeeting()
+                        : inMeeting
+                          ? endMeeting(chatId)
+                          : void beginMeeting(chatId)
+                    }
+                    disabled={voiceDisabled && !inMeeting}
+                  >
+                    <AudioLines size={ICON_SIZE} aria-hidden />
+                  </button>
+                  <MeetingSetupPopover chatId={chatId} />
+                </span>
               )}
               {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
               chat's next turn will use, last in the utility group so it reads

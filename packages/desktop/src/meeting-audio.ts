@@ -194,6 +194,29 @@ export class SystemAudio {
   }
 }
 
+/**
+ * Runs `patch-audio probe`: resolves when System Audio Recording is allowed for
+ * Patch, rejects with the helper's message when it is not. The first probe is
+ * what makes macOS ask.
+ */
+export function probeSystemAudio(
+  binary: string,
+  spawnFn: Spawn = (cmd, args) => spawn(cmd, args),
+): Promise<void> {
+  const child = spawnFn(binary, ['probe']);
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  return new Promise<void>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('exit', (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `exited (${signal ?? code})`));
+    });
+  });
+}
+
 /** Runs `patch-audio mic-watch`, reporting each change in who has a mic open. */
 export function watchMicrophone(
   binary: string,

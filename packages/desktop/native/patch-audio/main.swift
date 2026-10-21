@@ -6,6 +6,8 @@
 //   patch-audio speakers   one JSON line per change: the text labels in a calling app's
 //                          windows ({"labels": [...]}), read through macOS Accessibility,
 //                          for the shell to pick participants and the active speaker from
+//   patch-audio probe      creates a process tap and removes it again: exit 0 when System
+//                          Audio Recording is allowed. The first run asks the user.
 //
 // `tap` is a Core Audio process tap: audio only, no screen capture, so macOS shows
 // no picker and no screen-sharing indicator. It follows the default output device
@@ -269,11 +271,26 @@ func runSpeakers() -> Never {
     }
 }
 
+// MARK: - probe
+
+/** macOS has no way to ask whether System Audio Recording is allowed without trying. */
+func runProbe() -> Never {
+    let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+    description.uuid = UUID()
+    description.name = "Patch probe"
+    description.isPrivate = true
+    var tapID = AudioObjectID(kAudioObjectUnknown)
+    check(AudioHardwareCreateProcessTap(description, &tapID), "create audio tap (is System Audio Recording allowed for Patch?)")
+    AudioHardwareDestroyProcessTap(tapID)
+    exit(0)
+}
+
 // MARK: - main
 
 switch CommandLine.arguments.dropFirst().first {
 case "tap": runTap()
 case "mic-watch": runMicWatch()
 case "speakers": runSpeakers()
-default: fail("usage: patch-audio tap | mic-watch | speakers")
+case "probe": runProbe()
+default: fail("usage: patch-audio tap | mic-watch | speakers | probe")
 }

@@ -68,6 +68,13 @@ export interface PatchDesktopBridge {
    * predates it.
    */
   startSystemAudio?(): Promise<void>;
+  /**
+   * Where meeting mode's three macOS permissions stand (null off macOS). Call
+   * audio reads `unknown` until it has been tried. Absent on a shell that predates it.
+   */
+  getMeetingPermissions?(): Promise<MeetingPermissions | null>;
+  /** Ask macOS for one; rejects with the helper's message when call audio is refused. */
+  requestMeetingPermission?(kind: MeetingPermissionKind): Promise<MeetingPermissionState>;
   stopSystemAudio?(): void;
   onSystemAudio?(cb: (pcm: Uint8Array) => void): () => void;
   /** The tap stopped without being asked to. */
@@ -265,3 +272,7 @@ export function useDesktopUpdaterState(): DesktopUpdaterState | null {
 
   return state;
 }
+
+export type MeetingPermissionKind = 'microphone' | 'callAudio' | 'accessibility';
+export type MeetingPermissionState = 'granted' | 'missing' | 'unknown';
+export type MeetingPermissions = Record<MeetingPermissionKind, MeetingPermissionState>;
