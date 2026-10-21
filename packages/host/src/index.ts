@@ -6593,7 +6593,19 @@ export async function handleServerEvent(
         return;
       }
       case 'patch.browser_view.watch': {
-        daemon.browserViewWatch(event.chatId, event.tabId, event.watch);
+        daemon.browserViewWatch(event.chatId, event.tabId, event.watch, {
+          ...(event.viewerId !== undefined ? { viewerId: event.viewerId } : {}),
+          ...(event.viewport !== undefined ? { viewport: event.viewport } : {}),
+        });
+        return;
+      }
+      case 'patch.browser_view.input': {
+        // The user's own input: handed straight to the page, never logged.
+        void daemon.browserViewInput(event.chatId, event.tabId, event.input);
+        return;
+      }
+      case 'patch.browser_view.drive': {
+        daemon.browserViewDrive(event.chatId, event.tabId, event.driver);
         return;
       }
       case 'patch.browser_view.stop': {

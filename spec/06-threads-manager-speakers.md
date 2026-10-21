@@ -155,7 +155,7 @@ Before anything irreversible a click or submission could trigger — a payment, 
 
 **Computer use (Settings → Computer use, web and phone).** One row per online machine, polled every 2 s through `GET /api/browser-use` (a read-through of `patch.browser_use.request` `status`). While any pointer-, keyboard- or form-driving tool call is running on a machine, its row becomes a banner — "Patch is using <machine> right now" — with the plain-language action ("Clicking") and a request to keep hands off for a moment, plus a `Stop now` button. Idle with windows left open, the row offers `Close windows`. `Stop` is `POST /api/browser-use/:hostId/stop` (`patch.browser_use.request` `stop`): it closes every browser window on the machine and fails the in-flight tool call with `browser_stopped`, whose message tells the agent not to reopen the browser or retry unless the user asks. A machine that does not answer shows as unchecked, never as idle; stopping an offline machine is a 409.
 
-The user can watch a tab live and take it over with `patch_browser_handoff` (`02-daemon.md` § Browser — Hand-off). There is no "Browsing &lt;site&gt;" status row yet.
+The user can watch any tab live and take it over at any time; while they drive it the agent's calls on that tab wait, and the one that waited fails with `user_was_driving` when they hand it back (`02-daemon.md` § Browser — Watching and stopping). `patch_browser_handoff` is how the agent asks for them (§ Hand-off).
 
 ### Disambiguation: when to use `patch_wake_me` vs `patch_job_*`
 

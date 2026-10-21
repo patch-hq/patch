@@ -88,3 +88,5 @@ export const Minus = icon('Minus');
 export const PackageOpen = icon('PackageOpen');
 export const Pencil = icon('Pencil');
 export const Download = icon('Download');
+export const Play = icon('Play');
+export const RotateCw = icon('RotateCw');

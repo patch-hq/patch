@@ -218,6 +218,7 @@ import { importDocx, exportMarkdownToDocx, exportMarkdownToPdf } from './docConv
 import type {
   AccountStrategy,
   BrowserHandoffInput,
+  BrowserViewInput,
   ChatInputEvent,
   DocExportFormat,
 } from '@patch/wire';
@@ -3708,7 +3709,14 @@ export class Daemon {
       chatId,
       active: st.active,
       ...(st.action ? { action: st.action } : {}),
-      tabs: st.tabs.map(({ tabId, url, handedOff }) => ({ tabId, url, handedOff })),
+      tabs: st.tabs.map(({ tabId, url, handedOff, driver, cursor }) => ({
+        tabId,
+        url,
+        handedOff,
+        ...(driver === 'user' ? { driver } : {}),
+        ...(cursor ? { cursor } : {}),
+      })),
+      ...(st.openedAt !== undefined ? { since: st.openedAt } : {}),
     });
   }
 
@@ -3918,8 +3926,27 @@ export class Daemon {
   }
 
   /** `patch.browser_view.watch` from a surface. */
-  browserViewWatch(chatId: string, tabId: string | undefined, watch: boolean): void {
-    this.browserHandoff_.watch(chatId, tabId, watch);
+  browserViewWatch(
+    chatId: string,
+    tabId: string | undefined,
+    watch: boolean,
+    view: { viewerId?: string; viewport?: { width: number; height: number; scale: number } } = {},
+  ): void {
+    this.browserHandoff_.watch(chatId, tabId, watch, view);
+  }
+
+  /** `patch.browser_view.input` from a surface: the user's own input, never logged. */
+  browserViewInput(chatId: string, tabId: string, input: BrowserViewInput): Promise<void> {
+    return this.browserHandoff_.viewInput(chatId, tabId, input);
+  }
+
+  /** `patch.browser_view.drive` from a surface: Take over / Hand back. */
+  browserViewDrive(chatId: string, tabId: string, driver: 'agent' | 'user'): void {
+    try {
+      this.browserHandoff_.drive(chatId, tabId, driver);
+    } catch (err) {
+      this.opts.logger.warn({ chatId, tabId, err }, 'browser view: drive failed');
+    }
   }
 
   /** `patch.browser_handoff.input` from a surface. */

@@ -70,6 +70,8 @@ import {
   TabNotFoundError,
   type BrowserProfile,
   TabInHandoffError,
+  UserDrivingError,
+  UserHandedBackError,
 } from './browser.js';
 import { RateLimiter } from './rate-limit.js';
 import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cascade.js';
@@ -752,7 +754,11 @@ function sendBrowserError(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof TabNotFoundError || err instanceof RefNotFoundError) {
     return reply.code(404).send({ error: err.code, message: err.message });
   }
-  if (err instanceof TabInHandoffError) {
+  if (
+    err instanceof TabInHandoffError ||
+    err instanceof UserDrivingError ||
+    err instanceof UserHandedBackError
+  ) {
     return reply.code(409).send({ error: err.code, message: err.message });
   }
   if (err instanceof BrowserStoppedError) {

@@ -1,0 +1,49 @@
+{
+ "screens": [
+  {
+   "id": "bar",
+   "name": "Mac \u00b7 working in background",
+   "path": "index.html"
+  },
+  {
+   "id": "mini",
+   "name": "Mac \u00b7 mini preview",
+   "path": "mini.html"
+  },
+  {
+   "id": "split",
+   "name": "Mac \u00b7 side by side",
+   "path": "split.html"
+  },
+  {
+   "id": "you",
+   "name": "Mac \u00b7 you\u2019re driving",
+   "path": "you.html"
+  },
+  {
+   "id": "needs",
+   "name": "Mac \u00b7 needs you",
+   "path": "needs.html"
+  },
+  {
+   "id": "p-bar",
+   "name": "Phone \u00b7 working in background",
+   "path": "p-bar.html"
+  },
+  {
+   "id": "p-live",
+   "name": "Phone \u00b7 live in the chat",
+   "path": "p-live.html"
+  },
+  {
+   "id": "p-open",
+   "name": "Phone \u00b7 opened",
+   "path": "p-open.html"
+  },
+  {
+   "id": "p-signin",
+   "name": "Phone \u00b7 sign in",
+   "path": "p-signin.html"
+  }
+ ]
+}

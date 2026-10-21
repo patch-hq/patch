@@ -129,6 +129,8 @@ const DETAIL_LEVEL_EVENT_TYPES = new Set<WireEvent['type']>([
   'patch.browser_view.frame',
   'patch.browser_view.status',
   'patch.browser_handoff.state',
+  'patch.browser_view.clipboard',
+  'patch.browser_view.form',
   // Meeting mode: the whole panel (transcript included) re-sent on every clip.
   // Only a surface watching the chat draws it.
   'meeting.state',
@@ -1491,6 +1493,8 @@ export class WsHub {
       case 'patch.browser_view.stop':
       case 'patch.browser_handoff.input':
       case 'patch.browser_handoff.control':
+      case 'patch.browser_view.input':
+      case 'patch.browser_view.drive':
       case 'meeting.action_request':
       case 'meeting.notes_request':
       case 'meeting.my_notes_request':

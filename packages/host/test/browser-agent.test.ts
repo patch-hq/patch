@@ -695,7 +695,14 @@ describeRealBrowser('agent browser — a full browser for an agent', () => {
       const idle = m.statusForChat('chat-status');
       expect(idle).toMatchObject({ chatId: 'chat-status', active: false });
       expect(idle.tabs).toEqual([
-        { tabId: t, url: `${fx.base}/nav1`, title: '', handedOff: false },
+        {
+          tabId: t,
+          url: `${fx.base}/nav1`,
+          title: '',
+          handedOff: false,
+          driver: 'agent',
+          openedAt: expect.any(Number),
+        },
       ]);
 
       const pending = m.waitFor(t, { text: 'never', timeoutMs: 1500 }).catch(() => undefined);

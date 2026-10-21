@@ -14782,252 +14782,538 @@ select.new-chat-account:focus-visible {
   color: var(--ink-2);
 }
 
-/* ---------- Browser hand-off ---------- */
-/* spec/14 § Browser hand-off. The agent's tab live in the chat; during a
-   hand-off the user clicks and types into it. */
-.browser-handoff-bar {
+/* ---------- Agent browser ---------- */
+/* spec/14 § Browser. The bar in the chat, the floating preview, and the large
+   view (a pane beside the chat, or the whole screen on a phone). One toolbar
+   row over the live page; who has the tab is a chip, not a banner. */
+
+/* Shared atoms */
+.bv-site-tile {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  color: #fff;
+  font-size: var(--text-min);
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.bv-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.bv-icon:hover:not(:disabled) {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.bv-icon:disabled {
+  color: var(--line);
+  cursor: default;
+}
+.bv-more {
+  font-size: 15px;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.bv-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px 0 9px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-min);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bv-chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.bv-chip.is-agent {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.bv-chip.is-agent i {
+  animation: bv-breathe 1.6s ease-in-out infinite;
+}
+.bv-chip.is-user {
+  background: var(--permission-tint);
+  color: var(--permission);
+}
+.bv-chip.is-needs {
+  background: var(--waiting-tint);
+  color: var(--waiting);
+}
+@keyframes bv-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+.bv-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-min);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bv-pill:hover {
+  background: var(--bg-soft);
+}
+.bv-pill.is-dark {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg-elevated);
+}
+.bv-pill.is-dark:hover {
+  background: var(--ink-2);
+}
+.bv-empty {
+  margin: auto;
+  font-size: var(--text-min);
+  color: var(--ink-faint);
+}
+
+/* The bar in the chat */
+.browser-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: var(--paper, var(--bg-elevated));
-  padding: 4px 16px;
-  border-bottom: 1px solid var(--line-soft);
+  gap: 10px;
+  width: calc(100% - 32px);
+  max-width: 760px;
+  min-height: 40px;
+  margin: 6px auto 2px;
+  padding: 0 6px 0 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-min);
 }
-.browser-handoff-status {
+.browser-bar-what {
   flex: 1;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--ink-2);
+  text-align: left;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-min);
-  color: var(--ink-2, inherit);
+  cursor: pointer;
 }
-/* The floating preview: a small live picture the user drags anywhere. */
-.browser-preview {
+.browser-bar-what b {
+  font-weight: 600;
+  color: var(--ink);
+}
+.browser-bar.is-needs .browser-bar-what b {
+  color: var(--waiting);
+}
+.browser-bar-site {
+  flex: none;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.browser-bar-time,
+.browser-mini-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  font-size: var(--text-min);
+}
+.browser-bar-sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--line-soft);
+}
+
+/* The floating preview */
+.browser-mini {
   position: fixed;
   z-index: 90;
   display: flex;
   flex-direction: column;
-  width: 288px;
+  width: 360px;
   overflow: hidden;
-  background: var(--paper, var(--bg-elevated));
+  background: var(--bg-elevated);
   border: 1px solid var(--line-soft);
-  border-radius: var(--radius, 10px);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   cursor: grab;
   touch-action: none;
   user-select: none;
 }
-.browser-preview.is-placing {
+.browser-mini.is-placing {
   visibility: hidden;
-  right: 12px;
-  bottom: 120px;
+  right: 20px;
+  bottom: 132px;
 }
-.browser-preview:active {
+.browser-mini:active {
   cursor: grabbing;
 }
-.browser-preview.is-handoff {
-  border-color: var(--accent, #6b8f52);
-  box-shadow:
-    0 0 0 2px var(--accent-soft, #cad9be),
-    var(--shadow-lg);
+.browser-mini.is-needs {
+  border-color: var(--waiting-tint);
 }
-.browser-preview-head {
+.browser-mini-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 10px;
+  gap: 8px;
+  height: 42px;
+  padding: 0 6px 0 12px;
+  font-size: var(--text-min);
 }
-.browser-preview-title {
-  flex: 1;
+.browser-mini-site {
+  font-weight: 600;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-min);
-  font-weight: 600;
-  color: var(--ink-2);
 }
-.browser-preview-actions {
+.browser-mini-gap {
+  flex: 1;
+}
+.browser-mini-picture {
   display: flex;
-  gap: 2px;
-}
-.browser-preview-actions button,
-.browser-preview-foot button,
-.browser-live-head button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 28px;
-  min-width: 28px;
-  padding: 2px 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-size: var(--text-min);
-  color: var(--ink-2);
+  min-height: 120px;
+  margin: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg-soft);
   cursor: pointer;
 }
-.browser-preview-actions button:hover,
-.browser-live-head button:hover {
-  background: var(--bg-elevated);
-  border-color: var(--line-soft);
-}
-.browser-preview-picture {
-  position: relative;
-  background: var(--bg-soft);
-}
-.browser-preview-frame {
+.browser-mini-frame {
   display: block;
   width: 100%;
   height: auto;
 }
-.browser-preview-cue {
-  position: absolute;
-  left: 50%;
-  bottom: 8px;
-  transform: translateX(-50%);
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  font-size: var(--text-min);
-  white-space: nowrap;
-  pointer-events: none;
-}
-.browser-preview-foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px;
-}
-.browser-handoff-done,
-.browser-live-head .browser-handoff-done,
-.browser-preview-foot .browser-handoff-done {
-  background: var(--accent-soft, #cad9be);
-  border-color: var(--line-soft);
-}
-
-/* The expanded view: a large live tab. */
-.browser-live-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(20, 16, 10, 0.45);
-}
-.browser-live {
-  display: flex;
-  flex-direction: column;
-  width: min(1400px, 100%);
-  height: min(940px, 100%);
-  overflow: hidden;
-  background: var(--paper, var(--bg-elevated));
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius, 10px);
-  box-shadow: var(--shadow-lg);
-}
-.browser-live-head {
+.browser-mini-foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 8px 8px 8px 12px;
 }
-.browser-live-heading {
+.browser-mini-line {
   flex: 1;
   min-width: 0;
-}
-.browser-live-title {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-min);
-  font-weight: 600;
-  color: var(--ink-2);
-}
-.browser-live-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.browser-live-viewonly {
   font-size: var(--text-min);
   color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.browser-live-stage {
+
+/* The large view */
+.bv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-elevated);
+}
+.bv-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.bv-nav {
+  display: flex;
+}
+.bv-address {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: var(--bg-soft);
+  color: var(--ink-faint);
+}
+.bv-address input,
+.bv-address-text {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-min);
+  color: var(--ink);
+  outline: none;
+}
+.bv-address-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: text;
+}
+.bv-address-site {
+  color: var(--ink-2);
+}
+.bv-address-path {
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bv-stage {
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
+  overflow: hidden;
   background: var(--bg-soft);
 }
-.browser-live-picture {
+.bv-picture {
   position: relative;
-  overflow: hidden;
+  flex: none;
+  background: #fff;
 }
-.browser-live-frame {
+.bv-frame {
   display: block;
   width: 100%;
   height: 100%;
-  cursor: default;
-  touch-action: manipulation;
+  user-select: none;
 }
-.browser-live-ripple {
+.bv-surface {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+.bv-surface.is-live {
+  cursor: default;
+}
+.bv-agent-cursor {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  pointer-events: none;
+  transition:
+    left 0.35s cubic-bezier(0.2, 0.7, 0.2, 1),
+    top 0.35s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.bv-agent-cursor svg {
+  width: 22px;
+  height: 22px;
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+.bv-agent-cursor span {
+  margin: 16px 0 0 -4px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--text-min);
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+}
+.bv-ripple {
   position: absolute;
   width: 28px;
   height: 28px;
   margin: -14px 0 0 -14px;
+  border: 2px solid var(--accent);
   border-radius: 50%;
-  background: var(--accent, #6b8f52);
-  opacity: 0.45;
   pointer-events: none;
-  animation: browser-live-ripple 0.45s ease-out forwards;
+  animation: bv-ripple 0.45s ease-out forwards;
 }
-@keyframes browser-live-ripple {
+@keyframes bv-ripple {
+  from {
+    opacity: 0.8;
+    transform: scale(0.4);
+  }
   to {
-    transform: scale(1.8);
     opacity: 0;
+    transform: scale(1.6);
   }
 }
-@media (max-width: 640px) {
-  .browser-preview {
-    width: 184px;
-  }
-  .browser-live-backdrop {
-    padding: 0;
-  }
-  .browser-live {
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
-  }
-}
-.browser-handoff-keys {
+.bv-keys {
   position: absolute;
   left: 0;
-  top: 0;
+  bottom: 0;
   width: 1px;
   height: 1px;
   opacity: 0;
-  pointer-events: none;
+  border: 0;
+  padding: 0;
 }
-.browser-handoff-url,
-.browser-handoff-empty {
-  margin: 0;
+
+/* The whole screen, on a phone */
+.bv-screen-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: var(--bg-elevated);
+}
+.bv-screen .bv-toolbar {
+  height: 52px;
+  padding: 0 6px 0 4px;
+}
+.bv-screen .bv-address {
+  justify-content: flex-start;
+  background: transparent;
+}
+.bv-screen .bv-address-text {
+  justify-content: flex-start;
+  font-weight: 600;
+}
+.bv-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line-soft);
+}
+.bv-foot-reason {
+  flex: 1;
+  min-width: 0;
   font-size: var(--text-min);
   color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The sign-in card: the page's own form as fields on this screen */
+.bv-signin-wrap {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.18));
+}
+.bv-signin {
+  width: min(420px, 100%);
+  padding: 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.bv-signin-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.bv-signin-top .bv-site-tile {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  line-height: 28px;
+}
+.bv-signin h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.bv-signin-field {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: 12px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg-panel);
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+}
+.bv-signin-field:focus {
+  border-color: var(--ink-3);
+  background: var(--bg-elevated);
+  outline: none;
+}
+.bv-signin-go {
+  width: 100%;
+  height: 44px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  color: var(--bg-elevated);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bv-signin-alt {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+.bv-signin-alt button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.bv-signin-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: var(--text-min);
+  color: var(--ink-faint);
+}
+
+@media (max-width: 640px) {
+  .browser-mini {
+    width: min(320px, calc(100vw - 24px));
+  }
+  .browser-bar {
+    width: calc(100% - 24px);
+  }
+  .browser-bar-site {
+    display: none;
+  }
 }
 .task-attachments {
   flex: none;

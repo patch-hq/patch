@@ -627,7 +627,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_browser_open',
     {
       description:
-        'Open a URL in a REAL browser on this host (Chrome/Chromium, never headless, a normal fingerprint with no automation flags) and return a tabId for the other patch_browser_* tools. `profile` (default "logged-in") picks which cookies it carries: "logged-in" is the ONE persistent profile shared by every chat on this host, so a site logged into once stays logged in; "logged-out" is a throwaway profile with no cookies, for a task that must run signed out. Fails clearly, with no fallback to another browser, if the host has no browser component installed. Use patch_browser_read next to see the page.',
+        'Open a URL in a REAL browser on this host (Chrome/Chromium, never headless, a normal fingerprint with no automation flags) and return a tabId for the other patch_browser_* tools. `profile` (default "logged-in") picks which cookies it carries: "logged-in" is the ONE persistent profile shared by every chat on this host, so a site logged into once stays logged in; "logged-out" is a throwaway profile with no cookies, for a task that must run signed out. Fails clearly, with no fallback to another browser, if the host has no browser component installed. Use patch_browser_read next to see the page. The user can watch any tab live and take it over at any time: while they drive it your patch_browser_* calls on that tab wait, and when they hand it back the call that waited fails with `user_was_driving` — read the page again before acting, because they may have changed it.',
       inputSchema: {
         url: z.string().min(1),
         profile: z.enum(['logged-in', 'logged-out']).optional(),

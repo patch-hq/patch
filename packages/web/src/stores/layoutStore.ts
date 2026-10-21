@@ -20,6 +20,8 @@ export type PageKind = 'jobs' | 'job' | 'settings' | 'files' | 'pads' | 'pad' | 
 export type TabDescriptor =
   | { kind: 'chat'; chatId: string }
   | { kind: 'terminal'; chatId: string }
+  /** The chat's agent browser, large, beside the chat (spec/14 § Browser). */
+  | { kind: 'browser'; chatId: string }
   | { kind: 'file'; chatId: string; path: string }
   | { kind: 'page'; page: 'jobs' }
   | { kind: 'page'; page: 'job'; jobId: string }
@@ -93,6 +95,8 @@ export function tabKey(descriptor: TabDescriptor): string {
       return `chat:${descriptor.chatId}`;
     case 'terminal':
       return `terminal:${descriptor.chatId}`;
+    case 'browser':
+      return `browser:${descriptor.chatId}`;
     case 'file':
       return `file:${descriptor.chatId}:${descriptor.path}`;
     case 'page':
@@ -294,6 +298,7 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
   switch (d['kind']) {
     case 'chat':
     case 'terminal':
+    case 'browser':
       return typeof d['chatId'] === 'string';
     case 'file':
       return typeof d['chatId'] === 'string' && typeof d['path'] === 'string';

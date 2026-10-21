@@ -718,6 +718,10 @@ export class PatchWs {
       useBrowserHandoffStore.getState().applyState(event);
       return;
     }
+    if (event.type === 'patch.browser_view.form') {
+      useBrowserHandoffStore.getState().applyForm(event);
+      return;
+    }
     if (event.type === 'chat.call_request') {
       useVoiceStore.getState().setIncoming({
         callId: event.callId,

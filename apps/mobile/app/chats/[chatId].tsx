@@ -96,6 +96,7 @@ import {
   ManagerSegments,
   type ManagerTab,
 } from '../../src/components/ManagerChats';
+import { BrowserLiveCard } from '../../src/components/browser/BrowserLiveCard';
 import { ChatBars } from '../../src/components/ChatBars';
 import { ChatFindBar } from '../../src/components/ChatFindBar';
 import { findMessageSeqs, stepIndex } from '../../src/lib/chatFind';
@@ -1335,6 +1336,7 @@ function ChatDetailBody(): React.ReactElement {
           </View>
         ) : (
           <>
+            <BrowserLiveCard chatId={chatId} />
             <DelegateStrip chatId={chatId} />
             <Composer key={chatId} chatId={chatId} folder={row?.folder} autoFocus />
           </>

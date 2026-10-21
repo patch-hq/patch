@@ -489,10 +489,39 @@ hands one tab to the user, in the chat, and waits.
   `patch.browser_view.frame` (host → surfaces): a JPEG of the tab each time
   its page paints (Chrome's screencast, so a still page sends one frame and a
   moving one up to 20 a second), its viewport size, its address with the query
-  and fragment removed, and its title. Surfaces renew the watch every 5 s; the host stops streaming a
-  tab not asked for in 15 s, so a vanished surface costs nothing. Frames are
+  and fragment removed, its title, and whether it can go back or forward. A
+  picture is sent as soon as the view opens, so a page that is not moving still
+  shows. Surfaces renew the watch every 5 s; the host stops streaming a tab not
+  asked for in 15 s, so a vanished surface costs nothing. Frames are
   detail-level (only surfaces focused on the chat get them) and carry no `seq`:
-  they never enter history. This alone is the read-only view.
+  they never enter history.
+- **Large view.** Each open view names itself (`viewerId`). A view shown large
+  sends its own size and pixel ratio (`viewport`): the tab takes that size, so
+  a phone gets the site's own narrow layout and the agent sees the same size,
+  and pictures are drawn at that ratio — Chrome's screencast draws at the
+  window's own ratio, so each paint is answered with a screenshot from the
+  session that set it. When no large view renews it the agent's own size comes
+  back. A size the agent sets itself (`patch_browser_viewport`) wins: views stop
+  resizing the tab until they all close. The agent's screenshots are always in
+  CSS pixels, so a view never moves its coordinates.
+- **Using the tab.** The user can work any tab of their chat at any time
+  (`patch.browser_view.input`, host `inputVersion` 2): presses and releases
+  with their button, click count and modifiers (so a drag selects text or
+  drags), the wheel, keys held or pressed (Cmd on a Mac is Ctrl to a browser on
+  any other system), text, back, forward, reload and an address, and Copy,
+  which answers with the selection (`patch.browser_view.clipboard`). They play
+  one at a time in order, a burst of moves collapsing to the newest, and are
+  never logged. Working the page — a press, a key, text, navigation — takes the
+  tab over (`driver: 'user'` in the status); moving the pointer and scrolling
+  do not. Take over and Hand back can also be sent outright
+  (`patch.browser_view.drive`). While the user drives, every agent call on that
+  tab waits; on Hand back the call that waited fails with `user_was_driving`
+  ("read the page again before acting") rather than acting on a page the user
+  may have changed, and a call made later carries the same as a one-time
+  notice. One that waits 10 minutes fails with `user_driving`. A tab nobody is
+  watching any more goes back to the agent. The status also carries where the
+  agent last pointed (`cursor`), so a view draws its cursor, and when the
+  chat's oldest open tab was opened (`since`), for the timer.
 - **Hand-off.** `patch_browser_handoff({ tabId, reason, callbackPort?,
 timeoutSeconds? })` blocks the tool call. The host emits
   `patch.browser_handoff.state` `waiting` with the agent's `reason`, and
@@ -507,6 +536,14 @@ timeoutSeconds? })` blocks the tool call. The host emits
   so does `timeoutSeconds` (default 600), the tab closing, or the OAuth relay
   below. The host then emits `state` `ended` with the `outcome` (`done`,
   `cancelled`, `timeout`, `tab_closed`, `callback`).
+- **Sign-in form.** While a hand-off waits, the host looks for a sign-in form
+  on the page (a visible password or one-time-code field, or an email or
+  username field on a sign-in page) and tells surfaces its fields' labels and
+  kinds (`patch.browser_view.form`), never values, again whenever it changes. A
+  phone shows them as its own fields and sends what the user typed as `fill`:
+  the host puts the values into the page's fields, marks them as the user's
+  (so the agent's reads show `[redacted]`) and submits. The user can always use
+  the page instead.
 - **Share for review.** `patch_browser_handoff({ tabId, reason, share: true })`
   is the non-blocking form, for a page the user should look at rather than act
   for the agent (a local app on a headless host). It returns at once with

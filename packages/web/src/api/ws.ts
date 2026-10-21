@@ -873,6 +873,25 @@ export class PatchWs {
       useBrowserHandoffStore.getState().applyState(event);
       return;
     }
+    if (event.type === 'patch.browser_view.form') {
+      useBrowserHandoffStore.getState().applyForm(event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.clipboard') {
+      // The answer to this window's own Copy: only the window the user is in writes the clipboard.
+      if (event.text !== '' && document.hasFocus()) {
+        navigator.clipboard.writeText(event.text).catch((err: unknown) => {
+          useUiStore
+            .getState()
+            .pushError(
+              'Couldn’t copy from the browser',
+              undefined,
+              err instanceof Error ? err.message : String(err),
+            );
+        });
+      }
+      return;
+    }
     if (event.type === 'meeting.state') {
       useMeetingStore.getState().apply(event.chatId, event.meeting);
       return;

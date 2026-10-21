@@ -4208,6 +4208,14 @@ export const PatchBrowserViewFrameEvent = z
     /** Address without query or fragment (they can carry authorization codes). */
     url: z.string(),
     title: z.string(),
+    /**
+     * The host's live-view input version. Absent: only `patch.browser_handoff.input`
+     * during a hand-off. `2`: `patch.browser_view.input` and `.drive` at any time.
+     */
+    inputVersion: z.number().int().positive().optional(),
+    /** Whether the tab can go back / forward, for the view's toolbar. */
+    canGoBack: z.boolean().optional(),
+    canGoForward: z.boolean().optional(),
   })
   .strict();
 export type PatchBrowserViewFrameEvent = z.infer<typeof PatchBrowserViewFrameEvent>;
@@ -4225,6 +4233,26 @@ export const PatchBrowserViewWatchEvent = z
     /** Absent: the chat's most recently opened tab. */
     tabId: z.string().min(1).optional(),
     watch: z.boolean(),
+    /**
+     * One open view on one surface, minted by that view. Lets the host tell a
+     * large view on the phone from a preview on the desktop, so one's renewals
+     * never undo the other's size. Absent: an older surface's single view.
+     */
+    viewerId: z.string().min(1).max(64).optional(),
+    /**
+     * The large view's size, in CSS pixels at the viewer's pixel ratio. Present
+     * only while the tab is shown large: the host lays the page out at that size
+     * and sends frames at full resolution, and puts the agent's own size back
+     * when no large view asks for it. Absent: a preview, sent at the tab's size.
+     */
+    viewport: z
+      .object({
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        scale: z.number().positive().max(4),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type PatchBrowserViewWatchEvent = z.infer<typeof PatchBrowserViewWatchEvent>;
@@ -4249,9 +4277,18 @@ export const PatchBrowserViewStatusEvent = z
           tabId: z.string().min(1),
           url: z.string(),
           handedOff: z.boolean(),
+          /** Who is using the tab: the agent, or the user after Take over. Absent: the agent. */
+          driver: z.enum(['agent', 'user']).optional(),
+          /** Where the agent last pointed, in viewport CSS pixels, and when (ms epoch). */
+          cursor: z
+            .object({ x: z.number(), y: z.number(), at: z.number().int().nonnegative() })
+            .strict()
+            .optional(),
         })
         .strict(),
     ),
+    /** When the chat's oldest open tab was opened (ms epoch): how long it has been browsing. */
+    since: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type PatchBrowserViewStatusEvent = z.infer<typeof PatchBrowserViewStatusEvent>;
@@ -4349,6 +4386,149 @@ export const PatchBrowserHandoffControlEvent = z
   })
   .strict();
 export type PatchBrowserHandoffControlEvent = z.infer<typeof PatchBrowserHandoffControlEvent>;
+
+/** Held modifier keys on a live-view pointer or key input. */
+export const BrowserViewModifier = z.enum(['Alt', 'Control', 'Meta', 'Shift']);
+export type BrowserViewModifier = z.infer<typeof BrowserViewModifier>;
+
+/**
+ * What the user does in the live view (`patch.browser_view.input`), at viewport
+ * CSS pixels. A superset of {@link BrowserHandoffInput}: presses and releases
+ * so a drag selects text or moves a slider, held keys, the toolbar's
+ * navigation, copying the page's selection out, and filling a sign-in form
+ * from the surface's own fields.
+ */
+export const BrowserViewInput = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('pointer'),
+      action: z.enum(['move', 'down', 'up', 'click', 'double_click', 'right_click']),
+      x: z.number(),
+      y: z.number(),
+      button: z.enum(['left', 'right', 'middle']).optional(),
+      /** 2 for the second press of a double click, 3 for a triple. */
+      clickCount: z.number().int().min(1).max(3).optional(),
+      modifiers: z.array(BrowserViewModifier).max(4).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('scroll'),
+      x: z.number(),
+      y: z.number(),
+      dx: z.number(),
+      dy: z.number(),
+    })
+    .strict(),
+  /** Literal text, typed into whatever has focus. Never logged. */
+  z.object({ kind: z.literal('text'), text: z.string().min(1) }).strict(),
+  /** A key name or chord ("Enter", "Control+a"); `down`/`up` hold and release it. */
+  z
+    .object({
+      kind: z.literal('key'),
+      key: z.string().min(1),
+      action: z.enum(['press', 'down', 'up']).optional(),
+    })
+    .strict(),
+  /** The toolbar: back, forward, reload, or go to an address the user typed. */
+  z
+    .object({
+      kind: z.literal('nav'),
+      action: z.enum(['back', 'forward', 'reload', 'goto']),
+      url: z.string().min(1).max(8192).optional(),
+    })
+    .strict(),
+  /** Copy the page's selection to the user's clipboard (`patch.browser_view.clipboard`). */
+  z.object({ kind: z.literal('copy') }).strict(),
+  /**
+   * The surface's own sign-in card (`patch.browser_view.form`): the values go
+   * into the page's fields and are never logged or shown to the agent.
+   */
+  z
+    .object({
+      kind: z.literal('fill'),
+      formId: z.string().min(1),
+      values: z
+        .array(z.object({ field: z.string().min(1), value: z.string() }).strict())
+        .min(1)
+        .max(8),
+      submit: z.boolean(),
+    })
+    .strict(),
+]);
+export type BrowserViewInput = z.infer<typeof BrowserViewInput>;
+
+/**
+ * Surface → host: the user's input to a chat's tab, at any time — not only in
+ * a hand-off. A press, a key, text or navigation also takes the tab over (the
+ * agent pauses, `driver: 'user'`); moves and scrolls do not. Hosts that say
+ * `inputVersion: 2` on their frames accept it.
+ */
+export const PatchBrowserViewInputEvent = z
+  .object({
+    type: z.literal('patch.browser_view.input'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    input: BrowserViewInput,
+  })
+  .strict();
+export type PatchBrowserViewInputEvent = z.infer<typeof PatchBrowserViewInputEvent>;
+
+/**
+ * Surface → host: Take over (`user`) or Hand back (`agent`). While the user
+ * drives, the agent's browser tools on that tab wait; when it is handed back
+ * the one that waited fails telling the agent to read the page again, since
+ * the user may have changed it.
+ */
+export const PatchBrowserViewDriveEvent = z
+  .object({
+    type: z.literal('patch.browser_view.drive'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    driver: z.enum(['agent', 'user']),
+  })
+  .strict();
+export type PatchBrowserViewDriveEvent = z.infer<typeof PatchBrowserViewDriveEvent>;
+
+/** Host → surfaces: the page's selection, for the surface to put on the user's clipboard. */
+export const PatchBrowserViewClipboardEvent = z
+  .object({
+    type: z.literal('patch.browser_view.clipboard'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    text: z.string(),
+  })
+  .strict();
+export type PatchBrowserViewClipboardEvent = z.infer<typeof PatchBrowserViewClipboardEvent>;
+
+/**
+ * Host → surfaces: the sign-in form on a tab the agent handed to the user, so
+ * a phone can show its own fields instead of a small picture of the page's.
+ * Labels only, never values. `fields: []` means the page has no such form now.
+ */
+export const PatchBrowserViewFormEvent = z
+  .object({
+    type: z.literal('patch.browser_view.form'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    /** Changes whenever the form does (a password step after an email step). */
+    formId: z.string().min(1),
+    /** The site, as the user would name it ("gwr.com"). */
+    site: z.string(),
+    fields: z
+      .array(
+        z
+          .object({
+            field: z.string().min(1),
+            label: z.string(),
+            kind: z.enum(['text', 'email', 'password', 'code']),
+          })
+          .strict(),
+      )
+      .max(8),
+  })
+  .strict();
+export type PatchBrowserViewFormEvent = z.infer<typeof PatchBrowserViewFormEvent>;
 
 export const SurfaceHeartbeatEvent = z
   .object({
@@ -8574,6 +8754,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchBrowserHandoffStateEvent,
   PatchBrowserHandoffInputEvent,
   PatchBrowserHandoffControlEvent,
+  PatchBrowserViewInputEvent,
+  PatchBrowserViewDriveEvent,
+  PatchBrowserViewClipboardEvent,
+  PatchBrowserViewFormEvent,
   SurfaceHeartbeatEvent,
   SurfaceHeartbeatAckEvent,
   SurfaceForegroundedEvent,
@@ -8863,6 +9047,10 @@ export const EVENT_SCHEMAS = {
   'patch.browser_handoff.state': PatchBrowserHandoffStateEvent,
   'patch.browser_handoff.input': PatchBrowserHandoffInputEvent,
   'patch.browser_handoff.control': PatchBrowserHandoffControlEvent,
+  'patch.browser_view.input': PatchBrowserViewInputEvent,
+  'patch.browser_view.drive': PatchBrowserViewDriveEvent,
+  'patch.browser_view.clipboard': PatchBrowserViewClipboardEvent,
+  'patch.browser_view.form': PatchBrowserViewFormEvent,
   'surface.heartbeat': SurfaceHeartbeatEvent,
   'surface.heartbeat_ack': SurfaceHeartbeatAckEvent,
   'surface.foregrounded': SurfaceForegroundedEvent,

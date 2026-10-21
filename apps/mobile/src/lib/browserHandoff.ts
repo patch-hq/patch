@@ -15,38 +15,64 @@ export function toViewport(
   };
 }
 
-/** Does this chat's transcript show the agent using its browser? */
-export function chatUsedBrowser(entries: ReadonlyArray<{ kind: string; tool?: string }>): boolean {
-  return entries.some((e) => e.kind === 'tool_call' && (e.tool ?? '').includes('patch_browser_'));
-}
-
-/**
- * What a chat's browser bar says it is doing: "Browsing example.com", with the
- * running action after it ("Browsing example.com · Clicking"). No tabs is just
- * "Browser".
- */
-export function browsingLabel(
-  status:
-    | { active: boolean; action?: string | undefined; tabs: ReadonlyArray<{ url: string }> }
-    | undefined,
-): string {
-  if (!status || (status.tabs.length === 0 && !status.active)) return 'Browser';
-  let host = '';
-  for (const t of status.tabs) {
-    try {
-      host = new URL(t.url).hostname.replace(/^www\./, '');
-    } catch {
-      host = '';
-    }
-    if (host) break;
-  }
-  const base = host ? `Browsing ${host}` : 'Browsing';
-  return status.active && status.action ? `${base} · ${status.action}` : base;
-}
-
 /** Is there anything for Stop to stop: an action running or a tab open? */
 export function canStopBrowser(
   status: { active: boolean; tabs: ReadonlyArray<unknown> } | undefined,
 ): boolean {
   return Boolean(status && (status.active || status.tabs.length > 0));
+}
+
+/** The site of an address, as a person names it ("gwr.com"); '' when it has none. */
+export function siteOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+/** How long the browser has been in use: "0:42", "12:05", "1:02:33". */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const ss = String(total % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+/** The newest one-line summary of the agent's browser work, as its tool run shows it. */
+export function browsingSummary(
+  entries: ReadonlyArray<{ kind: string; tool?: string; callId?: string }>,
+  summaries: Readonly<Record<string, { callIds: string[]; summary: string | null }>> | undefined,
+): string | null {
+  if (!summaries) return null;
+  const runs = Object.values(summaries);
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.kind !== 'tool_call' || !(e.tool ?? '').includes('patch_browser_') || !e.callId) continue;
+    const run = runs.find((r) => r.callIds.includes(e.callId!));
+    if (run?.summary) return run.summary.replace(/…$/, '').trim();
+  }
+  return null;
+}
+
+/** Who has the tab: the agent, the user after Take over, or the agent waiting for the user. */
+export type DriveState = 'agent' | 'user' | 'needs';
+
+export function driveState(
+  handoff: { tabId: string } | undefined,
+  status: { tabs: ReadonlyArray<{ tabId: string; driver?: 'agent' | 'user' }> } | undefined,
+  tabId: string | undefined,
+): DriveState {
+  if (handoff && (tabId === undefined || handoff.tabId === tabId)) return 'needs';
+  return status?.tabs.find((t) => t.tabId === tabId)?.driver === 'user' ? 'user' : 'agent';
+}
+
+/** The tab a chat's views show: the one handed over, else the newest picture's, else the newest. */
+export function viewedTab(
+  handoff: { tabId: string } | undefined,
+  frame: { tabId: string } | undefined,
+  status: { tabs: ReadonlyArray<{ tabId: string }> } | undefined,
+): string | undefined {
+  return handoff?.tabId ?? frame?.tabId ?? status?.tabs[status.tabs.length - 1]?.tabId;
 }

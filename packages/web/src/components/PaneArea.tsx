@@ -15,6 +15,7 @@ import { api } from '../api/rest.js';
 import {
   ExternalLink,
   Files,
+  Globe,
   FolderTree,
   PanelRightOpen,
   Settings as SettingsIcon,
@@ -48,6 +49,7 @@ import { JobsRoute } from '../routes/JobsRoute.js';
 import { JobEditorRoute } from '../routes/JobEditorRoute.js';
 import { SettingsRoute } from '../routes/SettingsRoute.js';
 import { TerminalPanel } from './TerminalPanel.js';
+import { BrowserView } from './BrowserView.js';
 import { PadsPage } from './PadsPage.js';
 import { PadPane } from './PadPane.js';
 import { NewPadPage } from './NewPadPage.js';
@@ -114,6 +116,8 @@ function tabTitle(
       return chatTitle(d.chatId, chatName);
     case 'terminal':
       return `Terminal — ${chatTitle(d.chatId, chatName)}`;
+    case 'browser':
+      return `Browser — ${chatTitle(d.chatId, chatName)}`;
     case 'file':
       return d.path.includes('/') ? d.path.slice(d.path.lastIndexOf('/') + 1) : d.path;
     case 'page':
@@ -146,6 +150,8 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
       return null;
     case 'terminal':
       return <TerminalSquare size={13} aria-hidden />;
+    case 'browser':
+      return <Globe size={13} aria-hidden />;
     case 'file':
       return <Files size={13} aria-hidden />;
     case 'page':
@@ -404,6 +410,8 @@ function TabContent({
       return (
         <FileEditorTab chatId={d.chatId} path={d.path} tabId={tab.id} focused={focused} ws={ws} />
       );
+    case 'browser':
+      return <BrowserView chatId={d.chatId} layout="pane" />;
     case 'page':
       switch (d.page) {
         case 'jobs':

@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
-import { BrowserManager, TabInHandoffError } from '../src/browser.js';
+import { BrowserManager, TabInHandoffError, UserHandedBackError } from '../src/browser.js';
 import { BrowserHandoff } from '../src/browserHandoff.js';
 import { describeRealBrowser } from './helpers/realBrowser.js';
 
@@ -39,6 +39,22 @@ function startFixture(): Promise<Fixture> {
         res.end(
           '<html><head><title>Signed in as tom@example.com</title></head><body>ok</body></html>',
         );
+        return;
+      }
+      if (url.pathname === '/text') {
+        res.end(`<html><head><title>Words</title></head><body style="margin:0">
+          <p id="t" style="position:absolute;left:20px;top:20px;margin:0;font:20px monospace">hello wonderful world</p>
+        </body></html>`);
+        return;
+      }
+      if (url.pathname === '/login') {
+        res.end(`<html><head><title>Sign in to Example</title></head><body style="margin:0">
+          <form method="GET" action="/submit">
+            <label for="em">Email address</label><input id="em" name="em" type="email" autocomplete="username" />
+            <label for="pw">Password</label><input id="pw" name="pw" type="password" />
+            <button>Sign in</button>
+          </form>
+        </body></html>`);
         return;
       }
       if (url.pathname === '/cb') {
@@ -337,5 +353,145 @@ describeRealBrowser('Browser hand-off — real Chromium', () => {
     expect(message).toContain(`port ${port} could not be reached`);
     expect(message).not.toContain(CODE);
     expect(browser.isHandedOff(tab.tabId)).toBe(false);
+  });
+
+  /** A view stays open the way a surface keeps it open: by renewing its watch. */
+  const renewals: NodeJS.Timeout[] = [];
+  afterEach(() => {
+    for (const t of renewals.splice(0)) clearInterval(t);
+  });
+  function keepWatching(
+    handoff: BrowserHandoff,
+    tabId: string,
+    view: Parameters<BrowserHandoff['watch']>[3],
+  ): () => void {
+    handoff.watch('c1', tabId, true, view);
+    const t = setInterval(() => handoff.watch('c1', tabId, true, view), 100);
+    renewals.push(t);
+    return () => clearInterval(t);
+  }
+
+  /** Width and height of a base64 JPEG, read from its start-of-frame marker. */
+  function jpegSize(b64: string): { width: number; height: number } {
+    const b = Buffer.from(b64, 'base64');
+    for (let i = 2; i < b.length; ) {
+      const marker = b[i + 1]!;
+      const len = b.readUInt16BE(i + 2);
+      if (marker >= 0xc0 && marker <= 0xc3) {
+        return { height: b.readUInt16BE(i + 5), width: b.readUInt16BE(i + 7) };
+      }
+      i += 2 + len;
+    }
+    throw new Error('no frame header in that JPEG');
+  }
+
+  it('pauses the agent while the user drives, and tells it to look again when handed back', async () => {
+    const { browser, handoff, tab } = await setup(':51');
+    keepWatching(handoff, tab.tabId, { viewerId: 'v1' });
+    // Just using the page takes it over: no button needed.
+    await handoff.viewInput('c1', tab.tabId, { kind: 'pointer', action: 'click', x: 60, y: 180 });
+    await handoff.viewInput('c1', tab.tabId, { kind: 'text', text: 'tom-the-username' });
+    expect(browser.statusForChat('c1').tabs[0]!.driver).toBe('user');
+
+    let settled = false;
+    const agentRead = browser.read(tab.tabId).finally(() => (settled = true));
+    agentRead.catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(settled).toBe(false); // the agent waits while the user drives
+
+    handoff.drive('c1', tab.tabId, 'agent');
+    await expect(agentRead).rejects.toBeInstanceOf(UserHandedBackError);
+    expect(browser.statusForChat('c1').tabs[0]!.driver).toBe('agent');
+
+    // Its next look works, and what the user typed is not in it.
+    const read = await browser.read(tab.tabId);
+    expect(JSON.stringify(read)).not.toContain('tom-the-username');
+  });
+
+  it("lays the page out at a large view's size and pixel ratio, then puts the agent's size back", async () => {
+    const { browser, handoff, events, tab } = await setup(':52');
+    const closeLarge = keepWatching(handoff, tab.tabId, {
+      viewerId: 'v1',
+      viewport: { width: 700, height: 500, scale: 2 },
+    });
+    await until(
+      () => framesOf(events).some((f) => f.width === 700 && jpegSize(f.data).width === 1400),
+      'a sharp 700-wide frame',
+    );
+    const frame = framesOf(events).find((f) => f.width === 700)!;
+    expect(frame.height).toBe(500);
+    expect(frame.inputVersion).toBe(2);
+    // The agent's coordinates stay CSS pixels however sharp the view.
+    expect(await browser.viewport(tab.tabId)).toEqual({ width: 700, height: 500 });
+    const shot = Buffer.from((await browser.screenshot(tab.tabId)).data, 'base64');
+    expect([shot.readUInt32BE(16), shot.readUInt32BE(20)]).toEqual([700, 500]);
+
+    // A preview joining does not undo the large view's size.
+    keepWatching(handoff, tab.tabId, { viewerId: 'v2' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await browser.viewport(tab.tabId)).toEqual({ width: 700, height: 500 });
+
+    // The large view closes: the agent's own size and pixel ratio come back.
+    closeLarge();
+    handoff.watch('c1', tab.tabId, false, { viewerId: 'v1' });
+    await until(() => framesOf(events).at(-1)!.width === 1280, 'a frame at the agent size');
+    expect(await browser.viewport(tab.tabId)).toEqual({ width: 1280, height: 720 });
+    const dpr = await browser.evaluate(tab.tabId, 'devicePixelRatio');
+    expect(dpr).toEqual(expect.objectContaining({ value: 1 }));
+  });
+
+  it('drags to select text and copies it to the user', async () => {
+    const { handoff, events, tab, fixture } = await setup(':53');
+    keepWatching(handoff, tab.tabId, { viewerId: 'v1' });
+    await handoff.viewInput('c1', tab.tabId, {
+      kind: 'nav',
+      action: 'goto',
+      url: `${fixture.baseUrl}/text`,
+    });
+    await until(() => framesOf(events).some((f) => f.url.endsWith('/text')), 'the text page');
+    await new Promise((r) => setTimeout(r, 300));
+    await handoff.viewInput('c1', tab.tabId, { kind: 'pointer', action: 'down', x: 21, y: 32 });
+    await handoff.viewInput('c1', tab.tabId, { kind: 'pointer', action: 'move', x: 90, y: 32 });
+    await handoff.viewInput('c1', tab.tabId, { kind: 'pointer', action: 'up', x: 90, y: 32 });
+    await handoff.viewInput('c1', tab.tabId, { kind: 'copy' });
+    const clip = events.find((e) => e.type === 'patch.browser_view.clipboard') as
+      | Extract<WireEvent, { type: 'patch.browser_view.clipboard' }>
+      | undefined;
+    expect(clip?.text.length).toBeGreaterThanOrEqual(3);
+    expect('hello wonderful world'.startsWith(clip!.text)).toBe(true);
+    // Back on the toolbar.
+    await handoff.viewInput('c1', tab.tabId, { kind: 'nav', action: 'back' });
+    await until(() => framesOf(events).at(-1)!.url.endsWith('/'), 'back to the first page');
+    expect(framesOf(events).at(-1)!.canGoForward).toBe(true);
+  });
+
+  it('shows the sign-in form to the surface during a hand-off and fills it from its own fields', async () => {
+    const { browser, handoff, events, tab, fixture } = await setup(':54');
+    await browser.navigate(tab.tabId, 'goto', `${fixture.baseUrl}/login`);
+    const result = handoff.request({ chatId: 'c1', tabId: tab.tabId, reason: 'Sign in' });
+    await until(
+      () => events.some((e) => e.type === 'patch.browser_view.form' && e.fields.length === 2),
+      'the sign-in form',
+    );
+    const form = events.find(
+      (e) => e.type === 'patch.browser_view.form' && e.fields.length === 2,
+    ) as Extract<WireEvent, { type: 'patch.browser_view.form' }>;
+    expect(form.site).toBe('127.0.0.1');
+    expect(form.fields.map((f) => [f.kind, f.label])).toEqual([
+      ['email', 'Email address'],
+      ['password', 'Password'],
+    ]);
+    await handoff.viewInput('c1', tab.tabId, {
+      kind: 'fill',
+      formId: form.formId,
+      values: [
+        { field: form.fields[0]!.field, value: 'tom@example.com' },
+        { field: form.fields[1]!.field, value: PASSWORD },
+      ],
+      submit: true,
+    });
+    await until(() => fixture.submitted.includes(PASSWORD), 'the form to be submitted');
+    handoff.control('c1', 'done', stateOf(events)[0]!.handoffId);
+    expect(JSON.stringify(await result)).not.toContain(PASSWORD);
   });
 });
