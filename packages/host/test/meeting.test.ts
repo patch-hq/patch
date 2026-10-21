@@ -882,8 +882,7 @@ describe('MeetingManager', () => {
     const m = make();
     m.start('c1');
     const m2 = make();
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('node:fs').writeFileSync(join(dir, 'c1.json'), '{not json');
+    writeFileSync(join(dir, 'c1.json'), '{not json');
     expect(() => m2.get('c1')).toThrow();
   });
 });
