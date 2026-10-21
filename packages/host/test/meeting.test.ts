@@ -109,6 +109,23 @@ describe('MeetingManager', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it('keeps transcribing clips while a slow analysis pass is still running', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    let release!: () => void;
+    analyse.mockImplementationOnce(
+      () => new Promise<MeetingAnalysis>((r) => (release = () => r(analysis()))),
+    );
+    const tick = m.tick('c1');
+    await Promise.resolve();
+    transcribe.mockResolvedValueOnce('said during the slow pass');
+    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+    expect(m.get('c1')!.transcript.map((l) => l.text)).toContain('said during the slow pass');
+    release();
+    await tick;
+  });
+
   it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {
     diarise = true;
     const m = make();

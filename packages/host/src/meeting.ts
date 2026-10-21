@@ -218,8 +218,10 @@ interface Runtime {
   lastResearchAt: number;
   /** The pass in flight, so only one runs and tests can wait for it. */
   researching: Promise<void> | undefined;
-  /** Serialises transcription and analysis so lines land in order. */
+  /** Serialises analysis and write-ups. */
   chain: Promise<void>;
+  /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
+  txChain: Promise<void>;
 }
 
 /** Consecutive segments from one voice read as one line. */
@@ -301,6 +303,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
+      txChain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
@@ -354,6 +357,7 @@ export class MeetingManager {
     rt.state.endedAt = t;
     this.disarmTimer(rt);
     this.commit(chatId, rt);
+    await rt.txChain;
     await this.enqueue(rt, async () => {
       await this.analyse(chatId, rt, true);
       await this.writeUp(chatId, rt);
@@ -427,7 +431,7 @@ export class MeetingManager {
       throw new MeetingError(`chat ${chatId}'s meeting has ended`);
     }
     const at = meetingElapsedMs(rt.state, this.now());
-    return this.enqueue(rt, async () => {
+    const next = rt.txChain.then(async () => {
       const speaker = source === 'mic' ? 'you' : 'them';
       const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
       let pieces: { text: string; voice?: number }[];
@@ -475,6 +479,8 @@ export class MeetingManager {
       rt.state.error = null;
       this.commit(chatId, rt);
     });
+    rt.txChain = next.catch(() => undefined);
+    return next;
   }
 
   /** Show `name` for a `them` voice (e.g. the user recognised Them 2 as Priya). */
@@ -852,7 +858,8 @@ export class MeetingManager {
   private async correctLines(chatId: string, rt: Runtime): Promise<void> {
     if (!this.deps.correct) return;
     const from = Math.max(rt.analysedUpTo, rt.correctedUpTo);
-    const lines = rt.state.transcript.slice(from);
+    const upTo = rt.state.transcript.length;
+    const lines = rt.state.transcript.slice(from, upTo);
     if (lines.length === 0) return;
     const out = await this.deps.correct({
       chatId,
@@ -877,7 +884,7 @@ export class MeetingManager {
       }
       l.text = fixed;
     });
-    rt.correctedUpTo = rt.state.transcript.length;
+    rt.correctedUpTo = upTo;
   }
 
   private async analyse(chatId: string, rt: Runtime, final: boolean): Promise<void> {
@@ -890,7 +897,7 @@ export class MeetingManager {
     const upTo = rt.state.transcript.length;
     try {
       await this.correctLines(chatId, rt);
-      const newLines = rt.state.transcript.slice(rt.analysedUpTo);
+      const newLines = rt.state.transcript.slice(rt.analysedUpTo, upTo);
       const raw = await this.deps.analyse({
         chatId,
         previous: { now: rt.state.now, topics: rt.state.topics, actions: rt.state.actions },
@@ -1036,6 +1043,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
+      txChain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
     // A host restart finds the meeting `live` with no audio coming: park it as
