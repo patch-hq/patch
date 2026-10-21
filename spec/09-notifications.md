@@ -171,6 +171,8 @@ A `push` or `desktop` notification carries inline actions so it can be acted on 
 | Pending question (`AskUserQuestion`)                          | Its options as buttons, when there are 3 or fewer and it's a single question with a single-select answer. Otherwise, Reply — the typed text becomes the answer. |
 | `patch_notify` with `quickReplies`                            | Each of up to 2 short strings renders as its own button alongside Reply; tapping one sends that exact text as the user's reply (spec/06 § `patch_notify`).      |
 
+Buttons that answer with a fixed text (quick replies, a question's options) open the app as they send, because Android only hands the tap to the app's code while that code is running — with the app killed, a button that did not open it would do nothing. Reply and Deny send without opening it.
+
 Tapping the notification's body (rather than one of these actions) still opens the source chat, or follows a `deepLink`, exactly as without actions.
 
 A reply/action that can't be delivered (offline, not authenticated) keeps the notification up, reading "Not sent — tap to retry", and keeps whatever was typed — tapping it again retries the same thing. Nothing an action tries to send is ever silently dropped. A delivered reply/action updates the notification to read "Sent".
