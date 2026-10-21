@@ -341,6 +341,21 @@ describe('sortAttentionQueue', () => {
   });
 });
 
+describe('groupChats — hosts', () => {
+  it('keeps the same path on two hosts as two projects', () => {
+    const all = [
+      row({ chatId: 'a', folder: '~/p', hostId: 'd1', lastUpdated: 300 }),
+      row({ chatId: 'b', folder: '~/p', hostId: 'd2', lastUpdated: 200 }),
+    ];
+    const folders = groupChats(all).folders;
+    expect(folders.map((f) => [f.hostId, f.rows.map((r) => r.chatId)])).toEqual([
+      ['d1', ['a']],
+      ['d2', ['b']],
+    ]);
+    expect(new Set(folders.map((f) => f.key)).size).toBe(2);
+  });
+});
+
 // chatsInProject — the set behind "archive all in project" (spec/14 § Sidebar →
 // Folders). The point of it is that it is WIDER than grouped.folders[].rows.
 describe('chatsInProject', () => {
@@ -358,7 +373,11 @@ describe('chatsInProject', () => {
     // The drawn rows are only ever the plain one...
     expect(groupChats(all).folders[0]?.rows.map((c) => c.chatId)).toEqual(['plain']);
     // ...while archive-all reaches all three.
-    expect(chatsInProject(all, '~/p').map((c) => c.chatId)).toEqual(['plain', 'pin', 'snoozed']);
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual([
+      'plain',
+      'pin',
+      'snoozed',
+    ]);
   });
 
   it('leaves already-archived and soft-deleted chats alone', () => {
@@ -367,7 +386,15 @@ describe('chatsInProject', () => {
       row({ chatId: 'gone', folder: '~/p', status: 'archived', lastUpdated: 200 }),
       row({ chatId: 'binned', folder: '~/p', status: 'deleted', lastUpdated: 100 }),
     ];
-    expect(chatsInProject(all, '~/p').map((c) => c.chatId)).toEqual(['active']);
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual(['active']);
+  });
+
+  it('never reaches into the same path on another host', () => {
+    const all = [
+      row({ chatId: 'here', folder: '~/p', hostId: 'd1', lastUpdated: 300 }),
+      row({ chatId: 'there', folder: '~/p', hostId: 'd2', lastUpdated: 200 }),
+    ];
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual(['here']);
   });
 
   it('never includes special threads, and never reaches into another folder', () => {
@@ -377,7 +404,7 @@ describe('chatsInProject', () => {
       row({ chatId: SPECIAL_THREAD_IDS.speakers, folder: '~/p', lastUpdated: 120 }),
       row({ chatId: 'elsewhere', folder: '~/other', lastUpdated: 100 }),
     ];
-    expect(chatsInProject(all, '~/p').map((c) => c.chatId)).toEqual(['mine']);
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual(['mine']);
   });
 });
 

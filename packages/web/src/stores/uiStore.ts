@@ -578,7 +578,7 @@ const TOAST_TTL_MS = 6000;
 /** What the Snooze sheet is open for (spec/14 § Snooze sheet). */
 export type SnoozeSheetTarget =
   | { kind: 'chat'; chatId: string }
-  | { kind: 'project'; folder: string; name: string }
+  | { kind: 'project'; folder: string; hostId: string; name: string }
   | { kind: 'chats'; chatIds: string[] };
 
 interface UiState {

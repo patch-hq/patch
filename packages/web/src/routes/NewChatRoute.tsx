@@ -182,11 +182,16 @@ export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const [searchParams] = useSearchParams();
   const draftIdParam = searchParams.get('draft');
   const folderParam = searchParams.get('folder');
+  // The project header's + names the host as well as the path: the same path on
+  // two hosts is two directories (spec/04 § Spawn).
+  const hostParam = searchParams.get('host');
 
   const [draftId, setDraftId] = useState<string>(() => {
     const st = useDraftStore.getState();
     if (draftIdParam && st.drafts[draftIdParam]) return draftIdParam;
-    return st.create(folderParam ?? undefined);
+    const id = st.create(folderParam ?? undefined);
+    if (hostParam) st.update(id, { hostId: hostParam });
+    return id;
   });
   // The URL naming a DIFFERENT existing draft is the sidebar switching drafts —
   // adopt it (which re-keys, and so remounts, the panel).

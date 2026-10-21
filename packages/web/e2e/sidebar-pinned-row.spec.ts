@@ -169,9 +169,11 @@ test.describe('pinned sidebar row', () => {
     expect(gap).toBeGreaterThanOrEqual(0);
     expect(gap).toBeLessThanOrEqual(9);
 
-    // The name is the row's dominant track, not a minority of it.
+    // The name is the row's dominant track, not a minority of it. The pin glyph
+    // beside the time takes ~15px of the slot, so the bar is 45%; held-open tool
+    // chips (the bug this guards) left the name near 36%.
     const rowBox = (await row.boundingBox())!;
-    expect(nameBox.width / rowBox.width).toBeGreaterThan(0.5);
+    expect(nameBox.width / rowBox.width).toBeGreaterThan(0.45);
   });
 
   test('the Manager row still keeps its tools open at rest', async ({ page }) => {

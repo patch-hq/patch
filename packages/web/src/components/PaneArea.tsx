@@ -37,7 +37,7 @@ import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { StatusBadge } from './StatusBadge.js';
-import { deriveBadge } from '../stores/chatStore.js';
+import { useChatBadge } from './ChatStatusBadge.js';
 import { openTabInNewWindow } from '../lib/newWindow.js';
 import { CloseIcon } from './icons.js';
 import { shortcutTitle } from '../lib/shortcuts.js';
@@ -597,7 +597,8 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
     queryFn: () => api.listJobs() as Promise<{ jobs: { id: string; name: string }[] }>,
     enabled: isJob,
   });
-  const badge = tab.descriptor.kind === 'chat' && row ? deriveBadge(row) : null;
+  const chatBadge = useChatBadge(row);
+  const badge = tab.descriptor.kind === 'chat' ? chatBadge : null;
   const padId =
     tab.descriptor.kind === 'page' && tab.descriptor.page === 'pad' ? tab.descriptor.padId : null;
   const { data: pad } = useQuery({

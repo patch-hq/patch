@@ -7,12 +7,12 @@
 import { useMemo, type JSX } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronRight, Compass } from 'lucide-react';
-import { deriveBadge, useChatStore } from '../stores/chatStore.js';
+import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { groupChats } from '../lib/chatGroups.js';
 import type { ChatRow } from '../stores/types.js';
-import { StatusBadge } from './StatusBadge.js';
+import { ChatStatusBadge } from './ChatStatusBadge.js';
 
 export function MiniSidebar(): JSX.Element {
   const chats = useChatStore((s) => s.chats);
@@ -65,7 +65,7 @@ export function MiniSidebar(): JSX.Element {
                 {row === grouped.manager ? (
                   <Compass size={16} aria-hidden />
                 ) : (
-                  <StatusBadge badge={deriveBadge(row)} pendingWake={row.pendingWake} />
+                  <ChatStatusBadge row={row} />
                 )}
               </Link>
             ))}

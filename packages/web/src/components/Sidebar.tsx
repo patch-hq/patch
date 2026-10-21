@@ -115,7 +115,7 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu
 import { DevSourceBadge } from './DevSourceBadge.js';
 import { NotificationBell } from './NotificationBell.js';
 import { JobAlerts } from './JobAlerts.js';
-import { useChatHasUnread } from '../stores/notificationsStore.js';
+import { useChatBadge } from './ChatStatusBadge.js';
 import { shortcutLabel, shortcutTitle } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
 import { failed } from '../lib/errorCopy.js';
@@ -144,7 +144,7 @@ function lifecycleTitle(label: string, count: number | null, chord?: string): st
 // mobile's `useSettledPreview` (apps/mobile/src/components/ChatRow.tsx) for
 // the analogous reconnect-replay flicker on message previews.
 function useSettledBadge(row: ChatRow): DisplayBadge {
-  const target = deriveBadge(row);
+  const target = useChatBadge(row)!;
   const [shown, setShown] = useState(target);
   useEffect(() => {
     if (target === shown) return;
@@ -284,9 +284,9 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
             ...grouped,
             pinned: grouped.pinned.filter((c) => matchesStateFilter(c, stateFilter)),
             folders: grouped.folders
-              .map(({ folder, rows }) => ({
-                folder,
-                rows: rows.filter((c) => matchesStateFilter(c, stateFilter)),
+              .map((g) => ({
+                ...g,
+                rows: g.rows.filter((c) => matchesStateFilter(c, stateFilter)),
               }))
               .filter((f) => f.rows.length > 0),
           };
@@ -294,9 +294,9 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
     const matches = (c: ChatRow): boolean => needsAttention(c) || c.chatId === heldChatId;
     const pinned = sortAttentionQueue(stateFiltered.pinned.filter(matches));
     const folders = stateFiltered.folders
-      .map(({ folder, rows }) => ({
-        folder,
-        rows: sortAttentionQueue(rows.filter(matches)),
+      .map((g) => ({
+        ...g,
+        rows: sortAttentionQueue(g.rows.filter(matches)),
       }))
       .filter((f) => f.rows.length > 0);
     return { ...stateFiltered, pinned, folders };
@@ -504,6 +504,16 @@ function RegularSidebar({
 }): JSX.Element {
   const navigate = useNavigate();
   const bumpLifecycleScrollTick = useUiStore((s) => s.bumpLifecycleScrollTick);
+  const presenceHosts = usePresenceStore((s) => s.hosts);
+  const hostNames = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(presenceHosts).flatMap(([id, h]) =>
+          h.host?.hostName ? [[id, h.host.hostName]] : [],
+        ),
+      ),
+    [presenceHosts],
+  );
   // Global chat search (spec/03 § Chat search): once the trimmed query is long
   // enough to send, the scrolling band shows results instead of the chat list.
   const activeSearch = searchableQuery(searchQuery);
@@ -531,7 +541,7 @@ function RegularSidebar({
         ? []
         : [
             ...view.pinned,
-            ...view.folders.flatMap((f) => (collapsedFolders.includes(f.folder) ? [] : f.rows)),
+            ...view.folders.flatMap((f) => (collapsedFolders.includes(f.key) ? [] : f.rows)),
           ].map((c) => c.chatId),
     [view, collapsedFolders, activeSearch],
   );
@@ -619,17 +629,18 @@ function RegularSidebar({
           those rows are still listed (hiding a chat is worse), just unheaded
           until the folder is known. */}
             {!showSidebarSkeleton &&
-              view.folders.map(({ folder, rows }) => {
-                const collapsed = collapsedFolders.includes(folder);
+              view.folders.map(({ key, hostId, folder, rows }) => {
+                const collapsed = collapsedFolders.includes(key);
+                const projectName = projectLabel(folder, hostId, view.folders, hostNames);
                 const backPill = folderBackPill(rows);
                 return folderBasename(folder) === '' ? (
-                  <section key={folder} className="sb-folder" data-testid="folder-section-unfiled">
+                  <section key={key} className="sb-folder" data-testid="folder-section-unfiled">
                     {rows.map((c) => (
                       <ChatRowView key={c.chatId} row={c} active={activeChatId} />
                     ))}
                   </section>
                 ) : (
-                  <section key={folder} className="sb-folder">
+                  <section key={key} className="sb-folder">
                     {/* Header shows the project NAME (basename); full path on hover.
               Two hover-revealed archive buttons: the first archives the project
               AS LISTED (these rows), the second archives ALL in the project —
@@ -649,15 +660,15 @@ function RegularSidebar({
                         className="folder-head-toggle"
                         data-testid={`folder-collapse-${folder}`}
                         aria-expanded={!collapsed}
-                        aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${folderBasename(folder)}`}
-                        onClick={() => toggleFolderCollapsed(folder)}
+                        aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${projectName}`}
+                        onClick={() => toggleFolderCollapsed(key)}
                       >
                         {collapsed ? (
                           <ChevronRight size={13} aria-hidden className="folder-head-chev" />
                         ) : (
                           <ChevronDown size={13} aria-hidden className="folder-head-chev" />
                         )}
-                        <span className="folder-head-label">{folderBasename(folder)}</span>
+                        <span className="folder-head-label">{projectName}</span>
                       </button>
                       {/* How many rows the fold is hiding — the header is otherwise
                   identical collapsed or open. */}
@@ -677,9 +688,11 @@ function RegularSidebar({
                           className="folder-archive-btn"
                           data-testid={`folder-new-chat-${folder}`}
                           title={`New chat in ${folder}`}
-                          aria-label={`New chat in project ${folderBasename(folder)}`}
+                          aria-label={`New chat in project ${projectName}`}
                           onClick={() =>
-                            navigate(`/chats/new?folder=${encodeURIComponent(folder)}`)
+                            navigate(
+                              `/chats/new?folder=${encodeURIComponent(folder)}&host=${encodeURIComponent(hostId)}`,
+                            )
                           }
                         >
                           <Plus size={13} aria-hidden />
@@ -689,8 +702,8 @@ function RegularSidebar({
                           className="folder-archive-btn"
                           data-testid={`folder-archive-${folder}`}
                           title="Archive listed"
-                          aria-label={`archive project ${folderBasename(folder)}`}
-                          onClick={() => archiveProject(folderBasename(folder), rows, navigate)}
+                          aria-label={`archive project ${projectName}`}
+                          onClick={() => archiveProject(projectName, rows, navigate)}
                         >
                           <Archive size={13} aria-hidden />
                         </button>
@@ -699,14 +712,12 @@ function RegularSidebar({
                           className="folder-archive-btn"
                           data-testid={`folder-archive-all-${folder}`}
                           title="Archive all"
-                          aria-label={`archive all in project ${folderBasename(folder)}`}
-                          onClick={() =>
-                            archiveAllInProject(folderBasename(folder), folder, navigate)
-                          }
+                          aria-label={`archive all in project ${projectName}`}
+                          onClick={() => archiveAllInProject(projectName, folder, hostId, navigate)}
                         >
                           <Boxes size={13} aria-hidden />
                         </button>
-                        <ProjectSnoozeMenu folder={folder} name={folderBasename(folder)} />
+                        <ProjectSnoozeMenu folder={folder} hostId={hostId} name={projectName} />
                       </span>
                     </div>
                     {collapsed
@@ -1816,18 +1827,9 @@ function ChatRowView({
    */
   automations?: boolean;
 }): JSX.Element {
-  const settled = useSettledBadge(row);
-  // spec/09 § Notification log: an unread notification is unread output. It
-  // used to draw its own bell beside the title, next to the status badge and
-  // the pin — three marks in a line on a busy row — when the badge column
-  // already has a state for exactly this fact. Reading the chat clears both,
-  // so they are one signal: a quiet row with an unread entry draws the unread
-  // dot. A stronger state (`working`, `permission`, `errored`) keeps its own.
-  const hasUnreadNotif = useChatHasUnread(row.chatId);
-  const badge: DisplayBadge =
-    hasUnreadNotif && (settled === 'read' || settled === 'background' || settled === 'monitoring')
-      ? 'done'
-      : settled;
+  // Includes the unread-notification lift (spec/09 § Notification log), shared
+  // with every other surface through `useChatBadge`.
+  const badge = useSettledBadge(row);
   const goalMet = row.goal === null && row.lastGoal?.outcome === 'met';
   const hostLabel = useAmbiguousHostLabel(row);
   const navigate = useNavigate();
@@ -2558,6 +2560,22 @@ function formatWhen(ms: number): string {
  * segments with a leading ellipsis so the meaningful tail stays visible; the
  * full path is on the `title` tooltip.
  */
+/**
+ * The project's name in a folder header: its basename, plus the host's name in
+ * brackets when a project on another host shares that basename (spec/04 § Name
+ * — the same rule a chat title follows). A name used on one host carries no host.
+ */
+function projectLabel(
+  folder: string,
+  hostId: string,
+  groups: Array<{ folder: string; hostId: string }>,
+  hostNames: Record<string, string>,
+): string {
+  const base = folderBasename(folder);
+  const ambiguous = groups.some((g) => g.hostId !== hostId && folderBasename(g.folder) === base);
+  return ambiguous ? `${base} (${(hostNames[hostId] ?? hostId).trim()})` : base;
+}
+
 /** Last path segment (the folder's basename) — the folder-head + Recent label. */
 function folderBasename(folder: string): string {
   const segs = folder.split('/').filter(Boolean);
@@ -2787,8 +2805,13 @@ function archiveProject(name: string, rows: ChatRow[], navigate: (to: string) =>
  * rows DRAWN under the header; this moves every chat in the folder, including
  * the pinned and snoozed ones that live in their own sections.
  */
-function archiveAllInProject(name: string, folder: string, navigate: (to: string) => void): void {
-  const rows = chatsInProject(Object.values(useChatStore.getState().chats), folder);
+function archiveAllInProject(
+  name: string,
+  folder: string,
+  hostId: string,
+  navigate: (to: string) => void,
+): void {
+  const rows = chatsInProject(Object.values(useChatStore.getState().chats), folder, hostId);
   if (rows.length === 0) return;
   const ui = useUiStore.getState();
   void ui

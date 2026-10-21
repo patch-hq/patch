@@ -1212,7 +1212,7 @@ describe('Sidebar', () => {
     const btn = screen.getByTestId('folder-new-chat-/home/tom/projects/portfolio');
     expect(btn).toHaveAttribute('aria-label', 'New chat in project portfolio');
     fireEvent.click(btn);
-    expect(seen.at(-1)).toBe('/chats/new?folder=%2Fhome%2Ftom%2Fprojects%2Fportfolio');
+    expect(seen.at(-1)).toBe('/chats/new?folder=%2Fhome%2Ftom%2Fprojects%2Fportfolio&host=d1');
   });
 
   it('archive-project is a no-op when the custom modal is dismissed', async () => {

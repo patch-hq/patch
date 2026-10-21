@@ -8,12 +8,29 @@ import { deriveBadge } from '../stores/chatStore.js';
 import type { ChatRow, FolderRosterEntry } from '../stores/types.js';
 import { isHidden, isSnoozed } from '../stores/types.js';
 
+/**
+ * One project in the sidebar. Paths are scoped to their host (spec/04 § Spawn:
+ * the same string on two hosts is two directories), so the group is the
+ * (host, folder) pair, never the path alone. `key` is that pair as one string,
+ * for React keys and the collapsed-state list.
+ */
+export interface FolderGroup {
+  key: string;
+  hostId: string;
+  folder: string;
+  rows: ChatRow[];
+}
+
+export function folderGroupKey(hostId: string, folder: string): string {
+  return `${hostId}\u0000${folder}`;
+}
+
 export interface Grouped {
   manager: ChatRow | null;
   speakers: ChatRow | null;
   pinned: ChatRow[];
   /** Each project's active rows. Snoozed chats appear only under the Snoozed tab. */
-  folders: Array<{ folder: string; rows: ChatRow[] }>;
+  folders: FolderGroup[];
   archived: ChatRow[];
   /** Soft-deleted chats (spec/04 § Lifecycle → E5). */
   deleted: ChatRow[];
@@ -72,11 +89,12 @@ function isSpecialThread(chatId: string): boolean {
  * chats (nothing to do) and soft-deleted chats (cold storage; archiving them
  * would drag them back out of Deleted).
  */
-export function chatsInProject(all: ChatRow[], folder: string): ChatRow[] {
+export function chatsInProject(all: ChatRow[], folder: string, hostId: string): ChatRow[] {
   return all
     .filter(
       (c) =>
         c.folder === folder &&
+        c.hostId === hostId &&
         !isSpecialThread(c.chatId) &&
         c.status !== 'archived' &&
         c.status !== 'deleted',
@@ -132,9 +150,7 @@ function cmpChats(sort: ChatSort): (a: ChatRow, b: ChatRow) => number {
 }
 
 /** Comparator for two projects: by the newest row (or, for name, the folder's basename). */
-function cmpFolders(
-  sort: ChatSort,
-): (a: { folder: string; rows: ChatRow[] }, b: { folder: string; rows: ChatRow[] }) => number {
+function cmpFolders(sort: ChatSort): (a: FolderGroup, b: FolderGroup) => number {
   const newest = (rows: ChatRow[], key: 'lastUserActivity' | 'lastUpdated'): number =>
     Math.max(...rows.map((r) => r[key]), 0);
   const base = (f: string): string => f.split('/').filter(Boolean).pop() ?? f;
@@ -143,17 +159,20 @@ function cmpFolders(
       case 'last-action':
         return (
           newest(b.rows, 'lastUserActivity') - newest(a.rows, 'lastUserActivity') ||
-          a.folder.localeCompare(b.folder)
+          a.folder.localeCompare(b.folder) ||
+          a.hostId.localeCompare(b.hostId)
         );
       case 'last-update':
         return (
           newest(b.rows, 'lastUpdated') - newest(a.rows, 'lastUpdated') ||
-          a.folder.localeCompare(b.folder)
+          a.folder.localeCompare(b.folder) ||
+          a.hostId.localeCompare(b.hostId)
         );
       case 'name':
         return (
           base(a.folder).localeCompare(base(b.folder), undefined, { sensitivity: 'base' }) ||
-          a.folder.localeCompare(b.folder)
+          a.folder.localeCompare(b.folder) ||
+          a.hostId.localeCompare(b.hostId)
         );
     }
   };
@@ -175,7 +194,7 @@ export function groupChats(
   // spec/04 § Snooze: "snoozed" is derived from the clock, so a snooze that
   // lapses simply stops matching — no event needed to bring the chat back.
   const now = Date.now();
-  const byFolder = new Map<string, ChatRow[]>();
+  const byFolder = new Map<string, FolderGroup>();
   const snoozedFolders = new Set<string>();
   // Folder → most-recent lastUpdated across its non-deleted chats, for the
   // Recent folders list. Special threads never contribute (E2).
@@ -244,9 +263,10 @@ export function groupChats(
       pinned.push(c);
       continue;
     }
-    const list = byFolder.get(c.folder) ?? [];
-    list.push(c);
-    byFolder.set(c.folder, list);
+    const key = folderGroupKey(c.hostId, c.folder);
+    const group = byFolder.get(key);
+    if (group) group.rows.push(c);
+    else byFolder.set(key, { key, hostId: c.hostId, folder: c.folder, rows: [c] });
   }
   // Every sort ends in a deterministic tiebreaker (chatId for chats, folder
   // path for folders). Without it, rows that tie on the primary key fall back
@@ -262,11 +282,10 @@ export function groupChats(
   const folderCmp = cmpFolders(
     ordering.groupSort === 'same-as-chats' ? ordering.chatSort : ordering.groupSort,
   );
-  const folders = Array.from(byFolder.keys())
-    .map((folder) => {
-      const rows = byFolder.get(folder) ?? [];
-      rows.sort(cmpChats(ordering.chatSort));
-      return { folder, rows };
+  const folders = Array.from(byFolder.values())
+    .map((group) => {
+      group.rows.sort(cmpChats(ordering.chatSort));
+      return group;
     })
     .sort(folderCmp);
   archived.sort((a, b) => b.lastUpdated - a.lastUpdated || cmpId(a, b));
@@ -306,7 +325,10 @@ export function groupChats(
     if (!liveFolders.has(folder)) folderRecency.delete(folder);
   }
   // A project whose only chats are snoozed is not listed anywhere but Snoozed.
-  const shownFolders = new Set<string>([...byFolder.keys(), ...snoozedFolders]);
+  const shownFolders = new Set<string>([
+    ...Array.from(byFolder.values(), (g) => g.folder),
+    ...snoozedFolders,
+  ]);
   for (const p of pinned) if (p.folder) shownFolders.add(p.folder);
   const recentFolders = Array.from(folderRecency.entries())
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
