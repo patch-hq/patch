@@ -49,12 +49,6 @@ export interface NotificationRouterDeps {
    * (spec/09 § Snoozed chats): nothing routed for it is delivered or replayed.
    */
   isChatSnoozed?: (chatId: string) => boolean;
-  /**
-   * Told of each notification that reached at least one desktop surface, so it
-   * can be handed to the phone if the user leaves before opening it (spec/09 §
-   * Handing over to the phone).
-   */
-  onDesktopRouted?: (event: NotifyEvent) => void;
   /** Override clock. */
   nowMs?: () => number;
 }
@@ -210,30 +204,7 @@ export class NotificationRouter {
     return channel;
   }
 
-  /**
-   * The handover push (spec/09 § Handing over to the phone): one notification
-   * goes out as the push it would have been, several as one push naming their
-   * chats that opens the chat list. Held back by the Patch app being open on the
-   * phone, as an ordinary push is.
-   */
-  async handOver(entries: { event: NotifyEvent }[], chatNames: string[]): Promise<void> {
-    if (entries.length === 0) return;
-    if (entries.length === 1) {
-      await this.routePush(entries[0]!.event, 'any', { handover: true });
-      return;
-    }
-    const message = `${entries.length} notifications while you were away: ${chatNames.join(', ')}`;
-    await this.routePush({ type: 'notify', chatId: 'handover', channel: 'push', message }, 'any', {
-      handover: true,
-      combined: true,
-    });
-  }
-
-  private async routePush(
-    event: NotifyEvent,
-    suppressOn: 'any' | 'computer',
-    handover?: { handover: true; combined?: true },
-  ): Promise<void> {
+  private async routePush(event: NotifyEvent, suppressOn: 'any' | 'computer'): Promise<void> {
     const account = this.deps.registry.getAccount();
     if (!account) {
       throw new Error('push: no account bootstrapped');
@@ -268,7 +239,6 @@ export class NotificationRouter {
         {
           chatId: event.chatId,
           suppressOn,
-          handover: handover !== undefined,
           computers: this.deps.presence.computers(account.accountId, this.now()),
         },
         'push suppressed: user is at a computer or has Patch open on the phone',
@@ -286,10 +256,7 @@ export class NotificationRouter {
       });
       return;
     }
-    // A combined handover push has no chat: the phone opens the chat list.
-    const data: Record<string, string> = handover?.combined
-      ? { kind: 'handover' }
-      : { chatId: event.chatId };
+    const data: Record<string, string> = { chatId: event.chatId };
     if (event.kind) data['kind'] = event.kind;
     if (event.callId) data['callId'] = event.callId;
     if (event.deepLink) data['deepLink'] = event.deepLink;
@@ -374,8 +341,6 @@ export class NotificationRouter {
       );
     } else {
       this.deps.logger.info({ chatId: event.chatId, surfaces: count }, 'desktop notify routed');
-      // A call ring has its own accept/decline; a silent aside asked for nothing now.
-      if (event.kind !== 'call' && event.priority !== 'silent') this.deps.onDesktopRouted?.(event);
     }
   }
 

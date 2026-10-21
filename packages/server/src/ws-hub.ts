@@ -142,13 +142,6 @@ export interface WsHubDeps {
   sharedSettings?: () => WireEvent;
   registry: Registry;
   presence: PresenceTracker;
-  /**
-   * Told when what a computer's presence rests on may have changed (an input
-   * report, a surface going offline) and when a surface opens a chat, so the
-   * handover to the phone (spec/09 § Handing over to the phone) reacts in
-   * seconds rather than at its next tick.
-   */
-  presenceHandover?: { check(): Promise<unknown>; opened(chatId: string): void };
   hostLink: HostLink;
   /**
    * Server-side mirror of chat activity. On host-link loss the hub queries it
@@ -825,7 +818,6 @@ export class WsHub {
         // as it once did, unroute the window that is still open).
         if (lastForSurface) {
           this.deps.presence.offline(conn.accountId, conn.surfaceId);
-          this.checkHandover();
         }
       } else {
         log.info({}, 'ws close (pre-auth)');
@@ -834,12 +826,6 @@ export class WsHub {
 
     socket.on('error', (err: Error) => {
       log.warn({ err: err.message }, 'ws error');
-    });
-  }
-
-  private checkHandover(): void {
-    this.deps.presenceHandover?.check().catch((err: Error) => {
-      this.deps.logger.error({ err: err.message }, 'handover to phone failed');
     });
   }
 
@@ -1301,7 +1287,6 @@ export class WsHub {
           scope: event.scope,
           ...(event.away ? { away: event.away } : {}),
         });
-        this.checkHandover();
         return;
       }
       case 'surface.foregrounded':
@@ -1313,7 +1298,6 @@ export class WsHub {
       }
       case 'chat.focus_change': {
         this.deps.presence.setFocus(conn.accountId, conn.surfaceId, event.chatId);
-        if (event.chatId !== null) this.deps.presenceHandover?.opened(event.chatId);
         if (event.chatId === null) {
           // Unsubscribe from everything.
           conn.watchedChats.clear();

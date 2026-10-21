@@ -105,7 +105,6 @@ import { HookRunner } from './hooks/runner.js';
 import { registerHookRoutes } from './hooks/routes.js';
 import type { HooksInterface } from './hooks/types.js';
 import { NotificationRouter, type PushBackend } from './notifications/router.js';
-import { PhoneHandover } from './notifications/handover.js';
 import { CallOrchestrator } from './notifications/call-orchestrator.js';
 import { ChatCompletionNotifier } from './notifications/chat-complete.js';
 import { AwaitingPermissionNotifier } from './notifications/awaiting-permission.js';
@@ -686,33 +685,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       const until = chatRegistry.get(chatId)?.snoozedUntil ?? null;
       return until !== null && until > (opts.nowMs ? opts.nowMs() : Date.now());
     },
-    onDesktopRouted: (event) => phoneHandover.record(event),
     ...(speakersRecorder ? { speakersRecorder } : {}),
     ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
   });
-
-  // spec/09 § Handing over to the phone — what was shown on the desktop, sent
-  // to the phone if the user leaves before opening it. `notificationRouter` is
-  // read lazily: it is constructed with a callback into this.
-  const phoneHandover = new PhoneHandover({
-    logger: log.child({ component: 'phone-handover' }),
-    presence,
-    accountId: () => registry.getAccount()?.accountId,
-    chat: (chatId) => {
-      const c = chatRegistry.get(chatId);
-      if (!c) return undefined;
-      const snoozed =
-        c.snoozedUntil !== null && c.snoozedUntil > (opts.nowMs ? opts.nowMs() : Date.now());
-      return {
-        name: c.name ?? c.preview ?? chatId,
-        live: c.status !== 'archived' && c.status !== 'deleted' && !snoozed,
-      };
-    },
-    send: (entries, names) => notificationRouter.handOver(entries, names),
-    ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
-  });
-  phoneHandover.start();
-  app.addHook('onClose', async () => phoneHandover.stop());
 
   // spec/09 § bell — what agents sent, with read state. `wsHub` is backfilled
   // below, so the change broadcast reads it lazily.
@@ -787,7 +762,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ...(accountSettings ? { sharedSettings: () => accountSettings.changedEvent() } : {}),
     registry,
     presence,
-    presenceHandover: phoneHandover,
     hostLink,
     chatRegistry,
     ...(opts.hostOfflineGraceMs !== undefined

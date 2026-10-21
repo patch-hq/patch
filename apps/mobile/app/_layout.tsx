@@ -235,9 +235,6 @@ export default function RootLayout(): React.ReactElement | null {
     if (!action) return;
     if (action.type === 'external') {
       void Linking.openURL(action.url);
-    } else if (action.type === 'chats') {
-      // Handover push (spec/09 § Handing over to the phone) — the chat list.
-      navigateWhenReady('/(tabs)/chats');
     } else if (action.type === 'install') {
       // A build that needs installing: Updates shows the progress, and the
       // download starts at once when the push named the file.

@@ -387,22 +387,12 @@ Implemented in the server (see `01-server.md`). The question is whether the user
 - A computer is active when it reported within the last 45s, did not report `away`, and its `idleMs` is under the away threshold. The threshold is the account setting `Send to my phone after` (`01-server.md` § Settings): 1 minute (the default), 5 minutes, or `Only when I lock`, which never lets idle time alone make a computer inactive. Page-scope evidence uses 5 minutes whenever the setting is 1 minute, because time away from one browser tab is not time away from the machine.
 - `isComputerActive(account)`: any web or desktop surface is active. A terminal surface never reports.
 - Phones still use `surface.heartbeat`, sent every 10s while the app is in the foreground. `isActive(account)` is `isComputerActive` or a phone heartbeat within 30s.
-- Push routing reads one or the other before dispatching: `patch_notify` uses `isActive`, and the notifications the server raises itself use `isComputerActive`. At the computer, a notification is a desktop toast and the phone stays quiet; away from it, it's a push. Urgent follows the same rule.
+- Push routing reads one or the other before dispatching: `patch_notify` uses `isActive`, and the notifications the server raises itself use `isComputerActive`. At the computer, a notification is a desktop toast and the phone stays quiet; away from it, it's a push with its own message and deep link. Urgent follows the same rule. A notification shown on a computer counts as seen: there is no catching up, bundling or second delivery when the user later leaves.
 - Every routing decision is logged with the evidence it rested on (which computer, `away`, or how long idle), and Settings → Hosts & devices shows each computer's current presence: active with the time since input, away and why, or not reporting.
-
-## Handing over to the phone
-
-A notification shown on a computer the user then leaves is not lost. When `isComputerActive` goes from true to false, the server sends one push for the notifications it routed to the desktop in the previous 10 minutes that the user has not yet opened.
-
-- Opened means the user clicked the toast, or opened the notification's source chat on any surface after it was sent.
-- A notification whose chat has since been snoozed, archived or deleted is not handed over.
-- One notification is sent as the push it would have been. Several are sent as one push, `<N> notifications while you were away`, listing the chat names, which opens the chat list.
-- The push is held back by the Patch app being in the foreground on the phone, as an ordinary push is, and a notification is handed over at most once.
-- This is held in the server's memory and does not survive a server restart.
 
 ## Delivery failure
 
-If Expo's push API returns an error, log to `/data/undelivered.jsonl` and surface via `patch doctor`. There is no retry queue. Undelivered and handover pushes follow this as any push does. `push` has no server-side credential to check: Expo's push API takes none, so a server with no push configured is not a state that exists — the FCM V1 credentials that actually reach the device are a one-time upload to the EAS project, made by the app publisher, never read from this server's env.
+If Expo's push API returns an error, log to `/data/undelivered.jsonl` and surface via `patch doctor`. There is no retry queue. Undelivered pushes follow this as any push does. `push` has no server-side credential to check: Expo's push API takes none, so a server with no push configured is not a state that exists — the FCM V1 credentials that actually reach the device are a one-time upload to the EAS project, made by the app publisher, never read from this server's env.
 
 ## Cross-refs
 
