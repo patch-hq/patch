@@ -1471,6 +1471,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           key={draftId}
           ref={composerRef}
           chatId="new"
+          attachmentKey={`new:${draftId}`}
           selectedModel={effectiveModel ?? undefined}
           hostId={pickerHostId}
           folder={folder.trim()}

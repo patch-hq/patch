@@ -255,6 +255,9 @@ function makePending(file: File): PendingAttachment {
 
 export interface ComposerProps {
   chatId: string;
+  /** Owner key for unsent attachments, when `chatId` is shared by several
+   *  composers (every new-chat draft is "new"). Defaults to `chatId`. */
+  attachmentKey?: string;
   /**
    * The host this chat runs on. Credentials and presence are per host (spec/10
    * § Surface in Settings, spec/04 § Spawn), so whether sending is possible is
@@ -462,6 +465,7 @@ function focusIsClaimed(): boolean {
 export const Composer = forwardRef(function Composer(
   {
     chatId,
+    attachmentKey = chatId,
     hostId,
     folder,
     onSend,
@@ -692,11 +696,13 @@ export const Composer = forwardRef(function Composer(
   // Attachments the user has added but not yet sent (spec/14 § Composer). They
   // upload on send; a failed upload surfaces an error and keeps the attachment
   // (NO FALLBACK — never silently dropped).
-  const attachments = useComposerAttachmentStore((s) => s.byChat[chatId] ?? NO_ATTACHMENTS);
+  const attachments = useComposerAttachmentStore((s) => s.byChat[attachmentKey] ?? NO_ATTACHMENTS);
   const setAttachments = (
     fn: PendingAttachment[] | ((cur: PendingAttachment[]) => PendingAttachment[]),
   ): void =>
-    useComposerAttachmentStore.getState().update(chatId, typeof fn === 'function' ? fn : () => fn);
+    useComposerAttachmentStore
+      .getState()
+      .update(attachmentKey, typeof fn === 'function' ? fn : () => fn);
   // A new-chat send with attachments waiting on the chat to be created
   // (`resolveChatId`). Attachment uploads never hold the composer: the message
   // is in the stream, counting them, the moment Send is pressed.
