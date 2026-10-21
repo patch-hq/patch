@@ -142,6 +142,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  FolderOpen,
   GitFork,
   RotateCcw,
   Copy,
@@ -3613,7 +3614,7 @@ function ToolCall({
   // falls through to the ordinary row — no empty frame, no fallback.
   if (entry.tool && toolLabel(entry.tool) === 'view_file' && result) {
     const view = viewFilePayload(result.toolResult);
-    if (view) return <ViewFileCard view={view} />;
+    if (view) return <ViewFileCard view={view} chatId={chatId} />;
   }
 
   // One-line summary naming what the call is doing (spec/14 ## Main chat
@@ -4130,6 +4131,12 @@ interface ViewFileView {
   height?: number | undefined;
   /** A downloadable file's size in bytes. */
   size?: number | undefined;
+  /** A `file`'s inline preview page, when the host could build one. */
+  previewUrl?: string | undefined;
+  /** Why a previewable file has no preview. */
+  previewError?: string | undefined;
+  /** Where the file sits on the host's disk — what open file / open folder act on. */
+  absPath?: string | undefined;
 }
 
 /**
@@ -4179,7 +4186,13 @@ function asViewFile(value: unknown): ViewFileView | null {
   const width = typeof v['width'] === 'number' ? v['width'] : undefined;
   const height = typeof v['height'] === 'number' ? v['height'] : undefined;
   const size = typeof v['size'] === 'number' ? v['size'] : undefined;
-  return { kind, url, name, width, height, size };
+  const previewUrl =
+    typeof v['previewUrl'] === 'string' && v['previewUrl'].startsWith('/api/')
+      ? v['previewUrl']
+      : undefined;
+  const previewError = typeof v['previewError'] === 'string' ? v['previewError'] : undefined;
+  const absPath = typeof v['absPath'] === 'string' ? v['absPath'] : undefined;
+  return { kind, url, name, width, height, size, previewUrl, previewError, absPath };
 }
 
 /**
@@ -4511,14 +4524,47 @@ function DelegateTranscript({
  * An image is shown at a readable size and expands; an HTML file gets a taller
  * frame, since a page needs room to be a page.
  */
-function ViewFileCard({ view }: { view: ViewFileView }): JSX.Element {
+function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const isImage = view.kind === 'image';
+  const chatHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
+  const bridge = getDesktopBridge();
+  const localHostBridge = bridge?.localHost;
+  const openPathBridge = bridge?.openPath;
+  const [localHostId, setLocalHostId] = useState<string | null>(null);
+  useEffect(() => {
+    if (view.kind !== 'file' || localHostBridge === undefined || openPathBridge === undefined)
+      return;
+    let live = true;
+    localHostBridge.status().then(
+      (st) => {
+        if (live) setLocalHostId(st.hostId);
+      },
+      (err: unknown) => console.error('local host status failed', err),
+    );
+    return () => {
+      live = false;
+    };
+  }, [view.kind, localHostBridge, openPathBridge]);
   if (view.kind === 'file') {
+    // Open file / open folder act on the disk the file was written to, so they
+    // are offered only when this Mac's own host owns the chat.
+    const canOpen =
+      view.absPath !== undefined &&
+      openPathBridge !== undefined &&
+      localHostId !== null &&
+      localHostId === chatHostId;
+    const open = (mode: 'file' | 'folder'): void => {
+      setOpenError(null);
+      (openPathBridge as NonNullable<typeof openPathBridge>)(view.absPath as string, mode).catch(
+        (err: unknown) => setOpenError(err instanceof Error ? err.message : String(err)),
+      );
+    };
     return (
       <div className="view-file view-file-file" data-testid="view-file" data-kind="file">
-        <div className="view-file-bar">
+        <div className={`view-file-bar${view.previewUrl ? ' has-preview' : ''}`}>
           <FileText size={14} aria-hidden />
           <span className="view-file-name" data-testid="view-file-filename">
             {view.name}
@@ -4528,16 +4574,72 @@ function ViewFileCard({ view }: { view: ViewFileView }): JSX.Element {
               {formatBytes(view.size)}
             </span>
           ) : null}
+          {canOpen ? (
+            <>
+              <button
+                type="button"
+                className="view-file-download"
+                data-testid="view-file-open-file"
+                aria-label={`Open ${view.name}`}
+                title="Open file"
+                onClick={() => open('file')}
+              >
+                <ExternalLink size={14} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="view-file-download"
+                data-testid="view-file-open-folder"
+                aria-label={`Open folder containing ${view.name}`}
+                title="Open folder"
+                onClick={() => open('folder')}
+              >
+                <FolderOpen size={14} aria-hidden />
+              </button>
+            </>
+          ) : null}
           <a
             className="view-file-download"
             href={view.url}
             download={view.name}
             data-testid="view-file-download"
             aria-label={`Download ${view.name}`}
+            title="Download"
           >
             <Download size={14} aria-hidden />
           </a>
         </div>
+        {openError !== null ? (
+          <div className="view-file-error" data-testid="view-file-open-error" role="alert">
+            {openError}
+          </div>
+        ) : null}
+        {view.previewError !== undefined ? (
+          <div className="view-file-error" data-testid="view-file-preview-error" role="alert">
+            No preview: {view.previewError}
+          </div>
+        ) : null}
+        {view.previewUrl !== undefined ? (
+          <iframe
+            className={`view-file-frame view-file-preview${expanded ? ' expanded' : ''}`}
+            data-testid="view-file-preview"
+            src={view.previewUrl}
+            title={`Preview of ${view.name}`}
+            sandbox="allow-popups allow-popups-to-escape-sandbox"
+            loading="lazy"
+          />
+        ) : null}
+        {view.previewUrl !== undefined ? (
+          <button
+            type="button"
+            className="view-file-more"
+            data-testid="view-file-preview-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        ) : null}
       </div>
     );
   }

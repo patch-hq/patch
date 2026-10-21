@@ -40,7 +40,7 @@ import {
   autoUpdater as squirrel,
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { hostname } from 'node:os';
 import { realpathSync, existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import {
@@ -1209,6 +1209,25 @@ function registerIpc(): void {
     const img = nativeImage.createFromBuffer(Buffer.from(png));
     if (img.isEmpty()) throw new Error('copy-image: bytes are not a decodable image');
     clipboard.writeImage(img);
+  });
+  // A view_file card's "open file" / "open folder": the host reported where the
+  // file sits on disk, and this runs on the machine the host runs on. The
+  // renderer only offers these when this Mac's own host owns the chat. A path
+  // that is not absolute, or that no longer exists, throws back to the card.
+  ipcMain.handle('patch:open-path', async (_e, payload: { path?: unknown; mode?: unknown }) => {
+    const path = payload?.path;
+    const mode = payload?.mode;
+    if (typeof path !== 'string' || !isAbsolute(path)) {
+      throw new Error('open-path: expected an absolute path');
+    }
+    if (mode !== 'file' && mode !== 'folder') throw new Error('open-path: mode is file or folder');
+    if (!existsSync(path)) throw new Error(`open-path: ${path} no longer exists`);
+    if (mode === 'folder') {
+      shell.showItemInFolder(path);
+      return;
+    }
+    const failure = await shell.openPath(path);
+    if (failure !== '') throw new Error(`open-path: ${failure}`);
   });
   // spec/14 § New windows — the renderer's explicit "open in new window"
   // actions (lib/newWindow.ts), never a link the user clicked (those stay on
