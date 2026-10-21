@@ -365,7 +365,7 @@ export function resolveSkillLink(input: {
   // chrome-cdp lives only in `~/.claude/skills` on the host with Chrome) asked
   // about from a folder/host that genuinely doesn't have it — conflating the
   // two made a real "not on this host" read as "this host can't tell me".
-  if (input.paths === undefined) return { reason: 'host does not report skill files' };
+  if (input.paths === undefined) return { reason: 'machine does not report skill files' };
   const file = input.paths[input.skill];
   if (file === undefined) return { reason: 'skill not found on this host' };
   const chat = input.chats.find((c) => c.hostId === input.hostId && c.folder === input.folder);
@@ -1068,7 +1068,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     if (!phrase) return;
     const hostId = form.spawnHostId || defaultHostId(hosts);
     if (!hostId) {
-      setRecurrenceNlError('No host is available to run the translation on yet.');
+      setRecurrenceNlError('No machine is available to run the translation on yet.');
       return;
     }
     setRecurrenceNlTranslating(true);
@@ -1165,7 +1165,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // that would dispatch nowhere. Refuse at save time, where there is someone
     // to tell (spec/08 § Action).
     if (usesSpawnFields && !form.spawnHostId.trim()) {
-      pushError('Choose which host the chat runs on.');
+      pushError('Choose which machine the chat runs on.');
       return;
     }
     // A gate with no host or folder would dispatch nowhere, and the server's own
@@ -1173,7 +1173,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // than as a 400 about a field name (spec/08 § Gate).
     if (form.gateOn && form.gateCommand.trim().length > 0) {
       if (!form.gateHostId.trim()) {
-        pushError('Choose which host the gate command runs on.');
+        pushError('Choose which machine the gate command runs on.');
         return;
       }
       if (!form.gateFolder.trim()) {
@@ -1306,7 +1306,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           ))}
         </select>
         {modelHostId === null ? (
-          <p className="field-hint">Pick a folder first. Models are per host.</p>
+          <p className="field-hint">Pick a folder first. Models are per machine.</p>
         ) : modelCatalog.status === 'error' ? (
           <p className="field-hint" data-testid="job-spawn-model-error">
             Couldn’t load this host’s models: {modelCatalog.error ?? 'unknown error'}
@@ -2159,8 +2159,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     {form.spawnHostId === '' && form.spawnFolder === '' && !folderCustom ? (
                       <option value="" disabled>
                         {folderGroups.length === 0
-                          ? 'No hosts connected'
-                          : 'Select a host and folder…'}
+                          ? 'No machines connected'
+                          : 'Select a machine and folder…'}
                       </option>
                     ) : null}
                     {folderGroups.map((g) => (
@@ -2179,7 +2179,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <p className="field-hint" data-testid="job-spawn-host">
                     {form.spawnHostId
                       ? `Runs on ${folderGroups.find((g) => g.hostId === form.spawnHostId)?.label ?? form.spawnHostId}`
-                      : 'No host chosen. Pick a folder under the machine it lives on.'}
+                      : 'No machine chosen. Pick a folder under the machine it lives on.'}
                   </p>
                   {folderIsAdHoc ? (
                     <input

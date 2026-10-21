@@ -103,7 +103,7 @@ describe('validateForm', () => {
           spawnPrompt: 'go',
         }),
       ),
-    ).toMatch(/which host/i);
+    ).toMatch(/which machine/i);
   });
 
   it('requires a host for an ensure action', () => {
@@ -117,7 +117,7 @@ describe('validateForm', () => {
           spawnPrompt: 'go',
         }),
       ),
-    ).toMatch(/which host/i);
+    ).toMatch(/which machine/i);
   });
 
   it('requires a folder for a spawn action', () => {
@@ -839,7 +839,7 @@ describe('resolveSkillEditTarget', () => {
 
   it('gives a reason when the host answers with no paths at all (an older host)', () => {
     expect(resolveSkillEditTarget({ skill: 'life-coach', paths: undefined, hostId: 'd1' })).toEqual(
-      { reason: 'host does not report skill files' },
+      { reason: 'machine does not report skill files' },
     );
   });
 

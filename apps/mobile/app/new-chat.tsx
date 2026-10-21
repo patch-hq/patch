@@ -6,7 +6,7 @@
 // become (empty transcript above, controls + composer below) rather than a
 // form:
 //
-//   Folder — one pill, `<folder> · <host>`, opening the folder picker sheet
+//   Project — one pill, `<folder> · <machine>`, opening the folder picker sheet
 //            (one search box; picking a folder picks its host too).
 //   Model  — the three most recently used models on that host, plus the pill
 //            that opens the host's full live catalogue.
@@ -247,7 +247,7 @@ export default function NewChat(): React.ReactElement {
   const sendTarget = async (): Promise<string | null> => {
     const pushError = useUiStore.getState().pushError;
     if (hostId === null) {
-      pushError('Choose which host to start the chat on.');
+      pushError('Choose which machine to start the chat on.');
       return null;
     }
     if (folder === null) {
@@ -315,7 +315,29 @@ export default function NewChat(): React.ReactElement {
           contentContainerStyle={{ paddingBottom: space.sm }}
           keyboardShouldPersistTaps="handled"
         >
-          <PickRow label="Folder">
+          {/* The account the chat's turns START on (spec/10 § Backend
+              credentials — preferred account). A preference, not a pin. */}
+          {preferable.length > 1 ? (
+            <PickRow label="Account">
+              <Chip
+                testID="new-chat-account-strategy"
+                label="By strategy"
+                selected={preferredAccountId === null}
+                onPress={() => setPreferredAccountId(null)}
+              />
+              {preferable.map((a) => (
+                <Chip
+                  key={a.id}
+                  testID={`new-chat-account-${a.id}`}
+                  label={a.label}
+                  selected={preferredAccountId === a.id}
+                  onPress={() => setPreferredAccountId(a.id)}
+                />
+              ))}
+            </PickRow>
+          ) : null}
+
+          <PickRow label="Project">
             <Chip
               testID="new-chat-folder-pill"
               label={
@@ -351,34 +373,12 @@ export default function NewChat(): React.ReactElement {
             />
           </PickRow>
 
-          {/* The account the chat's turns START on (spec/10 § Backend
-              credentials — preferred account). A preference, not a pin. */}
-          {preferable.length > 1 ? (
-            <PickRow label="Account">
-              <Chip
-                testID="new-chat-account-strategy"
-                label="By strategy"
-                selected={preferredAccountId === null}
-                onPress={() => setPreferredAccountId(null)}
-              />
-              {preferable.map((a) => (
-                <Chip
-                  key={a.id}
-                  testID={`new-chat-account-${a.id}`}
-                  label={a.label}
-                  selected={preferredAccountId === a.id}
-                  onPress={() => setPreferredAccountId(a.id)}
-                />
-              ))}
-            </PickRow>
-          ) : null}
-
-          <AccountUsageStrip />
-
           <PickRow label="Permissions">
             <Chip
               testID="new-chat-permission-mode"
-              label={effectiveMode === null ? 'Host default' : permissionModeLabel(effectiveMode)}
+              label={
+                effectiveMode === null ? 'Machine default' : permissionModeLabel(effectiveMode)
+              }
               selected={false}
               onPress={() => setModeMenuOpen(true)}
               icon={
@@ -389,6 +389,10 @@ export default function NewChat(): React.ReactElement {
               }
             />
           </PickRow>
+
+          {/* Usage, beneath the rows and apart from them (spec/15 § New chat
+              flow): what each account has left, read-only. */}
+          <AccountUsageStrip />
         </ScrollView>
 
         <Composer

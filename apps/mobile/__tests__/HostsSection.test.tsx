@@ -4,7 +4,7 @@
 // Hosts is a page: Add a host in its header, then one row per machine that
 // opens that machine's own page (HostDetail) — its name, Update,
 // agent backends with Sign in, optional components, Files and Terminal, and
-// Remove this host. Every edit is addressed to that one machine and refused
+// Remove this machine. Every edit is addressed to that one machine and refused
 // up front, naming it, when it cannot hear it.
 
 import React from 'react';
@@ -203,7 +203,7 @@ describe('mobile Settings → Hosts → the list', () => {
 
   it('states plainly when no machine is registered', () => {
     const r = render(<HostsSection />);
-    expect(textOf(findHost(r.root, byTestId('hosts-empty')))).toBe('No hosts yet');
+    expect(textOf(findHost(r.root, byTestId('hosts-empty')))).toBe('No machines yet');
   });
 });
 
@@ -237,7 +237,7 @@ describe('mobile Settings → Hosts → Add a host', () => {
   it('is a page titled Hosts, with the host list under it', () => {
     reportHost('h1', { hostName: 'laptop' });
     const r = render(<HostsPage />);
-    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Hosts');
+    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Machines');
     expect(findHost(r.root, byTestId('host-h1'))).toBeTruthy();
   });
 
@@ -305,8 +305,11 @@ describe('mobile Settings → Hosts → Add a host', () => {
 
   it('each install-command refusal code is said in words', async () => {
     for (const [code, words] of [
-      ['nothing_published', 'No host build has been published yet.'],
-      ['no_build_for_os: macos', 'No host build has been published for that operating system yet.'],
+      ['nothing_published', 'No machine build has been published yet.'],
+      [
+        'no_build_for_os: macos',
+        'No machine build has been published for that operating system yet.',
+      ],
       ['something else', 'something else'],
     ] as const) {
       vi.mocked(api.hostInstallCommand).mockRejectedValueOnce(new Error(code));
@@ -332,7 +335,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   it('an unknown or removed host says it is gone', () => {
     const r = render(<HostDetail hostId="nope" />);
     expect(textOf(findHost(r.root, byTestId('host-detail-gone')))).toBe(
-      'This host is no longer on the account',
+      'This machine is no longer on the account',
     );
     expect(queryHost(r.root, byTestId('host-nope-remove'))).toBeNull();
     // Not having removed it here, it does not navigate away on its own.
@@ -671,7 +674,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     });
   });
 
-  describe('Remove this host', () => {
+  describe('Remove this machine', () => {
     beforeEach(() => {
       reportHost('h1', { hostName: 'laptop' });
       reportHost('h2', { hostName: 'other' });

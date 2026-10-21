@@ -64,11 +64,12 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import { isPlainEnter } from '../lib/submitChord.js';
 
 const HEAD_ICON = 18;
-// How many projects the setup row offers as one-click toggles (spec/14 §8).
-const QUICK_FOLDER_COUNT = 3;
-// How many models the setup row offers as one-click toggles on its own line
-// (spec/14 §8). Same count as the projects — the two rows read as one idea.
-const QUICK_MODEL_COUNT = 3;
+// How many projects the Project row offers as chips (spec/14 §8): the head of
+// the picker's own list, in its fixed order, so the row never reshuffles.
+const QUICK_FOLDER_COUNT = 4;
+// How many models the Model row offers as chips (spec/14 §8): the account
+// default first, then the head of the catalogue. Same count as the projects.
+const QUICK_MODEL_COUNT = 4;
 
 // Error codes that indicate the host rejected a spawn before a real chat was
 // created. These can arrive over WS after a 202 HTTP response when the host
@@ -251,9 +252,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   const [terminalTakesPanel, setTerminalTakesPanel] = useState(false);
 
   // Whether a chat creation is in flight (send, voice-note-starts-a-chat, or a
-  // header action). Declared up here, ahead of `quickFolders`/`quickModels`
-  // below, because their order-freeze reads it — moved out of its old spot
-  // next to `createChatInFolder` so that read isn't a temporal-dead-zone bug.
+  // header action).
   const [submitting, setSubmitting] = useState(false);
 
   // The chats this screen is allowed to infer a PROJECT from — every folder it
@@ -399,32 +398,18 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // `folderOptions`.
   const folderOptionLabels = useMemo(() => folderLabels(folderOptions), [folderOptions]);
 
-  // The projects offered as one-click toggles in the setup row (spec/14 §8):
-  // most-recently-used first, topped up from the picker's own list. Reaching a
-  // project through the pop-up costs an open-then-choose round trip, and the
-  // project you were last in is the one this screen is nearly always headed
-  // for. They are drawn from the SAME options the pop-up lists — a shortcut
-  // into it, never a second source — so a project can't be offered here that
-  // the pop-up disowns.
-  const foldersByRecency = useMemo(() => {
-    const newest = new Map<string, number>();
-    for (const c of projectChats) {
-      if (c.hostId !== pickerHostId) continue;
-      const at = newest.get(c.folder);
-      if (at === undefined || c.lastUpdated > at) newest.set(c.folder, c.lastUpdated);
-    }
-    return Array.from(newest.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([f]) => f);
-  }, [projectChats, pickerHostId]);
-  const quickFoldersLive = useMemo(() => {
-    const out: string[] = [];
-    for (const f of [...foldersByRecency, ...folderOptions]) {
-      if (out.length === QUICK_FOLDER_COUNT) break;
-      if (f && !out.includes(f)) out.push(f);
-    }
-    return out;
-  }, [foldersByRecency, folderOptions]);
+  // The projects offered as chips in the Project row (spec/14 §8): the head of
+  // the picker's own list, in the picker's own order — configured project
+  // roots first, then the machine's recent folders. The order is FIXED. It
+  // used to follow chat recency, which reshuffled the row whenever an agent or
+  // a job touched a chat in the background (Tom: "things jump around depending
+  // on what's happening in the background"). They are drawn from the SAME
+  // options the pop-up lists — a shortcut into it, never a second source — so
+  // a project can't be offered here that the pop-up disowns.
+  const quickFolders = useMemo(
+    () => folderOptions.filter((f) => f !== '').slice(0, QUICK_FOLDER_COUNT),
+    [folderOptions],
+  );
 
   // A `?folder=` param (from the sidebar Recent folders shortcut) wins over the
   // most-recently-used default and counts as a user-chosen folder.
@@ -452,7 +437,12 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // The surface holds NO default model id and NO browser-local last-used: that
   // pair is what made a fresh browser send `claude-opus-5` on every spawn and
   // overwrite the machine's real last-used model.
-  const [model, setModel] = useState<string | null>(draftModel ?? lastNewChat?.model ?? null);
+  //
+  // The draft's own choice, else NONE: an omitted model resolves on the host to
+  // the account's default (Settings → Agent → Model for new chats). The last
+  // new chat's model used to seed this too — dropped, because that default
+  // exists to be the default (Tom: "you should actually use the default").
+  const [model, setModel] = useState<string | null>(draftModel ?? null);
   // The shared account the chat starts on, or null to leave it to the strategy.
   const [preferredAccountId, setPreferredAccountId] = useState<string | null>(null);
   useEffect(() => {
@@ -555,74 +545,23 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   const usageSummary = summariseUsage(
     effectiveModel?.startsWith('openai/api/') ? undefined : chosenAccount?.usage,
   );
-  // The models offered as one-click toggles on their own line in the setup row
-  // (spec/14 §8) — the exact shape the projects already have, for the same
-  // reason: the model you last worked in is the one this screen is nearly
-  // always headed for, and reaching it through the pop-up costs an
-  // open-then-choose round trip.
-  //
-  // Recency comes from EXISTING CHATS, not from a browser-local last-used:
-  // each chat carries the model it resolved to at spawn, so the history is
-  // already on the wire. Keeping it there is what stops this row becoming the
-  // surface-local default that used to overwrite a machine's own last-used
-  // model — a toggle only ever sets `model` when the user presses it.
-  //
-  // Job-spawned chats (`jobId !== null`) are excluded from this recency scan
-  // (Todoist: "patch last used should default to last used in a user
-  // initiated chat, not a job"). A job's model is a persistent, deliberate
-  // setting on the job itself (JobEditorRoute), most often left at the
-  // account default rather than hand-picked — so a run of unattended jobs
-  // pushed this row toward whatever they happened to run on, burying the
-  // model the user actually last chose by hand.
+  // The models offered as chips in the Model row (spec/14 §8): the account
+  // default first — marked as such — then the head of the catalogue
+  // (newest-first), in the catalogue's own order. Fixed, like the projects:
+  // this used to follow the models recent chats ran on, and reshuffled with
+  // them. Drawn from the SAME catalogue the pop-up lists — a shortcut into it,
+  // never a second source — so a retired model is offered nowhere.
   const modelCatalog = useModelCatalog();
   const catalogModels = modelCatalog.models;
-  const modelsByRecency = useMemo(() => {
-    const newest = new Map<string, number>();
-    for (const c of projectChats) {
-      if (!c.model || c.jobId !== null) continue;
-      const at = newest.get(c.model);
-      if (at === undefined || c.lastUpdated > at) newest.set(c.model, c.lastUpdated);
-    }
-    return Array.from(newest.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([m]) => m);
-  }, [projectChats]);
-  const quickModelsLive = useMemo(() => {
-    // Drawn from the SAME catalogue the pop-up lists — a shortcut into it,
-    // never a second source. A model retired since the chat that used it
-    // spawned is no longer offered anywhere, so it is not offered here either.
-    const offered = new Set(catalogModels.map((m) => m.id));
-    const out: string[] = [];
-    for (const id of [...modelsByRecency, ...catalogModels.map((m) => m.id)]) {
+  const quickModels = useMemo(() => {
+    const ids = catalogModels.map((m) => m.id);
+    const out: string[] = hostModel !== null && ids.includes(hostModel) ? [hostModel] : [];
+    for (const id of ids) {
       if (out.length === QUICK_MODEL_COUNT) break;
-      if (offered.has(id) && !out.includes(id)) out.push(id);
+      if (!out.includes(id)) out.push(id);
     }
     return out;
-  }, [modelsByRecency, catalogModels]);
-  // Freeze the quick-toggle order the instant a send/create starts (Todoist:
-  // "the order of the last used workflow/model should not change when you
-  // send the message ... that screen should stay as is"). `foldersByRecency`/
-  // `modelsByRecency` are LIVE off `projectChats`, and the moment the new chat
-  // this send is creating lands in the store with its own `lastUpdated`, it
-  // reorders both rows out from under the user mid-send — before, or instead
-  // of, the navigation away that was supposed to be the next thing they saw.
-  // `submitting` (set at the top of `createChatInFolder`, the one entry point
-  // every send/call/voice-note path funnels through) marks exactly that
-  // window: snapshot the live list once on the first submitting render, keep
-  // returning that snapshot for as long as submitting stays true, and drop it
-  // the moment submitting goes back to false (a failed create, which leaves
-  // this screen showing and should resume tracking live recency again).
-  const frozenQuickFoldersRef = useRef<string[] | null>(null);
-  const frozenQuickModelsRef = useRef<string[] | null>(null);
-  if (submitting) {
-    if (frozenQuickFoldersRef.current === null) frozenQuickFoldersRef.current = quickFoldersLive;
-    if (frozenQuickModelsRef.current === null) frozenQuickModelsRef.current = quickModelsLive;
-  } else {
-    frozenQuickFoldersRef.current = null;
-    frozenQuickModelsRef.current = null;
-  }
-  const quickFolders = frozenQuickFoldersRef.current ?? quickFoldersLive;
-  const quickModels = frozenQuickModelsRef.current ?? quickModelsLive;
+  }, [catalogModels, hostModel]);
   const {
     data: browse,
     isLoading: browseLoading,
@@ -699,7 +638,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     setSubmitting(true);
     try {
       if (pickerHostId === null) {
-        pushError('Choose which host to start the chat on.');
+        pushError('Choose which machine to start the chat on.');
         setSubmitting(false);
         return null;
       }
@@ -1017,330 +956,371 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // these are the two decisions the screen exists to take. Once the first
   // message spawns the chat, the setup "moves up": the folder reads as the live
   // chat's header crumb and the model is fixed at spawn.
+  // Which chip rows already show the choice. When they do, the pill beside
+  // them is only the way to the rest of the list, and reads as such.
+  const folderIsQuick = folder !== '' && quickFolders.includes(folder);
+  const modelIsQuick = effectiveModel !== null && quickModels.includes(effectiveModel);
   const setupRow = (
     <div className="new-chat-setup" data-testid="new-chat-setup">
-      <AccountUsageStrip />
-      {/* Where the chat runs (spec/14 §8), only once there is a choice to make.
-          An offline machine is listed so its absence is visible, and cannot be
-          chosen. */}
-      {machines.length > 1 ? (
-        <div className="new-chat-machines" data-testid="new-chat-machines">
-          <HostPicker
-            hosts={machines.map((m) => ({
-              hostId: m.hostId,
-              label: m.host?.hostName ?? m.hostId,
-              online: m.online,
-            }))}
-            selected={pickerHostId}
-            onSelect={chooseMachine}
-            testId="new-chat-host"
-          />
-        </div>
-      ) : null}
-      {/* One-click project toggles (spec/14 §8) — the recent projects, in the
-          row itself, so the commonest choice doesn't cost a trip through the
-          pop-up. Same toggle and same host pairing as the pop-up's rows. */}
-      {quickFolders.length > 0 ? (
-        <div
-          className="new-chat-quick"
-          data-testid="new-chat-quick"
-          onKeyDown={handleQuickFolderKeyDown}
-        >
-          {quickFolders.map((f) => (
-            <button
-              key={f}
-              ref={(el) => {
-                if (el) quickFolderRefs.current.set(f, el);
-                else quickFolderRefs.current.delete(f);
-              }}
-              type="button"
-              className={`folder-quick ${f === folder ? 'selected' : ''}`}
-              data-testid={`folder-quick-${f}`}
-              aria-pressed={f === folder}
-              title={f}
-              disabled={signedOut}
-              onClick={() => chooseFolder(f)}
+      {/* One labelled row per decision, in the order they are taken: machine,
+          account, project, model (spec/14 §8). A row with nothing to decide —
+          one machine, one account — is absent rather than drawn with one chip. */}
+      <div className="new-chat-setup-grid" data-testid="new-chat-setup-grid">
+        {/* Where the chat runs. An offline machine is listed so its absence is
+            visible, and cannot be chosen. */}
+        {machines.length > 1 ? (
+          <>
+            <span className="new-chat-setup-label">Machine</span>
+            <div className="new-chat-setup-row new-chat-machines" data-testid="new-chat-machines">
+              <HostPicker
+                hosts={machines.map((m) => ({
+                  hostId: m.hostId,
+                  label: m.host?.hostName ?? m.hostId,
+                  online: m.online,
+                }))}
+                selected={pickerHostId}
+                onSelect={chooseMachine}
+                testId="new-chat-host"
+              />
+            </div>
+          </>
+        ) : null}
+        {/* The account this chat's turns START on (spec/10 § Backend
+            credentials — preferred account). A preference, not a pin: a spent
+            account is walked past. Auto leaves the choice to the account
+            strategy. Only the chosen model's backend's accounts are offered,
+            and only once there is more than one to choose between. */}
+        {preferableAccounts.length > 1 ? (
+          <>
+            <span className="new-chat-setup-label">Account</span>
+            <div
+              className="new-chat-setup-row"
+              role="radiogroup"
+              aria-label="Account"
+              data-testid="new-chat-account"
             >
-              {folderOptionLabels[folderOptions.indexOf(f)]}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {/* Folder picker pop-up (spec/14 § Sidebar §8): tap the pill to choose
-          from configured folders, recent folders, or type an ad-hoc path. */}
-      <div className="folder-picker" ref={folderAnchorRef}>
-        <button
-          type="button"
-          className="folder-pill"
-          data-testid="new-chat-folder-pill"
-          aria-haspopup="listbox"
-          aria-expanded={pickerOpen}
-          // Nothing here can be acted on until the machine can run a turn.
-          disabled={signedOut}
-          onClick={() => setPickerOpen((v) => !v)}
-        >
-          {/* H2 (desktop review): show the folder's BASENAME as the label;
-                  the full absolute path is available on hover via `title`, so
-                  the pill never spells out a long path inline. */}
-          <span className="folder-pill-label mono" title={folder || undefined}>
-            {folder ? folderName(folder) : 'Choose a folder…'}
-          </span>
-          <span className="folder-pill-caret" aria-hidden>
-            ▾
-          </span>
-        </button>
-        {pickerOpen ? (
+              <button
+                type="button"
+                role="radio"
+                className={`folder-quick ${preferredAccountId === null ? 'selected' : ''}`}
+                data-testid="new-chat-account-auto"
+                aria-checked={preferredAccountId === null}
+                onClick={() => setPreferredAccountId(null)}
+              >
+                Auto
+              </button>
+              {preferableAccounts.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="radio"
+                  className={`folder-quick ${preferredAccountId === a.id ? 'selected' : ''}`}
+                  data-testid={`new-chat-account-${a.id}`}
+                  aria-checked={preferredAccountId === a.id}
+                  onClick={() => setPreferredAccountId(a.id)}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+        {/* The project: chips for the head of the picker's list, then the pill
+            that opens the picker for the rest, to browse, or to type a path.
+            Same toggle and same host pairing as the pop-up's rows. No tooltip:
+            the chip reads the project name and nothing hides behind it. */}
+        <span className="new-chat-setup-label">Project</span>
+        <div className="new-chat-setup-row">
           <div
-            className={`folder-popup place-${folderPlacement.direction}`}
-            style={{ maxHeight: folderPlacement.maxHeight }}
-            data-testid="folder-popup"
-            role="listbox"
+            className="new-chat-quick"
+            data-testid="new-chat-quick"
+            onKeyDown={handleQuickFolderKeyDown}
           >
-            {/* One field for both jobs: type to narrow the recents below, or
+            {quickFolders.map((f) => (
+              <button
+                key={f}
+                ref={(el) => {
+                  if (el) quickFolderRefs.current.set(f, el);
+                  else quickFolderRefs.current.delete(f);
+                }}
+                type="button"
+                className={`folder-quick ${f === folder ? 'selected' : ''}`}
+                data-testid={`folder-quick-${f}`}
+                aria-pressed={f === folder}
+                disabled={signedOut}
+                onClick={() => chooseFolder(f)}
+              >
+                {folderOptionLabels[folderOptions.indexOf(f)]}
+              </button>
+            ))}
+          </div>
+          {/* Folder picker pop-up (spec/14 § Sidebar §8): the pill opens the
+              full list, the browse tree and the ad-hoc path field. It reads
+              the chosen folder only when no chip does. */}
+          <div className="folder-picker" ref={folderAnchorRef}>
+            <button
+              type="button"
+              className={`folder-pill ${folder !== '' && !folderIsQuick ? 'selected' : ''}`}
+              data-testid="new-chat-folder-pill"
+              aria-haspopup="listbox"
+              aria-expanded={pickerOpen}
+              // Nothing here can be acted on until the machine can run a turn.
+              disabled={signedOut}
+              onClick={() => setPickerOpen((v) => !v)}
+            >
+              {/* The folder's BASENAME when no chip shows the choice (an ad-hoc or
+              browsed path, or one past the chips); otherwise the pill is the
+              way to the rest of the list and says so. No tooltip. */}
+              <span className={`folder-pill-label ${folderIsQuick ? '' : 'mono'}`}>
+                {folderIsQuick ? 'Other…' : folder ? folderName(folder) : 'Choose a folder…'}
+              </span>
+              <span className="folder-pill-caret" aria-hidden>
+                ▾
+              </span>
+            </button>
+            {pickerOpen ? (
+              <div
+                className={`folder-popup place-${folderPlacement.direction}`}
+                style={{ maxHeight: folderPlacement.maxHeight }}
+                data-testid="folder-popup"
+                role="listbox"
+              >
+                {/* One field for both jobs: type to narrow the recents below, or
                 type any absolute path the daemon can reach and press Enter. */}
-            <input
-              type="text"
-              className="folder-input"
-              data-testid="new-chat-folder"
-              placeholder="Search projects or type a path"
-              aria-label="folder"
-              value={folder}
-              onChange={(e) => {
-                userEditedFolder.current = true;
-                setFolder(e.target.value);
-              }}
-              onKeyDown={(e) => {
-                if (isPlainEnter(e)) {
-                  e.preventDefault();
-                  setPickerOpen(false);
-                }
-              }}
-            />
-            {/* RECENT — configured + recently-used folders. These are
+                <input
+                  type="text"
+                  className="folder-input"
+                  data-testid="new-chat-folder"
+                  placeholder="Search projects or type a path"
+                  aria-label="folder"
+                  value={folder}
+                  onChange={(e) => {
+                    userEditedFolder.current = true;
+                    setFolder(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (isPlainEnter(e)) {
+                      e.preventDefault();
+                      setPickerOpen(false);
+                    }
+                  }}
+                />
+                {/* RECENT — configured + recently-used folders. These are
                     shortcuts: one tap SELECTS the folder and closes the picker
                     ("start here"). Each row shows the folder NAME (bold) as the
                     primary label; the full path is muted secondary text, never
                     the primary (spec/14 § Sidebar §8). No chevron — a recent row
                     is a destination, not a drill target. */}
-            <section className="folder-section">
-              <p className="folder-section-head">Recent projects</p>
-              {folderOptions.length === 0 ? (
-                /* H3 (desktop review): a proper empty state when there are no
+                <section className="folder-section">
+                  <p className="folder-section-head">Recent projects</p>
+                  {folderOptions.length === 0 ? (
+                    /* H3 (desktop review): a proper empty state when there are no
                        recent folders — a short prompt pointing at Browse. */
-                <div className="folder-recent-empty" data-testid="folder-recent-empty">
-                  <p className="folder-recent-empty-title">No recent projects</p>
-                  <p className="folder-recent-empty-hint">
-                    Browse for a project to start a chat in.
-                  </p>
-                </div>
-              ) : shownFolderIdx.length === 0 ? (
-                <p className="folder-popup-empty muted" data-testid="folder-recent-nomatch">
-                  No match. Press Enter to use this path.
-                </p>
-              ) : (
-                <ul className="folder-popup-list">
-                  {shownFolderIdx.map((i) => {
-                    const f = folderOptions[i] as string;
-                    return (
-                      <li key={f}>
-                        <button
-                          type="button"
-                          className={`folder-option ${f === folder ? 'selected' : ''}`}
-                          data-testid={`folder-option-${f}`}
-                          role="option"
-                          aria-selected={f === folder}
-                          title={f}
-                          onClick={() => chooseFolder(f)}
-                        >
-                          <span className="folder-option-text">
-                            <span className="folder-option-name">{folderName(f)}</span>
-                            {/* The extra path line shows ONLY when this option's
+                    <div className="folder-recent-empty" data-testid="folder-recent-empty">
+                      <p className="folder-recent-empty-title">No recent projects</p>
+                      <p className="folder-recent-empty-hint">
+                        Browse for a project to start a chat in.
+                      </p>
+                    </div>
+                  ) : shownFolderIdx.length === 0 ? (
+                    <p className="folder-popup-empty muted" data-testid="folder-recent-nomatch">
+                      No match. Press Enter to use this path.
+                    </p>
+                  ) : (
+                    <ul className="folder-popup-list">
+                      {shownFolderIdx.map((i) => {
+                        const f = folderOptions[i] as string;
+                        return (
+                          <li key={f}>
+                            <button
+                              type="button"
+                              className={`folder-option ${f === folder ? 'selected' : ''}`}
+                              data-testid={`folder-option-${f}`}
+                              role="option"
+                              aria-selected={f === folder}
+                              title={f}
+                              onClick={() => chooseFolder(f)}
+                            >
+                              <span className="folder-option-text">
+                                <span className="folder-option-name">{folderName(f)}</span>
+                                {/* The extra path line shows ONLY when this option's
                                   basename collides with another's — then the
                                   disambiguating label (…/parent/name) is the extra
                                   the user needs. Unique names stand alone. */}
-                            {folderOptionLabels[i] !== folderName(f) ? (
-                              <span className="folder-option-path mono">
-                                {folderOptionLabels[i]}
+                                {folderOptionLabels[i] !== folderName(f) ? (
+                                  <span className="folder-option-path mono">
+                                    {folderOptionLabels[i]}
+                                  </span>
+                                ) : null}
                               </span>
-                            ) : null}
-                          </span>
-                          {f === folder ? (
-                            <span className="folder-option-check" aria-hidden>
-                              ✓
-                            </span>
-                          ) : null}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
-            {/* BROWSE (spec/04 § Browsing): drill into the daemon's directory
+                              {f === folder ? (
+                                <span className="folder-option-check" aria-hidden>
+                                  ✓
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+                {/* BROWSE (spec/04 § Browsing): drill into the daemon's directory
                         tree. Entry rows carry a chevron — clicking DRILLS IN (opens
                         subfolders), it does NOT select. Selecting the folder you're
                         currently looking at is a separate, clearly-labelled accent
                         action ("Use this folder") below the list. Distinct
                         affordances so drill vs select never read the same. */}
-            <section className="folder-section folder-browser" data-testid="folder-browser">
-              <div className="folder-browser-bar">
-                <p className="folder-section-head">Browse</p>
-                {browse?.dir ? (
-                  <button
-                    type="button"
-                    className="folder-browser-up"
-                    data-testid="folder-browser-up"
-                    onClick={() => setBrowseDir(browse.parent)}
-                  >
-                    ↑ Up
-                  </button>
-                ) : null}
-              </div>
-              {/* Breadcrumb — current folder NAME as the primary label; the
+                <section className="folder-section folder-browser" data-testid="folder-browser">
+                  <div className="folder-browser-bar">
+                    <p className="folder-section-head">Browse</p>
+                    {browse?.dir ? (
+                      <button
+                        type="button"
+                        className="folder-browser-up"
+                        data-testid="folder-browser-up"
+                        onClick={() => setBrowseDir(browse.parent)}
+                      >
+                        ↑ Up
+                      </button>
+                    ) : null}
+                  </div>
+                  {/* Breadcrumb — current folder NAME as the primary label; the
                           full absolute path is muted secondary text (spec/14 §8).
                           ONLY once drilled in: at the roots view there is no current
                           directory, and a synthetic "Projects" crumb under the
                           "Browse" heading is a stray line of text — not clickable
                           like the rows beneath it, not a heading, and saying nothing
                           the heading doesn't already say. */}
-              {browse?.dir ? (
-                <span
-                  className="folder-browser-crumb"
-                  data-testid="folder-browser-crumb"
-                  title={browse.dir}
-                >
-                  <span className="folder-browser-crumb-name">{folderName(browse.dir)}</span>
-                  <span className="folder-browser-crumb-path mono">{browse.dir}</span>
-                </span>
-              ) : null}
-              {browseLoading ? (
-                <p className="folder-popup-empty muted">Loading…</p>
-              ) : browseErr ? (
-                <p className="error" data-testid="folder-browser-error">
-                  {(browseErr as Error).message}
-                </p>
-              ) : (browse?.entries?.length ?? 0) === 0 ? (
-                // Two different emptinesses, and conflating them stalls people:
-                // AT THE ROOTS VIEW (no `dir`), nothing to browse means this
-                // machine has no project folders registered at all — "No
-                // subfolders here" blames the wrong thing and offers no way
-                // out. Drilled INTO a folder, it really is an empty folder.
-                browse?.dir ? (
-                  <p className="folder-popup-empty muted">No subfolders here.</p>
-                ) : (
-                  <p className="folder-popup-empty muted" data-testid="folder-browser-no-roots">
-                    Nothing here. Type a path below to open any folder on this machine.
-                  </p>
-                )
-              ) : (
-                <ul className="folder-browser-list">
-                  {browse?.entries.map((e) => (
-                    <li key={e.path}>
-                      <button
-                        type="button"
-                        className="folder-browser-entry"
-                        data-testid={`folder-browser-entry-${e.name}`}
-                        title={`Open ${e.name}`}
-                        onClick={() => setBrowseDir(e.path)}
-                      >
-                        <span className="folder-browser-entry-name">{e.name}</span>
-                        <span className="folder-browser-entry-chevron" aria-hidden>
-                          ›
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {/* SELECT the currently-browsed directory (distinct from the
+                  {browse?.dir ? (
+                    <span
+                      className="folder-browser-crumb"
+                      data-testid="folder-browser-crumb"
+                      title={browse.dir}
+                    >
+                      <span className="folder-browser-crumb-name">{folderName(browse.dir)}</span>
+                      <span className="folder-browser-crumb-path mono">{browse.dir}</span>
+                    </span>
+                  ) : null}
+                  {browseLoading ? (
+                    <p className="folder-popup-empty muted">Loading…</p>
+                  ) : browseErr ? (
+                    <p className="error" data-testid="folder-browser-error">
+                      {(browseErr as Error).message}
+                    </p>
+                  ) : (browse?.entries?.length ?? 0) === 0 ? (
+                    // Two different emptinesses, and conflating them stalls people:
+                    // AT THE ROOTS VIEW (no `dir`), nothing to browse means this
+                    // machine has no project folders registered at all — "No
+                    // subfolders here" blames the wrong thing and offers no way
+                    // out. Drilled INTO a folder, it really is an empty folder.
+                    browse?.dir ? (
+                      <p className="folder-popup-empty muted">No subfolders here.</p>
+                    ) : (
+                      <p className="folder-popup-empty muted" data-testid="folder-browser-no-roots">
+                        Nothing here. Type a path below to open any folder on this machine.
+                      </p>
+                    )
+                  ) : (
+                    <ul className="folder-browser-list">
+                      {browse?.entries.map((e) => (
+                        <li key={e.path}>
+                          <button
+                            type="button"
+                            className="folder-browser-entry"
+                            data-testid={`folder-browser-entry-${e.name}`}
+                            title={`Open ${e.name}`}
+                            onClick={() => setBrowseDir(e.path)}
+                          >
+                            <span className="folder-browser-entry-name">{e.name}</span>
+                            <span className="folder-browser-entry-chevron" aria-hidden>
+                              ›
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {/* SELECT the currently-browsed directory (distinct from the
                           drill rows above). Absent at the roots view — you can't open
                           a chat in the synthetic "Projects" root. */}
-              {browse?.dir ? (
-                <button
-                  type="button"
-                  className="folder-browser-use"
-                  data-testid="folder-browser-use"
-                  onClick={() => {
-                    userEditedFolder.current = true;
-                    setFolder(browse.dir as string);
-                    // The tree just browsed belongs to `pickerHostId`; keep
-                    // the chosen path bound to the host it came from.
-                    setChosenHostId(pickerHostId);
-                    setPickerOpen(false);
-                  }}
-                >
-                  Use “{folderName(browse.dir)}”
-                </button>
-              ) : null}
-            </section>
+                  {browse?.dir ? (
+                    <button
+                      type="button"
+                      className="folder-browser-use"
+                      data-testid="folder-browser-use"
+                      onClick={() => {
+                        userEditedFolder.current = true;
+                        setFolder(browse.dir as string);
+                        // The tree just browsed belongs to `pickerHostId`; keep
+                        // the chosen path bound to the host it came from.
+                        setChosenHostId(pickerHostId);
+                        setPickerOpen(false);
+                      }}
+                    >
+                      Use “{folderName(browse.dir)}”
+                    </button>
+                  ) : null}
+                </section>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
-      {/* Per-chat model (spec/13) — the model this chat will START on. Persists
-          to the draft. The SAME control the chat header uses to change a live
-          chat's model (spec/14 § Model selector), so the app has one model
-          control rather than two. */}
-      <ModelPicker
-        selected={effectiveModel}
-        onSelect={chooseModel}
-        open={modelOpen}
-        onToggle={() => setOpenPicker((v) => (v === 'model' ? null : 'model'))}
-        anchorRef={modelAnchorRef}
-        placement={modelPlacement}
-        testId="new-chat-model"
-        disabled={signedOut && !hostHasCreditSource}
-      />
-      {/* The account this chat's turns START on (spec/10 § Backend credentials —
-          preferred account). A preference, not a pin: a spent account is walked
-          past. "Strategy" leaves the choice to the account strategy. */}
-      {preferableAccounts.length > 1 ? (
-        <select
-          className="new-chat-account"
-          aria-label="Start on account"
-          data-testid="new-chat-account"
-          value={preferredAccountId ?? ''}
-          onChange={(e) => setPreferredAccountId(e.target.value === '' ? null : e.target.value)}
-        >
-          <option value="">Account: by strategy</option>
-          {preferableAccounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              Start on {a.label}
-            </option>
-          ))}
-        </select>
-      ) : null}
-      {/* One-click model toggles (spec/14 §8) — the recently used models, on a
-          line of their own beneath the pills, so the commonest choice doesn't
-          cost a trip through the pop-up. Same chip as the project toggles
-          above; unlike them there is no deselect, since a chat always spawns on
-          some model. Nothing offered while the catalogue is unreadable — the
-          pop-up says why, and a guessed row here would contradict it. */}
-      {quickModels.length > 0 ? (
-        <div
-          className="new-chat-quick new-chat-quick-models"
-          data-testid="new-chat-quick-models"
-          onKeyDown={handleQuickModelKeyDown}
-        >
-          {quickModels.map((id) => (
-            <button
-              key={id}
-              ref={(el) => {
-                if (el) quickModelRefs.current.set(id, el);
-                else quickModelRefs.current.delete(id);
-              }}
-              type="button"
-              className={`model-quick ${id === effectiveModel ? 'selected' : ''}`}
-              data-testid={`model-quick-${id}`}
-              aria-pressed={id === effectiveModel}
-              title={id}
-              disabled={signedOut && !hostHasCreditSource}
-              onClick={() => chooseModel(id)}
-            >
-              {catalogModels.find((m) => m.id === id)?.label ?? id}
-            </button>
-          ))}
         </div>
-      ) : null}
+        {/* The model: the account default first, marked, then the head of the
+            catalogue, and the pill that opens the full live list (spec/14 §
+            Model selector) — the SAME control the chat header uses to change a
+            live chat's model, so the app has one model control rather than
+            two. No deselect: a chat always spawns on some model. Nothing is
+            offered while the catalogue is unreadable — the pop-up says why. */}
+        <span className="new-chat-setup-label">Model</span>
+        <div className="new-chat-setup-row">
+          {quickModels.length > 0 ? (
+            <div
+              className="new-chat-quick new-chat-quick-models"
+              data-testid="new-chat-quick-models"
+              onKeyDown={handleQuickModelKeyDown}
+            >
+              {quickModels.map((id) => (
+                <button
+                  key={id}
+                  ref={(el) => {
+                    if (el) quickModelRefs.current.set(id, el);
+                    else quickModelRefs.current.delete(id);
+                  }}
+                  type="button"
+                  className={`model-quick ${id === effectiveModel ? 'selected' : ''}`}
+                  data-testid={`model-quick-${id}`}
+                  aria-pressed={id === effectiveModel}
+                  disabled={signedOut && !hostHasCreditSource}
+                  onClick={() => chooseModel(id)}
+                >
+                  <span className="quick-label">
+                    {catalogModels.find((m) => m.id === id)?.label ?? id}
+                  </span>
+                  {id === hostModel ? <span className="quick-sub">default</span> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <ModelPicker
+            selected={effectiveModel}
+            onSelect={chooseModel}
+            open={modelOpen}
+            onToggle={() => setOpenPicker((v) => (v === 'model' ? null : 'model'))}
+            anchorRef={modelAnchorRef}
+            placement={modelPlacement}
+            testId="new-chat-model"
+            disabled={signedOut && !hostHasCreditSource}
+            active={!modelIsQuick && effectiveModel !== null}
+            {...(modelIsQuick ? { triggerLabel: 'More…' } : {})}
+          />
+        </div>
+      </div>
+      {/* Usage, apart from the selections (Tom: "keep usage separate from the
+          selections"): what each account has left, read-only, so the account
+          is chosen with its headroom in view without the figures being the
+          control. */}
+      <AccountUsageStrip />
     </div>
   );
 

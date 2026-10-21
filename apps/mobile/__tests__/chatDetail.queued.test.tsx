@@ -71,12 +71,12 @@ describe('queued messages on the chat screen', () => {
     expect(badges).toEqual(['Queued · next tool call', '2nd in queue · next tool call']);
   });
 
-  it('reads "Host offline" on the chip while the host is offline', () => {
+  it('reads "Machine offline" on the chip while the host is offline', () => {
     usePresenceStore.getState().setHost('offline');
     queue('A', 'first queued');
     const r = renderRN(<ChatDetailScreen />);
     expect(findAllHost(r.root, byTestId('queued-badge')).map((b) => b.props.children)).toEqual([
-      'Host offline',
+      'Machine offline',
     ]);
   });
 

@@ -162,7 +162,7 @@ export default function ChatDoc(): React.ReactElement {
         draft,
       );
       if (!landed) {
-        Alert.alert('Save not confirmed', 'The host did not report the new content back.');
+        Alert.alert('Save not confirmed', 'The machine did not report the new content back.');
         return;
       }
       setLoaded({ path: loaded.path, saved: draft });

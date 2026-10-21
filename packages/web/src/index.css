@@ -2767,29 +2767,196 @@ a.ch-row:hover {
   margin: 0;
   padding: 0 24px;
 }
+/* New-chat setup (spec/14 §8): one labelled row per decision — Machine,
+   Account, Project, Model — as a two-column grid, labels in a quiet right-
+   aligned column so the rows scan as a form rather than a cloud of pills. The
+   usage block sits beneath, apart from the selections. */
 .new-chat-setup {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  width: 100%;
+  max-width: 1140px;
+  padding: 0 24px;
   overflow: visible;
-  flex-wrap: wrap;
 }
-.new-chat-usage {
-  flex-basis: 100%;
+.new-chat-setup-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 20px;
+  row-gap: 14px;
+  align-items: center;
+}
+.new-chat-setup-label {
+  font-size: var(--text-min);
+  color: var(--ink-3);
+  text-align: right;
+  white-space: nowrap;
+}
+.new-chat-setup-row {
   display: flex;
-  justify-content: center;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* The chips of a row and the pill after them flow together in the row; the
+   chip group exists only to scope the roving Left/Right key handler. */
+.new-chat-quick {
+  display: contents;
+}
+.quick-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* `default` beside the model the account would pick on its own. */
+.quick-sub {
+  margin-left: 6px;
+  color: var(--ink-faint);
+}
+.folder-quick.selected .quick-sub,
+.model-quick.selected .quick-sub {
+  color: var(--on-accent);
+  opacity: 0.75;
+}
+@media (max-width: 640px) {
+  .new-chat-setup-grid {
+    grid-template-columns: 1fr;
+    row-gap: 6px;
+  }
+  .new-chat-setup-label {
+    text-align: left;
+  }
+  .new-chat-setup-row {
+    margin-bottom: 8px;
+  }
+}
+/* Usage (spec/14 §8): one read-only card per connected subscription account,
+   two meters each (5-hour, week) with the figure said in words — `79% used ·
+   resets 14:00` — so a bar is never read backwards. Four cards at a time; the
+   rest are a page away. */
+.new-chat-usage {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 16px;
+  display: grid;
+  gap: 10px;
+}
+.new-chat-usage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.new-chat-usage-title {
+  margin: 0;
+  font-size: var(--text-min);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.new-chat-usage-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: var(--text-min);
   color: var(--ink-3);
 }
-.new-chat-usage-item {
-  display: inline-flex;
-  gap: 6px;
+.new-chat-usage-pager button {
+  min-width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--bg-elevated);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.new-chat-usage-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.new-chat-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+}
+.new-chat-usage-card {
+  display: grid;
+  row-gap: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  padding: 10px 14px 12px;
+  background: var(--bg-panel);
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  line-height: 1.25;
+  min-width: 0;
 }
 .new-chat-usage-name {
-  color: var(--ink-2);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 500;
+  min-width: 0;
+}
+.new-chat-usage-name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-chat-usage-backend {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+.new-chat-usage-meters {
+  display: grid;
+  grid-template-columns: max-content minmax(72px, 1fr) minmax(0, max-content);
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items: center;
+}
+.new-chat-usage-label,
+.new-chat-usage-fig,
+.new-chat-usage-empty {
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.new-chat-usage-label {
+  white-space: nowrap;
+}
+/* The figure wraps at its own ` · ` rather than running past the card. */
+.new-chat-usage-fig {
+  min-width: 0;
+  max-width: 100%;
+}
+.new-chat-usage-empty {
+  margin: 0;
+}
+.new-chat-usage-bar {
+  position: relative;
+  display: block;
+  height: 8px;
+  min-width: 72px;
+  border-radius: 4px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+.new-chat-usage-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  background: var(--accent);
+  border-radius: 4px;
+}
+.new-chat-usage-bar.warn i {
+  background: var(--waiting);
+}
+.new-chat-usage-bar.blocked i {
+  background: var(--danger);
+}
+/* A window the host did not report says so, in the meter's place. */
+.new-chat-usage-missing {
+  grid-column: 2 / -1;
 }
 /* Per-chat model selector (spec/13) — a compact pill next to the folder. */
 .model-select {
@@ -10725,7 +10892,6 @@ button.background-task-bar-row:hover .background-task-bar-description {
   background: var(--bg-elevated);
   color: var(--ink-2);
   font-size: var(--text-min);
-  min-width: 220px;
   cursor: pointer;
 }
 .folder-pill-label {
@@ -10742,28 +10908,10 @@ button.background-task-bar-row:hover .background-task-bar-description {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-/* One-click project toggles in the new-chat setup row (spec/14 §8). Same pill
-   shape, radius and type scale as the folder pill they sit beside, so the row
-   reads as one control group rather than a pill plus some other app's buttons.
-   Sized to their label (no min-width) — three of them share the row. */
-.new-chat-quick {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-/* The model toggles get a LINE of their own beneath the pills: the setup row
-   wraps, and a full basis is what forces the break. Sharing the pills' line
-   would put six controls on it, and the two rows answer different questions. */
-.new-chat-quick-models {
-  flex-basis: 100%;
-}
-/* Which machine the chat runs on leads, on its own line above the projects:
-   the projects offered beneath it are that machine's, so it is decided first. */
-.new-chat-machines {
-  flex-basis: 100%;
-}
+/* Chips in the new-chat setup rows (spec/14 §8). Same pill shape, radius and
+   type scale as the folder/model pill they sit beside, so each row reads as
+   one control group rather than a pill plus some other app's buttons. Sized
+   to their label (no min-width). */
 .folder-quick,
 .model-quick {
   border: 1px solid var(--line);
@@ -10778,19 +10926,40 @@ button.background-task-bar-row:hover .background-task-bar-description {
   white-space: nowrap;
   cursor: pointer;
 }
+/* Hover keeps contrast: an unpressed chip takes the accent wash, and a PRESSED
+   one deepens its fill with its text staying white — it used to go to ink on
+   the accent fill, which was unreadable. */
 .folder-quick:hover:not(:disabled),
-.model-quick:hover:not(:disabled) {
+.model-quick:hover:not(:disabled),
+.folder-pill:hover:not(:disabled),
+.model-pill:not(.as-crumb):hover:not(:disabled) {
   border-color: var(--accent);
+  background: var(--accent-tint);
   color: var(--ink);
+}
+.folder-quick.selected:hover:not(:disabled),
+.model-quick.selected:hover:not(:disabled),
+.folder-pill.selected:hover:not(:disabled),
+.model-pill.is-active:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--on-accent);
 }
 /* Pressed state carries the accent fill — with no caret or ✓ to lean on, the
    fill is the only thing saying which project (or model) this chat will start
    on. */
 .folder-quick.selected,
-.model-quick.selected {
+.model-quick.selected,
+.folder-pill.selected,
+.model-pill.is-active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--bg-elevated);
+  color: var(--on-accent);
+}
+.folder-pill.selected .folder-pill-caret,
+.model-pill.is-active .model-pill-caret {
+  color: var(--on-accent);
+  opacity: 0.75;
 }
 .folder-quick:disabled,
 .model-quick:disabled {
@@ -13305,30 +13474,6 @@ button.chat-usage-crumb:hover {
 select.permission-mode.is-pending {
   opacity: 0.55;
   font-style: italic;
-}
-select.new-chat-account {
-  appearance: none;
-  -webkit-appearance: none;
-  align-self: flex-start;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill, 999px);
-  padding: 4px 28px 4px 12px;
-  background-color: var(--bg-elevated);
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--ink-3) 50%),
-    linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) 55%,
-    calc(100% - 10px) 55%;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
-  color: var(--ink-2);
-  font-size: var(--text-min);
-  cursor: pointer;
-}
-select.new-chat-account:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 /* Notifications bell (spec/09 § bell). */

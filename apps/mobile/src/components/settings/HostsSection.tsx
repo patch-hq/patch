@@ -57,11 +57,11 @@ export function HostsPage(): React.ReactElement {
   const [adding, setAdding] = React.useState(false);
   return (
     <SettingsPage
-      title="Hosts"
+      title="Machines"
       testID="settings-page-hosts"
       right={
         adding ? null : (
-          <SettingsButton testID="add-host" label="Add a host" onPress={() => setAdding(true)} />
+          <SettingsButton testID="add-host" label="Add a machine" onPress={() => setAdding(true)} />
         )
       }
     >
@@ -79,7 +79,7 @@ export function HostsSection(): React.ReactElement {
   return (
     <SettingsSection testID="settings-hosts">
       {rows.length === 0 ? (
-        <NoticeRow testID="hosts-empty" text="No hosts yet" />
+        <NoticeRow testID="hosts-empty" text="No machines yet" />
       ) : (
         rows.map((h) => (
           <Row
@@ -137,7 +137,7 @@ export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
     return (
       <SettingsPage title={hostId} testID="settings-host-detail">
         <SettingsSection>
-          <NoticeRow testID="host-detail-gone" text="This host is no longer on the account" />
+          <NoticeRow testID="host-detail-gone" text="This machine is no longer on the account" />
         </SettingsSection>
       </SettingsPage>
     );
@@ -468,7 +468,7 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
   return (
     <SettingsSection>
       <Row
-        title="Remove this host"
+        title="Remove this machine"
         right={
           <SettingsButton
             testID={`host-${host.hostId}-remove`}
@@ -497,10 +497,10 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
 /** The server's refusal, said in words rather than as a code. */
 function installCommandProblem(message: string): string {
   if (message.startsWith('nothing_published')) {
-    return 'No host build has been published yet.';
+    return 'No machine build has been published yet.';
   }
   if (message.startsWith('no_build_for_os')) {
-    return 'No host build has been published for that operating system yet.';
+    return 'No machine build has been published for that operating system yet.';
   }
   if (message.startsWith('no_public_url')) {
     return 'This server has no public address configured.';
@@ -578,10 +578,10 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
     platforms.state === 'error' || (platforms.state === 'ok' && platforms.value.length === 0);
 
   return (
-    <SettingsSection title="Add a host" testID="add-host-panel">
+    <SettingsSection title="Add a machine" testID="add-host-panel">
       {platforms.state === 'loading' ? <NoticeRow text="…" /> : null}
       {nothingPublished ? (
-        <NoticeRow testID="add-host-error" text="No host build has been published yet" />
+        <NoticeRow testID="add-host-error" text="No machine build has been published yet" />
       ) : null}
       {platforms.state === 'ok' && platforms.value.length > 0 ? (
         <>
@@ -762,7 +762,7 @@ export function ProviderKeys(): React.ReactElement {
                       onPress={() =>
                         Alert.alert(
                           `Revoke ${label} key?`,
-                          'It is deleted from every host; a host with one in its own environment goes back to that.',
+                          'It is deleted from every machine; a machine with one in its own environment goes back to that.',
                           [
                             { text: 'Cancel', style: 'cancel' },
                             {

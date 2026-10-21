@@ -92,7 +92,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Hooks',
       'Computer use',
       'Activity',
-      'Hosts',
+      'Machines',
       'Agent identity',
       'Providers',
       'Notifications',
@@ -306,7 +306,7 @@ describe('Settings host switcher (per-host pages)', () => {
     clearHosts();
     renderSettings('/settings/memories');
     await waitFor(() =>
-      expect(screen.getByTestId('settings-no-hosts')).toHaveTextContent('No hosts yet'),
+      expect(screen.getByTestId('settings-no-hosts')).toHaveTextContent('No machines yet'),
     );
   });
 
@@ -921,7 +921,9 @@ describe('Settings → Voice', () => {
       renderSettings('/settings/voice');
       const select = (await screen.findByTestId('kokoro-voice')) as HTMLSelectElement;
       expect(select.value).toBe('');
-      expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Each host’s Kokoro default');
+      expect(screen.getByTestId('voice-speaking')).toHaveTextContent(
+        'Each machine’s Kokoro default',
+      );
     });
 
     it('writes a new chat-name interval on blur and on Enter, and refuses a negative one', async () => {

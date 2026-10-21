@@ -167,7 +167,7 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     );
     const r = await render();
     await pressMenuItem(r.root, 'account-claude-code-a-menu', 'account-claude-code-a-disconnect');
-    expect(__getLastAlert()?.message).toContain('Every host stops using it');
+    expect(__getLastAlert()?.message).toContain('Every machine stops using it');
     expect(api.disconnectAccount).not.toHaveBeenCalled();
     await actAsync(async () => {
       __getLastAlert()!.buttons!.find((b) => b.text === 'Disconnect')!.onPress!();

@@ -1515,7 +1515,7 @@ export function ChatRoute({
       });
       const timer = setTimeout(() => {
         unsubscribe();
-        pushError(failed('edit'), undefined, 'the host did not confirm the new track');
+        pushError(failed('edit'), undefined, 'the machine did not confirm the new track');
       }, 15000);
       return true;
     },
@@ -3159,7 +3159,7 @@ function MessageEntry({
               <CloudOff size={12} strokeWidth={2.5} aria-hidden />
             )}
           </span>
-          {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
+          {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
         </div>
       ) : null}
       {/* spec/14 § Messages — the per-message meta strip: facts ABOUT the turn

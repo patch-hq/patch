@@ -124,7 +124,7 @@ describe('Settings tab — the list', () => {
       'Voice',
       'Hooks',
       'Computer use',
-      'Hosts',
+      'Machines',
       'Agent identity',
       'Providers',
       'Devices',
@@ -147,7 +147,7 @@ describe('Settings tab — the list', () => {
       'Hooks',
       'Computer use',
     ]);
-    expect(inGroup('Setup')).toEqual(['Hosts', 'Agent identity', 'Providers', 'Devices']);
+    expect(inGroup('Setup')).toEqual(['Machines', 'Agent identity', 'Providers', 'Devices']);
     expect(inGroup('System')).toEqual(['Updates', 'Account']);
   });
 

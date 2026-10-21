@@ -46,17 +46,14 @@ test('a new chat names the account it starts on, and sends it with the spawn', a
       .getState()
       .apply(state);
   });
-  const select = page.getByTestId('new-chat-account');
-  await expect(select).toBeVisible();
-  // Dressed as the model pill, not native chrome.
-  await expect(select).toHaveCSS('appearance', 'none');
-  await expect(select).toHaveCSS('border-top-left-radius', /^[1-9]\d*px$/);
-  await expect(select.locator('option')).toHaveText([
-    'Account: by strategy',
-    'Start on work',
-    'Start on personal',
-  ]);
-  await select.selectOption('a2');
+  const row = page.getByTestId('new-chat-account');
+  await expect(row).toBeVisible();
+  // Chips, like every other row of the setup — not a native select.
+  await expect(row.locator('select')).toHaveCount(0);
+  await expect(row.getByRole('radio')).toHaveText(['Auto', 'work', 'personal']);
+  await expect(page.getByTestId('new-chat-account-auto')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('new-chat-account-a2').click();
+  await expect(page.getByTestId('new-chat-account-a2')).toHaveAttribute('aria-checked', 'true');
   await page.locator('textarea').first().fill('hello');
   await page.locator('textarea').first().press('Enter');
   await expect.poll(() => spawn).toMatchObject({ preferredAccountId: 'a2' });

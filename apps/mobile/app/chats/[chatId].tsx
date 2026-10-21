@@ -2759,7 +2759,7 @@ const TimelineItem = React.memo(function TimelineItem({
               )}
             </View>
             <Text testID="delivery-pending" style={{ color: colors.ink3, fontSize: textMin }}>
-              {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
+              {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
             </Text>
           </View>
         ) : null}

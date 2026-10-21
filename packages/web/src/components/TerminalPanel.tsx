@@ -115,7 +115,7 @@ export function TerminalPanel({
         type: 'patch.terminal.error',
         sessionId,
         code: 'internal',
-        message: 'no host to open a shell on',
+        message: 'no machine to open a shell on',
       });
       return;
     }

@@ -125,7 +125,7 @@ export function HostSwitcher(): React.ReactElement | null {
  * at all, or one that has not reported — else null. Never invented values.
  */
 export function unreportedText(host: HostPresence | null): string | null {
-  if (host === null) return 'No hosts yet';
+  if (host === null) return 'No machines yet';
   if (host.host === null) return `${host.hostId} hasn’t reported yet`;
   return null;
 }

@@ -531,7 +531,7 @@ describe('Voice page: Speaking (shared, spec/01 § Settings)', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('voice-settings')))).toContain(
-      'Each host’s Kokoro default',
+      'Each machine’s Kokoro default',
     );
   });
 
@@ -595,7 +595,7 @@ describe('Voice page: frame', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('voice-devices-no-machines')))).toBe(
-      'Add a host first',
+      'Add a machine first',
     );
   });
 

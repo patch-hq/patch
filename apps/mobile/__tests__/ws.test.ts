@@ -941,7 +941,7 @@ describe('message dispatch', () => {
     expect(useSettingsStore.getState().data?.preferences.chatNameInterval).toBe(5);
   });
 
-  // Settings → Hosts → Remove this host: every surface is sent `host.removed`
+  // Settings → Hosts → Remove this machine: every surface is sent `host.removed`
   // and drops the host with every report it had cached for it.
   it('host.removed drops THAT host and its cached reports, and nothing else', () => {
     const sock = open();

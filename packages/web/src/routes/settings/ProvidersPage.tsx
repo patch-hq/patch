@@ -177,7 +177,7 @@ function ProviderKeys(): JSX.Element {
     const { label } = providerKeyInfo(id);
     const ok = await useUiStore.getState().confirm({
       title: `Revoke ${label} key`,
-      message: `Delete the ${label} key from every host? A host with one in its own environment goes back to that.`,
+      message: `Delete the ${label} key from every machine? A machine with one in its own environment goes back to that.`,
       confirmLabel: 'Revoke',
       danger: true,
     });

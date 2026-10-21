@@ -33,7 +33,7 @@ export function queueRelease(
 }
 
 export function queueChipLabel(pos: number, hostOnline = true, release?: QueueRelease): string {
-  if (!hostOnline) return 'Host offline';
+  if (!hostOnline) return 'Machine offline';
   const base = pos === 1 ? 'Queued' : `${ordinal(pos)} in queue`;
   if (release === undefined) return base;
   return `${base} · ${release === 'tool' ? 'next tool call' : 'end of turn'}`;
@@ -41,7 +41,7 @@ export function queueChipLabel(pos: number, hostOnline = true, release?: QueueRe
 
 /** The event that releases this turn — the half of the mental model a bare position can't carry. */
 export function queueChipTitle(pos: number, hostOnline = true, release?: QueueRelease): string {
-  if (!hostOnline) return 'Waiting for the host to come back online';
+  if (!hostOnline) return 'Waiting for the machine to come back online';
   if (release === 'tool') return 'Goes in when the agent finishes its current tool call';
   if (pos === 1) return 'Runs when the current turn finishes';
   const ahead = pos - 1;

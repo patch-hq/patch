@@ -550,7 +550,7 @@ describe('delivery status (spec/12 § Guaranteed input delivery)', () => {
     usePresenceStore.getState().setHost('offline');
     useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
     const r = renderRN(<ChatDetailScreen />);
-    expect(hasText(r.root, 'Host offline')).toBe(true);
+    expect(hasText(r.root, 'Machine offline')).toBe(true);
   });
 
   it('shows "Not delivered — tap to retry" when failed, and tapping retries', () => {

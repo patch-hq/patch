@@ -441,7 +441,7 @@ describe('Settings → Hosts', () => {
   it('states plainly when no machine is registered, and still offers to add one', () => {
     renderPage('hosts');
     // The empty state must point at the next action, not just report a void.
-    expect(screen.getByTestId('hosts-empty')).toHaveTextContent('No hosts yet');
+    expect(screen.getByTestId('hosts-empty')).toHaveTextContent('No machines yet');
     expect(screen.getByTestId('add-host')).toHaveTextContent('Add a host');
   });
 

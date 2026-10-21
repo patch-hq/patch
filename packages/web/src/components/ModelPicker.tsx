@@ -69,9 +69,16 @@ export interface ModelPickerProps {
   pending?: boolean;
   /**
    * Text for the pill in place of the model's name — for a place that offers
-   * the change as an action ("Change model") rather than reading the model.
+   * the change as an action ("Change model", "More…") rather than reading the
+   * model.
    */
   triggerLabel?: string;
+  /**
+   * True when the pill itself is what shows the chosen model — the new-chat
+   * row draws it filled then, like a pressed chip, because no chip beside it
+   * carries the choice.
+   */
+  active?: boolean;
 }
 
 export function ModelPicker({
@@ -89,6 +96,7 @@ export function ModelPicker({
   note = null,
   pending = false,
   triggerLabel,
+  active = false,
 }: ModelPickerProps): JSX.Element {
   // The selectable models are LIVE: loaded from the host's catalogue, which
   // reads the backend's model list. NO baked-in array — that is what let the
@@ -210,13 +218,12 @@ export function ModelPicker({
     <div className={`model-picker ${variant === 'crumb' ? 'as-crumb' : ''}`} ref={anchorRef}>
       <button
         type="button"
-        className={`model-pill ${variant === 'crumb' ? 'as-crumb' : ''} ${pending ? 'is-pending' : ''}`}
+        className={`model-pill ${variant === 'crumb' ? 'as-crumb' : ''} ${pending ? 'is-pending' : ''} ${active ? 'is-active' : ''}`}
         data-testid={testId}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="model"
         disabled={disabled}
-        title={selected ?? undefined}
         onClick={onToggle}
       >
         <span className={`model-pill-label ${triggerLabel ? '' : 'mono'}`}>

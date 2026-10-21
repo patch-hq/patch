@@ -26,12 +26,12 @@ test.describe('new chat folder pickers exclude special-thread folders', () => {
     const setup = page.getByTestId('new-chat-setup');
     await expect(setup).toBeVisible();
 
-    // Three slots, newest first. The harness's thread dirs are more recent than
-    // its `projects/patch` chat, so unfiltered the third slot reads "manager"
-    // — the count alone stays 3 either way, the NAMES are the assertion.
+    // The picker's list in its own order (recents by name). Unfiltered, the
+    // thread dirs would take two of the four slots — the NAMES are the
+    // assertion.
     const quicks = setup.locator('[data-testid^="folder-quick-"]');
-    await expect(quicks).toHaveCount(3);
-    await expect(quicks).toHaveText(['bus', 'portfolio', 'deploy-watch']);
+    await expect(quicks).toHaveCount(4);
+    await expect(quicks).toHaveText(['bus', 'deploy-watch', 'patch', 'portfolio']);
 
     for (const folder of THREAD_FOLDERS) {
       await expect(page.getByTestId(`folder-quick-${folder}`)).toHaveCount(0);

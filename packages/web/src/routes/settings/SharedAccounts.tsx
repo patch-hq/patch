@@ -146,7 +146,7 @@ function AccountEntry({
         ? reading.host
         : Object.values(usePresenceStore.getState().hosts).find((h) => h.online);
     if (!host) {
-      pushError('refresh usage: no host is online to read it');
+      pushError('refresh usage: no machine is online to read it');
       return;
     }
     sendToHost(host, { type: 'host.backend_usage_refresh', hostId: host.hostId, backendId });
@@ -202,7 +202,7 @@ function AccountEntry({
               void (async () => {
                 const ok = await useUiStore.getState().confirm({
                   title: `Disconnect ${row.label}`,
-                  message: `Disconnect ${row.label}? Every host stops using it until it is connected again.`,
+                  message: `Disconnect ${row.label}? Every machine stops using it until it is connected again.`,
                   confirmLabel: 'Disconnect',
                   danger: true,
                 });
@@ -220,7 +220,7 @@ function AccountEntry({
         void (async () => {
           const ok = await useUiStore.getState().confirm({
             title: `Remove ${row.label}`,
-            message: `Remove ${row.label} from every host? Its row goes too.`,
+            message: `Remove ${row.label} from every machine? Its row goes too.`,
             confirmLabel: 'Remove',
             danger: true,
           });
@@ -374,7 +374,7 @@ export function AddChatGPTAccount(): JSX.Element {
           Add API key
         </button>
       </div>
-      {host === null ? <Note testid="chatgpt-no-host">Connect a host to sign in</Note> : null}
+      {host === null ? <Note testid="chatgpt-no-host">Connect a machine to sign in</Note> : null}
       {pending && login ? (
         <div className="set-inline" role="status" data-testid="chatgpt-login-pending">
           <span className="set-row-title">Waiting for sign-in…</span>

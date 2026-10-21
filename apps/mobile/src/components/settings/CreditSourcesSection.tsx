@@ -230,7 +230,7 @@ function AccountRow({
         ? reading.host
         : Object.values(usePresenceStore.getState().hosts).find((h) => h.online);
     if (!host) {
-      Alert.alert('Refresh usage failed', 'No host is online to read it.');
+      Alert.alert('Refresh usage failed', 'No machine is online to read it.');
       return;
     }
     sendToHost(
@@ -273,7 +273,7 @@ function AccountRow({
     else if (action === 'disconnect') {
       Alert.alert(
         `Disconnect ${row.label}?`,
-        'Every host stops using it until it is connected again.',
+        'Every machine stops using it until it is connected again.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -285,7 +285,7 @@ function AccountRow({
         ],
       );
     } else if (action === 'remove') {
-      Alert.alert(`Remove ${row.label}?`, 'It is removed from every host.', [
+      Alert.alert(`Remove ${row.label}?`, 'It is removed from every machine.', [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Remove',
@@ -427,7 +427,7 @@ function AddChatGPT(): React.ReactElement {
         />
       </ButtonRow>
       {host === null ? (
-        <NoticeRow testID="chatgpt-no-host" text="Connect a host to sign in" />
+        <NoticeRow testID="chatgpt-no-host" text="Connect a machine to sign in" />
       ) : null}
       {keyOpen ? (
         <TokenEntry

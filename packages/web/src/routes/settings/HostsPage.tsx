@@ -33,10 +33,10 @@ import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
 function installCommandProblem(err: unknown): string {
   const code = err instanceof Error ? err.message : String(err);
   if (code === 'nothing_published') {
-    return 'No host build has been published yet, so there is no install command to give.';
+    return 'No machine build has been published yet, so there is no install command to give.';
   }
   if (code === 'no_build_for_os') {
-    return 'No host build has been published for that operating system yet.';
+    return 'No machine build has been published for that operating system yet.';
   }
   if (code === 'no_public_url') {
     return 'This server has no public address configured, so it cannot say where a new machine should download from.';
@@ -61,7 +61,7 @@ export function HostsPage(): JSX.Element {
 
   return (
     <SettingsPage
-      title="Hosts"
+      title="Machines"
       testid="settings-hosts"
       actions={
         <button
@@ -79,7 +79,7 @@ export function HostsPage(): JSX.Element {
       <ThisMac />
       <Group testid="hosts-list">
         {rows.length === 0 ? (
-          <Note testid="hosts-empty">No hosts yet</Note>
+          <Note testid="hosts-empty">No machines yet</Note>
         ) : (
           rows.map((h) => (
             <HostListRow
@@ -272,7 +272,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               />
             </Row>
             <Row
-              title="Host"
+              title="Machine"
               sub={
                 <>
                   <span data-testid={`host-${host.hostId}-platform`}>
@@ -385,7 +385,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       {report ? <BrowserRouteThrough host={host} /> : null}
 
       <div className="set-card set-card-gap">
-        <Row title="Remove this host">
+        <Row title="Remove this machine">
           <button
             type="button"
             className="set-btn danger"
@@ -525,7 +525,7 @@ function ThisMac(): JSX.Element | null {
       <div className="set-row">
         <div className="set-row-head">
           <div className="set-row-text">
-            <span className="set-row-title">Host</span>
+            <span className="set-row-title">Machine</span>
             <span className="set-sub">Not installed</span>
           </div>
           <button
@@ -590,11 +590,11 @@ function AddHost({ onClose }: { onClose: () => void }): JSX.Element {
     manifest.isError || (manifest.data !== undefined && options.length === 0);
 
   return (
-    <Group label="Add a host" testid="add-host-panel">
+    <Group label="Add a machine" testid="add-host-panel">
       {manifest.isPending ? <Note>…</Note> : null}
       {nothingPublished ? (
         <Note testid="add-host-error">
-          No host build has been published yet. Publish one with <code>pnpm build:host</code>.
+          No machine build has been published yet. Publish one with <code>pnpm build:host</code>.
         </Note>
       ) : null}
       {!nothingPublished && options.length > 0 ? (

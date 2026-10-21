@@ -312,7 +312,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_watch',
     category: 'patch',
     description:
-      'Runs a shell command as a durable background task the host itself owns, holds a real pid for, and can kill.',
+      'Runs a shell command as a durable background task the machine itself owns, holds a real pid for, and can kill.',
     params:
       'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number',
   },
@@ -475,7 +475,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_browser_open',
     category: 'patch',
     description:
-      'Opens a URL in a real browser on the host and returns a tabId for the other browser tools.',
+      'Opens a URL in a real browser on the machine and returns a tabId for the other browser tools.',
     params: "url: string, profile?: 'logged-in' | 'logged-out'",
   },
   {
@@ -557,7 +557,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_browser_tabs'),
     label: 'patch_browser_tabs',
     category: 'patch',
-    description: 'Lists every open browser tab on this host.',
+    description: 'Lists every open browser tab on this machine.',
     params: '(no params)',
   },
   {
@@ -603,7 +603,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_browser_downloads'),
     label: 'patch_browser_downloads',
     category: 'patch',
-    description: 'Lists files the browser downloaded, saved on the host.',
+    description: 'Lists files the browser downloaded, saved on the machine.',
     params: 'tabId?: string, waitSeconds?: number',
   },
   {

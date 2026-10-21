@@ -194,7 +194,7 @@ describe('Settings → Usage → changing accounts', () => {
       action('account-menu-claude-code-acct-a', 'account-disconnect-claude-code-acct-a'),
     );
     await waitFor(() => expect(useUiStore.getState().confirmDialog).not.toBeNull());
-    expect(useUiStore.getState().confirmDialog?.message).toContain('Every host stops using it');
+    expect(useUiStore.getState().confirmDialog?.message).toContain('Every machine stops using it');
     expect(disc).not.toHaveBeenCalled();
     useUiStore.getState().resolveConfirm(true);
     await waitFor(() => expect(disc).toHaveBeenCalledWith('claude-code', 'acct-a'));

@@ -30,6 +30,8 @@ export interface AccountUsageRow {
   key: string;
   /** The account's own label, without the backend prefix. */
   label: string;
+  /** The backend's name in words — `Claude`, `OpenAI`. */
+  backend: string;
   title: string;
   usage: HostAccount['usage'];
 }
@@ -62,6 +64,7 @@ export function accountRows(
       rows.push({
         key: `${backendId}:${account.id}`,
         label: account.label,
+        backend,
         title: `${backend} · ${account.label}`,
         usage,
       });
