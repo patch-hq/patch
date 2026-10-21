@@ -25,6 +25,8 @@ export const SCOPE_LABEL: Record<UsageScope, string> = {
 };
 
 export const SCOPE_ORDER: UsageScope[] = ['session', 'week', 'overage'];
+/** Where the Claude extra-usage add-on is turned on and managed. */
+export const EXTRA_USAGE_URL = 'https://claude.ai/settings/usage';
 
 /** Anthropic's reason code for an account that never bought the add-on. */
 export const OVERAGE_DISABLED_REASON = 'org_level_disabled_until';

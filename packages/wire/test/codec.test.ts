@@ -1449,6 +1449,19 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     result: { id: 'care-screens' },
   },
+  'patch.accounts.request': {
+    type: 'patch.accounts.request',
+    requestId: 'r1',
+    op: 'order',
+    backendId: 'claude-code',
+    accountIds: ['a1', 'a2'],
+  },
+  'patch.accounts.response': {
+    type: 'patch.accounts.response',
+    requestId: 'r1',
+    ok: true,
+    result: { strategy: 'priority', claude: [], codex: [] },
+  },
   'secrets.list': {
     type: 'secrets.list',
     secrets: [

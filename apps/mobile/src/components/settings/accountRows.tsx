@@ -4,7 +4,7 @@
 // themselves are shared settings (spec/01 § Settings), changed on the server.
 
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
 import { CLAUDE_BACKEND_ID, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../lib/theme';
 import {
@@ -208,10 +208,13 @@ export function UsageLine({
   scope,
   win,
   testID,
+  manageUrl,
 }: {
   scope: UsageScope;
   win: RateLimitWindow | undefined;
   testID: string;
+  /** Where this window's add-on is turned on; the label links there. */
+  manageUrl?: string;
 }): React.ReactElement | null {
   const colors = useTheme();
   if (!win) return null;
@@ -228,9 +231,26 @@ export function UsageLine({
   return (
     <View testID={testID} style={{ marginTop: space.xs }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <Text style={{ ...typography.meta, color: colors.ink3, width: 76 }}>
-          {SCOPE_LABEL[scope]}
-        </Text>
+        {manageUrl ? (
+          <Pressable
+            testID={`${testID}-manage`}
+            accessibilityRole="link"
+            accessibilityLabel={`Manage ${SCOPE_LABEL[scope]}`}
+            onPress={() => void Linking.openURL(manageUrl)}
+            style={{ width: 96 }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{ ...typography.meta, color: colors.leaf, textDecorationLine: 'underline' }}
+            >
+              {SCOPE_LABEL[scope]}
+            </Text>
+          </Pressable>
+        ) : (
+          <Text numberOfLines={1} style={{ ...typography.meta, color: colors.ink3, width: 96 }}>
+            {SCOPE_LABEL[scope]}
+          </Text>
+        )}
         <View
           style={{
             flex: 1,
@@ -266,6 +286,7 @@ export function UsageBars({
   refreshing,
   onRefresh,
   scopes = SCOPE_ORDER,
+  extraUsageUrl,
 }: {
   usage: AccountUsage | undefined;
   testID: string;
@@ -273,6 +294,8 @@ export function UsageBars({
   /** Present on a row with no ⋯ to put Refresh in (the legacy single account). */
   onRefresh?: () => void;
   scopes?: readonly UsageScope[];
+  /** Where Extra usage is turned on and managed. */
+  extraUsageUrl?: string;
 }): React.ReactElement {
   const colors = useTheme();
   const readAt = formatReadAt(usage?.at);
@@ -282,7 +305,13 @@ export function UsageBars({
         <Muted testID={`${testID}-empty`}>Usage not read yet</Muted>
       ) : (
         scopes.map((scope) => (
-          <UsageLine key={scope} scope={scope} win={usage[scope]} testID={`${testID}-${scope}`} />
+          <UsageLine
+            key={scope}
+            scope={scope}
+            win={usage[scope]}
+            testID={`${testID}-${scope}`}
+            manageUrl={scope === 'overage' ? extraUsageUrl : undefined}
+          />
         ))
       )}
       <View

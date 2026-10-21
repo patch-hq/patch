@@ -1,11 +1,11 @@
-// Usage → the Claude and ChatGPT accounts (spec/10 § Backend credentials).
+// Usage → one provider's accounts (spec/10 § Backend credentials).
 //
 // The accounts are shared settings (spec/01 § Settings): one ordered list per
-// backend, held on the server and sent to every host. Every change here is a
-// server write and settles on its answer. What a host does add is its own view
-// of each account — whether its check passed and how much is used — which
-// arrives on that host's `host.account` report; the freshest reading any
-// host has taken is the one shown.
+// provider, held on the server and sent to every host. Every change here is a
+// server write and settles on its answer. A host is only ever the READER of an
+// account — it takes the usage reading — and the freshest reading from any
+// host is what is shown; which host took it is not something this page says,
+// because an account belongs to nobody's machine.
 
 import type { JSX, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
@@ -13,14 +13,15 @@ import type { AccountStrategy, HostAccountSummary } from '@patch/wire';
 import { api, type SharedBackendId } from '../../api/rest.js';
 import { getActiveWs } from '../../api/ws.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
-import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
+import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { formatReadAt } from '../../lib/usage.js';
-import { hostLabel, sortHosts } from './hostScope.js';
+import { sortHosts } from './hostScope.js';
 import { sendToHost } from './hostWrite.js';
 import { writeShared } from './sharedWrite.js';
-import { AccountRow, RankedList, UsageBars } from './accountList.js';
+import { AccountRow, RankedList, UsageBars, type MenuItem } from './accountList.js';
 import { Note, Pills, Row } from './ui.js';
+import type { ProviderSpec, SharedRow } from './providers.js';
 
 const STRATEGIES: readonly AccountStrategy[] = [
   'priority',
@@ -34,45 +35,35 @@ const STRATEGY_LABELS: Record<AccountStrategy, string> = {
   'soonest-reset': 'Soonest reset',
   'least-used': 'Least used',
 };
+/** What each strategy does, in one sentence, shown on hover (spec/10 § Backend credentials). */
+export const STRATEGY_TITLES: Record<AccountStrategy, string> = {
+  priority: 'The first account here that still has allowance',
+  'round-robin': 'Each turn takes the next account along, spent evenly',
+  'soonest-reset': 'The account whose weekly limit resets soonest',
+  'least-used': 'The account with the most allowance left right now',
+};
 
-const BACKEND_NAME: Record<SharedBackendId, string> = { 'claude-code': 'Claude', codex: 'ChatGPT' };
-
-interface SharedRow {
-  id: string;
-  label: string;
-  connected: boolean;
-  email?: string;
-  organizationId?: string;
-  kind?: 'chatgpt' | 'apiKey';
-}
-
-/** The freshest reading of an account any host has taken, and which host took it. */
-function useReading(
-  backendId: SharedBackendId,
-  accountId: string,
-): { summary: HostAccountSummary; host: HostPresence } | null {
+/** The freshest reading of an account any host has taken. */
+function useReading(backendId: SharedBackendId, accountId: string): HostAccountSummary | null {
   const hosts = usePresenceStore((s) => s.hosts);
-  let best: { summary: HostAccountSummary; host: HostPresence } | null = null;
+  let best: HostAccountSummary | null = null;
   for (const host of Object.values(hosts)) {
     const summary = host.accounts[backendId]?.accounts?.find((a) => a.id === accountId);
     if (!summary) continue;
-    if (best === null || (summary.usage?.at ?? 0) > (best.summary.usage?.at ?? 0)) {
-      best = { summary, host };
-    }
+    if (best === null || (summary.usage?.at ?? 0) > (best.usage?.at ?? 0)) best = summary;
   }
   return best;
 }
 
-/** One backend's shared accounts, ranked, with the strategy that picks among them. */
-export function SharedAccounts({ backendId }: { backendId: SharedBackendId }): JSX.Element {
+/** One provider's shared accounts, ranked, with the strategy that picks among them. */
+export function SharedAccounts({ provider }: { provider: ProviderSpec }): JSX.Element {
+  const backendId = provider.id;
   const shared = usePreferencesStore((s) => s.shared);
-  const strategy = usePreferencesStore(
-    (s) => s.preferences.accountStrategy[backendId === 'codex' ? 'codex' : 'claude'],
-  );
+  const strategy = usePreferencesStore((s) => s.preferences.accountStrategy[provider.strategyKey]);
   const loaded = usePreferencesStore((s) => s.loaded);
   if (shared === null) return <Note testid={`accounts-loading-${backendId}`}>Loading…</Note>;
-  const rows: SharedRow[] = backendId === 'codex' ? shared.secrets.codex : shared.secrets.claude;
-  const name = BACKEND_NAME[backendId];
+  const rows = provider.rows(shared.secrets);
+  const name = provider.name;
 
   return (
     <div data-testid={`accounts-${backendId}`}>
@@ -83,6 +74,7 @@ export function SharedAccounts({ backendId }: { backendId: SharedBackendId }): J
           value={strategy}
           disabled={!loaded}
           labels={STRATEGY_LABELS}
+          titles={STRATEGY_TITLES}
           testid={`strategy-${backendId}`}
           onChange={(next) =>
             void writeShared(`${name} strategy`, () => api.setAccountStrategy(backendId, next))
@@ -100,7 +92,7 @@ export function SharedAccounts({ backendId }: { backendId: SharedBackendId }): J
           items={rows.map((a) => ({
             id: a.id,
             render: (handle: ReactNode, rank: number) => (
-              <AccountEntry backendId={backendId} row={a} rows={rows} handle={handle} rank={rank} />
+              <AccountEntry provider={provider} row={a} rows={rows} handle={handle} rank={rank} />
             ),
           }))}
         />
@@ -110,21 +102,21 @@ export function SharedAccounts({ backendId }: { backendId: SharedBackendId }): J
 }
 
 function AccountEntry({
-  backendId,
+  provider,
   row,
   rows,
   handle,
   rank,
 }: {
-  backendId: SharedBackendId;
+  provider: ProviderSpec;
   row: SharedRow;
   rows: SharedRow[];
   handle: ReactNode;
   rank: number;
 }): JSX.Element {
-  const pushError = useUiStore((s) => s.pushError);
+  const backendId = provider.id;
   const reading = useReading(backendId, row.id);
-  const name = BACKEND_NAME[backendId];
+  const name = provider.name;
   const id = `${backendId}-${row.id}`;
   // Two rows on one Claude organisation are one pool of credit under two
   // labels: failover between them has nowhere to go, so it is said.
@@ -132,28 +124,29 @@ function AccountEntry({
     row.organizationId === undefined
       ? undefined
       : rows.find((r) => r.id !== row.id && r.organizationId === row.organizationId);
-  const readAt = formatReadAt(reading?.summary.usage?.at);
+  const readAt = formatReadAt(reading?.usage?.at);
   const sub = [
     row.email ?? null,
-    row.connected ? null : 'Not connected',
+    row.connected ? null : 'Signed out',
     row.kind === 'apiKey' ? 'API key' : null,
-    readAt && reading ? `${readAt} on ${hostLabel(reading.host)}` : null,
+    readAt,
   ].filter((x): x is string => x !== null);
 
-  const refresh = (): void => {
-    const host =
-      reading?.host.online === true
-        ? reading.host
-        : Object.values(usePresenceStore.getState().hosts).find((h) => h.online);
-    if (!host) {
-      pushError('refresh usage: no machine is online to read it');
-      return;
-    }
-    sendToHost(host, { type: 'host.backend_usage_refresh', hostId: host.hostId, backendId });
-  };
+  const pasteToken = (title: string, verb: string): void =>
+    void (async () => {
+      const token = await useUiStore.getState().prompt({
+        title,
+        message: 'Paste a token from `claude setup-token`:',
+        placeholder: 'sk-ant-oat01-…',
+        confirmLabel: verb,
+      });
+      if (token === null || token.trim() === '') return;
+      await writeShared('sign in', () =>
+        api.updateAccount(backendId, row.id, { token: token.trim() }),
+      );
+    })();
 
-  const menu = [
-    { label: 'Refresh usage', onSelect: refresh, testid: `account-refresh-${id}` },
+  const menu: MenuItem[] = [
     {
       label: 'Rename',
       testid: `account-rename-${id}`,
@@ -171,49 +164,47 @@ function AccountEntry({
           );
         })(),
     },
-    ...(backendId === 'claude-code'
+    ...(provider.pasteToken
       ? [
-          {
-            label: row.connected ? 'Replace token' : 'Connect',
-            testid: `account-connect-${id}`,
-            onSelect: () =>
-              void (async () => {
-                const token = await useUiStore.getState().prompt({
-                  title: `Connect ${row.label}`,
-                  message: 'Paste a token from `claude setup-token`:',
-                  placeholder: 'sk-ant-oat01-…',
-                  confirmLabel: 'Connect',
-                });
-                if (token === null || token.trim() === '') return;
-                await writeShared('connect', () =>
-                  api.updateAccount(backendId, row.id, { token: token.trim() }),
-                );
-              })(),
-          },
+          row.connected
+            ? {
+                label: 'Sign in again',
+                detail: 'Replace the stored login with a fresh token',
+                testid: `account-connect-${id}`,
+                onSelect: () => pasteToken(`Sign in again to ${row.label}`, 'Sign in'),
+              }
+            : {
+                label: 'Sign in',
+                detail: 'Paste a token to start using this account',
+                testid: `account-connect-${id}`,
+                onSelect: () => pasteToken(`Sign in to ${row.label}`, 'Sign in'),
+              },
         ]
       : []),
     ...(row.connected
       ? [
           {
-            label: 'Disconnect',
+            label: 'Sign out',
+            detail: 'Keep the row, forget the login: nothing uses it until it is signed in again',
             danger: true,
             testid: `account-disconnect-${id}`,
             onSelect: () =>
               void (async () => {
                 const ok = await useUiStore.getState().confirm({
-                  title: `Disconnect ${row.label}`,
-                  message: `Disconnect ${row.label}? Every machine stops using it until it is connected again.`,
-                  confirmLabel: 'Disconnect',
+                  title: `Sign out of ${row.label}`,
+                  message: `Sign out of ${row.label}? Every machine stops using it until it is signed in again.`,
+                  confirmLabel: 'Sign out',
                   danger: true,
                 });
                 if (ok)
-                  await writeShared('disconnect', () => api.disconnectAccount(backendId, row.id));
+                  await writeShared('sign out', () => api.disconnectAccount(backendId, row.id));
               })(),
           },
         ]
       : []),
     {
       label: 'Remove',
+      detail: 'Forget this account everywhere',
       danger: true,
       testid: `account-remove-${id}`,
       onSelect: () =>
@@ -246,13 +237,15 @@ function AccountEntry({
           Same {name} account as {twin.label}
         </span>
       ) : null}
-      {reading?.summary.error ? (
+      {reading?.error ? (
         <p className="set-error" role="alert">
-          {reading.summary.error}
+          {reading.error}
         </p>
       ) : null}
       <UsageBars
-        usage={reading?.summary.usage}
+        usage={reading?.usage}
+        windows={provider.windows}
+        extraUsageUrl={provider.extraUsageUrl}
         testId={`account-usage-${id}`}
         testIdFor={(scope) => `account-usage-${scope}-${id}`}
       />
@@ -260,10 +253,8 @@ function AccountEntry({
   );
 }
 
-/** Add a Claude account from a pasted token, or adopt a host's own login. */
+/** Add a Claude account from a pasted `claude setup-token` token. */
 export function AddClaudeAccount(): JSX.Element {
-  const hosts = usePresenceStore((s) => s.hosts);
-  const online = sortHosts(Object.values(hosts)).filter((h) => h.online);
   return (
     <div className="set-inline set-add-bar start">
       <button
@@ -287,21 +278,6 @@ export function AddClaudeAccount(): JSX.Element {
       >
         Add account
       </button>
-      {online.map((h) => (
-        <button
-          key={h.hostId}
-          type="button"
-          className="set-btn ghost"
-          data-testid={`adopt-claude-${h.hostId}`}
-          onClick={() =>
-            void writeShared(`use the login on ${hostLabel(h)}`, () =>
-              api.adoptAccount('claude-code', h.hostId),
-            )
-          }
-        >
-          Use the login on {hostLabel(h)}
-        </button>
-      ))}
     </div>
   );
 }
@@ -309,7 +285,8 @@ export function AddClaudeAccount(): JSX.Element {
 /**
  * Add a ChatGPT account. A ChatGPT sign-in has to run on a machine — Codex
  * does the device flow — so one online host runs it and sends the login to
- * the server; an API key is added straight to the server.
+ * the server; which host is not the user's concern. An API key is added
+ * straight to the server.
  */
 export function AddChatGPTAccount(): JSX.Element {
   const hosts = usePresenceStore((s) => s.hosts);

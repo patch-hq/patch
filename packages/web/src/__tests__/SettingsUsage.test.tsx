@@ -73,7 +73,7 @@ describe('Settings → Usage → accounts', () => {
     expect(order('accounts-rank-claude-code')).toEqual(['acct-a', 'acct-b']);
     expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('work');
     expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('work@example.com');
-    expect(screen.getByTestId('account-claude-code-acct-b')).toHaveTextContent('Not connected');
+    expect(screen.getByTestId('account-claude-code-acct-b')).toHaveTextContent('Signed out');
     expect(screen.queryByTestId('settings-host-switch')).toBeNull();
   });
 
@@ -86,7 +86,7 @@ describe('Settings → Usage → accounts', () => {
     expect(screen.getByTestId('accounts-empty-codex')).toHaveTextContent('No ChatGPT accounts yet');
   });
 
-  it('shows the freshest usage reading any host has taken, naming that host', () => {
+  it('shows the freshest usage reading any host has taken, and names no host', () => {
     loadShared({ secrets: TWO });
     reportHost('d1', { hostName: 'hetzner' });
     reportHost('d2', { hostName: 'mac', runsManager: false });
@@ -96,7 +96,35 @@ describe('Settings → Usage → accounts', () => {
     reportAccounts('d2', [{ id: 'acct-a', label: 'work', connected: true, usage: newer }]);
     renderSettings('/settings/usage');
     expect(screen.getByTestId('account-usage-session-claude-code-acct-a')).toHaveTextContent('70%');
-    expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('on mac');
+    expect(screen.getByTestId('account-claude-code-acct-a')).not.toHaveTextContent(/on mac/);
+    expect(screen.getByTestId('account-claude-code-acct-a')).not.toHaveTextContent(/hetzner/);
+  });
+
+  it('puts the extra-usage reason on its own line, linked to where it is turned on', () => {
+    loadShared({ secrets: TWO });
+    reportHost('d1', { hostName: 'hetzner' });
+    reportAccounts('d1', [
+      {
+        id: 'acct-a',
+        label: 'work',
+        connected: true,
+        usage: {
+          at: 1_000,
+          session: { status: 'allowed', utilization: 0.1 },
+          overage: { status: 'rejected', disabledReason: 'org_level_disabled_until' },
+        },
+      },
+    ]);
+    renderSettings('/settings/usage');
+    const overage = screen.getByTestId('account-usage-overage-claude-code-acct-a');
+    expect(overage).toHaveTextContent('Extra usage');
+    expect(overage).toHaveTextContent('off');
+    expect(overage).toHaveClass('off');
+    expect(screen.getByTestId('account-extra-usage-settings')).toHaveAttribute(
+      'href',
+      'https://claude.ai/settings/usage',
+    );
+    expect(overage).toContainElement(screen.getByTestId('account-extra-usage-settings'));
   });
 
   it('warns when two accounts are the same Claude account', () => {
@@ -136,6 +164,19 @@ describe('Settings → Usage → strategy', () => {
     );
     expect(screen.getByTestId('strategy-codex-priority')).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it('says what each strategy does on hover', () => {
+    loadShared({ secrets: TWO });
+    renderSettings('/settings/usage');
+    expect(screen.getByTestId('strategy-claude-code-round-robin')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/next account along/),
+    );
+    expect(screen.getByTestId('strategy-claude-code-priority')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/first account/i),
+    );
+  });
 });
 
 describe('Settings → Usage → changing accounts', () => {
@@ -173,20 +214,18 @@ describe('Settings → Usage → changing accounts', () => {
     );
   });
 
-  it('offers each online host’s own login, and adopts it', async () => {
-    loadShared();
+  it('names no host anywhere on the page: an account is every host’s', () => {
+    loadShared({ secrets: TWO });
     reportHost('d1', { hostName: 'hetzner' });
     usePresenceStore.getState().setHostOnline('d1', true);
     reportHost('d2', { hostName: 'mac', runsManager: false });
-    usePresenceStore.getState().setHostOnline('d2', false);
-    const adopt = vi.spyOn(api, 'adoptAccount').mockResolvedValue(sharedState({ version: 2 }));
+    usePresenceStore.getState().setHostOnline('d2', true);
     renderSettings('/settings/usage');
-    expect(screen.queryByTestId('adopt-claude-d2')).toBeNull();
-    fireEvent.click(screen.getByTestId('adopt-claude-d1'));
-    await waitFor(() => expect(adopt).toHaveBeenCalledWith('claude-code', 'd1'));
+    expect(screen.queryByTestId('adopt-claude-d1')).toBeNull();
+    expect(screen.getByTestId('settings-usage')).not.toHaveTextContent(/hetzner|\bmac\b/);
   });
 
-  it('disconnect asks first, then disconnects for every host', async () => {
+  it('sign out asks first, then signs out for every host', async () => {
     loadShared({ secrets: TWO });
     const disc = vi.spyOn(api, 'disconnectAccount').mockResolvedValue(sharedState({ version: 2 }));
     renderSettings('/settings/usage');
@@ -242,20 +281,32 @@ describe('Settings → Usage → changing accounts', () => {
     expect(order('accounts-rank-claude-code')).toEqual(['acct-a', 'acct-b']);
   });
 
-  it('refresh usage asks a host that is online to read it', () => {
+  it('the ⋯ opens a panel whose actions say what they do, with no refresh', () => {
     loadShared({ secrets: TWO });
-    reportHost('d1', { hostName: 'hetzner' });
-    usePresenceStore.getState().setHostOnline('d1', true);
-    const { sent } = fakeWs();
     renderSettings('/settings/usage');
-    fireEvent.click(
-      action('account-menu-claude-code-acct-a', 'account-refresh-claude-code-acct-a'),
+    fireEvent.click(screen.getByTestId('account-menu-claude-code-acct-a'));
+    const menu = screen.getByTestId('account-menu-claude-code-acct-a-open');
+    expect(menu).toHaveAttribute('role', 'menu');
+    expect(screen.queryByTestId('account-refresh-claude-code-acct-a')).toBeNull();
+    expect(screen.getByTestId('account-connect-claude-code-acct-a')).toHaveTextContent(
+      'Sign in again',
     );
-    expect(sent).toContainEqual({
-      type: 'host.backend_usage_refresh',
-      hostId: 'd1',
-      backendId: 'claude-code',
-    });
+    expect(screen.getByTestId('account-connect-claude-code-acct-a')).toHaveTextContent(
+      /fresh token/,
+    );
+    expect(screen.getByTestId('account-disconnect-claude-code-acct-a')).toHaveTextContent(
+      'Sign out',
+    );
+    expect(screen.getByTestId('account-disconnect-claude-code-acct-a')).toHaveTextContent(
+      /forget the login/,
+    );
+    expect(screen.getByTestId('account-remove-claude-code-acct-a')).toHaveTextContent(/everywhere/);
+    // A signed-out row offers Sign in, and nothing to sign out of.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('account-menu-claude-code-acct-a-open')).toBeNull();
+    fireEvent.click(screen.getByTestId('account-menu-claude-code-acct-b'));
+    expect(screen.getByTestId('account-connect-claude-code-acct-b')).toHaveTextContent(/^Sign in/);
+    expect(screen.queryByTestId('account-disconnect-claude-code-acct-b')).toBeNull();
   });
 });
 
@@ -306,12 +357,14 @@ describe('Settings → Usage → ChatGPT sign-in', () => {
   });
 });
 
-describe('Settings → Usage → token-spending generation', () => {
-  it('title and status toggles read and write the shared settings', async () => {
+describe('Settings → Chats → token-spending generation', () => {
+  it('title and status toggles live on Chats, not Usage, and write the shared settings', async () => {
     const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     loadShared({ settings: { titleGenerationEnabled: true, statusGenerationEnabled: true } });
     renderSettings('/settings/usage');
+    expect(screen.queryByTestId('title-generation-toggle')).toBeNull();
+    renderSettings('/settings/chats');
     const title = screen.getByTestId('title-generation-toggle');
     expect(title).toBeChecked();
     fireEvent.click(title);

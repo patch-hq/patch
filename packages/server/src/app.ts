@@ -29,7 +29,7 @@ import { PresenceTracker } from './presence.js';
 import { createActivityReader } from './activity.js';
 import { createBrowserUseReader, HostOfflineError } from './browser-use.js';
 import { createToolLogReader } from './tool-log.js';
-import { createUsageReader } from './usage-report.js';
+import { createUsageReader, isUsagePeriod } from './usage-report.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SharedSettingsService } from './shared-settings.js';
 import { registerSettingsRoutes } from './settings-routes.js';
@@ -98,6 +98,7 @@ import { registerWebhookRoutes } from './jobs/webhooks.js';
 import { registerTodoistRoutes } from './jobs/todoist.js';
 import { registerJobRoutes } from './jobs/routes.js';
 import { attachJobsRpcBridge } from './jobs/rpc-bridge.js';
+import { attachAccountsRpcBridge } from './accounts-rpc-bridge.js';
 import type { Job, JobsInterface } from './jobs/types.js';
 import { HookStore } from './hooks/store.js';
 import { HookRunner } from './hooks/runner.js';
@@ -545,7 +546,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // through each machine's own bounded tool-calls.jsonl the same way.
   const toolLog = createToolLogReader({ hostLink });
   app.addHook('onClose', async () => toolLog.close());
-  const usageReader = createUsageReader({ hostLink });
+  const usageReader = createUsageReader({
+    hostLink,
+    onRefreshError: (period, err) =>
+      log.warn({ period, err: err.message }, 'usage: background re-read failed'),
+  });
   app.addHook('onClose', async () => usageReader.close());
 
   // Server-owned composer drafts (spec/14 § Composer, spec/15 § Composer).
@@ -1458,12 +1463,29 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // Settings → Usage: account limit history (for the burndown) and per-chat
-  // token totals, read through every online machine and merged.
+  // token totals, read through every online machine and merged. A named
+  // `period` (day/week/month) comes from the server's cache, so the page
+  // draws at once; `since`/`until` is a live read.
   app.get('/api/usage-report', async (req, reply) => {
     if (!(await authSurfaceOrHost(req.headers.authorization))) {
       return reply.code(401).send({ error: 'unauthenticated' });
     }
     const q = req.query as Record<string, string | undefined>;
+    if (q.period !== undefined) {
+      if (!isUsagePeriod(q.period)) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_input', message: 'period must be day, week or month' });
+      }
+      try {
+        return await usageReader.cached(q.period);
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'usage_unavailable',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const now = Date.now();
     const until = q.until !== undefined ? Number(q.until) : now;
     const since = q.since !== undefined ? Number(q.since) : until - 7 * 24 * 60 * 60 * 1000;
@@ -2128,6 +2150,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'jobs-rpc-bridge' }),
   });
 
+  // A host's own CLI and agents list/reorder the shared accounts over the link.
+  const detachAccountsBridge = accountSettings
+    ? attachAccountsRpcBridge({
+        link: hostLink,
+        shared: accountSettings,
+        logger: log.child({ component: 'accounts-rpc-bridge' }),
+      })
+    : undefined;
+
   registerJobRoutes(app, {
     logger: log.child({ component: 'jobs-routes' }),
     registry,
@@ -2193,6 +2224,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     recurrenceScheduler.stop();
     jobDispatcher.close();
     detachJobsBridge();
+    detachAccountsBridge?.();
     if (jobs instanceof JobStore) await jobs.close();
     if (hooks instanceof HookStore) await hooks.close();
   });

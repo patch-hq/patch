@@ -37,6 +37,7 @@ import { PERMISSION_MODES } from '../components/Composer.js';
 /** Each page's own testid, so a test can say which page is showing. */
 const PAGE_TESTID: Record<string, string> = {
   usage: 'settings-usage',
+  chats: 'settings-chats',
   agent: 'settings-agent',
   mcp: 'settings-mcp',
   memories: 'settings-memories',
@@ -82,6 +83,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       .filter((b) => b.getAttribute('data-testid')?.startsWith('settings-nav-'));
     expect(buttons.map((a) => a.textContent)).toEqual([
       'Usage',
+      'Chats',
       'Agent',
       'MCP',
       'Memories',

@@ -5058,6 +5058,8 @@ export const PatchSpawnEvent = z
     /** Optional; omitted takes the NAMED host's last-used model (spec/04 § Spawn). */
     model: z.string().min(1).optional(),
     prompt: z.string(),
+    /** The stored account the new chat starts on; the named host refuses one it does not hold. */
+    preferredAccountId: z.string().min(1).optional(),
     /**
      * Correlates the named host's `patch.spawn.response` with THIS call.
      * Present only when the frame is a cross-host REQUEST the caller is waiting
@@ -8072,6 +8074,46 @@ export const PatchPadResponseEvent = z
 export type PatchPadResponseEvent = z.infer<typeof PatchPadResponseEvent>;
 
 // ---------------------------------------------------------------------------
+// Shared accounts RPC: a host asks the server for the shared accounts (the
+// order and strategy every host draws from) or changes that order/strategy.
+// The server owns them, so a machine's own CLI and agents go through this
+// link rather than needing a separate login (spec/17 § Commands).
+// Consumed by the server's accounts bridge; never fanned out to surfaces.
+
+export const PatchAccountsRequestEvent = z
+  .object({
+    type: z.literal('patch.accounts.request'),
+    requestId: z.string().min(1),
+    op: z.enum(['list', 'order', 'strategy']),
+    /** order/strategy (and an optional filter for list). */
+    backendId: z.enum(['claude-code', 'codex']).optional(),
+    /** order: every account id, each once, first to last. */
+    accountIds: z.array(z.string().min(1)).optional(),
+    /** strategy. */
+    strategy: AccountStrategy.optional(),
+  })
+  .strict();
+export type PatchAccountsRequestEvent = z.infer<typeof PatchAccountsRequestEvent>;
+
+export const PatchAccountsResponseEvent = z
+  .object({
+    type: z.literal('patch.accounts.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** The shared accounts after the call: `{ strategy, claude: [...], codex: [...] }`. */
+    result: z.unknown().optional(),
+    error: z
+      .object({
+        code: z.string().min(1),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchAccountsResponseEvent = z.infer<typeof PatchAccountsResponseEvent>;
+
+// ---------------------------------------------------------------------------
 // Secrets (spec/15 § Settings tab — Secrets)
 //
 // The host owns the key-value secret store (it injects them into chats), the
@@ -8906,6 +8948,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   // Pads
   PatchPadRequestEvent,
   PatchPadResponseEvent,
+  PatchAccountsRequestEvent,
+  PatchAccountsResponseEvent,
   // Secrets
   SecretsListEvent,
   SecretsUpdatedEvent,
@@ -9188,6 +9232,8 @@ export const EVENT_SCHEMAS = {
   'patch.artifact.publish_response': PatchArtifactPublishResponseEvent,
   'patch.pad.request': PatchPadRequestEvent,
   'patch.pad.response': PatchPadResponseEvent,
+  'patch.accounts.request': PatchAccountsRequestEvent,
+  'patch.accounts.response': PatchAccountsResponseEvent,
   'secrets.list': SecretsListEvent,
   'secrets.updated': SecretsUpdatedEvent,
   'patch.secrets.set_request': PatchSecretsSetRequestEvent,

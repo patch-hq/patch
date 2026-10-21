@@ -75,9 +75,10 @@ Provider accounts have NO host tie. Whether a chat can run — the composer, the
 
 Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), once per backend for the whole account — the accounts are shared settings, held by the server and sent to every host (`01-server.md` § Settings):
 
-- Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `disconnect` action; not-connected shows a `connect` action.
-- An `add another account` action alongside the existing rows starts the same paste-a-token flow as connect, but always creates a new row rather than replacing one. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
-- An `adopt` action, per host, takes the backend's own login on that machine (below) and adds it as an account. A host whose login is already stored has none to offer.
+- Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `Sign out` action; signed-out shows a `Sign in` action. The row's actions sit behind a ⋯ that opens a small panel beside the row — it floats over the rows below rather than pushing them — and each action that is not self-evident carries one line saying what it does: `Sign in again` replaces the stored login with a fresh token; `Sign out` keeps the row and forgets the login; `Remove` forgets the account everywhere. No row names a machine: an account is every host's, and a host is only ever the reader of its usage.
+- An `Add account` action under the rows starts the same paste-a-token flow as sign-in, but always creates a new row rather than replacing one. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
+- The `adopt` call (take the backend's own login on a machine and add it as an account) stays as a REST and CLI operation, but Settings does not offer it per host: a host that holds accounts the server does not sends them on its first connect (`01-server.md` § Settings), so there is nothing for a person to pick a machine for.
+- EVERY PROVIDER IS ONE ENTRY IN A LIST, not a branch in the page. The web page keeps a registry (`providers.tsx`) in which each provider declares its name, which shared strategy setting ranks its accounts, which limit windows it reports and in what order, where its extra-usage add-on is managed, whether a login can be replaced by pasting a token, and the control that adds an account. The page walks the list and draws every entry the same way — strategy row, ranked accounts, add control — so a new provider (a local model server, say) is a new entry and never a change to the page.
 - A strategy control per backend, over the rows (§ above).
 - ONE ROW IS ONE CLAUDE ACCOUNT. Every stored credential records the Anthropic organisation it authenticates as, read from the `anthropic-organization-id` header on the call that validates it. (`GET /api/oauth/profile` answers 403 `oauth_scope_insufficient` for a `claude setup-token` token; the header is stamped on every response, including the free `/v1/models` 200.) A token whose organisation matches an account already stored is REFUSED, naming the row it clashes with — a second credential for the same account is not somewhere to fail over to, it is the same pool of credit under a second label. A re-connect of a row is exempt: replacing a row's own token with a fresh one for the same organisation is a rotation. An organisation that could not be established is "not known", never "different", so an unidentified token is still stored.
 - Two accounts sharing an organisation are sidelined TOGETHER when either runs out, and the chat says so. Failing over between them would spend a turn re-discovering the same empty pool.
@@ -85,7 +86,7 @@ Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), o
 Every surface with a Settings screen — web, desktop and mobile (`15-design-mobile.md` § Settings tab) — shows the same state and offers the same controls, read from `GET /api/accounts/:backendId` and kept live by the `settings.changed` push (`03-wire-protocol.md` § Settings).
 
 - Connect, add, disconnect, relabel, reorder and adopt are REST calls to the server (`01-server.md` § Endpoints). The server validates a pasted token itself, against the provider, before storing anything, so a token that does not work is refused in the reply naming why, and nothing is written.
-- Disconnect is confirmed first: it takes that key out of the sequence every chat on every host draws from.
+- Sign out and Remove are confirmed first: each takes that key out of the sequence every chat on every host draws from.
 - A change is settled when the server has committed it; the reply carries the new list, and the row shows it. Whether each host has picked it up is the host's applied settings version, shown on its Settings → Hosts row (`01-server.md` § Settings) — an offline host does not block a change, it receives it on reconnect.
 - The CLI drives the same calls through `patch accounts` (`17-cli.md` § Commands), and needs the server: with no server link it refuses, naming the server.
 
@@ -119,7 +120,7 @@ with no structured counterpart anywhere in patch, which is why nobody could
 explain it. (The per-model `seven_day_opus`/`seven_day_sonnet` variants remain
 unsurfaced.)
 
-USAGE HISTORY. Settings → Usage opens with two groups above the accounts. "Allowance left" is a burndown: for a chosen period (Day = last 24 h, Week = 7 d, Month = 30 d, or a Custom from/to date) one line per Claude account of the percent of the weekly window still unspent at each probe, rising back at the weekly reset. "Chats by tokens" ranks chats with a completed turn in the period by tokens (fresh + cached input + output, summed from each chat's `turn.end` usage in its own log). Both come from `GET /api/usage-report?since&until`, which asks every online host (`patch.usage.read.request`) and merges. History starts when a host first records it: each probe is appended to `logs/usage-history.jsonl` (bounded), so a period reaching back before that shows only the readings since; per-chat tokens go back as far as the chat logs do. A host that does not answer fails the call (no partial answer).
+USAGE HISTORY. Settings → Usage opens with two groups above the accounts. "Allowance left" is a burndown: for a chosen period (Day = last 24 h, Week = 7 d, Month = 30 d, or a Custom from/to date) one line per Claude account of the percent of the weekly window still unspent at each probe, rising back at the weekly reset. "Chats by tokens" ranks chats with a completed turn in the period by tokens (fresh + cached input + output, summed from each chat's `turn.end` usage in its own log). Both come from `GET /api/usage-report`: a named `period` (day/week/month) is answered from the server's cache, and `since&until` is read live. Reading means every online host scanning its chat logs (`patch.usage.read.request`), which took long enough that the page opened on a spinner every time; so the server keeps each named period's last answer, stamped with when it was read, hands it back at once, and re-reads behind it when it is older than five minutes — and on a ten-minute timer re-reads the default period (week) and any period that has been asked for, so the figures are current before anyone looks. The page says when the figures were read. The burndown is drawn as a smooth curve within each weekly cycle and a straight vertical step at each reset, so where every account's week starts is visible rather than smeared across the hours between two probes. History starts when a host first records it: each probe is appended to `logs/usage-history.jsonl` (bounded), so a period reaching back before that shows only the readings since; per-chat tokens go back as far as the chat logs do. A host that does not answer fails the call (no partial answer).
 
 Each window carries `status` (`allowed`/`allowed_warning`/`rejected`),
 `utilization` (0–1), `resetsAt` (epoch ms) and an optional `disabledReason`.
@@ -140,8 +141,15 @@ passed through: every instant patch displays is formatted from an epoch in the
 reader's own zone. A `rejected` session or week window reads as blocked. A
 rejected overage does NOT (spec/12 § A turn only dies for a reason someone
 chose): that line reads as off, in neutral styling, and says that nothing has
-been overspent. A row also carries a `Refresh` action, because the moment a
-person wants the figure is the moment they are deciding whether to wait.
+been overspent. The reason sits on the extra-usage line itself, in the column
+where a reset time would go — `Turn on`, linked to that account's Claude usage
+settings, when the add-on was never taken out; `disabled by organisation` when
+policy prevents it — so the line is one line, not a bar with a footnote. A row
+carries no `Refresh` action: the host reads every account every ten minutes and
+after any turn that runs one out, and `host.backend_usage_refresh` remains for
+the CLI and for a surface that has a reason to ask, but a button whose only
+effect is to make a figure a few minutes fresher is a button a person presses
+without knowing why.
 
 Usage also appears where the work happens: the composer's context ring opens a
 popover naming the pool closest to its limit, or the refusal, with every

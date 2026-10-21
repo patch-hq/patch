@@ -64,6 +64,12 @@ import {
 import { buildPreviewHtml, previewable } from './viewFilePreview.js';
 import { PadInputError, bundleDir, type PadRequest } from './pads.js';
 import {
+  AccountRefError,
+  AccountsRpcError,
+  resolveAccountRef,
+  type AccountsRpc,
+} from './accountsClient.js';
+import {
   BrowserNotInstalledError,
   RefNotFoundError,
   BrowserStoppedError,
@@ -170,7 +176,19 @@ export interface BuildOptions {
     folder: string;
     model?: string;
     prompt?: string;
+    preferredAccountId?: string;
   }) => Promise<{ chatId?: string }>;
+  /**
+   * The shared accounts, over the server link: list, and change order or
+   * strategy. Backs `patch_list_accounts` and the CLI's `accounts` commands on
+   * this machine. Unset, those endpoints 503.
+   */
+  accountsRpc?: AccountsRpc;
+  /**
+   * The accounts this machine holds for the backend a model runs on (Claude
+   * when no model is named), so `account` on a spawn can be a label.
+   */
+  heldAccounts?: (model: string | undefined) => Array<{ id: string; label: string }>;
   /**
    * The account-wide chat list, each entry naming the machine it lives on
    * (spec/03 § Cross-chat tools). Only the server sees every machine's chats,
@@ -815,6 +833,8 @@ const SpawnBody = z
     name: z.string().min(1).optional(),
     prompt: z.string().min(1).optional(),
     callerChatId: z.string().min(1).optional(),
+    /** The stored account the chat starts on: its id or its label. Refused if not held. */
+    account: z.string().min(1).optional(),
     /** SDK model override (CLI `--model` pass-through; spec/13). */
     model: z.string().min(1).optional(),
     /** SDK permission mode (CLI `--dangerously-skip-permissions`; spec/13). */
@@ -825,6 +845,12 @@ const SpawnBody = z
   .strict();
 
 const StopParams = z.object({ id: z.string().min(1) }).strict();
+
+const AccountsBackendParams = z.object({ backendId: z.enum(['claude-code', 'codex']) }).strict();
+const AccountsOrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).strict();
+const AccountsStrategyBody = z
+  .object({ strategy: z.enum(['priority', 'round-robin', 'soonest-reset', 'least-used']) })
+  .strict();
 
 const ListChatsQuery = z
   .object({
@@ -1314,8 +1340,20 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'bad_request', detail: parsed.error.flatten() });
     }
+    let preferredAccountId: string | undefined;
+    if (parsed.data.account !== undefined) {
+      try {
+        preferredAccountId = resolveSpawnAccount(parsed.data.account, parsed.data.model);
+      } catch (err) {
+        return reply.code(400).send({
+          error: 'account_not_found',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const spawnReq: SpawnChatOptions = {
       folder: parsed.data.folder,
+      ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.prompt !== undefined ? { prompt: parsed.data.prompt } : {}),
       ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
@@ -1378,6 +1416,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   // the machine itself drives them without a round trip through the server.
 
   /** Shared gate: authed, and the host controls actually wired. */
+  /** An `account` as typed (id or label) → the stored account id on this machine. */
+  const resolveSpawnAccount = (account: string, model: string | undefined): string => {
+    if (!opts.heldAccounts) {
+      throw new AccountRefError('this machine has no account store, so it cannot pick an account');
+    }
+    return resolveAccountRef(account, opts.heldAccounts(model));
+  };
+
   const hostGate = (
     req: FastifyRequest,
     reply: FastifyReply,
@@ -1495,6 +1541,71 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         .send({ error: 'claude_settings_invalid', message: (err as Error).message });
     }
     return { ok: true, ...host.claudeSettings.snapshot() };
+  });
+
+  // ---- shared accounts (over the server link) ----------------------------
+  // `/accounts*` is the machine's own CLI (local key); `/internal/accounts` is
+  // the MCP child (`patch_list_accounts`). All go to the server, which owns the
+  // order and strategy, so none needs a separate login.
+  const accountsCall = async (
+    reply: FastifyReply,
+    req: Parameters<AccountsRpc>[0],
+  ): Promise<unknown> => {
+    if (!opts.accountsRpc) {
+      return reply
+        .code(503)
+        .send({ error: 'accounts_unavailable', message: 'accounts are not wired on this host' });
+    }
+    try {
+      return await opts.accountsRpc(req);
+    } catch (err) {
+      const code = err instanceof AccountsRpcError ? err.code : 'internal';
+      const status = code === 'link_offline' ? 503 : code === 'timeout' ? 504 : 400;
+      return reply.code(status).send({
+        error: code,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  app.get('/accounts', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    return accountsCall(reply, { op: 'list' });
+  });
+  app.get('/internal/accounts', async (_req, reply) => accountsCall(reply, { op: 'list' }));
+  app.put('/accounts/:backendId/order', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    const params = AccountsBackendParams.safeParse(req.params);
+    const body = AccountsOrderBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: (!params.success ? params.error : body.error!).message,
+      });
+    }
+    return accountsCall(reply, {
+      op: 'order',
+      backendId: params.data.backendId,
+      accountIds: body.data.accountIds,
+    });
+  });
+  app.put('/accounts/:backendId/strategy', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    const params = AccountsBackendParams.safeParse(req.params);
+    const body = AccountsStrategyBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: (!params.success ? params.error : body.error!).message,
+      });
+    }
+    return accountsCall(reply, {
+      op: 'strategy',
+      backendId: params.data.backendId,
+      strategy: body.data.strategy,
+    });
   });
 
   // GET /backends — each backend's version and this host's view of the shared accounts.
@@ -2640,7 +2751,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { folder, host, name, prompt, callerChatId, model, permissionMode } = parsed.data;
+    const { folder, host, name, prompt, callerChatId, model, permissionMode, account } =
+      parsed.data;
     const limiterKey = callerChatId ?? 'anonymous';
     if (!limiter.check(`spawn:${limiterKey}`)) {
       toolLog({
@@ -2653,6 +2765,24 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return sendRateLimited(reply, `spawn:${limiterKey}`);
     }
     const selfHostId = opts.daemon!.hostId;
+    let preferredAccountId: string | undefined;
+    if (account !== undefined) {
+      try {
+        preferredAccountId = resolveSpawnAccount(account, model);
+      } catch (err) {
+        toolLog({
+          tool: 'patch_spawn',
+          callerChatId,
+          durationMs: Date.now() - start,
+          ok: false,
+          err: 'account_not_found',
+        });
+        return reply.code(400).send({
+          error: 'account_not_found',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     // spec/03 § Cross-chat tools — a call whose target is on the calling chat's
     // own machine is short-circuited in-process; one naming another machine
     // goes over the wire, relayed by the server to that machine's host.
@@ -2696,6 +2826,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           folder,
           ...(model !== undefined ? { model } : {}),
           ...(prompt !== undefined ? { prompt } : {}),
+          ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
         });
         toolLog({
           tool: 'patch_spawn',
@@ -2734,6 +2865,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ...(prompt !== undefined ? { prompt } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
+        ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
       };
       const chatId = await opts.daemon!.spawnChat(spawnReq);
       if (opts.emitWire && callerChatId) {

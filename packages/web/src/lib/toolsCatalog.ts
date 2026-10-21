@@ -131,7 +131,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_spawn',
     category: 'patch',
     description: 'Creates a brand-new persistent chat in a folder and returns its id.',
-    params: 'folder: string, host?: string, name?: string, prompt?: string, model?: string',
+    params:
+      'folder: string, host?: string, name?: string, prompt?: string, model?: string, account?: string',
   },
   {
     name: patchToolId('patch_send_to'),
@@ -372,6 +373,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_list_devices',
     category: 'patch',
     description: 'Lists the registered voice devices and whether each is online.',
+    params: '(no params)',
+  },
+  {
+    name: patchToolId('patch_list_accounts'),
+    label: 'patch_list_accounts',
+    category: 'patch',
+    description:
+      'Lists the shared Claude and ChatGPT accounts in the order chats try them, with ids and labels.',
     params: '(no params)',
   },
   {

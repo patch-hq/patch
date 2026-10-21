@@ -118,6 +118,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_search_chats',
   'patch_activity',
   'patch_list_devices',
+  'patch_list_accounts',
   'patch_stop',
   'patch_notify',
   'patch_speak',

@@ -23,6 +23,7 @@ import {
 
 const PAGES = [
   { id: 'usage', title: 'Usage', testid: 'settings-usage' },
+  { id: 'chats', title: 'Chats', testid: 'settings-chats' },
   { id: 'agent', title: 'Agent', testid: 'settings-agent' },
   { id: 'mcp', title: 'MCP', testid: 'settings-mcp' },
   { id: 'memories', title: 'Memories', testid: 'settings-memories' },

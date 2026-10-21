@@ -1,3 +1,4 @@
+import { AccountsClient } from './accountsClient.js';
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
@@ -1007,6 +1008,12 @@ async function startHost(
       ...(credentialError ? { credentialError } : {}),
     };
   };
+
+  /** The accounts this machine holds for the backend `model` runs on, in the shared order. */
+  const heldAccountsFor = (model: string | undefined): Array<{ id: string; label: string }> =>
+    isCodexModel(model)
+      ? (codexAccounts.report().accounts ?? []).map((a) => ({ id: a.id, label: a.label }))
+      : (readPatchStore(oauthOpts)?.accounts ?? []).map((a) => ({ id: a.id, label: a.label }));
 
   /**
    * This host's `host.host` self-description, rebuilt from live state each
@@ -2104,6 +2111,10 @@ async function startHost(
         queuePull.handleResponse(event);
         return;
       }
+      if (event.type === 'patch.accounts.response') {
+        accountsClient.handleResponse(event);
+        return;
+      }
       if (event.type === 'patch.pad.response') {
         padClient.handleResponse(event);
         return;
@@ -2712,11 +2723,35 @@ async function startHost(
         // believing it spawned a chat that does not exist (spec/03 § Cross-chat
         // tools — the call resolves inside the turn, success or failure).
         const spawnRequestId = event.requestId;
+        // A preference this machine does not hold is refused, never ignored: a
+        // chat that quietly ran on another account is the failure this stops.
+        if (
+          event.preferredAccountId !== undefined &&
+          !heldAccountsFor(event.model).some((a) => a.id === event.preferredAccountId)
+        ) {
+          const message = `account ${event.preferredAccountId} is not one of ${selfHostId}'s accounts for this backend`;
+          logger.error({ sourceChatId: event.sourceChatId }, `cross-host patch.spawn: ${message}`);
+          if (spawnRequestId !== undefined) {
+            sender({
+              type: 'patch.spawn.response',
+              requestId: spawnRequestId,
+              sourceChatId: event.sourceChatId,
+              hostId: selfHostId,
+              folder: event.folder,
+              ok: false,
+              error: { code: 'account_not_found', message },
+            });
+          }
+          return;
+        }
         void daemon
           .spawnChat({
             folder: event.folder,
             ...(event.model !== undefined ? { model: event.model } : {}),
             ...(event.prompt !== '' ? { prompt: event.prompt } : {}),
+            ...(event.preferredAccountId !== undefined
+              ? { preferredAccountId: event.preferredAccountId }
+              : {}),
           })
           .then((chatId) => {
             logger.info(
@@ -4225,6 +4260,8 @@ async function startHost(
   });
   // patch_pad_* (spec/14 § Pads): the same round trip, for design spaces.
   const padClient = new PadClient({ emit, isLinkOnline: () => linkOnline });
+  // The shared accounts, asked of the server over the same link.
+  const accountsClient = new AccountsClient({ emit, isLinkOnline: () => linkOnline });
   // spec/04 § Message queueing — the server-run queue's tool-boundary pull.
   const queuePull = new QueuePullClient({ emit, isLinkOnline: () => linkOnline });
   pullQueuedFromServer = (chatId) => queuePull.pull(chatId);
@@ -4578,6 +4615,8 @@ async function startHost(
     emitWire: emit,
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,
+    accountsRpc: accountsClient.request,
+    heldAccounts: heldAccountsFor,
     meetingAgentEdit: (chatId, edit) => meetings!.agentEdit(chatId, edit),
     // Live link diagnostics + spec/12 link-drop control on the control UDS.
     serverLink: {

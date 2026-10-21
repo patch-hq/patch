@@ -145,6 +145,7 @@ export function Pills<T extends string>({
   testid,
   label,
   labels,
+  titles,
 }: {
   options: readonly T[];
   value: T;
@@ -154,6 +155,8 @@ export function Pills<T extends string>({
   label: string;
   /** What each option reads as, where that is not the option itself. */
   labels?: Partial<Record<T, string>>;
+  /** What each option does, shown on hover (spec/14 § Copy — Tooltips). */
+  titles?: Partial<Record<T, string>>;
 }): JSX.Element {
   return (
     <div className="set-pills" role="group" aria-label={label} data-testid={testid}>
@@ -164,6 +167,7 @@ export function Pills<T extends string>({
           className={o === value ? 'on' : undefined}
           aria-pressed={o === value}
           disabled={disabled}
+          title={titles?.[o]}
           data-testid={testid ? `${testid}-${o}` : undefined}
           onClick={() => {
             if (o !== value) onChange(o);

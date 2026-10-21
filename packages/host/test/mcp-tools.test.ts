@@ -136,6 +136,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_job_update',
         'patch_job_webhooks',
         'patch_agent',
+        'patch_list_accounts',
         'patch_list_chats',
         'patch_list_devices',
         'patch_loop',

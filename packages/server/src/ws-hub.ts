@@ -1684,6 +1684,9 @@ export class WsHub {
       // Pad file bundles and answers: consumed by the pads bridge (spec/14 § Pads).
       event.type === 'patch.pad.request' ||
       event.type === 'patch.pad.response' ||
+      // Shared-accounts asks and answers: consumed by the accounts bridge.
+      event.type === 'patch.accounts.request' ||
+      event.type === 'patch.accounts.response' ||
       event.type === 'patch.host_files.response' ||
       // The summary is answered over REST to the one caller that asked.
       event.type === 'patch.link_summary.response' ||

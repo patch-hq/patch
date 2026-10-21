@@ -294,18 +294,20 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_spawn',
     {
       description:
-        "Create a brand-new persistent chat in a folder, optionally on ANOTHER machine. Returns the new chatId and the machine it was created on; a spawn the target machine refuses (unknown folder, no model catalogue there) fails with that machine's own reason, so a result you get back is a chat that really exists. Use when the user wants a new long-lived, user-visible chat as an artifact — not for work that should finish inside this turn. `host` is the hostId of the machine to create it on (see patch_list_chats for which machines chats live on); omitted means this machine. `model` is optional — the target machine picks its own last-used model.",
+        "Create a brand-new persistent chat in a folder, optionally on ANOTHER machine. Returns the new chatId and the machine it was created on; a spawn the target machine refuses (unknown folder, no model catalogue there) fails with that machine's own reason, so a result you get back is a chat that really exists. Use when the user wants a new long-lived, user-visible chat as an artifact — not for work that should finish inside this turn. `host` is the hostId of the machine to create it on (see patch_list_chats for which machines chats live on); omitted means this machine. `model` is optional — the target machine picks its own last-used model. `account` is optional — the id or label of the stored Claude/ChatGPT account the chat starts on (see patch_list_accounts); omitted, the chat runs on whichever account is first in the shared order. An account the machine does not hold is refused, never ignored.",
       inputSchema: {
         folder: z.string().min(1),
         host: z.string().min(1).optional(),
         name: z.string().min(1).optional(),
         prompt: z.string().min(1).optional(),
         model: z.string().min(1).optional(),
+        account: z.string().min(1).optional(),
       },
     },
-    async ({ folder, host, name, prompt, model }) => {
+    async ({ folder, host, name, prompt, model, account }) => {
       const body: Record<string, unknown> = { folder, callerChatId };
       if (host !== undefined) body['host'] = host;
+      if (account !== undefined) body['account'] = account;
       if (model !== undefined) body['model'] = model;
       if (name !== undefined) body['name'] = name;
       if (prompt !== undefined) body['prompt'] = prompt;
@@ -329,6 +331,20 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
             : `patch_spawn failed, no chat was created: ${message}`,
         );
       }
+    },
+  );
+
+  // ---- patch_list_accounts ------------------------------------------------
+  server.registerTool(
+    'patch_list_accounts',
+    {
+      description:
+        "List the shared Claude and ChatGPT accounts every machine draws from, in the order a chat with no account of its own tries them, with each backend's routing strategy. Each account has an `id` and a `label` — either is accepted as `account` on patch_spawn. Reordering is a CLI job (`patch accounts order`).",
+      inputSchema: {},
+    },
+    async () => {
+      const res = await uds<unknown>({ method: 'GET', path: '/internal/accounts' });
+      return toolResult(res);
     },
   );
 

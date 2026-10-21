@@ -6,9 +6,9 @@ import { settingsUrl, stubSettingsApi } from './settingsHarness.js';
 // which a host reports on `host.account`. Settings renders each window it HAS as a percentage +
 // a human local reset time — never a raw epoch/enum. A window with no reading
 // is omitted entirely rather than drawn as a blank/zero placeholder, but the
-// row and its `Refresh` action are always present, so an account too spent to
-// run a turn (and therefore unable to produce an in-turn reading) can still be
-// asked. Real-browser e2e against the harness, seeding the report via
+// row is always present and says the reading has not been taken: the host
+// reads every account on its own clock, so there is no button to press.
+// Real-browser e2e against the harness, seeding the report via
 // `window.__presenceStore` the way the real WS greeting/report would.
 const SETTINGS = settingsUrl('usage');
 
@@ -51,27 +51,28 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     });
   });
 
-  // Was "render nothing at all". That left the one case where a reading is most
-  // wanted — an account too spent to run a turn, and therefore unable to
-  // produce an in-turn reading — as a blank area with no way to ask for one.
-  test('says usage has not been read yet, and offers to read it', async ({ page }) => {
+  // Was "render nothing at all". That left an account too spent to run a turn —
+  // and therefore unable to produce an in-turn reading — as a blank area.
+  test('says usage has not been read yet, and the ⋯ opens a panel that explains itself', async ({
+    page,
+  }) => {
     await page.goto(SETTINGS);
     await expect(page.getByTestId('account-claude-code-a1')).toBeVisible();
     await expect(page.getByTestId('account-usage-claude-code-a1-empty')).toContainText(
       /not read yet/i,
     );
-    // Reading it is one of the account's actions, behind its ⋯, asked of a host that is online.
+    // The row's actions float beside it rather than pushing the list down.
+    const before = (await page.getByTestId('account-claude-code-a1').boundingBox())!;
     await page.getByTestId('account-menu-claude-code-a1').click();
-    await expect(page.getByTestId('account-refresh-claude-code-a1')).toBeVisible();
-    await page.getByTestId('account-refresh-claude-code-a1').click();
-    const sent = await page.evaluate(
-      () => (window as unknown as { __wsSent: Array<Record<string, unknown>> }).__wsSent,
-    );
-    expect(sent).toContainEqual({
-      type: 'host.backend_usage_refresh',
-      hostId: 'd1',
-      backendId: 'claude-code',
-    });
+    const menu = page.getByTestId('account-menu-claude-code-a1-open');
+    await expect(menu).toBeVisible();
+    await expect(page.getByTestId('account-refresh-claude-code-a1')).toHaveCount(0);
+    await expect(page.getByTestId('account-disconnect-claude-code-a1')).toContainText('Sign out');
+    await expect(page.getByTestId('account-remove-claude-code-a1')).toContainText(/everywhere/);
+    const after = (await page.getByTestId('account-claude-code-a1').boundingBox())!;
+    expect(Math.abs(after.height - before.height)).toBeLessThan(2);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
     // No window lines at all, for any of the three windows: "not read" and
     // "read as zero" must not look the same. This is the regression the test
     // was written for, so it has to cover every window, not just the first.
@@ -117,21 +118,27 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     const overage = page.getByTestId('account-usage-overage-claude-code-a1');
     await expect(overage).toContainText('Extra usage');
     await expect(overage).toContainText('off');
-    // The account-controlled state, in words, under the bars.
+    // Where to turn it on, on the line itself, in place of a reset time.
     const bars = page.getByTestId('account-usage-claude-code-a1');
-    await expect(bars).toContainText('Extra usage: disabled');
+    await expect(overage).toContainText('Turn on');
     await expect(page.getByTestId('account-extra-usage-settings')).toHaveAttribute(
       'href',
       'https://claude.ai/settings/usage',
     );
     await expect(bars).not.toContainText(/nothing has been overspent/i);
+    // One line: the label never wraps.
+    const label = overage.locator('.set-bar-label');
+    const box = (await label.boundingBox())!;
+    expect(box.height).toBeLessThan(30);
     // The session is what stopped the work, and it is the only line that says so.
     await expect(page.getByTestId('account-usage-session-claude-code-a1')).toContainText(
       /blocked/i,
     );
     await expect(overage).not.toContainText(/blocked/i);
-    // And the reading says how old it is, so a stale figure cannot pass for live.
-    await expect(page.getByTestId('account-claude-code-a1')).toContainText(/read .* on dev-host/i);
+    // And the reading says how old it is, so a stale figure cannot pass for
+    // live — without naming the machine that took it.
+    await expect(page.getByTestId('account-claude-code-a1')).toContainText(/read /i);
+    await expect(page.getByTestId('account-claude-code-a1')).not.toContainText(/dev-host/);
   });
 
   // The bug the user reported: their Default account was healthy — Anthropic said
@@ -163,7 +170,7 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     const bars = page.getByTestId('account-usage-claude-code-a1');
     await expect(bars).not.toContainText(/organisation/i);
     await expect(bars).not.toContainText(/switched off/i);
-    await expect(bars).toContainText('Extra usage: disabled');
+    await expect(overage).toContainText('Turn on');
     await expect(bars).not.toContainText(/nothing has been overspent/i);
     // The pools that CAN stop work are drawn normally and say nothing is wrong.
     await expect(page.getByTestId('account-usage-session-claude-code-a1')).toContainText('5%');
@@ -183,9 +190,9 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
       at: Date.now(),
     });
 
-    const bars = page.getByTestId('account-usage-claude-code-a1');
-    await expect(bars).toContainText('Extra usage: disabled by organisation');
-    await expect(bars).not.toContainText('Extra usage: disabled ·');
+    const overage = page.getByTestId('account-usage-overage-claude-code-a1');
+    await expect(overage).toContainText('disabled by organisation');
+    await expect(overage).not.toContainText('Turn on');
     await expect(page.getByTestId('account-extra-usage-settings')).toHaveCount(0);
   });
 

@@ -115,6 +115,7 @@ describe('Settings tab — the list', () => {
     expect(headers).toEqual(['Settings', 'Agents', 'Setup', 'System']);
     expect(rowTitles(r)).toEqual([
       'Usage',
+      'Chats',
       'Agent',
       'MCP',
       'Memories',
@@ -137,6 +138,7 @@ describe('Settings tab — the list', () => {
       ).map((i) => String(i.props.accessibilityLabel));
     expect(inGroup('Agents')).toEqual([
       'Usage',
+      'Chats',
       'Agent',
       'MCP',
       'Memories',

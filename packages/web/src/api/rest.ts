@@ -30,6 +30,15 @@ import type { OutgoingFile } from '../lib/sendQueue.js';
 /** The backends whose accounts are shared settings. */
 export type SharedBackendId = 'claude-code' | 'codex';
 
+/** What `GET /api/usage-report` answers: the window it covers, when it was read, and the figures. */
+export interface UsageReport {
+  since: number;
+  until: number;
+  at: number;
+  samples: (UsageSample & { hostId: string })[];
+  chats: (ChatTokenUsage & { hostId: string })[];
+}
+
 /** An uploaded attachment: the wire ref plus the relative URL to render it inline. */
 export type UploadedAttachment = AttachmentRef & { url: string };
 
@@ -446,12 +455,16 @@ export const api = {
       nextCursor?: number;
     }>(`/api/tool-log?${qs.toString()}`);
   },
-  /** Settings → Usage: probe history and per-chat token totals for a window. */
-  usageReport: (params: { since: number; until: number }) =>
-    request<{
-      samples: (UsageSample & { hostId: string })[];
-      chats: (ChatTokenUsage & { hostId: string })[];
-    }>(`/api/usage-report?since=${params.since}&until=${params.until}`),
+  /**
+   * Settings → Usage: probe history and per-chat token totals. A named period
+   * is answered from the server's cache at once; a window is read live.
+   */
+  usageReport: (params: { period: 'day' | 'week' | 'month' } | { since: number; until: number }) =>
+    request<UsageReport>(
+      'period' in params
+        ? `/api/usage-report?period=${params.period}`
+        : `/api/usage-report?since=${params.since}&until=${params.until}`,
+    ),
   listHooks: () => request<{ hooks: Hook[] }>('/api/hooks'),
   getHook: (id: string) => request<Hook>(`/api/hooks/${id}`),
   createHook: (body: HookCreateBody) => request<Hook>('/api/hooks', { method: 'POST', body }),

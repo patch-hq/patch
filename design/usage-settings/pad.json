@@ -1,0 +1,6 @@
+{ "screens": [
+  { "id": "usage", "name": "Usage", "path": "index.html" },
+  { "id": "usage-open", "name": "Usage — menu and tooltip", "path": "index.html#open" },
+  { "id": "add-provider", "name": "Add provider", "path": "index.html#add-provider" },
+  { "id": "chats", "name": "Chats", "path": "chats.html" }
+] }

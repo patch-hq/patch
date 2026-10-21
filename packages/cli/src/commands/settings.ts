@@ -58,9 +58,47 @@ function backendOf(name: string): 'claude-code' | 'codex' {
   throw new Error(`no backend "${name}" (claude or codex)`);
 }
 
-function printAccounts(state: SharedState, backend: 'claude-code' | 'codex'): void {
-  const list = backend === 'codex' ? state.secrets.codex : state.secrets.claude;
-  const strategy = state.settings.accountStrategy[backend === 'codex' ? 'codex' : 'claude'];
+/** The shared accounts in order, as `patch accounts` shows and `--json` returns them. */
+interface AccountsView {
+  strategy: { claude: string; codex: string };
+  claude: Array<{ id: string; label: string; connected: boolean; email?: string }>;
+  codex: Array<{ id: string; label: string; connected: boolean; email?: string }>;
+}
+
+const viewOf = (state: SharedState): AccountsView => ({
+  strategy: state.settings.accountStrategy,
+  claude: state.secrets.claude,
+  codex: state.secrets.codex,
+});
+
+/**
+ * List / reorder / set strategy for the shared accounts. On a machine with a
+ * running host this goes over the host's own socket — the host relays it to the
+ * server on its existing link, so no separate login is needed. Anywhere else it
+ * is REST with the paired credential. One path is chosen up front, never both.
+ */
+const accountsApi = (opts: CommonOpts) => {
+  const t = getTransport(opts);
+  const uds = t.kind === 'uds';
+  return {
+    list: async (): Promise<AccountsView> =>
+      uds
+        ? t.get<AccountsView>('/accounts')
+        : viewOf(await t.get<SharedState>('/api/settings/shared')),
+    order: async (id: 'claude-code' | 'codex', accountIds: string[]): Promise<AccountsView> =>
+      uds
+        ? t.put<AccountsView>(`/accounts/${id}/order`, { accountIds })
+        : viewOf(await t.put<SharedState>(`/api/accounts/${id}/order`, { accountIds })),
+    strategy: async (id: 'claude-code' | 'codex', strategy: string): Promise<AccountsView> =>
+      uds
+        ? t.put<AccountsView>(`/accounts/${id}/strategy`, { strategy })
+        : viewOf(await t.put<SharedState>(`/api/accounts/${id}/strategy`, { strategy })),
+  };
+};
+
+function printAccounts(view: AccountsView, backend: 'claude-code' | 'codex'): void {
+  const list = backend === 'codex' ? view.codex : view.claude;
+  const strategy = view.strategy[backend === 'codex' ? 'codex' : 'claude'];
   emitText(`${backend === 'codex' ? 'ChatGPT' : 'Claude'} — strategy: ${strategy}`);
   if (list.length === 0) emitText('  (no accounts)');
   list.forEach((a, i) =>
@@ -123,15 +161,15 @@ export function registerSettingsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (backend: string | undefined, opts: CommonOpts) => {
       await run(opts, async () => {
-        const state = await server(opts).get<SharedState>('/api/settings/shared');
+        const view = await accountsApi(opts).list();
         if (opts.json) {
-          emitJson(state.secrets);
+          emitJson(view);
           return;
         }
-        if (backend !== undefined) printAccounts(state, backendOf(backend));
+        if (backend !== undefined) printAccounts(view, backendOf(backend));
         else {
-          printAccounts(state, 'claude-code');
-          printAccounts(state, 'codex');
+          printAccounts(view, 'claude-code');
+          printAccounts(view, 'codex');
         }
       });
     });
@@ -157,7 +195,7 @@ export function registerSettingsCommands(program: Command): void {
           };
           const state = await server(opts).post<SharedState>(`/api/accounts/${id}`, body);
           if (opts.json) emitJson(state);
-          else printAccounts(state, id);
+          else printAccounts(viewOf(state), id);
         });
       },
     );
@@ -213,11 +251,9 @@ export function registerSettingsCommands(program: Command): void {
     .action(async (backend: string, accountIds: string[], opts: CommonOpts) => {
       await run(opts, async () => {
         const id = backendOf(backend);
-        const state = await server(opts).put<SharedState>(`/api/accounts/${id}/order`, {
-          accountIds,
-        });
-        if (opts.json) emitJson(state);
-        else printAccounts(state, id);
+        const view = await accountsApi(opts).order(id, accountIds);
+        if (opts.json) emitJson(view);
+        else printAccounts(view, id);
       });
     });
 
@@ -228,11 +264,9 @@ export function registerSettingsCommands(program: Command): void {
     .action(async (backend: string, strategy: string, opts: CommonOpts) => {
       await run(opts, async () => {
         const id = backendOf(backend);
-        const state = await server(opts).put<SharedState>(`/api/accounts/${id}/strategy`, {
-          strategy,
-        });
-        if (opts.json) emitJson(state);
-        else printAccounts(state, id);
+        const view = await accountsApi(opts).strategy(id, strategy);
+        if (opts.json) emitJson(view);
+        else printAccounts(view, id);
       });
     });
 
@@ -249,7 +283,7 @@ export function registerSettingsCommands(program: Command): void {
           hostId,
         });
         if (opts.json) emitJson(state);
-        else printAccounts(state, id);
+        else printAccounts(viewOf(state), id);
       });
     });
 

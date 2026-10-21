@@ -9281,20 +9281,80 @@ button.set-row-open:focus-visible {
   line-height: 1;
   padding: 4px 10px;
 }
-.set-acct-actions {
-  grid-column: 3 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+/* The row's ⋯ and the panel it opens. The panel floats over the rows below
+   (never pushing them), anchored under its button; the card's own clipping is
+   lifted while one is open so the panel can reach past the card's edge. */
+.set-acct-more {
+  position: relative;
+  align-self: start;
 }
+.set-card:has(.set-acct-menu) {
+  overflow: visible;
+}
+.set-acct-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 240px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+.set-acct-menu-item {
+  all: unset;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 500;
+}
+.set-acct-menu-item:hover,
+.set-acct-menu-item:focus-visible {
+  background: var(--bg-soft);
+}
+.set-acct-menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.set-acct-menu-item.danger {
+  color: var(--danger);
+}
+.set-acct-menu-detail {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: var(--text-min);
+  line-height: 1.35;
+}
+/* Label column sized to its longest label ("Extra usage"), so no window's
+   name wraps onto two lines. */
 .set-bars {
   display: grid;
-  grid-template-columns: 64px minmax(60px, 1fr) max-content max-content;
+  grid-template-columns: max-content minmax(60px, 1fr) max-content max-content;
   gap: 4px 12px;
   align-items: center;
   margin-top: 8px;
   color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.set-bar-label {
+  white-space: nowrap;
+}
+.set-bar-reset a {
+  color: var(--accent-strong);
+}
+.usage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 0 16px 12px;
   font-size: var(--text-min);
 }
 .set-bar-row {
@@ -9563,8 +9623,12 @@ button.set-row-open:focus-visible {
     grid-template-columns: 18px 22px minmax(0, 1fr) auto;
     padding: 12px;
   }
+  /* No room for a fourth column at phone width: the reset time and reason
+     are dropped, as before, and the label column still fits "Extra usage"
+     on one line. The phone app has its own Usage section. */
   .set-bars {
-    grid-template-columns: 58px minmax(40px, 1fr) max-content;
+    grid-template-columns: max-content minmax(40px, 1fr) max-content;
+    gap: 4px 8px;
   }
   .set-bar-reset {
     display: none;

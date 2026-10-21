@@ -3,6 +3,7 @@
 
 export type SettingsPageId =
   | 'usage'
+  | 'chats'
   | 'agent'
   | 'mcp'
   | 'memories'
@@ -23,6 +24,7 @@ export type SettingsPageId =
 
 export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string }[] = [
   { id: 'usage', title: 'Usage', group: 'Agents' },
+  { id: 'chats', title: 'Chats', group: 'Agents' },
   { id: 'agent', title: 'Agent', group: 'Agents' },
   { id: 'mcp', title: 'MCP', group: 'Agents' },
   { id: 'memories', title: 'Memories', group: 'Agents' },

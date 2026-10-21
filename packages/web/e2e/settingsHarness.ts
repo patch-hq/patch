@@ -176,7 +176,17 @@ export async function stubSettingsApi(
     ),
   );
   await page.route('**/api/version', (r) => r.fulfill(json(VERSION_REPORT)));
-  await page.route('**/api/usage-report**', (r) => r.fulfill(json({ samples: [], chats: [] })));
+  await page.route('**/api/usage-report**', (r) =>
+    r.fulfill(
+      json({
+        since: Date.now() - 7 * 86_400_000,
+        until: Date.now(),
+        at: Date.now(),
+        samples: [],
+        chats: [],
+      }),
+    ),
+  );
   await page.route('**/api/secrets', (r) => r.fulfill(json({ secrets: [] })));
   return server;
 }

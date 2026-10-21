@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings — Usage</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="settings">
+  <nav class="set-nav">
+    <h1>Settings</h1>
+    <span class="set-label">Agents</span>
+    <a class="on" href="index.html">Usage</a>
+    <a href="chats.html">Chats</a>
+    <a>Agent</a><a>MCP</a><a>Memories</a><a>Manager</a><a>Goals</a><a>Prompts</a><a>Voice</a><a>Hooks</a><a>Computer use</a><a>Activity</a>
+    <span class="set-label">Setup</span>
+    <a>Hosts</a><a>Agent identity</a><a>Keys</a><a>Notifications</a><a>Devices</a>
+    <span class="set-label">System</span>
+    <a>Updates</a><a>Account</a>
+  </nav>
+  <main class="set-main">
+    <div class="set-page">
+      <div class="set-head"><h1 class="display">Usage</h1></div>
+
+      <section class="set-group">
+        <h2 class="set-label">Allowance left</h2>
+        <div class="set-card">
+          <div class="set-row">
+            <div class="set-row-text"><span class="set-row-title">Period</span></div>
+            <div class="set-row-ctrl"><div class="set-pills">
+              <button>Day</button><button class="on">Week</button><button>Month</button><button>Custom</button>
+            </div></div>
+          </div>
+          <div class="chart">
+            <svg viewBox="0 0 640 170" style="width:100%;height:auto" role="img" aria-label="Weekly allowance remaining">
+              <g stroke="currentColor" opacity=".15"><line x1="36" x2="632" y1="8" y2="8"/><line x1="36" x2="632" y1="79" y2="79"/><line x1="36" x2="632" y1="150" y2="150"/></g>
+              <g font-size="11" fill="#645c50"><text x="32" y="12" text-anchor="end">100%</text><text x="32" y="83" text-anchor="end">50%</text><text x="32" y="154" text-anchor="end">0%</text>
+              <text x="36" y="168">Tue 14 Oct, 04:00</text><text x="334" y="168" text-anchor="middle">Fri 17 Oct, 16:00</text><text x="632" y="168" text-anchor="end">Tue 21 Oct, 04:00</text></g>
+              <path fill="none" stroke="#46802f" stroke-width="2" stroke-linejoin="round" d="M36,52 C54.0,54.7 72.0,57.2 90,60 C110.0,63.1 130.0,67.3 150,70 C170.0,72.7 190.0,73.4 210,76 C222.7,77.6 235.3,80.0 248,82 L248,8 C265.3,10.0 282.7,10.7 300,14 C320.0,17.8 340.0,25.7 360,30 C380.0,34.3 400.0,35.8 420,40 C440.0,44.2 460.0,50.7 480,55 C500.0,59.3 520.0,62.8 540,66 C560.0,69.2 580.0,71.3 600,74"/>
+              <path fill="none" stroke="#c46a12" stroke-width="2" stroke-linejoin="round" d="M36,8 C57.3,12.0 78.7,15.9 100,20 C123.3,24.5 146.7,28.7 170,34 C193.3,39.3 216.7,46.7 240,52 C263.3,57.3 286.7,61.0 310,66 C333.3,71.0 356.7,77.7 380,82 C399.3,85.5 418.7,87.3 438,90 L438,8 C458.7,12.7 479.3,16.6 500,22 C520.0,27.3 540.0,35.0 560,40 C573.3,43.3 586.7,45.3 600,48"/>
+              <path fill="none" stroke="#574fa6" stroke-width="2" stroke-linejoin="round" d="M36,88 C54.0,92.0 72.0,97.1 90,100 C102.7,102.1 115.3,102.7 128,104 L128,8 C152.0,11.3 176.0,15.0 200,18 C223.3,21.0 246.7,22.7 270,26 C293.3,29.3 316.7,34.0 340,38 C363.3,42.0 386.7,46.0 410,50 C433.3,54.0 456.7,58.3 480,62 C503.3,65.7 526.7,68.5 550,72 C566.7,74.5 583.3,77.3 600,80"/>
+            </svg>
+          </div>
+          <div class="legend"><span><i style="background:#46802f"></i>Claude · work</span><span><i style="background:#c46a12"></i>Claude · Default</span><span><i style="background:#574fa6"></i>ChatGPT</span></div>
+        </div>
+      </section>
+
+      <section class="set-group">
+        <h2 class="set-label">Chats by tokens</h2>
+        <div class="set-card">
+          <div class="set-row"><div class="set-row-text"><span class="set-row-title">Foreman: day-log collector errors</span></div><span class="set-val">1.8M</span></div>
+          <div class="set-row"><div class="set-row-text"><span class="set-row-title">Patch usage settings redesign</span></div><span class="set-val">940k</span></div>
+          <div class="set-row"><div class="set-row-text"><span class="set-row-title">Meal plan w/c 20 Oct</span></div><span class="set-val">310k</span></div>
+          <div class="set-row"><div class="set-row-text"><span class="set-row-title">Page 1 of 4</span></div><div class="set-row-ctrl"><button class="set-btn ghost">Previous</button><button class="set-btn ghost">Next</button></div></div>
+        </div>
+      </section>
+
+      <!-- Providers: every one rendered from the same declaration -->
+      <section class="set-group">
+        <div class="set-group-head"><h2 class="set-label">Claude</h2><button class="set-btn ghost set-more" aria-label="Claude actions">⋯</button></div>
+        <div class="set-card">
+          <div class="set-row">
+            <div class="set-row-text"><span class="set-row-title">Pick the account by</span></div>
+            <div class="set-row-ctrl"><div class="set-pills" id="claude-strategy">
+              <button class="on" data-tip="The first account here that still has allowance">Priority</button>
+              <button data-tip="Each turn takes the next account along, spent evenly" id="tip-rr">Round robin</button>
+              <button data-tip="The account whose weekly limit resets soonest">Soonest reset</button>
+              <button data-tip="The account with the most allowance left right now">Least used</button>
+            </div></div>
+          </div>
+          <div class="set-acct active">
+            <span class="set-handle">⠿</span><span class="set-rank">1</span>
+            <div class="set-acct-body">
+              <span class="set-row-title">work</span>
+              <span class="set-sub">tom@wpp.com · read just now</span>
+              <div class="set-bars">
+                <div class="set-bar-row warn"><span>5-hour</span><span class="set-bar"><i style="width:95%"></i></span><span class="set-bar-value">95%</span><span><span class="w">resets </span>15:00</span></div>
+                <div class="set-bar-row"><span>Weekly</span><span class="set-bar"><i style="width:35%"></i></span><span class="set-bar-value">35%</span><span><span class="w">resets </span>Tue 04:00</span></div>
+                <div class="set-bar-row off"><span>Extra usage</span><span class="set-bar"><i style="width:0"></i></span><span class="set-bar-value">off</span><span>disabled by organisation</span></div>
+              </div>
+            </div>
+            <div class="set-menu-wrap"><button class="set-btn ghost set-more" aria-label="work actions">⋯</button></div>
+          </div>
+          <div class="set-acct">
+            <span class="set-handle">⠿</span><span class="set-rank">2</span>
+            <div class="set-acct-body">
+              <span class="set-row-title">Default</span>
+              <span class="set-sub">tom.chambers@gmail.com · read just now</span>
+              <div class="set-bars">
+                <div class="set-bar-row warn"><span>5-hour</span><span class="set-bar"><i style="width:94%"></i></span><span class="set-bar-value">94%</span><span><span class="w">resets </span>17:00</span></div>
+                <div class="set-bar-row"><span>Weekly</span><span class="set-bar"><i style="width:56%"></i></span><span class="set-bar-value">56%</span><span><span class="w">resets </span>Tue 20:00</span></div>
+                <div class="set-bar-row off"><span>Extra usage</span><span class="set-bar"><i style="width:0"></i></span><span class="set-bar-value">off</span><a href="https://claude.ai/settings/usage" target="_blank" rel="noreferrer">Turn on ↗</a></div>
+              </div>
+            </div>
+            <div class="set-menu-wrap">
+              <button class="set-btn ghost set-more" aria-label="Default actions" data-menu="menu-default">⋯</button>
+              <div class="set-menu" id="menu-default" role="menu">
+                <button>Rename</button>
+                <button>Sign in again<small>Replace the stored login with a fresh one</small></button>
+                <button>Pause<small>Keep it here but stop using it</small></button>
+                <hr>
+                <button class="danger">Remove<small>Forget this account everywhere</small></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="set-add-bar"><button class="set-btn">Sign in with Claude</button><button class="set-btn ghost">Paste a token</button></div>
+      </section>
+
+      <section class="set-group">
+        <div class="set-group-head"><h2 class="set-label">ChatGPT</h2><button class="set-btn ghost set-more" aria-label="ChatGPT actions">⋯</button></div>
+        <div class="set-card">
+          <div class="set-row">
+            <div class="set-row-text"><span class="set-row-title">Pick the account by</span></div>
+            <div class="set-row-ctrl"><div class="set-pills">
+              <button class="on" data-tip="The first account here that still has allowance">Priority</button>
+              <button data-tip="Each turn takes the next account along, spent evenly">Round robin</button>
+              <button data-tip="The account whose weekly limit resets soonest">Soonest reset</button>
+              <button data-tip="The account with the most allowance left right now">Least used</button>
+            </div></div>
+          </div>
+          <div class="set-acct active">
+            <span class="set-handle">⠿</span><span class="set-rank">1</span>
+            <div class="set-acct-body">
+              <span class="set-row-title">tom.chambers@gmail.com</span>
+              <span class="set-sub">read 2 min ago</span>
+              <div class="set-bars">
+                <div class="set-bar-row"><span>Weekly</span><span class="set-bar"><i style="width:71%"></i></span><span class="set-bar-value">71%</span><span><span class="w">resets </span>Tue 07:00</span></div>
+              </div>
+            </div>
+            <div class="set-menu-wrap"><button class="set-btn ghost set-more" aria-label="actions">⋯</button></div>
+          </div>
+        </div>
+        <div class="set-add-bar"><button class="set-btn">Sign in with ChatGPT</button><button class="set-btn ghost">Add API key</button></div>
+      </section>
+
+      <section class="set-group">
+        <div class="set-group-head"><h2 class="set-label">Ollama</h2><button class="set-btn ghost set-more" aria-label="Ollama actions">⋯</button></div>
+        <div class="set-card">
+          <div class="set-acct active">
+            <span class="set-handle">⠿</span><span class="set-rank">1</span>
+            <div class="set-acct-body">
+              <span class="set-row-title">Mac studio</span>
+              <span class="set-sub">http://mac-studio:11434 · qwen3:32b · no limits</span>
+            </div>
+            <div class="set-menu-wrap"><button class="set-btn ghost set-more" aria-label="actions">⋯</button></div>
+          </div>
+        </div>
+        <div class="set-add-bar"><button class="set-btn">Add server</button></div>
+      </section>
+
+      <div class="set-add-bar" style="margin:-12px 0 28px"><button class="set-btn primary" id="add-provider">Add provider</button></div>
+
+      <section class="set-group">
+        <div class="set-card">
+          <div class="set-row">
+            <div class="set-row-text"><span class="set-row-title">Resume automatically when a limit resets</span></div>
+            <div class="set-row-ctrl"><span class="toggle on"><span class="toggle-track"><span class="toggle-knob"></span></span></span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="sheet-bg" id="sheet">
+  <div class="sheet" role="dialog" aria-label="Add provider">
+    <h2 class="display">Add provider</h2>
+    <div class="set-card" style="border:0;border-radius:0">
+      <div class="set-row"><div class="set-row-text"><span class="set-row-title">Gemini</span><span class="set-sub">Sign in with Google · daily limit</span></div><span class="set-val">›</span></div>
+      <div class="set-row"><div class="set-row-text"><span class="set-row-title">Anthropic API</span><span class="set-sub">API key · paid per use</span></div><span class="set-val">›</span></div>
+      <div class="set-row"><div class="set-row-text"><span class="set-row-title">OpenRouter</span><span class="set-sub">API key · credit balance</span></div><span class="set-val">›</span></div>
+      <div class="set-row"><div class="set-row-text"><span class="set-row-title">LM Studio</span><span class="set-sub">Local server · no limits</span></div><span class="set-val">›</span></div>
+      <div class="set-row"><div class="set-row-text"><span class="set-row-title">Any OpenAI-compatible server</span><span class="set-sub">URL and optional key · no limits</span></div><span class="set-val">›</span></div>
+    </div>
+    <div class="foot"><button class="set-btn ghost" id="close-sheet">Cancel</button></div>
+  </div>
+</div>
+
+<script>
+  const menu = document.getElementById('menu-default');
+  document.querySelector('[data-menu]').addEventListener('click', e => { e.stopPropagation(); menu.classList.toggle('open'); });
+  document.addEventListener('click', () => menu.classList.remove('open'));
+  const sheet = document.getElementById('sheet');
+  document.getElementById('add-provider').addEventListener('click', () => sheet.classList.add('open'));
+  document.getElementById('close-sheet').addEventListener('click', () => sheet.classList.remove('open'));
+  function applyHash() {
+    const h = location.hash;
+    menu.classList.toggle('open', h === '#open');
+    document.getElementById('tip-rr').classList.toggle('tip', h === '#open');
+    sheet.classList.toggle('open', h === '#add-provider');
+  }
+  applyHash(); addEventListener('hashchange', applyHash);
+</script>
+</body>
+</html>
