@@ -4447,7 +4447,7 @@ a.ch-row:hover {
   gap: 4px;
   margin-left: auto;
   flex: none;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
 }
 .tool-running-spinner {
   animation: background-task-spin 1.8s linear infinite;
@@ -10051,7 +10051,7 @@ main.empty-state p {
   font-size: var(--text-min);
   color: var(--ink-3);
   border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   padding: 0 6px;
 }
 .goal-banner-expanded .goal-banner-text {
@@ -10101,7 +10101,7 @@ main.empty-state p {
   color: var(--ink-3);
   padding: 2px;
   cursor: pointer;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
 }
 .goal-clear-btn:hover {
   color: var(--ink-1, var(--ink-2));
@@ -10182,7 +10182,7 @@ main.empty-state p {
 }
 .task-bar-count {
   flex: none;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
 .task-bar-list {
@@ -10198,7 +10198,7 @@ main.empty-state p {
 }
 .task-row-completed .task-text {
   text-decoration: line-through;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
 }
 .task-status-btn,
 .task-delete-btn {
@@ -10211,7 +10211,7 @@ main.empty-state p {
   color: var(--ink-3);
   padding: 2px;
   cursor: pointer;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
 }
 .task-status-btn:hover,
 .task-delete-btn:hover {
@@ -10229,7 +10229,7 @@ main.empty-state p {
   white-space: nowrap;
 }
 .task-row-draft .task-text {
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
 }
 .task-done-btn {
   flex: none;
@@ -10238,7 +10238,7 @@ main.empty-state p {
   color: var(--ink-1, var(--ink-2));
   font: inherit;
   padding: 1px 10px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .task-add-icon {
@@ -10253,7 +10253,7 @@ main.empty-state p {
   outline: none;
 }
 .task-add-input::placeholder {
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
 }
 
 /* ---------- Reminder banner (patch/todo.md — Reminders) ---------- */
@@ -10290,7 +10290,7 @@ main.empty-state p {
   color: var(--ink-3);
   padding: 2px;
   cursor: pointer;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
 }
 .reminder-clear-btn:hover {
   color: var(--ink-1, var(--ink-2));
@@ -10322,7 +10322,7 @@ main.empty-state p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
 }
 .wake-bar-stop-btn {
   display: inline-flex;
@@ -10334,7 +10334,7 @@ main.empty-state p {
   color: var(--ink-3);
   padding: 2px;
   cursor: pointer;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
 }
 .wake-bar-stop-btn:hover {
   color: var(--ink-1, var(--ink-2));
@@ -10409,7 +10409,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
 .background-task-bar-elapsed {
   flex: none;
   padding-left: 8px;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -10418,13 +10418,13 @@ button.background-task-bar-row:hover .background-task-bar-description {
   flex: 1 1 0;
   min-width: 0;
   padding-left: 8px;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .background-task-bar-progress[data-quiet='true'] {
-  color: var(--warn, #b45309);
+  color: var(--amber);
 }
 /* The command preview: pushed to the trailing edge (ahead of the kill button),
    monospace so it reads as a literal command rather than prose, and its own
@@ -10434,7 +10434,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
   flex: none;
   margin-left: auto;
   padding-left: 12px;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   font-size: var(--text-min);
   white-space: nowrap;
@@ -10454,7 +10454,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
   width: 20px;
   height: 20px;
   margin-left: 8px;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   cursor: pointer;
 }
 .background-task-bar-kill:hover {
@@ -10469,7 +10469,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
 }
 /* Show all, on the title row. Muted and set after the count, so the line still
    reads as a count first and a control second. */
@@ -10478,7 +10478,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
   align-items: center;
   gap: 6px;
   margin-left: 12px;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   cursor: pointer;
 }
 .background-task-bar-all input {
@@ -10512,7 +10512,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   cursor: pointer;
 }
 .background-task-bar-toggle:hover {
@@ -13526,7 +13526,7 @@ select.new-chat-account:focus-visible {
   cursor: pointer;
 }
 .mm-label-btn:hover {
-  color: var(--ink-1);
+  color: var(--ink);
 }
 .mm-prompt {
   display: flex;
@@ -13858,7 +13858,7 @@ select.new-chat-account:focus-visible {
 .mm-seg button[aria-selected='true'] {
   background: var(--bg-elevated);
   color: var(--ink);
-  box-shadow: var(--shadow-sm, 0 1px 2px rgba(40, 30, 15, 0.08));
+  box-shadow: var(--shadow-sm);
 }
 .mm-icon {
   all: unset;
@@ -13869,7 +13869,7 @@ select.new-chat-account:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--bg-elevated);
   color: var(--ink-3);
@@ -13987,7 +13987,7 @@ select.new-chat-account:focus-visible {
 .mm-topic [contenteditable] {
   outline: none;
   cursor: text;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
 }
 .mm-topic [contenteditable]:focus {
   background: var(--bg-elevated);
@@ -15445,7 +15445,7 @@ select.new-chat-account:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
   font-size: var(--text-min);
   white-space: nowrap;
   text-decoration: none;
