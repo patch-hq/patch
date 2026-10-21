@@ -805,6 +805,12 @@ test('every install path goes through quitAndInstallNow, not a bare quitAndInsta
   );
 });
 
+test('the install IPC re-checks for the newest build before installing', () => {
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  assert.match(src, /ipcMain\.on\('patch:updater:install', \(\) => \{\s*void installLatest\(\);/);
+  assert.match(src, /createLatestInstaller\(/);
+});
+
 test('preload.ts exposes checkForUpdateNow and installUpdate to the SPA', () => {
   const src = readFileSync(join(here, 'preload.ts'), 'utf8');
   assert.match(src, /checkForUpdateNow\(\): void/);
@@ -830,7 +836,7 @@ test('a finished download does NOT install itself', () => {
   );
   assert.match(
     src,
-    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*if \(updaterState\) installUpdate\(updaterState\);/,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*void installLatest\(\);/,
     'the only install path is the one the user presses',
   );
 });

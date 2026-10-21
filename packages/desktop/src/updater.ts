@@ -612,3 +612,57 @@ export function createInstaller(
     });
   };
 }
+
+/** How long "Update Patch" waits for a newer build to finish downloading. */
+export const LATEST_DOWNLOAD_WAIT_MS = 4 * 60_000;
+
+/**
+ * "Update Patch" always lands on the newest published build. Patch ships ~20
+ * times a day, so the build staged on disk when the button is pressed is often
+ * already one or more deploys old; installing it relaunches into a build that
+ * the next check immediately flags as behind, and the banner comes straight
+ * back — "multiple updates queued". So the press first asks the feed again,
+ * waits for anything newer to finish downloading, and only then installs.
+ *
+ * Single-flight: pressing again while this is in progress joins it. Failures
+ * (check error, download never finishing) go to `onError`, never swallowed.
+ */
+export function createLatestInstaller(deps: {
+  check: () => Promise<void>;
+  getState: () => UpdaterState;
+  install: (state: UpdaterState) => void;
+  onError: (err: Error) => void;
+  waitMs?: number;
+  pollMs?: number;
+}): () => Promise<void> {
+  const waitMs = deps.waitMs ?? LATEST_DOWNLOAD_WAIT_MS;
+  const pollMs = deps.pollMs ?? 250;
+  let inFlight: Promise<void> | null = null;
+  const run = async (): Promise<void> => {
+    await deps.check();
+    const checked = deps.getState();
+    if (checked.lastResult === 'error' && checked.lastErrorKind === 'check') {
+      deps.onError(new Error(conciseReason(checked.lastError ?? 'the update check failed')));
+      return;
+    }
+    const deadline = Date.now() + waitMs;
+    // A newer build is "available" with downloaded=false until its own
+    // download lands (the reducer drops `downloaded` for a different version).
+    while (!deps.getState().downloaded) {
+      if (deps.getState().lastResult === 'up-to-date' || Date.now() >= deadline) {
+        deps.onError(new Error("the latest build hasn't finished downloading"));
+        return;
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+    deps.install(deps.getState());
+  };
+  return () => {
+    inFlight ??= run()
+      .catch((err) => deps.onError(err as Error))
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  };
+}

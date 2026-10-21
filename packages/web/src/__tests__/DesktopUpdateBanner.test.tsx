@@ -177,7 +177,7 @@ describe('DesktopUpdateBanner', () => {
     fireEvent.click(screen.getByTestId('desktop-update-restart'));
     expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Updating');
     await act(async () => {
-      vi.advanceTimersByTime(90_000);
+      vi.advanceTimersByTime(310_000);
     });
     expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Update Patch');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
