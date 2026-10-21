@@ -7114,7 +7114,9 @@ button.view-file-download {
 
 /* ---------- App tooltip (spec/14 § Copy — Tooltips, TooltipHost.tsx) ---------- */
 .app-tooltip {
-  z-index: 80;
+  /* Above every overlay (modal 3000, context menu 1100, sidebar 101): it names
+     controls inside all of them. */
+  z-index: 4000;
   max-width: 280px;
   padding: 4px 8px;
   background: var(--ink);
