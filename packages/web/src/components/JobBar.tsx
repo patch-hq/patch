@@ -10,8 +10,9 @@ import { useNavigate } from 'react-router-dom';
 import { Zap } from 'lucide-react';
 import type { Job } from '@patch/wire/jobs';
 import { api } from '../api/rest.js';
+import { formatDateTime } from '../lib/formatDateTime.js';
 
-export function JobBar({ jobId }: { jobId: string }): JSX.Element {
+export function JobBar({ jobId, at }: { jobId: string; at: number }): JSX.Element {
   const navigate = useNavigate();
   const { data, error } = useQuery({
     queryKey: ['job', jobId],
@@ -20,7 +21,7 @@ export function JobBar({ jobId }: { jobId: string }): JSX.Element {
   const label = error
     ? `Failed to load job: ${(error as Error).message}`
     : data
-      ? `Run by "${data.name}" job`
+      ? `Run by "${data.name}" job · ${formatDateTime(at)}`
       : 'Loading job…';
   return (
     <div className="archived-banner" data-testid="job-bar" role="status">

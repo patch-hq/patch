@@ -17,6 +17,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import type { ChatRow } from '../stores/types.js';
+import { formatDateTime } from '../lib/formatDateTime.js';
 import { ModalOverlay } from './ModalOverlay.js';
 
 /**
@@ -270,6 +271,9 @@ export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | nul
       <div className="goal-banner-main">
         <Target size={16} aria-hidden />
         <span className="goal-banner-label">Goal finished</span>
+        <span className="finished-goal-time" data-testid="finished-goal-time">
+          {formatDateTime(last.endedAt)}
+        </span>
         <span className="finished-goal-title" data-testid="finished-goal-summary">
           {label}: {last.condition}
         </span>

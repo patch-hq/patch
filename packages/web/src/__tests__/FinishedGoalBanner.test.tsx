@@ -20,6 +20,15 @@ const row = (o: Partial<ChatRow> = {}): ChatRow =>
 describe('FinishedGoalBanner', () => {
   beforeEach(() => localStorage.clear());
 
+  it('shows when the goal finished', () => {
+    render(
+      <FinishedGoalBanner
+        row={row({ lastGoal: { ...lastGoal, endedAt: Date.UTC(2026, 9, 21, 12, 53) } })}
+      />,
+    );
+    expect(screen.getByTestId('finished-goal-time')).toHaveTextContent(/21 Oct, \d{2}:\d{2}/);
+  });
+
   it('shows the full goal text and metrics, untruncated', () => {
     render(<FinishedGoalBanner row={row()} />);
     expect(screen.getByTestId('finished-goal-summary')).toHaveTextContent(`Goal met: ${long}`);

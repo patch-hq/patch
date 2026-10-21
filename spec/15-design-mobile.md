@@ -579,7 +579,7 @@ Connection has four states — `connecting` · `connected` · `reconnecting` · 
 
 A search button in the chat header opens a bar under it: one input, an `n/total` count, previous / next and close. Typing matches messages whose text contains the query, case-insensitively, over the transcript data (the list is virtualised, so there is no rendered text to search). The first match is scrolled to mid-screen and tinted, the same way a search hit is opened; the keyboard's search key and the next / previous buttons step through matches, wrapping. Closing the bar clears the query. Unlike web, matches are whole messages, not words within them.
 
-Job bar. Mirrors web's: a job-created chat carries a bar after the connection banners reading `Run by "<job name>" job` (the job is fetched by id; while it loads the bar reads "Loading job…", and a failed fetch shows the error) with an Open job link to the job editor. No bar on other chats.
+Job bar. Mirrors web's: a job-created chat carries a bar after the connection banners reading `Run by "<job name>" job · <date, time>` (the job is fetched by id; while it loads the bar reads "Loading job…", and a failed fetch shows the error) with an Open job link to the job editor. No bar on other chats.
 
 ## Parity with web and desktop
 
