@@ -1,8 +1,7 @@
-// Meeting mode (the meeting in place of the chat stream + actions above the composer). Pure view
+// Meeting mode: the chat stays a chat, and the meeting lives in a panel on its right. Pure view
 // of the host's MeetingState; every control goes through lib/meetingControl.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Check, ChevronDown, ChevronUp, Copy, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
@@ -23,6 +22,7 @@ import {
   setAgentRunsActions,
   setMeetingResearch,
   editMeetingNotes,
+  addNote,
   editNote,
   endMeeting,
   getMeetingSpeed,
@@ -41,14 +41,11 @@ import {
 import { writeupBodyHtml, writeupFromBody, writeupText } from '../lib/meetingWriteup.js';
 import {
   isMeetingShown,
-  useMeetingAsking,
   useMeetingStore,
   type MeetingPromptKey,
   type MeetingView,
 } from '../stores/meetingStore.js';
 import { parseMeetingNotes, type MeetingNote } from '../lib/meetingNotes.js';
-import { Markdown } from './Markdown.js';
-import type { ChatEventEntry } from '../stores/chatStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import type { AccountPreferences } from '../api/rest.js';
 import { patchShared } from '../routes/settings/sharedWrite.js';
@@ -231,188 +228,257 @@ function SpeakerName({
   );
 }
 
-/**
- * One row across the top of the meeting. The same controls sit in the same
- * place live and after; once the meeting has ended it folds into one line so
- * the chat has the room.
- */
-export function MeetingBar({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const capturing = useMeetingStore((s) => s.capturingChatId === chatId);
-  const view = useMeetingStore((s) => s.view[chatId] ?? 'summary');
-  const setView = useMeetingStore((s) => s.setView);
-  const folded = useMeetingStore((s) => s.folded[chatId] === true);
+const VIEWS: MeetingView[] = ['notes', 'mine', 'actions', 'transcript'];
+const VIEW_LABEL: Record<MeetingView, string> = {
+  notes: 'Notes',
+  mine: 'My notes',
+  actions: 'Actions',
+  transcript: 'Transcript',
+};
+
+const openActions = (meeting: MeetingState) =>
+  meeting.actions.filter((a) => a.status !== 'dismissed');
+
+/** The timer: a red dot while live, "Paused ·" while paused, the duration alone once ended. */
+function MeetingPill({ meeting, prefix }: { meeting: MeetingState; prefix?: string }) {
+  const now = useNow(meeting.status === 'live');
+  const elapsed = meetingElapsedMs(meeting, now);
+  return (
+    <span
+      className={meeting.status === 'ended' ? 'mm-pill ended' : 'mm-pill'}
+      data-testid="meeting-pill"
+    >
+      {meeting.status === 'live' ? <span className="mm-dot" /> : null}
+      {prefix ?? (meeting.status === 'paused' ? 'Paused · ' : '')}
+      {formatMeetingClock(elapsed)}
+    </span>
+  );
+}
+
+function People({ meeting }: { meeting: MeetingState }) {
+  const people = participantsOf(meeting);
+  return people.length > 0 ? (
+    <span className="mm-people" data-testid="meeting-people" title={people.join(', ')}>
+      {people.join(' · ')}
+    </span>
+  ) : (
+    <span className="mm-sp" />
+  );
+}
+
+/** The panel's first row: timer, people, Pause/End or Resume, settings, and fold once ended. */
+function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const setFolded = useMeetingStore((s) => s.setFolded);
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
   const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
-  const now = useNow(meeting.status === 'live');
-  const elapsed = meetingElapsedMs(meeting, now);
-  const people = participantsOf(meeting);
   const ended = meeting.status === 'ended';
-  const isFolded = ended && folded;
+  return (
+    <div className="mm-head" data-testid="meeting-bar" data-status={meeting.status}>
+      <MeetingPill meeting={meeting} />
+      <People meeting={meeting} />
+      {meeting.status === 'live' ? (
+        <button
+          type="button"
+          className="mm-btn"
+          data-testid="meeting-pause"
+          onClick={() => pauseMeeting(chatId)}
+        >
+          Pause
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="mm-btn"
+          data-testid="meeting-resume"
+          onClick={() => (ended ? void resumeEndedMeeting(chatId) : resumeMeeting(chatId))}
+        >
+          Resume
+        </button>
+      )}
+      {!ended ? (
+        <button
+          type="button"
+          className="mm-end"
+          data-testid="meeting-end"
+          onClick={() => endMeeting(chatId)}
+        >
+          End
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="mm-icon"
+        data-testid="meeting-cog"
+        aria-label="Meeting settings"
+        title="Meeting settings"
+        aria-pressed={settingsOpen}
+        onClick={() => setSettingsOpen(!settingsOpen)}
+      >
+        <SlidersHorizontal size={16} aria-hidden="true" />
+      </button>
+      {ended ? (
+        <button
+          type="button"
+          className="mm-icon"
+          data-testid="meeting-fold"
+          aria-label="Fold the meeting away"
+          title="Fold the meeting away"
+          aria-expanded="true"
+          onClick={() => {
+            setSettingsOpen(false);
+            setFolded(chatId, true);
+          }}
+        >
+          <ChevronUp size={16} aria-hidden="true" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
+/** An ended meeting folded away: one thin line over the chat, with a way back to its notes or transcript. */
+function FoldedBar({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const setView = useMeetingStore((s) => s.setView);
+  const setFolded = useMeetingStore((s) => s.setFolded);
   const show = (v: MeetingView) => {
     setView(chatId, v);
-    setSettingsOpen(false);
     setFolded(chatId, false);
   };
-
   return (
     <section
-      className={isFolded ? 'mm-bar folded' : 'mm-bar'}
+      className="mm-bar folded"
       data-testid="meeting-bar"
       data-status={meeting.status}
-      data-folded={isFolded ? 'true' : undefined}
+      data-folded="true"
     >
       <div className="mm-head">
-        <span className={ended ? 'mm-pill ended' : 'mm-pill'} data-testid="meeting-pill">
-          {meeting.status === 'live' ? <span className="mm-dot" /> : null}
-          {isFolded ? 'Meeting · ' : meeting.status === 'paused' ? 'Paused · ' : ''}
-          {formatMeetingClock(elapsed)}
-        </span>
-        {people.length > 0 ? (
-          <span className="mm-people" data-testid="meeting-people" title={people.join(', ')}>
-            {people.join(' · ')}
-          </span>
-        ) : null}
-        <span className="mm-sp" />
-        {isFolded ? (
-          <>
-            <button
-              type="button"
-              className="mm-btn"
-              data-testid="meeting-open-summary"
-              onClick={() => show('summary')}
-            >
-              Summary
-            </button>
-            <button
-              type="button"
-              className="mm-btn"
-              data-testid="meeting-open-transcript"
-              onClick={() => show('transcript')}
-            >
-              Transcript
-            </button>
-          </>
-        ) : (
-          <div className="mm-seg" role="tablist">
-            {(['summary', 'transcript'] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                role="tab"
-                aria-selected={!settingsOpen && view === v}
-                data-testid={`meeting-tab-${v}`}
-                onClick={() => show(v)}
-              >
-                {v === 'summary' ? 'Summary' : 'Transcript'}
-              </button>
-            ))}
-          </div>
-        )}
-        <span className="mm-sp" />
-        {isFolded ? null : (
-          <button
-            type="button"
-            className="mm-icon"
-            data-testid="meeting-cog"
-            aria-label="Meeting settings"
-            title="Meeting settings"
-            aria-pressed={settingsOpen}
-            onClick={() => setSettingsOpen(!settingsOpen)}
-          >
-            <SlidersHorizontal size={16} aria-hidden="true" />
-          </button>
-        )}
-        {meeting.status === 'live' ? (
-          <button
-            type="button"
-            className="mm-btn"
-            data-testid="meeting-pause"
-            onClick={() => pauseMeeting(chatId)}
-          >
-            Pause
-          </button>
-        ) : null}
-        {meeting.status === 'paused' || (ended && !isFolded) ? (
-          <button
-            type="button"
-            className="mm-btn"
-            data-testid="meeting-resume"
-            onClick={() => (ended ? void resumeEndedMeeting(chatId) : resumeMeeting(chatId))}
-          >
-            Resume
-          </button>
-        ) : null}
-        {!ended ? (
-          <button
-            type="button"
-            className="mm-end"
-            data-testid="meeting-end"
-            onClick={() => endMeeting(chatId)}
-          >
-            End
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="mm-icon"
-            data-testid="meeting-fold"
-            aria-label={isFolded ? 'Show the meeting' : 'Fold the meeting away'}
-            title={isFolded ? 'Show the meeting' : 'Fold the meeting away'}
-            aria-expanded={!isFolded}
-            onClick={() => {
-              setSettingsOpen(false);
-              setFolded(chatId, !isFolded);
-            }}
-          >
-            {isFolded ? (
-              <ChevronDown size={16} aria-hidden="true" />
-            ) : (
-              <ChevronUp size={16} aria-hidden="true" />
-            )}
-          </button>
-        )}
+        <MeetingPill meeting={meeting} prefix="Meeting · " />
+        <People meeting={meeting} />
+        <button
+          type="button"
+          className="mm-btn"
+          data-testid="meeting-open-summary"
+          onClick={() => show('notes')}
+        >
+          Notes
+        </button>
+        <button
+          type="button"
+          className="mm-btn"
+          data-testid="meeting-open-transcript"
+          onClick={() => show('transcript')}
+        >
+          Transcript
+        </button>
+        <button
+          type="button"
+          className="mm-icon"
+          data-testid="meeting-fold"
+          aria-label="Show the meeting"
+          title="Show the meeting"
+          aria-expanded="false"
+          onClick={() => setFolded(chatId, false)}
+        >
+          <ChevronDown size={16} aria-hidden="true" />
+        </button>
       </div>
-
-      {meeting.error ? (
-        <div className="mm-error" role="alert" data-testid="meeting-error">
-          {meeting.error}
-        </div>
-      ) : null}
-      {meeting.status === 'live' && !capturing ? (
-        <div className="mm-error" data-testid="meeting-not-listening">
-          This device is not listening.{' '}
-          <button
-            type="button"
-            className="mm-btn"
-            data-testid="meeting-listen-here"
-            onClick={() => void listenHere(chatId)}
-          >
-            Listen here
-          </button>
-        </div>
-      ) : null}
     </section>
   );
 }
 
-/** What the settings button opens: research, the meeting's prompts, models and timing, in place. */
+/** One error, one line; the whole text is on hover, and a click shows it in full. */
+function AlertLine({
+  testid,
+  text,
+  children,
+}: {
+  testid: string;
+  text: string;
+  children?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="mm-alert"
+      role="alert"
+      data-testid={testid}
+      data-open={open}
+      title={text}
+      onClick={() => setOpen(!open)}
+    >
+      <span className="mm-alert-t">{text}</span>
+      {children}
+    </div>
+  );
+}
+
+/** Everything that has gone wrong with the meeting, under the tabs. */
+function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const capturing = useMeetingStore((s) => s.capturingChatId === chatId);
+  const notListening = meeting.status === 'live' && !capturing;
+  if (!meeting.error && !meeting.researchError && !notListening) return null;
+  return (
+    <div className="mm-alerts">
+      {meeting.error ? <AlertLine testid="meeting-error" text={meeting.error} /> : null}
+      {meeting.researchError ? (
+        <AlertLine testid="meeting-research-error" text={meeting.researchError} />
+      ) : null}
+      {notListening ? (
+        <AlertLine testid="meeting-not-listening" text="This device is not listening">
+          <button
+            type="button"
+            className="mm-btn"
+            data-testid="meeting-listen-here"
+            onClick={(e) => {
+              e.stopPropagation();
+              void listenHere(chatId);
+            }}
+          >
+            Listen here
+          </button>
+        </AlertLine>
+      ) : null}
+    </div>
+  );
+}
+
+/** The meeting's on/off switches: research as it goes, and the agent running its own actions. */
+export function MeetingSwitches({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const ended = meeting.status === 'ended';
+  return (
+    <div className="mm-switches">
+      <label className="mm-switch">
+        <input
+          type="checkbox"
+          data-testid="meeting-research-on"
+          checked={meeting.researchOn === true}
+          disabled={ended}
+          onChange={(e) => setMeetingResearch(chatId, e.target.checked)}
+        />
+        Research as we go
+      </label>
+      {ended ? null : (
+        <label className="mm-switch">
+          <input
+            type="checkbox"
+            data-testid="meeting-agent-runs"
+            checked={meeting.agentRunsActions === true}
+            onChange={(e) => setAgentRunsActions(chatId, e.target.checked)}
+          />
+          Agent does its own actions
+        </label>
+      )}
+    </div>
+  );
+}
+
+/** What the settings button opens: the switches, the meeting's prompts, models and timing, in place. */
 function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const promptEditor = useMeetingStore((s) => s.promptEditor);
   const openPromptEditor = useMeetingStore((s) => s.openPromptEditor);
   return (
     <div className="mm-settings" data-testid="meeting-settings">
-      <label className="mm-speed">
-        <input
-          type="checkbox"
-          data-testid="meeting-research-on"
-          checked={meeting.researchOn === true}
-          disabled={meeting.status === 'ended'}
-          onChange={(e) => setMeetingResearch(chatId, e.target.checked)}
-        />
-        Research as we go
-      </label>
+      <MeetingSwitches chatId={chatId} meeting={meeting} />
       {meeting.status !== 'ended' ? (
         <label className="mm-speed">
           Notes update
@@ -674,42 +740,6 @@ function NoteRow({ chatId, note }: { chatId: string; note: MeetingNote }) {
   );
 }
 
-/** What Tom asked the agent during the meeting, and its answer, at the time they were said. */
-function ChatTurn({ chatId, entry }: { chatId: string; entry: ChatEventEntry }) {
-  if (entry.role === 'user')
-    return (
-      <div className="mm-ask" data-testid="meeting-ask">
-        {entry.content}
-      </div>
-    );
-  return (
-    <div className="mm-answer" data-testid="meeting-answer">
-      <Markdown content={entry.content ?? ''} />
-      <MeetingEditChips chatId={chatId} seq={entry.seq} messageAt={entry.messageAt} />
-    </div>
-  );
-}
-
-/** The chat's own words since the meeting began: typed questions and the agent's replies. */
-function useMeetingTurns(chatId: string, meeting: MeetingState): ChatEventEntry[] {
-  const timeline = useChatStore((s) => s.timelines[chatId]);
-  return useMemo(
-    () =>
-      (timeline ?? []).filter(
-        (e) =>
-          e.kind === 'message' &&
-          (e.role === 'user' || e.role === 'assistant') &&
-          (e.content ?? '').trim() !== '' &&
-          e.messageAt !== undefined &&
-          e.messageAt >= meeting.startedAt &&
-          e.synthetic !== true &&
-          e.origin !== 'machine' &&
-          e.jobTrigger !== true,
-      ),
-    [timeline, meeting.startedAt],
-  );
-}
-
 /** How long the live tail reaches back: roughly the last minute of talk. */
 const TAIL_MS = 60_000;
 
@@ -740,82 +770,105 @@ function LiveTail({ chatId, meeting }: { chatId: string; meeting: MeetingState }
   );
 }
 
-type StreamItem =
+/** One entry in Notes: a point, or a research card at the time it was raised. */
+export type NotesItem =
   | { kind: 'point'; at: number; topic: MeetingTopic }
-  | { kind: 'note'; at: number; note: MeetingNote }
-  | { kind: 'card'; at: number; card: MeetingCard }
-  | { kind: 'turn'; at: number; entry: ChatEventEntry };
+  | { kind: 'card'; at: number; card: MeetingCard };
+
+/** Points and research cards together, oldest first, so the newest is at the bottom. */
+export function notesItems(topics: MeetingTopic[], cards: MeetingCard[]): NotesItem[] {
+  return [
+    ...topics.map((t) => ({ kind: 'point' as const, at: t.at, topic: t })),
+    ...cards.map((c) => ({ kind: 'card' as const, at: c.at, card: c })),
+  ].sort((a, b) => a.at - b.at);
+}
 
 /**
- * The Summary: points, Tom's notes, research and his questions to the agent,
- * oldest first so the newest is at the bottom, then the live tail; after the
- * meeting, the write-up closes it.
+ * Notes: the points and the agent's research, oldest first, then while live the
+ * talk the points have not taken in yet. Once ended, the write-up heads it.
  */
-function SummaryStream({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+function NotesStream({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const [focus, setFocus] = useState<PointFocus | null>(null);
-  const turns = useMeetingTurns(chatId, meeting);
   const live = meeting.status !== 'ended';
-  const items = useMemo(() => {
-    const out: StreamItem[] = [
-      ...meeting.topics.map((t) => ({ kind: 'point' as const, at: t.at, topic: t })),
-      ...parseMeetingNotes(meeting.myNotes ?? '').map((n) => ({
-        kind: 'note' as const,
-        at: n.at,
-        note: n,
-      })),
-      ...(meeting.cards ?? []).map((c) => ({ kind: 'card' as const, at: c.at, card: c })),
-      ...turns.map((e) => ({
-        kind: 'turn' as const,
-        at: Math.max(0, (e.messageAt ?? meeting.startedAt) - meeting.startedAt),
-        entry: e,
-      })),
-    ];
-    return out.sort((a, b) => a.at - b.at);
-  }, [meeting.topics, meeting.myNotes, meeting.cards, turns, meeting.startedAt]);
+  const items = useMemo(
+    () => notesItems(meeting.topics, meeting.cards ?? []),
+    [meeting.topics, meeting.cards],
+  );
   const points = items.flatMap((i) => (i.kind === 'point' ? [i.topic] : []));
   const newest = points.at(-1);
-  const scroller = usePinnedScroll([items, meeting.transcript.length]);
+  // Live, the newest stays in view; once ended, the write-up at the top does.
+  const scroller = usePinnedScroll([items, meeting.transcript.length], live);
 
   return (
     <div className="mm-scroll" data-testid="meeting-points" ref={scroller}>
       <div className="mm-col">
-        {meeting.researchError ? (
-          <div className="mm-feed-err" role="alert" data-testid="meeting-research-error">
-            {meeting.researchError}
-          </div>
-        ) : null}
+        {!live ? <WriteupView chatId={chatId} meeting={meeting} /> : null}
         {items.length === 0 && live ? <div className="mm-wait">Listening…</div> : null}
         {items.map((i) => {
-          if (i.kind === 'point') {
-            const at = points.indexOf(i.topic);
-            return (
-              <PointRow
-                key={i.topic.id}
-                chatId={chatId}
-                topic={i.topic}
-                isNow={live && i.topic === newest}
-                lines={linesBehind(meeting, i.topic, points[at + 1])}
-                focus={focus}
-                setFocus={setFocus}
-              />
-            );
-          }
-          if (i.kind === 'note')
-            return <NoteRow key={`n${i.note.index}`} chatId={chatId} note={i.note} />;
           if (i.kind === 'card') return <ResearchCard key={i.card.id} card={i.card} />;
-          return <ChatTurn key={`t${i.entry.seq}`} chatId={chatId} entry={i.entry} />;
+          const at = points.indexOf(i.topic);
+          return (
+            <PointRow
+              key={i.topic.id}
+              chatId={chatId}
+              topic={i.topic}
+              isNow={live && i.topic === newest}
+              lines={linesBehind(meeting, i.topic, points[at + 1])}
+              focus={focus}
+              setFocus={setFocus}
+            />
+          );
         })}
         {live ? <LiveTail chatId={chatId} meeting={meeting} /> : null}
-        {!live ? <WriteupView chatId={chatId} meeting={meeting} /> : null}
       </div>
     </div>
   );
 }
 
+/** My notes: Tom's own notes, each at the time he wrote it, and a box to write the next one. */
+function MyNotesPane({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const notes = useMemo(() => parseMeetingNotes(meeting.myNotes ?? ''), [meeting.myNotes]);
+  const [draft, setDraft] = useState('');
+  const scroller = usePinnedScroll([notes.length]);
+  const write = () => {
+    const text = draft.trim();
+    if (text === '') return;
+    addNote(chatId, text);
+    setDraft('');
+  };
+  return (
+    <div className="mm-mine">
+      <div className="mm-scroll" data-testid="meeting-my-notes" ref={scroller}>
+        <div className="mm-col">
+          {notes.length === 0 ? <div className="mm-wait">No notes yet</div> : null}
+          {notes.map((n) => (
+            <NoteRow key={`n${n.index}`} chatId={chatId} note={n} />
+          ))}
+        </div>
+      </div>
+      <textarea
+        className="mm-write"
+        data-testid="meeting-note-input"
+        aria-label="Write a note"
+        placeholder="Write a note…"
+        rows={1}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            write();
+          }
+        }}
+      />
+    </div>
+  );
+}
+
 /** Keeps a scroller at the bottom as content arrives, unless Tom has scrolled up to read. */
-function usePinnedScroll(deps: unknown[]) {
+function usePinnedScroll(deps: unknown[], pin = true) {
   const ref = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
+  const pinned = useRef(pin);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -825,6 +878,9 @@ function usePinnedScroll(deps: unknown[]) {
     el.addEventListener('scroll', onScroll);
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
+  useLayoutEffect(() => {
+    pinned.current = pin;
+  }, [pin]);
   useLayoutEffect(() => {
     const el = ref.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
@@ -881,7 +937,7 @@ function TranscriptList({ chatId, meeting }: { chatId: string; meeting: MeetingS
 }
 
 /**
- * The write-up that closes the Summary once the meeting has ended: an editable
+ * The write-up that heads Notes once the meeting has ended: an editable
  * title, date and duration, Regenerate and Copy, and a body of short headings.
  * Tom's words are dark ink, generated text is softer, and names the clean-up
  * pass fixed are underlined with the original on hover.
@@ -1016,49 +1072,60 @@ function WriteupView({ chatId, meeting }: { chatId: string; meeting: MeetingStat
   );
 }
 
-/** The meeting in place of the chat stream: Summary or Transcript, or its settings. */
-export function MeetingView({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const view = useMeetingStore((s) => s.view[chatId] ?? 'summary');
+/** The panel on the chat's right: header row, tabs, errors, then a tab or the settings. */
+export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const view = useMeetingStore((s) => s.view[chatId] ?? 'notes');
+  const setView = useMeetingStore((s) => s.setView);
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
+  const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
+  const ended = meeting.status === 'ended';
+  // A meeting that ends goes to Notes, where the write-up now heads the points.
+  const wasEnded = useRef(ended);
+  useEffect(() => {
+    if (ended === wasEnded.current) return;
+    wasEnded.current = ended;
+    if (ended) setView(chatId, 'notes');
+  }, [ended, chatId, setView]);
+  const actionCount = openActions(meeting).length;
   return (
-    <section className="mm-view" data-testid="meeting-panel" data-status={meeting.status}>
+    <aside className="mm-panel" data-testid="meeting-panel" data-status={meeting.status}>
+      <MeetingHead chatId={chatId} meeting={meeting} />
+      <div className="mm-tabs" role="tablist">
+        {VIEWS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            className="mm-tab"
+            aria-selected={!settingsOpen && view === v}
+            data-testid={`meeting-tab-${v}`}
+            onClick={() => {
+              setView(chatId, v);
+              setSettingsOpen(false);
+            }}
+          >
+            {VIEW_LABEL[v]}
+            {v === 'actions' && actionCount > 0 ? <b className="mm-tab-n">{actionCount}</b> : null}
+          </button>
+        ))}
+      </div>
+      <MeetingAlerts chatId={chatId} meeting={meeting} />
       {settingsOpen ? (
         <div className="mm-scroll">
           <div className="mm-col">
             <MeetingSettingsPane chatId={chatId} meeting={meeting} />
           </div>
         </div>
+      ) : view === 'mine' ? (
+        <MyNotesPane chatId={chatId} meeting={meeting} />
+      ) : view === 'actions' ? (
+        <MeetingActions chatId={chatId} meeting={meeting} />
       ) : view === 'transcript' ? (
         <TranscriptList chatId={chatId} meeting={meeting} />
       ) : (
-        <SummaryStream chatId={chatId} meeting={meeting} />
+        <NotesStream chatId={chatId} meeting={meeting} />
       )}
-    </section>
-  );
-}
-
-/** The composer's switch while a meeting is shown: write a note into it, or ask the agent. */
-export function NoteAskSwitch({ chatId }: { chatId: string }) {
-  const asking = useMeetingAsking(chatId);
-  const setAsking = useMeetingStore((s) => s.setAsking);
-  return (
-    <span className="mm-mode" role="radiogroup" aria-label="Composer mode">
-      {(['Note', 'Ask'] as const).map((m) => {
-        const on = (m === 'Ask') === asking;
-        return (
-          <button
-            key={m}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            data-testid={`meeting-mode-${m.toLowerCase()}`}
-            onClick={() => setAsking(chatId, m === 'Ask')}
-          >
-            {m}
-          </button>
-        );
-      })}
-    </span>
+    </aside>
   );
 }
 
@@ -1254,44 +1321,10 @@ function ActionRow({
   );
 }
 
-const TRAY_HEIGHT_KEY = 'patch.meetingTrayHeight';
-const TRAY_DEFAULT = 170;
-const TRAY_MIN = 40;
-const readTrayHeight = (): number => {
-  const n = Number(localStorage.getItem(TRAY_HEIGHT_KEY));
-  return Number.isFinite(n) && n >= TRAY_MIN ? n : TRAY_DEFAULT;
-};
-
-/** The actions tray above the composer: Tom's, other people's, and the agent's. */
+/** The Actions tab: Tom's, other people's and the agent's, one compact row each. */
 export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const [open, setOpen] = useState(false);
-  const [bodyMax, setBodyMax] = useState(readTrayHeight);
-  const live = meeting.actions.filter((a) => a.status !== 'dismissed');
-  if (live.length === 0) return null;
-  const onGripDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-    const startY = e.clientY;
-    const startH = bodyMax;
-    let latest = startH;
-    const move = (ev: PointerEvent) => {
-      // The tray sits at the bottom: dragging up grows it.
-      latest = Math.round(
-        Math.min(window.innerHeight * 0.6, Math.max(TRAY_MIN, startH + startY - ev.clientY)),
-      );
-      setBodyMax(latest);
-    };
-    const up = (ev: PointerEvent) => {
-      target.releasePointerCapture(ev.pointerId);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      localStorage.setItem(TRAY_HEIGHT_KEY, String(latest));
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-  const of = (k: MeetingAction['kind']) => live.filter((a) => a.kind === k);
+  const open = openActions(meeting);
+  const of = (k: MeetingAction['kind']) => open.filter((a) => a.kind === k);
   const mine = of('mine');
   const others = of('other');
   const agent = of('agent');
@@ -1313,94 +1346,37 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
         ['Agent', agent],
       ];
   return (
-    <div className="mm-tray" data-testid="meeting-actions">
-      {open ? (
-        <div
-          className="mm-tray-grip"
-          data-testid="meeting-actions-grip"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize actions"
-          onPointerDown={onGripDown}
-        />
-      ) : null}
-      <div className="mm-tray-head">
-        <button
-          type="button"
-          className="mm-tray-toggle"
-          data-testid="meeting-actions-toggle"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          <span className="mm-tray-label">Actions</span>
-          <span className="mm-tray-count" data-testid="meeting-actions-count">
-            {ended ? (
-              <>
-                <b>{agent.length}</b> agent did · <b>{mine.length}</b> mine · <b>{others.length}</b>{' '}
-                others
-              </>
-            ) : (
-              <>
-                <b>{mine.length}</b> mine · <b>{others.length}</b> others · <b>{agent.length}</b>{' '}
-                agent
-              </>
-            )}
-          </span>
-        </button>
-        {ended ? null : (
-          <input
-            type="checkbox"
-            data-testid="meeting-agent-runs"
-            title="Agent runs its own actions"
-            aria-label="Agent runs its own actions"
-            checked={agentRuns}
-            onChange={(e) => setAgentRunsActions(chatId, e.target.checked)}
-          />
+    <div className="mm-scroll">
+      <div className="mm-col mm-actions" data-testid="meeting-actions">
+        {open.length === 0 ? <div className="mm-wait">No actions yet</div> : null}
+        {groups.map(([label, rows]) =>
+          rows.length === 0 ? null : (
+            <div key={label}>
+              <div className="mm-act-grp">{label}</div>
+              {rows.map((a) => (
+                <ActionRow
+                  key={a.id}
+                  chatId={chatId}
+                  action={a}
+                  speakers={speakers}
+                  agentRuns={agentRuns}
+                  ended={ended}
+                />
+              ))}
+            </div>
+          ),
         )}
-        <button
-          type="button"
-          className="mm-tray-caret"
-          aria-label={open ? 'Collapse actions' : 'Expand actions'}
-          onClick={() => setOpen(!open)}
-        >
-          {open ? '▾' : '▸'}
-        </button>
       </div>
-      {open ? (
-        <div
-          className="mm-tray-body"
-          data-testid="meeting-actions-body"
-          style={{ maxHeight: bodyMax }}
-        >
-          {groups.map(([label, rows]) =>
-            rows.length === 0 ? null : (
-              <div key={label}>
-                {ended ? <div className="mm-tray-grp">{label}</div> : null}
-                {rows.map((a) => (
-                  <ActionRow
-                    key={a.id}
-                    chatId={chatId}
-                    action={a}
-                    speakers={speakers}
-                    agentRuns={agentRuns}
-                    ended={ended}
-                  />
-                ))}
-              </div>
-            ),
-          )}
-        </div>
-      ) : null}
     </div>
   );
 }
 
 /**
- * Wraps the chat's stream + composer. With a meeting shown, a bar goes on top
- * and the meeting takes the chat stream's place, the composer staying below;
- * once an ended meeting is folded away the chat is a chat again. Without one it
- * is `display: contents`, and the nesting never changes, so the wrapped tree
- * never remounts when a meeting starts, ends or folds.
+ * Wraps the chat's stream + composer. With a meeting shown the chat stays as it
+ * is on the left and the meeting's panel sits on its right; an ended meeting
+ * folded away is one line over the chat. Without one it is `display: contents`,
+ * and the nesting never changes, so the wrapped tree never remounts when a
+ * meeting starts, ends or folds.
  */
 export function MeetingLayout({ chatId, children }: { chatId: string; children: ReactNode }) {
   const meeting = useMeetingStore((s) => s.byChat[chatId]);
@@ -1416,13 +1392,11 @@ export function MeetingLayout({ chatId, children }: { chatId: string; children: 
       data-testid={meeting ? 'meeting-body' : undefined}
       data-meeting-shown={shown ? 'true' : undefined}
     >
-      {meeting ? <MeetingBar chatId={chatId} meeting={meeting} /> : null}
-      <div className={meeting ? 'mm-main' : 'mm-contents'}>
-        <div className={meeting ? 'mm-left' : 'mm-contents'}>
-          {shown ? <MeetingView chatId={chatId} meeting={meeting} /> : null}
-          {children}
-        </div>
+      <div className={meeting ? 'mm-left' : 'mm-contents'}>
+        {meeting && !shown ? <FoldedBar chatId={chatId} meeting={meeting} /> : null}
+        {children}
       </div>
+      {shown ? <MeetingPanel chatId={chatId} meeting={meeting} /> : null}
     </div>
   );
 }

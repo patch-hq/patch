@@ -13597,7 +13597,6 @@ select.permission-mode.is-pending {
 .mm-body {
   flex: 1;
   display: flex;
-  flex-direction: column;
   min-height: 0;
 }
 .mm-label {
@@ -13684,70 +13683,13 @@ select.permission-mode.is-pending {
   font-weight: 600;
   cursor: pointer;
 }
-.mm-tray {
-  position: relative;
-  flex: none;
-  border-top: 1px solid var(--line-soft);
-  background: var(--bg-panel);
-}
-.mm-tray-grip {
-  position: absolute;
-  top: -3px;
-  left: 0;
-  right: 0;
-  height: 7px;
-  cursor: row-resize;
-  touch-action: none;
-  z-index: 1;
-}
-.mm-tray-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 20px;
-}
-.mm-tray-toggle {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-}
-.mm-tray-label,
-.mm-tray-grp {
+.mm-act-grp {
   font-size: var(--text-min);
   font-weight: 600;
   color: var(--ink-3);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-}
-.mm-tray-grp {
-  margin: 6px 0 2px;
-}
-.mm-tray-count {
-  font-size: var(--text-min);
-  color: var(--ink-3);
-}
-.mm-tray-count b {
-  color: var(--ink);
-}
-.mm-tray-caret {
-  border: none;
-  background: none;
-  color: var(--ink-3);
-  cursor: pointer;
-  font: inherit;
-}
-.mm-tray-body {
-  max-height: 170px;
-  overflow: auto;
-  padding: 0 20px 8px;
+  margin: 10px 0 2px;
 }
 .mm-act {
   display: flex;
@@ -13853,13 +13795,8 @@ select.permission-mode.is-pending {
   color: var(--on-accent);
 }
 
-/* The meeting in place of the chat stream (design/meeting-mode-v3). One type
-   scale: 12px meta, 14px body, 15px Tom's notes and the newest point. */
-.mm-main {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
+/* The chat on the left, the meeting's panel on its right (design/meeting-mode-v4).
+   One type scale: meta at the floor, 14px body, 15px tabs, Tom's notes and the newest point. */
 .mm-left {
   flex: 1;
   overflow: hidden;
@@ -13873,9 +13810,132 @@ select.permission-mode.is-pending {
   min-height: 0;
   overflow: auto;
 }
-/* The meeting stands in for the chat stream; the composer stays. */
-.mm-body[data-meeting-shown='true'] .mm-left > .chat-stream {
-  display: none;
+/* Flush to the edge: a hairline on its left and nothing else around it. */
+.mm-panel {
+  flex: 0 0 clamp(320px, 36%, 460px);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line-soft);
+}
+.mm-panel > .mm-head {
+  flex: none;
+  padding: 8px 10px 6px 16px;
+}
+.mm-panel .mm-col {
+  max-width: none;
+  margin: 0;
+  padding: 8px 12px 16px 6px;
+}
+.mm-tabs {
+  flex: none;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+}
+.mm-tab {
+  all: unset;
+  box-sizing: border-box;
+  padding: 7px 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-3);
+  white-space: nowrap;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.mm-tab[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+.mm-tab-n {
+  margin-left: 5px;
+  font-size: var(--text-min);
+  color: var(--ink-faint);
+}
+/* Errors under the tabs: one line each, the whole text on click. */
+.mm-alerts {
+  flex: none;
+  padding: 4px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mm-alert {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: var(--text-min);
+  line-height: 1.4;
+  color: var(--danger);
+  cursor: pointer;
+}
+.mm-alert-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mm-alert[data-open='true'] .mm-alert-t {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.mm-alert .mm-btn {
+  padding: 1px 10px;
+  font-size: var(--text-min);
+}
+/* My notes: the list, and a box at the foot to write the next one. */
+.mm-mine {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mm-write {
+  flex: none;
+  margin: 8px 12px 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  resize: none;
+  outline: none;
+}
+.mm-write:focus {
+  border-color: var(--accent);
+}
+.mm-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mm-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--ink);
+}
+/* Settings in a narrow panel: every label above its control. */
+.mm-settings .set-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-height: 0;
+  padding: 10px 12px;
+}
+.mm-settings .set-row select,
+.mm-settings .set-row input:not([type='checkbox']) {
+  width: 100%;
 }
 .mm-bar {
   flex: none;
@@ -13926,28 +13986,6 @@ select.permission-mode.is-pending {
   font-size: var(--text-min);
   color: var(--ink-3);
 }
-.mm-seg {
-  display: inline-flex;
-  flex: none;
-  background: var(--bg-soft);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-pill);
-  padding: 2px;
-}
-.mm-seg button {
-  all: unset;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink-3);
-  padding: 4px 16px;
-  border-radius: var(--radius-pill);
-}
-.mm-seg button[aria-selected='true'] {
-  background: var(--bg-elevated);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
-}
 .mm-icon {
   all: unset;
   box-sizing: border-box;
@@ -13978,13 +14016,6 @@ select.permission-mode.is-pending {
   to {
     transform: rotate(-360deg);
   }
-}
-.mm-view {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-elevated);
 }
 .mm-scroll {
   flex: 1;
@@ -14103,22 +14134,6 @@ select.permission-mode.is-pending {
 .mm-col > .mm-card li {
   display: list-item;
 }
-/* Tom's question to the agent, and its answer, where they happened. */
-.mm-ask {
-  align-self: flex-end;
-  max-width: 70%;
-  margin: 6px 10px;
-  background: var(--bg-soft);
-  border-radius: var(--radius-lg);
-  padding: 8px 12px;
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-.mm-answer {
-  margin: 2px 10px 6px 64px;
-  font-size: 14px;
-  color: var(--ink-2);
-}
 /* The last minute of talk the notes have not taken in yet. */
 .mm-tail {
   margin-top: 10px;
@@ -14162,11 +14177,11 @@ select.permission-mode.is-pending {
 .mm-tx-head .mm-label {
   margin: 0;
 }
-/* The write-up that closes the Summary once the meeting has ended. */
+/* The write-up that heads Notes once the meeting has ended. */
 .mm-sum {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line-soft);
+  margin: 0 0 8px 10px;
+  padding: 4px 0 12px;
+  border-bottom: 1px solid var(--line-soft);
 }
 .mm-sum * {
   overflow-wrap: anywhere;
@@ -14220,7 +14235,7 @@ select.permission-mode.is-pending {
   position: static;
   border-bottom: 1px dotted var(--accent);
 }
-/* The composer's Note / Ask switch, inside the input box at its start. */
+/* Something at the start of the composer's input box. */
 .composer-input-wrap.has-leading .composer-input,
 .composer-input-wrap.has-leading .composer-live-preview,
 .composer-input-wrap.has-leading .composer-chip-mirror {
@@ -14232,42 +14247,16 @@ select.permission-mode.is-pending {
   top: 7px;
   z-index: 1;
 }
-.mm-mode {
-  display: inline-flex;
-  background: var(--bg-soft);
-  border-radius: var(--radius-pill);
-  padding: 2px;
-}
-.mm-mode button {
-  all: unset;
-  cursor: pointer;
-  font-size: var(--text-min);
-  font-weight: 600;
-  color: var(--ink-3);
-  padding: 2px 11px;
-  border-radius: var(--radius-pill);
-}
-.mm-mode button[aria-checked='true'] {
-  background: var(--ink);
-  color: var(--bg-elevated);
-}
-@media (max-width: 700px) {
-  .mm-head {
-    flex-wrap: wrap;
+@media (max-width: 800px) {
+  .mm-body {
+    flex-direction: column;
   }
-  .mm-people {
-    display: none;
+  .mm-panel {
+    flex: 0 0 45%;
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
   }
-  .mm-seg {
-    order: 10;
-    width: 100%;
-  }
-  .mm-seg button {
-    flex: 1;
-    text-align: center;
-  }
-  .mm-col > .mm-card,
-  .mm-answer {
+  .mm-col > .mm-card {
     margin-left: 10px;
   }
 }
@@ -16128,11 +16117,6 @@ select.permission-mode.is-pending {
 }
 
 /* Research cards (meeting mode). Type is shown by the label's colour, never a left bar. */
-.mm-feed-err {
-  font-size: var(--text-min);
-  color: var(--danger);
-  margin-bottom: 6px;
-}
 .mm-card {
   background: var(--bg-elevated);
   border: 1px solid var(--line-soft);

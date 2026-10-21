@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, createEvent, act } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
@@ -45,15 +46,16 @@ function seedChats(ids: string[]): void {
   );
 }
 
-function renderPanes(): void {
+function renderPanes({ strict = false }: { strict?: boolean } = {}): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const tree = (
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <PaneArea ws={null} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 beforeEach(() => {
@@ -307,5 +309,25 @@ describe('PaneArea — moving a tab keeps it mounted', () => {
       screen.getByTestId('settings-stub'),
     );
     expect(settingsMounts.count).toBe(1);
+  });
+});
+
+describe('PaneArea — StrictMode (the dev app and the e2e harness both run in it)', () => {
+  it("shows the tab's content in its pane after the double mount, and still after a move", () => {
+    seedChats(['c1']);
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' }, { placement: 'tab' });
+    useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    const first = useLayoutStore.getState().root as LeafPane;
+    const settingsTab = first.tabs.find((t) => t.descriptor.kind === 'page')!;
+    renderPanes({ strict: true });
+    expect(screen.getByTestId(`pane-content-${first.id}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
+
+    act(() => useLayoutStore.getState().splitWithTab(first.id, settingsTab.id, first.id, 'right'));
+    const rightId = (useLayoutStore.getState().root as SplitPane).children[1]!.pane.id;
+    expect(screen.getByTestId(`pane-content-${rightId}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
   });
 });
