@@ -1192,7 +1192,7 @@ body {
    it is shaped that way) — the time has to step aside for a keyboard-revealed
    cluster exactly as it does for a hovered one.
    A PINNED row is NOT exempt and is not held open either: it reads its state
-   from `.name-pin` beside the title (spec/14 § Sidebar §3), so it keeps the
+   from `.when-pin` beside the time (spec/14 § Sidebar §3), so it keeps the
    time at rest and yields the slot on hover like any ordinary row. */
 .sb-row:hover:not(.deleted):not(.draft-row) .row-when,
 .sb-row:focus-within:not(:focus:not(:focus-visible)):not(.deleted):not(.draft-row) .row-when {
@@ -1299,30 +1299,28 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A pinned or goal-bearing row marks its state next to the title (spec/14 §
-   Sidebar §3, spec/04 § Goals) rather than as a sibling of `.name` — the row
-   is a 3-column grid (badge · name · top-right slot) with no column of its
-   own for an extra marker, so a sibling marker gets auto-placed into the
-   name's cell and shoves `.name` itself into an implicit next row, cramming
-   the title into the 18px badge column. Nesting the marker(s) inside `.name`
-   instead keeps the title at full width and the relative time on screen.
-   Only a pinned-or-goal row takes this shape: the glyph turns `.name` into a
-   flex container, and a bare text node in a flex container is an anonymous
-   item that cannot be ellipsised, so the title moves into `.name-text` and
-   carries the clipping itself. */
+/* Row marks (spec/14 § Sidebar § Row marks). The goal marker is the ONE mark
+   that sits beside the title: the status column carries the turn's state and
+   the top-right slot carries the pin, so no row stacks glyphs before its name.
+   It nests inside `.name` rather than as a sibling: the row is a 3-column grid
+   (badge, name, top-right slot) with no column of its own for an extra marker,
+   so a sibling gets auto-placed into the name's cell and shoves `.name` into an
+   implicit next row. Only a goal row takes this shape: the glyph turns `.name`
+   into a flex container, and a bare text node in a flex container cannot be
+   ellipsised, so the title moves into `.name-text` and carries the clipping. */
 .sb-row .name.has-marks {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
-.name-pin {
+/* The pin at rest: a small grey glyph beside the time in the top-right slot.
+   Grey, not accent: it is a property of the row, not a state that needs
+   attention. On hover the tools cover the slot and the accent pin button
+   (`.pin-btn.is-pinned`) stands in the same place. */
+.when-pin {
   flex: 0 0 auto;
-  color: var(--accent-strong);
-}
-.name-bell {
-  flex: 0 0 auto;
-  color: var(--accent-strong);
+  color: var(--ink-3);
 }
 .goal-marker {
   display: inline-flex;
@@ -1584,7 +1582,7 @@ body {
   cursor: pointer;
 }
 /* A pinned row's pin control reads as active (accent-filled) once hover brings
-   the tools out. The state itself is carried at rest by `.name-pin`, not by
+   the tools out. The state itself is carried at rest by `.when-pin`, not by
    this button. */
 .pin-btn.is-pinned {
   color: var(--accent-strong);
@@ -2550,16 +2548,32 @@ a.ch-row:hover {
    Keep the `badge-` prefix so a future bare `.working`/`.done`/`.read` rule
    cannot do the same. Guarded by e2e/status-badge-size.spec.ts. */
 .badge {
-  /* Unread: a clean solid accent dot with a soft tint halo. The old double
+  /* ONE FOOTPRINT (spec/14 § Status badges). Every state occupies the same
+     16px box, so the sidebar's status column reads as a line of equal marks
+     that differ by hue and shape only. The three dot states are a 10px disc
+     (the element itself, measured by e2e/status-badge-size.spec.ts); the drawn
+     states override to the full box and centre a glyph whose outer size matches
+     the disc. A badge that grows its own box pushes the row title out of place
+     and stops reading as a status marker, which is how the sidebar came to show
+     dots at four sizes.
+     Unread: a clean solid accent dot with a soft tint halo. The old double
      box-shadow (panel gap + accent ring) rendered as a hollow target that read
      as "broken". */
+  --badge-box: 16px;
+  --badge-dot: 10px;
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  flex: none;
+  width: var(--badge-dot);
+  height: var(--badge-dot);
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-tint);
   vertical-align: middle;
+}
+/* In the sidebar grid the badge track is 18px; centre every state in it so a
+   10px disc and a 16px glyph box share the same axis. */
+.sb-row > .badge {
+  justify-self: center;
 }
 .badge.badge-working {
   /* Orange, no glow — a plain dot that fades via opacity (`pulse`). Used to
@@ -2571,8 +2585,6 @@ a.ch-row:hover {
   /* Overrides the base `.badge` tint-halo shadow — that halo is sized/coloured
      for the accent (green) dot and would otherwise leak through here. */
   box-shadow: none;
-  width: 9px;
-  height: 9px;
   animation: pulse 1.6s ease-in-out infinite;
 }
 .badge.badge-permission {
@@ -2581,9 +2593,10 @@ a.ch-row:hover {
      distinction, and at 8-9px a 2px ring against a slow opacity fade is the
      weakest signal in the sidebar for the state that most needs you to act. */
   background: var(--permission);
+  /* The ring stays inside the 16px footprint (10px disc + 1px gap + 2px ring). */
   box-shadow:
-    0 0 0 2px var(--bg-panel),
-    0 0 0 5px var(--permission);
+    0 0 0 1px var(--bg-panel),
+    0 0 0 3px var(--permission);
 }
 /* A FAILED chat. A drawn glyph, not a tinted dot: the dots differ only by
    colour, which is the weakest possible signal for the one state that means the
@@ -2593,12 +2606,14 @@ a.ch-row:hover {
 .badge.badge-errored {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--danger);
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
   line-height: 1;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
 }
 /* An idle chat with a background command or sub-agent still running. A drawn,
    STATIC glyph rather than another tinted dot: it stands in for the `done` dot
@@ -2610,9 +2625,10 @@ a.ch-row:hover {
 .badge.badge-background {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--ink-3);
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -2626,9 +2642,10 @@ a.ch-row:hover {
 .badge.badge-monitoring {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--ink-3);
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -2637,11 +2654,12 @@ a.ch-row:hover {
 .badge.badge-read {
   background: none;
   box-shadow: none;
+  border-radius: 0;
   color: var(--ink-3);
   font-size: 14px;
   line-height: 1;
-  width: auto;
-  height: auto;
+  width: var(--badge-box);
+  height: var(--badge-box);
 }
 @keyframes pulse {
   0%,
