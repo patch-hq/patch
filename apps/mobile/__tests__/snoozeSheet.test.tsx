@@ -39,7 +39,7 @@ vi.mock('../src/api/rest', () => ({
     chatSectionCounts: vi
       .fn()
       .mockResolvedValue({ archived: 0, snoozed: 0, hidden: 0, deleted: 0, automations: 0 }),
-    listArchivedChats: vi.fn().mockResolvedValue({ chats: [] }),
+    listArchivedChats: vi.fn().mockResolvedValue({ chats: [], nextOffset: null }),
     listHiddenChats: vi.fn().mockResolvedValue({ chats: [] }),
   },
 }));

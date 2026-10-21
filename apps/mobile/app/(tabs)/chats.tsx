@@ -818,7 +818,7 @@ export default function ChatsScreen(): React.ReactElement {
   // Hidden and archived rows are not in the cold-start roster; fetch each
   // whenever it could be drawn — its section is open, or a search covers it.
   useHiddenChats(open.hidden || searching);
-  useArchivedChats(open.archived || searching);
+  const { loadMore: loadMoreArchived } = useArchivedChats(open.archived || searching, searching);
 
   // Batch mode (spec/15 § Batch view): the `Batch` tab swaps the whole column
   // for BatchView, which owns its own scroll region — the Chats tab's own
@@ -905,6 +905,8 @@ export default function ChatsScreen(): React.ReactElement {
       ) : (
         <FlatList
           data={items}
+          onEndReached={open.archived ? loadMoreArchived : undefined}
+          onEndReachedThreshold={1}
           keyboardShouldPersistTaps="handled"
           keyExtractor={(item, idx) =>
             item.kind === 'header'
