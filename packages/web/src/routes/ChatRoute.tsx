@@ -91,8 +91,14 @@ import { addToTodoList } from '../lib/addToTodo.js';
 import { discardUpload, retryUpload, sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import type { PatchWs } from '../api/ws.js';
 import { getActiveWs } from '../api/ws.js';
-import { MeetingActions, MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
-import { useMeetingStore } from '../stores/meetingStore.js';
+import {
+  MeetingActions,
+  MeetingEditChips,
+  MeetingLayout,
+  NoteAskSwitch,
+} from '../components/MeetingPanel.js';
+import { isMeetingShown, useMeetingAsking, useMeetingStore } from '../stores/meetingStore.js';
+import { addNote } from '../lib/meetingControl.js';
 import {
   EXTRA_USAGE_URL,
   EXTRA_USAGE_OFF_SENTENCE,
@@ -641,6 +647,11 @@ export function ChatRoute({
   // composer's own attachment state, which it doesn't otherwise have access to.
   const composerRef = useRef<ComposerHandle>(null);
   const meeting = useMeetingStore((s) => s.byChat[chatId]);
+  const meetingFolded = useMeetingStore((s) => s.folded[chatId] === true);
+  const meetingShown = isMeetingShown(meeting, meetingFolded);
+  const meetingAsking = useMeetingAsking(chatId);
+  // A shown meeting's composer writes a note into it unless switched to Ask.
+  const noting = meetingShown && !meetingAsking;
   const chatDrop = useWholeChatDrop(composerRef);
   // Follow mode: while true we keep the latest message pinned in view. A fresh
   // open starts in follow mode; the user scrolling UP to read history turns it
@@ -1571,6 +1582,17 @@ export function ChatRoute({
       setComposerReplace({ text: turnEdit.savedDraft, nonce: Date.now() });
       return;
     }
+    if (noting) {
+      if (files && files.length > 0) {
+        useUiStore
+          .getState()
+          .pushError('A note cannot carry attachments. Switch to Ask to send them.');
+        return false;
+      }
+      if (message.trim() === '') return false;
+      addNote(chatId, message.trim());
+      return;
+    }
     const afterTurn = sendOpts?.afterTurn === true;
     const interrupt = sendOpts?.interrupt === true;
     // patch/todo.md — `/goal <text>` sets the chat's goal INSTEAD of sending a
@@ -2160,7 +2182,7 @@ export function ChatRoute({
                 onSendAnyway={handleHookSendAnyway}
               />
             ) : null}
-            {meeting ? <MeetingActions chatId={chatId} meeting={meeting} /> : null}
+            {meetingShown ? <MeetingActions chatId={chatId} meeting={meeting} /> : null}
             <DelegateStrip chatId={chatId} />
             <Composer
               key={chatId}
@@ -2194,6 +2216,12 @@ export function ChatRoute({
               insert={composerInsert}
               replace={composerReplace}
               checking={hookChecking}
+              {...(meetingShown
+                ? {
+                    leading: <NoteAskSwitch chatId={chatId} />,
+                    placeholder: noting ? 'Write a note…' : 'Ask about the meeting…',
+                  }
+                : {})}
               running={isStoppable(row)}
               onStop={handleStop}
             />

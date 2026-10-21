@@ -5,11 +5,14 @@
 import { SpeakerLog } from './speakerLog.js';
 import {
   DEFAULT_MEETING_SETTINGS,
+  meetingElapsedMs,
+  type MeetingState,
   type MeetingNotesOp,
   type MeetingSettings,
   type MeetingWriteup,
 } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
+import { addMeetingNote, editMeetingNote } from './meetingNotes.js';
 import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
@@ -264,6 +267,29 @@ export function editMeetingNotes(chatId: string, edit: MeetingNotesOp): void {
 /** The My notes text; the host stores it with the meeting and answers with `meeting.state`. */
 export function saveMyNotes(chatId: string, text: string): void {
   ws().send({ type: 'meeting.my_notes_request', chatId, text });
+}
+
+/**
+ * Rewrites the notes text and shows it at once; the host stores it and its
+ * `meeting.state` echo confirms. Throws when the chat has no meeting.
+ */
+function writeNotes(chatId: string, next: (m: MeetingState) => string): void {
+  const store = useMeetingStore.getState();
+  const m = store.byChat[chatId];
+  if (!m) throw new Error(`chat ${chatId} has no meeting`);
+  const text = next(m);
+  saveMyNotes(chatId, text);
+  store.apply(chatId, { ...m, myNotes: text });
+}
+
+/** A note from the composer's Note mode, timed at this moment of the meeting. */
+export function addNote(chatId: string, text: string): void {
+  writeNotes(chatId, (m) => addMeetingNote(m.myNotes ?? '', meetingElapsedMs(m, Date.now()), text));
+}
+
+/** Rewrites one note in place; empty text removes it. */
+export function editNote(chatId: string, index: number, text: string): void {
+  writeNotes(chatId, (m) => editMeetingNote(m.myNotes ?? '', index, text));
 }
 
 /** The edited final write-up; the host stores it and answers with `meeting.state`. */

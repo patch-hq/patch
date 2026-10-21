@@ -29,7 +29,7 @@
 // Composer — skill autocomplete).
 
 import { LONG_PASTE_CHARS, pastedTextName } from '../lib/pastedText';
-import type { JSX, Ref } from 'react';
+import type { JSX, ReactNode, Ref } from 'react';
 import {
   forwardRef,
   useEffect,
@@ -396,6 +396,10 @@ export interface ComposerProps {
   checking?: boolean;
   /** The hook name(s) a `checking` state is waiting on, for the button's label. */
   checkingHookNames?: string[];
+  /** Replaces "Type a message" (a meeting's Note mode writes a note, not a message). */
+  placeholder?: string;
+  /** Drawn at the start of the input row, before the text (the meeting's Note / Ask switch). */
+  leading?: ReactNode;
   /**
    * Edit mode (spec/04 § Branching): this composer edits the text
    * of a message already in the transcript instead of composing a new one. It
@@ -489,6 +493,8 @@ export const Composer = forwardRef(function Composer(
     onStop,
     checking = false,
     checkingHookNames,
+    placeholder: placeholderText = 'Type a message',
+    leading,
     edit,
     editingTurn,
   }: ComposerProps,
@@ -1994,7 +2000,8 @@ export const Composer = forwardRef(function Composer(
       <div className="composer-row">
         {/* The input and its live-dictation mirror share one positioned box so
             the greyed preview sits exactly over the real text. */}
-        <div className="composer-input-wrap">
+        <div className={leading ? 'composer-input-wrap has-leading' : 'composer-input-wrap'}>
+          {leading ? <div className="composer-leading">{leading}</div> : null}
           {/* Live-dictation preview (spec/07 § Dictation into the composer):
               what is already in the input, in normal ink, plus the host's
               interim transcript GREYED behind a text-transparent textarea, so
@@ -2030,7 +2037,7 @@ export const Composer = forwardRef(function Composer(
              button's own `Send (↵)` tooltip and the ⌘? cheat-sheet carry that.
              `Reconnecting…` is the one permitted swap — state, not teaching. */
             placeholder={
-              suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : 'Type a message'
+              suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : placeholderText
             }
             onChange={(e) => {
               setValue(joinQuotes(quotes, e.target.value));

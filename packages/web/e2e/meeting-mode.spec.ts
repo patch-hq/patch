@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Meeting mode (components/MeetingPanel.tsx). The harness has no host, so the
+// Meeting mode (components/MeetingPanel.tsx, design/meeting-mode-v3). The harness has no host, so the
 // spec plays the host's side: it reads what the surface sends from
 // `window.__wsSent` and answers by applying `meeting.state` to the store.
 
@@ -21,388 +21,362 @@ const sent = (page: Page, type: string) =>
     type,
   );
 
+/** Plays the host: merges `patch` into the chat's meeting as a `meeting.state` would. */
+const applyMeeting = (page: Page, patch: Record<string, unknown>) =>
+  page.evaluate((p) => {
+    const store = (window as unknown as { __meetingStore: any }).__meetingStore;
+    const cur = store.getState().byChat['chat_tools'];
+    store.getState().apply('chat_tools', { ...cur, ...p });
+  }, patch);
+
+const openTray = async (page: Page) => {
+  await page.getByTestId('meeting-actions-toggle').click();
+  await expect(page.getByTestId('meeting-actions-body')).toBeVisible();
+};
+
 test.describe('meeting mode — live', () => {
-  test('lays the panel beside the chat, with actions above the composer', async ({ page }) => {
+  test("the meeting takes the chat stream's place; the bar is on top and the composer stays below", async ({
+    page,
+  }) => {
     await page.goto(URL_LIVE);
-    const panel = page.getByTestId('meeting-panel');
-    await expect(panel).toBeVisible();
-    const [stream, composer, pan, actions] = await Promise.all([
-      page.getByTestId('chat-stream').boundingBox(),
-      page.getByTestId('composer').boundingBox(),
-      panel.boundingBox(),
-      page.getByTestId('meeting-actions').boundingBox(),
-    ]);
-    expect(pan!.x).toBeGreaterThanOrEqual(stream!.x + stream!.width - 1);
-    expect(pan!.width).toBeGreaterThan(290);
-    expect(pan!.width).toBeLessThan(420);
-    expect(actions!.y).toBeGreaterThan(stream!.y);
-    expect(actions!.y + actions!.height).toBeLessThanOrEqual(composer!.y + 1);
-    // the composer stays in the chat column, not under the panel
-    expect(composer!.x + composer!.width).toBeLessThanOrEqual(pan!.x + 1);
-  });
-
-  test('the bar sits across the top, above both the chat and the side panel', async ({ page }) => {
-    await page.goto(URL_LIVE);
-    const [bar, stream, pan] = await Promise.all([
+    const view = page.getByTestId('meeting-panel');
+    await expect(view).toBeVisible();
+    await expect(page.getByTestId('chat-stream')).toBeHidden();
+    const [bar, v, actions, composer] = await Promise.all([
       page.getByTestId('meeting-bar').boundingBox(),
-      page.getByTestId('chat-stream').boundingBox(),
-      page.getByTestId('meeting-panel').boundingBox(),
+      view.boundingBox(),
+      page.getByTestId('meeting-actions').boundingBox(),
+      page.getByTestId('composer').boundingBox(),
     ]);
-    expect(bar!.y + bar!.height).toBeLessThanOrEqual(stream!.y + 1);
-    expect(bar!.y + bar!.height).toBeLessThanOrEqual(pan!.y + 1);
-    expect(bar!.width).toBeGreaterThan(stream!.width + pan!.width - 2);
-    await expect(page.getByTestId('meeting-panel').getByTestId('meeting-drawer')).toHaveCount(0);
+    expect(bar!.y + bar!.height).toBeLessThanOrEqual(v!.y + 1);
+    expect(v!.y + v!.height).toBeLessThanOrEqual(actions!.y + 1);
+    expect(actions!.y + actions!.height).toBeLessThanOrEqual(composer!.y + 1);
+    // one column: the meeting is as wide as the chat area, with no side panel
+    expect(v!.width).toBeGreaterThan(bar!.width - 2);
+    await expect(page.locator('.mm-panel')).toHaveCount(0);
   });
 
-  test('the transcript appears in one place only: the bar drawer', async ({ page }) => {
-    await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-drawer')).toBeVisible();
-    await expect(page.getByTestId('meeting-panel').getByTestId('meeting-line')).toHaveCount(0);
-    await expect(page.getByTestId('meeting-panel')).not.toContainText('Transcript');
-    await expect(page.getByTestId('meeting-search')).toHaveCount(0);
-  });
-
-  test('the panel has Points and My notes tabs and a cog', async ({ page }) => {
-    await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-tab-points')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('meeting-points')).toBeVisible();
-    await page.getByTestId('meeting-tab-notes').click();
-    await expect(page.getByTestId('meeting-tab-notes')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('meeting-points')).toHaveCount(0);
-    await expect(page.getByTestId('meeting-cog')).toBeVisible();
-  });
-
-  test('My notes: typing saves to the host, survives switching tabs, and shows in dark ink', async ({
+  test('the bar is one row: timer, people, Summary / Transcript, settings, Pause, End', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    await page.getByTestId('meeting-tab-notes').click();
-    const box = page.getByTestId('meeting-my-notes');
-    await expect(box).toBeVisible();
-    await box.click();
-    await page.keyboard.type('Ask Priya about the rollout');
-    await expect.poll(async () => (await sent(page, 'meeting.my_notes_request')).length).toBe(1);
-    expect((await sent(page, 'meeting.my_notes_request'))[0]).toMatchObject({
-      chatId: 'chat_tools',
-      text: 'Ask Priya about the rollout',
-    });
-    await page.getByTestId('meeting-tab-points').click();
-    await page.getByTestId('meeting-tab-notes').click();
-    await expect(page.getByTestId('meeting-my-notes')).toHaveValue('Ask Priya about the rollout');
-    const [ink, ink1, ink2] = await page.evaluate(() => {
-      const colour = (v: string) => {
-        const d = document.createElement('div');
-        d.style.color = `var(${v})`;
-        document.body.appendChild(d);
-        const c = getComputedStyle(d).color;
-        d.remove();
-        return c;
-      };
-      return [
-        getComputedStyle(document.querySelector('[data-testid="meeting-my-notes"]')!).color,
-        colour('--ink'),
-        colour('--ink-2'),
-      ];
-    });
-    expect(ink).toBe(ink1);
-    expect(ink).not.toBe(ink2);
+    await expect(page.getByRole('tab')).toHaveText(['Summary', 'Transcript']);
+    await expect(page.getByTestId('meeting-tab-summary')).toHaveAttribute('aria-selected', 'true');
+    const ids = [
+      'meeting-pill',
+      'meeting-people',
+      'meeting-tab-summary',
+      'meeting-cog',
+      'meeting-pause',
+      'meeting-end',
+    ];
+    const boxes = await Promise.all(ids.map((id) => page.getByTestId(id).boundingBox()));
+    const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
+    for (const b of boxes) expect(Math.abs(mid(b!) - mid(boxes[0]!))).toBeLessThan(4);
+    for (let i = 1; i < boxes.length; i++) expect(boxes[i]!.x).toBeGreaterThan(boxes[i - 1]!.x);
+    // the timer has no "Live" word: the red dot says it
+    await expect(page.getByTestId('meeting-pill')).toHaveText(/^3\d:\d\d$/);
+    await expect(page.getByTestId('meeting-pill').locator('.mm-dot')).toBeVisible();
   });
 
-  test('My notes: text saved from another surface appears, and blur saves at once', async ({
+  test('the header names who is on the call, unnamed voices counted as unknown', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    await page.getByTestId('meeting-tab-notes').click();
-    await page.evaluate(() => {
-      const store = (
-        window as unknown as {
-          __meetingStore: {
-            getState: () => {
-              byChat: Record<string, object>;
-              apply: (c: string, m: object) => void;
-            };
-          };
-        }
-      ).__meetingStore;
-      const st = store.getState();
-      st.apply('chat_tools', { ...st.byChat['chat_tools']!, myNotes: 'From the laptop' });
+    await applyMeeting(page, {
+      transcript: [
+        { at: 1000, speaker: 'them', name: 'Ada', text: 'hello' },
+        { at: 2000, speaker: 'them', name: 'Bo', text: 'hi' },
+        { at: 3000, speaker: 'them', text: 'unnamed' },
+        { at: 4000, speaker: 'you', text: 'ok' },
+      ],
     });
-    await expect(page.getByTestId('meeting-my-notes')).toHaveValue('From the laptop');
-    const box = page.getByTestId('meeting-my-notes');
-    await box.fill('Follow up Friday');
-    await box.blur();
-    expect((await sent(page, 'meeting.my_notes_request')).at(-1)).toMatchObject({
-      text: 'Follow up Friday',
-    });
-  });
-
-  test('the cog opens prompts, models and timing in place', async ({ page }) => {
-    await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-settings')).toHaveCount(0);
-    await page.getByTestId('meeting-cog').click();
-    const s = page.getByTestId('meeting-settings');
-    await expect(s.getByTestId('meeting-analysis-model')).toBeVisible();
-    await expect(s.getByTestId('meeting-analyse-seconds')).toBeVisible();
-    await expect(s.getByTestId('meeting-speed')).toBeVisible();
-    await s.getByTestId('meeting-prompt-open-notes').click();
-    await expect(s.getByTestId('meeting-prompt-editor')).toBeVisible();
-    await page.getByTestId('meeting-tab-points').click();
-    await expect(page.getByTestId('meeting-settings')).toHaveCount(0);
-    await expect(page.getByTestId('meeting-panel')).toBeVisible();
-  });
-
-  test('the header names who is on the call, and there is no auto-end setting', async ({
-    page,
-  }) => {
-    await page.goto(URL_LIVE);
-    await page.evaluate(() => {
-      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
-      const cur = store.getState().byChat['chat_tools'];
-      store.getState().apply('chat_tools', {
-        ...cur,
-        transcript: [
-          { at: 1000, speaker: 'them', name: 'Ada', text: 'hello' },
-          { at: 2000, speaker: 'them', name: 'Bo', text: 'hi' },
-          { at: 3000, speaker: 'them', text: 'unnamed' },
-          { at: 4000, speaker: 'you', text: 'ok' },
-        ],
-      });
-    });
-    await expect(page.getByTestId('meeting-people')).toHaveText('Ada · Bo · You');
+    await expect(page.getByTestId('meeting-people')).toHaveText('Ada · Bo · You · 1 unknown');
     await expect(page.getByTestId('meeting-bar')).not.toContainText(/auto-?end/i);
-    await expect(page.getByTestId('meeting-now-label')).toHaveText('Now · You');
   });
 
-  test.describe('transcript drawer', () => {
-    const seed = (page: Page, count = 40) =>
-      page.evaluate((n) => {
+  test("Summary runs oldest first: points, Tom's notes and research at their times, the newest point marked Now", async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const view = page.getByTestId('meeting-points');
+    const times = await view
+      .locator(
+        '[data-testid=meeting-topic] > .tm, [data-testid=meeting-note] > .tm, [data-testid=meeting-card] .mm-card-t',
+      )
+      .allInnerTexts();
+    expect(times).toEqual(['00:30', '01:40', '17:33', '22:05', '22:30', '23:41', '24:46', '31:40']);
+    const topics = page.getByTestId('meeting-topic');
+    await expect(topics).toHaveCount(3);
+    await expect(topics.locator('[data-now=true]')).toHaveCount(0);
+    const now = page.locator('[data-testid=meeting-topic][data-now=true]');
+    await expect(now).toHaveCount(1);
+    await expect(now).toContainText('Now');
+    await expect(now).toContainText('failing tests');
+    // Decisions are marked in the text; no chips, no Edit buttons, no "add a point"
+    await expect(topics.locator('.decw')).toHaveCount(2);
+    await expect(page.getByTestId('meeting-point-insert')).toHaveCount(0);
+    await expect(
+      view.getByRole('button', { name: /^(Edit|Add bullet|Add a point here)$/ }),
+    ).toHaveCount(0);
+  });
+
+  test("Tom's notes are in full ink at 15px; generated points are softer", async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const note = page.getByTestId('meeting-note').first();
+    await expect(note).toContainText('ask Marco about the sandbox budget');
+    const style = (sel: string) =>
+      page
+        .locator(sel)
+        .first()
+        .evaluate((el) => {
+          const c = getComputedStyle(el);
+          return [c.color, c.fontSize];
+        });
+    const ink = await page.evaluate(() => {
+      const d = document.createElement('div');
+      d.style.color = 'var(--ink)';
+      document.body.appendChild(d);
+      const c = getComputedStyle(d).color;
+      d.remove();
+      return c;
+    });
+    const [noteInk, noteSize] = await style('[data-testid=meeting-note] .nm');
+    expect(noteInk).toBe(ink);
+    expect(noteSize).toBe('15px');
+    const [pointInk] = await style('[data-testid=meeting-topic]:not([data-now]) .nm');
+    expect(pointInk).not.toBe(ink);
+  });
+
+  test('the newest talk the notes have not taken in yet shows at the bottom, labelled by speaker', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    const tail = page.getByTestId('meeting-tail');
+    await expect(tail).toContainText('Not in the summary yet');
+    const lines = tail.getByTestId('meeting-line');
+    await expect(lines).toHaveCount(3);
+    await expect(lines.nth(0)).toContainText('Unknown');
+    await expect(lines.nth(0)).not.toContainText('Them');
+    await expect(lines.nth(1)).toContainText('Unknown 2');
+    await expect(lines.last()).toHaveClass(/prov/);
+    // it is below the Now point
+    const [now, t] = await Promise.all([
+      page.locator('[data-testid=meeting-topic][data-now=true]').boundingBox(),
+      tail.boundingBox(),
+    ]);
+    expect(t!.y).toBeGreaterThan(now!.y + now!.height - 1);
+    // once the notes are current there is nothing left to show
+    await applyMeeting(page, { live: null });
+    await expect(tail).toHaveCount(0);
+  });
+
+  test('the Summary stays pinned to the newest item until Tom scrolls up', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 600 });
+    await page.goto(URL_LIVE);
+    const scroller = page.getByTestId('meeting-points');
+    const gap = () => scroller.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+    await expect.poll(gap).toBeLessThan(5);
+    const add = (n: number) =>
+      page.evaluate((k) => {
         const store = (window as unknown as { __meetingStore: any }).__meetingStore;
         const cur = store.getState().byChat['chat_tools'];
-        store.getState().apply('chat_tools', {
-          ...cur,
-          live: 'so can we ship on Friday',
-          transcript: Array.from({ length: n }, (_, i) => ({
-            at: i * 1000,
-            speaker: 'them',
-            name: i % 2 ? 'Ada' : 'Bo',
-            text: `sample line ${i}`,
-          })),
-        });
-      }, count);
-
-    test('closed shows only the live line, speaker bold and words italic', async ({ page }) => {
-      await page.goto(URL_LIVE);
-      await seed(page);
-      const live = page.getByTestId('meeting-live');
-      await expect(live).toContainText('so can we ship on Friday');
-      await expect(live.locator('b')).toHaveText('Ada');
-      expect(await live.evaluate((el) => getComputedStyle(el).fontStyle)).toBe('italic');
-      expect(await live.locator('b').evaluate((el) => getComputedStyle(el).fontWeight)).toBe('700');
-      await expect(page.getByTestId('meeting-line')).toHaveCount(0);
-      await expect(page.getByTestId('meeting-now-label')).toHaveText('Now · Ada');
-    });
-
-    test('tap opens to about half the window and toggles back closed', async ({ page }) => {
-      await page.goto(URL_LIVE);
-      await seed(page);
-      const grip = page.getByTestId('meeting-grip');
-      await grip.click();
-      await expect(page.getByTestId('meeting-line')).toHaveCount(40);
-      const win = page.viewportSize()!.height;
-      const h = (await page.getByTestId('meeting-lines').boundingBox())!.height;
-      expect(h).toBeGreaterThan(win * 0.35);
-      expect(h).toBeLessThan(win * 0.6);
-      await grip.click();
-      await expect(page.getByTestId('meeting-line')).toHaveCount(0);
-      await expect(page.getByTestId('meeting-live')).toBeVisible();
-    });
-
-    test('dragging the divider opens it, capped at 75% of the window', async ({ page }) => {
-      await page.goto(URL_LIVE);
-      await seed(page);
-      const grip = page.getByTestId('meeting-grip');
-      const g = (await grip.boundingBox())!;
-      const x = g.x + g.width / 2;
-      const y = g.y + g.height / 2;
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.move(x, y + 150, { steps: 5 });
-      await page.mouse.up();
-      await expect(page.getByTestId('meeting-lines')).toBeVisible();
-      const win = page.viewportSize()!.height;
-      const bar1 = (await page.getByTestId('meeting-bar').boundingBox())!.height;
-      expect(bar1).toBeGreaterThan(150);
-      await page.mouse.move(x, y + 150);
-      const g2 = (await grip.boundingBox())!;
-      await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(g2.x + g2.width / 2, win + 400, { steps: 5 });
-      await page.mouse.up();
-      const bar2 = (await page.getByTestId('meeting-bar').boundingBox())!.height;
-      expect(bar2).toBeLessThanOrEqual(win * 0.75 + 2);
-      expect(bar2).toBeGreaterThan(win * 0.6);
-    });
-
-    test('open, earlier lines with the latest at the bottom', async ({ page }) => {
-      await page.goto(URL_LIVE);
-      await seed(page);
-      await page.getByTestId('meeting-grip').click();
-      const lines = page.getByTestId('meeting-line');
-      await expect(lines.last()).toContainText('sample line 39');
-      await expect(lines.first()).toContainText('sample line 0');
-      expect(
-        await page.getByTestId('meeting-lines').evaluate((el) => el.scrollHeight > el.clientHeight),
-      ).toBe(true);
-    });
-
-    test('no horizontal scroll at 390px', async ({ page }) => {
-      await page.setViewportSize({ width: 390, height: 800 });
-      await page.goto(URL_LIVE);
-      await seed(page);
-      const overflow = () =>
-        page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-      expect(await overflow()).toBe(false);
-      await page.getByTestId('meeting-grip').click();
-      expect(await overflow()).toBe(false);
-      await page.getByTestId('meeting-grip').click();
-      await page.getByTestId('meeting-cog').click();
-      expect(await overflow()).toBe(false);
-      const bar = (await page.getByTestId('meeting-bar').boundingBox())!;
-      expect(bar.x + bar.width).toBeLessThanOrEqual(390);
-    });
-  });
-
-  test('transcript stays pinned to the latest line until Tom scrolls up', async ({ page }) => {
-    await page.goto(URL_LIVE);
-    await page.getByTestId('meeting-grip').click();
-    const add = (n: number, start: number) =>
-      page.evaluate(
-        ([count, from]) => {
-          const store = (window as unknown as { __meetingStore: any }).__meetingStore;
-          const cur = store.getState().byChat['chat_tools'];
-          const more = Array.from({ length: count }, (_, i) => ({
-            at: (from + i) * 1000,
-            speaker: 'them',
-            text: `filler line ${from + i}`,
-          }));
-          store.getState().apply('chat_tools', {
-            ...cur,
-            transcript: [...cur.transcript, ...more],
-          });
-        },
-        [n, start],
-      );
-    const lines = page.getByTestId('meeting-lines');
-    const gap = () => lines.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
-    await add(60, 100);
+        const extra = Array.from({ length: 4 }, (_, i) => ({
+          id: `p${k}_${i}`,
+          at: 32 * 60_000 + k * 1000 + i,
+          title: `Dev: point ${k}.${i}`,
+          points: ['detail one', 'detail two'],
+          decided: false,
+        }));
+        store.getState().apply('chat_tools', { ...cur, topics: [...cur.topics, ...extra] });
+      }, n);
+    await add(1);
     await expect.poll(gap).toBeLessThan(5);
-    await add(5, 200);
-    await expect.poll(gap).toBeLessThan(5);
-    await lines.evaluate((el) => {
+    await scroller.evaluate((el) => {
       el.scrollTop = 0;
       return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     });
-    await add(5, 300);
+    await add(2);
     expect(await gap()).toBeGreaterThan(100);
-    await lines.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-      return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    });
-    await add(5, 400);
-    await expect.poll(gap).toBeLessThan(5);
   });
 
-  test('numbered voices show as Them N, and naming one sends it to the host and relabels it', async ({
+  test('Note mode: the composer writes a timed note into the Summary and the host stores it', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    const apply = (extra: Record<string, unknown>) =>
-      page.evaluate((e) => {
-        const store = (window as unknown as { __meetingStore: any }).__meetingStore;
-        const cur = store.getState().byChat['chat_tools'];
-        store.getState().apply('chat_tools', {
-          ...cur,
-          ...e,
-          transcript: [
-            ...cur.transcript,
-            { at: 9000, speaker: 'them', voice: 1, text: 'voice one speaking' },
-            { at: 9500, speaker: 'them', voice: 2, text: 'voice two speaking' },
+    await expect(page.getByTestId('meeting-mode-note')).toHaveAttribute('aria-checked', 'true');
+    const input = page.getByTestId('composer-input');
+    await expect(input).toHaveAttribute('placeholder', 'Write a note…');
+    await input.fill('chase the vendor dates');
+    await input.press('Enter');
+    const notes = page.getByTestId('meeting-note');
+    await expect(notes).toHaveCount(3);
+    await expect(notes.last()).toContainText('chase the vendor dates');
+    await expect(input).toHaveValue('');
+    const req = (await sent(page, 'meeting.my_notes_request')).at(-1) as unknown as {
+      chatId: string;
+      text: string;
+    };
+    expect(req.chatId).toBe('chat_tools');
+    expect(req.text).toMatch(
+      /^01:40 ask Marco about the sandbox budget\n22:30 check the flag plan with Priya\n3\d:\d\d chase the vendor dates$/,
+    );
+    expect(await sent(page, 'chat.input')).toHaveLength(0);
+  });
+
+  test('a note is edited in place, and emptying it removes it', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    const text = page.getByTestId('meeting-note-text').first();
+    await text.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('ask Marco about budget');
+    await page.keyboard.press('Enter');
+    expect((await sent(page, 'meeting.my_notes_request')).at(-1)).toMatchObject({
+      text: '01:40 ask Marco about budget\n22:30 check the flag plan with Priya',
+    });
+    await text.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('meeting-note')).toHaveCount(1);
+    expect((await sent(page, 'meeting.my_notes_request')).at(-1)).toMatchObject({
+      text: '22:30 check the flag plan with Priya',
+    });
+  });
+
+  test('Ask mode sends the message to the agent instead of writing a note', async ({ page }) => {
+    await page.goto(`${URL_LIVE}&ws=fake`);
+    await page.getByTestId('meeting-mode-ask').click();
+    const input = page.getByTestId('composer-input');
+    await expect(input).toHaveAttribute('placeholder', 'Ask about the meeting…');
+    await input.fill('who owns the vendor review?');
+    await input.press('Enter');
+    await expect.poll(async () => (await sent(page, 'chat.input')).length).toBe(1);
+    expect(await sent(page, 'meeting.my_notes_request')).toHaveLength(0);
+  });
+
+  test("Tom's question and the agent's answer show in the Summary at the time they happened", async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await page.evaluate(() => {
+      const chats = (window as unknown as { __chatStore: any }).__chatStore;
+      const m = (window as unknown as { __meetingStore: any }).__meetingStore.getState().byChat[
+        'chat_tools'
+      ];
+      chats.setState((st: any) => ({
+        timelines: {
+          ...st.timelines,
+          chat_tools: [
+            ...st.timelines.chat_tools,
+            {
+              seq: 900,
+              kind: 'message',
+              role: 'user',
+              content: 'is 40 cars right?',
+              messageAt: m.startedAt + 24 * 60_000,
+            },
+            {
+              seq: 901,
+              kind: 'message',
+              role: 'assistant',
+              content: 'Yes, the **operator** says 40.',
+              messageAt: m.startedAt + 24 * 60_000 + 5000,
+            },
           ],
-        });
-      }, extra);
-    await apply({});
-    await page.getByTestId('meeting-grip').click();
+        },
+      }));
+    });
+    const ask = page.getByTestId('meeting-ask');
+    await expect(ask).toHaveText('is 40 cars right?');
+    await expect(page.getByTestId('meeting-answer').locator('strong')).toHaveText('operator');
+    // between the 23:41 fact check and the 24:46 card
+    const [fact, a, explained] = await Promise.all([
+      page.locator('[data-testid=meeting-card][data-kind=fact]').boundingBox(),
+      ask.boundingBox(),
+      page.locator('[data-testid=meeting-card][data-kind=explained]').boundingBox(),
+    ]);
+    expect(a!.y).toBeGreaterThan(fact!.y);
+    expect(a!.y).toBeLessThan(explained!.y);
+  });
+
+  test('the Transcript tab shows every line with a copy button that stays at the top', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1000, height: 500 });
+    await page.goto(URL_LIVE);
+    await page.getByTestId('meeting-tab-transcript').click();
+    await expect(page.getByTestId('meeting-tab-transcript')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const lines = page.getByTestId('meeting-transcript').getByTestId('meeting-line');
+    await expect(lines).toHaveCount(5);
+    await expect(lines.nth(2)).toContainText('Unknown');
+    await applyMeeting(page, {
+      transcript: Array.from({ length: 60 }, (_, i) => ({
+        at: i * 1000,
+        speaker: 'you',
+        text: `line ${i}`,
+      })),
+    });
+    const copy = page.getByTestId('meeting-transcript-copy');
+    const before = (await copy.boundingBox())!.y;
+    await page.getByTestId('meeting-transcript').evaluate((el) => {
+      (el.parentElement as HTMLElement).scrollTop = 400;
+    });
+    expect(Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await copy.click();
+    const text = await page.evaluate(() => navigator.clipboard.readText());
+    expect(text.split('\n')[0]).toBe('00:00 You: line 0');
+    await expect(copy).toHaveAttribute('title', 'Copied');
+  });
+
+  test('numbered voices show as Unknown N, and naming one sends it to the host and relabels it', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await applyMeeting(page, {
+      transcript: [
+        { at: 9000, speaker: 'them', voice: 1, text: 'voice one speaking' },
+        { at: 9500, speaker: 'them', voice: 2, text: 'voice two speaking' },
+      ],
+    });
+    await page.getByTestId('meeting-tab-transcript').click();
     const voices = page.getByTestId('meeting-voice');
-    await expect(voices).toHaveText(['Them 1', 'Them 2']);
+    await expect(voices).toHaveText(['Unknown 1', 'Unknown 2']);
     page.once('dialog', (d) => d.accept('Priya'));
     await voices.nth(1).click();
     const reqs = (await sent(page, 'meeting.control_request')) as Array<Record<string, unknown>>;
     expect(reqs.at(-1)).toMatchObject({ action: 'name_voice', voice: 2, name: 'Priya' });
-    await page.evaluate(() => {
-      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
-      const cur = store.getState().byChat['chat_tools'];
-      store.getState().apply('chat_tools', { ...cur, voices: { '2': 'Priya' } });
-    });
-    await expect(voices).toHaveText(['Them 1', 'Priya']);
+    await applyMeeting(page, { voices: { '2': 'Priya' } });
+    await expect(voices).toHaveText(['Unknown 1', 'Priya']);
   });
 
-  test('shows Live + timer and points newest first, decisions marked in the text with no chips', async ({
+  test('the settings button opens research, prompts, models and timing in place of the Summary', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-pill')).toContainText(/Live · 3\d:\d\d/);
-    const topics = page.getByTestId('meeting-topic');
-    await expect(topics).toHaveCount(3);
-    await expect(topics.first()).toContainText('failing tests');
-    await expect(topics.last()).toContainText('release 4.2');
-    await expect(topics.locator('.decw')).toHaveCount(2);
-    await expect(topics.locator('.decw').first()).toHaveText('Decision:');
-    await expect(page.locator('.mm-dec')).toHaveCount(0);
-    await expect(
-      page.getByTestId('meeting-panel').getByRole('button', { name: /^(Edit|Add bullet)$/ }),
-    ).toHaveCount(0);
-  });
-
-  test('points taper: newest 15px with bullets, recent 14px with bullets, older one line', async ({
-    page,
-  }) => {
-    await page.goto(URL_LIVE);
-    await page.evaluate(() => {
-      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
-      const cur = store.getState().byChat['chat_tools'];
-      const extra = Array.from({ length: 5 }, (_, i) => ({
-        id: `x${i}`,
-        at: 40 * 60_000 + i * 60_000,
-        title: `Speaker ${i}: argument ${i}`,
-        points: ['detail'],
-        decided: false,
-      }));
-      store.getState().apply('chat_tools', { ...cur, topics: [...cur.topics, ...extra] });
-    });
-    const topics = page.getByTestId('meeting-topic');
-    const size = (i: number) =>
-      topics
-        .nth(i)
-        .locator('.nm')
-        .evaluate((el) => getComputedStyle(el).fontSize);
-    const weight = (i: number) =>
-      topics
-        .nth(i)
-        .locator('.nm')
-        .evaluate((el) => getComputedStyle(el).fontWeight);
-    await expect(topics).toHaveCount(8);
-    expect(await size(0)).toBe('15px');
-    expect(await size(1)).toBe('14px');
-    expect(await weight(1)).toBe('600');
-    await expect(topics.nth(0).locator('li').first()).toBeVisible();
-    await expect(topics.nth(1).locator('li').first()).toBeVisible();
-    await expect(topics.nth(5).locator('li').first()).toBeHidden();
-    expect(await size(7)).toBe('14px');
+    await expect(page.getByTestId('meeting-settings')).toHaveCount(0);
+    await page.getByTestId('meeting-cog').click();
+    const s = page.getByTestId('meeting-settings');
+    await expect(s.getByTestId('meeting-research-on')).toBeChecked();
+    await expect(s.getByTestId('meeting-analysis-model')).toBeVisible();
+    await expect(s.getByTestId('meeting-analyse-seconds')).toBeVisible();
+    await expect(s.getByTestId('meeting-speed')).toBeVisible();
+    await expect(page.getByTestId('meeting-points')).toHaveCount(0);
+    await s.getByTestId('meeting-prompt-open-notes').click();
+    await expect(s.getByTestId('meeting-prompt-editor')).toBeVisible();
+    await page.getByTestId('meeting-tab-summary').click();
+    await expect(page.getByTestId('meeting-settings')).toHaveCount(0);
+    await expect(page.getByTestId('meeting-points')).toBeVisible();
   });
 
   test('clicking a point title edits it in place and sends the edit', async ({ page }) => {
     await page.goto(URL_LIVE);
-    const title = page.getByTestId('meeting-point-title').first();
+    const failing = page.locator('[data-testid=meeting-topic][data-now=true]');
+    const title = failing.getByTestId('meeting-point-title');
     await title.click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.type('Sam: the tests fail because the sandbox has no credit');
@@ -412,14 +386,14 @@ test.describe('meeting mode — live', () => {
       op: 'set_title',
       text: 'Sam: the tests fail because the sandbox has no credit',
     });
-    await expect(page.getByTestId('meeting-point-title').first()).toHaveText(
+    await expect(failing.getByTestId('meeting-point-title')).toHaveText(
       'Sam: the tests fail because the sandbox has no credit',
     );
   });
 
   test('editing a decision keeps its Decision: prefix', async ({ page }) => {
     await page.goto(URL_LIVE);
-    const t = page.getByTestId('meeting-topic').last();
+    const t = page.getByTestId('meeting-topic').filter({ hasText: 'release 4.2' });
     await t.getByTestId('meeting-point-title').click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.type('Priya: release 4.2 ships on Tuesday');
@@ -430,7 +404,7 @@ test.describe('meeting mode — live', () => {
 
   test('Enter in a bullet starts a new bullet and the caret lands in it', async ({ page }) => {
     await page.goto(URL_LIVE);
-    const first = page.getByTestId('meeting-topic').first();
+    const first = page.getByTestId('meeting-topic').filter({ hasText: 'failing tests' });
     await first.getByTestId('meeting-point-bullet').first().click();
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
@@ -450,7 +424,7 @@ test.describe('meeting mode — live', () => {
     page,
   }) => {
     await page.goto(URL_LIVE);
-    const last = page.getByTestId('meeting-topic').nth(2);
+    const last = page.getByTestId('meeting-topic').filter({ hasText: 'release 4.2' });
     await last.getByTestId('meeting-point-title').click();
     await page.keyboard.press('Enter');
     await expect(last.getByTestId('meeting-point-bullet').first()).toBeFocused();
@@ -460,76 +434,28 @@ test.describe('meeting mode — live', () => {
     await expect(last.getByTestId('meeting-point-bullet').first()).toHaveText('Ships Monday');
   });
 
-  test('hovering a point shows a round + above it that inserts a new point there', async ({
-    page,
-  }) => {
-    await page.goto(URL_LIVE);
-    const topics = page.getByTestId('meeting-topic');
-    const target = topics.nth(1);
-    const plus = target.getByTestId('meeting-point-insert');
-    await expect(plus).toHaveCSS('opacity', '0');
-    await target.hover();
-    await expect(plus).toHaveCSS('opacity', '1');
-    const [pb, tb] = await Promise.all([plus.boundingBox(), target.boundingBox()]);
-    expect(pb!.y).toBeLessThan(tb!.y + 4);
-    expect(pb!.width).toBe(pb!.height);
-    await plus.click();
-    await expect(topics).toHaveCount(4);
-    // the new point sits above the one it was inserted at, and takes the caret
-    await expect(topics.nth(1).getByTestId('meeting-point-title')).toBeFocused();
-    await expect(topics.nth(2)).toContainText('split the points ledger');
-    await page.keyboard.type('Tom: ship it on Friday');
-    await page.keyboard.press('Tab');
-    await expect(topics.nth(1).getByTestId('meeting-point-title')).toHaveText(
-      'Tom: ship it on Friday',
-    );
-    const ops = (
-      (await sent(page, 'meeting.notes_request')) as Array<{ edit: { op: string } }>
-    ).map((r) => r.edit.op);
-    expect(ops).toEqual(['insert', 'set_title']);
-  });
-
-  test('an inserted point left empty is removed again', async ({ page }) => {
-    await page.goto(URL_LIVE);
-    const topics = page.getByTestId('meeting-topic');
-    await topics.first().hover();
-    await topics.first().getByTestId('meeting-point-insert').click();
-    await expect(topics).toHaveCount(4);
-    await page.getByTestId('meeting-tab-notes').click();
-    await page.getByTestId('meeting-tab-points').click();
-    await expect(topics).toHaveCount(3);
-  });
-
   test("clicking a point's time shows the transcript lines it came from, indented under it", async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    const newest = page.getByTestId('meeting-topic').first();
+    const newest = page.getByTestId('meeting-topic').filter({ hasText: 'failing tests' });
     await expect(newest.getByTestId('meeting-point-lines')).toHaveCount(0);
     await newest.getByTestId('meeting-point-time').click();
     const lines = newest.getByTestId('meeting-point-line');
-    await expect(lines).toHaveCount(2);
+    await expect(lines).toHaveCount(3);
     await expect(lines.first()).toContainText('busiest week of the year');
-    const [title, line] = await Promise.all([
-      newest.getByTestId('meeting-point-title').boundingBox(),
+    const [time, line] = await Promise.all([
+      newest.getByTestId('meeting-point-time').boundingBox(),
       lines.first().boundingBox(),
     ]);
-    expect(line!.x).toBeGreaterThanOrEqual(title!.x - 1);
+    // indented under the point, past its time
+    expect(line!.x).toBeGreaterThanOrEqual(time!.x + time!.width);
     await newest.getByTestId('meeting-point-time').click();
     await expect(newest.getByTestId('meeting-point-lines')).toHaveCount(0);
   });
 
-  test('the live line shows what is being said, and the speed option tunes the host', async ({
-    page,
-  }) => {
+  test('the speed option tunes the host', async ({ page }) => {
     await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-live')).toContainText('statement run');
-    await page.evaluate(() => {
-      const store = (window as unknown as { __meetingStore: any }).__meetingStore;
-      const cur = store.getState().byChat['chat_tools'];
-      store.getState().apply('chat_tools', { ...cur, live: 'so can we ship on Friday' });
-    });
-    await expect(page.getByTestId('meeting-live')).toContainText('so can we ship on Friday');
     await page.getByTestId('meeting-cog').click();
     await page.getByTestId('meeting-speed').selectOption('fast');
     const reqs = (await sent(page, 'meeting.control_request')) as Array<{
@@ -550,8 +476,12 @@ test.describe('meeting mode — live', () => {
       .not.toBe(a);
   });
 
-  test('the tray counts actions by kind and has one compact row each', async ({ page }) => {
+  test('the tray is one line until opened, then counts actions by kind with one compact row each', async ({
+    page,
+  }) => {
     await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-actions-body')).toHaveCount(0);
+    await openTray(page);
     await expect(page.getByTestId('meeting-actions-count')).toHaveText(
       '1 mine · 1 others · 1 agent',
     );
@@ -568,6 +498,7 @@ test.describe('meeting mode — live', () => {
     page,
   }) => {
     await page.goto(URL_LIVE);
+    await openTray(page);
     const [mine, other] = [0, 1].map((n) => page.getByTestId('meeting-action').nth(n));
     await expect(mine.getByTestId('meeting-action-chat')).toHaveText('Start chat');
     await expect(mine.getByTestId('meeting-action-do')).toHaveCount(0);
@@ -591,6 +522,7 @@ test.describe('meeting mode — live', () => {
     page,
   }) => {
     await page.goto(URL_LIVE);
+    await openTray(page);
     const owner = page.getByTestId('meeting-action').nth(1).getByTestId('meeting-action-owner');
     await expect(owner.locator('option')).toHaveText(['Priya', 'Dev', 'Everyone']);
     await owner.selectOption('Everyone');
@@ -605,6 +537,7 @@ test.describe('meeting mode — live', () => {
     page,
   }) => {
     await page.goto(URL_LIVE);
+    await openTray(page);
     const agent = page.getByTestId('meeting-action').nth(2);
     const box = page.getByTestId('meeting-agent-runs');
     await expect(box).toHaveAttribute('title', 'Agent runs its own actions');
@@ -636,6 +569,7 @@ test.describe('meeting mode — live', () => {
 
   test('every action can be dismissed and the tray collapses', async ({ page }) => {
     await page.goto(URL_LIVE);
+    await openTray(page);
     for (const n of [0, 1, 2]) {
       await page
         .getByTestId('meeting-action')
@@ -650,7 +584,7 @@ test.describe('meeting mode — live', () => {
 
   test('the caret collapses the tray body', async ({ page }) => {
     await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-actions-body')).toBeVisible();
+    await openTray(page);
     await page.getByTestId('meeting-actions-toggle').click();
     await expect(page.getByTestId('meeting-actions-body')).toHaveCount(0);
     await expect(page.getByTestId('meeting-actions-count')).toBeVisible();
@@ -660,6 +594,7 @@ test.describe('meeting mode — live', () => {
     page,
   }) => {
     await page.goto(URL_LIVE);
+    await openTray(page);
     const maxH = () =>
       page
         .getByTestId('meeting-actions-body')
@@ -675,6 +610,7 @@ test.describe('meeting mode — live', () => {
     await page.mouse.up();
     expect(await maxH()).toBeCloseTo(270, -1);
     await page.reload();
+    await openTray(page);
     expect(await maxH()).toBeCloseTo(270, -1);
     const g2 = (await page.getByTestId('meeting-actions-grip').boundingBox())!;
     await page.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
@@ -694,7 +630,7 @@ test.describe('meeting mode — live', () => {
       const { resumedAt: _r, ...rest } = m;
       store.getState().apply('chat_tools', { ...rest, status: 'paused', elapsedBaseMs: 60_000 });
     });
-    await expect(page.getByTestId('meeting-pill')).toContainText('Paused · 01:00');
+    await expect(page.getByTestId('meeting-pill')).toHaveText('Paused · 01:00');
     await page.getByTestId('meeting-resume').click();
     await page.getByTestId('meeting-end').click();
     const actions = (
@@ -725,7 +661,7 @@ test.describe('meeting mode — live', () => {
 test.describe('meeting mode — after', () => {
   const URL_ENDED = '/app/dev-harness.html?chat=chat_tools&meeting=ended';
 
-  test('same layout as live: duration pill without Ended wording, people chip, Resume; chat stays open', async ({
+  test('same bar as live: duration pill, people, Resume and a fold button; no Pause or End', async ({
     page,
   }) => {
     await page.goto(URL_ENDED);
@@ -733,27 +669,59 @@ test.describe('meeting mode — after', () => {
     await expect(page.getByTestId('meeting-bar')).not.toContainText('Ended');
     await expect(page.getByTestId('meeting-people')).toBeVisible();
     await expect(page.getByTestId('meeting-resume')).toBeVisible();
+    await expect(page.getByTestId('meeting-fold')).toBeVisible();
     await expect(page.getByTestId('meeting-pause')).toHaveCount(0);
     await expect(page.getByTestId('meeting-end')).toHaveCount(0);
-    await expect(page.getByTestId('meeting-drawer')).toHaveCount(0);
-    await expect(page.getByTestId('meeting-now')).toHaveCount(0);
+    await expect(page.getByRole('tab')).toHaveText(['Summary', 'Transcript']);
+    await expect(page.getByTestId('meeting-tail')).toHaveCount(0);
+    await expect(page.locator('[data-testid=meeting-topic][data-now=true]')).toHaveCount(0);
     await expect(page.getByTestId('composer-input')).toBeEnabled();
     await expect(page.getByTestId('meeting-card')).toHaveCount(3);
   });
 
-  test('tabs are Summary, Points, My notes, Transcript plus the cog; Summary is first and open', async ({
+  test('the composer defaults to Ask once the meeting has ended', async ({ page }) => {
+    await page.goto(URL_ENDED);
+    await expect(page.getByTestId('meeting-mode-ask')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('composer-input')).toHaveAttribute(
+      'placeholder',
+      'Ask about the meeting…',
+    );
+  });
+
+  test('folding puts the meeting into one line and gives the chat back; it stays folded', async ({
     page,
   }) => {
     await page.goto(URL_ENDED);
-    await expect(page.getByRole('tab')).toHaveText(['Summary', 'Points', 'My notes', 'Transcript']);
-    await expect(page.getByTestId('meeting-tab-summary')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('meeting-cog')).toBeVisible();
-    await page.getByTestId('meeting-tab-transcript').click();
-    await expect(
-      page.getByTestId('meeting-transcript').getByTestId('meeting-line').first(),
-    ).toBeVisible();
-    await page.getByTestId('meeting-tab-points').click();
-    await expect(page.getByTestId('meeting-points')).toBeVisible();
+    await expect(page.getByTestId('chat-stream')).toBeHidden();
+    const tall = (await page.getByTestId('meeting-bar').boundingBox())!.height;
+    await page.getByTestId('meeting-fold').click();
+    const bar = page.getByTestId('meeting-bar');
+    await expect(bar).toHaveAttribute('data-folded', 'true');
+    await expect(page.getByTestId('chat-stream')).toBeVisible();
+    await expect(page.getByTestId('meeting-panel')).toHaveCount(0);
+    await expect(page.getByTestId('meeting-actions')).toHaveCount(0);
+    await expect(page.getByTestId('meeting-mode-note')).toHaveCount(0);
+    await expect(page.getByTestId('composer-input')).toHaveAttribute(
+      'placeholder',
+      'Type a message',
+    );
+    await expect(page.getByTestId('meeting-pill')).toHaveText('Meeting · 52:00');
+    expect((await bar.boundingBox())!.height).toBeLessThanOrEqual(tall);
+    await page.reload();
+    await expect(page.getByTestId('meeting-bar')).toHaveAttribute('data-folded', 'true');
+    // Transcript opens it again, on the Transcript
+    await page.getByTestId('meeting-open-transcript').click();
+    await expect(page.getByTestId('meeting-bar')).not.toHaveAttribute('data-folded', 'true');
+    await expect(page.getByTestId('meeting-tab-transcript')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(page.getByTestId('chat-stream')).toBeHidden();
+  });
+
+  test('a live meeting cannot be folded', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-fold')).toHaveCount(0);
   });
 
   test('the actions tray is grouped Agent did / My actions / Other actions, others show the owner name', async ({
@@ -763,6 +731,7 @@ test.describe('meeting mode — after', () => {
     await expect(page.getByTestId('meeting-actions-count')).toHaveText(
       '1 agent did · 1 mine · 1 others',
     );
+    await openTray(page);
     const tray = page.getByTestId('meeting-actions');
     await expect(tray.locator('.mm-tray-grp')).toHaveText([
       'Agent did',
@@ -775,18 +744,28 @@ test.describe('meeting mode — after', () => {
     await expect(page.getByTestId('meeting-action-dismiss')).toHaveCount(1);
   });
 
-  test('the Summary is the write-up: title, date and duration, Regenerate, Copy, headings', async ({
+  test('the write-up closes the Summary: title, date and duration, icon Regenerate and Copy, headings', async ({
     page,
   }) => {
     await page.goto(URL_ENDED);
     await expect(page.getByTestId('meeting-writeup-title')).toHaveText('Bus fund planning call');
     await expect(page.getByTestId('meeting-writeup-meta')).toContainText('52 min');
-    await expect(page.getByTestId('meeting-regenerate')).toBeVisible();
-    await expect(page.getByTestId('meeting-copy')).toBeVisible();
+    for (const id of ['meeting-regenerate', 'meeting-copy']) {
+      const b = page.getByTestId(id);
+      await expect(b).toBeVisible();
+      await expect(b).toHaveText('');
+      await expect(b.locator('svg')).toHaveCount(1);
+    }
     await expect(page.getByTestId('meeting-writeup-body').locator('h2')).toHaveText([
       'Where we landed',
       'Open questions',
     ]);
+    // after every point
+    const [lastPoint, sum] = await Promise.all([
+      page.getByTestId('meeting-topic').last().boundingBox(),
+      page.getByTestId('meeting-summary').boundingBox(),
+    ]);
+    expect(sum!.y).toBeGreaterThan(lastPoint!.y);
   });
 
   test("Tom's notes are darker than generated text, and fixed names are underlined with the original", async ({
@@ -800,8 +779,8 @@ test.describe('meeting mode — after', () => {
     await expect(fixed).toHaveText('WECA');
     await expect(fixed).toHaveAttribute('title', 'was: Weka');
     expect(await fixed.evaluate((e) => getComputedStyle(e).borderBottomStyle)).toBe('dotted');
+    expect(await fixed.evaluate((e) => getComputedStyle(e).position)).toBe('static');
   });
-
   test("editing the write-up saves it, and an edited line becomes Tom's", async ({ page }) => {
     await page.goto(URL_ENDED);
     await page.getByTestId('meeting-writeup-title').fill('Renamed call');
@@ -831,16 +810,16 @@ test.describe('meeting mode — after', () => {
     expect(await sent(page, 'meeting.writeup_request')).toMatchObject([
       { chatId: 'chat_tools', regenerate: true },
     ]);
-    await expect(page.getByTestId('meeting-regenerate')).toHaveText('Writing…');
+    await expect(page.getByTestId('meeting-regenerate')).toHaveAttribute('title', 'Writing…');
+    await expect(page.getByTestId('meeting-regenerate')).toBeDisabled();
     await page.evaluate(() => {
       const store = (window as unknown as { __meetingStore: any }).__meetingStore;
       const m = store.getState().byChat['chat_tools'];
       store.getState().apply('chat_tools', { ...m, writeup: { title: 'Second go', sections: [] } });
     });
-    await expect(page.getByTestId('meeting-regenerate')).toHaveText('Regenerate');
+    await expect(page.getByTestId('meeting-regenerate')).toHaveAttribute('title', 'Regenerate');
     await expect(page.getByTestId('meeting-writeup-title')).toHaveText('Second go');
   });
-
   test('a failed write-up says so, and a missing one says it is being written', async ({
     page,
   }) => {
@@ -931,7 +910,7 @@ test.describe('meeting mode — capture with a real (fake) microphone', () => {
       });
     });
     await expect(page.getByTestId('meeting-panel')).toBeVisible();
-    await expect(page.getByTestId('meeting-live')).toContainText('Listening');
+    await expect(page.getByTestId('meeting-points')).toContainText('Listening');
     await expect(page.getByTestId('meeting-btn')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('meeting-not-listening')).toHaveCount(0);
 
@@ -1002,39 +981,19 @@ test.describe('meeting mode — editing prompts mid-call', () => {
   });
 });
 
-test.describe('meeting mode — agent feed', () => {
-  test('sits at the top of the left column: header with the checkbox, cards, then the chat and composer', async ({
-    page,
-  }) => {
-    await page.goto(URL_LIVE);
-    const feed = page.getByTestId('meeting-feed');
-    await expect(feed).toBeVisible();
-    await expect(feed).toContainText('Agent');
-    await expect(page.getByTestId('meeting-research-on')).toBeChecked();
-    await expect(feed).toContainText('Research as we go');
-    const [f, stream, composer, panel] = await Promise.all([
-      feed.boundingBox(),
-      page.getByTestId('chat-stream').boundingBox(),
-      page.getByTestId('composer').boundingBox(),
-      page.getByTestId('meeting-panel').boundingBox(),
-    ]);
-    expect(f!.y + f!.height).toBeLessThanOrEqual(stream!.y + 1);
-    expect(stream!.y + stream!.height).toBeLessThanOrEqual(composer!.y + 1);
-    expect(f!.x + f!.width).toBeLessThanOrEqual(panel!.x + 1);
-  });
-
-  test('shows the three card types by a coloured label, with title, time, bullets and no left bar', async ({
+test.describe('meeting mode — research cards', () => {
+  test('show the three card types by a coloured label, with title, time, bullets and no left bar', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
     const cards = page.getByTestId('meeting-card');
     await expect(cards).toHaveCount(3);
-    // newest first
-    await expect(cards.nth(0).getByTestId('meeting-card-title')).toHaveText('Harbour levy');
-    await expect(cards.nth(0).getByTestId('meeting-card-kind')).toHaveText('Explained');
-    await expect(cards.nth(0)).toContainText('24:46');
+    // oldest first, with everything else in the Summary
+    await expect(cards.nth(0).getByTestId('meeting-card-kind')).toHaveText('Answer');
     await expect(cards.nth(1).getByTestId('meeting-card-kind')).toHaveText('Fact check');
-    await expect(cards.nth(2).getByTestId('meeting-card-kind')).toHaveText('Answer');
+    await expect(cards.nth(2).getByTestId('meeting-card-title')).toHaveText('Harbour levy');
+    await expect(cards.nth(2).getByTestId('meeting-card-kind')).toHaveText('Explained');
+    await expect(cards.nth(2)).toContainText('24:46');
     const colours = await cards.evaluateAll((els) =>
       els.map((el) => getComputedStyle(el.querySelector('[data-testid=meeting-card-kind]')!).color),
     );
@@ -1051,7 +1010,7 @@ test.describe('meeting mode — agent feed', () => {
     page,
   }) => {
     await page.goto(URL_LIVE);
-    const fact = page.getByTestId('meeting-card').nth(1);
+    const fact = page.locator('[data-testid=meeting-card][data-kind=fact]');
     await expect(fact.getByTestId('meeting-card-title')).toHaveText(
       '"The ferry carries about fifty cars"',
     );
@@ -1060,73 +1019,76 @@ test.describe('meeting mode — agent feed', () => {
     await expect(link).toHaveText('Operator fleet page');
     await expect(link).toHaveAttribute('href', 'https://example.org/fleet');
     await expect(link).toHaveAttribute('target', '_blank');
-    // other kinds have no verdict
     await expect(page.getByTestId('meeting-card-verdict')).toHaveCount(1);
   });
 
-  test('the checkbox tells the host, and the host says research failed where the cards are', async ({
+  test('the research switch tells the host, and a failed pass says so in the Summary', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
+    await page.getByTestId('meeting-cog').click();
     await page.getByTestId('meeting-research-on').uncheck();
     await expect.poll(async () => (await sent(page, 'meeting.research_request')).length).toBe(1);
     expect((await sent(page, 'meeting.research_request'))[0]).toMatchObject({ on: false });
-    await expect(page.getByTestId('meeting-research-on')).not.toBeChecked();
+    await page.getByTestId('meeting-tab-summary').click();
     await expect(page.getByTestId('meeting-research-error')).toHaveCount(0);
-    await page.evaluate(() => {
-      const st = (
-        window as unknown as {
-          __meetingStore: {
-            getState(): {
-              byChat: Record<string, object>;
-              apply(id: string, m: object): void;
-            };
-          };
-        }
-      ).__meetingStore.getState();
-      const [id, m] = Object.entries(st.byChat)[0]!;
-      st.apply(id, { ...m, researchError: 'research failed: search is down' });
-    });
+    await applyMeeting(page, { researchError: 'research failed: search is down' });
     await expect(page.getByTestId('meeting-research-error')).toHaveText(
       'research failed: search is down',
     );
   });
 
-  test('a reply that changed the notes carries a chip, and only that reply', async ({ page }) => {
+  test('an answer that changed the notes carries a chip, and only that answer', async ({
+    page,
+  }) => {
     await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-edit-chip')).toHaveCount(0);
-    await page.evaluate(() => {
-      const st = (
-        window as unknown as {
-          __meetingStore: {
-            getState(): {
-              byChat: Record<string, object>;
-              apply(id: string, m: object): void;
-            };
-          };
-        }
-      ).__meetingStore.getState();
-      const [id, m] = Object.entries(st.byChat)[0]!;
-      st.apply(id, {
-        ...m,
-        agentEdits: [{ id: 'e1', at: 1760000000000 + 5000, label: 'Added to points' }],
-      });
+    const t0 = await page.evaluate(() => {
+      const chats = (window as unknown as { __chatStore: any }).__chatStore;
+      const m = (window as unknown as { __meetingStore: any }).__meetingStore.getState().byChat[
+        'chat_tools'
+      ];
+      const at = m.startedAt + 30 * 60_000;
+      chats.setState((st: any) => ({
+        timelines: {
+          ...st.timelines,
+          chat_tools: [
+            ...st.timelines.chat_tools,
+            { seq: 900, kind: 'message', role: 'assistant', content: 'Added it.', messageAt: at },
+            {
+              seq: 901,
+              kind: 'message',
+              role: 'assistant',
+              content: 'Anything else?',
+              messageAt: at + 60_000,
+            },
+          ],
+        },
+      }));
+      return at;
     });
-    const chips = page.getByTestId('meeting-edit-chip');
-    await expect(chips).toHaveCount(1);
-    await expect(chips.first()).toHaveText('✓ Added to points');
-    // inside the first agent reply, not a later one
-    const first = page.getByTestId('msg').filter({ has: chips }).first();
-    await expect(first).toHaveAttribute('data-message-at', String(1760000000000 + 14_000));
+    await expect(page.getByTestId('meeting-edit-chip')).toHaveCount(0);
+    await applyMeeting(page, {
+      agentEdits: [{ id: 'e1', at: t0 - 1000, label: 'Added to points' }],
+    });
+    const answers = page.getByTestId('meeting-answer');
+    await expect(
+      answers.filter({ hasText: 'Added it.' }).getByTestId('meeting-edit-chip'),
+    ).toHaveText('✓ Added to points');
+    await expect(
+      answers.filter({ hasText: 'Anything else?' }).getByTestId('meeting-edit-chip'),
+    ).toHaveCount(0);
   });
 
-  test('an ended meeting keeps its cards but the checkbox is locked', async ({ page }) => {
+  test('an ended meeting keeps its cards but the research switch is locked', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_tools&meeting=ended');
     await expect(page.getByTestId('meeting-card')).toHaveCount(3);
+    await page.getByTestId('meeting-cog').click();
     await expect(page.getByTestId('meeting-research-on')).toBeDisabled();
   });
 
-  test('the cog holds the research model and the least gap between passes', async ({ page }) => {
+  test('the settings hold the research model and the least gap between passes', async ({
+    page,
+  }) => {
     await page.goto(URL_LIVE);
     await page.getByTestId('meeting-cog').click();
     await expect(page.getByTestId('meeting-research-model')).toBeVisible();

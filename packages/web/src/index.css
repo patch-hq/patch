@@ -13512,65 +13512,6 @@ select.new-chat-account:focus-visible {
   flex-direction: column;
   min-height: 0;
 }
-.mm-main {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(300px, 34%, 400px);
-  min-height: 0;
-}
-.mm-bar {
-  flex: none;
-  position: relative;
-  z-index: 5;
-  border-bottom: 1px solid var(--line-soft);
-  background: var(--bg-panel);
-  padding: 12px 20px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.mm-left {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-.mm-left .chat-stream {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-.mm-panel {
-  border-left: 1px solid var(--line-soft);
-  background: var(--bg-panel);
-  overflow: hidden;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-height: 0;
-}
-.mm-points {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding-top: 8px;
-}
-@media (max-width: 800px) {
-  .mm-bar {
-    padding: 10px 16px;
-  }
-  .mm-main {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
-  }
-  .mm-panel {
-    border-left: none;
-    border-top: 1px solid var(--line-soft);
-    padding: 12px 16px;
-  }
-}
 .mm-label {
   font-size: var(--text-min);
   font-weight: 600;
@@ -13613,167 +13554,12 @@ select.new-chat-account:focus-visible {
 .mm-prompt-actions {
   justify-content: flex-end;
 }
-.mm-now {
-  background: var(--bg-elevated);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-lg);
-  padding: 14px 16px;
-  box-shadow: var(--shadow-sm);
-}
-.mm-now h4 {
-  font-weight: 600;
-  font-size: 15px;
-  line-height: 1.3;
-  margin: 0 0 8px;
-}
-.mm-now h4.mm-wait {
-  color: var(--ink-3);
-  margin: 0;
-}
-.mm-now ul,
-.mm-topic ul {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--ink-2);
-  list-style: disc;
-}
-.mm-now li,
-.mm-topic li {
-  display: list-item;
-}
 .mm-wait {
   color: var(--ink-3);
-}
-/* The final write-up: Tom's words in --ink, generated text in --ink-2. */
-.mm-sum {
-  flex: 1;
-  min-width: 0;
-  overflow: auto;
-  padding: 14px 18px;
-  background: var(--bg-elevated);
-}
-.mm-sum * {
-  overflow-wrap: anywhere;
-}
-.mm-sum h1 {
-  font-family: Fraunces, Georgia, serif;
-  font-weight: 500;
-  font-size: 20px;
-  margin: 0 0 2px;
-  outline: 0;
-}
-.mm-sum .meta {
-  color: var(--ink-3);
-  font-size: var(--text-min);
-  margin-bottom: 10px;
-}
-.mm-sum .tools {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-.mm-sum .body {
-  outline: 0;
-}
-.mm-sum h2 {
-  font-size: 14px;
-  margin: 14px 0 4px;
-}
-.mm-sum ul {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--ink-2);
-  font-size: 14px;
-  list-style: disc;
-}
-.mm-sum li {
-  display: list-item;
-}
-.mm-sum li.mine {
-  color: var(--ink);
-}
-.mm-sum .fixed {
-  border-bottom: 1px dotted var(--accent);
 }
 .mm-act-owner-name {
   font-size: var(--text-min);
   color: var(--ink-3);
-}
-.mm-transcript {
-  flex: 1;
-  padding: 14px 18px;
-  overflow-y: auto;
-}
-/* My notes: Tom's own words, in the darkest ink. */
-.mm-mynotes {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  margin-top: 8px;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  resize: none;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
-}
-.mm-drawer {
-  position: relative;
-  min-width: 0;
-}
-.mm-drawer .mm-label {
-  margin-bottom: 4px;
-}
-/* The live line: speaker bold, words provisional and italic. */
-.mm-live {
-  font-size: 15px;
-  line-height: 1.4;
-  color: var(--ink);
-  font-style: italic;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow-wrap: anywhere;
-}
-.mm-live b {
-  font-style: normal;
-}
-.mm-lines {
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-}
-/* The divider is the bar's bottom border, with a grab area straddling it. */
-.mm-grip {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -18px;
-  height: 18px;
-  cursor: ns-resize;
-  touch-action: none;
-  z-index: 6;
-}
-.mm-grip::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 11px;
-  width: 44px;
-  height: 5px;
-  margin-left: -22px;
-  border-radius: 3px;
-  background: var(--line);
-}
-.mm-grip:hover::after,
-.mm-grip:focus-visible::after {
-  background: var(--ink-faint);
 }
 .mm-ln {
   display: flex;
@@ -13792,177 +13578,12 @@ select.new-chat-account:focus-visible {
   cursor: pointer;
   text-decoration: underline dotted;
 }
-.mm-ln.newest {
-  font-size: 15px;
-  color: var(--ink);
-}
-.mm-people {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  padding: 5px 12px;
-  font-size: 14px;
-  color: var(--ink-2);
-}
-.mm-tabs {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  border-bottom: 1px solid var(--line-soft);
-  margin: -4px 0 0;
-  overflow-x: auto;
-}
-.mm-tab {
-  all: unset;
-  box-sizing: border-box;
-  padding: 6px 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink-3);
-  white-space: nowrap;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-.mm-tab[aria-selected='true'] {
-  color: var(--ink);
-  border-bottom-color: var(--accent);
-}
-.mm-cog {
-  all: unset;
-  display: flex;
-  padding: 6px;
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.mm-cog:hover,
-.mm-cog[aria-pressed='true'] {
-  color: var(--ink);
-}
-.mm-settings {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 .mm-speed {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--ink-3);
   font-size: var(--text-min);
-}
-.mm-topic {
-  position: relative;
-  padding: 8px 2px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.mm-topic .r {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-}
-.mm-topic .tm {
-  appearance: none;
-  background: none;
-  border: 0;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-  color: var(--ink-faint);
-  font-size: var(--text-min);
-  width: 38px;
-  flex: none;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
-.mm-topic .tm:hover,
-.mm-topic .tm[aria-expanded='true'] {
-  color: var(--ink-2);
-}
-.mm-topic .nm {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  font-size: 14px;
-}
-.mm-topic.l0 .nm {
-  font-size: 15px;
-}
-.mm-topic.l2 .nm,
-.mm-topic.l3 .nm {
-  font-weight: 400;
-  color: var(--ink-2);
-}
-.mm-topic.l3 .nm {
-  font-size: var(--text-min);
-  color: var(--ink-3);
-}
-.mm-topic ul {
-  margin: 4px 0 0 48px;
-  font-size: 14px;
-}
-/* Older points are a single line; their bullets show only while being edited. */
-.mm-topic.l2 ul,
-.mm-topic.l3 ul {
-  display: none;
-}
-.mm-topic.l2:focus-within ul,
-.mm-topic.l3:focus-within ul {
-  display: block;
-}
-.mm-topic [contenteditable] {
-  outline: none;
-  cursor: text;
-  border-radius: var(--radius-sm, 4px);
-}
-.mm-topic [contenteditable]:focus {
-  background: var(--bg-elevated);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-.mm-topic [contenteditable]:empty::before {
-  content: attr(data-placeholder);
-  color: var(--ink-faint);
-  font-weight: 400;
-}
-.mm-topic .decw {
-  color: var(--accent-strong);
-  font-weight: 700;
-}
-.mm-ins {
-  appearance: none;
-  position: absolute;
-  left: -2px;
-  top: -11px;
-  width: 20px;
-  height: 20px;
-  line-height: 18px;
-  padding: 0;
-  text-align: center;
-  border-radius: 50%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  color: var(--ink-3);
-  font-size: 14px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.1s;
-  z-index: 2;
-}
-.mm-topic:hover .mm-ins,
-.mm-ins:focus-visible {
-  opacity: 1;
-}
-.mm-tx {
-  margin: 6px 0 0 48px;
-  font-size: var(--text-min);
-  color: var(--ink-2);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 .mm-do {
   flex: none;
@@ -14093,29 +13714,6 @@ select.new-chat-account:focus-visible {
   color: var(--ink-2);
   background: var(--bg-soft);
 }
-.mm-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.mm-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  white-space: nowrap;
-  background: var(--accent-tint);
-  color: var(--accent-strong);
-  border-radius: var(--radius-pill);
-  padding: 4px 12px;
-  font-weight: 600;
-  font-size: 15px;
-  padding: 5px 14px;
-}
-.mm-pill.ended {
-  background: var(--bg-soft);
-  color: var(--ink-2);
-}
 .mm-dot {
   display: inline-block;
   width: 8px;
@@ -14165,6 +13763,425 @@ select.new-chat-account:focus-visible {
   background: var(--voice);
   border-color: var(--voice);
   color: var(--on-accent);
+}
+
+/* The meeting in place of the chat stream (design/meeting-mode-v3). One type
+   scale: 12px meta, 14px body, 15px Tom's notes and the newest point. */
+.mm-main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.mm-left {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.mm-left .chat-stream {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* The meeting stands in for the chat stream; the composer stays. */
+.mm-body[data-meeting-shown='true'] .mm-left > .chat-stream {
+  display: none;
+}
+.mm-bar {
+  flex: none;
+  position: relative;
+  z-index: 5;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  padding: 8px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mm-bar.folded {
+  padding: 5px 18px;
+}
+.mm-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+}
+.mm-sp {
+  flex: 1;
+}
+.mm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border-radius: var(--radius-pill);
+  padding: 3px 11px;
+  font-weight: 600;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.mm-pill.ended {
+  background: var(--bg-soft);
+  color: var(--ink-2);
+}
+.mm-people {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.mm-seg {
+  display: inline-flex;
+  flex: none;
+  background: var(--bg-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+}
+.mm-seg button {
+  all: unset;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-3);
+  padding: 4px 16px;
+  border-radius: var(--radius-pill);
+}
+.mm-seg button[aria-selected='true'] {
+  background: var(--bg-elevated);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(40, 30, 15, 0.08));
+}
+.mm-icon {
+  all: unset;
+  box-sizing: border-box;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.mm-icon:hover,
+.mm-icon[aria-pressed='true'] {
+  color: var(--ink);
+  background: var(--bg-soft);
+}
+.mm-icon:disabled {
+  cursor: default;
+}
+.mm-spin {
+  animation: mm-spin 1s linear infinite;
+}
+@keyframes mm-spin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+.mm-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+}
+.mm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.mm-col {
+  /* The chat's reading measure (--measure lives on .chat-stream, which this replaces). */
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 14px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mm-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Points (generated, softer ink) and Tom's notes (full ink), oldest first. */
+.mm-topic {
+  display: flex;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+.mm-topic .tm {
+  all: unset;
+  flex: none;
+  width: 44px;
+  padding-top: 2px;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-size: var(--text-min);
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+.mm-topic.mine .tm {
+  cursor: default;
+}
+.mm-topic .tm:hover,
+.mm-topic .tm[aria-expanded='true'] {
+  color: var(--ink-2);
+}
+.mm-topic .c {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mm-topic .nm {
+  color: var(--ink-2);
+}
+.mm-topic ul {
+  margin: 3px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+  color: var(--ink-3);
+}
+.mm-topic li {
+  display: list-item;
+}
+.mm-topic.mine .nm {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 500;
+}
+.mm-topic.now {
+  background: var(--accent-tint);
+}
+.mm-topic.now .nm {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+.mm-now-tag {
+  font-size: var(--text-min);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  margin-right: 6px;
+}
+.mm-topic .decw {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+.mm-topic [contenteditable] {
+  outline: none;
+  cursor: text;
+  border-radius: var(--radius-sm, 4px);
+}
+.mm-topic [contenteditable]:focus {
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.mm-topic [contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+.mm-tx {
+  margin-top: 6px;
+  font-size: var(--text-min);
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mm-col > .mm-card {
+  margin: 6px 10px 6px 64px;
+}
+.mm-col > .mm-card ul {
+  list-style: disc;
+}
+.mm-col > .mm-card li {
+  display: list-item;
+}
+/* Tom's question to the agent, and its answer, where they happened. */
+.mm-ask {
+  align-self: flex-end;
+  max-width: 70%;
+  margin: 6px 10px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-lg);
+  padding: 8px 12px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.mm-answer {
+  margin: 2px 10px 6px 64px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+/* The last minute of talk the notes have not taken in yet. */
+.mm-tail {
+  margin-top: 10px;
+  padding: 8px 10px 0;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mm-tail .mm-label {
+  margin: 0 0 2px 54px;
+  color: var(--ink-faint);
+}
+.mm-tail .mm-ln .tm,
+.mm-transcript .mm-ln .tm {
+  width: 44px;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+.mm-ln.prov {
+  font-style: italic;
+  color: var(--ink-faint);
+}
+.mm-ln.prov b {
+  font-style: normal;
+}
+.mm-transcript {
+  gap: 6px;
+}
+.mm-tx-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 8px;
+  margin-bottom: 4px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--line-soft);
+}
+.mm-tx-head .mm-label {
+  margin: 0;
+}
+/* The write-up that closes the Summary once the meeting has ended. */
+.mm-sum {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.mm-sum * {
+  overflow-wrap: anywhere;
+}
+.mm-sum-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.mm-sum h1 {
+  flex: 1;
+  min-width: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 500;
+  font-size: 20px;
+  margin: 0;
+  outline: 0;
+}
+.mm-sum .meta {
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.mm-sum .body {
+  outline: 0;
+}
+.mm-sum h2 {
+  font-size: var(--text-min);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 14px 0 4px;
+}
+.mm-sum ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+  font-size: 14px;
+  list-style: disc;
+}
+.mm-sum li {
+  display: list-item;
+  margin: 3px 0;
+}
+.mm-sum li.mine {
+  color: var(--ink);
+}
+.mm-sum .fixed {
+  /* Something outside this sheet also styles a bare `.fixed` as position: fixed. */
+  position: static;
+  border-bottom: 1px dotted var(--accent);
+}
+/* The composer's Note / Ask switch, inside the input box at its start. */
+.composer-input-wrap.has-leading .composer-input,
+.composer-input-wrap.has-leading .composer-live-preview,
+.composer-input-wrap.has-leading .composer-chip-mirror {
+  padding-left: 124px;
+}
+.composer-leading {
+  position: absolute;
+  left: 10px;
+  top: 7px;
+  z-index: 1;
+}
+.mm-mode {
+  display: inline-flex;
+  background: var(--bg-soft);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+}
+.mm-mode button {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--text-min);
+  font-weight: 600;
+  color: var(--ink-3);
+  padding: 2px 11px;
+  border-radius: var(--radius-pill);
+}
+.mm-mode button[aria-checked='true'] {
+  background: var(--ink);
+  color: var(--bg-elevated);
+}
+@media (max-width: 700px) {
+  .mm-head {
+    flex-wrap: wrap;
+  }
+  .mm-people {
+    display: none;
+  }
+  .mm-seg {
+    order: 10;
+    width: 100%;
+  }
+  .mm-seg button {
+    flex: 1;
+    text-align: center;
+  }
+  .mm-col > .mm-card,
+  .mm-answer {
+    margin-left: 10px;
+  }
 }
 
 /* ---- Pads (spec/14 § Pads) ---- */
@@ -15913,42 +15930,11 @@ select.new-chat-account:focus-visible {
   font-size: var(--text-min);
 }
 
-/* Agent feed (meeting mode): research cards over the chat. Type is shown by the label's colour, never a left bar. */
-.mm-feed {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 42%;
-  overflow: auto;
-  padding: 10px 20px 4px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.mm-feed-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.mm-feed-head .mm-label {
-  margin-bottom: 0;
-}
-.mm-feed-auto {
-  font-size: var(--text-min);
-  color: var(--ink-3);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+/* Research cards (meeting mode). Type is shown by the label's colour, never a left bar. */
 .mm-feed-err {
   font-size: var(--text-min);
   color: var(--danger);
   margin-bottom: 6px;
-}
-.mm-feed-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 8px;
 }
 .mm-card {
   background: var(--bg-elevated);
@@ -15959,6 +15945,7 @@ select.new-chat-account:focus-visible {
   font-size: 14px;
 }
 .mm-card-h {
+  flex-wrap: wrap;
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -16025,10 +16012,4 @@ select.new-chat-account:focus-visible {
   background: var(--accent-tint);
   border-radius: var(--radius-pill);
   padding: 1px 8px;
-}
-@media (max-width: 800px) {
-  .mm-feed {
-    max-height: 30%;
-    padding: 8px 16px 2px;
-  }
 }

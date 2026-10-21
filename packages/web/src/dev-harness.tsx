@@ -3298,6 +3298,7 @@ if (voiceParam === 'call' || voiceParam === 'hands-free') {
 // `?meeting=live|paused|ended` seeds the chat with a meeting (meeting mode), and
 // `window.__meetingStore` lets a spec play the host's `meeting.state` replies.
 (window as unknown as { __meetingStore?: typeof useMeetingStore }).__meetingStore = useMeetingStore;
+(window as unknown as { __chatStore?: typeof useChatStore }).__chatStore = useChatStore;
 const meetingParam = params.get('meeting');
 if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'ended') {
   const t0 = Date.now();
@@ -3398,6 +3399,10 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
     ],
     agentRunsActions: false,
     researchOn: true,
+    myNotes: '01:40 ask Marco about the sandbox budget\n22:30 check the flag plan with Priya',
+    ...(meetingParam === 'live'
+      ? { live: "If we do it in November we're migrating in the busiest week of the year." }
+      : {}),
     cards: [
       {
         id: 'k3',
@@ -3437,6 +3442,12 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
         at: 33 * 60_000 + 58_000,
         speaker: 'them',
         text: "If we do it in November we're migrating in the busiest week of the year.",
+      },
+      {
+        at: 33 * 60_000 + 59_000,
+        speaker: 'them',
+        voice: 2,
+        text: 'And the freeze starts the week after.',
       },
       {
         at: 34 * 60_000 + 3000,
