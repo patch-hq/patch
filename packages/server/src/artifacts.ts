@@ -31,6 +31,7 @@ import { PatchArtifactPublishRequestEvent, type WireEvent } from '@patch/wire';
 import { verifySurfaceCredential } from '@patch/auth';
 import type { HostLink } from './host-link.js';
 import type { Registry } from './registry.js';
+import { SIGNIN_PAGE_CSP, signInPage, wantsHtml } from './signin-page.js';
 
 const BRIDGE_SURFACE_ID = 'artifact-bridge';
 /** Ids are daemon-minted hex digests; charset-validate before touching the fs. */
@@ -321,6 +322,14 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       return reply.code(404).send({ error: 'artifact not found' });
     }
     if (!(await authorised(req, chatId, artifactId))) {
+      if (wantsHtml(req.headers.accept)) {
+        return reply
+          .code(401)
+          .header('content-type', 'text/html; charset=utf-8')
+          .header('content-security-policy', SIGNIN_PAGE_CSP)
+          .header('cache-control', 'no-store')
+          .send(signInPage(`/api/chats/${chatId}/artifact/${artifactId}/share`));
+      }
       return reply.code(401).send({ error: 'unauthenticated' });
     }
     const dir = join(deps.artifactsDir, chatId);

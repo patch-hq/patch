@@ -437,6 +437,30 @@ describe('artifacts', () => {
     }
   });
   describe('access control', () => {
+    it('answers a browser navigation with a styled sign-in page, not JSON', async () => {
+      const { built, hostLink } = await makeApp();
+      try {
+        await publish(hostLink, publishRequest());
+        const base = '/api/chats/c1/artifact/a1';
+        const browser = await built.app.inject({
+          method: 'GET',
+          url: base,
+          headers: { accept: 'text/html,application/xhtml+xml' },
+        });
+        expect(browser.statusCode).toBe(401);
+        expect(browser.headers['content-type']).toContain('text/html');
+        expect(browser.body).toContain('Sign in to Patch');
+        expect(browser.body).toContain('patch.credential.v1');
+        expect(browser.body).toContain(`${base}/share`);
+        expect(browser.headers['content-security-policy']).toBeDefined();
+        // API clients still get the JSON error.
+        const api = await built.app.inject({ method: 'GET', url: base });
+        expect(api.statusCode).toBe(401);
+        expect(api.json()).toEqual({ error: 'unauthenticated' });
+      } finally {
+        await built.app.close();
+      }
+    });
     it('refuses an unsigned, mis-signed or tampered request', async () => {
       const { built, hostLink } = await makeApp();
       try {
