@@ -2688,7 +2688,7 @@ export class BrowserManager {
             .send('Page.captureScreenshot', { format: 'jpeg', quality })
             .catch(() => null)) as { data: string } | null;
           if (shot && !stopped) emit(shot.data, v.width, v.height);
-          else if (!shot && ++misses < 10) dirty = true;
+          else if (!shot && ++misses < 30) dirty = true;
           await new Promise((r) => setTimeout(r, shot ? minFrameMs : 100));
         } while (dirty && !stopped);
       } finally {
@@ -2723,14 +2723,22 @@ export class BrowserManager {
     /** Chrome sends a frame only when the page paints: a still page would show nothing. */
     const still = async (): Promise<void> => {
       if (sharpWanted()) return sharp();
-      const m = (await cdp.send('Page.getLayoutMetrics')) as {
-        cssVisualViewport?: { clientWidth: number; clientHeight: number };
-      };
-      const shot = (await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality })) as {
-        data: string;
-      };
-      if (!stopped && m.cssVisualViewport) {
-        emit(shot.data, m.cssVisualViewport.clientWidth, m.cssVisualViewport.clientHeight);
+      // Chrome refuses a capture for a moment after the page changes size, and a
+      // page that is not moving will not paint again to ask: try for a while.
+      for (let attempt = 0; attempt < 30 && !stopped; attempt++) {
+        const m = (await cdp.send('Page.getLayoutMetrics').catch(() => null)) as {
+          cssVisualViewport?: { clientWidth: number; clientHeight: number };
+        } | null;
+        const shot = (await cdp
+          .send('Page.captureScreenshot', { format: 'jpeg', quality })
+          .catch(() => null)) as { data: string } | null;
+        if (shot && m?.cssVisualViewport) {
+          if (!stopped) {
+            emit(shot.data, m.cssVisualViewport.clientWidth, m.cssVisualViewport.clientHeight);
+          }
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 100));
       }
     };
     const start = async (): Promise<void> => {
@@ -2762,11 +2770,29 @@ export class BrowserManager {
    * own size back. A device the agent emulated, or a size the agent set since,
    * is never overridden.
    */
-  async setViewerViewport(
+  setViewerViewport(
     tabId: string,
     vp: { width: number; height: number; scale: number } | null,
   ): Promise<void> {
-    const tab = this.requireTab(tabId);
+    // One at a time per tab: a renewal landing while a restore is half done
+    // would read the view's size back as the agent's and never give it back.
+    const prev = this.viewerChains.get(tabId) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(() => this.applyViewerViewport(tabId, vp));
+    this.viewerChains.set(tabId, next);
+    void next.finally(() => {
+      if (this.viewerChains.get(tabId) === next) this.viewerChains.delete(tabId);
+    });
+    return next;
+  }
+
+  private readonly viewerChains = new Map<string, Promise<void>>();
+
+  private async applyViewerViewport(
+    tabId: string,
+    vp: { width: number; height: number; scale: number } | null,
+  ): Promise<void> {
+    const tab = this.tabsById.get(tabId);
+    if (!tab) return;
     if (tab.page.isClosed()) return;
     if (vp === null) {
       tab.viewerYielded = false;

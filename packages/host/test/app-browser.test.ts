@@ -33,11 +33,9 @@ const electronDist = (): boolean => {
   }
 };
 const runnable =
-  process.platform === 'linux' && spawnSync('which', ['xvfb-run']).status === 0 && electronDist();
+  process.platform === 'linux' && spawnSync('which', ['Xvfb']).status === 0 && electronDist();
 if (!runnable) {
-  console.warn(
-    'app-browser.test: skipped — needs Linux with xvfb-run, Electron and the desktop build',
-  );
+  console.warn('app-browser.test: skipped — needs Linux with Xvfb, Electron and the desktop build');
 }
 
 const silent = pino({ level: 'silent' });
@@ -79,6 +77,9 @@ describe.skipIf(!runnable)('the agent browser in the Patch app', () => {
   vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
   let home: string;
   let app: ChildProcess;
+  let xvfb: ChildProcess;
+  // A display of this suite's own, stopped with it: none of the other suites use :47.
+  const DISPLAY = ':47';
   let site: { server: Server; base: string };
   let browser: BrowserManager;
 
@@ -86,15 +87,14 @@ describe.skipIf(!runnable)('the agent browser in the Patch app', () => {
     home = mkdtempSync(join(tmpdir(), 'patch-app-browser-'));
     mkdirSync(join(home, '.patch'));
     const endpointFile = join(home, '.patch', 'agent-browser.json');
-    app = spawn(
-      'xvfb-run',
-      ['-a', ELECTRON, '--no-sandbox', join(__dirname, 'fixtures/app-browser-main.cjs')],
-      {
-        env: { ...process.env, ENDPOINT_FILE: endpointFile, DESKTOP_DIST: DIST },
-        stdio: 'ignore',
-        detached: true,
-      },
-    );
+    xvfb = spawn('Xvfb', [DISPLAY, '-screen', '0', '1280x800x24', '-nolisten', 'tcp'], {
+      stdio: 'ignore',
+    });
+    await new Promise((r) => setTimeout(r, 500));
+    app = spawn(ELECTRON, ['--no-sandbox', join(__dirname, 'fixtures/app-browser-main.cjs')], {
+      env: { ...process.env, DISPLAY, ENDPOINT_FILE: endpointFile, DESKTOP_DIST: DIST },
+      stdio: 'ignore',
+    });
     const until = Date.now() + 30_000;
     while (!(existsSync(endpointFile) && JSON.parse(readFileSync(endpointFile, 'utf8')).endpoint)) {
       if (Date.now() > until) throw new Error('the Patch app browser never came up');
@@ -114,12 +114,11 @@ describe.skipIf(!runnable)('the agent browser in the Patch app', () => {
 
   afterAll(async () => {
     await browser?.dispose();
-    if (app?.pid) {
-      try {
-        process.kill(-app.pid, 'SIGTERM');
-      } catch {
-        /* already gone */
-      }
+    for (const child of [app, xvfb]) {
+      if (!child || child.exitCode !== null) continue;
+      const gone = new Promise((r) => child.once('exit', r));
+      child.kill('SIGTERM');
+      await gone;
     }
     await new Promise<void>((r) => site?.server.close(() => r()));
     rmSync(home, { recursive: true, force: true });

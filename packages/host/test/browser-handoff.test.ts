@@ -436,8 +436,14 @@ describeRealBrowser('Browser hand-off — real Chromium', () => {
     handoff.watch('c1', tab.tabId, false, { viewerId: 'v1' });
     await until(() => framesOf(events).at(-1)!.width === 1280, 'a frame at the agent size');
     expect(await browser.viewport(tab.tabId)).toEqual({ width: 1280, height: 720 });
-    const dpr = await browser.evaluate(tab.tabId, 'devicePixelRatio');
-    expect(dpr).toEqual(expect.objectContaining({ value: 1 }));
+    // Chrome applies the change to the page a moment after it is made.
+    await vi.waitFor(
+      async () =>
+        expect(await browser.evaluate(tab.tabId, 'devicePixelRatio')).toEqual(
+          expect.objectContaining({ value: 1 }),
+        ),
+      { timeout: 5_000 },
+    );
   });
 
   it('drags to select text and copies it to the user', async () => {
