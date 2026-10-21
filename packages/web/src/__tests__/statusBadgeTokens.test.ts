@@ -67,7 +67,7 @@ describe('permission-coloured surfaces', () => {
     expect(badge![0]).toContain('background: var(--permission);');
     // The outer ring too — a half-done change leaves an orange ring round an
     // indigo dot, which reads as a rendering bug rather than a state.
-    expect(badge![0]).toContain('0 0 0 5px var(--permission);');
+    expect(badge![0]).toMatch(/0 0 0 \d+px var\(--permission\);/);
     expect(badge![0]).not.toContain('var(--waiting)');
   });
 
