@@ -676,29 +676,6 @@ export const Composer = forwardRef(function Composer(
       });
   }
 
-  // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
-  // unreliable in the desktop shell, so size it here: reset to `auto` (allows
-  // shrinking), then to scrollHeight (clamped at the cap). Crucially, keep
-  // overflow HIDDEN while the content fits under the cap — the field simply
-  // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
-  // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
-  // can't push the chat off-screen.
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    // `scrollHeight` is the content+padding box; with `box-sizing: border-box`
-    // the style height also includes the border, so add the border delta —
-    // otherwise the box lands 1–2px short of the content and clips it (which is
-    // exactly what makes a spurious scrollbar flicker in). offsetHeight -
-    // clientHeight is that border total (overflow is hidden here, so no
-    // scrollbar contributes to it).
-    const border = el.offsetHeight - el.clientHeight;
-    const contentHeight = el.scrollHeight + border;
-    const cap = maxInputHeight();
-    el.style.height = `${Math.min(contentHeight, cap)}px`;
-    el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
-  }, [value]);
   const pushError = useUiStore((s) => s.pushError);
   const dictateChord = useUiStore((s) => s.dictateChord);
   // Attachments the user has added but not yet sent (spec/14 § Composer). They
@@ -1096,6 +1073,38 @@ export const Composer = forwardRef(function Composer(
   const recordingRef = useRef<VoiceRecording | null>(null);
   const previewRef = useRef<DictationPreview | null>(null);
   const showLivePreview = micState === 'recording' && livePartial.length > 0;
+
+  // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
+  // unreliable in the desktop shell, so size it here: reset to `auto` (allows
+  // shrinking), then to scrollHeight (clamped at the cap). Crucially, keep
+  // overflow HIDDEN while the content fits under the cap — the field simply
+  // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
+  // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
+  // can't push the chat off-screen.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    // `scrollHeight` is the content+padding box; with `box-sizing: border-box`
+    // the style height also includes the border, so add the border delta —
+    // otherwise the box lands 1–2px short of the content and clips it (which is
+    // exactly what makes a spurious scrollbar flicker in). offsetHeight -
+    // clientHeight is that border total (overflow is hidden here, so no
+    // scrollbar contributes to it).
+    const border = el.offsetHeight - el.clientHeight;
+    // While dictating, the interim transcript is painted by the mirror, not
+    // held by the textarea, so its text never reaches `el.scrollHeight`: size
+    // to whichever is taller. The mirror is absolutely filling the wrapper
+    // (now at the textarea's `auto` height), so its scrollHeight is its content.
+    const mirror = el.parentElement?.querySelector<HTMLElement>(
+      '.composer-live-preview, .composer-chip-mirror',
+    );
+    const contentHeight = Math.max(el.scrollHeight, mirror?.scrollHeight ?? 0) + border;
+    const cap = maxInputHeight();
+    el.style.height = `${Math.min(contentHeight, cap)}px`;
+    el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
+    syncMirrors(el);
+  }, [value, livePartial, showLivePreview]);
   // Seconds spent waiting on the transcript, so a slow upload visibly counts
   // up instead of looking identical to recording.
   const [transcribeSecs, setTranscribeSecs] = useState(0);
