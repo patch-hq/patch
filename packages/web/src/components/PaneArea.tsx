@@ -7,7 +7,8 @@
 // terminals and pages join as later stages extend `TabDescriptor`
 // (`stores/layoutStore.ts`) and the `TabContent` switch below.
 
-import { Fragment, useCallback, useRef, useState } from 'react';
+import { Fragment, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { DragEvent as ReactDragEvent, JSX, MouseEvent as ReactMouseEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/rest.js';
@@ -164,10 +165,66 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
   }
 }
 
+// Tab content is mounted ONCE per tab, in `PaneArea`, into a detached host
+// element that belongs to the tab. The pane it is shown in only adopts that
+// element into its content slot. Moving a tab to another pane or splitting it
+// out therefore moves a DOM node instead of unmounting and remounting the
+// content, so a chat, terminal or editor keeps its state.
+const tabHostEls = new Map<string, HTMLElement>();
+
+function tabHostEl(tabId: string): HTMLElement {
+  let el = tabHostEls.get(tabId);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'tab-host';
+    el.style.display = 'contents';
+    tabHostEls.set(tabId, el);
+  }
+  return el;
+}
+
+function activeLeafTabs(node: PaneNode, out: { pane: LeafPane; tab: Tab }[] = []) {
+  if (node.type === 'leaf') {
+    const tab = node.tabs.find((t) => t.id === node.activeTabId);
+    if (tab) out.push({ pane: node, tab });
+  } else {
+    for (const c of node.children) activeLeafTabs(c.pane, out);
+  }
+  return out;
+}
+
+function HostedTab({
+  tab,
+  focused,
+  ws,
+}: {
+  tab: Tab;
+  focused: boolean;
+  ws: PatchWs | null;
+}): JSX.Element {
+  const el = tabHostEl(tab.id);
+  useLayoutEffect(
+    () => () => {
+      el.remove();
+      tabHostEls.delete(tab.id);
+    },
+    [el, tab.id],
+  );
+  return createPortal(<TabContent tab={tab} focused={focused} ws={ws} />, el);
+}
+
 export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
   const root = useLayoutStore((s) => s.root);
+  const activePaneId = useLayoutStore((s) => s.activePaneId);
   const totalPanes = countPanes(root);
-  return <PaneNodeView node={root} ws={ws} totalPanes={totalPanes} />;
+  return (
+    <>
+      <PaneNodeView node={root} ws={ws} totalPanes={totalPanes} />
+      {activeLeafTabs(root).map(({ pane, tab }) => (
+        <HostedTab key={tab.id} tab={tab} focused={pane.id === activePaneId} ws={ws} />
+      ))}
+    </>
+  );
 }
 
 function PaneNodeView({
@@ -180,7 +237,7 @@ function PaneNodeView({
   totalPanes: number;
 }): JSX.Element {
   const resizeSplit = useLayoutStore((s) => s.resizeSplit);
-  if (node.type === 'leaf') return <Pane pane={node} ws={ws} totalPanes={totalPanes} />;
+  if (node.type === 'leaf') return <Pane pane={node} totalPanes={totalPanes} />;
   return (
     <div
       className={`pane-split pane-split-${node.direction}`}
@@ -210,15 +267,7 @@ function PaneNodeView({
 // imported twice under two names in the same file.
 import { PaneDivider as PaneDividerHandle } from './PaneDivider.js';
 
-function Pane({
-  pane,
-  ws,
-  totalPanes,
-}: {
-  pane: LeafPane;
-  ws: PatchWs | null;
-  totalPanes: number;
-}): JSX.Element {
+function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX.Element {
   const activePaneId = useLayoutStore((s) => s.activePaneId);
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const moveTab = useLayoutStore((s) => s.moveTab);
@@ -302,7 +351,7 @@ function Pane({
           <div className={`pane-dropzone pane-dropzone-${dropEdge}`} data-testid="pane-dropzone" />
         ) : null}
         {activeTab ? (
-          <TabContent key={activeTab.id} tab={activeTab} focused={focused} ws={ws} />
+          <TabSlot tabId={activeTab.id} />
         ) : (
           <div className="pane-empty" data-testid="pane-empty">
             No tabs open
@@ -311,6 +360,15 @@ function Pane({
       </div>
     </div>
   );
+}
+
+/** Adopts the tab's persistent host element (see `HostedTab`) into this pane. */
+function TabSlot({ tabId }: { tabId: string }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    ref.current?.appendChild(tabHostEl(tabId));
+  }, [tabId]);
+  return <div ref={ref} className="tab-slot" style={{ display: 'contents' }} />;
 }
 
 function TabContent({
