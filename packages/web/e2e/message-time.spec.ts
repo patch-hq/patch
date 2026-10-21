@@ -119,7 +119,7 @@ test.describe('hovering a message shows the real time it arrived', () => {
     await page.goto(HARNESS);
     await applyEvent(page, assistantMessage(2));
     await expect(page.getByTestId('msg-time')).toHaveCount(0);
-    // A turn that never retried and carries no known time has no strip at all.
-    await expect(page.getByTestId('msg-meta')).toHaveCount(0);
+    // The strip still holds the message's tools; it just carries no time.
+    await expect(page.getByTestId('msg-meta').last()).not.toContainText(/\d:\d\d/);
   });
 });

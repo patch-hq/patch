@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { WireEvent } from '@patch/wire';
 
-// spec/14 § Messages — the copy button in a message's gutter.
+// spec/14 § Messages — the copy button in a message's hover strip.
 const HARNESS = '/app/dev-harness.html?chat=chat_bus';
 
 test('hovering a message reveals a copy button that copies its text', async ({ page, context }) => {
@@ -28,9 +28,11 @@ test('hovering a message reveals a copy button that copies its text', async ({ p
 
   const msg = page.getByTestId('msg').last();
   const button = msg.getByTestId('msg-copy-trigger');
-  await expect(button).toHaveCSS('opacity', '0');
+  // The copy button lives in the message's hover strip, which is hidden at rest.
+  const strip = msg.getByTestId('msg-meta');
+  await expect(strip).toHaveCSS('opacity', '0');
   await msg.locator('.content').hover();
-  await expect(button).toHaveCSS('opacity', '1');
+  await expect(strip).toHaveCSS('opacity', '1');
   await button.click();
   await expect(button).toHaveAttribute('data-state', 'copied');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('copy me please');

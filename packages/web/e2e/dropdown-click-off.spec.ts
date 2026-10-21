@@ -54,10 +54,11 @@ test.describe('dropdowns close on click-off', () => {
     await pill.click();
     const popup = page.getByTestId('model-popup');
     await expect(popup).toBeVisible();
-    // Read the pill only once the catalogue has resolved it to a label, so the
-    // comparison below is about click-off and not about load timing.
-    await expect(pill).toContainText('Claude Opus 5');
-    const label = (await pill.innerText()).replace('▾', '').trim();
+    // The chosen model is the pressed chip beside the pill. Read it only once the
+    // catalogue has loaded, so the comparison below is about click-off, not timing.
+    const chosen = page.getByTestId('new-chat-quick-models').locator('[aria-pressed="true"]');
+    await expect(chosen).toHaveCount(1);
+    const label = await chosen.innerText();
 
     // Inside the list but not on an option — still open.
     await popup.click({ position: { x: 2, y: 2 } });
@@ -67,7 +68,7 @@ test.describe('dropdowns close on click-off', () => {
     await expect(popup).toBeHidden();
     await expect(pill).toHaveAttribute('aria-expanded', 'false');
     // Click-off selects nothing.
-    expect((await pill.innerText()).replace('▾', '').trim()).toBe(label);
+    await expect(chosen).toHaveText(label);
   });
 
   test('composer skill autocomplete closes on click-off and keeps the typed text', async ({
