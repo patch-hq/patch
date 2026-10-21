@@ -178,6 +178,54 @@ describe('layoutStore — splitting', () => {
   });
 });
 
+describe('layoutStore — reusing the neighbouring pane', () => {
+  it('open-to-the-side reuses an existing pane on that edge instead of splitting again', () => {
+    store().openTab({ kind: 'chat', chatId: 'c1' });
+    store().openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
+    const rightId = (store().root as SplitPane).children[1]!.pane.id;
+    store().setActivePane((store().root as SplitPane).children[0]!.pane.id);
+    store().openTab({ kind: 'chat', chatId: 'c3' }, { placement: 'split', edge: 'right' });
+
+    const split = store().root as SplitPane;
+    expect(split.children).toHaveLength(2);
+    const right = split.children[1]!.pane as LeafPane;
+    expect(right.id).toBe(rightId);
+    expect(right.tabs.map((t) => cid(t.descriptor))).toEqual(['c3']);
+    expect(store().activePaneId).toBe(rightId);
+  });
+
+  it("adds a tab beside the neighbour's when its active tab has unsaved edits", () => {
+    store().openTab({ kind: 'chat', chatId: 'c1' });
+    store().openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
+    const right = (store().root as SplitPane).children[1]!.pane as LeafPane;
+    setTabDirty(right.tabs[0]!.id, true);
+    store().setActivePane((store().root as SplitPane).children[0]!.pane.id);
+    store().openTab({ kind: 'chat', chatId: 'c3' }, { placement: 'split', edge: 'right' });
+    const after = (store().root as SplitPane).children[1]!.pane as LeafPane;
+    expect(after.tabs.map((t) => cid(t.descriptor))).toEqual(['c2', 'c3']);
+    setTabDirty(right.tabs[0]!.id, false);
+  });
+});
+
+describe('layoutStore — closePane', () => {
+  it('closes a pane with all its tabs, collapsing the split', () => {
+    store().openTab({ kind: 'chat', chatId: 'c1' });
+    store().openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
+    const rightId = (store().root as SplitPane).children[1]!.pane.id;
+    store().openTab({ kind: 'chat', chatId: 'c3' }, { placement: 'tab' });
+    store().closePane(rightId);
+    const leaf = rootLeaf();
+    expect(leaf.tabs.map((t) => cid(t.descriptor))).toEqual(['c1']);
+    expect(store().activePaneId).toBe(leaf.id);
+  });
+
+  it('leaves the last pane in place, emptied', () => {
+    store().openTab({ kind: 'chat', chatId: 'c1' });
+    store().closePane(rootLeaf().id);
+    expect(rootLeaf().tabs).toEqual([]);
+  });
+});
+
 describe('layoutStore — splitActivePane (⌘\\)', () => {
   it('splits a pane holding only ONE tab — unlike splitWithTab, this is not a no-op', () => {
     store().openTab({ kind: 'chat', chatId: 'c1' });

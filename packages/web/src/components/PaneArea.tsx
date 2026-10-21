@@ -370,6 +370,8 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
   const setActiveTab = useLayoutStore((s) => s.setActiveTab);
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const closeTab = useLayoutStore((s) => s.closeTab);
+  const closePane = useLayoutStore((s) => s.closePane);
+  const multiplePanes = useLayoutStore((s) => s.root.type === 'split');
   const reorderTab = useLayoutStore((s) => s.reorderTab);
   const moveTab = useLayoutStore((s) => s.moveTab);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -461,6 +463,17 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
           else moveTab(payload.paneId, payload.tabId, pane.id, pane.tabs.length);
         }}
       />
+      {multiplePanes && (
+        <button
+          type="button"
+          className="pane-tab-close pane-close"
+          aria-label="Close pane"
+          data-testid={`pane-close-${pane.id}`}
+          onClick={() => closePane(pane.id)}
+        >
+          ×
+        </button>
+      )}
       <ContextMenu
         anchor={menu.anchor}
         items={menuTab ? tabContextItems(menuTab, pane) : []}

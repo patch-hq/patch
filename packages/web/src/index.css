@@ -818,6 +818,10 @@ body {
   background: var(--bg-soft);
   color: var(--ink);
 }
+.pane-close {
+  margin: 0 6px;
+  align-self: center;
+}
 .pane-tab-bar-fill {
   flex: 1;
   min-width: 12px;
