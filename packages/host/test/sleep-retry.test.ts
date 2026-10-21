@@ -1,20 +1,22 @@
 // A closed-lid Mac on battery sleeps regardless of the sleep guard, and spends
-// the night in seconds-long maintenance wakes. A turn dies in each one; the
-// retry ladder used to spend its three rungs in the next three and leave a 3am
-// job errored by morning. A turn the machine slept through is owed again once
-// the machine is properly awake, and takes no rung of the ladder.
+// the night in seconds-long dark wakes. A turn started in one died when the Mac
+// dropped back to sleep; the retry ladder spent its three rungs in the next
+// three and left a 3am job errored by morning.
+//
+// Now a turn is held until the machine is fully awake (macOS says which wake it
+// is in), and a turn the machine slept through goes round again, held the same
+// way, without being reported as an error or taking a rung of the ladder.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import type { WireEvent } from '@patch/wire';
+import type { ChatStateEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
 import { createSleepWatch, type SleepWatch } from '../src/sleepWatch.js';
-import { SLEPT_THROUGH_MESSAGE } from '../src/failureCopy.js';
 
 const silent = pino({ level: 'silent' });
 const SLEPT =
@@ -31,11 +33,11 @@ function failsThenSucceeds(errMsg: string, failures: number) {
   return { backend, calls: () => calls };
 }
 
-function fakeWatch(awakeMs: { v: number }): SleepWatch {
+function fakeWatch(awake: { v: boolean }): SleepWatch {
   return {
     check: () => undefined,
     sleptSince: () => false,
-    awakeForMs: () => awakeMs.v,
+    isFullyAwake: () => awake.v,
     dispose: () => undefined,
   };
 }
@@ -59,7 +61,10 @@ function makeHost(backend: SdkBackend, sleepWatch: SleepWatch, tag: string) {
   return { daemon, folder, events };
 }
 
-describe('a turn the machine slept through', () => {
+const states = (events: WireEvent[]): ChatStateEvent[] =>
+  events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+
+describe('the wake gate', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
@@ -67,43 +72,51 @@ describe('a turn the machine slept through', () => {
     vi.useRealTimers();
   });
 
-  it('is re-sent past the ladder ceiling and completes', async () => {
-    const { backend, calls } = failsThenSucceeds(SLEPT, 6);
-    const { daemon, folder } = makeHost(backend, fakeWatch({ v: 10 * 60_000 }), 'slept');
-    await daemon.spawnChat({ folder, prompt: 'x' });
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(calls()).toBe(7);
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(calls()).toBe(7);
-    daemon.shutdown();
-  });
-
-  it('tells the chat the machine slept, not what the provider said', async () => {
-    const { backend } = failsThenSucceeds(SLEPT, 1);
-    const { daemon, folder, events } = makeHost(backend, fakeWatch({ v: 10 * 60_000 }), 'said');
-    await daemon.spawnChat({ folder, prompt: 'x' });
-    await vi.advanceTimersByTimeAsync(1_000);
-    const err = events.find((e) => e.type === 'chat.error');
-    expect(err?.type === 'chat.error' && err.error.message).toBe(SLEPT_THROUGH_MESSAGE);
-    daemon.shutdown();
-  });
-
-  it('waits until the machine has been awake a few minutes', async () => {
-    const awake = { v: 20_000 };
-    const { backend, calls } = failsThenSucceeds(SLEPT, 1);
-    const { daemon, folder } = makeHost(backend, fakeWatch(awake), 'darkwake');
-    await daemon.spawnChat({ folder, prompt: 'x' });
-    await vi.advanceTimersByTimeAsync(30 * 60_000);
+  it('holds a turn through a dark wake, visibly, and runs it on a full wake', async () => {
+    const awake = { v: false };
+    const { backend, calls } = failsThenSucceeds('', 0);
+    const { daemon, folder, events } = makeHost(backend, fakeWatch(awake), 'dark');
+    void daemon.spawnChat({ folder, prompt: 'x' });
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(calls()).toBe(0);
+    expect(states(events).at(-1)?.waitingForWakeSince).toEqual(expect.any(Number));
+    awake.v = true;
+    await vi.advanceTimersByTimeAsync(20_000);
     expect(calls()).toBe(1);
-    awake.v = 5 * 60_000;
+    expect(states(events).at(-1)?.waitingForWakeSince).toBeNull();
+    daemon.shutdown();
+  });
+
+  it('a stop while the turn is held ends it, and it never runs', async () => {
+    const awake = { v: false };
+    const { backend, calls } = failsThenSucceeds('', 0);
+    const { daemon, folder, events } = makeHost(backend, fakeWatch(awake), 'stop');
+    void daemon.spawnChat({ folder, prompt: 'x' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    const chatId = states(events).at(-1)!.chatId;
+    await daemon.stopChat(chatId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(states(events).at(-1)?.waitingForWakeSince).toBeNull();
+    awake.v = true;
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(calls()).toBe(2);
+    expect(calls()).toBe(0);
+    daemon.shutdown();
+  });
+
+  it('a turn the machine slept through goes round again with no error and no rung spent', async () => {
+    const { backend, calls } = failsThenSucceeds(SLEPT, 6);
+    const { daemon, folder, events } = makeHost(backend, fakeWatch({ v: true }), 'slept');
+    await daemon.spawnChat({ folder, prompt: 'x' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls()).toBe(7);
+    expect(events.some((e) => e.type === 'chat.error')).toBe(false);
+    expect(states(events).some((s) => s.activity === 'errored')).toBe(false);
     daemon.shutdown();
   });
 
   it('does not change how a failure with no sleep is retried', async () => {
     const { backend, calls } = failsThenSucceeds('API Error: 503 service unavailable', 99);
-    const { daemon, folder } = makeHost(backend, fakeWatch({ v: 10 * 60_000 }), 'awake');
+    const { daemon, folder } = makeHost(backend, fakeWatch({ v: true }), 'awake');
     await daemon.spawnChat({ folder, prompt: 'x' });
     await vi.advanceTimersByTimeAsync(400_000);
     expect(calls()).toBe(4);
@@ -112,6 +125,42 @@ describe('a turn the machine slept through', () => {
 });
 
 describe('sleepWatch', () => {
+  const FULL =
+    'Current System Capabilities are: CPU Graphics Audio Network \nCurrent Power State: 4\n';
+  const DARK = 'Current System Capabilities are: CPU Network Disk \nCurrent Power State: 4\n';
+
+  it('reads a full wake from Graphics being among the capabilities', () => {
+    let out = FULL;
+    const w = createSleepWatch({ logger: silent, platform: 'darwin', readSystemState: () => out });
+    expect(w.isFullyAwake()).toBe(true);
+    out = DARK;
+    expect(w.isFullyAwake()).toBe(false);
+    w.dispose();
+  });
+
+  it('is always awake off macOS', () => {
+    const read = vi.fn(() => DARK);
+    const w = createSleepWatch({ logger: silent, platform: 'linux', readSystemState: read });
+    expect(w.isFullyAwake()).toBe(true);
+    expect(read).not.toHaveBeenCalled();
+    w.dispose();
+  });
+
+  it('says so loudly when it cannot read the wake state, and does not hold turns on it', () => {
+    const error = vi.fn();
+    const logger = { ...silent, error, info: vi.fn() } as unknown as pino.Logger;
+    const w = createSleepWatch({
+      logger,
+      platform: 'darwin',
+      readSystemState: () => {
+        throw new Error('pmset missing');
+      },
+    });
+    expect(w.isFullyAwake()).toBe(true);
+    expect(error).toHaveBeenCalledOnce();
+    w.dispose();
+  });
+
   it('notices a tick that lands long after it was due', () => {
     let t = 1_000_000;
     const w = createSleepWatch({ logger: silent, now: () => t, tickMs: 5_000, gapMs: 30_000 });
@@ -123,10 +172,6 @@ describe('sleepWatch', () => {
     w.check();
     expect(w.sleptSince(before)).toBe(true);
     expect(w.sleptSince(t)).toBe(false);
-    expect(w.awakeForMs()).toBe(0);
-    t += 4_000;
-    w.check();
-    expect(w.awakeForMs()).toBe(4_000);
     w.dispose();
   });
 });

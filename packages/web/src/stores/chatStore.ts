@@ -1714,6 +1714,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Resume kind (rate_limit vs overloaded) — cleared alongside
             // rateLimitResumingAt. Absent on payloads from older hosts.
             resumeKind: event.resumeKind !== undefined ? event.resumeKind : row.resumeKind,
+            waitingForWakeSince:
+              event.waitingForWakeSince !== undefined
+                ? event.waitingForWakeSince
+                : (row.waitingForWakeSince ?? null),
             // The figures behind the pause — which account, which pool, how
             // full, when it clears. Same absent/null rule as the two above.
             limitBlock:

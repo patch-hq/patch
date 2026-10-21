@@ -887,12 +887,8 @@ export interface SpawnChatOptions {
  */
 const SDK_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000];
 
-/**
- * A turn the machine slept through waits until the machine has been awake
- * this long: past any maintenance wake, which a Mac ends inside a minute.
- */
-const AWAKE_SETTLE_MS = 3 * 60_000;
-const AWAKE_POLL_MS = 30_000;
+/** How often a turn held for a sleeping machine asks whether it has woken. */
+const WAKE_POLL_MS = 15_000;
 
 /** Re-sends for a session the SDK aborted unasked: one resumed, one on a fresh session. */
 const SESSION_ABORT_RESTARTS = 2;
@@ -2999,6 +2995,10 @@ export class Daemon {
   private readonly sessionAbortCount = new Map<string, number>();
   /** Armed generic-error retries, so shutdown can cancel them. */
   private readonly sdkRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Chats whose turn is held until the machine is fully awake, and since when. */
+  private readonly waitingForWakeSince = new Map<string, number>();
+  /** Keeps each sleep re-send's localId unique, however fast they come. */
+  private sleepRetrySeq = 0;
   /**
    * Turns parked waiting for a retry — a rate-limit reset or a backoff step.
    * Held here as well as in the timer's closure so `persistPendingTurns` can
@@ -6761,30 +6761,39 @@ export class Daemon {
   }
 
   /**
-   * Re-send a turn the machine slept through, once the machine has been awake
-   * for `AWAKE_SETTLE_MS`. It is not a failure of the turn, so it takes no rung
-   * of the ladder; it costs nothing to wait for, so there is no ceiling — every
-   * wait ends with the machine awake and the turn running.
+   * Hold a turn until the machine is in a full wake. Surfaces see
+   * `waitingForWakeSince` for as long as it is held. Returns once the machine
+   * is awake, or the turn is stopped.
    */
-  private scheduleAwakeRetry(chatId: string, prompt: string, retryOfSeq: number | undefined): void {
-    this.parkTurn(chatId, prompt, undefined, retryOfSeq, 'retry');
-    const poll = (): void => {
-      const watch = this.opts.sleepWatch;
-      watch?.check();
-      if (watch !== undefined && watch.awakeForMs() < AWAKE_SETTLE_MS) {
-        const next = setTimeout(poll, AWAKE_POLL_MS);
-        next.unref?.();
-        this.sdkRetryTimers.set(chatId, next);
-        return;
+  private async holdUntilFullyAwake(
+    chatId: string,
+    watch: SleepWatch,
+    signal: AbortSignal,
+  ): Promise<void> {
+    this.waitingForWakeSince.set(chatId, this.opts.now());
+    this.emitState(chatId);
+    this.opts.logger.info(
+      { chatId },
+      'machine is in a dark wake — holding the turn until it is fully awake',
+    );
+    try {
+      while (!signal.aborted) {
+        await new Promise<void>((resolve) => {
+          const done = (): void => {
+            clearTimeout(t);
+            signal.removeEventListener('abort', done);
+            resolve();
+          };
+          const t = setTimeout(done, WAKE_POLL_MS);
+          signal.addEventListener('abort', done);
+        });
+        if (!signal.aborted && watch.isFullyAwake()) break;
       }
-      this.sdkRetryTimers.delete(chatId);
-      this.resendRetriedTurn(chatId, prompt, `sleep-retry-${chatId}`, retryOfSeq);
-    };
-    const existing = this.sdkRetryTimers.get(chatId);
-    if (existing) clearTimeout(existing);
-    const timer = setTimeout(poll, AWAKE_POLL_MS);
-    timer.unref?.();
-    this.sdkRetryTimers.set(chatId, timer);
+    } finally {
+      this.waitingForWakeSince.delete(chatId);
+      this.emitState(chatId);
+      this.opts.logger.info({ chatId, stopped: signal.aborted }, 'wake hold over');
+    }
   }
 
   private resendRetriedTurn(
@@ -8624,6 +8633,14 @@ export class Daemon {
     const abortController = new AbortController();
     this.aborters.set(chatId, abortController);
 
+    // A turn never starts while the machine is in a dark wake: it would die when
+    // the machine drops back to sleep. Before the credential is read, so a long
+    // wait never runs on a stale token; a stop during the wait lands on the
+    // aborted check below.
+    if (this.opts.sleepWatch?.isFullyAwake() === false) {
+      await this.holdUntilFullyAwake(chatId, this.opts.sleepWatch, abortController.signal);
+    }
+
     // OAuth gate (spec/10-auth.md): re-read the credential BEFORE the SDK query,
     // self-refreshing an expiring token (see makeResolveOAuth). Missing/expired
     // and unrefreshable → emit `host.unauthenticated`, refuse the query. NO
@@ -9519,6 +9536,27 @@ export class Daemon {
         this.opts.sleepWatch?.check();
         const sleptThrough =
           /went to sleep/i.test(errMsg) || this.opts.sleepWatch?.sleptSince(turnStartedAt) === true;
+        if (sleptThrough) {
+          // Not reported as an error: nothing is wrong with the turn. It goes
+          // round again at once, the wake gate at the top of the next attempt
+          // holds it (visibly) until the machine is fully awake, and the
+          // re-send folds onto the turn's own bubble.
+          this.opts.logger.warn(
+            { chatId, errMsg },
+            'turn died while the machine slept — re-sending it, held until the machine is fully awake',
+          );
+          turnOutcome = 'interrupted';
+          turnError = undefined;
+          const cur = this.chatState.get(chatId);
+          void this.sendInput({
+            chatId,
+            message: prompt,
+            localId: `sleep-retry-${chatId}-${++this.sleepRetrySeq}-${this.opts.now()}`,
+            ...(cur?.turnOrigin ? { origin: cur.turnOrigin } : {}),
+            ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
+          });
+          return false;
+        }
         // What the provider said about the limit, structured — carried through
         // the error boundary rather than re-read out of the sentence. Undefined
         // for a failure that stated no limit (a crash, an abort).
@@ -9837,7 +9875,7 @@ export class Daemon {
         // same wedged state and cannot succeed, so it is skipped. Re-send at
         // once, resuming the session; if that aborts too, restart the turn on
         // a fresh session; only then leave the chat errored.
-        if (err instanceof Error && err.name === 'AbortError' && !sleptThrough) {
+        if (err instanceof Error && err.name === 'AbortError') {
           const aborts = (this.sessionAbortCount.get(chatId) ?? 0) + 1;
           if (aborts <= SESSION_ABORT_RESTARTS) {
             this.sessionAbortCount.set(chatId, aborts);
@@ -10021,11 +10059,10 @@ export class Daemon {
         if (failing) {
           failing.turnRetrying =
             !blockedOnCredit &&
+            failureClass.kind === 'transient' &&
             !isSessionInvalid &&
-            (sleptThrough ||
-              (failureClass.kind === 'transient' &&
-                !(err instanceof Error && err.name === 'AbortError') &&
-                (this.sdkRetryCount.get(chatId) ?? 0) < SDK_RETRY_BACKOFF_MS.length));
+            !(err instanceof Error && err.name === 'AbortError') &&
+            (this.sdkRetryCount.get(chatId) ?? 0) < SDK_RETRY_BACKOFF_MS.length;
         }
         this.emitState(chatId);
         this.opts.logger.error({ chatId, err, code }, 'SDK run errored');
@@ -10047,12 +10084,6 @@ export class Daemon {
           // now`, the credit-return sweep and the next host boot each have
           // the turn to run, and a turn that settles clears it.
           this.parkTurn(chatId, prompt, localId, turnAnchorSeq, 'credit');
-        } else if (!isSessionInvalid && sleptThrough) {
-          this.opts.logger.warn(
-            { chatId, errMsg },
-            'turn died while the machine slept — re-sending once it is properly awake',
-          );
-          this.scheduleAwakeRetry(chatId, prompt, turnAnchorSeq);
         } else if (!isSessionInvalid && failureClass.kind === 'permanent') {
           // A PERMANENT failure (bad request, refused credential, over-long
           // prompt...) fails identically every time: no ladder, the chat
@@ -15050,6 +15081,7 @@ export class Daemon {
       lastError: s.lastError,
       rateLimitResumingAt,
       ...(resumeKind !== undefined ? { resumeKind } : {}),
+      waitingForWakeSince: this.waitingForWakeSince.get(chatId) ?? null,
       // Not gated on a resume time: a limit nobody parked is still a limit, and
       // the block is the whole structured account of it (spec/12).
       limitBlock: this.limitBlocks.get(chatId) ?? null,

@@ -1600,6 +1600,13 @@ export const ChatStateEvent = z
      */
     resumeKind: z.enum(['rate_limit', 'overloaded']).optional(),
     /**
+     * ms-epoch since when this chat's turn has been held because its machine is
+     * in a dark wake (a Mac with its lid shut, waking briefly for maintenance).
+     * The turn runs as soon as the machine is fully awake; `null` when nothing
+     * is held. Optional for back-compat: absent means the host predates it.
+     */
+    waitingForWakeSince: z.number().int().nullable().optional(),
+    /**
      * WHY this chat is blocked, in figures rather than in Anthropic's prose.
      *
      * The prose is genuinely misleading: "You've hit your monthly spend limit"

@@ -188,6 +188,8 @@ export interface ChatRow {
    * when no resume is pending. Optional for back-compat with older hosts.
    */
   resumeKind: 'rate_limit' | 'overloaded' | null;
+  /** Since when the turn has been held for its machine to wake fully; `null` when not held. */
+  waitingForWakeSince?: number | null;
   /**
    * Why the chat is blocked, in figures — which account, which pool, how full,
    * when it clears. `null` when it is not blocked.

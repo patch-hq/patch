@@ -2133,6 +2133,7 @@ export function ChatRoute({
                     it reads as the next thing in the conversation. Up in the
                     chrome it was one more permanent-looking strip among six. */}
                 <RateLimitBubble row={row} />
+                <WakeHoldBubble row={row} />
               </div>
               {showScrollDown ? (
                 <div className="scroll-down-anchor">
@@ -5443,6 +5444,32 @@ function PermissionCard({
  * controls, not prose — turn extra usage on, and choose whether it picks itself
  * back up.
  */
+/**
+ * The turn is held because its machine is in a dark wake (lid shut, waking
+ * briefly for maintenance). Not an error: it runs as soon as the machine is
+ * fully awake, and the notice goes when it does.
+ */
+function WakeHoldBubble({
+  row,
+}: {
+  row: import('../stores/types.js').ChatRow;
+}): JSX.Element | null {
+  const host = usePresenceStore((st) =>
+    (st.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim(),
+  );
+  const since = row.waitingForWakeSince ?? null;
+  if (since === null) return null;
+  return (
+    <div className="msg msg-system rate-limit-bubble" data-testid="wake-hold-bar">
+      <div className="content">
+        <p className="rate-limit-headline">
+          Waiting for <strong>{host}</strong> to wake. This turn runs as soon as it does.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function RateLimitBubble({
   row,
 }: {
