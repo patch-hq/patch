@@ -13,6 +13,7 @@ describe('classifyFailure', () => {
     ['API Error: 529 overloaded_error', 'transient'],
     ['API Error: 429 rate_limit_error', 'transient'],
     ['API Error: 500 api_error', 'transient'],
+    ['[session_crash] error_name=AbortError api_error_status=none cause_name=none', 'transient'],
     ['API Error: 502 bad gateway', 'transient'],
     ['API Error: 408 request timeout', 'transient'],
     ['read ECONNRESET', 'transient'],

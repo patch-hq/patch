@@ -14,6 +14,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
 import { createSleepWatch, type SleepWatch } from '../src/sleepWatch.js';
+import { SLEPT_THROUGH_MESSAGE } from '../src/failureCopy.js';
 
 const silent = pino({ level: 'silent' });
 const SLEPT =
@@ -55,7 +56,7 @@ function makeHost(backend: SdkBackend, sleepWatch: SleepWatch, tag: string) {
     generateChatId: () => `chat-${tag}-${++id}`,
     sleepWatch,
   });
-  return { daemon, folder };
+  return { daemon, folder, events };
 }
 
 describe('a turn the machine slept through', () => {
@@ -74,6 +75,16 @@ describe('a turn the machine slept through', () => {
     expect(calls()).toBe(7);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(calls()).toBe(7);
+    daemon.shutdown();
+  });
+
+  it('tells the chat the machine slept, not what the provider said', async () => {
+    const { backend } = failsThenSucceeds(SLEPT, 1);
+    const { daemon, folder, events } = makeHost(backend, fakeWatch({ v: 10 * 60_000 }), 'said');
+    await daemon.spawnChat({ folder, prompt: 'x' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const err = events.find((e) => e.type === 'chat.error');
+    expect(err?.type === 'chat.error' && err.error.message).toBe(SLEPT_THROUGH_MESSAGE);
     daemon.shutdown();
   });
 

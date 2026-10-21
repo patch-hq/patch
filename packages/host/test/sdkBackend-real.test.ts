@@ -1452,6 +1452,18 @@ describe('createRealSdkBackend — an error result is a failed turn, not a quiet
     ).rejects.toThrow(/tool crashed; and again/);
   });
 
+  it('drops the blank entry Claude Code pads a session crash with', async () => {
+    const err = await runWith({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      errors: ['', '[session_crash] error_name=AbortError api_error_status=none cause_name=none'],
+    }).catch((e: unknown) => e as Error);
+    expect(err.message).toBe(
+      'Claude Code returned an error result: [session_crash] error_name=AbortError api_error_status=none cause_name=none',
+    );
+  });
+
   it('fails on an error_* subtype even when is_error is absent', async () => {
     await expect(runWith({ type: 'result', subtype: 'error_max_turns' })).rejects.toThrow(
       /error_max_turns/,

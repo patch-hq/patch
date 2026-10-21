@@ -1496,9 +1496,13 @@ export function resultErrorText(msg: unknown): string | undefined {
   // Prefer the specific text over the subtype label: "You've hit your monthly
   // spend limit · resets 8pm" is what the rate-limit and account-failover
   // predicates match on, and what a person needs to read.
+  // Claude Code pads `errors` with an empty string beside a session-crash
+  // report, which joined into "; [session_crash] ..." — only the entries that
+  // say something are kept.
   const errors = m['errors'];
-  if (Array.isArray(errors) && errors.length > 0) {
-    return errors.map((e) => String(e)).join('; ');
+  if (Array.isArray(errors)) {
+    const said = errors.map((e) => String(e).trim()).filter((e) => e.length > 0);
+    if (said.length > 0) return said.join('; ');
   }
   const result = m['result'];
   if (typeof result === 'string' && result.trim().length > 0) return result;

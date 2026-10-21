@@ -201,6 +201,7 @@ import {
   statedLimitOf,
 } from './limitFailure.js';
 import { classifyFailure, backoffMs as overloadBackoffMs } from './errorClass.js';
+import { describeTurnFailure } from './failureCopy.js';
 import { CLAUDE_BACKEND_ID } from './host.js';
 import {
   applyFindReplace,
@@ -9972,11 +9973,17 @@ export class Daemon {
                 ...(block?.accountLabel !== undefined ? { accountLabel: block.accountLabel } : {}),
                 ...(block?.resetsAt !== undefined ? { resetsAt: block.resetsAt } : {}),
               });
+        // `errMsg` stays the provider's words for every predicate above; what
+        // the bubble and the job's run row show is said in plain terms — a
+        // slept-through turn is owed, not failed, and a session crash is
+        // named by its error rather than its field dump.
         const reportedMsg =
           limitWords ??
           (hostOutOfCredit
             ? `Usage limit reached — every account on this host is out of credit. The turn also failed with: ${errMsg}`
-            : errMsg);
+            : describeTurnFailure(errMsg, {
+                sleptThrough: sleptThrough && !isSessionInvalid && !blockedOnCredit,
+              }));
         turnError = { code, message: reportedMsg };
         const seq = this.bumpSeq(chatId);
         const errorEvent: ChatErrorEvent = {

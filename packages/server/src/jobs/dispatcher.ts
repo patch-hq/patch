@@ -587,6 +587,21 @@ export class JobDispatcher {
    * with no error anywhere their owner would look.
    */
   private readonly lastEnsureEntry = new Map<string, PendingEntry>();
+
+  /** The newest run row of `jobId` that landed a fire in `chatId`, while the log's tail still holds it. */
+  private fireRowFor(jobId: string, chatId: string): RunLogEntry | null {
+    try {
+      return (
+        this.logs
+          .readRuns(jobId, 50)
+          .find((r) => r.action?.chatId === chatId && r.status !== 'chat-error') ?? null
+      );
+    } catch (err) {
+      this.logger.warn({ jobId, chatId, err }, 'jobs: could not read the run log for a failed chat');
+      return null;
+    }
+  }
+
   /** Chats already retried once, so a chat that stays broken cannot loop. */
   private readonly sessionRetried = new Set<string>();
   /** Cap on `lastEnsureEntry`, which would otherwise grow with every chat. */
@@ -975,11 +990,16 @@ export class JobDispatcher {
       // and dropping the work because the attribution is missing would be the
       // very failure this exists to stop.
       if (linkedJobId !== null) {
+        // The fire that made this chat wrote its own `ok` row when the spawn
+        // landed, so its trigger and action are read back off that rather
+        // than guessed — a 03:00 cron fire was being logged as `manual`.
+        const own = this.fireRowFor(linkedJobId, chatId);
         attributions.push({
           jobId: linkedJobId,
-          trigger: 'manual',
-          actionType: 'spawn',
-          hostId: fromHostId,
+          trigger: own?.trigger ?? 'manual',
+          actionType: own?.action?.type ?? 'spawn',
+          hostId: fromHostId ?? own?.action?.hostId ?? null,
+          ...(own?.action?.folder !== undefined ? { folder: own.action.folder } : {}),
         });
       }
     }
