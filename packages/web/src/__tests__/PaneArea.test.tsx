@@ -61,6 +61,19 @@ beforeEach(() => {
   useChatStore.getState()._reset();
 });
 
+const settingsMounts = vi.hoisted(() => ({ count: 0 }));
+vi.mock('../routes/SettingsRoute.js', async () => {
+  const React = await import('react');
+  return {
+    SettingsRoute: () => {
+      React.useEffect(() => {
+        settingsMounts.count += 1;
+      }, []);
+      return <div data-testid="settings-stub" />;
+    },
+  };
+});
+
 const openTabInNewWindow = vi.hoisted(() => vi.fn());
 vi.mock('../lib/newWindow.js', async (orig) => ({
   ...(await orig<typeof import('../lib/newWindow.js')>()),
@@ -266,5 +279,33 @@ describe('PaneArea — regressions found using it', () => {
       expect(openTabInNewWindow).not.toHaveBeenCalled();
       expect((useLayoutStore.getState().root as LeafPane).tabs).toHaveLength(2);
     });
+  });
+});
+
+describe('PaneArea — moving a tab keeps it mounted', () => {
+  it('moving a tab to another pane or splitting it out does not remount its content', () => {
+    seedChats(['c1']);
+    settingsMounts.count = 0;
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' }, { placement: 'tab' });
+    useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    const first = useLayoutStore.getState().root as LeafPane;
+    const settingsTab = first.tabs.find((t) => t.descriptor.kind === 'page')!;
+    renderPanes();
+    expect(settingsMounts.count).toBe(1);
+
+    act(() => useLayoutStore.getState().splitWithTab(first.id, settingsTab.id, first.id, 'right'));
+    expect(screen.getByTestId('settings-stub')).toBeInTheDocument();
+    const split = useLayoutStore.getState().root as SplitPane;
+    const rightId = split.children[1]!.pane.id;
+    expect(screen.getByTestId(`pane-content-${rightId}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
+    expect(settingsMounts.count).toBe(1);
+
+    act(() => useLayoutStore.getState().moveTab(rightId, settingsTab.id, first.id, 0));
+    expect(screen.getByTestId(`pane-content-${first.id}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
+    expect(settingsMounts.count).toBe(1);
   });
 });
