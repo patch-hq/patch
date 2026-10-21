@@ -70,6 +70,7 @@ import {
   TabNotFoundError,
   type BrowserProfile,
   TabInHandoffError,
+  AppBrowserUnavailableError,
   UserDrivingError,
   UserHandedBackError,
 } from './browser.js';
@@ -748,7 +749,7 @@ const BrowserViewportBody = z
 
 /** The one error shape every `/internal/browser/*` route maps the same way. */
 function sendBrowserError(reply: FastifyReply, err: unknown): FastifyReply {
-  if (err instanceof BrowserNotInstalledError) {
+  if (err instanceof BrowserNotInstalledError || err instanceof AppBrowserUnavailableError) {
     return reply.code(503).send({ error: err.code, message: err.message });
   }
   if (err instanceof TabNotFoundError || err instanceof RefNotFoundError) {

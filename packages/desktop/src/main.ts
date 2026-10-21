@@ -61,6 +61,7 @@ import {
 import { buildContextMenuTemplate } from './context-menu';
 import { buildAppMenuTemplate } from './app-menu';
 import { InAppBrowser } from './in-app-browser';
+import { AgentBrowser, agentBrowserEndpointFile } from './agent-browser';
 import { PANEL_WIDTH_FRACTION } from './in-app-browser-layout';
 import { routeLink, routeWindowOpen } from './link-policy';
 import { parseWindowSize, type ChildWindowSize } from './window-size';
@@ -160,6 +161,16 @@ let trayPopover: BrowserWindow | null = null;
 let popoverHiddenAt = 0;
 let voiceOverlay: BrowserWindow | null = null;
 let tray: Tray | null = null;
+/** The agent's browser, when a host on this machine uses it (agent-browser.ts). */
+let agentBrowser: AgentBrowser | null = null;
+
+/** What a host starts to bring this app up: the .app bundle on a Mac, the binary elsewhere. */
+function appLaunchPath(): string {
+  if (process.platform === 'darwin' && app.isPackaged) {
+    return join(process.execPath, '..', '..', '..');
+  }
+  return process.execPath;
+}
 
 // The embedded web panel (spec/14 § Links and the web panel), bound to the main
 // window. Lazily created the first time PATCH asks to show a page, so a session
@@ -1109,6 +1120,33 @@ export function raiseMainWindow(): void {
 }
 
 function registerIpc(): void {
+  // spec/02 § Browser — In the Patch app: a large view of an agent tab shows
+  // the tab itself, laid over the view's place in the window.
+  ipcMain.handle(
+    'patch:agent-browser:owns',
+    (_e, targetId: unknown) =>
+      typeof targetId === 'string' && agentBrowser !== null && agentBrowser.owns(targetId),
+  );
+  ipcMain.on('patch:agent-browser:show', (e, payload: unknown) => {
+    const p = payload as {
+      targetId?: unknown;
+      rect?: { x: number; y: number; width: number; height: number };
+    };
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!agentBrowser || !win || typeof p.targetId !== 'string' || !p.rect) return;
+    // The page measures in CSS pixels; the window lays views out in its own.
+    const z = e.sender.getZoomFactor();
+    agentBrowser.show(p.targetId, win, {
+      x: p.rect.x * z,
+      y: p.rect.y * z,
+      width: p.rect.width * z,
+      height: p.rect.height * z,
+    });
+  });
+  ipcMain.on('patch:agent-browser:hide', (_e, payload: unknown) => {
+    const targetId = (payload as { targetId?: unknown }).targetId;
+    if (agentBrowser && typeof targetId === 'string') agentBrowser.hide(targetId);
+  });
   panelWidthFraction = loadPanelWidthFraction();
   ipcMain.on('patch:request-raise', () => {
     raiseMainWindow();
@@ -1718,6 +1756,10 @@ function webUrlForHelp(): string | undefined {
 }
 
 export function bootstrap(): void {
+  // The agent's tabs keep drawing while no window shows them, so the host's
+  // live view and screenshots of a hidden tab work (agent-browser.ts).
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
   // One process owns the profile. A second copy cannot open Chromium's locked
   // localStorage database and otherwise misleadingly renders the pairing page.
   if (!app.requestSingleInstanceLock()) {
@@ -1779,6 +1821,20 @@ export function bootstrap(): void {
     // packaged app while working in a browser. NO FALLBACK: anything else, and
     // anything from another origin, is refused (permissions.ts).
     configurePermissions(session.defaultSession, SERVER_URL);
+    agentBrowser = new AgentBrowser({
+      endpointFile: agentBrowserEndpointFile(),
+      appPath: appLaunchPath(),
+      version: app.getVersion(),
+      log: (message, extra) => console.warn(`[patch] ${message}`, extra ?? ''),
+      onUserInput: (win, targetId) => {
+        if (!win.isDestroyed()) win.webContents.send('patch:agent-browser:input', { targetId });
+      },
+    });
+    // NO FALLBACK: a browser that cannot listen says so; the host then fails loudly too.
+    await agentBrowser.start().catch((err: unknown) => {
+      console.error('[patch] agent browser: could not start', err);
+      agentBrowser = null;
+    });
     mainWindow = createMainWindow();
     tray = createTray();
     registerGlobalHotkeys();
@@ -1798,6 +1854,13 @@ export function bootstrap(): void {
   });
 
   app.on('will-quit', (e) => {
+    if (agentBrowser) {
+      e.preventDefault();
+      const browser = agentBrowser;
+      agentBrowser = null;
+      void browser.stop().finally(() => app.quit());
+      return;
+    }
     globalShortcut.unregisterAll();
     systemAudio.stop();
     stopMicWatch?.();

@@ -59,6 +59,19 @@ export class BrowserNotInstalledError extends Error {
   }
 }
 
+/**
+ * spec/02 § Browser — In the Patch app. The app is installed here, so the
+ * agent's browser lives in it, and it could not be reached. NO FALLBACK: never
+ * a quiet switch to a separate Chromium.
+ */
+export class AppBrowserUnavailableError extends Error {
+  readonly code = 'app_browser_unavailable' as const;
+  constructor(detail: string) {
+    super(`the agent's browser is in the Patch app on this machine, and ${detail}`);
+    this.name = 'AppBrowserUnavailableError';
+  }
+}
+
 export class TabNotFoundError extends Error {
   readonly code = 'tab_not_found' as const;
   constructor(tabId: string) {
@@ -327,6 +340,8 @@ interface Tab {
   cdp?: CDPSession;
   /** When the agent opened it (ms epoch): the live view's timer. */
   openedAt: number;
+  /** In the Patch app: the tab's DevTools target there, so a large view can show it as itself. */
+  appTarget?: string;
   /** Who is using it: the agent, or the user after Take over. */
   driver: 'agent' | 'user';
   /** Agent calls waiting for the user to hand the tab back. */
@@ -389,6 +404,18 @@ export interface BrowserManagerOptions {
   webBotAuth?: WebBotAuthConfig;
   /** Called when a chat's browser activity changes (an action starts or ends, a tab opens or closes). */
   onActivity?: (chatId: string) => void;
+  /**
+   * spec/02 § Browser — In the Patch app: the Patch app on this machine hosts
+   * the browser. Both profiles are its: the signed-in one is the app's own, a
+   * throwaway one is an in-memory context there. No Chromium or Xvfb of this
+   * host's own is started.
+   */
+  appBrowser?: AppBrowserLink;
+}
+
+/** Where the Patch app's browser is, starting the app when it is not running. */
+export interface AppBrowserLink {
+  endpoint(): Promise<string>;
 }
 
 /** What a chat's surfaces show: is the agent driving a browser for it, and on which tabs. */
@@ -404,6 +431,7 @@ export interface ChatBrowserStatus {
     handedOff: boolean;
     driver: 'agent' | 'user';
     cursor?: { x: number; y: number; at: number };
+    appTarget?: string;
     openedAt: number;
   }>;
   /** When the oldest of these tabs was opened. */
@@ -599,6 +627,11 @@ export class BrowserManager {
   private xvfb: ChildProcess | null = null;
   private display: string | undefined;
   private playwrightMod: typeof import('playwright') | null = null;
+  /** The Patch app's browser, while connected (`appBrowser`). */
+  private appConnection: Browser | null = null;
+  private appConnecting: Promise<Browser> | null = null;
+  /** A throwaway context's route in the app: a context's own proxy, not a launch option. */
+  private appThrowawayProxy: { server: string } | undefined;
 
   /** Tabs the user has taken over: the agent's tools refuse them until the hand-off ends. */
   private readonly handoffTabs = new Set<string>();
@@ -662,6 +695,7 @@ export class BrowserManager {
           handedOff,
           driver: t.driver,
           ...(t.cursor ? { cursor: { ...t.cursor } } : {}),
+          ...(t.appTarget ? { appTarget: t.appTarget } : {}),
           openedAt: t.openedAt,
         };
       });
@@ -839,6 +873,7 @@ export class BrowserManager {
    * the same clear way, never half-launches.
    */
   private async checkChromiumInstalled(): Promise<void> {
+    if (this.opts.appBrowser) return;
     const { chromium } = await this.playwright();
     const execPath = chromium.executablePath();
     if (!existsSync(execPath)) {
@@ -948,6 +983,58 @@ export class BrowserManager {
     return run;
   }
 
+  /** The Patch app's browser, connected once and shared by both profiles. */
+  private connectApp(): Promise<Browser> {
+    if (this.appConnection?.isConnected()) return Promise.resolve(this.appConnection);
+    if (this.appConnecting) return this.appConnecting;
+    const link = this.opts.appBrowser!;
+    this.appConnecting = (async () => {
+      let endpoint: string;
+      try {
+        endpoint = await link.endpoint();
+      } catch (err) {
+        throw new AppBrowserUnavailableError(err instanceof Error ? err.message : String(err));
+      }
+      const { chromium } = await this.playwright();
+      const browser = await chromium.connectOverCDP(endpoint).catch((err: unknown) => {
+        throw new AppBrowserUnavailableError(
+          `connecting to it failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+      browser.on('disconnected', () => {
+        if (this.appConnection !== browser) return;
+        this.appConnection = null;
+        this.loggedInContext = null;
+        this.loggedInContextProxyKey = null;
+        this.ephemeralBrowser = null;
+        this.ephemeralBrowserProxyKey = null;
+        this.markContextDead('logged-in', undefined, browser);
+        this.markContextDead('logged-out', undefined, browser);
+      });
+      this.appConnection = browser;
+      return browser;
+    })().finally(() => {
+      this.appConnecting = null;
+    });
+    return this.appConnecting;
+  }
+
+  /** In the app, the tab's DevTools target id, for the large view to show it as itself. */
+  private async learnAppTarget(tab: Tab, page: Page): Promise<void> {
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const { targetInfo } = (await cdp.send('Target.getTargetInfo')) as {
+        targetInfo: { targetId: string };
+      };
+      if (tab.page === page) {
+        tab.appTarget = targetInfo.targetId;
+        this.notify(tab.ownerChatId);
+      }
+    } finally {
+      await cdp.detach().catch(() => undefined);
+    }
+  }
+
   private getLoggedInContext(routeThrough?: RouteThrough): Promise<BrowserContext> {
     return this.serialised('logged-in', () => this.launchLoggedInContext(routeThrough));
   }
@@ -960,6 +1047,30 @@ export class BrowserManager {
       this.loggedInContext = null;
     }
     if (this.loggedInContext) return this.loggedInContext;
+    if (this.opts.appBrowser) {
+      const browser = await this.connectApp();
+      const context = browser.contexts()[0];
+      if (!context) throw new AppBrowserUnavailableError('it offered no signed-in profile');
+      // The app is not launched with a proxy: its profile is re-pointed instead.
+      const session = await browser.newBrowserCDPSession();
+      await session.send(
+        'Patch.setProxy' as never,
+        (launchOpt ? { proxyServer: launchOpt.server } : {}) as never,
+      );
+      await session.detach();
+      await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
+      await this.installSigning(context);
+      context.on('close', () => {
+        if (this.loggedInContext === context) {
+          this.loggedInContext = null;
+          this.loggedInContextProxyKey = null;
+        }
+        this.markContextDead('logged-in', context);
+      });
+      this.loggedInContext = context;
+      this.loggedInContextProxyKey = key;
+      return context;
+    }
     await this.checkChromiumInstalled();
     const { chromium } = await this.playwright();
     const userDataDir = join(this.opts.root, 'profile');
@@ -991,6 +1102,18 @@ export class BrowserManager {
 
   private async launchEphemeralBrowser(routeThrough?: RouteThrough): Promise<Browser> {
     const { key, launchOpt } = await this.proxyFor(routeThrough);
+    if (this.opts.appBrowser) {
+      // One app browser for both profiles: a new route closes the throwaway
+      // tabs, never the browser (that would take the signed-in tabs with it).
+      if (this.ephemeralBrowser && this.ephemeralBrowserProxyKey !== key) {
+        await this.closeTabsFor('logged-out');
+      }
+      const browser = await this.connectApp();
+      this.appThrowawayProxy = launchOpt;
+      this.ephemeralBrowser = browser;
+      this.ephemeralBrowserProxyKey = key;
+      return browser;
+    }
     if (this.ephemeralBrowser && this.ephemeralBrowserProxyKey !== key) {
       await this.closeTabsFor('logged-out');
       await this.ephemeralBrowser.close();
@@ -1216,7 +1339,9 @@ export class BrowserManager {
   }
 
   private async newThrowawayContext(browser: Browser): Promise<BrowserContext> {
-    const context = await browser.newContext();
+    const context = await browser.newContext(
+      this.opts.appBrowser && this.appThrowawayProxy ? { proxy: this.appThrowawayProxy } : {},
+    );
     await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
     await this.installSigning(context);
     return context;
@@ -1366,6 +1491,12 @@ export class BrowserManager {
       }
       tab.fileChooser = undefined;
     });
+    if (this.opts.appBrowser) {
+      tab.appTarget = undefined;
+      this.learnAppTarget(tab, page).catch((err: unknown) => {
+        this.opts.logger.warn({ err, tabId: tab.tabId }, 'browser: could not learn the app tab id');
+      });
+    }
   }
 
   /** A target=_blank link or window.open: a tab of its own, owned by the same chat. */
@@ -2916,6 +3047,12 @@ export class BrowserManager {
    */
   async clearLoggedInProfile(): Promise<void> {
     await this.closeTabsFor('logged-in');
+    if (this.opts.appBrowser) {
+      // The profile is the app's: clear what it holds rather than a directory here.
+      const context = await this.getLoggedInContext();
+      await context.clearCookies();
+      return;
+    }
     if (this.loggedInContext) {
       await this.loggedInContext.close();
       this.loggedInContext = null;
@@ -2930,6 +3067,14 @@ export class BrowserManager {
       await this.close(tabId).catch((err: unknown) => {
         this.opts.logger.warn({ tabId, err }, 'browser: error closing tab on dispose');
       });
+    }
+    if (this.appConnection) {
+      // Closes what this host opened in the app; the app itself keeps running.
+      const app = this.appConnection;
+      this.appConnection = null;
+      this.loggedInContext = null;
+      this.ephemeralBrowser = null;
+      await app.close().catch(() => undefined);
     }
     if (this.loggedInContext) {
       await this.loggedInContext.close().catch(() => undefined);

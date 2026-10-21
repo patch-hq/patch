@@ -478,6 +478,46 @@ untouched. Settings → Computer use has the host-wide Stop, which does the same
 every chat. The user can also take any tab over at any time through the hand-off
 below.
 
+### In the Patch app
+
+When the Patch app is installed on the host's own machine, the agent's browser
+lives in the app instead of in a Chromium of the host's own. The app is a real
+browser; its tabs are the agent's tabs, and a large view of one in that app's
+window (`14-design-web.md` § Main chat panel — Browser) shows the tab itself
+laid over the view's place — typing, selection, scrolling, the context menu,
+copy and paste are the browser's own — rather than a picture of it.
+
+- **The bridge.** Electron has no browser-wide DevTools endpoint that is not an
+  open, unauthenticated port, so the app serves one: a loopback WebSocket whose
+  path holds a 32-byte random token, written with the app's path and pid to
+  `~/.patch/agent-browser.json` (mode 600). The host connects Playwright to it
+  (`connectOverCDP`) and drives tabs with the same code as anywhere else, so
+  every `patch_browser_*` tool, the live view and hand-off work unchanged.
+  Page sessions are relayed to each tab's own debugger; the browser-level
+  commands Playwright sends — targets, contexts, cookies, permissions,
+  downloads — are answered from Electron's own APIs. A command the bridge does
+  not answer fails naming it.
+- **Profiles.** The signed-in profile is the app's own persistent partition,
+  shared by every chat; a throwaway profile is an in-memory context of its own.
+  Route through re-points the signed-in profile's proxy and gives a throwaway
+  context its own. The user agent carries no app or Electron token.
+- **Tabs.** A tab no view shows lives in a window that is open but never seen
+  (borderless, transparent, off every screen, taking no input), so its page
+  keeps drawing for screenshots and the live view; a large view moves it into
+  its own window at the view's place and back when it closes, and a window
+  that closes or reloads gives its tabs back. A link that opens a new tab, or
+  `window.open`, becomes a tab of its own with its opener kept. Downloads go
+  where the host asks. The host learns each tab's target id and reports it in
+  the status (`appTarget`), which is how the app's own window knows the tab is
+  its to show. The user working a shown tab while the agent is not acting
+  takes it over, as in the live view.
+- **Starting.** The host decides at start: the endpoint file exists (the app
+  has run here) means the app's browser. Not running, the host starts it in
+  the background (`open -g -j` on a Mac) and waits up to 30 s. NO FALLBACK:
+  an app that does not come up fails the browser call
+  (`app_browser_unavailable`, 503) rather than reverting to a separate Chromium.
+  The host's disconnecting closes what it opened; the app keeps running.
+
 ### Hand-off
 
 The agent can drive the browser but must not type the user's passwords, pass

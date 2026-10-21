@@ -132,6 +132,7 @@ import {
   type ReadResult,
   type StorageState,
   type TabInfo,
+  type AppBrowserLink,
 } from './browser.js';
 import {
   persistPendingDecision,
@@ -734,6 +735,8 @@ export interface HostOptions {
   browser?: BrowserManager;
   /** Deployment signing stays on the paired server; the host receives only this RPC facade. */
   webBotAuth?: WebBotAuthConfig;
+  /** spec/02 § Browser — In the Patch app: the app on this machine hosts the agent's browser. */
+  appBrowser?: AppBrowserLink;
   /**
    * spec/02 § Browser — Route through: resolves THIS host's current routing
    * target (if any) into what `BrowserManager.open` needs — whether that
@@ -2463,6 +2466,7 @@ export class Daemon {
         root: join(dirname(dirname(dirname(options.metaStore.pathFor('_')))), 'browser'),
         logger: options.logger.child({ component: 'browser' }),
         ...(options.webBotAuth ? { webBotAuth: options.webBotAuth } : {}),
+        ...(options.appBrowser ? { appBrowser: options.appBrowser } : {}),
         onActivity: (chatId) => this.emitBrowserStatus(chatId),
       });
     this.browserHandoff_ = new BrowserHandoff({
@@ -3709,12 +3713,13 @@ export class Daemon {
       chatId,
       active: st.active,
       ...(st.action ? { action: st.action } : {}),
-      tabs: st.tabs.map(({ tabId, url, handedOff, driver, cursor }) => ({
+      tabs: st.tabs.map(({ tabId, url, handedOff, driver, cursor, appTarget }) => ({
         tabId,
         url,
         handedOff,
         ...(driver === 'user' ? { driver } : {}),
         ...(cursor ? { cursor } : {}),
+        ...(appTarget ? { appTarget } : {}),
       })),
       ...(st.openedAt !== undefined ? { since: st.openedAt } : {}),
     });

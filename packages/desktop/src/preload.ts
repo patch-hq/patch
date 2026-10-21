@@ -77,6 +77,25 @@ contextBridge.exposeInMainWorld('patch', {
   // window" and the updater panel die together, silently. `window-chrome.test.ts`
   // is what keeps the two copies in agreement.
   overlayTitleBar: process.platform === 'darwin',
+  // spec/02 § Browser — In the Patch app. The agent's tabs, when the host on
+  // this machine keeps them in this app: a large view shows the tab itself at
+  // its own place in the window instead of a picture of it.
+  agentBrowser: {
+    owns(targetId: string): Promise<boolean> {
+      return ipcRenderer.invoke('patch:agent-browser:owns', targetId) as Promise<boolean>;
+    },
+    show(targetId: string, rect: { x: number; y: number; width: number; height: number }): void {
+      ipcRenderer.send('patch:agent-browser:show', { targetId, rect });
+    },
+    hide(targetId: string): void {
+      ipcRenderer.send('patch:agent-browser:hide', { targetId });
+    },
+    onInput(cb: (e: { targetId: string }) => void): () => void {
+      const handler = (_: unknown, payload: { targetId: string }): void => cb(payload);
+      ipcRenderer.on('patch:agent-browser:input', handler);
+      return () => ipcRenderer.removeListener('patch:agent-browser:input', handler);
+    },
+  },
   notify(payload: NotifyPayload): void {
     ipcRenderer.send('patch:notify', payload);
   },

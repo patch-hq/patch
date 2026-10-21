@@ -473,3 +473,115 @@ describe('browser view helpers', () => {
     ).toBe('Looking up trains');
   });
 });
+
+describe('the large view in the Patch app', () => {
+  beforeEach(() => {
+    useBrowserHandoffStore.getState().reset();
+    useChatStore.getState()._reset();
+  });
+  afterEach(() => {
+    setActiveWs(null);
+    delete (window as unknown as { patch?: unknown }).patch;
+  });
+
+  function fakeApp() {
+    const calls: { show: unknown[]; hide: string[] } = { show: [], hide: [] };
+    let input: ((e: { targetId: string }) => void) | null = null;
+    (window as unknown as { patch: unknown }).patch = {
+      agentBrowser: {
+        owns: async (id: string) => id === 'T1',
+        show: (id: string, rect: unknown) => calls.show.push([id, rect]),
+        hide: (id: string) => calls.hide.push(id),
+        onInput: (cb: (e: { targetId: string }) => void) => {
+          input = cb;
+          return () => (input = null);
+        },
+      },
+    };
+    return { calls, press: (id: string) => input?.({ targetId: id }) };
+  }
+
+  it('shows the tab itself over the stage, and the user working it takes it over unless the agent is acting', async () => {
+    const sent = fakeWs();
+    const app = fakeApp();
+    act(() => {
+      useBrowserHandoffStore.getState().applyStatus(
+        statusEvent({
+          tabs: [{ tabId: 't1', url: 'https://www.gwr.com/', handedOff: false, appTarget: 'T1' }],
+        }),
+      );
+      useBrowserHandoffStore.getState().applyFrame('c1', frame);
+    });
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 400,
+      y: 48,
+      width: 800,
+      height: 700,
+      left: 400,
+      top: 48,
+      right: 1200,
+      bottom: 748,
+    } as DOMRect);
+    const { unmount } = render(<BrowserView chatId="c1" layout="pane" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(app.calls.show[0]).toEqual(['T1', { x: 400, y: 48, width: 800, height: 700 }]);
+    rect.mockRestore();
+    // No picture and no keyboard field of ours: the tab takes input itself.
+    expect(screen.queryByTestId('browser-handoff-frame')).toBeNull();
+    expect(screen.queryByTestId('browser-handoff-keys')).toBeNull();
+    // The host is not asked to lay the page out for a view it is not drawing.
+    const watches = sent.filter((e) => e.type === 'patch.browser_view.watch') as Array<
+      Extract<WireEvent, { type: 'patch.browser_view.watch' }>
+    >;
+    expect(watches.every((w) => w.viewport === undefined)).toBe(true);
+
+    // The agent acting: its own clicks are not the user's.
+    act(() =>
+      useBrowserHandoffStore.getState().applyStatus(
+        statusEvent({
+          active: true,
+          tabs: [{ tabId: 't1', url: 'https://www.gwr.com/', handedOff: false, appTarget: 'T1' }],
+        }),
+      ),
+    );
+    act(() => app.press('T1'));
+    expect(sent.filter((e) => e.type === 'patch.browser_view.drive')).toHaveLength(0);
+    act(() =>
+      useBrowserHandoffStore.getState().applyStatus(
+        statusEvent({
+          active: false,
+          tabs: [{ tabId: 't1', url: 'https://www.gwr.com/', handedOff: false, appTarget: 'T1' }],
+        }),
+      ),
+    );
+    act(() => app.press('T1'));
+    expect(sent.filter((e) => e.type === 'patch.browser_view.drive')).toEqual([
+      { type: 'patch.browser_view.drive', chatId: 'c1', tabId: 't1', driver: 'user' },
+    ]);
+
+    unmount();
+    expect(app.calls.hide).toContain('T1');
+  });
+
+  it('shows a picture of a tab that lives elsewhere', async () => {
+    fakeWs();
+    fakeApp();
+    act(() => {
+      useBrowserHandoffStore.getState().applyStatus(
+        statusEvent({
+          tabs: [
+            { tabId: 't1', url: 'https://www.gwr.com/', handedOff: false, appTarget: 'OTHER' },
+          ],
+        }),
+      );
+      useBrowserHandoffStore.getState().applyFrame('c1', frame);
+    });
+    render(<BrowserView chatId="c1" layout="pane" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('browser-handoff-frame')).toBeTruthy();
+  });
+});

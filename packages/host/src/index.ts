@@ -192,6 +192,7 @@ import { HostStateStore } from './hostState.js';
 import { BrowserTunnelClient, BrowserTunnelRelay } from './browser-tunnel.js';
 import { AudioRelayBridge } from './audio-relay-bridge.js';
 import { webBotAuthFromServer } from './webBotAuth.js';
+import { appBrowserLink } from './appBrowser.js';
 import {
   browserToolsEnabledOf,
   enabledMcpServers,
@@ -4027,6 +4028,16 @@ async function startHost(
       alwaysAllowed: () => hostStateStore.get().computerUseAlwaysAllowed === true,
       setAlwaysAllowed: () => hostStateStore.update({ computerUseAlwaysAllowed: true }),
     },
+    // spec/02 § Browser — In the Patch app: when the app is installed on this
+    // machine, the agent's browser lives in it.
+    ...(() => {
+      const link = appBrowserLink({
+        home: homedir(),
+        logger: logger.child({ component: 'app-browser' }),
+      });
+      if (link) logger.info('browser: the agent browser lives in the Patch app on this machine');
+      return link ? { appBrowser: link } : {};
+    })(),
     // spec/02 § Browser — Route through.
     browserRouting: {
       target: () => browserRouteThrough,

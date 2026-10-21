@@ -4279,6 +4279,11 @@ export const PatchBrowserViewStatusEvent = z
           handedOff: z.boolean(),
           /** Who is using the tab: the agent, or the user after Take over. Absent: the agent. */
           driver: z.enum(['agent', 'user']).optional(),
+          /**
+           * The tab's DevTools target in the Patch app, when the host on that
+           * app's machine keeps its browser there: the app shows the tab itself.
+           */
+          appTarget: z.string().min(1).optional(),
           /** Where the agent last pointed, in viewport CSS pixels, and when (ms epoch). */
           cursor: z
             .object({ x: z.number(), y: z.number(), at: z.number().int().nonnegative() })

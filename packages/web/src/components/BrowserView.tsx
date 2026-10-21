@@ -60,6 +60,7 @@ import {
 } from '../lib/browserView.js';
 import { closeBrowserLarge } from '../lib/browserLayout.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 
 /** A press that travels further than this on a touch screen scrolls instead of clicking. */
@@ -323,6 +324,38 @@ export function SignInCard({
   );
 }
 
+// ---- The tab itself, in the Patch app ----------------------------------------
+
+/**
+ * spec/02 § Browser — In the Patch app: whether this window's app holds the
+ * tab, so the large view shows the tab itself rather than a picture of it.
+ */
+function useAppTab(appTarget: string | undefined): boolean {
+  const [owned, setOwned] = useState(false);
+  useEffect(() => {
+    const bridge = getDesktopBridge()?.agentBrowser;
+    if (!bridge || !appTarget) {
+      setOwned(false);
+      return;
+    }
+    let live = true;
+    bridge.owns(appTarget).then(
+      (o) => {
+        if (live) setOwned(o);
+      },
+      (err: unknown) => {
+        // The picture still works; say why the tab itself is not shown.
+        console.error('browser view: the app could not say whether it holds this tab', err);
+        if (live) setOwned(false);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [appTarget]);
+  return owned;
+}
+
 // ---- The large view -----------------------------------------------------------
 
 interface Ripple {
@@ -352,8 +385,11 @@ export function BrowserView({
   const shown = frame && frame.tabId === tabId ? frame : undefined;
   const v2 = (frame?.inputVersion ?? 0) >= 2;
   const state = driveState(handoff, status, tabId);
-  const canInput = Boolean(tabId) && (v2 || Boolean(handoff));
   const tabInfo = status?.tabs.find((t) => t.tabId === tabId);
+  const appTarget = tabInfo?.appTarget;
+  // The tab itself is laid over the stage: it takes the user's input directly.
+  const native = useAppTab(appTarget);
+  const canInput = !native && Boolean(tabId) && (v2 || Boolean(handoff));
 
   const stageRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -382,7 +418,8 @@ export function BrowserView({
     const t = setTimeout(() => setViewport(next), 200);
     return () => clearTimeout(t);
   }, [stage.width, stage.height]);
-  useBrowserWatch(chatId, true, tabId, viewport);
+  // A tab shown as itself sizes to its own view; the host only needs its address and state.
+  useBrowserWatch(chatId, true, tabId, native ? null : viewport);
 
   // Typing goes to the page from the moment the view opens on a tab the user may use.
   useEffect(() => {
@@ -653,8 +690,55 @@ export function BrowserView({
     },
   ];
 
+  // Lay the tab itself over the stage, following it as panes move and resize.
+  // A menu of ours would open underneath it, so it steps aside while one is open.
+  const menuOpen = tabsMenu.anchor !== null;
+  useEffect(() => {
+    const bridge = getDesktopBridge()?.agentBrowser;
+    const el = stageRef.current;
+    if (!native || !bridge || !appTarget || !el) return;
+    if (menuOpen) {
+      bridge.hide(appTarget);
+      return;
+    }
+    let last = '';
+    const place = (): void => {
+      const r = el.getBoundingClientRect();
+      const key = `${r.x},${r.y},${r.width},${r.height}`;
+      if (key === last || r.width < 1 || r.height < 1) return;
+      last = key;
+      bridge.show(appTarget, { x: r.x, y: r.y, width: r.width, height: r.height });
+    };
+    place();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
+    ro?.observe(el);
+    const poll = setInterval(place, 250);
+    window.addEventListener('resize', place);
+    return () => {
+      ro?.disconnect();
+      clearInterval(poll);
+      window.removeEventListener('resize', place);
+      bridge.hide(appTarget);
+    };
+  }, [native, appTarget, menuOpen]);
+
+  // The user working the tab itself takes it over — but not the agent's own
+  // clicks, which the app sees the same way: only while the agent is not acting.
+  useEffect(() => {
+    const bridge = getDesktopBridge()?.agentBrowser;
+    if (!native || !bridge || !appTarget || !tabId) return;
+    return bridge.onInput((e) => {
+      if (e.targetId !== appTarget) return;
+      const s = useBrowserHandoffStore.getState();
+      const st = s.status[chatId];
+      if (driveState(s.handoffs[chatId], st, tabId) !== 'agent' || st?.active) return;
+      sendDrive(chatId, tabId, 'user');
+    });
+  }, [native, appTarget, chatId, tabId]);
+
   const cursor = tabInfo?.cursor;
   const showCursor =
+    !native &&
     state === 'agent' &&
     cursor !== undefined &&
     shown !== undefined &&
@@ -777,8 +861,12 @@ export function BrowserView({
           </>
         ) : null}
       </header>
-      <div className="bv-stage" ref={stageRef}>
-        {shown ? (
+      <div
+        className={`bv-stage${native ? ' is-native' : ''}`}
+        ref={stageRef}
+        data-testid="browser-stage"
+      >
+        {native ? null : shown ? (
           <div
             className="bv-picture"
             style={fit.width > 0 ? { width: fit.width, height: fit.height } : undefined}

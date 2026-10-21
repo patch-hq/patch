@@ -77,6 +77,18 @@ export interface PatchDesktopBridge {
    * through macOS Accessibility. `onMeetingSpeakersFailed` carries the helper's
    * own message (e.g. Accessibility not allowed). Absent on a shell that predates it.
    */
+  /**
+   * spec/02 § Browser — In the Patch app. The agent's tabs, when the host on
+   * this machine keeps its browser in this app: a large view shows the tab
+   * itself laid over its place in the window. `onInput` says the user pressed
+   * or typed in a tab being shown. Absent on a shell that predates it.
+   */
+  agentBrowser?: {
+    owns(targetId: string): Promise<boolean>;
+    show(targetId: string, rect: { x: number; y: number; width: number; height: number }): void;
+    hide(targetId: string): void;
+    onInput(cb: (e: { targetId: string }) => void): () => void;
+  };
   startMeetingSpeakers?(): void;
   stopMeetingSpeakers?(): void;
   onMeetingSpeakers?(cb: (e: { participants: string[]; speaking: string[] }) => void): () => void;
