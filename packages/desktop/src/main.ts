@@ -1906,12 +1906,15 @@ export function bootstrap(): void {
   });
 
   app.on('will-quit', (e) => {
+    // The agent browser's endpoint file is cleared and its tabs closed at once;
+    // its socket closes with the process. Never hold the quit for it: a second
+    // app.quit() while this one is still unwinding is ignored, and the app hangs.
     if (agentBrowser) {
-      e.preventDefault();
       const browser = agentBrowser;
       agentBrowser = null;
-      void browser.stop().finally(() => app.quit());
-      return;
+      browser.stop().catch((err: unknown) => {
+        console.error('[patch] agent browser: stopping failed', err);
+      });
     }
     globalShortcut.unregisterAll();
     systemAudio.stop();

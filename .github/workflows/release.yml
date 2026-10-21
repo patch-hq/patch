@@ -236,6 +236,10 @@ jobs:
   mac:
     if: github.repository == 'tomchambers2/patch'
     runs-on: macos-15
+    # Normally ~10 minutes. Without a limit a hung step held the release queue
+    # (one run at a time) for GitHub's default six hours, and every newer
+    # release waited behind it until it was cancelled.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
