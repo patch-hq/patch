@@ -1357,6 +1357,10 @@ The state a project and its chats show after a snooze ends (`04-chats-and-folder
 | `↵`              | Accept incoming call                                                                                                                                                                              | Incoming-call banner               |
 | `Esc`            | Dismiss incoming call · cancel voice note                                                                                                                                                         | Context-dependent                  |
 
+### Customising
+
+Settings → Shortcuts (Setup group) lists every shortcut on one page and lets the user rebind any chord the app dispatches itself: all the rows above except the keys that only mean something inside one widget (the composer's `↵` / `⇧ ↵` / Esc, `/` skill autocomplete, the incoming-call banner, a permission card's `1` / `2` / `3`, `⌘ ↵`, `⌘ S`, `⌘ ⇧ E`), which are listed on the page as fixed. Dictate is on the same page. Each row shows its current chord, a Change button that records the next chord pressed (Esc cancels), and — once it differs from the default — a Reset. A chord needs ⌘/Ctrl or ⌥, so a bare letter stays typeable. A chord already used by another action is refused and the row names its owner. Overrides are kept per machine in the browser, not on the account, since a chord belongs to the keyboard it is pressed on. The cheat-sheet and every tooltip that carries a chord draw the current one. Keyboard shortcuts have no phone equivalent, so the mobile app has no such page.
+
 `⌘ ↵` is not a composer key with a special case elsewhere; it is the app's commit
 key. Every field that has a save or commit action takes it — the message editor,
 a job's fields, a host's prompts and settings, the file editor, the sign-in

@@ -9084,6 +9084,9 @@ button.set-row-open:focus-visible {
 .set-btn:hover {
   background: var(--bg-soft);
 }
+.set-error {
+  color: var(--danger);
+}
 .set-chord {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   font-size: 14px;

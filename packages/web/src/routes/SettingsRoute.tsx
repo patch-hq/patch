@@ -38,6 +38,7 @@ import { ManagerPage } from './settings/ManagerPage.js';
 import { GoalsPage } from './settings/GoalsPage.js';
 import { PromptsPage } from './settings/PromptsPage.js';
 import { VoicePage } from './settings/VoicePage.js';
+import { ShortcutsPage } from './settings/ShortcutsPage.js';
 import { HooksPage } from './settings/HooksPage.js';
 import { ComputerUsePage } from './settings/ComputerUsePage.js';
 import { HostsPage } from './settings/HostsPage.js';
@@ -59,6 +60,7 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   goals: GoalsPage,
   prompts: PromptsPage,
   voice: VoicePage,
+  shortcuts: ShortcutsPage,
   hooks: HooksPage,
   computer: ComputerUsePage,
   activity: ActivityPage,

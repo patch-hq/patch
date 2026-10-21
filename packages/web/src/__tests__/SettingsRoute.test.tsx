@@ -53,6 +53,7 @@ const PAGE_TESTID: Record<string, string> = {
   providers: 'settings-providers',
   notifications: 'settings-notifications',
   devices: 'settings-devices',
+  shortcuts: 'settings-shortcuts',
   updates: 'settings-version',
   account: 'settings-account',
 };
@@ -99,6 +100,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Providers',
       'Notifications',
       'Devices',
+      'Shortcuts',
       'Updates',
       'Account',
     ]);

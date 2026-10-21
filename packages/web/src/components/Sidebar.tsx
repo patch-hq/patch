@@ -117,7 +117,7 @@ import { DevSourceBadge } from './DevSourceBadge.js';
 import { NotificationBell } from './NotificationBell.js';
 import { JobAlerts } from './JobAlerts.js';
 import { useChatBadge } from './ChatStatusBadge.js';
-import { shortcutLabel, shortcutTitle } from '../lib/shortcuts.js';
+import { shortcutLabel, shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
 import { failed } from '../lib/errorCopy.js';
 import { startPadsPolling, usePadsStore } from '../stores/padsStore.js';
@@ -156,6 +156,7 @@ function useSettledBadge(row: ChatRow): DisplayBadge {
 }
 
 export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): JSX.Element {
+  const collapseGlyphs = useActionGlyphs('toggleSidebar');
   const chats = useChatStore((s) => s.chats);
   const hydrated = useChatStore((s) => s.hydrated);
   // Before the cold-start `GET /api/chats` lands (or a live reload — every
@@ -372,7 +373,7 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
               className="sidebar-collapse-btn"
               data-testid="sidebar-collapse"
               aria-label="Collapse sidebar"
-              title={shortcutTitle('Collapse sidebar', '⌘/')}
+              title={shortcutTitle('Collapse sidebar', collapseGlyphs)}
               onClick={() => setSidebarCollapsed(true)}
             >
               <ChevronLeft size={16} aria-hidden />
@@ -503,6 +504,8 @@ function RegularSidebar({
   activeDevices: Record<string, string>;
   sectionCounts: SectionCounts | null;
 }): JSX.Element {
+  const channelsGlyphs = useActionGlyphs('toggleChannels');
+  const archivedGlyphs = useActionGlyphs('toggleArchived');
   const navigate = useNavigate();
   const bumpLifecycleScrollTick = useUiStore((s) => s.bumpLifecycleScrollTick);
   const presenceHosts = usePresenceStore((s) => s.hosts);
@@ -758,7 +761,7 @@ function RegularSidebar({
                     type="button"
                     className="ch-toggle"
                     data-testid="channels-toggle"
-                    title={shortcutLabel('⌘2')}
+                    title={shortcutLabel(channelsGlyphs)}
                     onClick={() => setChannelsOpen(!channelsOpen)}
                   >
                     <svg viewBox="0 0 16 16" className="ch-chev" aria-hidden>
@@ -854,7 +857,7 @@ function RegularSidebar({
               title={lifecycleTitle(
                 'Archived',
                 sectionCounts === null ? null : sectionCounts.archived,
-                '⌘⇧A',
+                archivedGlyphs,
               )}
               aria-pressed={archivedOpen}
               onClick={() => setArchivedOpen(!archivedOpen)}

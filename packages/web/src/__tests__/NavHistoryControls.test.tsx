@@ -137,7 +137,7 @@ describe('NavHistoryControls', () => {
     expect(back()).not.toBeDisabled();
   });
 
-  it('leaves ⌘←/⌘→ alone in contenteditable and terminal widgets, and with ctrl/alt/shift', () => {
+  it('leaves ⌘←/⌘→ alone in contenteditable and terminal widgets, and with shift/alt', () => {
     render(
       <>
         <Harness />
@@ -150,7 +150,6 @@ describe('NavHistoryControls', () => {
     fireEvent.click(screen.getByText('go b'));
     fireEvent.keyDown(screen.getByTestId('rich'), { key: 'ArrowLeft', metaKey: true });
     fireEvent.keyDown(screen.getByTestId('term'), { key: 'ArrowLeft', metaKey: true });
-    fireEvent.keyDown(window, { key: 'ArrowLeft', ctrlKey: true });
     fireEvent.keyDown(window, { key: 'ArrowLeft', metaKey: true, shiftKey: true });
     fireEvent.keyDown(window, { key: 'ArrowLeft', metaKey: true, altKey: true });
     expect(current()).toBe('/chats/b');

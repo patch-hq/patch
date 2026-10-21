@@ -14,7 +14,9 @@ import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { shortcutTitle } from '../lib/shortcuts.js';
+import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
+import { matchesAction } from '../lib/keymap.js';
+import { useUiStore } from '../stores/uiStore.js';
 
 const ICON = 16;
 
@@ -38,6 +40,8 @@ export function NavHistoryControls(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const key = location.pathname + location.search;
+  const backGlyphs = useActionGlyphs('historyBack');
+  const forwardGlyphs = useActionGlyphs('historyForward');
 
   // The stack and cursor live in `navHistory` (module-level, mutated in place);
   // a version counter forces the re-render that recomputes the disabled states.
@@ -102,12 +106,13 @@ export function NavHistoryControls(): JSX.Element {
   // them would make it impossible to jump within a line of composer text.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const overrides = useUiStore.getState().shortcutOverrides;
+      const back = matchesAction(e, 'historyBack', overrides);
+      if (!back && !matchesAction(e, 'historyForward', overrides)) return;
       const target = e.target as HTMLElement | null;
       if (target?.closest?.(TEXT_EDITING_SELECTOR)) return;
       e.preventDefault();
-      if (e.key === 'ArrowLeft') goBack();
+      if (back) goBack();
       else goForward();
     }
     window.addEventListener('keydown', onKeyDown);
@@ -121,7 +126,7 @@ export function NavHistoryControls(): JSX.Element {
         className="nav-history-btn"
         data-testid="nav-back"
         aria-label="Back"
-        title={shortcutTitle('Back', '⌘←')}
+        title={shortcutTitle('Back', backGlyphs)}
         disabled={!canBack}
         onClick={goBack}
       >
@@ -132,7 +137,7 @@ export function NavHistoryControls(): JSX.Element {
         className="nav-history-btn"
         data-testid="nav-forward"
         aria-label="Forward"
-        title={shortcutTitle('Forward', '⌘→')}
+        title={shortcutTitle('Forward', forwardGlyphs)}
         disabled={!canForward}
         onClick={goForward}
       >

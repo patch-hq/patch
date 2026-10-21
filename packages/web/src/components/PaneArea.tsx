@@ -40,7 +40,7 @@ import { StatusBadge } from './StatusBadge.js';
 import { useChatBadge } from './ChatStatusBadge.js';
 import { openTabInNewWindow } from '../lib/newWindow.js';
 import { CloseIcon } from './icons.js';
-import { shortcutTitle } from '../lib/shortcuts.js';
+import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { SideThreadsPanel } from './SideThreadsPanel.js';
 import { FileEditorTab } from './FileEditorTab.js';
@@ -602,6 +602,7 @@ interface PaneTabProps {
  *  and status badge stay live — they are read where they render, never from a
  *  one-off `getState()` that would freeze them at the last unrelated render. */
 function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
+  const closeTabGlyphs = useActionGlyphs('closeTab');
   const chatId = tabChatId(tab.descriptor);
   const row = useChatStore((s) => (chatId ? s.chats[chatId] : undefined));
   const isJob = tab.descriptor.kind === 'page' && tab.descriptor.page === 'job';
@@ -675,7 +676,7 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
         className="pane-tab-close"
         data-testid={`tab-close-${tab.id}`}
         aria-label="Close tab"
-        title={shortcutTitle('Close tab', '⌘W')}
+        title={shortcutTitle('Close tab', closeTabGlyphs)}
         onClick={(e) => {
           e.stopPropagation();
           on.onClose();

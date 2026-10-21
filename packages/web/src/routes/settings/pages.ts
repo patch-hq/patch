@@ -19,6 +19,7 @@ export type SettingsPageId =
   | 'providers'
   | 'notifications'
   | 'devices'
+  | 'shortcuts'
   | 'updates'
   | 'account';
 
@@ -40,6 +41,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
   { id: 'providers', title: 'Providers', group: 'Setup' },
   { id: 'notifications', title: 'Notifications', group: 'Setup' },
   { id: 'devices', title: 'Devices', group: 'Setup' },
+  { id: 'shortcuts', title: 'Shortcuts', group: 'Setup' },
   { id: 'updates', title: 'Updates', group: 'System' },
   { id: 'account', title: 'Account', group: 'System' },
 ];
