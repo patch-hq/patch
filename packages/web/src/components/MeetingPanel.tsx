@@ -1194,14 +1194,16 @@ export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: M
             )}
           </span>
         </button>
-        <input
-          type="checkbox"
-          data-testid="meeting-agent-runs"
-          title="Agent runs its own actions"
-          aria-label="Agent runs its own actions"
-          checked={agentRuns}
-          onChange={(e) => setAgentRunsActions(chatId, e.target.checked)}
-        />
+        {ended ? null : (
+          <input
+            type="checkbox"
+            data-testid="meeting-agent-runs"
+            title="Agent runs its own actions"
+            aria-label="Agent runs its own actions"
+            checked={agentRuns}
+            onChange={(e) => setAgentRunsActions(chatId, e.target.checked)}
+          />
+        )}
         <button
           type="button"
           className="mm-tray-caret"
