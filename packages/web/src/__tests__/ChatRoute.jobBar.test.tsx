@@ -35,6 +35,7 @@ function seed(jobId: string | null): void {
       disabled: false,
       lastUpdated: 0,
       jobId,
+      lastUserActivity: Date.UTC(2026, 9, 21, 12, 53),
     },
   ]);
 }
@@ -64,17 +65,20 @@ describe('ChatRoute — job bar', () => {
     setActiveWs(null);
   });
 
-  it('links a job-created chat to its job', () => {
+  it('links a job-created chat to its job', async () => {
     seed('j_bus');
     renderChat();
     expect(screen.getByTestId('job-bar')).toBeInTheDocument();
     expect(screen.getByTestId('job-bar-link')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Run by "bus check" job · 21 Oct, \d{2}:\d{2}/),
+    ).toBeInTheDocument();
   });
 
   it('names the job that ran the chat', async () => {
     seed('j_bus');
     renderChat();
-    expect(await screen.findByText('Run by "bus check" job')).toBeInTheDocument();
+    expect(await screen.findByText(/^Run by "bus check" job · /)).toBeInTheDocument();
     expect(api.getJob).toHaveBeenCalledWith('j_bus');
   });
 
