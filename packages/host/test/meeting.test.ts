@@ -58,7 +58,7 @@ describe('MeetingManager', () => {
   let clock: number;
   let events: WireEvent[];
   let analyse: ReturnType<typeof vi.fn<(i: AnalyseInput) => Promise<MeetingAnalysis>>>;
-  let transcribe: ReturnType<typeof vi.fn<(b: Buffer, prompt?: string) => Promise<string>>>;
+  let transcribe: ReturnType<typeof vi.fn<(b: Buffer) => Promise<string>>>;
   let startChat: ReturnType<typeof vi.fn<(c: string, m: string) => Promise<string>>>;
   let transcribeVoices: ReturnType<
     typeof vi.fn<(s: string, b: Buffer) => Promise<{ text: string; voice: number }[]>>
@@ -109,17 +109,6 @@ describe('MeetingManager', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('gives a diarised clip the same vocabulary prompt, including names given to voices', async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    transcribeVoices.mockResolvedValue([{ text: 'Hello.', voice: 1 }]);
-    await m.ingestAudio('c1', 'system', Buffer.from('a'), 'Priya Shah');
-    m.nameVoice('c1', 1, 'Dev Rao');
-    await m.ingestAudio('c1', 'system', Buffer.from('b'), 'Priya Shah');
-    expect(transcribeVoices.mock.calls.at(-1)?.[2]).toBe('Participants: Priya Shah, Dev Rao.');
-  });
-
   it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {
     diarise = true;
     const m = make();
@@ -134,7 +123,7 @@ describe('MeetingManager', () => {
       ['them', 1, 'Shall we start? Yes please.'],
       ['them', 2, 'I have the numbers.'],
     ]);
-    expect(transcribeVoices).toHaveBeenCalledWith('c1:1000000', expect.any(Buffer), undefined);
+    expect(transcribeVoices).toHaveBeenCalledWith('c1:1000000', expect.any(Buffer));
     expect(transcribe).not.toHaveBeenCalled();
   });
 
@@ -346,114 +335,13 @@ describe('MeetingManager', () => {
     ]);
   });
 
-  describe('transcription vocabulary', () => {
-    const lastPrompt = (): string | undefined =>
-      (transcribe.mock.calls.at(-1) as unknown as [Buffer, string | undefined])[1];
-
-    it('passes no prompt when nothing is known', async () => {
-      const m = make();
-      m.start('c1');
-      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-      expect(lastPrompt()).toBeUndefined();
-    });
-
-    it('names the participants the call app has lit up', async () => {
-      const m = make();
-      m.start('c1');
-      await m.ingestAudio('c1', 'system', Buffer.from('a'), 'Priya Shah');
-      expect(lastPrompt()).toBe('Participants: Priya Shah.');
-      await m.ingestAudio('c1', 'system', Buffer.from('b'), 'Dev Rao');
-      expect(lastPrompt()).toBe('Participants: Priya Shah, Dev Rao.');
-    });
-
-    it('learns terms the clean-up pass corrects and feeds them to later clips', async () => {
-      const correct = vi.fn(async (i: CorrectInput) =>
-        i.lines.map((l) => l.text.replace('weka', 'WECA')),
-      );
-      const m = new MeetingManager({
-        dir,
-        transcribe,
-        analyse,
-        correct,
-        prompts: () => PROMPTS,
-        startChat,
-        logger,
-        emit: (e) => events.push(e),
-        now: () => clock,
-        newId: () => `id${++n}`,
-        setInterval: () => 1,
-        clearInterval: () => {},
-      });
-      m.start('c1');
-      transcribe.mockResolvedValueOnce('the weka board');
-      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-      await m.tick('c1');
-      await m.ingestAudio('c1', 'mic', Buffer.from('b'));
-      expect(lastPrompt()).toBe('Terms: WECA.');
-      // and survives a restart
-      const again = make();
-      await again.ingestAudio('c1', 'mic', Buffer.from('c'));
-      expect(lastPrompt()).toBe('Terms: WECA.');
-    });
-
-    it('carries terms from the earlier meeting in the same chat and from the folder', async () => {
-      const m = new MeetingManager({
-        dir,
-        transcribe,
-        analyse,
-        folderChats: () => ['c1', 'c2', 'c3'],
-        prompts: () => PROMPTS,
-        startChat,
-        logger,
-        emit: (e) => events.push(e),
-        now: () => clock,
-        newId: () => `id${++n}`,
-        setInterval: () => 1,
-        clearInterval: () => {},
-      });
-      m.start('c2');
-      transcribe.mockResolvedValueOnce('We met Marlow Quay. Then Marlow Quay agreed.');
-      await m.ingestAudio('c2', 'system', Buffer.from('a'), 'Priya Shah');
-      await m.end('c2');
-      m.start('c3');
-      await m.ingestAudio('c3', 'mic', Buffer.from('b'));
-      expect(lastPrompt()).toBe('Terms: Priya Shah, Marlow Quay.');
-      // a live meeting in the folder is not mined, and neither is a corrupt file
-      writeFileSync(join(dir, 'c4.json'), '{nope');
-      const folder = new MeetingManager({
-        dir,
-        transcribe,
-        analyse,
-        folderChats: () => ['c3', 'c4'],
-        prompts: () => PROMPTS,
-        startChat,
-        logger,
-        emit: () => {},
-        setInterval: () => 1,
-        clearInterval: () => {},
-      });
-      folder.start('c5');
-      await folder.ingestAudio('c5', 'mic', Buffer.from('c'));
-      expect(lastPrompt()).toBeUndefined();
-    });
-
-    it('adds glossary terms without their mishearings', async () => {
-      const m = new MeetingManager({
-        dir,
-        transcribe,
-        analyse,
-        glossary: () => ['CRSTS: crests'],
-        prompts: () => PROMPTS,
-        startChat,
-        logger,
-        emit: () => {},
-        setInterval: () => 1,
-        clearInterval: () => {},
-      });
-      m.start('c1');
-      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-      expect(lastPrompt()).toBe('Terms: CRSTS.');
-    });
+  it('transcribes with no vocabulary prompt, even once names are known', async () => {
+    // A prompt made from earlier text gets parroted back over unclear audio.
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'system', Buffer.from('a'), 'Priya Shah');
+    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+    for (const call of transcribe.mock.calls) expect(call).toHaveLength(1);
   });
 
   it('drops silent clips instead of adding empty lines', async () => {
