@@ -146,6 +146,12 @@ export interface PatchDesktopBridge {
    * and on shells that predate it.
    */
   copyImagePng?(png: Uint8Array): Promise<void>;
+  /**
+   * Open a file with its default app, or reveal it in the file manager, on the
+   * machine the shell runs on. Only meaningful for a file the shell's own host
+   * wrote. Absent in a browser and on shells that predate it.
+   */
+  openPath?(path: string, mode: 'file' | 'folder'): Promise<void>;
   /** Run a check now and resolve with the resulting state. */
   checkForUpdates?(): Promise<DesktopUpdaterState>;
   /** Subscribe to state pushes from main (download progress, errors). */

@@ -4681,6 +4681,37 @@ a.ch-row:hover {
   display: inline-flex;
   color: var(--ink-2);
 }
+.view-file-file .view-file-bar.has-preview {
+  border-bottom: 1px solid var(--line);
+}
+button.view-file-download {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.view-file-error {
+  padding: 4px 10px 8px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.view-file-preview {
+  height: 200px;
+}
+.view-file-preview.expanded {
+  height: 70vh;
+}
+.view-file-more {
+  display: block;
+  width: 100%;
+  padding: 4px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: none;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
 .view-file-frame {
   display: block;
   width: 100%;

@@ -326,11 +326,54 @@ describe('POST /internal/view_file (view_file)', () => {
         expect(res.statusCode).toBe(200);
         expect((res.json() as { kind: string }).kind).toBe('file');
         expect(published[0]!.raw!.filename).toBe(name);
+        // Text files also get a preview page, published second.
+        expect(published.length).toBe(['data.csv', 'notes.txt'].includes(name) ? 2 : 1);
       } finally {
         await app.close();
       }
     },
   );
+
+  it('publishes an escaped text preview next to a text file, and reports absPath', async () => {
+    const { app, chatId, folder, published } = await setup();
+    try {
+      writeFileSync(join(folder, 'notes.txt'), '<b>hi</b> & bye', 'utf8');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'notes.txt' },
+      });
+      const body = res.json() as { url: string; previewUrl?: string; absPath: string };
+      expect(body.absPath).toBe(join(folder, 'notes.txt'));
+      expect(body.previewUrl).toMatch(/^\/api\/chats\/.+\/artifact\/[0-9a-f]+$/);
+      expect(body.previewUrl).not.toBe(body.url);
+      expect(published[1]!.html).toContain('&lt;b&gt;hi&lt;/b&gt; &amp; bye');
+      expect(published[1]!.html).not.toContain('<b>hi</b>');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('says why a Word file has no preview when it cannot be converted', async () => {
+    const { app, chatId, folder, published } = await setup();
+    try {
+      writeFileSync(join(folder, 'broken.docx'), 'not a zip', 'utf8');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'broken.docx' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { previewUrl?: string; previewError?: string };
+      expect(body.previewUrl).toBeUndefined();
+      expect(body.previewError).toBeTruthy();
+      expect(published).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
 
   it('rejects an oversize downloadable file', async () => {
     const { app, chatId, folder, published } = await setup();

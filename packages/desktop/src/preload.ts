@@ -234,6 +234,9 @@ contextBridge.exposeInMainWorld('patch', {
   async copyImagePng(png: Uint8Array): Promise<void> {
     await ipcRenderer.invoke('patch:copy-image', png);
   },
+  async openPath(path: string, mode: 'file' | 'folder'): Promise<void> {
+    await ipcRenderer.invoke('patch:open-path', { path, mode });
+  },
   async getDesktopEvents(): Promise<unknown[]> {
     return (await ipcRenderer.invoke('patch:get-events')) as unknown[];
   },

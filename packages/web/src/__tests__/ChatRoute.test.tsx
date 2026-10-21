@@ -2616,6 +2616,94 @@ describe('ChatRoute regression', () => {
     expect(screen.getByTestId('view-file').getAttribute('data-expanded')).toBe('true');
   });
 
+  function seedFileCard(id: string, ack: Record<string, unknown>): void {
+    seedChat(id, [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'v1',
+        toolArgs: { file_path: 'minutes.docx' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'v1',
+        toolResult: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              kind: 'file',
+              url: `/api/chats/${id}/artifact/aaa`,
+              name: 'minutes.docx',
+              size: 2048,
+              ...ack,
+            }),
+          },
+        ],
+        at: 1,
+      },
+    ]);
+  }
+
+  it('shows a file card with an inline preview, and no open buttons outside the desktop app', () => {
+    seedFileCard('c-file-prev', {
+      previewUrl: '/api/chats/c-file-prev/artifact/bbb',
+      absPath: '/home/u/chat/minutes.docx',
+    });
+    renderChat('c-file-prev');
+    const frame = screen.getByTestId('view-file-preview');
+    expect(frame.getAttribute('src')).toBe('/api/chats/c-file-prev/artifact/bbb');
+    expect(screen.getByTestId('view-file-download')).toBeInTheDocument();
+    expect(screen.queryByTestId('view-file-open-file')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('view-file-open-folder')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('view-file-preview-toggle'));
+    expect(screen.getByTestId('view-file-preview').className).toContain('expanded');
+  });
+
+  it('says why there is no preview', () => {
+    seedFileCard('c-file-noprev', { previewError: 'corrupt zip' });
+    renderChat('c-file-noprev');
+    expect(screen.getByTestId('view-file-preview-error').textContent).toContain('corrupt zip');
+    expect(screen.queryByTestId('view-file-preview')).not.toBeInTheDocument();
+  });
+
+  it("offers open file and open folder when this Mac's own host owns the chat", async () => {
+    const openPath = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { patch: unknown }).patch = {
+      openPath,
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedFileCard('c-file-open', { absPath: '/home/u/chat/minutes.docx' });
+      renderChat('c-file-open');
+      fireEvent.click(await screen.findByTestId('view-file-open-file'));
+      fireEvent.click(screen.getByTestId('view-file-open-folder'));
+      expect(openPath).toHaveBeenNthCalledWith(1, '/home/u/chat/minutes.docx', 'file');
+      expect(openPath).toHaveBeenNthCalledWith(2, '/home/u/chat/minutes.docx', 'folder');
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
+  it('hides open buttons when the chat lives on another host', async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      openPath: vi.fn(),
+      localHost: { status: async () => ({ installed: true, hostId: 'other' }) },
+    };
+    try {
+      seedFileCard('c-file-remote', { absPath: '/srv/chat/minutes.docx' });
+      renderChat('c-file-remote');
+      await new Promise((r) => setTimeout(r, 30));
+      expect(screen.queryByTestId('view-file-open-file')).not.toBeInTheDocument();
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
   // spec/14 § Viewing files — a PDF gets the same sandboxed-iframe treatment
   // as an HTML page (not the image/lightbox path), since neither is a
   // lightbox candidate.

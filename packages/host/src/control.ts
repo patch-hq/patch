@@ -16,7 +16,7 @@
 import { expandHome } from './expandHome.js';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, resolve, join, sep } from 'node:path';
+import { basename, extname, resolve, join, sep } from 'node:path';
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -61,6 +61,7 @@ import {
   type PublishArtifact,
   type ViewFileKind,
 } from './artifacts.js';
+import { buildPreviewHtml, previewable } from './viewFilePreview.js';
 import { PadInputError, bundleDir, type PadRequest } from './pads.js';
 import {
   BrowserNotInstalledError,
@@ -3312,6 +3313,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
 
     let relPath: string;
+    let absPath: string;
     let kind: ViewFileKind;
     let size: { width: number; height: number } | undefined;
     let html: string | undefined;
@@ -3320,6 +3322,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     try {
       const resolved = resolveViewFilePath(state.folder, filePath);
       relPath = resolved.relPath;
+      absPath = resolved.absPath;
       kind = resolved.kind;
       const stat = statSync(resolved.absPath);
       if (!stat.isFile()) throw new ArtifactInputError(`not a file: ${filePath}`);
@@ -3425,6 +3428,30 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         .send({ error: 'view_file_publish_failed', message } satisfies ErrorEnvelope);
     }
 
+    // A downloadable file also gets an inline preview page, published under its
+    // own id. A previewable file whose page cannot be built still succeeds as a
+    // download card, but the ack says why there is no preview.
+    let previewUrl: string | undefined;
+    let previewError: string | undefined;
+    if (kind === 'file') {
+      const ext = extname(relPath).toLowerCase();
+      if (previewable(ext)) {
+        try {
+          const previewHtml = await buildPreviewHtml(absPath, ext, name);
+          const published = await opts.publishArtifact({
+            chatId: callerChatId,
+            artifactId: artifactIdFor(callerChatId, `view_file_preview\u0000${relPath}`),
+            title: name,
+            path: relPath,
+            html: previewHtml,
+          });
+          previewUrl = published.url;
+        } catch (err) {
+          previewError = err instanceof Error ? err.message : String(err);
+        }
+      }
+    }
+
     toolLog({ tool: 'view_file', callerChatId, durationMs: Date.now() - start, ok: true });
     return {
       ok: true,
@@ -3433,6 +3460,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       url,
       name,
       path: relPath,
+      // Where the file sits on this host: the desktop app opens it from here.
+      absPath,
+      ...(previewUrl !== undefined ? { previewUrl } : {}),
+      ...(previewError !== undefined ? { previewError } : {}),
       ...(size ?? {}),
       ...(fileBytes !== undefined ? { size: fileBytes } : {}),
     };
