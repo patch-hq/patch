@@ -733,7 +733,7 @@ A Pad is a design space: a set of screens Tom edits directly while the chat that
 
 Where they live. The Pads entry sits above Jobs in the sidebar's lower navigation, carrying the count of changes Tom has made on Pads and not yet sent. It opens the Pads page: a search field, New Pad, and the Pads grouped by the app they design for (a Pad with no app is grouped under No app). Each is a card with a picture of its first screen, its name, the chat that owns it, when it last moved, and a badge: Working while a batch he sent awaits the agent's reply, otherwise the number of pending changes, otherwise none. Clicking a card opens the Pad.
 
-Opening a Pad. A Pad opens in a pane directly to the left of its owning chat, opening that chat first if it is not already in the layout; a Pad already open is focused, never opened twice. The pane header names the Pad (click to rename), the app and chat it belongs to and its badge, with a way to the chat and Delete (confirmed). Everything below the header is the editor.
+Opening a Pad. A Pad opens in a pane directly to the right of its owning chat, opening that chat first if it is not already in the layout; a Pad already open is focused, never opened twice. The pane header names the Pad (click to rename), the app and chat it belongs to and its badge, with a way to the chat and Delete (confirmed). Everything below the header is the editor.
 
 The editor.
 
