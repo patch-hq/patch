@@ -111,14 +111,6 @@ contextBridge.exposeInMainWorld('patch', {
   async startSystemAudio(): Promise<void> {
     await ipcRenderer.invoke('patch:system-audio:start');
   },
-  getMeetingPermissions(): Promise<Record<'microphone' | 'callAudio' | 'accessibility', boolean>> {
-    return ipcRenderer.invoke('patch:meeting-permissions:get');
-  },
-  requestMeetingPermission(
-    kind: 'microphone' | 'callAudio' | 'accessibility',
-  ): Promise<Record<'microphone' | 'callAudio' | 'accessibility', boolean>> {
-    return ipcRenderer.invoke('patch:meeting-permissions:request', kind);
-  },
   stopSystemAudio(): void {
     ipcRenderer.send('patch:system-audio:stop');
   },

@@ -50,7 +50,6 @@ import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
-import { offerFirstRunSetup } from './lib/meetingSetup.js';
 import { useBrowserHandoffStore } from './stores/browserHandoffStore.js';
 import { applyMeetingNotesOp, type MeetingState } from '@patch/wire';
 import { useDraftStore } from './stores/draftStore.js';
@@ -3250,8 +3249,6 @@ if (voiceParam === 'call' || voiceParam === 'hands-free') {
 // `?meeting=live|paused|ended` seeds the chat with a meeting (meeting mode), and
 // `window.__meetingStore` lets a spec play the host's `meeting.state` replies.
 (window as unknown as { __meetingStore?: typeof useMeetingStore }).__meetingStore = useMeetingStore;
-// AppShell offers the meeting permission card on launch; the harness has no AppShell.
-void offerFirstRunSetup();
 const meetingParam = params.get('meeting');
 if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'ended') {
   const t0 = Date.now();

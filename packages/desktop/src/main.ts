@@ -20,7 +20,7 @@
 
 import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
-import { execFile, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import {
   app,
   BrowserWindow,
@@ -33,7 +33,6 @@ import {
   nativeImage,
   powerMonitor,
   session,
-  systemPreferences,
   desktopCapturer,
   dialog,
   screen,
@@ -83,7 +82,6 @@ import {
   watchMicrophone,
 } from './meeting-audio';
 import { watchSpeakers } from './meeting-speakers';
-import { MeetingPermissions, type MeetingPermissionKind } from './meeting-permissions';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -842,38 +840,6 @@ const OWN_BUNDLE_PREFIX = 'io.github.tomchambers2.patch';
 const systemAudio = new SystemAudio(() =>
   helperPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, devDir: __dirname }),
 );
-const CALL_AUDIO_GRANTED_FILE = (): string => join(app.getPath('userData'), 'call-audio-granted');
-/** `patch-audio accessibility [--prompt]` prints granted | denied. */
-function accessibilityTrusted(prompt: boolean): Promise<boolean> {
-  const binary = helperPath({
-    packaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    devDir: __dirname,
-  });
-  return new Promise((resolve, reject) => {
-    execFile(
-      binary,
-      prompt ? ['accessibility', '--prompt'] : ['accessibility'],
-      (err, out, errOut) => {
-        if (err) reject(new Error(errOut.trim() || err.message));
-        else resolve(out.trim() === 'granted');
-      },
-    );
-  });
-}
-const meetingPermissions = new MeetingPermissions({
-  micStatus: () => systemPreferences.getMediaAccessStatus('microphone'),
-  askMic: () => systemPreferences.askForMediaAccess('microphone'),
-  accessibility: () => accessibilityTrusted(false),
-  askAccessibility: () => accessibilityTrusted(true),
-  tapOnce: async () => {
-    if (systemAudio.running) return;
-    await systemAudio.start({ onPcm: () => {}, onFailed: () => {} });
-    systemAudio.stop();
-  },
-  readCallAudioGranted: () => existsSync(CALL_AUDIO_GRANTED_FILE()),
-  writeCallAudioGranted: () => writeFileSync(CALL_AUDIO_GRANTED_FILE(), '1'),
-});
 let stopMicWatch: (() => void) | null = null;
 /** Held while shown: an unreferenced Notification can be collected before it is clicked. */
 const meetingToasts = new Set<Notification>();
@@ -1473,11 +1439,6 @@ function setupAutoUpdater(): void {
     sender.once('destroyed', () => systemAudio.stop());
   });
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
-  // Meeting mode: the three permissions, read and asked for ahead of a meeting.
-  ipcMain.handle('patch:meeting-permissions:get', () => meetingPermissions.read());
-  ipcMain.handle('patch:meeting-permissions:request', (_e, kind: MeetingPermissionKind) =>
-    meetingPermissions.request(kind),
-  );
   // Meeting mode: who is lit up on the call, read through macOS Accessibility.
   // A failure (e.g. permission not granted) is sent to the renderer to show.
   let stopSpeakers: (() => void) | null = null;

@@ -66,8 +66,7 @@ import { useSelectionStore } from './stores/selectionStore.js';
 import { stepVisibleChat } from './lib/chatGroups.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { isMeetingOpen, useMeetingStore } from './stores/meetingStore.js';
-import { endMeeting } from './lib/meetingControl.js';
-import { offerFirstRunSetup, requestMeetingStart } from './lib/meetingSetup.js';
+import { endMeeting, startMeeting } from './lib/meetingControl.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
 import { resolvePane, useLayoutStore } from './stores/layoutStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
@@ -323,8 +322,6 @@ export function AppShell(): JSX.Element {
         }),
       );
     }
-    // Meeting mode: ask for its permissions now, not as the first meeting starts.
-    void offerFirstRunSetup();
     // Meeting mode: the shell saw a call app open the mic (offer to start) or
     // let go of it (offer to end). The click on its toast is the consent.
     if (bridge.onMeetingSignal) {
@@ -341,7 +338,7 @@ export function AppShell(): JSX.Element {
             return;
           }
           if (isMeetingOpen(useMeetingStore.getState().byChat[chatId])) return;
-          void requestMeetingStart(chatId);
+          void startMeeting(chatId);
         }),
       );
     }
