@@ -6,6 +6,8 @@
 //   patch-audio speakers   one JSON line per change: the text labels in a calling app's
 //                          windows ({"labels": [...]}), read through macOS Accessibility,
 //                          for the shell to pick participants and the active speaker from
+//   patch-audio accessibility [--prompt]
+//                          prints `granted` or `denied`; --prompt asks macOS to show its dialog
 //
 // `tap` is a Core Audio process tap: audio only, no screen capture, so macOS shows
 // no picker and no screen-sharing indicator. It follows the default output device
@@ -269,11 +271,18 @@ func runSpeakers() -> Never {
     }
 }
 
+func runAccessibility(prompt: Bool) -> Never {
+    let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary)
+    print(trusted ? "granted" : "denied")
+    exit(0)
+}
+
 // MARK: - main
 
 switch CommandLine.arguments.dropFirst().first {
 case "tap": runTap()
 case "mic-watch": runMicWatch()
 case "speakers": runSpeakers()
-default: fail("usage: patch-audio tap | mic-watch | speakers")
+case "accessibility": runAccessibility(prompt: CommandLine.arguments.contains("--prompt"))
+default: fail("usage: patch-audio tap | mic-watch | speakers | accessibility [--prompt]")
 }

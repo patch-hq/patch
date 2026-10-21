@@ -56,7 +56,9 @@ import {
   Clock,
   Zap,
 } from 'lucide-react';
-import { endMeeting, startMeeting } from '../lib/meetingControl.js';
+import { endMeeting } from '../lib/meetingControl.js';
+import { requestMeetingStart } from '../lib/meetingSetup.js';
+import { MeetingSetup } from './MeetingSetup.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
 import { CloseIcon } from './icons.js';
 import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
@@ -2285,18 +2287,23 @@ export const Composer = forwardRef(function Composer(
               {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
               {chatId === 'new' ? null : (
-                <button
-                  type="button"
-                  className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
-                  data-testid="meeting-btn"
-                  aria-pressed={inMeeting}
-                  aria-label={inMeeting ? 'end meeting' : 'meeting'}
-                  title={inMeeting ? 'End meeting' : 'Meeting'}
-                  onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
-                  disabled={voiceDisabled && !inMeeting}
-                >
-                  <AudioLines size={ICON_SIZE} aria-hidden />
-                </button>
+                <span className="mm-setup-anchor">
+                  <button
+                    type="button"
+                    className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
+                    data-testid="meeting-btn"
+                    aria-pressed={inMeeting}
+                    aria-label={inMeeting ? 'end meeting' : 'meeting'}
+                    title={inMeeting ? 'End meeting' : 'Meeting'}
+                    onClick={() =>
+                      inMeeting ? endMeeting(chatId) : void requestMeetingStart(chatId)
+                    }
+                    disabled={voiceDisabled && !inMeeting}
+                  >
+                    <AudioLines size={ICON_SIZE} aria-hidden />
+                  </button>
+                  <MeetingSetup chatId={chatId} />
+                </span>
               )}
               {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
               chat's next turn will use, last in the utility group so it reads

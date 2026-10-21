@@ -95,7 +95,7 @@ function watchSpeakers(bridge: PatchDesktopBridge): void {
 }
 
 /** Mic always; system audio too on the desktop app, through its native helper. */
-export async function acquireSources(): Promise<MeetingSources> {
+export async function acquireSources(withNames = true): Promise<MeetingSources> {
   const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
   const bridge = getDesktopBridge();
   if (!bridge) return { mic };
@@ -104,7 +104,7 @@ export async function acquireSources(): Promise<MeetingSources> {
       throw new Error('this desktop app is too old to hear the call. Update Patch');
     }
     await bridge.startSystemAudio();
-    watchSpeakers(bridge);
+    if (withNames) watchSpeakers(bridge);
     return { mic, system: systemFeed(bridge) };
   } catch (err) {
     for (const t of mic.getTracks()) t.stop();
@@ -136,11 +136,11 @@ function systemFeed(bridge: PatchDesktopBridge): PcmFeed {
   };
 }
 
-async function beginCapture(chatId: string): Promise<void> {
+async function beginCapture(chatId: string, withNames = true): Promise<void> {
   // 'new' is the new-chat screen's placeholder, not a chat: no host owns it, so
   // the server would drop every control frame and clip sent for it.
   if (chatId === 'new') throw new Error('Send a first message to create the chat, then start it');
-  const sources = await acquireSources();
+  const sources = await acquireSources(withNames);
   try {
     capture = startMeetingCapture(
       sources,
@@ -177,9 +177,10 @@ function report(what: string, err: unknown): void {
   useUiStore.getState().pushError(`${what}: ${(err as Error).message}`);
 }
 
-export async function startMeeting(chatId: string): Promise<void> {
+/** `withNames: false` is the Start popover's "Start without names": no Accessibility, speakers stay "Them". */
+export async function startMeeting(chatId: string, withNames = true): Promise<void> {
   try {
-    await beginCapture(chatId);
+    await beginCapture(chatId, withNames);
     ws().send({
       type: 'meeting.control_request',
       chatId,

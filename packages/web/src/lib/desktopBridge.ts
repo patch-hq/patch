@@ -17,6 +17,9 @@ export type NotificationSendPayload = {
     | { kind: 'ignore' };
 };
 
+export type MeetingPermissionKind = 'microphone' | 'callAudio' | 'accessibility';
+export type MeetingPermissionState = Record<MeetingPermissionKind, boolean>;
+
 export interface PatchDesktopBridge {
   /**
    * spec/05 § Desktop packaging → Window chrome: true when the shell drew this
@@ -69,6 +72,13 @@ export interface PatchDesktopBridge {
    */
   startSystemAudio?(): Promise<void>;
   stopSystemAudio?(): void;
+  /**
+   * Meeting mode's three macOS permissions, read and asked for ahead of a
+   * meeting. `request` rejects with the reason if the ask fails. Absent on a
+   * shell that predates it.
+   */
+  getMeetingPermissions?(): Promise<MeetingPermissionState>;
+  requestMeetingPermission?(kind: MeetingPermissionKind): Promise<MeetingPermissionState>;
   onSystemAudio?(cb: (pcm: Uint8Array) => void): () => void;
   /** The tap stopped without being asked to. */
   onSystemAudioFailed?(cb: (e: { message: string }) => void): () => void;
