@@ -226,7 +226,7 @@ export function buildResearchPrompt(input: ResearchInput): string {
     'Return [] when nothing is worth a card: most stretches of a meeting need none. At most 3 cards.',
     '',
     'Reply with ONE JSON object and nothing else:',
-    '{"cards":[{"kind":"explained | fact | answer","title":"","atSeconds":0,"bullets":[""],"verdict":"fact only","source":{"name":"","url":""}}]}',
+    '{"cards":[{"kind":"explained | fact | answer","title":"","atSeconds":0,"bullets":[""],"verdict":"correct | off | unclear (kind fact only; omit for explained and answer)","source":{"name":"","url":""}}]}',
     'atSeconds is the transcript time in seconds that prompted the card.',
   ].join('\n');
 }

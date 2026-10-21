@@ -342,6 +342,16 @@ describe('the researcher', () => {
     expect(p).toContain('Tidal gate');
     expect(p).toMatch(/NEVER state a figure/);
     expect(p).toContain('"unclear"');
+    expect(p).toContain('"verdict":"correct | off | unclear');
+    expect(p).not.toContain('"verdict":"fact only"');
+  });
+
+  it('rejects a verdict outside correct, off, unclear rather than papering over it', () => {
+    expect(() =>
+      parseResearch(
+        '{"cards":[{"kind":"fact","title":"x","bullets":["y"],"verdict":"explained"}]}',
+      ),
+    ).toThrow(/verdict/);
   });
 
   it('parses fenced JSON and rejects a malformed reply', () => {
