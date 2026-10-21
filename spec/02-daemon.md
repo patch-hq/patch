@@ -66,7 +66,10 @@ describes (`17-cli.md` § Skill).
 
 The host self-updates. It checks the server for a newer build on boot and on a
 schedule, downloads it, and restarts itself under the service manager. A host
-behind the current version shows an update control in Settings → Hosts. A failed
+behind the current version shows an update control in Settings → Updates. The shared setting
+`autoUpdateHosts` (default on) governs this: off, a host neither installs on its own schedule nor is told
+to by the server when it connects, and stays put until Update (one host) or Update all is pressed. A
+host whose server greeting it cannot read still updates. A failed
 update leaves the running version in place and reports the failure to surfaces.
 The restart never lands under a running turn: it would kill the turn and every
 command it is running. An update asked for while any chat on the host is mid-turn

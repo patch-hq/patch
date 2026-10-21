@@ -415,6 +415,10 @@ Rules.
   drift between them, with a remedy per item. It re-reads the mounted web-dist
   and downloads dir per request, so a check reflects the box as it is now.
   `/api/healthz` stays the public, minimal LB probe.
+- Settings → Updates is one list of components, each with a version and a status, a
+  single Update control per host that is behind, Update all, and the
+  auto-update toggle. Hosts on different builds are not drift: each row says
+  whether it is behind. No standing text about signing limits or host mismatch.
 - Unknown reads as unknown. An unstamped, missing or unreadable layer is
   reported as such. A malformed report is rejected at the client boundary
   (`assertVersionReport`) so a partial response reaches the panel's error state

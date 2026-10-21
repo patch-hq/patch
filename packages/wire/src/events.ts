@@ -2140,6 +2140,12 @@ export const SharedSettings = z
     statusGenerationEnabled: z.boolean(),
     autoResumeRateLimit: z.boolean(),
     /**
+     * Whether hosts install a published host build on their own (spec/02 §
+     * Self-update). Off: a host stays on its build until someone presses Update
+     * for it (or Update all) in Settings → Updates.
+     */
+    autoUpdateHosts: z.boolean(),
+    /**
      * Whether the page and chat scroll position follows the user between
      * surfaces (spec/05 § Handover). Off: no surface reports its position and
      * none adopts another's.
@@ -2229,6 +2235,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // On: a chat that hits a limit waits for the reset rather than being
   // silently abandoned mid-task.
   autoResumeRateLimit: true,
+  autoUpdateHosts: true,
   syncPosition: true,
   questionExpiry: true,
   questionExpirySeconds: QUESTION_EXPIRY_SECONDS_DEFAULT,

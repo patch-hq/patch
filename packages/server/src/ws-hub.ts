@@ -219,6 +219,8 @@ export interface WsHubDeps {
    */
   serverVersion?: string;
   publishedHost?: () => { version: string; targets: string[] } | null;
+  /** Whether a behind host is told to update on connect (shared `autoUpdateHosts`). Absent: yes. */
+  autoUpdateHosts?: () => boolean;
 }
 
 export class WsHub {
@@ -1152,6 +1154,7 @@ export class WsHub {
       case 'incomparable':
         return;
       case 'update':
+        if (this.deps.autoUpdateHosts && !this.deps.autoUpdateHosts()) return;
         log.warn(ctx, 'host is behind the server; telling it to update');
         socket.send(encode({ type: 'host.update', hostId }));
         return;

@@ -778,6 +778,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     idGenerator,
     getAppVersion: () => appBundleVersion,
     serverVersion: VERSION,
+    autoUpdateHosts: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
     // Read per connect, not cached: a deploy publishes the host and restarts
     // this server in one run, but a hand-published host must count too. A
     // missing or unreadable manifest is null — "nothing published", which the

@@ -123,6 +123,8 @@ const HostStateFile = z
     titleGenerationEnabled: z.boolean().optional(),
     statusGenerationEnabled: z.boolean().optional(),
     autoResumeRateLimit: z.boolean().optional(),
+    /** Whether this host installs a published build on its own (shared `autoUpdateHosts`). */
+    autoUpdateHosts: z.boolean().optional(),
     /**
      * Whether an unanswered `AskUserQuestion` on this host expires
      * (`host.settings` → `questionExpiry`), and the window in seconds it is

@@ -33,6 +33,7 @@ const SETTING_KEYS: Record<string, string> = {
   'question-expiry': 'questionExpiry',
   'question-expiry-seconds': 'questionExpirySeconds',
   'auto-resume': 'autoResumeRateLimit',
+  'auto-update': 'autoUpdateHosts',
   'chat-name-interval': 'chatNameInterval',
   'title-generation': 'titleGenerationEnabled',
   'status-generation': 'statusGenerationEnabled',

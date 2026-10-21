@@ -202,30 +202,8 @@ export interface DriftInput {
 export function computeDrift(input: DriftInput): VersionDrift[] {
   const drift: VersionDrift[] = [];
 
-  // --- Machines disagreeing with each other (spec/11: the host layer can
-  // differ from host to host). With one `daemon` field this was invisible:
-  // five machines on 0.1.374 and four on 0.1.375 reported as one version and
-  // looked like agreement. Unknown stays unknown — a machine that has never
-  // reported a build is called out separately, never folded in as "same".
   const online = input.hosts.filter((h) => h.online);
   const stamped = online.filter((h) => h.version !== null);
-  const versions = [...new Set(stamped.map((h) => h.version))];
-  if (versions.length > 1) {
-    const byVersion = versions
-      .map(
-        (v) =>
-          `${v} (${stamped
-            .filter((h) => h.version === v)
-            .map((h) => h.hostId)
-            .join(', ')})`,
-      )
-      .join(' vs ');
-    drift.push({
-      kind: 'hosts-disagree',
-      detail: `connected machines are on different host builds: ${byVersion}`,
-      remedy: 'update the machines that are behind (Settings → Hosts → Update)',
-    });
-  }
   for (const h of online.filter((x) => x.version === null)) {
     drift.push({
       kind: 'host-unstamped',

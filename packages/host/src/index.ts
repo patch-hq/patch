@@ -760,6 +760,9 @@ async function startHost(
    * not.
    */
   let autoResumeRateLimit = persistedHostState.autoResumeRateLimit ?? true;
+  // Whether the scheduled check installs a published build itself. A manual
+  // `host.update` and an unreadable server greeting always apply.
+  let autoUpdateHosts = persistedHostState.autoUpdateHosts ?? true;
 
   /**
    * Whether an unanswered question on this host expires, and the window it is
@@ -1685,6 +1688,10 @@ async function startHost(
       autoResumeRateLimit = shared.autoResumeRateLimit;
       daemon.setAutoResumeRateLimit(autoResumeRateLimit);
       hostStateStore.update({ autoResumeRateLimit });
+    }
+    if (shared.autoUpdateHosts !== autoUpdateHosts) {
+      autoUpdateHosts = shared.autoUpdateHosts;
+      hostStateStore.update({ autoUpdateHosts });
     }
     if (
       shared.questionExpiry !== questionExpiry ||
@@ -4341,7 +4348,7 @@ async function startHost(
     // already knows how to do this safely: nothing happens with no update
     // published, and a busy machine defers until idle rather than killing a
     // running turn.
-    if (check.available || check.awaitingArtifact) {
+    if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
       const result = await applyUpdateOnce();
       if (!result.applied && !result.deferred) {
         logger.warn({ reason: result.message }, 'self-update: scheduled apply refused');

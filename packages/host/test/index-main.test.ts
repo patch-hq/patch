@@ -3563,6 +3563,43 @@ describe('src/index.ts main() — scheduled self-update actually applies', () =>
       await boot.cleanup();
     }
   });
+
+  it('does not pull a published build on its own when auto-update is off', async () => {
+    const lines: string[] = [];
+    const artifactBytes = Buffer.from('not a real host tarball');
+    const manifest: HostManifest = {
+      version: '9.9.9',
+      gitSha: 'deadbeef',
+      builtAt: new Date().toISOString(),
+      signingPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      artifacts: [
+        {
+          target: 'linux-x64',
+          file: 'patch-host-linux-x64.tar.gz',
+          bytes: artifactBytes.length,
+          sha256: '0'.repeat(64),
+          sig: 'invalid-sig',
+        },
+      ],
+    };
+    const boot = await bootMain(
+      {},
+      {
+        hostJson: { autoUpdateHosts: false },
+        logStream: { write: (chunk: string) => void lines.push(chunk) },
+        selfUpdateManifest: { manifest, files: { 'patch-host-linux-x64.tar.gz': artifactBytes } },
+      },
+    );
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      await waitFor(() => lines.some((l) => l.includes('self-update: availability changed')));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(lines.some((l) => l.includes('self-update: scheduled apply refused'))).toBe(false);
+    } finally {
+      await boot.cleanup();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
