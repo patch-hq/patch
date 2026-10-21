@@ -415,6 +415,8 @@ export interface BrowserManagerOptions {
 
 /** Where the Patch app's browser is, starting the app when it is not running. */
 export interface AppBrowserLink {
+  /** Whether the app has ever run on this machine (its endpoint file exists). */
+  present(): boolean;
   endpoint(): Promise<string>;
 }
 
@@ -873,7 +875,7 @@ export class BrowserManager {
    * the same clear way, never half-launches.
    */
   private async checkChromiumInstalled(): Promise<void> {
-    if (this.opts.appBrowser) return;
+    if (this.usingApp()) return;
     const { chromium } = await this.playwright();
     const execPath = chromium.executablePath();
     if (!existsSync(execPath)) {
@@ -983,6 +985,23 @@ export class BrowserManager {
     return run;
   }
 
+  /**
+   * Whether the agent's browser is the Patch app's. Decided at the first
+   * launch, not when the host starts: the app installed or updated after the
+   * host came up still counts. Fixed from then for this host's life, since
+   * tabs cannot move between the two.
+   */
+  private appDecided: boolean | undefined;
+  private usingApp(): boolean {
+    if (this.appDecided === undefined) {
+      if (!this.opts.appBrowser) return false;
+      this.appDecided = this.opts.appBrowser.present();
+      if (this.appDecided)
+        this.opts.logger.info('browser: the agent browser lives in the Patch app');
+    }
+    return this.appDecided;
+  }
+
   /** The Patch app's browser, connected once and shared by both profiles. */
   private connectApp(): Promise<Browser> {
     if (this.appConnection?.isConnected()) return Promise.resolve(this.appConnection);
@@ -1047,7 +1066,7 @@ export class BrowserManager {
       this.loggedInContext = null;
     }
     if (this.loggedInContext) return this.loggedInContext;
-    if (this.opts.appBrowser) {
+    if (this.usingApp()) {
       const browser = await this.connectApp();
       const context = browser.contexts()[0];
       if (!context) throw new AppBrowserUnavailableError('it offered no signed-in profile');
@@ -1102,7 +1121,7 @@ export class BrowserManager {
 
   private async launchEphemeralBrowser(routeThrough?: RouteThrough): Promise<Browser> {
     const { key, launchOpt } = await this.proxyFor(routeThrough);
-    if (this.opts.appBrowser) {
+    if (this.usingApp()) {
       // One app browser for both profiles: a new route closes the throwaway
       // tabs, never the browser (that would take the signed-in tabs with it).
       if (this.ephemeralBrowser && this.ephemeralBrowserProxyKey !== key) {
@@ -1340,7 +1359,7 @@ export class BrowserManager {
 
   private async newThrowawayContext(browser: Browser): Promise<BrowserContext> {
     const context = await browser.newContext(
-      this.opts.appBrowser && this.appThrowawayProxy ? { proxy: this.appThrowawayProxy } : {},
+      this.usingApp() && this.appThrowawayProxy ? { proxy: this.appThrowawayProxy } : {},
     );
     await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
     await this.installSigning(context);
@@ -1491,7 +1510,7 @@ export class BrowserManager {
       }
       tab.fileChooser = undefined;
     });
-    if (this.opts.appBrowser) {
+    if (this.usingApp()) {
       tab.appTarget = undefined;
       this.learnAppTarget(tab, page).catch((err: unknown) => {
         this.opts.logger.warn({ err, tabId: tab.tabId }, 'browser: could not learn the app tab id');
@@ -3047,7 +3066,7 @@ export class BrowserManager {
    */
   async clearLoggedInProfile(): Promise<void> {
     await this.closeTabsFor('logged-in');
-    if (this.opts.appBrowser) {
+    if (this.usingApp()) {
       // The profile is the app's: clear what it holds rather than a directory here.
       const context = await this.getLoggedInContext();
       await context.clearCookies();

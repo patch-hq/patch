@@ -511,7 +511,7 @@ copy and paste are the browser's own — rather than a picture of it.
   the status (`appTarget`), which is how the app's own window knows the tab is
   its to show. The user working a shown tab while the agent is not acting
   takes it over, as in the live view.
-- **Starting.** The host decides at start: the endpoint file exists (the app
+- **Starting.** The host decides at its first browser launch: the endpoint file exists (the app
   has run here) means the app's browser. Not running, the host starts it in
   the background (`open -g -j` on a Mac) and waits up to 30 s. NO FALLBACK:
   an app that does not come up fails the browser call

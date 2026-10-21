@@ -104,11 +104,11 @@ describe.skipIf(!runnable)('the agent browser in the Patch app', () => {
     expect(statSync(endpointFile).mode & 0o077).toBe(0);
     site = await fixture();
     const link = appBrowserLink({ home, logger: silent });
-    expect(link).toBeDefined();
+    expect(link.present()).toBe(true);
     browser = new BrowserManager({
       root: join(home, 'browser'),
       logger: silent,
-      appBrowser: link!,
+      appBrowser: link,
     });
   });
 

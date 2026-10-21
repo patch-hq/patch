@@ -4030,14 +4030,10 @@ async function startHost(
     },
     // spec/02 § Browser — In the Patch app: when the app is installed on this
     // machine, the agent's browser lives in it.
-    ...(() => {
-      const link = appBrowserLink({
-        home: homedir(),
-        logger: logger.child({ component: 'app-browser' }),
-      });
-      if (link) logger.info('browser: the agent browser lives in the Patch app on this machine');
-      return link ? { appBrowser: link } : {};
-    })(),
+    appBrowser: appBrowserLink({
+      home: homedir(),
+      logger: logger.child({ component: 'app-browser' }),
+    }),
     // spec/02 § Browser — Route through.
     browserRouting: {
       target: () => browserRouteThrough,

@@ -33,17 +33,16 @@ function alive(pid: number): boolean {
 }
 
 /**
- * The link to the app's browser, or undefined when the app has never run on
- * this machine (the host keeps its own Chromium).
+ * The link to the app's browser. `present()` is false while the app has never
+ * run on this machine, and the host keeps its own Chromium.
  */
 export function appBrowserLink(opts: {
   home: string;
   logger: Logger;
   platform?: NodeJS.Platform;
   now?: () => number;
-}): AppBrowserLink | undefined {
+}): AppBrowserLink {
   const file = join(opts.home, '.patch', 'agent-browser.json');
-  if (!existsSync(file)) return undefined;
   const platform = opts.platform ?? process.platform;
   const now = opts.now ?? Date.now;
   const read = (): EndpointFile => {
@@ -57,6 +56,7 @@ export function appBrowserLink(opts: {
   const running = (e: EndpointFile): string | undefined =>
     e.endpoint && e.pid !== undefined && alive(e.pid) ? e.endpoint : undefined;
   return {
+    present: () => existsSync(file),
     async endpoint(): Promise<string> {
       const first = read();
       const ready = running(first);
