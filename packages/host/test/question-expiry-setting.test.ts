@@ -189,6 +189,33 @@ describe('the question-expiry setting drives the timer', () => {
     }
   });
 
+  it('replays a question that expired as a request followed by its denial', async () => {
+    vi.useFakeTimers();
+    try {
+      const { daemon, events, folder } = setup();
+      const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
+      await vi.advanceTimersByTimeAsync(50);
+      const requestId = request(events).requestId;
+      await vi.advanceTimersByTimeAsync(QUESTION_EXPIRY_SECONDS_DEFAULT * 1000 + 1000);
+      expect(response(events)?.decision).toBe('deny');
+
+      const replayed: WireEvent[] = [];
+      daemon.replayChat(chatId, -1, (e) => replayed.push(e));
+
+      const reqIdx = replayed.findIndex(
+        (e) => e.type === 'chat.permission_request' && e.requestId === requestId,
+      );
+      const resIdx = replayed.findIndex(
+        (e) => e.type === 'chat.permission_response' && e.requestId === requestId,
+      );
+      expect(reqIdx, 'the expired question was dropped from replay').toBeGreaterThanOrEqual(0);
+      expect(resIdx).toBeGreaterThan(reqIdx);
+      expect(replayed[reqIdx]).not.toHaveProperty('expiry');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('refuses a window outside the wire bounds rather than clamping it', () => {
     const { daemon } = setup();
     // A clamp would leave the host running one number and Settings showing

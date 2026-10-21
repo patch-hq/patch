@@ -5635,8 +5635,45 @@ export class Daemon {
     const activeBranchId = meta.activeBranchId ?? this.branchIdFor(chatId);
     const targetBranchId = branchId ?? activeBranchId;
     const records = readTrackRecords(this.chatLog, chatId, meta, targetBranchId, fromSeq);
+    // A question that ran out unanswered is replayed as a request plus its
+    // denial, so a reload draws the greyed-out card the live surface showed
+    // instead of dropping it. Answered and cancelled ones are not: their tool
+    // rows already tell that story.
+    const expiredQuestions = new Set<string>();
     for (const record of records) {
-      if (record.rec.k === 'event') {
+      if (record.rec.k === 'permission.decision' && record.rec.by === 'expiry') {
+        expiredQuestions.add(record.rec.requestId);
+      }
+    }
+    for (const record of records) {
+      if (
+        record.rec.k === 'permission.request' &&
+        record.rec.tool === ASK_USER_QUESTION &&
+        expiredQuestions.has(record.rec.requestId) &&
+        !this.pendingPermissionEvents.has(`${chatId}:${record.rec.requestId}`)
+      ) {
+        emitToSurface({
+          type: 'chat.permission_request',
+          chatId,
+          requestId: record.rec.requestId,
+          request: {
+            tool: record.rec.tool,
+            args: record.rec.args,
+            ...(record.rec.description !== undefined
+              ? { description: record.rec.description }
+              : {}),
+          },
+          seq: record.seq,
+          ...(targetBranchId === activeBranchId ? {} : { branchId: targetBranchId }),
+        });
+        emitToSurface({
+          type: 'chat.permission_response',
+          chatId,
+          requestId: record.rec.requestId,
+          approve: false,
+          decision: 'deny',
+        });
+      } else if (record.rec.k === 'event') {
         const ev = record.rec.event;
         // Send the blob REFERENCE, never the body. Tool output is 85-99% of a
         // long chat's bytes — one measured chat shipped 23 MB to draw 150 KB
