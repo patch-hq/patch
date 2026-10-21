@@ -5,6 +5,7 @@ import {
   harnessModesInclude,
 } from './harnesses.js';
 import type { SleepGuard } from './sleepGuard.js';
+import type { SleepWatch } from './sleepWatch.js';
 import { expandHome } from './expandHome.js';
 import { escapesFolder } from './pathEscape.js';
 import { invalidateGitDirtyCache } from './git-dirty.js';
@@ -487,6 +488,8 @@ export interface HostOptions {
   onTurnCommitted?: (chatId: string) => void;
   /** Held from the start of a chat's pump until it settles, so the host machine cannot sleep mid-turn. */
   sleepGuard?: SleepGuard;
+  /** Tells a turn that died because the machine slept from one that failed on its own. */
+  sleepWatch?: SleepWatch;
   /**
    * Optional AI title summariser (spec/04 § Name). When set, the host fires
    * it ONCE per chat as soon as the chat's first user message is accepted —
@@ -877,6 +880,13 @@ export interface SpawnChatOptions {
  * Its length IS the retry ceiling.
  */
 const SDK_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000];
+
+/**
+ * A turn the machine slept through waits until the machine has been awake
+ * this long: past any maintenance wake, which a Mac ends inside a minute.
+ */
+const AWAKE_SETTLE_MS = 3 * 60_000;
+const AWAKE_POLL_MS = 30_000;
 
 /** Re-sends for a session the SDK aborted unasked: one resumed, one on a fresh session. */
 const SESSION_ABORT_RESTARTS = 2;
@@ -6655,32 +6665,68 @@ export class Daemon {
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       this.sdkRetryTimers.delete(chatId);
-      this.unparkTurn(chatId);
-      // A turn that arrived while we were waiting has already revived the
-      // chat, and a stop or delete means nobody wants this one any more.
-      const cur = this.chatState.get(chatId);
-      if (!cur || cur.activity !== 'errored') return;
-      // A FRESH localId per attempt, never the original turn's: (chatId,
-      // localId) is the idempotency key, so re-sending under the failed turn's
-      // id is silently deduped and the retry never happens. That made the
-      // second and third rungs of the ladder unreachable.
-      void this.sendInput({
-        chatId,
-        message: prompt,
-        localId: `sdk-retry-${chatId}-${attempt}-${this.opts.now()}`,
-        // spec/09 § Whose turn it was — a retry is the same turn, so it settles
-        // as whatever it was. A user turn that had to go round the error ladder
-        // still notifies once; a wake tick that did still says nothing.
-        ...(cur.turnOrigin ? { origin: cur.turnOrigin } : {}),
-        // The fresh localId above is what makes the host RUN this rung at
-        // all; this is what stops every surface drawing it as a second message.
-        ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
-      }).catch((err: unknown) => {
-        this.opts.logger.error({ chatId, err }, 'sdk error: retry could not be sent');
-      });
+      this.resendRetriedTurn(chatId, prompt, `sdk-retry-${chatId}-${attempt}`, retryOfSeq);
     }, delayMs);
     timer.unref?.();
     this.sdkRetryTimers.set(chatId, timer);
+  }
+
+  /**
+   * Re-send a turn the machine slept through, once the machine has been awake
+   * for `AWAKE_SETTLE_MS`. It is not a failure of the turn, so it takes no rung
+   * of the ladder; it costs nothing to wait for, so there is no ceiling — every
+   * wait ends with the machine awake and the turn running.
+   */
+  private scheduleAwakeRetry(chatId: string, prompt: string, retryOfSeq: number | undefined): void {
+    this.parkTurn(chatId, prompt, undefined, retryOfSeq, 'retry');
+    const poll = (): void => {
+      const watch = this.opts.sleepWatch;
+      watch?.check();
+      if (watch !== undefined && watch.awakeForMs() < AWAKE_SETTLE_MS) {
+        const next = setTimeout(poll, AWAKE_POLL_MS);
+        next.unref?.();
+        this.sdkRetryTimers.set(chatId, next);
+        return;
+      }
+      this.sdkRetryTimers.delete(chatId);
+      this.resendRetriedTurn(chatId, prompt, `sleep-retry-${chatId}`, retryOfSeq);
+    };
+    const existing = this.sdkRetryTimers.get(chatId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(poll, AWAKE_POLL_MS);
+    timer.unref?.();
+    this.sdkRetryTimers.set(chatId, timer);
+  }
+
+  private resendRetriedTurn(
+    chatId: string,
+    prompt: string,
+    localIdPrefix: string,
+    retryOfSeq: number | undefined,
+  ): void {
+    this.unparkTurn(chatId);
+    // A turn that arrived while we were waiting has already revived the
+    // chat, and a stop or delete means nobody wants this one any more.
+    const cur = this.chatState.get(chatId);
+    if (!cur || cur.activity !== 'errored') return;
+    // A FRESH localId per attempt, never the original turn's: (chatId,
+    // localId) is the idempotency key, so re-sending under the failed turn's
+    // id is silently deduped and the retry never happens. That made the
+    // second and third rungs of the ladder unreachable.
+    void this.sendInput({
+      chatId,
+      message: prompt,
+      localId: `${localIdPrefix}-${this.opts.now()}`,
+      // spec/09 § Whose turn it was — a retry is the same turn, so it settles
+      // as whatever it was. A user turn that had to go round the error ladder
+      // still notifies once; a wake tick that did still says nothing.
+      ...(cur.turnOrigin ? { origin: cur.turnOrigin } : {}),
+      // The fresh localId above is what makes the host RUN this rung at
+      // all; this is what stops every surface drawing it as a second message.
+      ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
+    }).catch((err: unknown) => {
+      this.opts.logger.error({ chatId, err }, 'sdk error: retry could not be sent');
+    });
   }
 
   /**
@@ -8695,6 +8741,7 @@ export class Daemon {
     // spec/04 § History — the turn opens in the chat's own history log before
     // anything it produces is written there.
     const turnId = randomUUID();
+    const turnStartedAt = this.opts.now();
     let turnOutcome: TurnOutcome = 'failed';
     let turnError: { code: ChatErrorCode; message: string } | undefined;
     this.branchIds.delete(chatId);
@@ -9375,6 +9422,12 @@ export class Daemon {
         }
         const errMsg = (err as Error).message ?? String(err);
         turnError = { code: 'sdk_error', message: errMsg };
+        // A turn that died because the machine slept under it did not fail:
+        // it is owed again once the machine is properly awake, and none of the
+        // retry budgets below are spent on it.
+        this.opts.sleepWatch?.check();
+        const sleptThrough =
+          /went to sleep/i.test(errMsg) || this.opts.sleepWatch?.sleptSince(turnStartedAt) === true;
         // What the provider said about the limit, structured — carried through
         // the error boundary rather than re-read out of the sentence. Undefined
         // for a failure that stated no limit (a crash, an abort).
@@ -9693,7 +9746,7 @@ export class Daemon {
         // same wedged state and cannot succeed, so it is skipped. Re-send at
         // once, resuming the session; if that aborts too, restart the turn on
         // a fresh session; only then leave the chat errored.
-        if (err instanceof Error && err.name === 'AbortError') {
+        if (err instanceof Error && err.name === 'AbortError' && !sleptThrough) {
           const aborts = (this.sessionAbortCount.get(chatId) ?? 0) + 1;
           if (aborts <= SESSION_ABORT_RESTARTS) {
             this.sessionAbortCount.set(chatId, aborts);
@@ -9871,10 +9924,11 @@ export class Daemon {
         if (failing) {
           failing.turnRetrying =
             !blockedOnCredit &&
-            failureClass.kind === 'transient' &&
             !isSessionInvalid &&
-            !(err instanceof Error && err.name === 'AbortError') &&
-            (this.sdkRetryCount.get(chatId) ?? 0) < SDK_RETRY_BACKOFF_MS.length;
+            (sleptThrough ||
+              (failureClass.kind === 'transient' &&
+                !(err instanceof Error && err.name === 'AbortError') &&
+                (this.sdkRetryCount.get(chatId) ?? 0) < SDK_RETRY_BACKOFF_MS.length));
         }
         this.emitState(chatId);
         this.opts.logger.error({ chatId, err, code }, 'SDK run errored');
@@ -9896,6 +9950,12 @@ export class Daemon {
           // now`, the credit-return sweep and the next host boot each have
           // the turn to run, and a turn that settles clears it.
           this.parkTurn(chatId, prompt, localId, turnAnchorSeq, 'credit');
+        } else if (!isSessionInvalid && sleptThrough) {
+          this.opts.logger.warn(
+            { chatId, errMsg },
+            'turn died while the machine slept — re-sending once it is properly awake',
+          );
+          this.scheduleAwakeRetry(chatId, prompt, turnAnchorSeq);
         } else if (!isSessionInvalid && failureClass.kind === 'permanent') {
           // A PERMANENT failure (bad request, refused credential, over-long
           // prompt...) fails identically every time: no ladder, the chat
