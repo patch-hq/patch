@@ -14569,6 +14569,24 @@ select.new-chat-account:focus-visible {
   display: flex;
   gap: 4px;
 }
+.pad-share {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 28px;
+  border-bottom: 1px solid var(--line);
+}
+.pad-share select,
+.pad-share input,
+.pad-share button {
+  min-height: var(--tap-min);
+  font: inherit;
+}
+.pad-share input {
+  flex: 1;
+  min-width: 200px;
+}
 .pad-frame {
   flex: 1;
   width: 100%;

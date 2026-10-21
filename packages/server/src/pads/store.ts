@@ -107,6 +107,8 @@ export interface PadRecord {
   /** Why the card thumbnail could not be drawn, when it could not. */
   thumbError?: string;
   thumbRev?: number;
+  /** Read-only sharing. Absent = private. `token` is the unguessable key of a link share. */
+  share?: { mode: 'link' | 'public'; token: string };
 }
 
 function writeJson(path: string, value: unknown): void {
@@ -175,6 +177,15 @@ export class PadStore {
     const p = this.file(id);
     if (!existsSync(p)) return null;
     return JSON.parse(readFileSync(p, 'utf8')) as PadRecord;
+  }
+
+  /** The Pad a shared-view key opens: a public Pad by id, or a link-shared one by token. */
+  findShared(key: string): PadRecord | null {
+    if (!validId(key) && !/^[0-9a-f]{32}$/.test(key)) return null;
+    const byId = this.get(key);
+    if (byId?.share?.mode === 'public') return byId;
+    if (!/^[0-9a-f]{32}$/.test(key)) return null;
+    return this.list().find((p) => p.share?.mode === 'link' && p.share.token === key) ?? null;
   }
 
   mustGet(id: string): PadRecord {

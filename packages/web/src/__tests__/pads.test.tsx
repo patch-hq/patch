@@ -32,6 +32,7 @@ const pad = (over: Partial<PadView> = {}): PadView => ({
   screens: [{ id: 'home', name: 'Home', path: 'index.html', pending: 0, thumbUrl: null }],
   screensError: null,
   frameUrl: '/api/padx/care/sig/',
+  share: null,
   thumbUrl: null,
   thumbError: null,
   ...over,
@@ -190,6 +191,25 @@ describe('PadPane', () => {
     wrap(<PadPane padId="care" />);
     expect(await screen.findByTestId('pad-screens-error')).toHaveTextContent('not valid JSON');
     expect(screen.queryByTestId('pad-frame')).not.toBeInTheDocument();
+  });
+  it('shares read-only: picks a mode, shows the link, and can issue a new one', async () => {
+    const get = vi.spyOn(api, 'getPad').mockResolvedValue(pad());
+    const patch = vi
+      .spyOn(api, 'patchPad')
+      .mockResolvedValue(pad({ share: { mode: 'link', url: '/api/shared/abc/' } }));
+    wrap(<PadPane padId="care" />);
+    fireEvent.click(await screen.findByTestId('pad-share'));
+    expect(screen.queryByTestId('pad-share-url')).not.toBeInTheDocument();
+    get.mockResolvedValue(pad({ share: { mode: 'link', url: '/api/shared/abc/' } }));
+    fireEvent.change(screen.getByTestId('pad-share-mode'), { target: { value: 'link' } });
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('care', { share: 'link' }));
+    expect(await screen.findByTestId('pad-share-url')).toHaveValue(
+      `${window.location.origin}/api/shared/abc/`,
+    );
+    fireEvent.click(screen.getByTestId('pad-share-rotate'));
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith('care', { share: 'link', rotate: true }),
+    );
   });
   it('deletes after a confirmation and closes its tab', async () => {
     vi.spyOn(api, 'getPad').mockResolvedValue(pad());

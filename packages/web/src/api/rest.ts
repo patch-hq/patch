@@ -222,6 +222,8 @@ export interface PadView {
   screensError: string | null;
   /** Signed, iframe-able URL of the editor. */
   frameUrl: string;
+  /** Read-only sharing; null while private. `url` is a path on this server. */
+  share: { mode: 'link' | 'public'; url: string } | null;
   thumbUrl: string | null;
   thumbError: string | null;
 }
@@ -282,8 +284,15 @@ export const api = {
       method: 'POST',
       body: { screens },
     }),
-  patchPad: (id: string, body: { name?: string; device?: 'desktop' | 'phone' }) =>
-    request<PadView>(`/api/pads/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  patchPad: (
+    id: string,
+    body: {
+      name?: string;
+      device?: 'desktop' | 'phone';
+      share?: 'private' | 'link' | 'public';
+      rotate?: boolean;
+    },
+  ) => request<PadView>(`/api/pads/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   deletePad: (id: string) =>
     request<null>(`/api/pads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 

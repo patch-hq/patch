@@ -754,6 +754,8 @@ Pad cards. Creating, updating or replying stamps a card into the owning chat (a 
 
 Access. The editor and the Pad's files are served from a URL signed over the Pad's id, because they load in a frame that cannot attach a bearer header; the Pads page, creation, rename and deletion need a surface bearer. The editor reaches into the design's document, so the design runs same-origin with Patch rather than in an opaque origin; Pads are authored by Tom's own agents.
 
+Sharing. A Pad is private until shared. A Share control in the pane header sets who can view it: Only me, Anyone with the link, or Public. A link share is an unguessable address (`/api/shared/<token>/`) shown with Copy and New link, which issues a fresh token and so revokes the old address. A public share is addressed by the Pad's id (`/api/shared/<id>/`). Either opens a read-only viewer that needs no Patch credential: the name, a screen switcher and the design, with no changes, notes, batches or Send, and no write route. The design's files are served with a `sandbox` content-security policy so their scripts run in an opaque origin, apart from Patch's. Turning sharing off closes both addresses at once. Setting it needs a surface bearer.
+
 Screen capture. The photograph of a screen other than the one on show is taken by loading that route in an off-screen frame of the app with a throwaway layout that persists nothing and marks nothing read, which is why the app may be framed by its own origin.
 
 ## Viewing files
