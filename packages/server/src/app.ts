@@ -16,9 +16,11 @@ import type { Logger } from 'pino';
 import {
   canonicalizeHostNames,
   DEFAULT_SHARED_SETTINGS,
+  signInQuestion,
   type ChatInputEvent,
   type HealthzResponse,
   type WireEvent,
+  CLOSE_SERVER_RESTARTING,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
@@ -29,7 +31,7 @@ import { createActivityReader } from './activity.js';
 import { ActivityLog } from './activity-log.js';
 import { createBrowserUseReader, HostOfflineError } from './browser-use.js';
 import { createToolLogReader } from './tool-log.js';
-import { createUsageReader } from './usage-report.js';
+import { createUsageReader, isUsagePeriod } from './usage-report.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SharedSettingsService } from './shared-settings.js';
 import { registerSettingsRoutes } from './settings-routes.js';
@@ -76,6 +78,7 @@ const MANAGER_SWEEP_TICK_MS = 10_000;
 // less frequent tick than the watch loop's is enough.
 const THREAD_ROTATION_TICK_MS = 30_000;
 import { registerLinkPreviewRoutes } from './link-preview-routes.js';
+import { registerLinkSummaryRoutes } from './link-summary-routes.js';
 import { RELEASE_REPO } from './release-channel.js';
 import { MobileUpdateNotifier, registerMobileUpdateRoutes } from './mobile-updates.js';
 import { registerClientCrashRoutes } from './client-crash-routes.js';
@@ -89,7 +92,7 @@ import { JobStore } from './jobs/store.js';
 import { JobDispatcher } from './jobs/dispatcher.js';
 import { JobChatLinks } from './jobs/chat-links.js';
 import { JobLogs } from './jobs/logs.js';
-import { JobAlerts } from './jobs/alerts.js';
+import { JobAlerts, describeFailure } from './jobs/alerts.js';
 import { CronScheduler } from './jobs/cron.js';
 import { HostWaker } from './jobs/host-wake.js';
 import { RecurrenceScheduler } from './jobs/recurrence.js';
@@ -97,13 +100,14 @@ import { registerWebhookRoutes } from './jobs/webhooks.js';
 import { registerTodoistRoutes } from './jobs/todoist.js';
 import { registerJobRoutes } from './jobs/routes.js';
 import { attachJobsRpcBridge } from './jobs/rpc-bridge.js';
+import { attachAccountsRpcBridge } from './accounts-rpc-bridge.js';
+import { attachApiRpcBridge } from './api-rpc-bridge.js';
 import type { Job, JobsInterface } from './jobs/types.js';
 import { HookStore } from './hooks/store.js';
 import { HookRunner } from './hooks/runner.js';
 import { registerHookRoutes } from './hooks/routes.js';
 import type { HooksInterface } from './hooks/types.js';
 import { NotificationRouter, type PushBackend } from './notifications/router.js';
-import { PhoneHandover } from './notifications/handover.js';
 import { CallOrchestrator } from './notifications/call-orchestrator.js';
 import { ChatCompletionNotifier } from './notifications/chat-complete.js';
 import { AwaitingPermissionNotifier } from './notifications/awaiting-permission.js';
@@ -133,7 +137,7 @@ export interface BuildOptions {
   webDistDir?: string;
   /** Required for WS auth + pairing — file-backed registry is loaded from this dir. */
   dataDir?: string;
-  /** How long the home host must be offline before another takes over (tests shorten it). */
+  /** How long the Manager host must be offline before another takes over (tests shorten it). */
   managerFailoverGraceMs?: number;
   /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
   hostOfflineGraceMs?: number;
@@ -328,6 +332,19 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // concurrency-limited so a burst cannot pin the event loop. `zlib` contexts
   // are the memory risk here, hence the modest window and the client-side
   // no-context-takeover: this box has 4 GB and runs everything else too.
+  // The plugin's own pre-close closes every socket with no code, which a
+  // surface cannot tell from a dropped link. This hook is added first so it
+  // runs first: sockets already closing ignore the plugin's later close().
+  app.addHook('preClose', function (done) {
+    const server = (
+      this as unknown as {
+        websocketServer?: { clients: Set<{ close(c: number, r: string): void }> };
+      }
+    ).websocketServer;
+    for (const client of server?.clients ?? [])
+      client.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+    done();
+  });
   await app.register(websocketPlugin, {
     options: {
       perMessageDeflate: {
@@ -395,7 +412,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         logger: log.child({ component: 'held-input' }),
       }),
       resolveChatHost: (chatId: string) => chatRegistryRef?.get(chatId)?.hostId ?? null,
-      homeHostId: () => registry.homeHostId(),
+      managerHostId: () => registry.managerHostId(),
       registeredHostIds: () => registry.registeredHostIds(),
       hostName: (hostId: string) => registry.hostName(hostId),
       specialThreadHost: () => managerFailover.specialThreadHost(),
@@ -454,6 +471,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   hostLink.onHostStatus((hostId, status) => {
     if (status === 'online') {
       hostLink.sendTo(hostId, '_server', { type: 'server.queue_mode', enabled: true });
+      // The server decides which machine runs the Manager; each machine is told as it attaches.
+      const manager = registry.managerHostId();
+      if (manager !== null) {
+        hostLink.sendTo(hostId, '_server', { type: 'host.set_manager', hostId: manager });
+      }
     }
   });
   // A host asks at a tool boundary what is waiting.
@@ -493,7 +515,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // Manager failover (spec/06 § Manager failover).
   const managerFailover = new ManagerFailover({
-    homeHostId: () => registry.homeHostId(),
+    managerHostId: () => registry.managerHostId(),
+    setManagerHostId: (hostId) => registry.setManagerHostId(hostId),
+    onMoved: (hostId) => {
+      for (const id of registry.registeredHostIds()) {
+        hostLink.sendTo(id, '_server', { type: 'host.set_manager', hostId });
+      }
+      wsHub.republishAllHosts();
+    },
     registeredHostIds: () => registry.registeredHostIds(),
     isOnline: (hostId) => hostLink.isOnline(hostId),
     onHostStatus: (handler) => hostLink.onHostStatus(handler),
@@ -506,8 +535,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   managerFailover.start();
   app.addHook('onClose', async () => managerFailover.stop());
-  const specialThreadHost = (): string | null =>
-    managerFailover.specialThreadHost() ?? registry.homeHostId();
+  const specialThreadHost = (): string | null => managerFailover.specialThreadHost();
 
   // Durable copy of message text so an offline host's chats stay searchable.
   const chatMirror = registry.dataDir
@@ -536,7 +564,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // through each machine's own bounded tool-calls.jsonl the same way.
   const toolLog = createToolLogReader({ hostLink });
   app.addHook('onClose', async () => toolLog.close());
-  const usageReader = createUsageReader({ hostLink });
+  const usageReader = createUsageReader({
+    hostLink,
+    onRefreshError: (period, err) =>
+      log.warn({ period, err: err.message }, 'usage: background re-read failed'),
+  });
   app.addHook('onClose', async () => usageReader.close());
 
   // Server-owned composer drafts (spec/14 § Composer, spec/15 § Composer).
@@ -601,7 +633,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const managerSweeper = new ManagerSweeper({
     chats: chatRegistry,
     settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
-    homeHostId: () => {
+    managerHostId: () => {
       const id = specialThreadHost();
       return id && hostLink.onlineHostIds().includes(id) ? id : undefined;
     },
@@ -672,33 +704,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       const until = chatRegistry.get(chatId)?.snoozedUntil ?? null;
       return until !== null && until > (opts.nowMs ? opts.nowMs() : Date.now());
     },
-    onDesktopRouted: (event) => phoneHandover.record(event),
     ...(speakersRecorder ? { speakersRecorder } : {}),
     ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
   });
-
-  // spec/09 § Handing over to the phone — what was shown on the desktop, sent
-  // to the phone if the user leaves before opening it. `notificationRouter` is
-  // read lazily: it is constructed with a callback into this.
-  const phoneHandover = new PhoneHandover({
-    logger: log.child({ component: 'phone-handover' }),
-    presence,
-    accountId: () => registry.getAccount()?.accountId,
-    chat: (chatId) => {
-      const c = chatRegistry.get(chatId);
-      if (!c) return undefined;
-      const snoozed =
-        c.snoozedUntil !== null && c.snoozedUntil > (opts.nowMs ? opts.nowMs() : Date.now());
-      return {
-        name: c.name ?? c.preview ?? chatId,
-        live: c.status !== 'archived' && c.status !== 'deleted' && !snoozed,
-      };
-    },
-    send: (entries, names) => notificationRouter.handOver(entries, names),
-    ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
-  });
-  phoneHandover.start();
-  app.addHook('onClose', async () => phoneHandover.stop());
 
   // spec/09 § bell — what agents sent, with read state. `wsHub` is backfilled
   // below, so the change broadcast reads it lazily.
@@ -773,7 +781,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ...(accountSettings ? { sharedSettings: () => accountSettings.changedEvent() } : {}),
     registry,
     presence,
-    presenceHandover: phoneHandover,
     hostLink,
     chatRegistry,
     activity: activityLog,
@@ -791,6 +798,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     idGenerator,
     getAppVersion: () => appBundleVersion,
     serverVersion: VERSION,
+    autoUpdateHosts: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
     // Read per connect, not cached: a deploy publishes the host and restarts
     // this server in one run, but a hand-published host must count too. A
     // missing or unreadable manifest is null — "nothing published", which the
@@ -839,6 +847,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     chatRegistry,
     registry,
     activity,
+    chatLogStore,
   });
 
   // spec/02 § Browser — Route through: relay a browsing host's SOCKS stream
@@ -1338,7 +1347,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         // is known and do not invent a name for it.
         hostName: h.host?.hostName ?? null,
         online: h.online,
-        isHomeHost: h.host?.isHomeHost ?? false,
+        runsManager: h.host?.runsManager ?? false,
         ...(h.host?.defaultModel !== undefined ? { defaultModel: h.host.defaultModel } : {}),
       })),
     };
@@ -1454,12 +1463,29 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // Settings → Usage: account limit history (for the burndown) and per-chat
-  // token totals, read through every online machine and merged.
+  // token totals, read through every online machine and merged. A named
+  // `period` (day/week/month) comes from the server's cache, so the page
+  // draws at once; `since`/`until` is a live read.
   app.get('/api/usage-report', async (req, reply) => {
     if (!(await authSurfaceOrHost(req.headers.authorization))) {
       return reply.code(401).send({ error: 'unauthenticated' });
     }
     const q = req.query as Record<string, string | undefined>;
+    if (q.period !== undefined) {
+      if (!isUsagePeriod(q.period)) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_input', message: 'period must be day, week or month' });
+      }
+      try {
+        return await usageReader.cached(q.period);
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'usage_unavailable',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const now = Date.now();
     const until = q.until !== undefined ? Number(q.until) : now;
     const since = q.since !== undefined ? Number(q.since) : until - 7 * 24 * 60 * 60 * 1000;
@@ -1486,9 +1512,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // revokes the machine's credential (so its next hello is answered
   // `auth.revoked` and it wipes its key), its live link is closed and its
   // buffered frames dropped, the hub forgets every cached report about it and
-  // tells every surface `host.removed {hostId}`. If it was the home machine,
-  // home passes to the next registered one and every machine and surface is
-  // told, exactly as a `set-home` would. Chats that ran on it are left as they
+  // tells every surface `host.removed {hostId}`. If it ran the Manager,
+  // the Manager passes to the next registered one and every machine and surface is
+  // told, as any Manager move would. Chats that ran on it are left as they
   // are: their history is the account's, not the machine's.
   app.delete<{ Params: { hostId: string } }>('/api/hosts/:hostId', async (req, reply) => {
     let auth;
@@ -1508,33 +1534,29 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         knownHosts: registry.registeredHostIds(),
       });
     }
-    const homeBefore = registry.homeHostId();
+    const managerBefore = registry.managerHostId();
     registry.removeHost(hostId);
     const linkClosed = wsHub.disconnectHostNow(hostId, () => hostLink.forget(hostId));
     const told = wsHub.removeHost(hostId);
-    const homeAfter = registry.homeHostId();
-    if (homeBefore === hostId && homeAfter !== null) {
+    const managerAfter = registry.managerHostId();
+    if (managerBefore === hostId && managerAfter !== null) {
       for (const id of registry.registeredHostIds()) {
-        hostLink.sendTo(id, 'server', { type: 'host.set_home', hostId: homeAfter });
+        hostLink.sendTo(id, 'server', { type: 'host.set_manager', hostId: managerAfter });
       }
-      wsHub.sendToAll({ type: 'host.set_home', hostId: homeAfter });
       wsHub.republishAllHosts();
     }
     log.info(
-      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told, homeAfter },
+      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told, managerAfter },
       'host removed from the account',
     );
     return { ok: true, hosts: wsHub.hosts() };
   });
 
-  // Renaming a machine and marking one the account home are SERVER-owned, even
-  // when the CLI naming them runs on that very machine (spec/17 § Hosts and the
-  // CLI). The registry holds both, so they must be written here and pushed to
-  // every surface — a daemon-local write would leave other surfaces stale.
-  for (const [route, kind] of [
-    ['/api/hosts/rename', 'rename'] as const,
-    ['/api/hosts/set-home', 'set-home'] as const,
-  ]) {
+  // Renaming a machine is SERVER-owned, even when the CLI naming it runs on
+  // that very machine (spec/17 § Hosts and the CLI). The registry holds the
+  // name, so it must be written here and pushed to every surface — a
+  // daemon-local write would leave other surfaces stale.
+  for (const route of ['/api/hosts/rename']) {
     app.post<{ Body: { hostId?: string; hostName?: string } }>(route, async (req, reply) => {
       const account = registry.getAccount();
       if (!account) return reply.code(401).send({ error: 'unauthenticated' });
@@ -1570,32 +1592,22 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         });
       }
 
-      if (kind === 'rename') {
-        const hostName = req.body?.hostName;
-        if (typeof hostName !== 'string' || hostName.trim().length === 0) {
-          // A machine must always have a name; an empty rename is refused.
-          return reply
-            .code(400)
-            .send({ error: 'invalid_name', message: 'a machine name cannot be empty' });
-        }
-        registry.setHostName(hostId, hostName.trim());
-        // The machine keeps its own self-description in step (and persists the
-        // rename so a restart does not revert it); every surface is told too.
-        hostLink.sendTo(hostId, 'server', {
-          type: 'host.rename',
-          hostId,
-          hostName: hostName.trim(),
-        });
-        wsHub.sendToAll({ type: 'host.rename', hostId, hostName: hostName.trim() });
-      } else {
-        registry.setHomeHostId(hostId);
-        // Broadcast to EVERY machine: the named one becomes home and the rest
-        // lose it, so exactly one machine reports the flag.
-        for (const id of registry.registeredHostIds()) {
-          hostLink.sendTo(id, 'server', { type: 'host.set_home', hostId });
-        }
-        wsHub.sendToAll({ type: 'host.set_home', hostId });
+      const hostName = req.body?.hostName;
+      if (typeof hostName !== 'string' || hostName.trim().length === 0) {
+        // A machine must always have a name; an empty rename is refused.
+        return reply
+          .code(400)
+          .send({ error: 'invalid_name', message: 'a machine name cannot be empty' });
       }
+      registry.setHostName(hostId, hostName.trim());
+      // The machine keeps its own self-description in step (and persists the
+      // rename so a restart does not revert it); every surface is told too.
+      hostLink.sendTo(hostId, 'server', {
+        type: 'host.rename',
+        hostId,
+        hostName: hostName.trim(),
+      });
+      wsHub.sendToAll({ type: 'host.rename', hostId, hostName: hostName.trim() });
       return { ok: true, hosts: wsHub.hosts() };
     });
   }
@@ -1782,6 +1794,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     registry,
   });
 
+  // ---- link summary REST route (spec/14 § Message links — Summarise) ----
+  registerLinkSummaryRoutes(app, {
+    logger: log.child({ component: 'link-summary-routes' }),
+    registry,
+    hostLink,
+    idGenerator,
+    settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
+  });
+
   // ---- client crash reports (phone error boundary / native crash) ----
   registerClientCrashRoutes(app, {
     logger: log.child({ component: 'client-crash-routes' }),
@@ -1925,7 +1946,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         type: 'notify',
         chatId: 'signin-request',
         channel: 'push',
-        message: `${label} wants to sign in to Patch. Open Patch to allow it.`,
+        message: `${signInQuestion(label)} Open Patch to answer.`,
         priority: 'urgent',
       }),
     ...(hostLink instanceof InboundHostLink
@@ -1994,7 +2015,17 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // AND is itself a gate-changed condition, naming the chat it failed on
     // (a dispatch failure with no chat landed has nothing to flag).
     onRun: (entry) => {
-      jobAlerts.onRun(entry);
+      if (jobAlerts.onRun(entry)) {
+        // The sidebar banner is also a bell entry, linking the job and the run.
+        const status = entry.status === 'gate-error' ? 'gate-error' : 'dispatch-error';
+        const name = jobs.get(entry.jobId)?.name ?? entry.jobId;
+        notificationLog.add({
+          message: `${name}: ${describeFailure(status, entry.error ?? '').reason}`,
+          importance: 'normal',
+          jobId: entry.jobId,
+          runTs: entry.ts,
+        });
+      }
       if (isJobRunFailure(entry.status)) managerSweeper.jobRunFailed(entry.action?.chatId ?? null);
     },
   });
@@ -2129,6 +2160,23 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'jobs-rpc-bridge' }),
   });
 
+  // A host's own CLI and agents list/reorder the shared accounts over the link.
+  const detachAccountsBridge = accountSettings
+    ? attachAccountsRpcBridge({
+        link: hostLink,
+        shared: accountSettings,
+        logger: log.child({ component: 'accounts-rpc-bridge' }),
+      })
+    : undefined;
+
+  // A host's own CLI manages patch through the link, with no paired credential.
+  const detachApiBridge = attachApiRpcBridge({
+    link: hostLink,
+    app,
+    registry,
+    logger: log.child({ component: 'api-rpc-bridge' }),
+  });
+
   registerJobRoutes(app, {
     logger: log.child({ component: 'jobs-routes' }),
     registry,
@@ -2194,6 +2242,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     recurrenceScheduler.stop();
     jobDispatcher.close();
     detachJobsBridge();
+    detachAccountsBridge?.();
+    detachApiBridge();
     if (jobs instanceof JobStore) await jobs.close();
     if (hooks instanceof HookStore) await hooks.close();
   });

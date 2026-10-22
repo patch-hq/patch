@@ -14,6 +14,7 @@
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -54,7 +55,6 @@ import {
   PanelRightOpen,
   Target,
   Layers,
-  Bell,
 } from 'lucide-react';
 import { CloseIcon, DeleteIcon } from './icons.js';
 import {
@@ -66,6 +66,7 @@ import {
 import { StatusBadge } from './StatusBadge.js';
 import { ProjectSnoozeMenu } from './ProjectSnoozeMenu.js';
 import { SidebarViewMenu } from './SidebarViewMenu.js';
+import { SidebarSortMenu } from './SidebarSortMenu.js';
 import { BatchPanel } from './BatchPanel.js';
 import { deriveBadge, useChatStore } from '../stores/chatStore.js';
 import { clearComposerDraft } from '../stores/composerDraftStore.js';
@@ -76,7 +77,7 @@ import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
 import { hasDraftText } from '../lib/draftText.js';
-import { hostLabel, sortHosts } from '../routes/settings/hostScope.js';
+import { connectionSummary } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
@@ -111,12 +112,13 @@ import {
   startVoiceCall,
   endVoiceCall,
 } from '../lib/voiceController.js';
+import { OpenableLink } from './OpenableLink.js';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { DevSourceBadge } from './DevSourceBadge.js';
 import { NotificationBell } from './NotificationBell.js';
 import { JobAlerts } from './JobAlerts.js';
-import { useChatHasUnread } from '../stores/notificationsStore.js';
-import { shortcutLabel, shortcutTitle } from '../lib/shortcuts.js';
+import { useChatBadge } from './ChatStatusBadge.js';
+import { shortcutLabel, shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
 import { failed } from '../lib/errorCopy.js';
 import { startPadsPolling, usePadsStore } from '../stores/padsStore.js';
@@ -144,7 +146,7 @@ function lifecycleTitle(label: string, count: number | null, chord?: string): st
 // mobile's `useSettledPreview` (apps/mobile/src/components/ChatRow.tsx) for
 // the analogous reconnect-replay flicker on message previews.
 function useSettledBadge(row: ChatRow): DisplayBadge {
-  const target = deriveBadge(row);
+  const target = useChatBadge(row)!;
   const [shown, setShown] = useState(target);
   useEffect(() => {
     if (target === shown) return;
@@ -155,6 +157,7 @@ function useSettledBadge(row: ChatRow): DisplayBadge {
 }
 
 export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): JSX.Element {
+  const collapseGlyphs = useActionGlyphs('toggleSidebar');
   const chats = useChatStore((s) => s.chats);
   const hydrated = useChatStore((s) => s.hydrated);
   // Before the cold-start `GET /api/chats` lands (or a live reload — every
@@ -217,6 +220,29 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   // archived — after a reload those chats are absent from `chats` entirely
   // (spec/04 § Folders → Folder roster).
   const folderRoster = useChatStore((s) => s.folderRoster);
+  // Archive-undo hold (spec/14 § Row tools): the archive chip commits at once
+  // (optimistic flip + REST) but the row stays drawn in its folder/pinned slot
+  // — greyed, with an Undo chip — until the pointer leaves the sidebar or 4s
+  // pass, so the next chat never slides under a stationary pointer.
+  const [heldArchives, setHeldArchives] = useState<ReadonlySet<string>>(new Set());
+  const flushHeldArchives = (): void => setHeldArchives(new Set());
+  // Stable, so the memoised rows still skip a re-render when only the open chat changes.
+  const holdArchive = useCallback(
+    (chatId: string): void => setHeldArchives((prev) => new Set([...prev, chatId])),
+    [],
+  );
+  const undoArchive = useCallback((chatId: string): void => {
+    setHeldArchives((prev) => {
+      const next = new Set(prev);
+      next.delete(chatId);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    if (heldArchives.size === 0) return;
+    const id = setTimeout(flushHeldArchives, 4000);
+    return () => clearTimeout(id);
+  }, [heldArchives]);
   // Section counts (spec/04 § Section counts) — what the collapsed lifecycle
   // rows show. `null` until the boot fetch lands (or if it failed), which draws
   // no badge; see the group's own comment below.
@@ -224,8 +250,8 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   const chatSort = useUiStore((s) => s.chatSort);
   const groupSort = useUiStore((s) => s.groupSort);
   const grouped = useMemo(
-    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }),
-    [chats, folderRoster, chatSort, groupSort],
+    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }, heldArchives),
+    [chats, folderRoster, chatSort, groupSort, heldArchives],
   );
 
   // Opening a row in needs-attention mode marks it read, which would
@@ -284,9 +310,9 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
             ...grouped,
             pinned: grouped.pinned.filter((c) => matchesStateFilter(c, stateFilter)),
             folders: grouped.folders
-              .map(({ folder, rows }) => ({
-                folder,
-                rows: rows.filter((c) => matchesStateFilter(c, stateFilter)),
+              .map((g) => ({
+                ...g,
+                rows: g.rows.filter((c) => matchesStateFilter(c, stateFilter)),
               }))
               .filter((f) => f.rows.length > 0),
           };
@@ -294,9 +320,9 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
     const matches = (c: ChatRow): boolean => needsAttention(c) || c.chatId === heldChatId;
     const pinned = sortAttentionQueue(stateFiltered.pinned.filter(matches));
     const folders = stateFiltered.folders
-      .map(({ folder, rows }) => ({
-        folder,
-        rows: sortAttentionQueue(rows.filter(matches)),
+      .map((g) => ({
+        ...g,
+        rows: sortAttentionQueue(g.rows.filter(matches)),
       }))
       .filter((f) => f.rows.length > 0);
     return { ...stateFiltered, pinned, folders };
@@ -320,6 +346,7 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       className="sb"
       data-testid="sidebar"
       style={{ width: standalone ? '100%' : sidebarWidth }}
+      onPointerLeave={heldArchives.size > 0 ? flushHeldArchives : undefined}
     >
       <header className="sb-brand">
         <span className="brand-row">
@@ -336,16 +363,8 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
             <span
               className={`conn-dot ${connectedAndOnline ? '' : 'offline'}`}
               aria-label={`connection: ${connection === 'connected' ? (hostOnline ? 'connected' : 'host-offline') : connection}`}
-              title={[
-                connection !== 'connected'
-                  ? 'Reconnecting…'
-                  : hostOnline
-                    ? 'Connected'
-                    : 'Agent offline',
-                ...sortHosts(Object.values(hostStates)).map(
-                  (h) => `${hostLabel(h)}: ${h.online ? 'online' : 'offline'}`,
-                ),
-              ].join('\n')}
+              title={connectionSummary(connection, hostStates)}
+              data-tooltip-full
               data-testid="conn-dot"
             />
           </span>
@@ -379,7 +398,7 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
               className="sidebar-collapse-btn"
               data-testid="sidebar-collapse"
               aria-label="Collapse sidebar"
-              title={shortcutTitle('Collapse sidebar', '⌘/')}
+              title={shortcutTitle('Collapse sidebar', collapseGlyphs)}
               onClick={() => setSidebarCollapsed(true)}
             >
               <ChevronLeft size={16} aria-hidden />
@@ -402,7 +421,10 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       />
 
       {/* The sidebar's one view dropdown (spec/14 § Sidebar §1b). */}
-      <SidebarViewMenu />
+      <div className="sidebar-controls">
+        <SidebarViewMenu />
+        {batchMode ? null : <SidebarSortMenu />}
+      </div>
 
       {batchMode ? (
         <>
@@ -441,6 +463,9 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
           searchQuery={searchQuery}
           activeDevices={activeDevices}
           sectionCounts={sectionCounts}
+          heldArchives={heldArchives}
+          onHoldArchive={holdArchive}
+          onUndoArchive={undoArchive}
         />
       )}
     </aside>
@@ -479,6 +504,9 @@ function RegularSidebar({
   searchQuery,
   activeDevices,
   sectionCounts,
+  heldArchives,
+  onHoldArchive,
+  onUndoArchive,
 }: {
   showSidebarSkeleton: boolean;
   view: Grouped;
@@ -500,15 +528,30 @@ function RegularSidebar({
   automationsOpen: boolean;
   setAutomationsOpen: (v: boolean) => void;
   forgottenFolders: string[];
-  forgetFolder: (folder: string) => void;
+  forgetFolder: (key: string) => void;
   collapsedFolders: string[];
   toggleFolderCollapsed: (folder: string) => void;
   searchQuery: string;
   activeDevices: Record<string, string>;
   sectionCounts: SectionCounts | null;
+  heldArchives: ReadonlySet<string>;
+  onHoldArchive: (chatId: string) => void;
+  onUndoArchive: (chatId: string) => void;
 }): JSX.Element {
+  const channelsGlyphs = useActionGlyphs('toggleChannels');
+  const archivedGlyphs = useActionGlyphs('toggleArchived');
   const navigate = useNavigate();
   const bumpLifecycleScrollTick = useUiStore((s) => s.bumpLifecycleScrollTick);
+  const presenceHosts = usePresenceStore((s) => s.hosts);
+  const hostNames = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(presenceHosts).flatMap(([id, h]) =>
+          h.host?.hostName ? [[id, h.host.hostName]] : [],
+        ),
+      ),
+    [presenceHosts],
+  );
   // Global chat search (spec/03 § Chat search): once the trimmed query is long
   // enough to send, the scrolling band shows results instead of the chat list.
   const activeSearch = searchableQuery(searchQuery);
@@ -536,7 +579,7 @@ function RegularSidebar({
         ? []
         : [
             ...view.pinned,
-            ...view.folders.flatMap((f) => (collapsedFolders.includes(f.folder) ? [] : f.rows)),
+            ...view.folders.flatMap((f) => (collapsedFolders.includes(f.key) ? [] : f.rows)),
           ].map((c) => c.chatId),
     [view, collapsedFolders, activeSearch],
   );
@@ -591,7 +634,15 @@ function RegularSidebar({
             {!showSidebarSkeleton && view.pinned.length > 0 ? (
               <section className="sb-pinned" data-testid="pinned-section">
                 {view.pinned.map((c) => (
-                  <ChatRowView key={c.chatId} row={c} active={activeChatId} pinned />
+                  <ChatRowView
+                    key={c.chatId}
+                    row={c}
+                    active={activeChatId === c.chatId}
+                    pinned
+                    archiveHeld={heldArchives.has(c.chatId)}
+                    onHoldArchive={onHoldArchive}
+                    onUndoArchive={onUndoArchive}
+                  />
                 ))}
                 <div className="pinned-div" />
               </section>
@@ -624,17 +675,25 @@ function RegularSidebar({
           those rows are still listed (hiding a chat is worse), just unheaded
           until the folder is known. */}
             {!showSidebarSkeleton &&
-              view.folders.map(({ folder, rows }) => {
-                const collapsed = collapsedFolders.includes(folder);
+              view.folders.map(({ key, hostId, folder, rows }) => {
+                const collapsed = collapsedFolders.includes(key);
+                const projectName = projectLabel(folder, hostId, view.folders, hostNames);
                 const backPill = folderBackPill(rows);
                 return folderBasename(folder) === '' ? (
-                  <section key={folder} className="sb-folder" data-testid="folder-section-unfiled">
+                  <section key={key} className="sb-folder" data-testid="folder-section-unfiled">
                     {rows.map((c) => (
-                      <ChatRowView key={c.chatId} row={c} active={activeChatId} />
+                      <ChatRowView
+                        key={c.chatId}
+                        row={c}
+                        active={activeChatId === c.chatId}
+                        archiveHeld={heldArchives.has(c.chatId)}
+                        onHoldArchive={onHoldArchive}
+                        onUndoArchive={onUndoArchive}
+                      />
                     ))}
                   </section>
                 ) : (
-                  <section key={folder} className="sb-folder">
+                  <section key={key} className="sb-folder">
                     {/* Header shows the project NAME (basename); full path on hover.
               Two hover-revealed archive buttons: the first archives the project
               AS LISTED (these rows), the second archives ALL in the project —
@@ -654,15 +713,15 @@ function RegularSidebar({
                         className="folder-head-toggle"
                         data-testid={`folder-collapse-${folder}`}
                         aria-expanded={!collapsed}
-                        aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${folderBasename(folder)}`}
-                        onClick={() => toggleFolderCollapsed(folder)}
+                        aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${projectName}`}
+                        onClick={() => toggleFolderCollapsed(key)}
                       >
                         {collapsed ? (
                           <ChevronRight size={13} aria-hidden className="folder-head-chev" />
                         ) : (
                           <ChevronDown size={13} aria-hidden className="folder-head-chev" />
                         )}
-                        <span className="folder-head-label">{folderBasename(folder)}</span>
+                        <span className="folder-head-label">{projectName}</span>
                       </button>
                       {/* How many rows the fold is hiding — the header is otherwise
                   identical collapsed or open. */}
@@ -682,9 +741,11 @@ function RegularSidebar({
                           className="folder-archive-btn"
                           data-testid={`folder-new-chat-${folder}`}
                           title={`New chat in ${folder}`}
-                          aria-label={`New chat in project ${folderBasename(folder)}`}
+                          aria-label={`New chat in project ${projectName}`}
                           onClick={() =>
-                            navigate(`/chats/new?folder=${encodeURIComponent(folder)}`)
+                            navigate(
+                              `/chats/new?folder=${encodeURIComponent(folder)}&host=${encodeURIComponent(hostId)}`,
+                            )
                           }
                         >
                           <Plus size={13} aria-hidden />
@@ -694,8 +755,8 @@ function RegularSidebar({
                           className="folder-archive-btn"
                           data-testid={`folder-archive-${folder}`}
                           title="Archive listed"
-                          aria-label={`archive project ${folderBasename(folder)}`}
-                          onClick={() => archiveProject(folderBasename(folder), rows, navigate)}
+                          aria-label={`archive project ${projectName}`}
+                          onClick={() => archiveProject(projectName, rows, navigate)}
                         >
                           <Archive size={13} aria-hidden />
                         </button>
@@ -704,20 +765,25 @@ function RegularSidebar({
                           className="folder-archive-btn"
                           data-testid={`folder-archive-all-${folder}`}
                           title="Archive all"
-                          aria-label={`archive all in project ${folderBasename(folder)}`}
-                          onClick={() =>
-                            archiveAllInProject(folderBasename(folder), folder, navigate)
-                          }
+                          aria-label={`archive all in project ${projectName}`}
+                          onClick={() => archiveAllInProject(projectName, folder, hostId, navigate)}
                         >
                           <Boxes size={13} aria-hidden />
                         </button>
-                        <ProjectSnoozeMenu folder={folder} name={folderBasename(folder)} />
+                        <ProjectSnoozeMenu folder={folder} hostId={hostId} name={projectName} />
                       </span>
                     </div>
                     {collapsed
                       ? null
                       : rows.map((c) => (
-                          <ChatRowView key={c.chatId} row={c} active={activeChatId} />
+                          <ChatRowView
+                            key={c.chatId}
+                            row={c}
+                            active={activeChatId === c.chatId}
+                            archiveHeld={heldArchives.has(c.chatId)}
+                            onHoldArchive={onHoldArchive}
+                            onUndoArchive={onUndoArchive}
+                          />
                         ))}
                   </section>
                 );
@@ -734,7 +800,14 @@ function RegularSidebar({
           threads are excluded (Manager lives in its own top slot — E2). Each
           row starts a new chat in that folder; the × forgets it. */}
                 <RecentFolders
-                  folders={grouped.recentFolders.filter((f) => !forgottenFolders.includes(f))}
+                  folders={grouped.recentFolders.filter(
+                    // A bare path is a forget saved before recents were per host:
+                    // it forgot that path wherever it lived.
+                    (f) =>
+                      !forgottenFolders.includes(f.key) && !forgottenFolders.includes(f.folder),
+                  )}
+                  shownProjects={view.folders}
+                  hostNames={hostNames}
                   onForget={forgetFolder}
                 />
 
@@ -751,7 +824,7 @@ function RegularSidebar({
                     type="button"
                     className="ch-toggle"
                     data-testid="channels-toggle"
-                    title={shortcutLabel('⌘2')}
+                    title={shortcutLabel(channelsGlyphs)}
                     onClick={() => setChannelsOpen(!channelsOpen)}
                   >
                     <svg viewBox="0 0 16 16" className="ch-chev" aria-hidden>
@@ -847,7 +920,7 @@ function RegularSidebar({
               title={lifecycleTitle(
                 'Archived',
                 sectionCounts === null ? null : sectionCounts.archived,
-                '⌘⇧A',
+                archivedGlyphs,
               )}
               aria-pressed={archivedOpen}
               onClick={() => setArchivedOpen(!archivedOpen)}
@@ -984,24 +1057,35 @@ function BottomNav(): JSX.Element {
     <>
       <JobAlerts />
       <nav className="sb-bottom" data-testid="bottom-nav">
-        <Link to="/pads" className={`nav-row ${onPads ? 'active' : ''}`} data-testid="nav-pads">
+        <OpenableLink
+          to="/pads"
+          opens={{ kind: 'page', page: 'pads' }}
+          className={`nav-row ${onPads ? 'active' : ''}`}
+          data-testid="nav-pads"
+        >
           <Layers size={16} aria-hidden className="nav-icon" /> Pads
           {pending > 0 ? (
             <span className="pads-navcount" data-testid="nav-pads-count">
               {pending}
             </span>
           ) : null}
-        </Link>
-        <Link to="/jobs" className={`nav-row ${onJobs ? 'active' : ''}`} data-testid="nav-jobs">
+        </OpenableLink>
+        <OpenableLink
+          to="/jobs"
+          opens={{ kind: 'page', page: 'jobs' }}
+          className={`nav-row ${onJobs ? 'active' : ''}`}
+          data-testid="nav-jobs"
+        >
           <Calendar size={16} aria-hidden className="nav-icon" /> Jobs
-        </Link>
-        <Link
+        </OpenableLink>
+        <OpenableLink
           to="/settings"
+          opens={{ kind: 'page', page: 'settings' }}
           className={`nav-row ${onSettings ? 'active' : ''}`}
           data-testid="nav-settings"
         >
           <Settings size={16} aria-hidden className="nav-icon" /> Settings
-        </Link>
+        </OpenableLink>
       </nav>
     </>
   );
@@ -1268,7 +1352,9 @@ export function ArchivedSection({
       ) : (
         archived
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} archived />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} archived />
+          ))
       )}
     </section>
   );
@@ -1303,7 +1389,7 @@ function ManagerRow({ row, active }: { row: ChatRow | null; active: string | nul
       </div>
     );
   }
-  return <ChatRowView row={row} active={active} special />;
+  return <ChatRowView row={row} active={active === row.chatId} special />;
 }
 
 /**
@@ -1344,31 +1430,41 @@ function ChannelRow({
     // loaded yet. Still render a LINK to the known stable chatId so the channel
     // is clickable rather than dead text.
     return (
-      <Link
+      <OpenableLink
         to={`/chats/${chatId}`}
+        opens={{ kind: 'chat', chatId }}
         className={`ch-row ${active === chatId ? 'active' : ''}`}
         data-testid={`channel-row-${chatId}`}
       >
         <span className="ch-name">{label}</span>
         {pill}
-      </Link>
+      </OpenableLink>
     );
   }
   const badge = deriveBadge(row);
   const cls = [
     'ch-row',
-    active === row.chatId ? 'active' : '',
+    active ? 'active' : '',
     badge === 'read' ? 'is-read' : '',
     row.disabled ? 'is-thread-disabled' : '',
   ]
     .filter(Boolean)
     .join(' ');
   return (
-    <Link to={`/chats/${row.chatId}`} className={cls} data-testid={`channel-row-${chatId}`}>
-      <StatusBadge badge={badge} pendingWake={row.pendingWake} />
+    <OpenableLink
+      to={`/chats/${row.chatId}`}
+      opens={{ kind: 'chat', chatId: row.chatId }}
+      className={cls}
+      data-testid={`channel-row-${chatId}`}
+    >
+      <StatusBadge
+        badge={badge}
+        pendingWake={row.pendingWake}
+        failureReason={row.lastError?.message ?? null}
+      />
       <span className="ch-name">{label}</span>
       {pill}
-    </Link>
+    </OpenableLink>
   );
 }
 
@@ -1380,30 +1476,54 @@ function ChannelRow({
  */
 function RecentFolders({
   folders,
+  shownProjects,
+  hostNames,
   onForget,
 }: {
-  folders: string[];
-  onForget: (folder: string) => void;
+  folders: Array<{ key: string; hostId: string; folder: string }>;
+  shownProjects: Array<{ folder: string; hostId: string }>;
+  hostNames: Record<string, string>;
+  onForget: (key: string) => void;
 }): JSX.Element | null {
   const navigate = useNavigate();
   // Show just the folder NAME; only two recents that share a basename grow a
   // disambiguating parent segment (spec/14 § Recent folders — todo "recent
   // should just show folder name, extra only if needed for disambiguation").
-  const labels = folderLabels(folders);
+  // A project on another host with the same name also gets the host's name, as
+  // in the project headers (spec/04 § Name).
+  // Parent segments only separate paths on the SAME host; the host name
+  // separates the rest.
+  const labels = folders
+    .map((f) => {
+      const sameHost = folders.filter((o) => o.hostId === f.hostId).map((o) => o.folder);
+      return folderLabels(sameHost)[sameHost.indexOf(f.folder)]!;
+    })
+    .map((label, i) => {
+      const { hostId, folder } = folders[i]!;
+      const base = folderBasename(folder);
+      const ambiguous = [...folders, ...shownProjects].some(
+        (g) => g.hostId !== hostId && folderBasename(g.folder) === base,
+      );
+      return ambiguous ? `${label} (${(hostNames[hostId] ?? hostId).trim()})` : label;
+    });
   if (folders.length === 0) return null;
   return (
     <section className="sb-recent-folders" data-testid="recent-folders">
       {/* User-facing copy calls a folder a PROJECT (spec/14 §4b) — the heading is
           "Recent projects", never "Recent folders". */}
       <div className="folder-head">Recent projects</div>
-      {folders.map((folder, i) => (
-        <div className="recent-folder-row" data-testid={`recent-folder-${folder}`} key={folder}>
+      {folders.map(({ key, hostId, folder }, i) => (
+        <div className="recent-folder-row" data-testid={`recent-folder-${folder}`} key={key}>
           <button
             type="button"
             className="recent-folder-start"
             data-testid={`recent-folder-start-${folder}`}
             title={`New chat in ${folder}`}
-            onClick={() => navigate(`/chats/new?folder=${encodeURIComponent(folder)}`)}
+            onClick={() =>
+              navigate(
+                `/chats/new?folder=${encodeURIComponent(folder)}&host=${encodeURIComponent(hostId)}`,
+              )
+            }
           >
             <FolderPlus size={14} aria-hidden />
             <span className="recent-folder-name">{labels[i]}</span>
@@ -1414,7 +1534,7 @@ function RecentFolders({
             data-testid={`recent-folder-forget-${folder}`}
             aria-label={`forget folder ${folder}`}
             title="Forget this folder"
-            onClick={() => onForget(folder)}
+            onClick={() => onForget(key)}
           >
             <CloseIcon size={16} />
           </button>
@@ -1488,7 +1608,9 @@ export function DeletedSection({
         // state (spec/14 §6).
         deleted
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} deleted />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} deleted />
+          ))
       )}
     </section>
   );
@@ -1571,7 +1693,9 @@ export function HiddenSection({
         // state (spec/14 §6).
         hidden
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} hidden />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} hidden />
+          ))
       )}
     </section>
   );
@@ -1610,7 +1734,9 @@ export function SnoozedSection({
         // state (spec/14 §6).
         snoozed
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} snoozed />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} snoozed />
+          ))
       )}
     </section>
   );
@@ -1703,7 +1829,9 @@ export function AutomationsSection({
         // state (spec/14 §6).
         automations
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} automations />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} automations />
+          ))
       )}
     </section>
   );
@@ -1791,7 +1919,7 @@ function DraftsSection({ activeDraftId }: { activeDraftId: string | null }): JSX
   );
 }
 
-function ChatRowView({
+const ChatRowView = memo(function ChatRowView({
   row,
   active,
   pinned,
@@ -1801,9 +1929,13 @@ function ChatRowView({
   snoozed,
   hidden,
   automations,
+  archiveHeld = false,
+  onHoldArchive,
+  onUndoArchive,
 }: {
   row: ChatRow;
-  active: string | null;
+  /** Whether this row is the open chat. A boolean, not the open id, so a switch re-renders two rows rather than all of them. */
+  active: boolean;
   pinned?: boolean;
   special?: boolean;
   /** Expanded archived rows are NOT greyed (spec/14 ## Greying rules). */
@@ -1815,14 +1947,24 @@ function ChatRowView({
   /** Rows in the Hidden section — show an Unhide control (spec/04 § Hidden). */
   hidden?: boolean;
   /**
+   * True while this chat is archived but held in place (the undo window): the
+   * row stays drawn, greyed, with an Undo chip in place of the archive chip.
+   */
+  archiveHeld?: boolean;
+  /** The archive chip was clicked — hold this chat's row in place. */
+  onHoldArchive?: (chatId: string) => void;
+  /** Release the hold: Undo was clicked, or the archive failed. */
+  onUndoArchive?: (chatId: string) => void;
+  /**
    * Rows in the Automations section (spec/14 § Sidebar) — a duplicate view of
    * a chat that also lives elsewhere (often Hidden), not a distinct list
    * of its own, so it never takes part in multi-select.
    */
   automations?: boolean;
 }): JSX.Element {
+  // Includes the unread-notification lift (spec/09 § Notification log), shared
+  // with every other surface through `useChatBadge`.
   const badge = useSettledBadge(row);
-  const hasUnreadNotif = useChatHasUnread(row.chatId);
   const goalMet = row.goal === null && row.lastGoal?.outcome === 'met';
   const hostLabel = useAmbiguousHostLabel(row);
   const navigate = useNavigate();
@@ -1866,9 +2008,10 @@ function ChatRowView({
     // inside `.row-when`), so it opts OUT of the hover overlay that hides the
     // time under the tools — spec/14 § Row tools.
     deleted || snoozed || hidden ? 'deleted' : '',
-    active === row.chatId ? 'active' : '',
+    active ? 'active' : '',
     isSelected ? 'selected' : '',
     badge === 'read' && !archived ? 'is-read' : '',
+    archiveHeld ? 'archive-held' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -1898,6 +2041,8 @@ function ChatRowView({
         return;
       }
       useChatStore.getState().setArchived(row.chatId, !next);
+      // The archive didn't happen: snap the row back rather than hold it.
+      if (next) onUndoArchive?.(row.chatId);
       useUiStore.getState().pushError(failed('archive'), undefined, (err as Error).message);
     });
   }
@@ -1906,7 +2051,24 @@ function ChatRowView({
     // Don't navigate into the chat — this is a sidebar-only management action.
     e.preventDefault();
     e.stopPropagation();
+    // Archiving from the chip holds the row in place; un-archiving does not.
+    if (!archived) onHoldArchive?.(row.chatId);
     applyArchive();
+  }
+
+  function handleUndoArchive(e: ReactMouseEvent): void {
+    e.preventDefault();
+    e.stopPropagation();
+    onUndoArchive?.(row.chatId);
+    useChatStore.getState().setArchived(row.chatId, false);
+    void api.archiveChat(row.chatId, false).catch((err) => {
+      if (err instanceof ApiError && err.status === 404) {
+        useChatStore.getState().retractChat(row.chatId);
+        return;
+      }
+      useChatStore.getState().setArchived(row.chatId, true);
+      useUiStore.getState().pushError(failed('undo archive'), undefined, (err as Error).message);
+    });
   }
 
   // E4: the sidebar pin control toggles pinned state — optimistic flip + REST
@@ -2142,6 +2304,12 @@ function ChatRowView({
   // anchor. `preventDefault` here is what stops the router (and, without the
   // app-wide guard, the browser's own same-origin page load) acting on it.
   function handleRowClick(e: ReactMouseEvent): void {
+    // ⌘/Ctrl-click opens the chat in a new window and leaves this one alone.
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      openChatInNewWindow(row.chatId);
+      return;
+    }
     if (e.shiftKey) {
       e.preventDefault();
       if (selectable) useSelectionStore.getState().extendTo(row.chatId);
@@ -2198,54 +2366,31 @@ function ChatRowView({
         {special ? (
           <Compass className="manager-glyph" data-testid="manager-glyph" size={16} aria-hidden />
         ) : (
-          <StatusBadge badge={badge} pendingWake={row.pendingWake} />
+          <StatusBadge
+            badge={badge}
+            pendingWake={row.pendingWake}
+            failureReason={row.lastError?.message ?? null}
+          />
         )}
-        {/* spec/04 § Goals, spec/14 § Sidebar — a chat working toward a goal
-          carries a marker beside its badge, not instead of it: the badge
-          still says what the TURN is doing, this says the chat is
-          additionally being held to a condition across turns. Purely
-          informational — it never affects sort or filter.
-
-          A pinned row carries its state as a glyph beside the title too
-          (spec/14 § Sidebar §3). Both marks have to render INSIDE `.name`'s
-          own cell: the row is a 3-column grid (badge · name · top-right
-          slot) with no column reserved for an extra sibling, so a marker
-          rendered as a sibling of `.name` has nowhere of its own to go —
-          grid auto-placement drops it into the name's cell and shoves
-          `.name` itself into an implicit next row, cramming the title into
-          the 18px badge column (it read as "H…"). The tools stay
-          hover-only, as on every other row, so the title keeps its full
-          width and the relative time stays readable. Only a pinned-or-goal
-          row takes the nested shape — an ordinary row keeps the plain text
-          node. */}
-        {pinned || row.goal !== null || goalMet || hasUnreadNotif ? (
+        {/* spec/04 § Goals, spec/14 § Sidebar § Row marks — the goal marker is
+          the ONLY mark that sits beside the title. The status column already
+          says what the turn is doing, and the pin is read from the top-right
+          slot (`.when-pin`), so a row never stacks more than one glyph before
+          its name. The marker renders INSIDE `.name`'s own cell: the row is a
+          3-column grid (badge · name · top-right slot) with no column for an
+          extra sibling, so a sibling marker gets auto-placed into the name's
+          cell and shoves `.name` into an implicit next row. Only a goal row
+          takes the nested shape — an ordinary row keeps the plain text node. */}
+        {row.goal !== null || goalMet ? (
           <span className="name has-marks">
-            {hasUnreadNotif && (
-              <Bell
-                className="name-bell"
-                data-testid={`name-bell-${row.chatId}`}
-                size={11}
-                aria-label="unread notification"
-              />
-            )}
-            {pinned && (
-              <Pin
-                className="name-pin"
-                data-testid={`name-pin-${row.chatId}`}
-                size={11}
-                aria-label="pinned"
-              />
-            )}
-            {(row.goal !== null || goalMet) && (
-              <span
-                className={goalMet ? 'goal-marker is-met' : 'goal-marker'}
-                data-testid={`goal-marker-${row.chatId}`}
-                data-goal-state={goalMet ? 'met' : 'working'}
-                title={goalMet ? `Goal met: ${row.lastGoal?.condition}` : `Goal: ${row.goal}`}
-              >
-                <Target size={11} aria-label={goalMet ? 'goal met' : 'working toward a goal'} />
-              </span>
-            )}
+            <span
+              className={goalMet ? 'goal-marker is-met' : 'goal-marker'}
+              data-testid={`goal-marker-${row.chatId}`}
+              data-goal-state={goalMet ? 'met' : 'working'}
+              title={goalMet ? `Goal met: ${row.lastGoal?.condition}` : `Goal: ${row.goal}`}
+            >
+              <Target size={12} aria-label={goalMet ? 'goal met' : 'working toward a goal'} />
+            </span>
             <span className="name-text">{title}</span>
           </span>
         ) : (
@@ -2360,6 +2505,21 @@ function ChatRowView({
           </span>
         ) : !special ? (
           <span className="row-when" data-testid={`row-when-${row.chatId}`}>
+            {/* spec/14 § Sidebar §3 — a pinned row marks its state at rest
+              with a small grey pin beside the time, in the slot the pin BUTTON
+              takes over on hover, so the state is read in the same place it
+              is changed. Beside the time rather than the title: the title
+              line carries at most one mark (the goal marker), and a pin
+              stacked in front of it next to the status badge was the third
+              glyph in a line on a pinned goal row. */}
+            {row.pinned ? (
+              <Pin
+                className="when-pin"
+                data-testid={`row-pin-${row.chatId}`}
+                size={11}
+                aria-label="pinned"
+              />
+            ) : null}
             <span className="when-time mono">
               {archived ? formatArchivedAt(row.lastUpdated) : formatWhen(row.lastUpdated)}
             </span>
@@ -2369,7 +2529,18 @@ function ChatRowView({
           <span className="row-tools">
             {/* Archive (spec/14 ## Chat lifecycle → Manual archive). Grouped with
             the other row actions top-right; special threads can't be archived. */}
-            {special ? null : (
+            {special ? null : archiveHeld ? (
+              <button
+                type="button"
+                className="pin-btn archive-btn"
+                data-testid={`undo-archive-btn-${row.chatId}`}
+                onClick={handleUndoArchive}
+                title="Undo archive"
+                aria-label="Undo archive"
+              >
+                <RotateCcw size={14} aria-hidden />
+              </button>
+            ) : (
               <button
                 type="button"
                 className="pin-btn archive-btn"
@@ -2535,7 +2706,7 @@ function ChatRowView({
       )}
     </>
   );
-}
+});
 
 /** Compact relative time for sidebar rows (e.g. `2m`, `3h`, `5d`). */
 // An archived row's `lastUpdated` is frozen at archive time, so a bare "3d"
@@ -2565,6 +2736,22 @@ function formatWhen(ms: number): string {
  * segments with a leading ellipsis so the meaningful tail stays visible; the
  * full path is on the `title` tooltip.
  */
+/**
+ * The project's name in a folder header: its basename, plus the host's name in
+ * brackets when a project on another host shares that basename (spec/04 § Name
+ * — the same rule a chat title follows). A name used on one host carries no host.
+ */
+function projectLabel(
+  folder: string,
+  hostId: string,
+  groups: Array<{ folder: string; hostId: string }>,
+  hostNames: Record<string, string>,
+): string {
+  const base = folderBasename(folder);
+  const ambiguous = groups.some((g) => g.hostId !== hostId && folderBasename(g.folder) === base);
+  return ambiguous ? `${base} (${(hostNames[hostId] ?? hostId).trim()})` : base;
+}
+
 /** Last path segment (the folder's basename) — the folder-head + Recent label. */
 function folderBasename(folder: string): string {
   const segs = folder.split('/').filter(Boolean);
@@ -2794,8 +2981,13 @@ function archiveProject(name: string, rows: ChatRow[], navigate: (to: string) =>
  * rows DRAWN under the header; this moves every chat in the folder, including
  * the pinned and snoozed ones that live in their own sections.
  */
-function archiveAllInProject(name: string, folder: string, navigate: (to: string) => void): void {
-  const rows = chatsInProject(Object.values(useChatStore.getState().chats), folder);
+function archiveAllInProject(
+  name: string,
+  folder: string,
+  hostId: string,
+  navigate: (to: string) => void,
+): void {
+  const rows = chatsInProject(Object.values(useChatStore.getState().chats), folder, hostId);
   if (rows.length === 0) return;
   const ui = useUiStore.getState();
   void ui

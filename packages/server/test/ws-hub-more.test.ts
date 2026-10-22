@@ -114,6 +114,13 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
         { type: 'meeting.get_request', chatId: 'chat-mtg' },
         { type: 'meeting.audio', chatId: 'chat-mtg', source: 'mic', audioBase64: 'AA==' },
         { type: 'meeting.action_request', chatId: 'chat-mtg', actionId: 'a1', decision: 'do' },
+        {
+          type: 'meeting.notes_request',
+          chatId: 'chat-mtg',
+          edit: { op: 'set_title', topicId: 't1', text: 'x' },
+        },
+        { type: 'meeting.my_notes_request', chatId: 'chat-mtg', text: 'x' },
+        { type: 'meeting.writeup_request', chatId: 'chat-mtg', regenerate: true },
         { type: 'chat.archive_request', chatId: 'chat-arc', archived: true },
         { type: 'chat.stop_request', chatId: 'chat-stop' },
         { type: 'chat.unqueue_request', chatId: 'chat-unq', localId: 'L1' },
@@ -143,6 +150,9 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
         // spec/04 § Model — a mid-chat model switch is relayed to the chat's
         // host untouched; the server holds no model of its own to keep in step.
         { type: 'chat.model_request', chatId: 'chat-model', model: 'claude-opus-4-1' },
+        // spec/04 § Handoff budget — the recoveries of a failed provider switch
+        // are relayed to the chat's host untouched.
+        { type: 'chat.handoff_recover_request', chatId: 'chat-handoff', action: 'retry' },
         { type: 'patch.peek.request', sourceChatId: 'chat-src', targetChatId: 'chat-tgt' },
         { type: 'patch.send_to', sourceChatId: 'chat-src', targetChatId: 'chat-tgt', message: 'm' },
         {
@@ -419,7 +429,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       h.hostLink.emit({
         type: 'claude_settings.list',
         hostId: 'd1',
-        drift: '{"model":"opus"}',
+        settingsJson: '{"model":"opus"}',
         memories: [
           {
             project: 'portfolio',
@@ -452,7 +462,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       const ev = await replayed;
       expect(ev).toMatchObject({
         hostId: 'd1',
-        drift: '{"model":"opus"}',
+        settingsJson: '{"model":"opus"}',
         memories: [
           {
             project: 'portfolio',
@@ -478,7 +488,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       h.hostLink.emit({
         type: 'claude_settings.list',
         hostId: 'd1',
-        drift: '{"model":"sonnet"}',
+        settingsJson: '{"model":"sonnet"}',
         memories: [
           {
             project: 'portfolio',
@@ -492,7 +502,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       h.hostLink.emit({
         type: 'claude_settings.updated',
         hostId: 'd1',
-        drift: '{"model":"opus"}',
+        settingsJson: '{"model":"opus"}',
         memories: [],
       });
       await new Promise((r) => setTimeout(r, 20));
@@ -515,7 +525,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
       const ev = await replayed;
       // The update REPLACED the cache, so the surface never sees the stale
       // memory entry — same "carries the COMPLETE state" contract as folders.
-      expect(ev).toMatchObject({ hostId: 'd1', drift: '{"model":"opus"}', memories: [] });
+      expect(ev).toMatchObject({ hostId: 'd1', settingsJson: '{"model":"opus"}', memories: [] });
       await client.close();
     } finally {
       await h.close();

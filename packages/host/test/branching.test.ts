@@ -148,6 +148,21 @@ describe('spec/04 § Branching — edit a user turn forks a new track', () => {
     expect(events.some((e) => e.type === 'chat.state')).toBe(true);
   });
 
+  it('refuses a fork with no text and no attachment, leaving the graph alone', async () => {
+    const { daemon, events, folder, metaStore } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    const turn = userMessages(replay(daemon, chatId))[0]!;
+    const before = metaStore.read(chatId)!.branches;
+    events.length = 0;
+    await daemon.forkChat({ chatId, seq: turn.seq, message: '', localId: 'l2' });
+
+    const err = events.find((e) => e.type === 'chat.error');
+    expect(err).toMatchObject({ error: { code: 'fork_empty_message' } });
+    expect(metaStore.read(chatId)!.branches).toEqual(before);
+    expect(events.some((e) => e.type === 'chat.branches')).toBe(false);
+  });
+
   it('the graph survives a host restart (persisted in meta.json)', async () => {
     const { daemon, events, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder });

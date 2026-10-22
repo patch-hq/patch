@@ -9,6 +9,7 @@ import type {
   ChatActivity,
   ChatStateEvent,
   ChatStatus,
+  EffortLevel,
   FinishedGoal,
   GoalProgress,
   PendingWake,
@@ -167,6 +168,13 @@ export interface ChatRow {
    */
   model: string | null;
   /**
+   * The Claude thinking-effort override this chat is running at (spec/04 §
+   * Effort), mirrored the same way `model` is. `null` when no override is set
+   * or the chat is on the Codex backend — either way there is nothing to show
+   * beyond the picker reading "Default".
+   */
+  effort: EffortLevel | null;
+  /**
    * ms-epoch when this chat's rate-limit auto-resume is scheduled, or `null`
    * when no retry is pending. Surfaced by the host when `autoResumeRateLimit`
    * is on and a turn was blocked by a usage/rate-limit error. Shown above the
@@ -180,6 +188,8 @@ export interface ChatRow {
    * when no resume is pending. Optional for back-compat with older hosts.
    */
   resumeKind: 'rate_limit' | 'overloaded' | null;
+  /** Since when the turn has been held for its machine to wake fully; `null` when not held. */
+  waitingForWakeSince?: number | null;
   /**
    * Why the chat is blocked, in figures — which account, which pool, how full,
    * when it clears. `null` when it is not blocked.
@@ -195,6 +205,8 @@ export interface ChatRow {
    * every row the app actually builds carries it.
    */
   limitBlock?: ChatStateEvent['limitBlock'] | null;
+  /** Why the chat's last turn failed (`chat.state` while errored); `null` otherwise. */
+  lastError?: ChatStateEvent['lastError'] | null;
   /**
    * The account the chat's latest turn ran on (`chat.state`, spec/10 § Backend
    * credentials). Null until a turn has run on the host holding the chat.
@@ -230,6 +242,13 @@ export interface ChatRow {
    * stopped. Optional like `backgroundTasks`, so fixtures need not declare it.
    */
   openToolCalls?: number;
+  /**
+   * Set when the user sends into a settled chat, so the row reads `working` before the
+   * host's first activity frame arrives. The host's next activity frame (or a failed
+   * delivery) clears it; `activity` itself is never touched, since the store reads it
+   * as the host's own word on whether a turn is in flight.
+   */
+  optimisticSend?: boolean;
   /**
    * `callId`s of this chat's open tool calls — same lifecycle as
    * `openToolCalls` above (one array entry per outstanding call, pushed on
@@ -342,7 +361,8 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   // chat cannot be both, and if it somehow claims to be, the failure is the more
   // important fact.
   if (row.activity === 'errored' || row.status === 'errored') return 'errored';
-  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0) return 'working';
+  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend)
+    return 'working';
   // Unread beats a still-running background job or self-wake loop (User: "unread
   // beats background always"). The chat HAS something new to look at — that is
   // the strongest true claim available, and it does not stop being true just

@@ -51,7 +51,7 @@ interface PublishCall {
   title: string;
   path: string;
   html?: string;
-  raw?: { contentType: string; base64: string };
+  raw?: { contentType: string; base64: string; filename?: string };
 }
 
 async function setup(opts: { publishFails?: boolean; noPublisher?: boolean } = {}) {
@@ -281,15 +281,126 @@ describe('POST /internal/view_file (view_file)', () => {
     }
   });
 
-  it('rejects a file type it cannot show, naming Read as the alternative', async () => {
+  it('publishes a Word document raw as a downloadable file, with its filename', async () => {
+    const { app, chatId, folder, events, published } = await setup();
+    try {
+      const docx = Buffer.from('PK\u0003\u0004fake-docx-bytes', 'binary');
+      writeFileSync(join(folder, 'Report Q3.docx'), docx);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'Report Q3.docx' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { kind: string; name: string; size?: number };
+      expect(body.kind).toBe('file');
+      expect(body.name).toBe('Report Q3.docx');
+      expect(body.size).toBe(docx.length);
+      expect(res.body).not.toContain(docx.toString('base64'));
+      expect(published).toHaveLength(1);
+      expect(published[0]!.html).toBeUndefined();
+      expect(published[0]!.raw).toEqual({
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        base64: docx.toString('base64'),
+        filename: 'Report Q3.docx',
+      });
+      expect(events.find((e) => e.type === 'chat.artifact')).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each(['sheet.xlsx', 'deck.pptx', 'data.csv', 'notes.txt', 'bundle.zip'])(
+    'treats %s as a downloadable file',
+    async (name) => {
+      const { app, chatId, folder, published } = await setup();
+      try {
+        writeFileSync(join(folder, name), 'x', 'utf8');
+        const res = await app.inject({
+          method: 'POST',
+          url: '/internal/view_file',
+          headers: AUTH,
+          payload: { callerChatId: chatId, file_path: name },
+        });
+        expect(res.statusCode).toBe(200);
+        expect((res.json() as { kind: string }).kind).toBe('file');
+        expect(published[0]!.raw!.filename).toBe(name);
+        // Text files also get a preview page, published second.
+        expect(published.length).toBe(['data.csv', 'notes.txt'].includes(name) ? 2 : 1);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('publishes an escaped text preview next to a text file, and reports absPath', async () => {
     const { app, chatId, folder, published } = await setup();
     try {
-      writeFileSync(join(folder, 'notes.txt'), 'hello', 'utf8');
+      writeFileSync(join(folder, 'notes.txt'), '<b>hi</b> & bye', 'utf8');
       const res = await app.inject({
         method: 'POST',
         url: '/internal/view_file',
         headers: AUTH,
         payload: { callerChatId: chatId, file_path: 'notes.txt' },
+      });
+      const body = res.json() as { url: string; previewUrl?: string; absPath: string };
+      expect(body.absPath).toBe(join(folder, 'notes.txt'));
+      expect(body.previewUrl).toMatch(/^\/api\/chats\/.+\/artifact\/[0-9a-f]+$/);
+      expect(body.previewUrl).not.toBe(body.url);
+      expect(published[1]!.html).toContain('&lt;b&gt;hi&lt;/b&gt; &amp; bye');
+      expect(published[1]!.html).not.toContain('<b>hi</b>');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('says why a Word file has no preview when it cannot be converted', async () => {
+    const { app, chatId, folder, published } = await setup();
+    try {
+      writeFileSync(join(folder, 'broken.docx'), 'not a zip', 'utf8');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'broken.docx' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { previewUrl?: string; previewError?: string };
+      expect(body.previewUrl).toBeUndefined();
+      expect(body.previewError).toBeTruthy();
+      expect(published).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects an oversize downloadable file', async () => {
+    const { app, chatId, folder, published } = await setup();
+    try {
+      writeFileSync(join(folder, 'big.docx'), Buffer.alloc(MAX_VIEW_PDF_BYTES + 1));
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'big.docx' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(published).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a file type it cannot show, naming Read as the alternative', async () => {
+    const { app, chatId, folder, published } = await setup();
+    try {
+      writeFileSync(join(folder, 'tool.exe'), 'hello', 'utf8');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'tool.exe' },
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { message: string }).message).toContain('Read');

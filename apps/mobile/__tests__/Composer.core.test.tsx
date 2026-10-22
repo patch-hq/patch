@@ -163,7 +163,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
   it('WS connected but host offline: attach/mic disabled (named reason), Send still enabled but QUEUED', async () => {
     setPresence('connected', 'offline');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const reason = 'Host offline — paused until your Hetzner box reconnects.';
+    const reason = 'Machine offline — paused until your Hetzner box reconnects.';
     // Both attach buttons (image + file) share the same label text.
     const attachButtons = findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`));
     expect(attachButtons).toHaveLength(2);
@@ -232,10 +232,10 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     expect(send.props['disabled']).toBe(false);
   });
 
-  it('host unknown (connected WS, presence not yet greeted): "Connecting to host…"', () => {
+  it('host unknown (connected WS, presence not yet greeted): "Connecting to machine…"', () => {
     setPresence('connected', 'unknown');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const reason = 'Connecting to host…';
+    const reason = 'Connecting to machine…';
     expect(findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`))).toHaveLength(2);
   });
 

@@ -21,12 +21,16 @@ export function stripWrappingQuotes(text: string): string {
 }
 
 const WORD_CHAR = /[\p{L}\p{N}]/u;
+/** The marks that can be an apostrophe; a double quote or backtick never is. */
+const APOSTROPHES = "'’‘";
 
 /** Whether `q` appears in `text` as a quote mark — an apostrophe inside a
  * word (`It's`, `don’t`) is not one. */
 function quotesInside(text: string, q: string): boolean {
+  const canBeApostrophe = APOSTROPHES.includes(q);
   for (let i = text.indexOf(q); i !== -1; i = text.indexOf(q, i + 1)) {
-    if (!(WORD_CHAR.test(text[i - 1] ?? '') && WORD_CHAR.test(text[i + 1] ?? ''))) return true;
+    const inWord = WORD_CHAR.test(text[i - 1] ?? '') && WORD_CHAR.test(text[i + 1] ?? '');
+    if (!(canBeApostrophe && inWord)) return true;
   }
   return false;
 }

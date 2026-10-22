@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { ChevronDown, ExternalLink } from 'lucide-react';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
-import { shortcutLabel } from '../lib/shortcuts.js';
+import { shortcutLabel, useActionGlyphs } from '../lib/shortcuts.js';
 
 export function NewChatSplit({
   onNewChat,
@@ -14,6 +14,7 @@ export function NewChatSplit({
   onNewChat: () => void;
   onNewWindow: () => void;
 }): JSX.Element {
+  const newChatGlyphs = useActionGlyphs('newChat');
   const [open, setOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -35,7 +36,7 @@ export function NewChatSplit({
         type="button"
         className="new-chat-fab"
         data-testid="new-chat-fab"
-        title={shortcutLabel('⌘N')}
+        title={shortcutLabel(newChatGlyphs)}
         onClick={onNewChat}
       >
         + New chat

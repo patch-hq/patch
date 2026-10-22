@@ -107,6 +107,27 @@ test.describe('snooze sheet', () => {
     expect(box.y + box.height).toBeLessThanOrEqual(view.height);
   });
 
+  test('Until complete is offered for a running chat and sends the sentinel', async ({ page }) => {
+    const calls = await stubSnooze(page);
+    await seed(page, THREE());
+    await page.getByTestId('action-more').click();
+    await page.getByTestId('action-snooze').click();
+    await page.getByTestId('snooze-sheet-preset-until-complete').click();
+    await expect(page.getByTestId('snooze-sheet-confirm')).toHaveText('Snooze until complete');
+    await page.getByTestId('snooze-sheet-confirm').click();
+    await expect.poll(() => calls.length).toBe(1);
+    expect(calls[0]!.body.snoozedUntil).toBe(8_640_000_000_000_000);
+    await expect(page.getByText('snoozed until complete')).toBeVisible();
+  });
+
+  test('Until complete is not offered when the chat has nothing running', async ({ page }) => {
+    await seed(page, THREE({ activity: 'idle' }));
+    await page.getByTestId('action-more').click();
+    await page.getByTestId('action-snooze').click();
+    await expect(page.getByTestId('snooze-sheet-preset-1-hour')).toBeVisible();
+    await expect(page.getByTestId('snooze-sheet-preset-until-complete')).toHaveCount(0);
+  });
+
   test('Esc and the scrim cancel without snoozing', async ({ page }) => {
     const calls = await stubSnooze(page);
     await seed(page, THREE());

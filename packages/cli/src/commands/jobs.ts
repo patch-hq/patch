@@ -22,6 +22,35 @@ function readJsonFile(path: string): unknown {
   return JSON.parse(raw) as unknown;
 }
 
+const JOB_FILE_HELP = `
+File shape: { name, trigger, action, enabled?, filter?, gate?, concurrency? }
+
+trigger (one of):
+  {type:"cron", expression:"<5-field cron>", timezone:"<IANA zone>"}
+      Write the expression in the user's own wall-clock time and name their zone
+      (e.g. Europe/London); it tracks DST. Omit timezone only to mean UTC.
+  {type:"recurrence", rrule:"FREQ=MONTHLY;BYDAY=SU;BYSETPOS=3;BYHOUR=9;BYMINUTE=0", timezone:"<IANA zone>"}
+      For nth-weekday / date-range patterns cron cannot express. Bare RRULE
+      value (no RRULE: label, no DTSTART); timezone is required.
+  {type:"webhook", scheme, secret?, path?}
+      Fires on an inbound POST to the job's own URL. scheme: none | hmac-sha256 |
+      github | stripe | todoist. secret is required for every scheme but none.
+      Todoist: scheme "todoist" with the app's client secret; narrow with filter.
+  {type:"follows", jobId, on?:"success"|"any"}   after another job's run settles.
+
+action (one of; all but script need a prompt, a skill, or both):
+  {type:"spawn", hostId, folder, prompt?, skill?, model?, permissionMode?, startHidden?, notifyOnComplete?, includePayload?, goal?}
+  {type:"continue", hostId, folder, prompt?, skill?, key?, model?, startHidden?, notifyOnComplete?, includePayload?, goal?}
+      Messages ONE durable chat, created on the first fire; key is a mustache
+      template ("{{payload.event_data.id}}") giving each subject its own chat.
+  {type:"message", chatId, prompt?, skill?, includePayload?}
+  {type:"script", hostId, folder, command, timeoutMs?}   no chat, no agent turn.
+
+filter: JSONata evaluated against the trigger payload; a fire proceeds only if truthy.
+update replaces the trigger wholesale: re-send timezone with expression.
+hostId comes from \`patch chats list\`.
+`;
+
 export function registerJobsCommands(program: Command): void {
   const jobs = program.command('jobs').description('Job CRUD');
 
@@ -77,6 +106,7 @@ export function registerJobsCommands(program: Command): void {
   jobs
     .command('create [file]')
     .description('Create a job from a JSON file, OR via flags')
+    .addHelpText('after', JOB_FILE_HELP)
     .option(
       '--cron <expr>',
       'Cron expression (flag-mode shortcut). Evaluated in --timezone (default $TZ) unless --utc.',
@@ -269,6 +299,7 @@ export function registerJobsCommands(program: Command): void {
   jobs
     .command('update <id> <file>')
     .description('Update a job from a JSON file (PATCH)')
+    .addHelpText('after', JOB_FILE_HELP)
     .option('--json', 'JSON output')
     .action(async (id: string, file: string, opts: CommonOpts) => {
       await run(opts, async () => {

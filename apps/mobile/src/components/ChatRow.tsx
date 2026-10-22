@@ -30,7 +30,8 @@ import {
   Pin,
 } from 'lucide-react-native';
 import type { ChatRow as ChatRowT } from '../stores/types';
-import { deriveBadge, isHidden, isSnoozed } from '../stores/types';
+import { useChatBadge } from '../lib/chatBadge';
+import { isHidden, isSnoozed } from '../stores/types';
 import { StatusBadge } from './StatusBadge';
 import { previewLine } from '../lib/badge';
 import { deriveChatTitle } from '../lib/labels';
@@ -111,7 +112,7 @@ function TrayButton({
 export function ChatRowItem({ row }: Props): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
-  const badge = deriveBadge(row);
+  const badge = useChatBadge(row);
   // Back from a snooze (spec/04 § Snooze → Back): only on a row that is drawn live,
   // never in the Snoozed section or Archived.
   const back = isSnoozed(row) || row.status === 'archived' ? null : rowBack(row);

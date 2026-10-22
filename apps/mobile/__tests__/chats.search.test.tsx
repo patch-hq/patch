@@ -128,7 +128,7 @@ const IN_AN_HOUR = Date.now() + 60 * 60_000;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   __clearAllMmkv();
-  listArchivedSpy.mockReset().mockResolvedValue({ chats: [] });
+  listArchivedSpy.mockReset().mockResolvedValue({ chats: [], nextOffset: null });
   listHiddenSpy.mockReset().mockResolvedValue({ chats: [] });
   searchSpy.mockReset().mockResolvedValue(answer([]));
   useChatStore.getState()._reset();
@@ -549,6 +549,7 @@ describe('search — archived rows', () => {
           snoozedUntil: null,
         },
       ],
+      nextOffset: null,
     });
     const r = renderRN(<ChatsScreen />);
     await actAsync(async () => {});

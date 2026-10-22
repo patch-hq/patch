@@ -13,6 +13,8 @@ import os
 
 import numpy as np
 
+from .diarise import Diariser, resolve_model, sherpa_embedder
+
 logger = logging.getLogger("patch_whisper_sidecar")
 
 SAMPLE_RATE = 16_000
@@ -53,18 +55,51 @@ class _Engine:
         self._model = WhisperModel(self._model_path, device="cpu", compute_type="int8")
         logger.info("faster-whisper model ready")
 
-    def transcribe(self, pcm: np.ndarray) -> str:
+    def transcribe(self, pcm: np.ndarray, prompt: str | None = None) -> str:
         self._ensure_loaded()
         assert self._model is not None
         audio = pcm.astype(np.float32) / 32768.0
-        segments, _info = self._model.transcribe(audio, language="en", beam_size=1)
+        segments, _info = self._model.transcribe(
+            audio, language="en", beam_size=1, initial_prompt=prompt or None
+        )
         return "".join(seg.text for seg in segments).strip()
+
+    def transcribe_segments(
+        self, pcm: np.ndarray, prompt: str | None = None
+    ) -> list[tuple[float, float, str]]:
+        self._ensure_loaded()
+        assert self._model is not None
+        audio = pcm.astype(np.float32) / 32768.0
+        segments, _info = self._model.transcribe(
+            audio, language="en", beam_size=1, initial_prompt=prompt or None
+        )
+        return [(s.start, s.end, s.text.strip()) for s in segments if s.text.strip()]
 
 
 class WhisperSidecar:
-    def __init__(self, model_path: str | None = None) -> None:
+    def __init__(self, model_path: str | None = None, diariser: Diariser | None = None) -> None:
         resolved = _resolve_model_path(model_path or os.environ.get("WHISPER_MODEL_PATH"))
         self._engine = _Engine(resolved)
+        self._diariser = diariser
+        self._diarise_model = os.environ.get("DIARISE_MODEL_PATH")
+        self._voiceprint = os.environ.get("VOICEPRINT_PATH")
+
+    def _get_diariser(self) -> Diariser:
+        if self._diariser is None:
+            self._diariser = Diariser(
+                sherpa_embedder(resolve_model(self._diarise_model)), self._voiceprint
+            )
+        return self._diariser
+
+    def _enrol(self, pcm: np.ndarray) -> float:
+        return self._get_diariser().enrol(pcm)
+
+    def _diarised(self, session: str, pcm: np.ndarray, prompt: str | None = None) -> list[dict]:
+        spans = self._engine.transcribe_segments(pcm, prompt)
+        voices = self._get_diariser().label(session, pcm, [(a, b) for a, b, _ in spans])
+        return [
+            {"start": a, "end": b, "text": t, "voice": v} for (a, b, t), v in zip(spans, voices)
+        ]
 
     async def warmup(self) -> None:
         await asyncio.to_thread(self._engine._ensure_loaded)
@@ -77,10 +112,26 @@ class WhisperSidecar:
                     logger.warning("whisper: binary frame with no pending request")
                     continue
                 request_id = pending["requestId"]
+                session = pending.get("diarise")
+                prompt = pending.get("prompt")
+                enrol = bool(pending.get("enrol"))
                 pending = None
                 pcm = np.frombuffer(raw, dtype="<i2")
                 try:
-                    text = await asyncio.to_thread(self._engine.transcribe, pcm)
+                    if enrol:
+                        seconds = await asyncio.to_thread(self._enrol, pcm)
+                        await websocket.send(
+                            json.dumps({"requestId": request_id, "enrolled": True, "seconds": seconds})
+                        )
+                        continue
+                    if session:
+                        segs = await asyncio.to_thread(self._diarised, str(session), pcm, prompt)
+                        text = " ".join(s["text"] for s in segs)
+                        await websocket.send(
+                            json.dumps({"requestId": request_id, "text": text, "segments": segs})
+                        )
+                        continue
+                    text = await asyncio.to_thread(self._engine.transcribe, pcm, prompt)
                     await websocket.send(json.dumps({"requestId": request_id, "text": text}))
                 except Exception as exc:
                     logger.exception("whisper: transcription failed for %s", request_id)

@@ -52,3 +52,26 @@ export function computeTooltipPosition(
 
   return { top, left, placement };
 }
+
+/**
+ * The rect a tooltip should hang from. A block control has one rect. An inline
+ * element that wraps has one per line and a bounding box covering all of them;
+ * use the fragment under the pointer (nearest vertically, then horizontally),
+ * or the first when there is no pointer (keyboard focus).
+ */
+export function pickLineRect(
+  rects: Rect[],
+  bounding: Rect,
+  pointer: { x: number; y: number } | null,
+): Rect {
+  if (rects.length <= 1) return rects[0] ?? bounding;
+  if (!pointer) return rects[0]!;
+  const dist = (r: Rect): number => {
+    const dy =
+      pointer.y < r.top ? r.top - pointer.y : pointer.y > r.bottom ? pointer.y - r.bottom : 0;
+    const dx =
+      pointer.x < r.left ? r.left - pointer.x : pointer.x > r.right ? pointer.x - r.right : 0;
+    return dy * 1000 + dx;
+  };
+  return rects.reduce((best, r) => (dist(r) < dist(best) ? r : best));
+}

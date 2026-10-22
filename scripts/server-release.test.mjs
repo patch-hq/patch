@@ -72,7 +72,7 @@ test('a first install needs no configuration: it writes server.env and carries o
   const env = readFileSync(join(home, 'server.env'), 'utf8');
   assert.doesNotMatch(env, /PATCH_INTERNAL_TOKEN=./, 'the server makes its own token (spec/01)');
   assert.doesNotMatch(env, /TELEGRAM/);
-  assert.match(env, /^PORT=3000$/m);
+  assert.match(env, /^PORT=3970$/m);
   assert.match(env, /^HOST=127\.0\.0\.1$/m);
   assert.equal(statSync(join(home, 'server.env')).mode & 0o777, 0o600);
   assert.equal(basename(readlinkSync(join(home, 'current'))), '0.1.1');

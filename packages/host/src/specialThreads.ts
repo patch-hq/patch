@@ -70,7 +70,7 @@ export interface BroadcastEntry {
 
 /**
  * Where a special thread's working folder is: `~/.patch/threads/<name>` on the
- * account's home machine (spec/02 § Stack, spec/06 § Where special threads run).
+ * machine the server has running the Manager (spec/02 § Stack, spec/06 § Where special threads run).
  *
  * Resolved from the host's own patch home — i.e. from the host user's HOME —
  * and from nothing else. It used to be resolved from `process.cwd()`, which is
@@ -169,6 +169,7 @@ export function ensureSpecialThreads(opts: EnsureSpecialThreadsOptions): void {
         lastUpdated: meta.updatedAt,
         claudeSessionId: meta.claudeSessionId,
         model: undefined,
+        effort: meta.effort,
         // A special thread carries its own mode like every other chat. An
         // existing one keeps what it was stamped with; a brand-new one takes
         // the host default now and keeps it (spec/02 § Permission mode).

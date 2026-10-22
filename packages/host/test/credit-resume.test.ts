@@ -472,3 +472,25 @@ describe('the idempotency guard must not eat the resume', () => {
     daemon.shutdown();
   });
 });
+
+describe('a key sidelined on a guess at boot is not held until the stated reset', () => {
+  it('records the failure time the restore was derived from, so the first later probe is believed', () => {
+    // After a restart the spent key is not on disk, so the boot marks the first
+    // stored key from a failed chat's message. If that chat actually spent the
+    // SECOND key, the first-priority key is sidelined with nowhere to switch to.
+    // Stamped with the failure's own time, a probe taken a refresh cycle later
+    // finds it spendable and clears it — rather than waiting for the reset.
+    const { clock, rotation, credit, resumeParked } = harness();
+    const failedAt = clock.t - 3 * HOUR;
+    rotation.markExhausted(
+      'first',
+      'restored from a failed chat after restart',
+      clock.t + 5 * HOUR,
+      failedAt,
+    );
+    expect(rotation.markedAt('first')).toBe(failedAt);
+    expect(credit.observedUsable('first', clock.t)).toBe(true);
+    expect(rotation.isExhausted('first')).toBe(false);
+    expect(resumeParked).toHaveBeenCalled();
+  });
+});

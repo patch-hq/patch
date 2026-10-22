@@ -16,20 +16,17 @@ test.describe('the limit notice when nothing was parked', () => {
     await expect(bar).toBeVisible();
     // The pool a person spends, on the account that spent it.
     await expect(page.locator('[data-testid="rate-limit-headline"]')).toContainText(
-      /reached your weekly limit/i,
+      /Weekly limit · Default/,
     );
-    await expect(page.locator('[data-testid="rate-limit-account"]')).toHaveText('Default');
     // The wait, in words, not a unit symbol.
     await expect(page.locator('[data-testid="rate-limit-countdown"]')).toContainText(
-      /It resets in .*hour/i,
+      /Resets in .*h/,
     );
-    await expect(page.locator('[data-testid="rate-limit-retry"]')).toBeVisible();
+    await expect(page.locator('[data-testid="rate-limit-send"]')).toBeVisible();
     await expect(page.locator('[data-testid="rate-limit-auto-resume"]')).toBeAttached();
     await expect(page.locator('[data-testid="rate-limit-extra-usage"]')).toBeVisible();
     // In the transcript, under the turn it is about — not in the banner stack.
-    await expect(page.locator('[data-testid="chat-stream"]')).toContainText(
-      /reached your weekly limit/i,
-    );
+    await expect(page.locator('[data-testid="chat-stream"]')).toContainText(/Weekly limit/);
   });
 
   test('reports the failure once, and never in the provider’s words', async ({ page }) => {

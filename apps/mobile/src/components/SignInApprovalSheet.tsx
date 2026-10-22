@@ -4,6 +4,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { signInQuestion } from '@patch/wire';
 import { api } from '../api/rest';
 import { useSignInStore } from '../stores/signInStore';
 import { usePresenceStore } from '../stores/presenceStore';
@@ -121,7 +122,7 @@ export function SignInApprovalSheet(): React.ReactElement | null {
       ) : current !== undefined ? (
         <>
           <Text style={{ color: fixed.onShade, fontFamily: fonts.bodyBold }}>
-            {current.label} wants to sign in
+            {signInQuestion(current.label)}
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: space.md }}>
             {button('Deny', () => void answer(current.id, false), false)}

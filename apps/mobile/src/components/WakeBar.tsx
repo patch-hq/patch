@@ -19,6 +19,7 @@ import { Pressable, Text, TextInput } from 'react-native';
 import { AlarmClock } from 'lucide-react-native';
 import type { ChatRow } from '../stores/types';
 import { writeLoopMessage } from '../lib/chatMeta';
+import { creditPause, formatResume } from '../lib/queueLabel';
 import { BarDetailSheet } from './chatBars/BarDetailSheet';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
@@ -66,6 +67,14 @@ export function WakeBar({ row }: { row: ChatRow | undefined }): ReactElement | n
   if (!wake) return null;
 
   const countdown = formatWakeCountdown(wake.fireAt - now);
+  // A wake is a turn; out of credit it cannot run, so the bar warns.
+  const pause = creditPause(row);
+  const pauseNote =
+    pause === null
+      ? ''
+      : pause.resetsAt === null
+        ? ' · out of credit'
+        : ` · out of credit until ${formatResume(pause.resetsAt, now)}`;
 
   const every = wake.every;
   const unchanged = draft.trim() === '' || draft.trim() === wake.message;
@@ -98,12 +107,17 @@ export function WakeBar({ row }: { row: ChatRow | undefined }): ReactElement | n
           gap: space.xs,
         }}
       >
-        <AlarmClock size={14} color={colors.ink2} />
+        <AlarmClock size={14} color={pause ? colors.amber : colors.ink2} />
         <Text
           testID="wake-bar-countdown"
-          style={{ color: colors.ink2, fontFamily: fonts.bodyMedium, fontSize: textMin }}
+          style={{
+            color: pause ? colors.amber : colors.ink2,
+            fontFamily: fonts.bodyMedium,
+            fontSize: textMin,
+          }}
         >
           Wakes {countdown}
+          {pauseNote}
         </Text>
         <Text
           testID="wake-bar-message"

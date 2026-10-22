@@ -205,15 +205,25 @@ describe('ChatRoute — /goal command + goal banner', () => {
     });
     renderChat();
     expect(screen.getByTestId('goal-banner-cell-time')).toHaveTextContent('9m');
-    expect(screen.getByTestId('goal-banner-cell-turns')).toHaveTextContent('3 turns');
+    expect(screen.getByTestId('goal-banner-cell-turns')).toHaveTextContent('3 checks');
     expect(screen.getByTestId('goal-banner-cell-tokens')).toHaveTextContent('8.2k tokens');
     const metrics = screen.getByTestId('goal-banner-meta');
     expect(metrics).toHaveTextContent('9m');
-    expect(metrics).toHaveTextContent('3 turns');
+    expect(metrics).toHaveTextContent('3 checks');
     expect(metrics).toHaveTextContent('8.2k tokens');
     expect(screen.getByTestId('goal-banner-reason')).toHaveTextContent(
       'Not met: Tests are still red',
     );
+  });
+
+  it('labels the banner with its state and expands the full goal text', () => {
+    seed('Ship the release by Friday');
+    renderChat();
+    expect(screen.getByTestId('goal-banner-label')).toHaveTextContent('Goal active');
+    const banner = screen.getByTestId('goal-banner');
+    expect(banner).not.toHaveClass('goal-banner-expanded');
+    fireEvent.click(screen.getByTestId('goal-expand-btn'));
+    expect(banner).toHaveClass('goal-banner-expanded');
   });
 
   it('shows no metrics/reason before the first evaluation has landed', () => {

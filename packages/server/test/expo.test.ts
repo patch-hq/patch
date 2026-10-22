@@ -54,6 +54,19 @@ describe('ExpoPushBackend.send — request shape', () => {
     ]);
   });
 
+  it("lifts data.categoryId to the message's own categoryId so Android attaches the action buttons", async () => {
+    const fetchSpy = vi.fn(async () => jsonResponse({ data: [{ status: 'ok', id: 'ticket-1' }] }));
+    vi.stubGlobal('fetch', fetchSpy);
+    await new ExpoPushBackend().send(['ExponentPushToken[tok-a]'], {
+      title: 't',
+      body: 'b',
+      data: { chatId: 'c1', categoryId: 'patch_dynamic' },
+    });
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const [message] = JSON.parse(init.body as string) as Array<{ categoryId?: string }>;
+    expect(message.categoryId).toBe('patch_dynamic');
+  });
+
   it('sets priority=high for an urgent push', async () => {
     const fetchSpy = vi.fn(async () => jsonResponse({ data: [{ status: 'ok', id: 'ticket-1' }] }));
     vi.stubGlobal('fetch', fetchSpy);

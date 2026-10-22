@@ -31,7 +31,8 @@ import { SettingsSection } from '../SettingsSection';
 import { sendToHost } from './hostSend';
 import { hostName, sortedHosts } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
-import { ErrorLine, Row, RowValue, SettingsButton, ValueRow } from './ui';
+import { ErrorLine, Row, RowValue, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
+import { patchShared } from './sharedWrite';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -126,6 +127,7 @@ export function UpdatesPage(): React.ReactElement {
   else sentence = '';
 
   const behindHosts = sortedHosts(hosts).filter((h) => h.host?.updateAvailable === true);
+  const onlineBehind = behindHosts.filter((h) => h.online);
   const drift = report?.drift ?? [];
   const anyBehind = pending || apkAvailable || behindHosts.length > 0 || drift.length > 0;
   const appStamp = build.gitSha ? `${build.version} · ${build.gitSha}` : build.version;
@@ -202,6 +204,41 @@ export function UpdatesPage(): React.ReactElement {
           ))}
         </SettingsSection>
       ) : null}
+
+      <WithSettings testID="update-mode">
+        {(data) => (
+          <SettingsSection testID="updates-mode">
+            <ToggleRow
+              label="Update hosts automatically"
+              testID="auto-update"
+              value={data.preferences.autoUpdateHosts}
+              onChange={(next) => void patchShared('Auto-update', { autoUpdateHosts: next })}
+            />
+            {onlineBehind.length > 0 ? (
+              <Row
+                title={`${onlineBehind.length} host${onlineBehind.length === 1 ? '' : 's'} behind`}
+                right={
+                  <SettingsButton
+                    testID="update-all"
+                    label="Update all"
+                    variant="quiet"
+                    onPress={() =>
+                      onlineBehind.forEach(
+                        (h) =>
+                          void sendToHost(
+                            h.hostId,
+                            { type: 'host.update', hostId: h.hostId },
+                            'Update',
+                          ),
+                      )
+                    }
+                  />
+                }
+              />
+            ) : null}
+          </SettingsSection>
+        )}
+      </WithSettings>
 
       <SettingsSection title="Versions" testID="updates-versions">
         <ValueRow

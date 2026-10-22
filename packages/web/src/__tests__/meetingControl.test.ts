@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const send = vi.fn();
 vi.mock('../api/ws.js', () => ({ getActiveWs: () => ({ send }) }));
 
-import { startMeeting, listenHere } from '../lib/meetingControl.js';
+import { startMeeting, listenHere, meetingSpeeds, setMeetingSpeed } from '../lib/meetingControl.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
 
 // A meeting belongs to a real chat. The new-chat screen's placeholder id 'new'
@@ -36,5 +37,20 @@ describe('meetingControl on the new-chat placeholder', () => {
     await listenHere('new');
     expect(getUserMedia).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('meeting speeds', () => {
+  it('Normal takes its analysis interval from the account setting; Fast and Slow stay put', () => {
+    const prefs = usePreferencesStore.getState().preferences;
+    usePreferencesStore.setState({ preferences: { ...prefs, meetingAnalyseSeconds: 45 } });
+    expect(meetingSpeeds()['normal']!.analyseSeconds).toBe(45);
+    expect(meetingSpeeds()['fast']!.analyseSeconds).toBe(8);
+    send.mockReset();
+    setMeetingSpeed('c1', 'normal');
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'tune', settings: { clipSeconds: 6, analyseSeconds: 45 } }),
+    );
+    usePreferencesStore.setState({ preferences: prefs });
   });
 });

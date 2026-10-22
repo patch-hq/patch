@@ -57,11 +57,13 @@ test('docked, the panel sits inside its chat and goes with it; popped out, it st
   // Inside the chat's own tab, not a sibling of the whole app.
   await expect(page.locator('.chat-tab-host [data-testid="side-threads-panel"]')).toHaveCount(1);
 
-  // Switching chats hides the docked panel.
+  // Switching chats closes the docked panel, and it stays closed on return.
   await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
   await expect(page.locator('.pane-tab')).toHaveCount(2);
   await expect(panel).toHaveCount(0);
   await page.locator('.pane-tab', { hasText: 'forked-fixture' }).click();
+  await expect(panel).toHaveCount(0);
+  await page.getByTestId('action-threads').click();
   await expect(panel).toBeVisible();
 
   // Pop out, then change chats: it stays, same width.

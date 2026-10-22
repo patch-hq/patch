@@ -10,7 +10,8 @@
 // with it. A failing UDS call surfaces; we don't silently retry over REST.
 
 import { RestClient } from './rest.js';
-import { UdsClient } from './uds.js';
+import { UdsClient, UdsError } from './uds.js';
+import { RestError } from './rest.js';
 import type { ResolvedConfig } from '../config.js';
 import { bearerToken } from '../auth.js';
 
@@ -60,6 +61,43 @@ export function buildTransport(
       patch: <T>(p: string, b?: unknown): Promise<T> => uds.patch<T>(p, b),
       put: <T>(p: string, b?: unknown): Promise<T> => uds.put<T>(p, b),
       delete: <T>(p: string): Promise<T> => uds.delete<T>(p),
+    };
+  }
+
+  // A server call from a machine that runs a host: relay it over the host's
+  // socket and its link to the server, so the CLI needs no credential of its
+  // own. Chosen up front by what is on this machine, never retried the other
+  // way; an explicit bearer or fetch (tests, scripts) keeps REST.
+  if (
+    opts.forceRest &&
+    opts.bearer === undefined &&
+    opts.fetchFn === undefined &&
+    config.hostSocket !== null &&
+    config.daemonLocalKey !== null
+  ) {
+    const uds = new UdsClient({ socketPath: config.hostSocket, localKey: config.daemonLocalKey });
+    const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+      try {
+        return await uds.post<T>('/server-api', {
+          method,
+          path,
+          ...(body !== undefined ? { body } : {}),
+        });
+      } catch (err) {
+        // Same error shape as a direct REST call, so messages read the same.
+        if (err instanceof UdsError) {
+          throw new RestError(err.status, err.body, `${method} ${path} → ${err.status}`, true);
+        }
+        throw err;
+      }
+    };
+    return {
+      kind: 'rest',
+      get: <T>(p: string): Promise<T> => call<T>('GET', p),
+      post: <T>(p: string, b?: unknown): Promise<T> => call<T>('POST', p, b),
+      patch: <T>(p: string, b?: unknown): Promise<T> => call<T>('PATCH', p, b),
+      put: <T>(p: string, b?: unknown): Promise<T> => call<T>('PUT', p, b),
+      delete: <T>(p: string): Promise<T> => call<T>('DELETE', p),
     };
   }
 

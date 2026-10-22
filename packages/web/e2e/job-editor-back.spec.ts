@@ -4,8 +4,6 @@ import { test, expect } from '@playwright/test';
 // The job editor (new-job and edit-job) must have a back/cancel button
 // that navigates to /jobs without requiring a save.
 
-const NEW_JOB = '/app/dev-harness.html?route=/jobs/new';
-
 // Bug report 23 Sep 2026: "patch job back page only goes back to jobs
 // instead of where you actually where". Opened via a chat's "Open job" row
 // (chat_job_open_link fixture — dev-harness.tsx), Back must return to that

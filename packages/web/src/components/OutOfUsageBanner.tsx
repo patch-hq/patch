@@ -85,7 +85,7 @@ export function OutOfUsageBanner({
   const [confirming, setConfirming] = useState(false);
   const sendSwitch = (): void => {
     if (chatId === undefined || target === undefined) return;
-    getActiveWs()?.send({ type: 'chat.model_request', chatId, model: target.id });
+    getActiveWs()?.send({ type: 'chat.model_request', chatId, model: target.id, retry: true });
   };
   const soonestAt = outage?.soonest?.resetsAt;
   useEffect(() => {

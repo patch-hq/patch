@@ -23,7 +23,7 @@ export function HostOfflineBanner(): React.ReactElement | null {
       testID="daemon-offline-banner"
       onPress={() => router.push('/(tabs)/settings')}
       accessibilityRole="button"
-      accessibilityLabel="Host offline — open Settings to see the host status"
+      accessibilityLabel="Machine offline — open Settings to see the machine status"
       style={{
         backgroundColor: colors.waitingTint,
         borderColor: colors.waiting,

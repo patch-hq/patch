@@ -13,6 +13,7 @@ describe('classifyFailure', () => {
     ['API Error: 529 overloaded_error', 'transient'],
     ['API Error: 429 rate_limit_error', 'transient'],
     ['API Error: 500 api_error', 'transient'],
+    ['[session_crash] error_name=AbortError api_error_status=none cause_name=none', 'transient'],
     ['API Error: 502 bad gateway', 'transient'],
     ['API Error: 408 request timeout', 'transient'],
     ['read ECONNRESET', 'transient'],
@@ -20,6 +21,8 @@ describe('classifyFailure', () => {
     ['fetch failed', 'transient'],
     ['socket hang up', 'transient'],
     ['Claude Code process exited with code 143', 'transient'],
+    ['Claude Code process exited with code 137', 'permanent'],
+    ['Claude Code process terminated by signal SIGKILL', 'permanent'],
   ])('%s → %s', (msg, kind) => {
     expect(classifyFailure(msg).kind).toBe(kind);
     expect(classifyFailure(msg).reason).not.toBe('unclassified');

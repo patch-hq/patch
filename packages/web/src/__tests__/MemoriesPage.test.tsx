@@ -295,7 +295,7 @@ describe('Settings → Memories — the entries', () => {
   it('shows the host chosen in the switcher, and only its memories', async () => {
     await openPage([ROLE], true);
     act(() => {
-      reportHost('d2', { hostName: 'hetzner', isHomeHost: false, harnessMemoryEnabled: true });
+      reportHost('d2', { hostName: 'hetzner', runsManager: false, harnessMemoryEnabled: true });
       reportClaudeSettings('d2', [GARDEN]);
     });
     fireEvent.click(await screen.findByTestId('settings-host-d2'));

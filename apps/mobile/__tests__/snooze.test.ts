@@ -14,6 +14,7 @@ import {
   resolvePreset,
   parseCustomSnooze,
 } from '../src/lib/snooze';
+import { SNOOZE_UNTIL_COMPLETE } from '@patch/wire';
 import { isSnoozed } from '../src/stores/types';
 
 afterEach(() => {
@@ -144,6 +145,17 @@ describe('formatWakeTime', () => {
     vi.setSystemTime(new Date(2026, 7, 25, 9, 0, 0));
     const out = formatWakeTime(new Date(2026, 7, 27, 9, 30, 0).getTime());
     expect(out).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/);
+  });
+
+  it('is the spec wording (spec/04 § Snooze): 24-hour, and a date beyond six days', () => {
+    // Tue 25 Aug 2026. It used to be a locale time ("05:30 PM") that never
+    // showed a date, so Next Monday a fortnight out read as a bare weekday.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 25, 9, 0, 0));
+    expect(formatWakeTime(new Date(2026, 7, 25, 17, 30, 0).getTime())).toBe('17:30');
+    expect(formatWakeTime(new Date(2026, 7, 27, 9, 30, 0).getTime())).toBe('Thu 09:30');
+    expect(formatWakeTime(new Date(2026, 8, 7, 8, 0, 0).getTime())).toBe('Mon 7 Sep');
+    expect(formatWakeTime(SNOOZE_UNTIL_COMPLETE)).toBe('when done');
   });
 });
 

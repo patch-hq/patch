@@ -33,10 +33,6 @@ export type NotificationAction =
    *  § Batch check-in) — an ordinary push, but `kind: 'batch'` and no
    *  `chatId`. Tapping it lands on the Batch tab, never a chat. */
   | { type: 'batch' }
-  /** A handover push (`09-notifications.md` § Handing over to the phone) naming
-   *  several chats — `kind: 'handover'` and no `chatId`. Tapping it lands on the
-   *  chat list. */
-  | { type: 'chats' }
   /** An expired AI-account sign-in — `kind: 'sign-in'` with a placeholder
    *  chatId. Tapping it lands on Settings, never a chat. */
   | { type: 'settings' }
@@ -171,7 +167,6 @@ export function resolveNotificationAction(
     const version = /patch-([^/]+)\.apk$/.exec(url)?.[1];
     return { action: { type: 'install', url, ...(version ? { version } : {}) } };
   }
-  if (data['kind'] === 'handover') return { action: { type: 'chats' } };
   const deepLink = data['deepLink'];
   if (typeof deepLink === 'string' && deepLink.length > 0) {
     const words = deepLinkWords(deepLink);

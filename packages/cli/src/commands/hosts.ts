@@ -9,13 +9,14 @@
 //   - Controls the HOST owns reach this machine over its own local socket, so
 //     they work with no round trip through the server (and while the server is
 //     unreachable).
-//   - Four commands go to the SERVER even when they name this machine, because
-//     the server owns what they change rather than the host: `add`, `rename`,
-//     `set-home` and `remove`.
+//   - Three commands go to the SERVER even when they name this machine, because
+//     the server owns what they change rather than the host: `add`, `rename`
+//     and `remove`.
 //
 // `--host` names another machine and forces the REST path, since another
 // machine's host is not reachable over this one's socket.
 
+import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
 import { emitJson, emitText, getTransport, run } from './_common.js';
@@ -28,7 +29,6 @@ export interface HostSummary {
   hostId: string;
   hostName: string | null;
   online: boolean;
-  isHomeHost: boolean;
   defaultModel?: string;
 }
 
@@ -100,14 +100,14 @@ export function registerHostsCommands(program: Command): void {
           // A machine that has never reported has no name — say so rather than
           // printing an id dressed up as one.
           const name = h.hostName ?? `${h.hostId} (no report yet)`;
-          emitText(`${h.online ? '●' : '○'} ${name}${h.isHomeHost ? '  [home]' : ''}  ${h.hostId}`);
+          emitText(`${h.online ? '●' : '○'} ${name}  ${h.hostId}`);
         }
       });
     });
 
   hosts
     .command('get')
-    .description('One machine: platform, backends, components, home marker')
+    .description('One machine: platform, backends, components')
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
@@ -173,6 +173,35 @@ export function registerHostsCommands(program: Command): void {
     });
 
   hosts
+    .command('devices')
+    .description('The voice devices registered on this machine, with live presence (online, muted)')
+    .option('--json', 'JSON output')
+    .action(async (opts: CommonOpts) => {
+      await run(opts, async () => {
+        // Presence is the host's own, so this is the local socket only.
+        const t = getTransport(opts);
+        if (t.kind !== 'uds') {
+          throw new Error(
+            'hosts devices: needs the host running on this machine (no host socket found)',
+          );
+        }
+        const res = await t.get<{
+          devices: Array<{ deviceId: string; name?: string; online?: boolean; muted?: boolean }>;
+        }>('/internal/devices');
+        if (opts.json) {
+          emitJson(res);
+          return;
+        }
+        if (res.devices.length === 0) emitText('(no devices)');
+        for (const d of res.devices) {
+          emitText(
+            `${d.deviceId}  ${d.name ?? ''}  ${d.online ? 'online' : 'offline'}${d.muted ? '  muted' : ''}`,
+          );
+        }
+      });
+    });
+
+  hosts
     .command('models')
     .description("That machine's model catalogue across its backends")
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
@@ -222,11 +251,11 @@ export function registerHostsCommands(program: Command): void {
 
   const claudeSettings = hosts
     .command('claude-settings')
-    .description("That host's Claude Code memory entries and any settings.json drift");
+    .description("That host's Claude Code settings.json and memory entries");
 
   claudeSettings
     .command('get', { isDefault: true })
-    .description('Show memory entries and any settings.json drift')
+    .description('Show settings.json text and memory entries')
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
@@ -241,18 +270,18 @@ export function registerHostsCommands(program: Command): void {
     });
 
   claudeSettings
-    .command('discard')
-    .description("Rewrite that host's drifted settings.json from the shared settings")
+    .command('set <file>')
+    .description("Replace that host's settings.json from a file")
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
     .option('--json', 'JSON output')
-    .action(async (opts: HostsOpts) => {
+    .action(async (file: string, opts: HostsOpts) => {
       await run(opts, async () => {
         const { t, path } = await hostRoute(
           opts,
-          '/claude-settings/discard',
-          () => '/api/hosts/claude-settings/discard',
+          '/claude-settings',
+          () => '/api/hosts/claude-settings',
         );
-        emitJson(await t.post<unknown>(path, {}));
+        emitJson(await t.post<unknown>(path, { text: readFileSync(file, 'utf8') }));
       });
     });
 
@@ -346,19 +375,6 @@ export function registerHostsCommands(program: Command): void {
             ...(hostId ? { hostId } : {}),
           }),
         );
-      });
-    });
-
-  hosts
-    .command('set-home')
-    .description('Make a machine the account home, where the special threads run')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
-    .option('--json', 'JSON output')
-    .action(async (opts: HostsOpts) => {
-      await run(opts, async () => {
-        const t = getTransport({ ...opts, remote: true });
-        const hostId = opts.host !== undefined ? await resolveHost(opts) : undefined;
-        emitJson(await t.post<unknown>('/api/hosts/set-home', { ...(hostId ? { hostId } : {}) }));
       });
     });
 

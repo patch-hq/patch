@@ -64,6 +64,8 @@ for (const [name, url] of [
         // A goal marker is an icon whose tooltip IS the goal's own text — user
         // data, shown nowhere else on the row, so it cannot be "a short name".
         if (String(t.testid).startsWith('goal-marker-')) return false;
+        // The connection dot exposes live status for each link, not control help.
+        if (t.testid === 'conn-dot') return false;
         return words > 5 && !isFullValue(t);
       });
       expect(wordy).toEqual([]);

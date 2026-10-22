@@ -47,7 +47,7 @@ The ORDER is the backend's account strategy, a shared setting (`01-server.md` §
 
 Whatever the strategy, a spent key is skipped: a strategy decides which credit to spend, never whether a turn runs.
 
-A chat — and the chat a job creates — can name a PREFERRED ACCOUNT, chosen when it is created and fixed for its life. Its turns start on that key, and the rest follow in the strategy's order. It is a preference, not a pin: a spent preferred key is walked past exactly like any other, and a failure is attributed to the key the turn actually ran on. A chat with a preference does not move a round-robin on. A preference naming a key the host does not hold for the chat's backend is refused when the chat is created; one the accounts later lose is ignored, so the chat runs on the host's keys rather than on nothing.
+A chat — and the chat a job creates — can name an account, which LOCKS it there: its turns run only on that key. When that key is spent the chat waits for the reset or shows the limit card; it never moves to another key, and the limit card for a locked chat offers Change account. The lock can be changed or removed at any time from the chat's account menu; Automatic (no account named) follows the account strategy and is the only way a chat moves between accounts. A locked chat does not move a round-robin on, and a failure is attributed to the key the turn ran on. An account that the host does not hold for the chat's backend is refused when named; one the accounts later lose is ignored, so the chat runs on the host's keys rather than on nothing.
 
 This is what makes a key running out cost one turn rather than every chat on it. The first turn to hit `You've hit your monthly spend limit` records that key as spent, with the reset time the provider's own message states; every turn after that resolves straight past it to the next key, with no failure of its own. When that reset passes the key is simply first in the order again, so everything goes back to it without anything having to remember to move it. Nothing rewrites a chat, because there is nothing on a chat to rewrite.
 
@@ -56,6 +56,8 @@ The turn that discovers it still has to be re-run, and is — once per key, not 
 **The same sequence answers every AI call, not only turns.** Patch makes one-shot calls that are not turns — a chat's title, its current-status summary, the model catalogue — and each of them walks the accounts too. A turn can afford to learn by failing, because the next turn is routed past the spent key; a one-shot has no next turn, so it walks the remaining sequence within the single call and marks what it learns for the calls behind it. Resolving once and giving up is not a smaller version of the rule, it is the absence of it: on 2026-09-12 title and status generation were pinned to the host's _active_ account while turns rotated away from it, so a night of 76 chats came out with no status at all — every one of them looking equally finished — while the chats themselves ran normally on the second key.
 
 A one-shot that no account can answer resolves to nothing, and the caller leaves what it was going to set unchanged. A one-shot that fails for any OTHER reason fails loudly with the provider's own words rather than resolving to nothing: "the model had nothing to say" and "this call did not happen" must not be the same answer, because reading the second as the first is what made a spend limit look like an empty summary.
+
+After a restart the spent key is not on disk, so the first stored key is provisionally recorded as spent from a failed chat's message. That record is a guess: it carries the failure's own time and every account's usage is read at once, so a reading showing the key spendable clears it immediately and the turn runs on it, rather than every key being held out until the reset.
 
 Work that stopped for want of credit starts again the moment ANY account has some — whichever account, and however it got it. Three things can reveal that, and all three do the same whole thing: a limit reaching the reset it stated; a person adding a key or reconnecting one with a fresh token; and a usage reading finding an account spendable that had been recorded as spent. The third is not a duplicate of the first: a refusal that names no reset time arms no timer, because there is no instant to wait for, so without it such an account stays sidelined until somebody touches a credential.
 
@@ -75,9 +77,10 @@ Provider accounts have NO host tie. Whether a chat can run — the composer, the
 
 Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), once per backend for the whole account — the accounts are shared settings, held by the server and sent to every host (`01-server.md` § Settings):
 
-- Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `disconnect` action; not-connected shows a `connect` action.
-- An `add another account` action alongside the existing rows starts the same paste-a-token flow as connect, but always creates a new row rather than replacing one. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
-- An `adopt` action, per host, takes the backend's own login on that machine (below) and adds it as an account. A host whose login is already stored has none to offer.
+- Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `Sign out` action; signed-out shows a `Sign in` action. The row's actions sit behind a ⋯ that opens a small panel beside the row — it floats over the rows below rather than pushing them — and each action that is not self-evident carries one line saying what it does: `Sign in again` replaces the stored login with a fresh token; `Sign out` keeps the row and forgets the login; `Remove` forgets the account everywhere. No row names a machine: an account is every host's, and a host is only ever the reader of its usage.
+- An `Add account` action under the rows starts the same paste-a-token flow as sign-in, but always creates a new row rather than replacing one. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
+- The `adopt` call (take the backend's own login on a machine and add it as an account) stays as a REST and CLI operation, but Settings does not offer it per host: a host that holds accounts the server does not sends them on its first connect (`01-server.md` § Settings), so there is nothing for a person to pick a machine for.
+- EVERY PROVIDER IS ONE ENTRY IN A LIST, not a branch in the page. The web page keeps a registry (`providers.tsx`) in which each provider declares its name, which shared strategy setting ranks its accounts, which limit windows it reports and in what order, where its extra-usage add-on is managed, whether a login can be replaced by pasting a token, and the control that adds an account. The page walks the list and draws every entry the same way — strategy row, ranked accounts, add control — so a new provider (a local model server, say) is a new entry and never a change to the page.
 - A strategy control per backend, over the rows (§ above).
 - ONE ROW IS ONE CLAUDE ACCOUNT. Every stored credential records the Anthropic organisation it authenticates as, read from the `anthropic-organization-id` header on the call that validates it. (`GET /api/oauth/profile` answers 403 `oauth_scope_insufficient` for a `claude setup-token` token; the header is stamped on every response, including the free `/v1/models` 200.) A token whose organisation matches an account already stored is REFUSED, naming the row it clashes with — a second credential for the same account is not somewhere to fail over to, it is the same pool of credit under a second label. A re-connect of a row is exempt: replacing a row's own token with a fresh one for the same organisation is a rotation. An organisation that could not be established is "not known", never "different", so an unidentified token is still stored.
 - Two accounts sharing an organisation are sidelined TOGETHER when either runs out, and the chat says so. Failing over between them would spend a turn re-discovering the same empty pool.
@@ -85,7 +88,7 @@ Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), o
 Every surface with a Settings screen — web, desktop and mobile (`15-design-mobile.md` § Settings tab) — shows the same state and offers the same controls, read from `GET /api/accounts/:backendId` and kept live by the `settings.changed` push (`03-wire-protocol.md` § Settings).
 
 - Connect, add, disconnect, relabel, reorder and adopt are REST calls to the server (`01-server.md` § Endpoints). The server validates a pasted token itself, against the provider, before storing anything, so a token that does not work is refused in the reply naming why, and nothing is written.
-- Disconnect is confirmed first: it takes that key out of the sequence every chat on every host draws from.
+- Sign out and Remove are confirmed first: each takes that key out of the sequence every chat on every host draws from.
 - A change is settled when the server has committed it; the reply carries the new list, and the row shows it. Whether each host has picked it up is the host's applied settings version, shown on its Settings → Hosts row (`01-server.md` § Settings) — an offline host does not block a change, it receives it on reconnect.
 - The CLI drives the same calls through `patch accounts` (`17-cli.md` § Commands), and needs the server: with no server link it refuses, naming the server.
 
@@ -119,7 +122,7 @@ with no structured counterpart anywhere in patch, which is why nobody could
 explain it. (The per-model `seven_day_opus`/`seven_day_sonnet` variants remain
 unsurfaced.)
 
-USAGE HISTORY. Settings → Usage opens with two groups above the accounts. "Allowance left" is a burndown: for a chosen period (Day = last 24 h, Week = 7 d, Month = 30 d, or a Custom from/to date) one line per Claude account of the percent of the weekly window still unspent at each probe, rising back at the weekly reset. "Chats by tokens" ranks chats with a completed turn in the period by tokens (fresh + cached input + output, summed from each chat's `turn.end` usage in its own log). Both come from `GET /api/usage-report?since&until`, which asks every online host (`patch.usage.read.request`) and merges. History starts when a host first records it: each probe is appended to `logs/usage-history.jsonl` (bounded), so a period reaching back before that shows only the readings since; per-chat tokens go back as far as the chat logs do. A host that does not answer fails the call (no partial answer).
+USAGE HISTORY. Settings → Usage opens with two groups above the accounts. "Allowance left" is a burndown: for a chosen period (Day = last 24 h, Week = 7 d, Month = 30 d, or a Custom from/to date) one line per Claude account of the percent of the weekly window still unspent at each probe, rising back at the weekly reset. "Chats by tokens" ranks chats with a completed turn in the period by tokens (fresh + cached input + output, summed from each chat's `turn.end` usage in its own log). Both come from `GET /api/usage-report`: a named `period` (day/week/month) is answered from the server's cache, and `since&until` is read live. Reading means every online host scanning its chat logs (`patch.usage.read.request`), which took long enough that the page opened on a spinner every time; so the server keeps each named period's last answer, stamped with when it was read, hands it back at once, and re-reads behind it when it is older than five minutes — and on a ten-minute timer re-reads the default period (week) and any period that has been asked for, so the figures are current before anyone looks. The page says when the figures were read. The burndown is drawn as a smooth curve within each weekly cycle and a straight vertical step at each reset, so where every account's week starts is visible rather than smeared across the hours between two probes. History starts when a host first records it: each probe is appended to `logs/usage-history.jsonl` (bounded), so a period reaching back before that shows only the readings since; per-chat tokens go back as far as the chat logs do. A host that does not answer fails the call (no partial answer).
 
 Each window carries `status` (`allowed`/`allowed_warning`/`rejected`),
 `utilization` (0–1), `resetsAt` (epoch ms) and an optional `disabledReason`.
@@ -140,8 +143,15 @@ passed through: every instant patch displays is formatted from an epoch in the
 reader's own zone. A `rejected` session or week window reads as blocked. A
 rejected overage does NOT (spec/12 § A turn only dies for a reason someone
 chose): that line reads as off, in neutral styling, and says that nothing has
-been overspent. A row also carries a `Refresh` action, because the moment a
-person wants the figure is the moment they are deciding whether to wait.
+been overspent. The reason sits on the extra-usage line itself, in the column
+where a reset time would go — `Turn on`, linked to that account's Claude usage
+settings, when the add-on was never taken out; `disabled by organisation` when
+policy prevents it — so the line is one line, not a bar with a footnote. A row
+carries no `Refresh` action: the host reads every account every ten minutes and
+after any turn that runs one out, and `host.backend_usage_refresh` remains for
+the CLI and for a surface that has a reason to ask, but a button whose only
+effect is to make a figure a few minutes fresher is a button a person presses
+without knowing why.
 
 Usage also appears where the work happens: the composer's context ring opens a
 popover naming the pool closest to its limit, or the refusal, with every
@@ -295,7 +305,7 @@ follow:
 
 Provider keys — the API keys the host itself uses for hosted voice and Groq
 Whisper — are shared by every host and set and revoked from one Settings →
-Keys page (`02-daemon.md` § Provider keys). The gate is every other shared
+Providers page (`02-daemon.md` § Provider keys). The gate is every other shared
 setting's: a live surface credential. They are stored like every other secret
 (`01-server.md` § Settings): on the server, encrypted, sent to every host, and
 never sent back to a surface, which sees where each key comes from and its

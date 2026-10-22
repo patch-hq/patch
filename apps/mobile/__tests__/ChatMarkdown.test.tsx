@@ -99,9 +99,9 @@ describe('ChatMarkdown — link previews', () => {
       );
     const web = link('https://example.com');
     expect(hasText(web.root, 'label')).toBe(true);
-    expect(findAllHost(web.root, byTestId('link-preview-toggle')).length).toBe(1);
+    expect(findAllHost(web.root, byTestId('link-summary-toggle')).length).toBe(1);
     const mail = link('mailto:a@b.c');
     expect(hasText(mail.root, 'label')).toBe(true);
-    expect(findAllHost(mail.root, byTestId('link-preview-toggle')).length).toBe(0);
+    expect(findAllHost(mail.root, byTestId('link-summary-toggle')).length).toBe(0);
   });
 });

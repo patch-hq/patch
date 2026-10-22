@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { api, ApiError, type ChatSummaryRow } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -47,6 +48,7 @@ vi.mock('../api/rest.js', async (importOriginal) => {
       }),
       checkHooks: vi.fn(async () => ({ decision: 'pass' as const, results: [] })),
       getSweepRuns: vi.fn(async () => ({ runs: [] })),
+      getJob: vi.fn(async (id: string) => ({ id, name: 'Test job' })),
       checkSweepNow: vi.fn(async () => ({ fired: false })),
     },
   };
@@ -89,12 +91,15 @@ function clickApprove(card: HTMLElement = screen.getByTestId('permission')): voi
 }
 
 function renderChat(chatId: string, ws: Parameters<typeof ChatRoute>[0]['ws'] = null) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
-      <Routes>
-        <Route path="/chats/:chatId" element={<ChatRoute ws={ws} />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
+        <Routes>
+          <Route path="/chats/:chatId" element={<ChatRoute ws={ws} />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -1916,7 +1921,7 @@ describe('ChatRoute regression', () => {
     ]);
     renderChat('c-queue-vs-offline');
     const chip = screen.getByTestId('queued-badge');
-    expect(chip).toHaveTextContent('Host offline');
+    expect(chip).toHaveTextContent('Machine offline');
     // The offline line owns the "reconnect" wording; the chip must not echo it —
     // that's what actually tells the two states apart, not the shared "Queued" word.
     expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/reconnect/i);
@@ -2018,9 +2023,36 @@ describe('ChatRoute regression', () => {
     renderChat('c-turn-failed');
     expect(screen.getByTestId('turn-failed')).toBeInTheDocument();
     expect(screen.getByTestId('turn-failed')).toHaveTextContent('Turn failed.');
-    // Not the old standalone raw-error-code row.
-    expect(screen.queryByText('something broke')).not.toBeInTheDocument();
+    // The host's text is behind the Details disclosure, not a standalone row.
+    expect(screen.getByTestId('turn-failed-detail')).toHaveTextContent('something broke');
+    expect(screen.queryByTestId('turn-failed-reason')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delivery-failed')).not.toBeInTheDocument();
+  });
+
+  it('a context-length turn failure says the input is too large and that an unchanged retry will fail', () => {
+    seedChat('c-turn-ctx', [
+      {
+        seq: 1,
+        kind: 'message',
+        role: 'user',
+        content: 'do the thing',
+        localId: 'L-turn-ctx',
+        turnFailed: true,
+        turnErrorMessage:
+          '400 context_length_exceeded: Your input exceeds the context window of this model.',
+        turnFailedSeq: 5,
+        at: 0,
+      },
+    ]);
+    renderChat('c-turn-ctx');
+    expect(screen.getByTestId('turn-failed')).toHaveAttribute(
+      'data-failure-kind',
+      'context_length',
+    );
+    expect(screen.getByTestId('turn-failed-reason')).toHaveTextContent(/too large/);
+    expect(screen.getByTestId('turn-failed-reason')).toHaveTextContent(/fail again/);
+    expect(screen.getByTestId('turn-retry')).toHaveTextContent('Retry anyway');
+    expect(screen.getByTestId('turn-failed-detail')).toHaveTextContent('context_length_exceeded');
   });
 
   it('tapping "retry" on a turnFailed message re-runs it IN PLACE: a fresh localId naming the original seq, and no second bubble', () => {
@@ -2172,13 +2204,13 @@ describe('ChatRoute regression', () => {
     expect(screen.getByTestId('delivery-pending-icon')).toHaveAttribute('data-icon', 'clock');
   });
 
-  it('shows "host offline — will send when it reconnects" while the host is offline', () => {
+  it('shows "machine offline — will send when it reconnects" while the host is offline', () => {
     usePresenceStore.getState().setHostOnline('d1', false);
     seedChat('c-pending-offline', [
       { seq: 1, kind: 'message', role: 'user', content: 'x', deliveryPending: true, at: 0 },
     ]);
     renderChat('c-pending-offline');
-    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/host offline.*reconnect/i);
+    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/machine offline.*reconnect/i);
     expect(screen.getByTestId('delivery-pending-icon')).toHaveAttribute('data-icon', 'cloud-off');
   });
 
@@ -2190,19 +2222,19 @@ describe('ChatRoute regression', () => {
       { seq: 1, kind: 'message', role: 'user', content: 'x', deliveryPending: true, at: 0 },
     ]);
     renderChat('c-pending-other-host-up');
-    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/host offline.*reconnect/i);
+    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/machine offline.*reconnect/i);
     expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(/offline.*queued/i);
     usePresenceStore.getState().setHostOnline('d2', false);
     usePresenceStore.setState({ connection: 'offline', hostsSeeded: false });
   });
 
-  it('a queued message reads "Host offline" on its chip while the host is offline', () => {
+  it('a queued message reads "Machine offline" on its chip while the host is offline', () => {
     usePresenceStore.getState().setHostOnline('d1', false);
     seedChat('c-queued-offline', [
       { seq: 1, kind: 'message', role: 'user', content: 'x', queued: true, localId: 'l1', at: 0 },
     ]);
     renderChat('c-queued-offline');
-    expect(screen.getByTestId('queued-badge')).toHaveTextContent('Host offline');
+    expect(screen.getByTestId('queued-badge')).toHaveTextContent('Machine offline');
   });
 
   it('a deliveryPending AND queued message shows only the Queued chip, not the pending line', () => {
@@ -2582,6 +2614,94 @@ describe('ChatRoute regression', () => {
     expect(card.getAttribute('data-expanded')).toBe('false');
     fireEvent.click(screen.getByTestId('view-file-expand'));
     expect(screen.getByTestId('view-file').getAttribute('data-expanded')).toBe('true');
+  });
+
+  function seedFileCard(id: string, ack: Record<string, unknown>): void {
+    seedChat(id, [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'v1',
+        toolArgs: { file_path: 'minutes.docx' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'v1',
+        toolResult: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              kind: 'file',
+              url: `/api/chats/${id}/artifact/aaa`,
+              name: 'minutes.docx',
+              size: 2048,
+              ...ack,
+            }),
+          },
+        ],
+        at: 1,
+      },
+    ]);
+  }
+
+  it('shows a file card with an inline preview, and no open buttons outside the desktop app', () => {
+    seedFileCard('c-file-prev', {
+      previewUrl: '/api/chats/c-file-prev/artifact/bbb',
+      absPath: '/home/u/chat/minutes.docx',
+    });
+    renderChat('c-file-prev');
+    const frame = screen.getByTestId('view-file-preview');
+    expect(frame.getAttribute('src')).toBe('/api/chats/c-file-prev/artifact/bbb');
+    expect(screen.getByTestId('view-file-download')).toBeInTheDocument();
+    expect(screen.queryByTestId('view-file-open-file')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('view-file-open-folder')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('view-file-preview-toggle'));
+    expect(screen.getByTestId('view-file-preview').className).toContain('expanded');
+  });
+
+  it('says why there is no preview', () => {
+    seedFileCard('c-file-noprev', { previewError: 'corrupt zip' });
+    renderChat('c-file-noprev');
+    expect(screen.getByTestId('view-file-preview-error').textContent).toContain('corrupt zip');
+    expect(screen.queryByTestId('view-file-preview')).not.toBeInTheDocument();
+  });
+
+  it("offers open file and open folder when this Mac's own host owns the chat", async () => {
+    const openPath = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { patch: unknown }).patch = {
+      openPath,
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedFileCard('c-file-open', { absPath: '/home/u/chat/minutes.docx' });
+      renderChat('c-file-open');
+      fireEvent.click(await screen.findByTestId('view-file-open-file'));
+      fireEvent.click(screen.getByTestId('view-file-open-folder'));
+      expect(openPath).toHaveBeenNthCalledWith(1, '/home/u/chat/minutes.docx', 'file');
+      expect(openPath).toHaveBeenNthCalledWith(2, '/home/u/chat/minutes.docx', 'folder');
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
+  it('hides open buttons when the chat lives on another host', async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      openPath: vi.fn(),
+      localHost: { status: async () => ({ installed: true, hostId: 'other' }) },
+    };
+    try {
+      seedFileCard('c-file-remote', { absPath: '/srv/chat/minutes.docx' });
+      renderChat('c-file-remote');
+      await new Promise((r) => setTimeout(r, 30));
+      expect(screen.queryByTestId('view-file-open-file')).not.toBeInTheDocument();
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
   });
 
   // spec/14 § Viewing files — a PDF gets the same sandboxed-iframe treatment

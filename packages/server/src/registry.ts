@@ -119,11 +119,11 @@ const RegistryFile = z
      */
     daemonKeys: z.array(DaemonKeyRecord),
     /**
-     * The account's HOME machine — where the special threads run (spec/06).
-     * `null` until one is chosen, in which case the first registered machine is
-     * the home machine so exactly one always holds it.
+     * The machine running the Manager and Speakers (spec/06). The server
+     * moves it when that machine is away; `null` until chosen, in which case
+     * the first registered machine holds it so exactly one always does.
      */
-    homeHostId: z.string().min(1).nullable(),
+    managerHostId: z.string().min(1).nullable(),
     /** Group 11: Expo push tokens per surface. */
     pushTokens: z.array(PushTokenRecord).optional(),
     /** Configurable project-launch folders per account (Settings → Project folders). */
@@ -144,7 +144,7 @@ const EMPTY: RegistryFile = {
   account: null,
   surfaces: [],
   daemonKeys: [],
-  homeHostId: null,
+  managerHostId: null,
 };
 
 export class Registry implements RevocationStoreInterface {
@@ -368,21 +368,21 @@ export class Registry implements RevocationStoreInterface {
   }
 
   /**
-   * The account's home machine (spec/06). Defaults to the first registered
-   * machine so exactly one machine holds the flag as soon as one exists.
+   * The machine running the Manager (spec/06). Defaults to the first registered
+   * machine so exactly one machine holds it as soon as one exists.
    */
-  homeHostId(): string | null {
-    const explicit = this.state.homeHostId;
+  managerHostId(): string | null {
+    const explicit = this.state.managerHostId;
     if (explicit !== null && this.isRegisteredHost(explicit)) return explicit;
     return this.registeredHostIds()[0] ?? null;
   }
 
-  /** Make one machine the account's home machine. Throws if unregistered. */
-  setHomeHostId(hostId: string): void {
+  /** Make one machine the one running the Manager. Throws if unregistered. */
+  setManagerHostId(hostId: string): void {
     if (!this.isRegisteredHost(hostId)) {
-      throw new Error(`Registry.setHomeHostId: no machine registered as ${hostId}`);
+      throw new Error(`Registry.setManagerHostId: no machine registered as ${hostId}`);
     }
-    this.state.homeHostId = hostId;
+    this.state.managerHostId = hostId;
     this.flush();
   }
 
@@ -417,7 +417,7 @@ export class Registry implements RevocationStoreInterface {
    * instead of retrying forever. It drops out of `registeredHostIds()` (and
    * so out of every roster and the host-addressing gate) at once. Pairing the
    * machine again replaces the tombstone (`setDaemonKey`). An explicit home
-   * choice naming it is cleared, so `homeHostId()` falls to the next machine.
+   * choice naming it is cleared, so `managerHostId()` falls to the next machine.
    *
    * Throws naming the id when it is not a registered machine.
    */
@@ -428,7 +428,7 @@ export class Registry implements RevocationStoreInterface {
     const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
     const rec = this.state.daemonKeys[idx] as DaemonKeyRecord;
     this.state.daemonKeys[idx] = { ...rec, revoked: true };
-    if (this.state.homeHostId === hostId) this.state.homeHostId = null;
+    if (this.state.managerHostId === hostId) this.state.managerHostId = null;
     this.flush();
   }
 

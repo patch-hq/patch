@@ -11,7 +11,12 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { taskNotificationSummary, type MessageCompaction, type RateLimitWindow } from '@patch/wire';
+import {
+  taskNotificationSummary,
+  type EffortLevel,
+  type MessageCompaction,
+  type RateLimitWindow,
+} from '@patch/wire';
 import {
   compactionFromSdkMetadata,
   compactionSummaryLine,
@@ -21,7 +26,7 @@ import { AGENT_SDK_PACKAGE } from './installPaths.js';
 import { encodeFolder, translateAttachment } from './history.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { isAccountExhaustedError } from './accountFailover.js';
-import { skillsReloader } from './projectSkills.js';
+import { discoverSkills, skillsReloader } from './projectSkills.js';
 import { McpSupervisor, MCP_START_TIMEOUT_MS, supervisorHooks } from './mcpSupervisor.js';
 import { createClaudeSessionStore } from './claudeSessionStore.js';
 import { readSidecar, type DocMode } from './docSidecar.js';
@@ -121,6 +126,12 @@ export interface SdkEnvelope {
    * TRACK ENTRIES (not raw Responses items) cut from the front.
    */
   seedTrim?: number;
+  /**
+   * What the harness reported about the request it just ran (spec/04 § Handoff
+   * budget): the model's real context window and the input tokens of the
+   * request. Feeds the model-limits registry and `handoff.verified`.
+   */
+  tokenUsage?: { contextWindow?: number; inputTokens?: number };
   /** Origin marker — useful for tests that want to assert ordering. */
   raw?: unknown;
 }
@@ -136,7 +147,7 @@ export interface SdkRunOptions {
    * Keeping this as one profile prevents every cosmetic caller from having to
    * remember the same cost-sensitive set of SDK options.
    */
-  inferenceProfile?: 'classifier' | undefined;
+  inferenceProfile?: 'classifier' | 'research' | undefined;
   /** Images sent alongside `prompt` as content blocks. One-shot path only. */
   images?: Array<{ mediaType: string; data: string }> | undefined;
   cwd: string;
@@ -170,6 +181,11 @@ export interface SdkRunOptions {
   mcpServer?: { command: string; args: string[]; env: Record<string, string> };
   /** SDK `options.model` override (CLI `--model` pass-through; spec/13). */
   model?: string | undefined;
+  /**
+   * SDK `options.effort` — Claude's thinking-effort level (spec/04 § Effort).
+   * Only ever set for a Claude-backend turn; a Codex turn never carries one.
+   */
+  effort?: EffortLevel | undefined;
   /**
    * Per-host system prompt override (Task 3). When non-empty, passed as
    * `options.systemPrompt` to the SDK query, replacing the SDK default.
@@ -298,6 +314,13 @@ export interface SdkRunOptions {
    * turn runs, instead of resuming `resumeSessionId` normally.
    */
   codexReseed?: { events: readonly TrackEntry[] };
+  /**
+   * The seeded track is a budgeted handoff (spec/04 § Handoff budget): the
+   * backend must NOT trim it to fit. A target that rejects it as over its
+   * window before any output is a `HandoffOverflowError`, so the host can
+   * re-plan once rather than resend or silently cut.
+   */
+  handoffStrict?: boolean;
   /**
    * Set only when resuming a track's OWN prior Codex thread after a return
    * trip through another harness (spec/04 § History — preserve the cached
@@ -1162,7 +1185,25 @@ const SHARED_OPTS = {
 const CLASSIFIER_SYSTEM_PROMPT =
   'Follow the user instruction exactly. Return only the requested answer. Do not use tools.';
 
+const RESEARCH_SYSTEM_PROMPT =
+  'Follow the user instruction exactly. Use web search to check what you are asked about, then return only the requested answer.';
+
 function inferenceProfileOptions(opts: SdkRunOptions): Partial<Options> {
+  // Same bare run as a classifier, plus web search and a few turns to use it.
+  if (opts.inferenceProfile === 'research') {
+    return {
+      tools: ['WebSearch', 'WebFetch'],
+      skills: [],
+      settingSources: [],
+      systemPrompt: RESEARCH_SYSTEM_PROMPT,
+      thinking: { type: 'disabled' },
+      effort: 'low',
+      maxTurns: 8,
+      persistSession: false,
+      includePartialMessages: false,
+      mcpServers: {},
+    };
+  }
   if (opts.inferenceProfile !== 'classifier') return {};
   return {
     tools: [],
@@ -1455,9 +1496,13 @@ export function resultErrorText(msg: unknown): string | undefined {
   // Prefer the specific text over the subtype label: "You've hit your monthly
   // spend limit · resets 8pm" is what the rate-limit and account-failover
   // predicates match on, and what a person needs to read.
+  // Claude Code pads `errors` with an empty string beside a session-crash
+  // report, which joined into "; [session_crash] ..." — only the entries that
+  // say something are kept.
   const errors = m['errors'];
-  if (Array.isArray(errors) && errors.length > 0) {
-    return errors.map((e) => String(e)).join('; ');
+  if (Array.isArray(errors)) {
+    const said = errors.map((e) => String(e).trim()).filter((e) => e.length > 0);
+    if (said.length > 0) return said.join('; ');
   }
   const result = m['result'];
   if (typeof result === 'string' && result.trim().length > 0) return result;
@@ -1640,6 +1685,31 @@ export class TurnFailedError extends Error {
   }
 }
 
+/**
+ * The target rejected a budgeted handoff as over its context window, before it
+ * produced any output (so no tool ran and re-planning is safe). `reportedLimit`
+ * is the window the provider named, when it named one.
+ */
+export class HandoffOverflowError extends TurnFailedError {
+  readonly reportedLimit: number | undefined;
+  constructor(message: string, reportedLimit: number | undefined) {
+    super(message, undefined);
+    this.name = 'HandoffOverflowError';
+    this.reportedLimit = reportedLimit;
+  }
+}
+
+/** The window a provider's overflow message names ("maximum context length is 272000 tokens"). */
+export function reportedContextLimit(message: string): number | undefined {
+  const m =
+    /(?:maximum|max(?:imum)?)\s+context\s+(?:length|window)\s+(?:is|of)\s+([\d,]+)/i.exec(
+      message,
+    ) ?? /limit\s+of\s+([\d,]+)\s+tokens/i.exec(message);
+  if (!m) return undefined;
+  const n = Number(m[1]!.replace(/,/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 function assertResultNotAnError(msg: unknown): void {
   const text = resultErrorText(msg) ?? assistantErrorText(msg);
   if (text !== undefined) {
@@ -1746,6 +1816,22 @@ function oneShotPrompt(opts: SdkRunOptions): string | AsyncIterable<SDKUserMessa
   })();
 }
 
+/**
+ * The skills on disk that the process's `init` message does not list as slash
+ * commands: a process that read its skill list before a skill was added. Empty
+ * when the message is not an `init` or carries no `slash_commands`.
+ */
+export function skillsMissingFromInit(msg: unknown, cwd: string): string[] {
+  if (typeof msg !== 'object' || msg === null) return [];
+  const m = msg as Record<string, unknown>;
+  if (m['type'] !== 'system' || m['subtype'] !== 'init') return [];
+  const listed = m['slash_commands'];
+  if (!Array.isArray(listed)) return [];
+  return discoverSkills(cwd)
+    .map((s) => s.name)
+    .filter((n) => !listed.includes(n));
+}
+
 async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { query } = await loadSdk();
   const { env, mcpServers } = buildSdkEnv(opts);
@@ -1773,6 +1859,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       ...forkOptsFor(opts),
       ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: live.mode,
       ...(opts.onPermissionRequest
         ? {
@@ -1798,6 +1885,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const toolNames = new Map<string, string>();
   try {
     for await (const msg of q) {
+      // A process that listed its skills before one was added would answer
+      // "unknown command" for it; reload now, before the prompt is handled.
+      if (skillsMissingFromInit(msg, opts.cwd).length > 0) await q.reloadPlugins();
       const mismatch = permissionModeMismatch(msg, live.mode);
       assertResultNotAnError(msg);
       if (mismatch !== undefined) yield permissionModeMismatchEnvelope(live.mode, mismatch);
@@ -1939,6 +2029,7 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
       ...forkOptsFor(opts),
       ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: opts.permissionMode ?? 'auto',
       ...(opts.onPermissionRequest
         ? {

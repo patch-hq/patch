@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { SidebarViewMenu } from '../components/SidebarViewMenu.js';
+import { SidebarSortMenu } from '../components/SidebarSortMenu.js';
 import { BatchPanel } from '../components/BatchPanel.js';
 import { useBatchStore } from '../stores/batchStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -17,6 +18,7 @@ function row(chatId: string, badge: 'working' | 'done', name = chatId): ChatRow 
     pendingWake: null,
     todos: [],
     snoozedUntil: null,
+    effort: null,
     chatId,
     hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
@@ -195,6 +197,17 @@ describe('SidebarViewMenu', () => {
     expect(useUiStore.getState().attentionOnly).toBe(false);
   });
 
+  it('Ready sets the done state filter and persists it', () => {
+    renderMenu();
+    choose('ready');
+    expect(useUiStore.getState().stateFilter).toBe('done');
+    expect(useUiStore.getState().attentionOnly).toBe(false);
+    expect(screen.getByTestId('sidebar-view-trigger').textContent).toContain('Ready');
+    cleanup();
+    renderMenu();
+    expect(screen.getByTestId('sidebar-view-trigger').textContent).toContain('Ready');
+  });
+
   it('persists the choice across a reload', () => {
     renderMenu();
     choose('failed');
@@ -239,20 +252,31 @@ describe('SidebarViewMenu', () => {
   });
 });
 
-describe('SidebarViewMenu sort controls', () => {
+describe('SidebarSortMenu (outside the view dropdown)', () => {
   beforeEach(() => {
     localStorage.clear();
     useUiStore.setState({ chatSort: 'last-action', groupSort: 'same-as-chats' });
   });
   afterEach(() => cleanup());
-  it('explains the stable default and keeps projects following chats by default', () => {
+  it('is not part of the view dropdown', () => {
     render(
       <MemoryRouter>
         <SidebarViewMenu />
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByTestId('sidebar-view-trigger'));
-    expect(screen.getByText('My recent activity')).toBeTruthy();
+    expect(screen.queryByTestId('sidebar-chat-sort')).toBeNull();
+    expect(screen.queryByTestId('sidebar-sort-advanced')).toBeNull();
+  });
+
+  it('explains the stable default and keeps projects following chats by default', () => {
+    render(
+      <MemoryRouter>
+        <SidebarSortMenu />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTestId('sidebar-sort-trigger'));
+    expect(screen.getByTestId('sidebar-chat-sort-last-action')).toBeTruthy();
     expect(screen.getByText('Agent updates won’t move conversations')).toBeTruthy();
     expect(screen.queryByTestId('sidebar-group-sort-last-update')).toBeNull();
     fireEvent.click(screen.getByTestId('sidebar-chat-sort-name'));
@@ -263,10 +287,10 @@ describe('SidebarViewMenu sort controls', () => {
   it('reveals and persists an independent project sort under Advanced', () => {
     render(
       <MemoryRouter>
-        <SidebarViewMenu />
+        <SidebarSortMenu />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByTestId('sidebar-view-trigger'));
+    fireEvent.click(screen.getByTestId('sidebar-sort-trigger'));
     fireEvent.click(screen.getByTestId('sidebar-sort-advanced'));
     expect(screen.getByTestId('sidebar-group-sort-same-as-chats')).toHaveAttribute(
       'aria-selected',

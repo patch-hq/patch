@@ -107,7 +107,7 @@ describe('large artifact frames over the real host socket', () => {
 });
 
 describe('artifact publish reply routing', () => {
-  it('answers the host that asked, not the account home machine', async () => {
+  it('answers the host that asked, not the account default host', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'patch-reply-'));
     const user = generateUserKeypair();
     const registry = Registry.load(dataDir);

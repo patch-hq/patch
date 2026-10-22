@@ -22,10 +22,11 @@ import {
 import {
   DEFAULT_SHARED_SETTINGS,
   EMPTY_SHARED_SECRETS,
-  type SettingsChangedEvent,
+  SettingsChangedEvent,
   type WireEvent,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
+import { DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 import { SettingsError, SharedSettingsService } from '../src/shared-settings.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
@@ -136,6 +137,15 @@ describe('SharedSettingsService', () => {
     expect(service.current().jobAutonomyPrompt).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: false }));
     expect(make().current().jobAutonomyPrompt).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
+  });
+
+  it('always sends claudeSettings to surfaces, including from a settings file written before it existed', () => {
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: false }));
+    const fresh = make();
+    expect(fresh.changedEvent().settings.claudeSettings).toEqual(
+      DEFAULT_SHARED_SETTINGS.claudeSettings,
+    );
+    expect(SettingsChangedEvent.safeParse(fresh.changedEvent()).success).toBe(true);
   });
 
   it('refuses to start on a settings file with a key that is present and wrong', () => {
@@ -375,14 +385,22 @@ describe('SharedSettingsService', () => {
     ]);
   });
 
-  it('refuses Claude settings text that is not a JSON object', () => {
-    expect(() =>
-      service.update({ claudeSettings: { shared: '[1]', darwin: '', linux: '' } }),
-    ).toThrow(/must be a JSON object/);
-    expect(() =>
-      service.update({ claudeSettings: { shared: '{', darwin: '', linux: '' } }),
-    ).toThrow(/not valid JSON/);
-    service.update({ claudeSettings: { shared: '{"model":"opus"}', darwin: '', linux: '' } });
+  it('drops the retired shared claudeSettings from an old settings file, and never sends it to hosts', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        sweepEnabled: false,
+        claudeSettings: { shared: '{"model":"opus"}', darwin: '', linux: '' },
+      }),
+    );
+    const reloaded = make();
+    expect(reloaded.current()).not.toHaveProperty('claudeSettings');
+    expect(reloaded.current().sweepEnabled).toBe(false);
+    reloaded.update({ sweepEnabled: true });
+    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'))).not.toHaveProperty(
+      'claudeSettings',
+    );
+    expect(() => reloaded.update({ claudeSettings: {} } as never)).toThrow();
   });
 
   it('adopts a provider key from a host’s environment', async () => {
@@ -593,6 +611,66 @@ describe('shared settings routes', () => {
       expect(empty.statusCode).toBe(400);
       const after = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
       expect(after.json().preferences.jobAutonomyPrompt).toBe('House rule.');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('PATCH /api/settings sets the watch check-in prompt, defaults to the built-in, and refuses empty', async () => {
+    const { built, auth } = await boot();
+    try {
+      const patch = (payload: object) =>
+        built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
+      const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
+      expect(before.json().preferences.watchCheckInPrompt).toBe(DEFAULT_WATCH_CHECK_IN_PROMPT);
+      const res = await patch({ watchCheckInPrompt: 'Still alive?' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().preferences.watchCheckInPrompt).toBe('Still alive?');
+      expect((await patch({ watchCheckInPrompt: '' })).statusCode).toBe(400);
+      expect(before.json().preferences.watchCheckInMinutes).toBe(60);
+      const mins = await patch({ watchCheckInMinutes: 15 });
+      expect(mins.json().preferences.watchCheckInMinutes).toBe(15);
+      expect((await patch({ watchCheckInMinutes: 0 })).statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('PATCH /api/settings sets the meeting models, transcription model and interval, and refuses bad values', async () => {
+    const { built, auth } = await boot();
+    try {
+      const patch = (payload: object) =>
+        built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
+      const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
+      expect(before.json().preferences).toMatchObject({
+        meetingAnalysisModel: 'claude-haiku-4-5-20251001',
+        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingTranscriptionModel: '',
+        meetingAnalyseSeconds: 15,
+        meetingResearchModel: 'claude-haiku-4-5-20251001',
+        meetingResearchSeconds: 60,
+      });
+      const res = await patch({
+        meetingAnalysisModel: 'claude-sonnet-5',
+        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingTranscriptionModel: '/models/whisper/small.en',
+        meetingAnalyseSeconds: 40,
+        meetingResearchModel: 'claude-sonnet-5',
+        meetingResearchSeconds: 120,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().preferences).toMatchObject({
+        meetingAnalysisModel: 'claude-sonnet-5',
+        meetingTranscriptionModel: '/models/whisper/small.en',
+        meetingAnalyseSeconds: 40,
+      });
+      expect((await patch({ meetingAnalysisModel: '' })).statusCode).toBe(400);
+      expect((await patch({ meetingAnalyseSeconds: 4 })).statusCode).toBe(400);
+      expect((await patch({ meetingAnalyseSeconds: 301 })).statusCode).toBe(400);
+      expect((await patch({ meetingResearchSeconds: 14 })).statusCode).toBe(400);
+      expect((await patch({ meetingResearchSeconds: 901 })).statusCode).toBe(400);
+      expect((await patch({ meetingResearchModel: '' })).statusCode).toBe(400);
+      expect((await patch({ meetingTranscriptionModel: '' })).statusCode).toBe(200);
     } finally {
       await built.app.close();
     }

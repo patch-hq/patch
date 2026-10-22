@@ -71,12 +71,28 @@ describe('queued messages on the chat screen', () => {
     expect(badges).toEqual(['Queued · next tool call', '2nd in queue · next tool call']);
   });
 
-  it('reads "Host offline" on the chip while the host is offline', () => {
+  it('reads "Machine offline" on the chip while the host is offline', () => {
     usePresenceStore.getState().setHost('offline');
     queue('A', 'first queued');
     const r = renderRN(<ChatDetailScreen />);
     expect(findAllHost(r.root, byTestId('queued-badge')).map((b) => b.props.children)).toEqual([
-      'Host offline',
+      'Machine offline',
+    ]);
+  });
+
+  it('reads "Paused · out of credit" on the chip while the chat is out of credit', () => {
+    apply({
+      type: 'chat.state',
+      chatId: 'c1',
+      activity: 'running',
+      permissionMode: 'bypassPermissions',
+      lastUpdated: 1,
+      limitBlock: { scope: 'session' },
+    } as never);
+    queue('A', 'first queued');
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('queued-badge')).map((b) => b.props.children)).toEqual([
+      'Paused · out of credit',
     ]);
   });
 

@@ -1,16 +1,18 @@
-// LinkPreviewToggle — the small icon next to a message link that expands an
-// inline mini-preview of the linked page's title/description/image, so
-// reading what a link points at doesn't require leaving the chat
+// LinkPreviewToggle — the small Summarise button next to a message link. A
+// click asks the server to fetch the linked page and summarise it with the
+// account's link-summary prompt (Settings → Agent), shown inline under the
+// link, so knowing what a link says doesn't require leaving the chat
 // (spec/14 § Message links).
 //
 // Only rendered for http(s) links — a relative in-app anchor or a mailto:
 // link has nothing for the server to fetch.
 
 import type { JSX } from 'react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Eye, ExternalLink } from 'lucide-react';
+import { Sparkles, ExternalLink } from 'lucide-react';
 import { api } from '../api/rest.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 
 export function LinkPreviewToggle({ url }: { url: string }): JSX.Element | null {
   const [open, setOpen] = useState(false);
@@ -21,11 +23,11 @@ export function LinkPreviewToggle({ url }: { url: string }): JSX.Element | null 
         type="button"
         className="link-preview-toggle"
         aria-expanded={open}
-        aria-label={open ? 'Hide link preview' : 'Preview link'}
-        data-testid="link-preview-toggle"
+        aria-label={open ? 'Hide link summary' : 'Summarise link'}
+        data-testid="link-summary-toggle"
         onClick={() => setOpen((v) => !v)}
       >
-        <Eye size={14} aria-hidden />
+        <Sparkles size={14} aria-hidden />
       </button>
       {/*
         The desktop shell's link policy (packages/desktop/src/link-policy.ts)
@@ -46,59 +48,35 @@ export function LinkPreviewToggle({ url }: { url: string }): JSX.Element | null 
       >
         <ExternalLink size={14} aria-hidden />
       </a>
-      {open ? <LinkPreviewCard url={url} /> : null}
+      {open ? <LinkSummaryCard url={url} /> : null}
     </span>
   );
 }
 
-function LinkPreviewCard({ url }: { url: string }): JSX.Element {
-  // A page's OG metadata doesn't change under a live chat session — never
-  // refetch the same link twice in one sitting.
+function LinkSummaryCard({ url }: { url: string }): JSX.Element {
+  // The prompt is part of the key: editing it in Settings makes the next open
+  // summarise afresh instead of replaying a summary the old prompt wrote.
+  const prompt = usePreferencesStore((s) => s.preferences.linkSummaryPrompt);
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['link-preview', url],
-    queryFn: () => api.linkPreview(url),
+    queryKey: ['link-summary', url, prompt],
+    queryFn: () => api.linkSummary(url),
     staleTime: Infinity,
+    retry: false,
   });
-  // The og:image is a third-party URL — the CSP's img-src ('self'/data:/blob:)
-  // blocks a plain `<img src>` pointed at it, so it's fetched with auth
-  // through /api/link-preview/image and turned into an object URL (same
-  // pattern as EditorRail's binary file preview).
-  const { data: imageBlob } = useQuery({
-    queryKey: ['link-preview-image', data?.image],
-    queryFn: () => api.linkPreviewImage(data!.image!),
-    enabled: !!data?.image,
-    staleTime: Infinity,
-  });
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!imageBlob) {
-      setImageUrl(null);
-      return;
-    }
-    const objectUrl = URL.createObjectURL(imageBlob);
-    setImageUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [imageBlob]);
   return (
-    <span className="link-preview-card" data-testid="link-preview-card">
-      {isLoading ? <span className="link-preview-status">Loading preview…</span> : null}
+    <span className="link-preview-card" data-testid="link-summary-card">
+      {isLoading ? <span className="link-preview-status">Summarising…</span> : null}
       {isError ? (
-        <span className="link-preview-status link-preview-error">
-          {error instanceof Error ? error.message : 'Preview failed'}
+        <span className="link-preview-status link-preview-error" data-testid="link-summary-error">
+          {error instanceof Error ? error.message : 'Summary failed'}
         </span>
       ) : null}
-      {data && !data.title && !data.description && !data.image ? (
-        <span className="link-preview-status">No preview available</span>
-      ) : null}
-      {imageUrl ? <img src={imageUrl} alt="" className="link-preview-image" /> : null}
-      {data?.title || data?.description ? (
-        <span className="link-preview-text">
-          {data.title ? <span className="link-preview-title">{data.title}</span> : null}
-          {data.description ? (
-            <span className="link-preview-description">{data.description}</span>
-          ) : null}
+      {data ? (
+        <span className="link-summary-text" data-testid="link-summary-text">
+          {data.summary}
         </span>
       ) : null}
+      <span className="link-preview-host">{new URL(url).host}</span>
     </span>
   );
 }

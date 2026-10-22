@@ -1,4 +1,4 @@
-// One host's own page (Settings → Hosts → a host): its name, Make home, its
+// One host's own page (Settings → Hosts → a host): its name, its
 // agents and components, Files and Terminal, and Remove this host.
 
 import React from 'react';

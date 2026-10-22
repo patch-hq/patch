@@ -109,3 +109,29 @@ describe('ChatMarkdown tables — dark', () => {
     expect(contrast(r.style['tr']!['borderColor'] as string, stripe)).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('ChatMarkdown tables — wide', () => {
+  type CellRule = (
+    node: { key: string; index: number },
+    children: React.ReactNode[],
+    parent: Array<{ type: string }>,
+    styles: Record<string, unknown>,
+  ) => React.ReactElement<{ horizontal?: boolean; style?: unknown; children?: unknown }>;
+
+  it('scrolls a table sideways instead of squashing its columns into the screen', () => {
+    const r = renderIn('light', lightColors);
+    const table = r.rules['table'] as unknown as CellRule;
+    const el = table({ key: 't', index: 0 }, [], [], r.style);
+    // A horizontal scroller is the last resort once columns stop fitting.
+    expect(el.props.horizontal).toBe(true);
+  });
+
+  it('gives every cell a minimum width so a column can never shrink to a sliver', () => {
+    const r = renderIn('light', lightColors);
+    for (const key of ['th', 'td']) {
+      const min = (r.style[key] as Record<string, unknown>)['minWidth'];
+      expect(typeof min).toBe('number');
+      expect(min as number).toBeGreaterThanOrEqual(96);
+    }
+  });
+});

@@ -380,9 +380,8 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
           .header('x-content-type-options', 'nosniff')
           .headers(served.csp ? { 'content-security-policy': served.csp } : {})
           // `inline` so images render in-page; anything not on the safe list
-          // downloads instead. The filename rides either way.
-          // A header value can't carry chars past U+00FF (Node throws), so
-          // `filename` gets an ASCII stand-in and `filename*` the real name.
+          // downloads instead. A header value can't carry chars past U+00FF (Node
+          // throws), so `filename` gets an ASCII stand-in and `filename*` the real name.
           .header(
             'content-disposition',
             `${served.disposition}; filename="${sidecar.name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; ` +

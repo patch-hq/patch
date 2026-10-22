@@ -97,7 +97,7 @@ beforeEach(() => {
   resetHosts();
   reportHost('d1', {
     hostName: 'laptop',
-    isHomeHost: true,
+    runsManager: true,
     harnessToolsPromptDefault: 'Use patch tools.',
     harnessSystemPrompt: '',
     questionExpiry: true,
@@ -138,7 +138,7 @@ describe('Agent page: frame', () => {
 });
 
 describe('Agent page: Model for new chats', () => {
-  it('offers the home machine’s catalogue and saves the choice', async () => {
+  it('offers the default machine’s catalogue and saves the choice', async () => {
     const r = await renderAgent();
     expect(api.models).toHaveBeenCalledWith('d1');
     expect(textOf(get(r, 'default-model'))).toBe('Opus 5');
@@ -155,13 +155,15 @@ describe('Agent page: Model for new chats', () => {
     expect(get(r, 'default-model-option-old-model')).toBeTruthy();
   });
 
-  it('with no home machine says where the list would come from', async () => {
+  it('with no single machine says where the list would come from', async () => {
     resetHosts();
     reportHost('a');
     reportHost('b');
     const r = await renderAgent();
     expect(api.models).not.toHaveBeenCalled();
-    expect(textOf(get(r, 'default-model-no-host'))).toBe('Make a host home to list models');
+    expect(textOf(get(r, 'default-model-no-host'))).toBe(
+      'No single machine to read the model list from',
+    );
   });
 
   it('a catalogue failure is shown', async () => {
@@ -306,9 +308,9 @@ describe('Agent page: Layers added to Claude Code', () => {
     const r = await renderAgent();
     expect(textOf(get(r, 'tools-summary'))).toBe('Built-in default');
     expect(textOf(get(r, 'system-summary'))).toBe('None');
-    expect(textOf(get(r, 'claude-shared-summary'))).toBe('None');
-    expect(textOf(get(r, 'claude-darwin-summary'))).toBe('None');
-    expect(textOf(get(r, 'claude-linux-summary'))).toBe('None');
+    // settings.json is each host's own file, under Providers — not a layer.
+    expect(queryHost(r.root, byTestId('claude-shared-summary'))).toBeNull();
+    expect(queryHost(r.root, byTestId('claude-darwin-edit'))).toBeNull();
   });
 
   it('says Off / Edited for the tools prompt, and clips the system prompt’s first line', async () => {
@@ -317,21 +319,19 @@ describe('Agent page: Layers added to Claude Code', () => {
         ...settingsFixture().preferences,
         harnessToolsPrompt: '',
         harnessSystemPrompt: 'Be terse.\nAlways.',
-        claudeSettings: { shared: '{"model":"opus"}', darwin: '', linux: '' },
       },
     });
     const r = await renderAgent();
     expect(textOf(get(r, 'tools-summary'))).toBe('Off');
     expect(textOf(get(r, 'system-summary'))).toBe('Be terse.');
-    expect(textOf(get(r, 'claude-shared-summary'))).toBe('Set');
   });
 
   it('each Edit opens that layer’s editor', async () => {
     const r = await renderAgent();
-    await actAsync(() => get(r, 'claude-darwin-edit').props.onPress());
+    await actAsync(() => get(r, 'system-edit').props.onPress());
     expect(routerMock.push).toHaveBeenCalledWith({
       pathname: '/settings/layer',
-      params: { layer: 'claude-darwin' },
+      params: { layer: 'system' },
     });
   });
 
@@ -374,31 +374,19 @@ describe('LayerEditor', () => {
     expect(api.setPreferences).toHaveBeenCalledWith({ harnessToolsPrompt: null });
   });
 
-  it('an OS override saves into its own part of claudeSettings', async () => {
-    const r = mount(<LayerEditor layer="claude-linux" />);
-    await actAsync(() => get(r, 'layer-editor-text').props.onChangeText('{"hooks":{}}'));
-    await actAsync(async () => {
-      get(r, 'layer-editor-save').props.onPress();
-      await flush();
-    });
-    expect(api.setPreferences).toHaveBeenCalledWith({
-      claudeSettings: { shared: '', darwin: '', linux: '{"hooks":{}}' },
-    });
-  });
-
   it('a refusal is shown in the server’s own words, and the editor stays', async () => {
     vi.mocked(api.setPreferences).mockRejectedValue(
       Object.assign(new Error('HTTP 400'), {
-        body: { error: 'invalid_input', message: 'claudeSettings.shared is not valid JSON' },
+        body: { error: 'invalid_input', message: 'harnessSystemPrompt is not valid' },
       }),
     );
-    const r = mount(<LayerEditor layer="claude-shared" />);
+    const r = mount(<LayerEditor layer="system" />);
     await actAsync(() => get(r, 'layer-editor-text').props.onChangeText('{'));
     await actAsync(async () => {
       get(r, 'layer-editor-save').props.onPress();
       await flush();
     });
-    expect(textOf(get(r, 'layer-editor-error'))).toContain('is not valid JSON');
+    expect(textOf(get(r, 'layer-editor-error'))).toContain('is not valid');
     expect(routerMock.back).not.toHaveBeenCalled();
   });
 

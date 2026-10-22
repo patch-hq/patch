@@ -25,9 +25,13 @@ export const SCOPE_LABEL: Record<UsageScope, string> = {
 };
 
 export const SCOPE_ORDER: UsageScope[] = ['session', 'week', 'overage'];
+/** Where the Claude extra-usage add-on is turned on and managed. */
+export const EXTRA_USAGE_URL = 'https://claude.ai/settings/usage';
 
 /** Anthropic's reason code for an account that never bought the add-on. */
 export const OVERAGE_DISABLED_REASON = 'org_level_disabled_until';
+/** Anthropic's reason code when organisation policy prevents the add-on. */
+export const OVERAGE_ORG_DISABLED_REASON = 'org_level_disabled';
 
 /** Extra usage being off, in the one sentence patch uses for it everywhere. */
 export const EXTRA_USAGE_OFF_TEXT = 'extra usage is not enabled — nothing has been overspent';
@@ -73,7 +77,9 @@ export function formatReadAt(at: number | undefined, now: number = Date.now()): 
 
 /** Anthropic's reason code in words; an unrecognised code is shown raw. */
 export function describeDisabledReason(reason: string): string {
-  return reason === OVERAGE_DISABLED_REASON ? EXTRA_USAGE_OFF_TEXT : reason;
+  if (reason === OVERAGE_DISABLED_REASON) return EXTRA_USAGE_OFF_TEXT;
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return 'disabled by organisation';
+  return reason;
 }
 
 /**

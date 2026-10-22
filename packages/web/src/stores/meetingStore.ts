@@ -5,10 +5,43 @@
 import { create } from 'zustand';
 import type { MeetingState } from '@patch/wire';
 
+export type MeetingPromptKey = 'now' | 'notes' | 'actions';
+
+/** What the meeting shows in place of the chat: the notes as they build up, or the transcript. */
+/** The meeting panel's tabs. */
+export type MeetingView = 'notes' | 'mine' | 'actions' | 'transcript';
+
+const FOLDED_KEY = 'patch.meetingFolded';
+
+/** Chats whose ended meeting Tom folded away, remembered across reloads. */
+function readFolded(): Record<string, true> {
+  try {
+    const v = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? '{}') as unknown;
+    return v && typeof v === 'object' ? (v as Record<string, true>) : {};
+  } catch {
+    // A corrupt key is only a UI preference: start unfolded, and say so.
+    console.warn('meetingStore: unreadable folded meetings, starting unfolded');
+    return {};
+  }
+}
+
 interface MeetingStoreState {
   byChat: Record<string, MeetingState | null>;
   /** The chat this surface is currently capturing audio for, if any. */
   capturingChatId: string | null;
+  /** Which meeting prompt the in-call editor is open on, if any. */
+  promptEditor: MeetingPromptKey | null;
+  /** Whether the right panel shows the meeting's settings (the cog) instead of its tab. */
+  settingsOpen: boolean;
+  setSettingsOpen(open: boolean): void;
+  /** Per chat: which tab of the meeting panel is open. Absent is Notes. */
+  view: Record<string, MeetingView>;
+  setView(chatId: string, view: MeetingView): void;
+  /** Per chat: the ended meeting is folded into one line and the chat has the room. */
+  folded: Record<string, true>;
+  setFolded(chatId: string, folded: boolean): void;
+  /** Opens the settings on one prompt; null closes the prompt editor and leaves the settings open. */
+  openPromptEditor(key: MeetingPromptKey | null): void;
   apply(chatId: string, meeting: MeetingState | null): void;
   setCapturing(chatId: string | null): void;
   reset(): void;
@@ -17,12 +50,43 @@ interface MeetingStoreState {
 export const useMeetingStore = create<MeetingStoreState>((set) => ({
   byChat: {},
   capturingChatId: null,
+  promptEditor: null,
+  settingsOpen: false,
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  view: {},
+  setView: (chatId, view) => set((s) => ({ view: { ...s.view, [chatId]: view } })),
+  folded: readFolded(),
+  setFolded: (chatId, folded) =>
+    set((s) => {
+      const next = { ...s.folded };
+      if (folded) next[chatId] = true;
+      else delete next[chatId];
+      localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
+      return { folded: next };
+    }),
+  openPromptEditor: (promptEditor) =>
+    set(promptEditor ? { promptEditor, settingsOpen: true } : { promptEditor }),
   apply: (chatId, meeting) => set((s) => ({ byChat: { ...s.byChat, [chatId]: meeting } })),
   setCapturing: (capturingChatId) => set({ capturingChatId }),
-  reset: () => set({ byChat: {}, capturingChatId: null }),
+  reset: () =>
+    set({
+      byChat: {},
+      capturingChatId: null,
+      promptEditor: null,
+      settingsOpen: false,
+      view: {},
+    }),
 }));
 
 /** A meeting that is still running (live or paused). */
 export function isMeetingOpen(m: MeetingState | null | undefined): m is MeetingState {
   return m != null && m.status !== 'ended';
+}
+
+/** The meeting's panel is shown: there is one, and it has not been folded away after it ended. */
+export function isMeetingShown(
+  m: MeetingState | null | undefined,
+  folded: boolean,
+): m is MeetingState {
+  return m != null && (m.status !== 'ended' || !folded);
 }

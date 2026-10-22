@@ -312,8 +312,8 @@ export default function JobEditor(): React.ReactElement {
   }, [isNew, recents, jobHostId, form.spawnFolder]);
 
   // Seed the host the same way the web editor does: the account's default host
-  // (its home host, or the only one) when there is an unambiguous answer. With
-  // several hosts and no home marked there is none, the field stays empty and
+  // (the only registered or online one) when there is an unambiguous answer. With
+  // several candidates there is none, the field stays empty and
   // save refuses — better than silently scheduling work onto the wrong machine
   // (spec/08 § Action).
   React.useEffect(() => {
@@ -450,7 +450,7 @@ export default function JobEditor(): React.ReactElement {
   const skillOptions = Array.from(
     new Set([...(skillValue ? [skillValue] : []), ...availableSkills]),
   );
-  // Same rule for models, plus a leading `Host default` chip: '' is a choice
+  // Same rule for models, plus a leading `Machine default` chip: '' is a choice
   // the user has to be able to return to, not just the initial state.
   // The shared accounts the job's chat could start on, for its model's backend.
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
@@ -465,7 +465,7 @@ export default function JobEditor(): React.ReactElement {
     return [{ id: '', label: 'By strategy' }, ...extra, ...held];
   }, [sharedSecrets, form.spawnModel, form.spawnAccount]);
   const modelOptions: Array<{ id: string; label: string }> = [
-    { id: '', label: 'Host default' },
+    { id: '', label: 'Machine default' },
     ...(form.spawnModel && !availableModels.some((m) => m.id === form.spawnModel)
       ? [{ id: form.spawnModel, label: form.spawnModel }]
       : []),
@@ -949,7 +949,7 @@ export default function JobEditor(): React.ReactElement {
           </Pressable>
           {form.gateOn ? (
             <>
-              <Field label="Gate host">
+              <Field label="Gate machine">
                 <Input
                   value={form.gateHostId}
                   onChangeText={(v) => setForm({ ...form, gateHostId: v })}
@@ -1081,7 +1081,7 @@ export default function JobEditor(): React.ReactElement {
                 whole point of the action (@patch/wire `ScriptAction`). */}
               {usesSpawnFields ? (
                 <>
-                  {/* Model (spec/15 § Job editor). Leads with `Host default`, which is
+                  {/* Model (spec/15 § Job editor). Leads with `Machine default`, which is
                 a real setting rather than the lack of one: no stored model means
                 each fire takes whatever that host was last used on, so the job
                 tracks the machine instead of pinning an id that will be retired.
@@ -1100,7 +1100,7 @@ export default function JobEditor(): React.ReactElement {
                           modelOptions.find((m) => m.id === form.spawnModel)?.label ??
                           form.spawnModel
                         }
-                        emptyText="No models on this host."
+                        emptyText="No models on this machine."
                         options={modelOptions}
                         onSelect={(id) =>
                           setForm({
@@ -1119,7 +1119,7 @@ export default function JobEditor(): React.ReactElement {
                     )}
                   </Field>
                   {/* The account the job's chat starts on (spec/08 § Action,
-                  spec/10 — preferred account). A preference, not a pin. */}
+                  spec/10 — preferred account). A lock: a spent account is waited on. */}
                   {accountOptions.length > 2 ? (
                     <Field label="Start on account">
                       <OptionPicker

@@ -685,17 +685,13 @@ describe('drift between machines', () => {
     expect(drift.filter((d) => d.kind.startsWith('host'))).toEqual([]);
   });
 
-  it('names the machines on each build when they disagree', () => {
+  it('does not list hosts on different builds as drift — the host list shows each build', () => {
     const drift = computeDrift(
       baseInput({
         hosts: [host(), host({ hostId: 'host-b', hostName: 'beta', version: '0.1.374' })],
       }),
     );
-    const d = drift.find((x) => x.kind === 'hosts-disagree');
-    expect(d).toBeDefined();
-    expect(d!.detail).toContain('host-a');
-    expect(d!.detail).toContain('host-b');
-    expect(d!.detail).toContain('0.1.374');
+    expect(drift.find((x) => x.kind === 'hosts-disagree')).toBeUndefined();
   });
 
   it('ignores an OFFLINE machine on an older build — it is not drift until it is back', () => {

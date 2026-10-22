@@ -33,7 +33,16 @@ export class PadError extends Error {
 
 /** A drawn change may be a shape: its points are the outline, so every surface can still replay it as a stroke. */
 export const SHAPES = ['rectangle', 'ellipse', 'line', 'arrow'];
-export const KINDS = ['move', 'resize', 'text', 'delete', 'note', 'draw', 'duplicate'] as const;
+export const KINDS = [
+  'move',
+  'resize',
+  'text',
+  'delete',
+  'note',
+  'draw',
+  'duplicate',
+  'add',
+] as const;
 export type ChangeKind = (typeof KINDS)[number];
 // Repeat edits of one element while pending fold into one change; notes,
 // drawings and deletions never do.
@@ -98,6 +107,8 @@ export interface PadRecord {
   /** Why the card thumbnail could not be drawn, when it could not. */
   thumbError?: string;
   thumbRev?: number;
+  /** Read-only sharing. Absent = private. `token` is the unguessable key of a link share. */
+  share?: { mode: 'link' | 'public'; token: string };
 }
 
 function writeJson(path: string, value: unknown): void {
@@ -166,6 +177,15 @@ export class PadStore {
     const p = this.file(id);
     if (!existsSync(p)) return null;
     return JSON.parse(readFileSync(p, 'utf8')) as PadRecord;
+  }
+
+  /** The Pad a shared-view key opens: a public Pad by id, or a link-shared one by token. */
+  findShared(key: string): PadRecord | null {
+    if (!validId(key) && !/^[0-9a-f]{32}$/.test(key)) return null;
+    const byId = this.get(key);
+    if (byId?.share?.mode === 'public') return byId;
+    if (!/^[0-9a-f]{32}$/.test(key)) return null;
+    return this.list().find((p) => p.share?.mode === 'link' && p.share.token === key) ?? null;
   }
 
   mustGet(id: string): PadRecord {
@@ -275,8 +295,8 @@ export class PadStore {
       if (patch[key] === undefined) continue;
       const v = patch[key];
       if (typeof v !== 'string') throw new PadError(400, `${key} must be a string`);
-      if (key === 'text' && c.kind === 'note') {
-        if (!v.trim()) throw new PadError(400, 'a note needs text');
+      if (key === 'text' && (c.kind === 'note' || c.kind === 'add')) {
+        if (!v.trim()) throw new PadError(400, 'text cannot be empty');
         next[key] = v.trim();
       } else next[key] = v;
     }
@@ -413,6 +433,10 @@ export function validateChange(input: unknown): NewChange {
     out['text'] = inp['text'].trim();
     const o = inp['offset'] ?? {};
     out['offset'] = { x: num(o.x ?? 0, 'offset.x'), y: num(o.y ?? 0, 'offset.y') };
+  } else if (kind === 'add') {
+    if (typeof inp['text'] !== 'string' || !inp['text'].trim())
+      throw new PadError(400, 'added text needs text');
+    out['text'] = inp['text'].trim();
   } else if (kind === 'draw') {
     out['points'] = points(inp['points'], 'points');
     if (typeof inp['color'] !== 'string' || !COLOR.test(inp['color']))

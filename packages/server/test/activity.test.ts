@@ -3,7 +3,7 @@
 // `patch.activity.request` both fan out `patch.activity.read.request` frames,
 // merge the answers and join them against the chat mirror.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -462,13 +462,22 @@ describe('read retry', () => {
         requestId: (reqs().at(-1)!.event as PatchActivityReadRequestEvent).requestId,
         messages: [],
       } as WireEvent);
-    const ok = reader.query({ since: 0, until: 1000 });
-    await new Promise((r) => setTimeout(r, 40)); // first attempt times out unanswered
-    expect(reqs().length).toBe(2);
-    answerLatest();
-    await expect(ok).resolves.toMatchObject({ messagesTruncated: false });
-    const dead = reader.query({ since: 0, until: 1000 });
-    await expect(dead).rejects.toThrow(/did not answer/);
-    reader.close();
+    // A simulated clock: on a loaded runner, real waits let the retry time out
+    // too before the test answered it, and that rejection had no listener yet.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const ok = reader.query({ since: 0, until: 1000 });
+      await vi.advanceTimersByTimeAsync(20); // first attempt times out unanswered
+      expect(reqs().length).toBe(2);
+      answerLatest();
+      await expect(ok).resolves.toMatchObject({ messagesTruncated: false });
+      const dead = reader.query({ since: 0, until: 1000 });
+      const refused = expect(dead).rejects.toThrow(/did not answer/);
+      await vi.advanceTimersByTimeAsync(40); // both attempts go unanswered
+      await refused;
+    } finally {
+      vi.useRealTimers();
+      reader.close();
+    }
   });
 });

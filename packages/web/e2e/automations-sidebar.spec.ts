@@ -162,6 +162,7 @@ test.describe('Automations sidebar section', () => {
               pinned: false,
               pinnedAt: null,
               lastUpdated: 300,
+              hostId: 'd1',
             },
           ],
         }),

@@ -19,11 +19,13 @@ import {
 } from 'react';
 import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { classifyTurnFailure } from '../lib/turnFailure.js';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
 import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery } from '@tanstack/react-query';
 import {
   SPECIAL_THREAD_IDS,
+  harnessForModel,
   hasTaskNotification,
   isEditToolCall as isEditToolCallWire,
   isGroupableToolCall,
@@ -39,18 +41,17 @@ import {
   type GoalOutcomeNotice,
   type SystemContextItem,
 } from '@patch/wire';
-import { backRecord, parseAgentReturn, type AgentReturn } from '@patch/wire';
+import { backRecord, parseAgentReturn, parseAskHuman, type AgentReturn } from '@patch/wire';
 import { SnoozeDivider } from '../components/SnoozeDivider.js';
 import type { WireEvent } from '@patch/wire';
 import type { Job, JobTrigger } from '@patch/wire/jobs';
 import { describeTrigger } from '../lib/jobDescribe.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { loadTranscript, dropTranscript, setBranch, trimCache } from '../lib/transcriptCache.js';
-import { patchShared } from './settings/sharedWrite.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { ChatHeader } from '../components/ChatHeader.js';
-import { ModelControl } from '../components/ChatModelControl.js';
+import { RateLimitCard } from '../components/RateLimitCard.js';
 import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
 import { SnoozedBanner } from '../components/SnoozedBanner.js';
@@ -67,6 +68,7 @@ import { parseReminderCommand } from '../lib/reminderCommand.js';
 import { parseLoopCommand } from '../lib/loopCommand.js';
 import { parseClearCommand } from '../lib/clearCommand.js';
 import { parseModelCommand, matchModel } from '../lib/modelCommand.js';
+import { parseEffortCommand } from '../lib/effortCommand.js';
 import { getModelCatalog } from '../lib/models.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { HookBlockCard } from '../components/HookBlockCard.js';
@@ -75,6 +77,7 @@ import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { ThreadsStrip } from '../components/ThreadsStrip.js';
 import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
+import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
@@ -87,19 +90,9 @@ import { addToTodoList } from '../lib/addToTodo.js';
 import { discardUpload, retryUpload, sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import type { PatchWs } from '../api/ws.js';
 import { getActiveWs } from '../api/ws.js';
-import { MeetingActions, MeetingLayout } from '../components/MeetingPanel.js';
-import { useMeetingStore } from '../stores/meetingStore.js';
-import {
-  EXTRA_USAGE_URL,
-  EXTRA_USAGE_OFF_SENTENCE,
-  OVERAGE_DISABLED_REASON,
-  LIMIT_NAME,
-  formatDurationWords,
-  formatReset,
-  formatResetDetail,
-  presentFailure,
-  routingSentence,
-} from '../lib/usage.js';
+import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
+import { isMeetingShown, useMeetingStore } from '../stores/meetingStore.js';
+import { presentFailure } from '../lib/usage.js';
 import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
@@ -122,11 +115,13 @@ import {
   queueChipLabel,
   queueChipTitle,
   queueRelease,
+  creditPause,
   type QueueRelease,
 } from '../lib/queueLabel.js';
 import { attemptPaging } from '../lib/turnAttempts.js';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../lib/askUserQuestion.js';
 import { QuestionCard } from '../components/QuestionCard.js';
+import { AskHumanCard } from '../components/AskHumanCard.js';
 import { toolCallSummary, toolRunNarrative } from '../lib/toolSummary.js';
 import { toolLabel } from '../lib/toolsCatalog.js';
 import { formatElapsed } from '../lib/backgroundTasks.js';
@@ -137,10 +132,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Bell,
+  Download,
   ExternalLink,
   FileText,
+  FolderOpen,
   GitFork,
   RotateCcw,
+  Copy,
+  X,
   MessageSquarePlus,
   Quote,
   LayoutTemplate,
@@ -633,6 +632,8 @@ export function ChatRoute({
   // composer's own attachment state, which it doesn't otherwise have access to.
   const composerRef = useRef<ComposerHandle>(null);
   const meeting = useMeetingStore((s) => s.byChat[chatId]);
+  const meetingFolded = useMeetingStore((s) => s.folded[chatId] === true);
+  const meetingShown = isMeetingShown(meeting, meetingFolded);
   const chatDrop = useWholeChatDrop(composerRef);
   // Follow mode: while true we keep the latest message pinned in view. A fresh
   // open starts in follow mode; the user scrolling UP to read history turns it
@@ -1297,7 +1298,12 @@ export function ChatRoute({
   const [composerReplace, setComposerReplace] = useState<{ text: string; nonce: number } | null>(
     null,
   );
+  // spec/04 § Branching — the user turn being edited in the main composer
+  // (everything from it down is greyed). `savedDraft` is what was typed in the
+  // composer before, put back when the edit ends.
+  const [turnEdit, setTurnEdit] = useState<{ seq: number; savedDraft: string } | null>(null);
   useEffect(() => {
+    setTurnEdit(null);
     setQueuedEdit(null);
     setComposerInsert(null);
     setHookChecking(false);
@@ -1428,21 +1434,32 @@ export function ChatRoute({
   );
 
   const handleFork = useCallback(
-    (seq: number, message: string): void => {
+    async (seq: number, message: string, files: OutgoingFile[] = []): Promise<boolean> => {
       if (!ws) {
         pushError('not connected');
-        return;
+        return false;
+      }
+      if (message.length === 0 && files.length === 0) {
+        pushError('An edited message needs text or an attachment');
+        return false;
+      }
+      // The replacement turn's files go up first (the fork carries refs, as a
+      // normal send does); a failed upload leaves the edit open untouched.
+      const refs: AttachmentRef[] = [];
+      try {
+        for (const a of files) {
+          const { ref } = await api.uploadAttachment(chatId, a.file);
+          refs.push({ id: ref.id, name: ref.name, mimeType: ref.mimeType, kind: ref.kind });
+        }
+      } catch (err) {
+        pushError(failed('attachment upload'), undefined, (err as Error).message);
+        return false;
       }
       // Everything from the edited turn down belongs to the track we're
       // leaving. The prefix ABOVE it is shared with the new track, so keep it
       // and let the fork's turn stream in beneath — no replay round-trip, and
       // never a moment showing a conversation that no longer exists.
-      useChatStore.setState((s) => ({
-        timelines: {
-          ...s.timelines,
-          [chatId]: (s.timelines[chatId] ?? []).filter((e) => e.seq < seq),
-        },
-      }));
+      const disabledTools = useToolsStore.getState().disabledFor(chatId);
       try {
         ws.send({
           type: 'chat.fork_request',
@@ -1450,13 +1467,61 @@ export function ChatRoute({
           seq,
           message,
           localId: `fork-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          ...(refs.length > 0 ? { attachments: refs } : {}),
+          ...(disabledTools.length > 0 ? { disabledTools } : {}),
         });
       } catch (err) {
         pushError(failed('edit'), undefined, (err as Error).message);
+        return false;
       }
+      // Only once the host acknowledges the fork (it announces the new active
+      // track via `chat.branches`) — a refused fork must leave the turns alone.
+      const before = useChatStore.getState().branchGraphs[chatId]?.activeBranchId;
+      // The old track is what is on screen NOW. The socket coalesces events, so
+      // the new track's echo and reply can land in the very commit that carries
+      // the acknowledgement — filtering by seq then would take them with it.
+      const leaving = new Set(
+        (useChatStore.getState().timelines[chatId] ?? []).filter((e) => e.seq >= seq),
+      );
+      const unsubscribe = useChatStore.subscribe((s) => {
+        if (s.branchGraphs[chatId]?.activeBranchId === before) return;
+        unsubscribe();
+        clearTimeout(timer);
+        useChatStore.setState((st) => ({
+          timelines: {
+            ...st.timelines,
+            [chatId]: (st.timelines[chatId] ?? []).filter((e) => !leaving.has(e)),
+          },
+        }));
+      });
+      const timer = setTimeout(() => {
+        unsubscribe();
+        pushError(failed('edit'), undefined, 'the machine did not confirm the new track');
+      }, 15000);
+      return true;
     },
     [ws, chatId, pushError],
   );
+
+  // Carry a settled user turn back into the main composer: its text, and every
+  // control the composer has (model, approval mode, attachments).
+  const handleEditTurn = useCallback(
+    (seq: number, text: string): void => {
+      setTurnEdit((cur) => ({
+        seq,
+        savedDraft: cur?.savedDraft ?? useComposerDraftStore.getState().get(chatId),
+      }));
+      setComposerReplace({ text, nonce: Date.now() });
+    },
+    [chatId],
+  );
+
+  function endTurnEdit(): void {
+    const edit = turnEdit;
+    if (!edit) return;
+    setTurnEdit(null);
+    setComposerReplace({ text: edit.savedDraft, nonce: Date.now() });
+  }
 
   const handleSwitchTrack = useCallback(
     (branchId: string): void => {
@@ -1492,6 +1557,13 @@ export function ChatRoute({
     _chatId?: string,
     sendOpts?: { afterTurn?: boolean; interrupt?: boolean },
   ): Promise<boolean | void> {
+    if (turnEdit) {
+      const ok = await handleFork(turnEdit.seq, message.trim(), files ?? []);
+      if (!ok) return false;
+      setTurnEdit(null);
+      setComposerReplace({ text: turnEdit.savedDraft, nonce: Date.now() });
+      return;
+    }
     const afterTurn = sendOpts?.afterTurn === true;
     const interrupt = sendOpts?.interrupt === true;
     // patch/todo.md — `/goal <text>` sets the chat's goal INSTEAD of sending a
@@ -1589,6 +1661,33 @@ export function ChatRoute({
         return;
       }
       ws.send({ type: 'chat.model_request', chatId, model: result.modelId });
+      return;
+    }
+    // spec/04-chats-and-folders.md § Effort — `/effort <level>` changes the
+    // chat's thinking-effort override INSTEAD of sending a chat turn, the same
+    // way the picker does (`chat.effort_request` on the live socket). A bare
+    // `/effort` clears the override; an unrecognised level is a usage error
+    // and sends nothing.
+    const parsedEffort = parseEffortCommand(message);
+    if (parsedEffort.isEffort) {
+      if (parsedEffort.unknown !== null) {
+        pushError(`unknown effort level: ${parsedEffort.unknown}`);
+        return;
+      }
+      if (
+        row?.model !== undefined &&
+        row.model !== null &&
+        harnessForModel(row.model) !== 'claude'
+      ) {
+        pushError('effort is not available on this chat’s model');
+        return;
+      }
+      if (parsedEffort.effort === row?.effort) return;
+      if (!ws) {
+        pushError('not connected');
+        return;
+      }
+      ws.send({ type: 'chat.effort_request', chatId, effort: parsedEffort.effort });
       return;
     }
     if (!ws) {
@@ -1814,6 +1913,20 @@ export function ChatRoute({
         i++;
         continue;
       }
+      // Queued turns that all hit the same failure (a session limit) each
+      // raise their own error; the same failure straight after itself is
+      // drawn once.
+      if (entry.kind === 'error' && i > from) {
+        const prev = timeline[i - 1];
+        if (
+          prev?.kind === 'error' &&
+          prev.content === entry.content &&
+          prev.errorCode === entry.errorCode
+        ) {
+          i++;
+          continue;
+        }
+      }
       // Already drawn inside the file's own row above.
       if (usedByViewFile.has(i)) {
         i++;
@@ -1907,7 +2020,8 @@ export function ChatRoute({
           onRetryDelivery={handleRetryDelivery}
           onRetryTurn={handleRetryTurn}
           onContinueTurn={handleContinueTurn}
-          onFork={handleFork}
+          onEditTurn={handleEditTurn}
+          {...(turnEdit?.seq === entry.seq && !entry.queued ? { editAnchor: true } : {})}
           onSwitchTrack={handleSwitchTrack}
           tracks={trackNav.get(entry.seq)}
           {...(paging.pageable.get(entry.seq) ? { attemptPageable: true } : {})}
@@ -1943,6 +2057,7 @@ export function ChatRoute({
         contentVersion={timeline.length}
         onOpen={() => expandTo(0, false)}
       />
+      {row.jobId ? <JobBar jobId={row.jobId} at={row.lastUserActivity} /> : null}
       <GoalBanner row={row} />
       <FinishedGoalBanner row={row} />
       <TaskBar key={`tasks-${row.chatId}`} row={row} />
@@ -2002,7 +2117,8 @@ export function ChatRoute({
                     turn you just sent — the reply that is not coming yet — so
                     it reads as the next thing in the conversation. Up in the
                     chrome it was one more permanent-looking strip among six. */}
-                <RateLimitBubble row={row} />
+                <RateLimitCard row={row} />
+                <WakeHoldBubble row={row} />
               </div>
               {showScrollDown ? (
                 <div className="scroll-down-anchor">
@@ -2052,7 +2168,6 @@ export function ChatRoute({
                 onSendAnyway={handleHookSendAnyway}
               />
             ) : null}
-            {meeting ? <MeetingActions chatId={chatId} meeting={meeting} /> : null}
             <DelegateStrip chatId={chatId} />
             <Composer
               key={chatId}
@@ -2070,7 +2185,10 @@ export function ChatRoute({
                 await api.setLoop(chatId, { message, at });
               }}
               onAddToTodo={handleAddToTodo}
-              onValueChange={(t) => useComposerDraftStore.getState().setDraft(chatId, t)}
+              onValueChange={(t) => {
+                if (!turnEdit) useComposerDraftStore.getState().setDraft(chatId, t);
+              }}
+              {...(turnEdit ? { editingTurn: { onCancel: endTurnEdit } } : {})}
               // spec/14 § Composer — opening a chat puts the cursor in the
               // composer, so you can type straight away without clicking it.
               // The `key={chatId}` above is what makes this fire on EVERY
@@ -2083,6 +2201,7 @@ export function ChatRoute({
               insert={composerInsert}
               replace={composerReplace}
               checking={hookChecking}
+              {...(meetingShown ? { placeholder: 'Ask about the meeting…' } : {})}
               running={isStoppable(row)}
               onStop={handleStop}
             />
@@ -2122,7 +2241,8 @@ const TimelineEntry = memo(function TimelineEntry({
   onRetryDelivery,
   onRetryTurn,
   onContinueTurn,
-  onFork,
+  onEditTurn,
+  editAnchor,
   onSwitchTrack,
   tracks,
   attemptPageable,
@@ -2165,7 +2285,9 @@ const TimelineEntry = memo(function TimelineEntry({
   /** spec/14 § Running-turn controls — nudge a `turnStopped` chat onward with a fresh turn. */
   onContinueTurn?(): void;
   /** spec/04 § Branching — edit this user turn, forking a new track from it. */
-  onFork?(seq: number, message: string): void;
+  onEditTurn?(seq: number, text: string): void;
+  /** This turn is the one being edited in the main composer (spec/04 § Branching). */
+  editAnchor?: boolean;
   onSwitchTrack?(branchId: string): void;
   /** Set when this turn is a fork point with more than one track. */
   tracks?: TrackNav;
@@ -2288,7 +2410,8 @@ const TimelineEntry = memo(function TimelineEntry({
         {...(onRetryDelivery ? { onRetryDelivery } : {})}
         {...(onRetryTurn ? { onRetryTurn } : {})}
         {...(onContinueTurn ? { onContinueTurn } : {})}
-        {...(onFork ? { onFork } : {})}
+        {...(onEditTurn ? { onEditTurn } : {})}
+        {...(editAnchor ? { editAnchor } : {})}
         {...(onSwitchTrack ? { onSwitchTrack } : {})}
         {...(tracks ? { tracks } : {})}
         {...(attemptPageable ? { attemptPageable } : {})}
@@ -2308,6 +2431,16 @@ const TimelineEntry = memo(function TimelineEntry({
   }
   if (entry.kind === 'permission_mode') {
     return <PermissionModeLine entry={entry} />;
+  }
+  if (entry.kind === 'handoff') {
+    return (
+      <div className="mode-change" data-testid="handoff-divider">
+        <span className="mode-change-label">{entry.content ?? ''}</span>
+      </div>
+    );
+  }
+  if (entry.kind === 'handoff_link') {
+    return <HandoffLinkLine entry={entry} />;
   }
   // (attachments render inline within the message branch above)
   if (entry.kind === 'tool_result') {
@@ -2339,6 +2472,8 @@ const TimelineEntry = memo(function TimelineEntry({
           <Link className="turn-error-action" to="/settings/usage" data-testid="turn-error-sign-in">
             Sign in
           </Link>
+        ) : entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
+          <HandoffActions chatId={chatId} />
         ) : entry.errorCode !== undefined && entry.errorCode !== 'sdk_error' ? (
           <code className="turn-error-code">{entry.errorCode}</code>
         ) : null}
@@ -2482,7 +2617,8 @@ function MessageEntry({
   onRetryDelivery,
   onRetryTurn,
   onContinueTurn,
-  onFork,
+  onEditTurn,
+  editAnchor,
   onSwitchTrack,
   tracks,
   attemptPageable,
@@ -2511,7 +2647,9 @@ function MessageEntry({
   onRetryTurn?(entry: ChatEventEntry): void;
   /** spec/14 § Running-turn controls — nudge a `turnStopped` chat onward with a fresh turn. */
   onContinueTurn?(): void;
-  onFork?(seq: number, message: string): void;
+  onEditTurn?(seq: number, text: string): void;
+  /** This turn is the one being edited in the main composer (spec/04 § Branching). */
+  editAnchor?: boolean;
   onSwitchTrack?(branchId: string): void;
   tracks?: TrackNav;
   /** An attempt of this re-sent turn has replies or a failure to page to. */
@@ -2520,7 +2658,13 @@ function MessageEntry({
   attemptAt?: number;
   onAttemptAt?(seq: number, idx: number): void;
 }): JSX.Element {
-  const [forkDraft, setForkDraft] = useState<string | null>(null);
+  // spec/04 ## Message queueing — a queued entry on a chat paused for credit
+  // says so. Selected as a primitive so the selector never returns a fresh object.
+  const pauseAt = useChatStore((s) => {
+    const p = entry.queued ? creditPause(s.chats[chatId] ?? {}) : null;
+    return p === null ? undefined : (p.resetsAt ?? 0);
+  });
+  const pause = pauseAt === undefined ? null : { resetsAt: pauseAt || null };
   // spec/14 § Side threads panel TRIGGER — hover button + right-click "Open
   // side thread" on ANY message, user or agent.
   const sideThreadMenu = useContextMenu();
@@ -2543,27 +2687,17 @@ function MessageEntry({
   // editor, but its text lives in `ChatRoute` (see `queuedEdit` there), since
   // this row is re-keyed the moment the message starts running.
   const isQueuedEdit = entry.queued === true && entry.localId !== undefined && !!onQueuedDraft;
-  const draft = isQueuedEdit ? (queuedDraft ?? null) : forkDraft;
+  const draft = isQueuedEdit ? (queuedDraft ?? null) : null;
   const editFolder = useChatStore((st) => st.chats[chatId]?.folder ?? '');
   const editHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? null);
   const setDraft = (text: string | null): void => {
     if (isQueuedEdit) onQueuedDraft!(entry.localId!, text);
-    else setForkDraft(text);
   };
-  // spec/04 § Branching — saving an edited turn forks a new track from it. One
-  // function, so the Save button and `⌘↵` cannot disagree about when a fork is
-  // allowed (an empty edit is not a turn, so neither can send one). A queued
-  // message's edit replaces its text in the queue instead; emptying it is a
-  // remove, which `onEditQueued` decides.
+  // A queued message's inline edit replaces its text in the queue; emptying it is
+  // a remove, which `onEditQueued` decides. A settled turn is edited in the main
+  // composer instead (spec/04 § Branching).
   function saveEdit(text: string): void {
-    const next = text.trim();
-    if (isQueuedEdit) {
-      onEditQueued?.(entry, next);
-      return;
-    }
-    if (next.length === 0) return;
-    setDraft(null);
-    onFork?.(entry.seq, next);
+    onEditQueued?.(entry, text.trim());
   }
   // spec/14 § Messages — Long user messages collapse (accordion). Plain React
   // state, not persisted: reopening the chat resets to collapsed, same as the
@@ -2638,7 +2772,7 @@ function MessageEntry({
     !entry.queued &&
     !entry.transcribing &&
     !entry.streaming &&
-    onFork !== undefined;
+    onEditTurn !== undefined;
   // spec/14 § Side threads panel TRIGGER — "Hovering any message (user or
   // agent)". Same settled-turn restriction as the edit pencil (above), minus
   // the user-only role check: a seq the host has no persisted record of yet
@@ -2655,9 +2789,13 @@ function MessageEntry({
   // as a brand new turn (spec/12 § turn retry); an assistant reply re-runs the
   // user turn it answered.
   const canRetry = canSideThread && onRetryTurn !== undefined;
+  // Copy needs only some text on a user or agent turn; unlike side thread and
+  // retry it has no persisted-seq requirement, so a streaming reply can be copied.
+  const canCopy =
+    (entry.role === 'user' || entry.role === 'assistant') && !entry.transcribing && text.length > 0;
   return (
     <div
-      className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}`}
+      className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}${editAnchor ? ' msg-edit-anchor' : ''}`}
       {...(canSideThread
         ? {
             onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
@@ -2741,6 +2879,9 @@ function MessageEntry({
               {entry.streaming ? <span className="stream-caret" aria-hidden="true" /> : null}
             </div>
           </div>
+          {entry.role === 'assistant' && !entry.streaming ? (
+            <MeetingEditChips chatId={chatId} seq={entry.seq} messageAt={entry.messageAt} />
+          ) : null}
           {/* spec/14 § Messages — Long user messages collapse (accordion).
               Icon-only, no label — the content itself (truncated or not) is
               the summary, unlike `ToolDisclosure`'s one-line stand-in text. */}
@@ -2766,7 +2907,7 @@ function MessageEntry({
           data-testid="msg-edit"
           aria-label="edit this message"
           title="Edit"
-          onClick={() => setDraft(entry.content ?? '')}
+          onClick={() => onEditTurn!(entry.seq, entry.content ?? '')}
         >
           <Pencil size={14} aria-hidden="true" />
         </button>
@@ -2869,9 +3010,10 @@ function MessageEntry({
           <span
             className="queued-badge"
             data-testid="queued-badge"
-            title={queueChipTitle(queuePos!, hostOnline, release)}
+            title={queueChipTitle(queuePos!, hostOnline, release, pause)}
+            data-paused={pause ? 'true' : undefined}
           >
-            {queueChipLabel(queuePos!, hostOnline, release)}
+            {queueChipLabel(queuePos!, hostOnline, release, pause)}
           </span>
           {entry.localId && onPromote ? (
             <button
@@ -2957,27 +3099,7 @@ function MessageEntry({
         // partway through. Same treatment as an undelivered message (not a
         // separate error line): the failure reads as "this message needs
         // resending", regardless of which hop actually broke.
-        <div
-          className="delivery-status failed"
-          data-testid="turn-failed"
-          title={
-            entry.turnErrorMessage === undefined
-              ? undefined
-              : presentFailure(entry.turnErrorMessage)
-          }
-        >
-          <span>Turn failed.</span>
-          {onRetryTurn ? (
-            <button
-              type="button"
-              className="delivery-retry"
-              data-testid="turn-retry"
-              onClick={() => onRetryTurn(entry)}
-            >
-              Tap to retry
-            </button>
-          ) : null}
-        </div>
+        <TurnFailedStatus entry={entry} onRetryTurn={onRetryTurn} />
       ) : entry.turnInterrupted ? (
         // spec/14 § Running-turn controls — a newer message got promoted ahead
         // of this one. The agent DID see it (the promoted turn resumed the same
@@ -3023,7 +3145,7 @@ function MessageEntry({
               <CloudOff size={12} strokeWidth={2.5} aria-hidden />
             )}
           </span>
-          {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
+          {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
         </div>
       ) : null}
       {/* spec/14 § Messages — the per-message meta strip: facts ABOUT the turn
@@ -3039,20 +3161,53 @@ function MessageEntry({
           entirely when the daemon/transcript carried no real time: showing
           nothing beats inventing one. The retry marker follows it.
 
+          The message's own tools (side thread, copy, retry) sit in the same
+          strip, first, so they reveal together with the time instead of
+          hanging in the gutter. Tom: "put these chat tools next to the rest of
+          the hover state below the chat, in line".
+
           Host and model follow the time on agent messages only: they are the
           chat's current ones, which says nothing about a message Tom typed. */}
-      {entry.messageAt !== undefined ? (
-        <div className="msg-time-rail" aria-hidden="true">
-          <span className="msg-time" data-testid="msg-time">
-            {formatMessageTime(entry.messageAt)}
-          </span>
-        </div>
-      ) : null}
-      {attemptCount > 1 ||
-      (entry.role !== 'user' && entry.messageAt !== undefined && (metaHost !== '' || metaModel)) ||
+      {canSideThread ||
+      canCopy ||
+      canRetry ||
+      entry.messageAt !== undefined ||
+      attemptCount > 1 ||
       entry.midTurn === true ||
       entry.sentNow === true ? (
         <div className="msg-meta" data-testid="msg-meta">
+          {canSideThread || canCopy || canRetry ? (
+            <span className="msg-tools" data-testid="msg-tools">
+              {canSideThread ? (
+                <button
+                  type="button"
+                  className="msg-side-thread"
+                  data-testid="msg-side-thread-trigger"
+                  aria-label="Open side thread"
+                  title="Open side thread"
+                  onClick={() => openSideThreadDraft(chatId, entry.seq, text)}
+                >
+                  <GitFork size={14} aria-hidden="true" />
+                </button>
+              ) : null}
+              {canCopy ? <MessageCopyButton text={text} /> : null}
+              {canRetry ? (
+                <button
+                  type="button"
+                  className="msg-retry"
+                  data-testid="msg-retry-trigger"
+                  aria-label="Retry"
+                  title="Retry"
+                  onClick={() => onRetryTurn(entry)}
+                >
+                  <RotateCcw size={14} aria-hidden="true" />
+                </button>
+              ) : null}
+            </span>
+          ) : null}
+          {entry.messageAt !== undefined ? (
+            <span data-testid="msg-time">{formatMessageTime(entry.messageAt)}</span>
+          ) : null}
           {entry.sentNow === true ? (
             <span data-testid="msg-meta-interrupted">interrupted</span>
           ) : null}
@@ -3072,33 +3227,6 @@ function MessageEntry({
       ) : null}
       {entry.systemContext && entry.systemContext.length > 0 ? (
         <SystemContextDisclosures items={entry.systemContext} />
-      ) : null}
-      {/* spec/14 § Side threads panel TRIGGER — hover-revealed on every
-          settled message (user or agent), mirroring the edit pencil's reveal.
-          Right-click offers the same action via the context menu. */}
-      {canSideThread ? (
-        <button
-          type="button"
-          className="msg-side-thread"
-          data-testid="msg-side-thread-trigger"
-          aria-label="Open side thread"
-          title="Open side thread"
-          onClick={() => openSideThreadDraft(chatId, entry.seq, text)}
-        >
-          <GitFork size={14} aria-hidden="true" />
-        </button>
-      ) : null}
-      {canRetry ? (
-        <button
-          type="button"
-          className="msg-retry"
-          data-testid="msg-retry-trigger"
-          aria-label="Retry"
-          title="Retry"
-          onClick={() => onRetryTurn(entry)}
-        >
-          <RotateCcw size={14} aria-hidden="true" />
-        </button>
       ) : null}
       {canSideThread ? (
         <ContextMenu
@@ -3155,6 +3283,45 @@ function MessageEntry({
         <HookAdviseNote advise={entry.hookAdvise} />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * spec/14 § Messages — hover-revealed copy button in the message gutter. Puts
+ * the message's markdown source on the clipboard; the icon becomes a tick for a
+ * moment, or a cross when the write fails (NO FALLBACK: a copy that did nothing
+ * must say so).
+ */
+function MessageCopyButton({ text }: { text: string }): JSX.Element {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const settle = (next: 'copied' | 'failed'): void => {
+    setState(next);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState('idle'), 2000);
+  };
+  const label = state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy';
+  const Icon = state === 'copied' ? Check : state === 'failed' ? X : Copy;
+  return (
+    <button
+      type="button"
+      className="msg-copy"
+      data-testid="msg-copy-trigger"
+      data-state={state}
+      aria-label={label}
+      title={label}
+      onClick={() => {
+        void Promise.resolve()
+          .then(() => navigator.clipboard.writeText(text))
+          .then(
+            () => settle('copied'),
+            () => settle('failed'),
+          );
+      }}
+    >
+      <Icon size={14} aria-hidden="true" />
+    </button>
   );
 }
 
@@ -3481,7 +3648,7 @@ function ToolCall({
   // falls through to the ordinary row — no empty frame, no fallback.
   if (entry.tool && toolLabel(entry.tool) === 'view_file' && result) {
     const view = viewFilePayload(result.toolResult);
-    if (view) return <ViewFileCard view={view} />;
+    if (view) return <ViewFileCard view={view} chatId={chatId} />;
   }
 
   // One-line summary naming what the call is doing (spec/14 ## Main chat
@@ -3511,6 +3678,16 @@ function ToolCall({
   // when the chat fired a notification and what it said. A `deepLink` is a
   // tappable row inside the box (not buried in the expanded JSON), opening the
   // same URI a push tap would.
+  // spec/14 § Action requests — a `patch_ask_human` is the agent blocked on
+  // the user, so its task is the card itself, links and codes live. Args that
+  // are not its shape fall through to the ordinary row.
+  const askHuman =
+    entry.tool && toolLabel(entry.tool) === 'patch_ask_human'
+      ? parseAskHuman(entry.toolArgs)
+      : null;
+  if (askHuman)
+    return <AskHumanCard task={askHuman.task} {...(askHuman.why ? { why: askHuman.why } : {})} />;
+
   if (entry.tool && toolLabel(entry.tool) === 'patch_notify') {
     const message = typeof args['message'] === 'string' ? args['message'] : '';
     const importance = typeof args['importance'] === 'string' ? args['importance'] : 'normal';
@@ -3979,13 +4156,21 @@ function ToolBlobBody({ blob }: { blob: ToolBlobRef }): JSX.Element {
 
 /** What `view_file` hands back: where the rendered page lives, and what it is. */
 interface ViewFileView {
-  kind: 'image' | 'pdf' | 'html';
+  kind: 'image' | 'pdf' | 'html' | 'file';
   /** Server-relative URL of the wrapped page (`/api/chats/:id/artifact/:aid`). */
   url: string;
   name: string;
   /** An image's real pixel size, so its box is held before it loads. */
   width?: number | undefined;
   height?: number | undefined;
+  /** A downloadable file's size in bytes. */
+  size?: number | undefined;
+  /** A `file`'s inline preview page, when the host could build one. */
+  previewUrl?: string | undefined;
+  /** Why a previewable file has no preview. */
+  previewError?: string | undefined;
+  /** Where the file sits on the host's disk — what open file / open folder act on. */
+  absPath?: string | undefined;
 }
 
 /**
@@ -4029,12 +4214,19 @@ function asViewFile(value: unknown): ViewFileView | null {
   const kind = v['kind'];
   const url = v['url'];
   const name = v['name'];
-  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html') return null;
+  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html' && kind !== 'file') return null;
   if (typeof url !== 'string' || !url.startsWith('/api/')) return null;
   if (typeof name !== 'string' || name.length === 0) return null;
   const width = typeof v['width'] === 'number' ? v['width'] : undefined;
   const height = typeof v['height'] === 'number' ? v['height'] : undefined;
-  return { kind, url, name, width, height };
+  const size = typeof v['size'] === 'number' ? v['size'] : undefined;
+  const previewUrl =
+    typeof v['previewUrl'] === 'string' && v['previewUrl'].startsWith('/api/')
+      ? v['previewUrl']
+      : undefined;
+  const previewError = typeof v['previewError'] === 'string' ? v['previewError'] : undefined;
+  const absPath = typeof v['absPath'] === 'string' ? v['absPath'] : undefined;
+  return { kind, url, name, width, height, size, previewUrl, previewError, absPath };
 }
 
 /**
@@ -4366,10 +4558,125 @@ function DelegateTranscript({
  * An image is shown at a readable size and expands; an HTML file gets a taller
  * frame, since a page needs room to be a page.
  */
-function ViewFileCard({ view }: { view: ViewFileView }): JSX.Element {
+function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const isImage = view.kind === 'image';
+  const chatHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
+  const bridge = getDesktopBridge();
+  const localHostBridge = bridge?.localHost;
+  const openPathBridge = bridge?.openPath;
+  const [localHostId, setLocalHostId] = useState<string | null>(null);
+  useEffect(() => {
+    if (view.kind !== 'file' || localHostBridge === undefined || openPathBridge === undefined)
+      return;
+    let live = true;
+    localHostBridge.status().then(
+      (st) => {
+        if (live) setLocalHostId(st.hostId);
+      },
+      (err: unknown) => console.error('local host status failed', err),
+    );
+    return () => {
+      live = false;
+    };
+  }, [view.kind, localHostBridge, openPathBridge]);
+  if (view.kind === 'file') {
+    // Open file / open folder act on the disk the file was written to, so they
+    // are offered only when this Mac's own host owns the chat.
+    const canOpen =
+      view.absPath !== undefined &&
+      openPathBridge !== undefined &&
+      localHostId !== null &&
+      localHostId === chatHostId;
+    const open = (mode: 'file' | 'folder'): void => {
+      setOpenError(null);
+      (openPathBridge as NonNullable<typeof openPathBridge>)(view.absPath as string, mode).catch(
+        (err: unknown) => setOpenError(err instanceof Error ? err.message : String(err)),
+      );
+    };
+    return (
+      <div className="view-file view-file-file" data-testid="view-file" data-kind="file">
+        <div className={`view-file-bar${view.previewUrl ? ' has-preview' : ''}`}>
+          <FileText size={14} aria-hidden />
+          <span className="view-file-name" data-testid="view-file-filename">
+            {view.name}
+          </span>
+          {view.size !== undefined ? (
+            <span className="view-file-size" data-testid="view-file-size">
+              {formatBytes(view.size)}
+            </span>
+          ) : null}
+          {canOpen ? (
+            <>
+              <button
+                type="button"
+                className="view-file-download"
+                data-testid="view-file-open-file"
+                aria-label={`Open ${view.name}`}
+                title="Open file"
+                onClick={() => open('file')}
+              >
+                <ExternalLink size={14} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="view-file-download"
+                data-testid="view-file-open-folder"
+                aria-label={`Open folder containing ${view.name}`}
+                title="Open folder"
+                onClick={() => open('folder')}
+              >
+                <FolderOpen size={14} aria-hidden />
+              </button>
+            </>
+          ) : null}
+          <a
+            className="view-file-download"
+            href={view.url}
+            download={view.name}
+            data-testid="view-file-download"
+            aria-label={`Download ${view.name}`}
+            title="Download"
+          >
+            <Download size={14} aria-hidden />
+          </a>
+        </div>
+        {openError !== null ? (
+          <div className="view-file-error" data-testid="view-file-open-error" role="alert">
+            {openError}
+          </div>
+        ) : null}
+        {view.previewError !== undefined ? (
+          <div className="view-file-error" data-testid="view-file-preview-error" role="alert">
+            No preview: {view.previewError}
+          </div>
+        ) : null}
+        {view.previewUrl !== undefined ? (
+          <iframe
+            className={`view-file-frame view-file-preview${expanded ? ' expanded' : ''}`}
+            data-testid="view-file-preview"
+            src={view.previewUrl}
+            title={`Preview of ${view.name}`}
+            sandbox="allow-popups allow-popups-to-escape-sandbox"
+            loading="lazy"
+          />
+        ) : null}
+        {view.previewUrl !== undefined ? (
+          <button
+            type="button"
+            className="view-file-more"
+            data-testid="view-file-preview-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div
       className={`view-file view-file-${view.kind}${expanded ? ' expanded' : ''}`}
@@ -4589,6 +4896,7 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
     !!entry.tool &&
     (toolLabel(entry.tool) === 'view_file' ||
       toolLabel(entry.tool) === 'patch_notify' ||
+      (toolLabel(entry.tool) === 'patch_ask_human' && parseAskHuman(entry.toolArgs) !== null) ||
       (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null))
   );
 }
@@ -4826,6 +5134,54 @@ function CompactionLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
         </dl>
       }
     />
+  );
+}
+
+// spec/04 § Handoff budget — what a failed provider switch offers: run the
+// pending message again, go back to the model the chat left, or carry on in a
+// fresh chat linked to this one. The host does the work; each is one frame.
+function HandoffActions({ chatId }: { chatId: string }): JSX.Element {
+  const send = (action: 'retry' | 'switch_back' | 'linked_chat'): void => {
+    getActiveWs()?.send({ type: 'chat.handoff_recover_request', chatId, action });
+  };
+  return (
+    <span className="turn-error-actions">
+      <button
+        type="button"
+        className="turn-error-action"
+        data-testid="handoff-retry"
+        onClick={() => send('retry')}
+      >
+        Retry
+      </button>
+      <button
+        type="button"
+        className="turn-error-action"
+        data-testid="handoff-switch-back"
+        onClick={() => send('switch_back')}
+      >
+        Switch back
+      </button>
+      <button
+        type="button"
+        className="turn-error-action"
+        data-testid="handoff-linked-chat"
+        onClick={() => send('linked_chat')}
+      >
+        Continue in a linked fresh chat
+      </button>
+    </span>
+  );
+}
+
+// The quiet row left behind when a chat was continued in a linked fresh chat.
+function HandoffLinkLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
+  return (
+    <div className="mode-change" data-testid="handoff-link">
+      <Link className="mode-change-label" to={`/chats/${entry.linkedChatId ?? ''}`}>
+        {entry.content ?? ''}
+      </Link>
+    </div>
   );
 }
 
@@ -5185,158 +5541,75 @@ function PermissionCard({
  * controls, not prose — turn extra usage on, and choose whether it picks itself
  * back up.
  */
-function RateLimitBubble({
+/**
+ * The turn is held because its machine is in a dark wake (lid shut, waking
+ * briefly for maintenance). Not an error: it runs as soon as the machine is
+ * fully awake, and the notice goes when it does.
+ */
+function WakeHoldBubble({
   row,
 }: {
   row: import('../stores/types.js').ChatRow;
 }): JSX.Element | null {
-  const resumingAt = row.rateLimitResumingAt;
-  const block = row.limitBlock ?? null;
-  // Shared by every host (spec/01 § Settings).
-  const autoResume = usePreferencesStore((s) => s.preferences.autoResumeRateLimit);
-
-  // When it lifts. The block's own figure where there is one — the window's
-  // reading, rather than the instant a resume happens to have been armed for.
-  // A non-positive value (epoch 0) is folded into null here too: `??` only
-  // treats null/undefined as absent, so a 0 that slipped past an upstream
-  // guard would otherwise survive as a "stated" reset and render as
-  // `now - 0`, a decades-old elapsed time (spec/12 § nothing said when
-  // nothing stated a reset — this is that case, not a real timestamp).
-  const rawResetsAt = block?.resetsAt ?? resumingAt ?? null;
-  const resetsAt = rawResetsAt !== null && rawResetsAt > 0 ? rawResetsAt : null;
-
-  // A countdown that does not count is a timestamp with extra steps. Ten
-  // seconds is under the minute it renders, so the number is never visibly
-  // stale, and it costs one render.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (resetsAt === null) return;
-    const id = window.setInterval(() => setNow(Date.now()), 10_000);
-    return () => window.clearInterval(id);
-  }, [resetsAt]);
-
-  // A limit with no resume armed still gets the notice (spec/12): auto-resume
-  // being off decides whether there is a countdown, not whether the reader is
-  // told what happened. Gating this on `resumingAt` alone is what left the
-  // unparked case showing the provider's sentence and nothing else.
-  if (!resumingAt && !block) return null;
-  // The limit's own instant has passed and the pause is still here, so the wait
-  // is no longer the thing standing between the user and their reply — the
-  // un-run turn is. `Try now` stops being one of three equal controls and
-  // becomes the action.
-  const pastReset = resetsAt !== null && resetsAt <= now;
-  const isOverload = row.resumeKind === 'overloaded';
-  const limitName = LIMIT_NAME[block?.scope ?? 'unknown'];
-  const routing = block?.routing ? routingSentence(block.routing, now) : '';
-
-  const resumeNow = (): void => {
-    getActiveWs()?.send({ type: 'chat.resume_now_request', chatId: row.chatId });
-  };
-  const toggleAutoResume = (): void => {
-    void patchShared('auto-resume', { autoResumeRateLimit: !autoResume });
-  };
-
+  const host = usePresenceStore((st) =>
+    (st.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim(),
+  );
+  const since = row.waitingForWakeSince ?? null;
+  if (since === null) return null;
   return (
-    <div className="msg msg-system rate-limit-bubble" data-testid="rate-limit-bar">
+    <div className="msg msg-system rate-limit-bubble" data-testid="wake-hold-bar">
       <div className="content">
-        <p className="rate-limit-headline" data-testid="rate-limit-headline">
-          {isOverload ? (
-            <>Claude is busy right now.</>
-          ) : (
-            <>
-              You&rsquo;ve reached your <strong>{limitName}</strong>
-              {block?.accountLabel ? (
-                <>
-                  {' on '}
-                  <span data-testid="rate-limit-account">{block.accountLabel}</span>
-                </>
-              ) : null}
-              .
-            </>
-          )}{' '}
-          {/* Nothing said when nothing stated a reset — an invented one reads
-              as a promise the limit has not made. */}
-          {resetsAt === null ? null : (
-            <span data-testid="rate-limit-countdown" title={formatResetDetail(resetsAt)}>
-              {resetsAt > now ? (
-                <>
-                  It resets in <strong>{formatDurationWords(resetsAt - now)}</strong>, at{' '}
-                  {formatReset(resetsAt, now)}.
-                </>
-              ) : (
-                /* Past the reset, and the notice is STILL up — which now means
-                   something definite rather than nothing: a chat whose turn has
-                   started clears the pause, so this turn demonstrably has not
-                   run. "It should be back now" said the opposite, and left the
-                   only thing left to do looking optional. */
-                <>
-                  {/* Floored at 1ms: `formatDurationWords(0)` is "any moment
-                      now", which lands on the tick the reset passes and reads
-                      as "That was any moment now ago". */}
-                  That was <strong>{formatDurationWords(Math.max(1, now - resetsAt))}</strong> ago
-                  and this turn has not run.
-                </>
-              )}
-            </span>
-          )}
+        <p className="rate-limit-headline">
+          Waiting for <strong>{host}</strong> to wake. This turn runs as soon as it does.
         </p>
+      </div>
+    </div>
+  );
+}
 
-        {routing ? (
-          <p className="rate-limit-routing" data-testid="rate-limit-routing">
-            {routing}
-          </p>
-        ) : null}
-
-        <div className="rate-limit-actions">
-          {/* No tooltip: the label says it (spec/14 § Copy — a tooltip names a
-              control, it does not explain one). */}
-          <label className="rate-limit-auto">
-            <input
-              type="checkbox"
-              checked={autoResume}
-              onChange={toggleAutoResume}
-              data-testid="rate-limit-auto-resume"
-            />
-            Resume when the limit resets
-          </label>
+// The failed-turn line: "Turn failed." plus the reason in words, the retry
+// button (withheld's label changes when an unchanged retry cannot work), and
+// the host's original text behind a disclosure for diagnosis.
+function TurnFailedStatus({
+  entry,
+  onRetryTurn,
+}: {
+  entry: ChatEventEntry;
+  onRetryTurn: ((entry: ChatEventEntry) => void) | undefined;
+}): JSX.Element {
+  const detail =
+    entry.turnErrorMessage === undefined ? undefined : presentFailure(entry.turnErrorMessage);
+  const summary = classifyTurnFailure(entry.turnErrorMessage);
+  return (
+    <div
+      className="delivery-status failed turn-failed"
+      data-testid="turn-failed"
+      data-failure-kind={summary?.kind}
+    >
+      <div className="turn-failed-row">
+        <span>Turn failed.</span>
+        {onRetryTurn ? (
           <button
             type="button"
-            className={pastReset ? 'ctrl rate-limit-retry-now' : 'ctrl'}
-            data-testid="rate-limit-retry"
-            data-past-reset={pastReset ? 'true' : 'false'}
-            onClick={resumeNow}
+            className="delivery-retry"
+            data-testid="turn-retry"
+            onClick={() => onRetryTurn(entry)}
           >
-            Try now
+            {summary?.permanent ? 'Retry anyway' : 'Tap to retry'}
           </button>
-          {/* The same switch the composer has, offered where the limit is: a
-              different model may have headroom this one has not (spec/04 § Model). */}
-          <ModelControl
-            chatId={row.chatId}
-            testId="rate-limit-change-model"
-            triggerLabel="Change model"
-          />
-          {block?.overageBlocked ? (
-            <a
-              className="ctrl"
-              data-testid="rate-limit-extra-usage"
-              href={EXTRA_USAGE_URL}
-              target="_blank"
-              rel="noreferrer"
-              // Patch cannot flip this — it is an Anthropic account setting, so
-              // the control is a way there, not a switch that lies.
-              // One sentence for this state, shared with the Settings line —
-              // two wordings for it read as two different situations.
-              title={
-                block.overageReason === OVERAGE_DISABLED_REASON
-                  ? `${EXTRA_USAGE_OFF_SENTENCE} Opens your Claude usage settings.`
-                  : 'Extra usage did not cover this limit. Opens your Claude usage settings.'
-              }
-            >
-              Turn on extra usage
-            </a>
-          ) : null}
-        </div>
+        ) : null}
       </div>
+      {summary !== undefined && summary.kind !== 'unknown' ? (
+        <div className="turn-failed-reason" data-testid="turn-failed-reason">
+          {summary.headline}
+        </div>
+      ) : null}
+      {detail !== undefined ? (
+        <details className="turn-failed-detail" data-testid="turn-failed-detail">
+          <summary>Details</summary>
+          <pre>{detail}</pre>
+        </details>
+      ) : null}
     </div>
   );
 }

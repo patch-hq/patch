@@ -80,7 +80,7 @@ describe('terminalStore', () => {
     for (const [reason, words] of [
       ['closed', 'Session closed'],
       ['idle_timeout', 'Closed after 30 minutes with no input'],
-      ['daemon_shutdown', 'The host restarted'],
+      ['daemon_shutdown', 'The machine restarted'],
     ] as const) {
       store().start('s1', 'd1', '/');
       store().ingest({ type: 'patch.terminal.exit', sessionId: 's1', code: null, reason });

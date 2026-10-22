@@ -17,10 +17,11 @@
 const CONTROL_TOKEN_RE = /\[\[[a-z][a-z0-9_-]*\]\]/i;
 // Code first (fenced blocks to their close or the end of an unfinished one,
 // then inline spans), so a token inside it is matched as part of the code and
-// kept; otherwise a token with the spaces/tabs either side, so a removal can
-// close the gap.
+// kept; otherwise a RUN of adjacent tokens with the spaces/tabs between and
+// either side, so one removal closes the whole gap — two neighbours tidied
+// separately left a double space behind.
 const CODE_OR_TOKEN_RE =
-  /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`|[ \t]*\[\[[a-z][a-z0-9_-]*\]\][ \t]*/gi;
+  /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`|[ \t]*\[\[[a-z][a-z0-9_-]*\]\](?:[ \t]*\[\[[a-z][a-z0-9_-]*\]\])*[ \t]*/gi;
 
 export function stripControlTokens(text: string): string {
   // Only touch text that actually carried a token: `[[ -f x ]]` in a shell

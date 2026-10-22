@@ -77,6 +77,12 @@ export interface WakeSchedulerDeps {
   allChatIds(): string[];
   /** Whether the chat's pump is currently occupied by a running turn. */
   isBusy(chatId: string): boolean;
+  /**
+   * Whether the chat is parked on a usage limit. A wake delivered into it
+   * would only queue behind the refused turn, so the wake is held and
+   * retried instead (see `fire`).
+   */
+  isLimited(chatId: string): boolean;
   now(): number;
   logger: Logger;
   /** Injectable timers (tests drive them deterministically). */
@@ -91,6 +97,8 @@ const WAKE_FILE = 'wake.json';
 export const WAKE_PREFIX = '[wake]';
 /** setTimeout's signed-32-bit ms ceiling (~24.8 days). Longer delays re-arm. */
 const MAX_TIMEOUT_MS = 2_147_483_000;
+/** How often a wake held back by a usage limit looks again. In-memory check only. */
+export const LIMITED_RETRY_MS = 60_000;
 
 export class WakeScheduler {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -169,6 +177,17 @@ export class WakeScheduler {
     if (rec.notAfter !== undefined && this.deps.now() > rec.notAfter) {
       this.deps.logger.info({ chatId, notAfter: rec.notAfter }, 'wake: dropped (past notAfter)');
       rmSync(this.filePath(chatId), { force: true });
+      return;
+    }
+    if (this.deps.isLimited(chatId)) {
+      // Out of usage: delivering would just queue a turn behind the refused one
+      // (and the whole backlog would replay when credit returned). Keep the
+      // record, push the fire time out and look again shortly — the wake then
+      // lands once, after credit is back.
+      const held: WakeRecord = { ...rec, fireAt: this.deps.now() + LIMITED_RETRY_MS };
+      this.persist(held);
+      this.arm(held);
+      this.deps.logger.info({ chatId }, 'wake: held — chat is waiting on a usage limit');
       return;
     }
     if (rec.every !== undefined) {

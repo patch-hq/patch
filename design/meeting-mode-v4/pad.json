@@ -1,0 +1,54 @@
+{
+ "screens": [
+  {
+   "id": "live",
+   "name": "Live \u00b7 Notes",
+   "path": "live.html"
+  },
+  {
+   "id": "live-mynotes",
+   "name": "Live \u00b7 My notes",
+   "path": "live-mynotes.html"
+  },
+  {
+   "id": "actions",
+   "name": "Live \u00b7 Actions",
+   "path": "actions.html"
+  },
+  {
+   "id": "live-transcript",
+   "name": "Live \u00b7 Transcript",
+   "path": "live-transcript.html"
+  },
+  {
+   "id": "live-error",
+   "name": "Live \u00b7 with an error",
+   "path": "live-error.html"
+  },
+  {
+   "id": "settings",
+   "name": "Settings",
+   "path": "settings.html"
+  },
+  {
+   "id": "after",
+   "name": "After \u00b7 Notes",
+   "path": "after.html"
+  },
+  {
+   "id": "after-mynotes",
+   "name": "After \u00b7 My notes",
+   "path": "after-mynotes.html"
+  },
+  {
+   "id": "after-actions",
+   "name": "After \u00b7 Actions",
+   "path": "after-actions.html"
+  },
+  {
+   "id": "transcript",
+   "name": "After \u00b7 Transcript",
+   "path": "transcript.html"
+  }
+ ]
+}

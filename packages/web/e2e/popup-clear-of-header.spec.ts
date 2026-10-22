@@ -31,8 +31,7 @@ for (const height of [600, 420, 340]) {
     expect(box.y + box.height).toBeLessThanOrEqual(height);
 
     // Capped, so the list scrolls inside itself rather than being clipped. The
-    // picker offers only the five newest models, which a 600px window has room
-    // for outright; the shorter windows are the ones that must scroll.
+    // picker lists every model, so it scrolls whenever the window is short.
     if (height < 500) {
       const scrolls = await popup.evaluate((el) => el.scrollHeight > el.clientHeight);
       expect(scrolls).toBe(true);

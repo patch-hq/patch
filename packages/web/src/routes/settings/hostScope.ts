@@ -1,11 +1,11 @@
 // Which host the per-host Settings pages are about.
 //
 // Most settings live on a machine, not on the account, so Usage, Agent, MCP,
-// Memories, Voice and Keys each show ONE host at a time, chosen in the page
+// Memories, Voice and Providers each show ONE host at a time, chosen in the page
 // header. The choice is shared across pages — switching to the Mac on Usage and
 // then opening Agent should still be looking at the Mac.
 //
-// The default is the home host (`defaultHostId`), the same rule every other
+// The default is `defaultHostId`, the same rule every other
 // host-scoped action in the app uses; failing that, the first host by name.
 
 import { create } from 'zustand';

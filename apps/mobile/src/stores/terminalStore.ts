@@ -46,13 +46,13 @@ export interface HostTerminal {
 export const MAX_OUTPUT_CHARS = 1_000_000;
 
 export const TOO_OLD_MESSAGE =
-  'This host cannot open an interactive terminal. Update it from Settings → Hosts.';
+  'This machine cannot open an interactive terminal. Update it from Settings → Machines.';
 
 const EXIT_WORDS: Record<Extract<WireEvent, { type: 'patch.terminal.exit' }>['reason'], string> = {
   shell_exit: 'Shell exited',
   closed: 'Session closed',
   idle_timeout: 'Closed after 30 minutes with no input',
-  daemon_shutdown: 'The host restarted',
+  daemon_shutdown: 'The machine restarted',
 };
 
 /**

@@ -4,21 +4,41 @@
 // params the tool does not take. Keep it honest against the live server.
 
 import { describe, expect, it } from 'vitest';
+import { createServer } from 'node:http';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildPatchToolsServer } from '../src/mcp.js';
 import { TOOL_CATALOG, PATCH_MCP_PREFIX } from '../../web/src/lib/toolsCatalog.js';
 
+// The browser tools are listed only once a browser has been opened, so open
+// one against a stub host to see the whole catalogue.
 async function liveTools() {
-  const server = buildPatchToolsServer({
-    hostSocketPath: '/dev/null',
-    chatId: 'test-chat',
-    localKey: 'test-key',
+  const socketPath = join(mkdtempSync(join(tmpdir(), 'patch-parity-')), 'h.sock');
+  const stub = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"tabId":"t1"}');
   });
-  const [c, s] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'test', version: '0.0.0' });
-  await Promise.all([client.connect(c), server.connect(s)]);
-  return (await client.listTools()).tools;
+  await new Promise<void>((r) => stub.listen(socketPath, r));
+  try {
+    const server = buildPatchToolsServer({
+      hostSocketPath: socketPath,
+      chatId: 'test-chat',
+      localKey: 'test-key',
+    });
+    const [c, s] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    await Promise.all([client.connect(c), server.connect(s)]);
+    await client.callTool({
+      name: 'patch_browser_open',
+      arguments: { url: 'https://example.com' },
+    });
+    return (await client.listTools()).tools;
+  } finally {
+    await new Promise<void>((r) => stub.close(() => r()));
+  }
 }
 
 const catalogParams = (params: string): string[] =>

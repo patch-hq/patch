@@ -560,7 +560,7 @@ describe('NewChat — folder picker sheet', () => {
     await press(r, 'folder-sheet-browse');
     expect(api.browseFolders).not.toHaveBeenCalled();
     expect(
-      hasText(findHost(r.root, byTestId('folder-sheet-error')), 'Choose which host to browse.'),
+      hasText(findHost(r.root, byTestId('folder-sheet-error')), 'Choose which machine to browse.'),
     ).toBe(true);
   });
 });
@@ -569,7 +569,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
   beforeEach(() => {
     saveLastNewChat({ hostId: HOST, folder: '/p/one', model: null, permissionMode: null });
     usePresenceStore.setState({
-      hosts: { [HOST]: host(HOST, true, { isHomeHost: true }), [OTHER]: host(OTHER, true) },
+      hosts: { [HOST]: host(HOST, true, { runsManager: true }), [OTHER]: host(OTHER, true) },
     });
     useChatStore.setState({
       chats: {
@@ -604,7 +604,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
 
   it('a folder on an offline host is refused, loudly', async () => {
     usePresenceStore.setState({
-      hosts: { [HOST]: host(HOST, true, { isHomeHost: true }), [OTHER]: host(OTHER, false) },
+      hosts: { [HOST]: host(HOST, true, { runsManager: true }), [OTHER]: host(OTHER, false) },
     });
     const r = await renderReady();
     await openSheet(r);
@@ -623,7 +623,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
     await send(r);
     expect(api.createChat).not.toHaveBeenCalled();
     expect(useUiStore.getState().errors[0]?.message).toBe(
-      'Choose which host to start the chat on.',
+      'Choose which machine to start the chat on.',
     );
   });
 });

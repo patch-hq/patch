@@ -1,6 +1,6 @@
-// Manager failover through the real hub: the home host goes away, another host
-// is asked to run the Manager, and a surface opening the Manager afterwards
-// still sees what was said while the home host was away.
+// Manager placement through the real hub: the host running the Manager goes
+// away, another host is asked to run it for good, and a surface opening the
+// Manager afterwards still sees what the new host's own log is missing.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -64,8 +64,8 @@ describe('Manager failover through the hub', () => {
       await wait();
       expect(link.sent.some((s) => s.event.type === 'host.manager_release')).toBe(true);
 
-      // A surface opens the Manager. The home host answers from its own log; the
-      // server adds the stretch that log is missing.
+      // A surface opens the Manager. The new host answers from its own log; the
+      // server adds the stretch that log is missing (what 'home' ran).
       registry.upsertSurface({ surfaceId: 'srf-1', surfaceKind: 'web', label: 'b', issuedAt: 1 });
       const jwt = await mintSurfaceCredential({
         userPrivateKey: user.privateKey,
@@ -81,14 +81,14 @@ describe('Manager failover through the hub', () => {
       client.on('chat.message', (e) => got.push(e.seq));
       client.replay('thread_manager', -1);
       await wait();
-      expect(got).toEqual([2, 3]);
+      expect(got).toEqual([0, 1]);
       await client.close();
     } finally {
       await built.app.close();
     }
   });
 
-  it('runs the sweep on the host standing in for the Manager, and on the home host once it is back', async () => {
+  it('runs the sweep on the Manager host, and on the new one once it has taken over', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(42));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });

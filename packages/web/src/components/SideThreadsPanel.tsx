@@ -26,6 +26,7 @@ import { ExternalLink, GitFork, PanelRight } from 'lucide-react';
 import type { ChatBranch } from '@patch/wire';
 import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { resolvePane, useLayoutStore } from '../stores/layoutStore.js';
 import type { PendingPermission } from '../stores/types.js';
 import {
   useSideThreadsStore,
@@ -101,6 +102,21 @@ export function SideThreadsReconciler(): null {
   const pendingNewTab = useSideThreadsStore((s) => s.pendingNewTab);
   const openThread = useSideThreadsStore((s) => s.openThread);
   const branchGraph = useChatStore((s) => (chatId ? s.branchGraphs[chatId] : undefined));
+  const poppedOut = useSideThreadsStore((s) => s.poppedOut);
+  const closePanel = useSideThreadsStore((s) => s.closePanel);
+  // The chat tab in focus, or null when the focused tab is not a chat.
+  const focusedChatId = useLayoutStore((s) => {
+    const pane = resolvePane(s.root, s.activePaneId);
+    const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
+    return tab?.descriptor.kind === 'chat' ? tab.descriptor.chatId : null;
+  });
+  // A docked panel belongs to its chat's tab: moving to another chat or a new
+  // one closes it, rather than leaving a stale open flag that makes it pop
+  // back when that tab is next focused. A popped-out panel stays on purpose.
+  useEffect(() => {
+    if (chatId === null || poppedOut) return;
+    if (focusedChatId !== chatId) closePanel();
+  }, [chatId, poppedOut, focusedChatId, closePanel]);
   // spec/14 § Side threads panel TRIGGER — the host mints the new branch's
   // id, so the trigger can only ARM an expectation (`pendingNewTab`); this
   // reconciler is what actually opens the panel once `chat.branches` reports

@@ -5,7 +5,9 @@ import { test, expect } from '@playwright/test';
 // broken gate shows as an error item naming the job, the reason in plain words
 // and the fix; it stays until dismissed, and goes by itself once the server
 // stops reporting it (the job's next run succeeded).
-const HARNESS = '/app/dev-harness.html';
+// `jobAlerts=live`: this spec serves the alerts itself (page.route), so the
+// harness's own empty answer must stand aside.
+const HARNESS = '/app/dev-harness.html?jobAlerts=live';
 
 const chatgptAlert = {
   jobId: 'j_01M3KNCY1VJNMMWMHFA56H0V97',

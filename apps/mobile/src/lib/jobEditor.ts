@@ -57,7 +57,7 @@ export function resolveSkillEditTarget(input: {
   // That is a DIFFERENT case from `paths` being present but missing just this
   // skill's key, which is the normal result for a machine-level skill asked
   // about from a host that genuinely doesn't have it.
-  if (input.paths === undefined) return { reason: 'host does not report skill files' };
+  if (input.paths === undefined) return { reason: 'machine does not report skill files' };
   const path = input.paths[input.skill];
   if (path === undefined) return { reason: 'skill not found on this host' };
   return { hostId: input.hostId, path };
@@ -329,14 +329,14 @@ export function validateForm(form: FormState): string | null {
   // A gate with no host or folder would be asked nowhere, and the server's own
   // `JobGate` refuses it — say so here, where there is someone to tell.
   if (form.gateOn && form.gateCommand.trim().length > 0) {
-    if (!form.gateHostId.trim()) return 'Choose which host the gate command runs on.';
+    if (!form.gateHostId.trim()) return 'Choose which machine the gate command runs on.';
     if (!form.gateFolder.trim()) return 'Choose a folder for the gate command to run in.';
   }
   const usesSpawnFields = form.actionType === 'spawn' || form.actionType === 'continue';
   // A `script` action is validated on its own terms: a host, a folder and a
   // command, and NO first turn (spec/08 § Action — `script`).
   if (form.actionType === 'script') {
-    if (!form.spawnHostId.trim()) return 'Choose which host the command runs on.';
+    if (!form.spawnHostId.trim()) return 'Choose which machine the command runs on.';
     if (!form.spawnFolder.trim()) return 'Choose a folder for the command to run in.';
     if (!form.scriptCommand.trim()) return 'Enter the command to run.';
     return null;
@@ -345,7 +345,7 @@ export function validateForm(form: FormState): string | null {
   // A job fires unattended, so one that cannot name a host would dispatch
   // nowhere. Refuse at save time, where there is someone to tell.
   if (usesSpawnFields && !form.spawnHostId.trim()) {
-    return 'Choose which host the chat runs on.';
+    return 'Choose which machine the chat runs on.';
   }
   if (usesSpawnFields && !form.spawnFolder.trim()) {
     return 'Choose a folder for the chat.';
@@ -552,8 +552,16 @@ export function withRecurrenceFrequency(
     freq,
     days: f.days.slice(0, 1).length > 0 ? f.days.slice(0, 1) : ['SU'],
     setPos: f.setPos ?? 1,
-    // A YEARLY rule needs at least one month.
-    months: f.months && f.months.length > 0 ? f.months : freq === 'YEARLY' ? [1] : null,
+    // A YEARLY rule holds exactly one month: with several, BYSETPOS counts over
+    // the whole year's set and the rule fires once a year, not once per month.
+    months:
+      freq === 'YEARLY'
+        ? f.months && f.months.length > 0
+          ? f.months.slice(0, 1)
+          : [1]
+        : f.months && f.months.length > 0
+          ? f.months
+          : null,
   };
 }
 
@@ -565,11 +573,11 @@ export function toggleRecurrenceDay(f: RecurrenceFields, code: string): Recurren
   return { ...f, days: f.days.filter((d) => d !== code) };
 }
 
-/** Toggle a month; YEARLY keeps at least one. */
+/** MONTHLY toggles membership; YEARLY replaces its single month (see withRecurrenceFrequency). */
 export function toggleRecurrenceMonth(f: RecurrenceFields, month: number): RecurrenceFields {
+  if (f.freq === 'YEARLY') return { ...f, months: [month] };
   const cur = f.months ?? [];
   if (!cur.includes(month)) return { ...f, months: [...cur, month].sort((a, b) => a - b) };
-  if (f.freq === 'YEARLY' && cur.length === 1) return f;
   const next = cur.filter((m) => m !== month);
   return { ...f, months: next.length > 0 ? next : null };
 }

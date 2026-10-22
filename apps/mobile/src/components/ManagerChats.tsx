@@ -15,13 +15,13 @@ import { SPECIAL_THREAD_IDS, threadRowState, threadRows, type ThreadRowState } f
 import { useChatStore } from '../stores/chatStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
-import { deriveBadge, type ChatRow } from '../stores/types';
+import type { ChatRow } from '../stores/types';
 import { getWs } from '../api/ws';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { deriveChatTitle } from '../lib/labels';
 import { fonts, radii, space, textMin, typography, useTheme } from '../lib/theme';
 import { EMPTY_STATES } from '../lib/emptyStates';
-import { StatusBadge } from './StatusBadge';
+import { ChatStatusBadge } from './ChatStatusBadge';
 import { EmptyState } from './EmptyState';
 import { SweepStatusLine } from './SweepStatusLine';
 
@@ -204,7 +204,7 @@ function ThreadRow({ row }: { row: ChatRow }): React.ReactElement {
       }}
     >
       <View style={{ width: 24, alignItems: 'center', marginRight: space.sm }}>
-        <StatusBadge badge={deriveBadge(row)} />
+        <ChatStatusBadge row={row} />
       </View>
       <View style={{ flex: 1 }}>
         <Text

@@ -30,8 +30,8 @@ const HostStateFile = z
     hostName: z.string().min(1).optional(),
     /** This machine's DEFAULT permission mode (`host.settings`). */
     permissionModeDefault: PermissionMode.optional(),
-    /** Is this the account's home machine (`host.set_home`)? */
-    isHomeHost: z.boolean().optional(),
+    /** Does the server have this machine running the Manager (`host.set_manager`)? */
+    runsManager: z.boolean().optional(),
     /**
      * The last Manager takeover this machine acted on (`host.manager_adopt` /
      * `host.manager_release`), so the same one told twice is acted on once.
@@ -111,6 +111,8 @@ const HostStateFile = z
      * the built-in defaults stand.
      */
     goalEvalPrompt: z.string().min(1).optional(),
+    watchCheckInPrompt: z.string().min(1).optional(),
+    watchCheckInMinutes: z.number().int().positive().optional(),
     goalModel: z.string().min(1).optional(),
     goalRefusalLimit: z.number().int().positive().optional(),
     /**
@@ -121,6 +123,8 @@ const HostStateFile = z
     titleGenerationEnabled: z.boolean().optional(),
     statusGenerationEnabled: z.boolean().optional(),
     autoResumeRateLimit: z.boolean().optional(),
+    /** Whether this host installs a published build on its own (shared `autoUpdateHosts`). */
+    autoUpdateHosts: z.boolean().optional(),
     /**
      * Whether an unanswered `AskUserQuestion` on this host expires
      * (`host.settings` → `questionExpiry`), and the window in seconds it is

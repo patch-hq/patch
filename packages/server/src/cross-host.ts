@@ -16,6 +16,8 @@
 //   2. `patch.list_chats.request` is answered from the server's chat mirror,
 //      because only the server sees every machine's chats. Each entry names the
 //      machine it lives on, so the calling agent can address it afterwards.
+//   2b. `patch.search_chats.request` is answered by `chat-search.ts` from the
+//      chat mirror and the transcripts the server holds.
 //   3. `patch.peek.request` / `patch.history.request` / `patch.send_to` carrying
 //      a `requestId` are relayed to whichever machine the chat mirror says OWNS
 //      `targetChatId` — resolved here rather than by the caller naming a host,
@@ -37,6 +39,8 @@ import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { Registry } from './registry.js';
 import type { ActivityReader } from './activity.js';
+import type { ChatLogStore } from './chat-log-store.js';
+import { searchChats } from './chat-search.js';
 
 /** Surface id used for server-originated frames on the host link. */
 const BRIDGE_SURFACE_ID = 'cross-host-bridge';
@@ -47,6 +51,7 @@ export interface CrossHostBridgeDeps {
   chatRegistry: ChatRegistry;
   registry: Registry;
   activity: ActivityReader;
+  chatLogStore: ChatLogStore;
 }
 
 /**
@@ -57,7 +62,7 @@ export interface CrossHostBridgeDeps {
 const RELAY_ROUTE_TTL_MS = 60_000;
 
 export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
-  const { logger, hostLink, chatRegistry, registry, activity } = deps;
+  const { logger, hostLink, chatRegistry, registry, activity, chatLogStore } = deps;
 
   /**
    * requestId → the machine that raised a relayed `patch.spawn`, so its
@@ -224,12 +229,36 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
           ...(event.archived === 'only' ? { archivedOnly: true } : {}),
           ...(event.archived === 'include' ? { includeArchived: true } : {}),
         })
-        .map((c) => ({ chatId: c.chatId, hostId: c.hostId }));
+        .map((c) => ({
+          chatId: c.chatId,
+          hostId: c.hostId,
+          name: c.name,
+          preview: c.preview,
+          folder: c.folder,
+          status: c.status,
+          activity: c.activity,
+          pinned: c.pinned,
+          pinnedAt: c.pinnedAt,
+          lastUpdated: c.lastUpdated,
+          statusSummary: c.statusSummary,
+        }));
       hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
         type: 'patch.list_chats.response',
         sourceChatId: event.sourceChatId,
         chatCount: chats.length,
         chats,
+      });
+      return;
+    }
+
+    if (event.type === 'patch.search_chats.request') {
+      if (fromHostId === null) return;
+      const answer = searchChats({ chatRegistry, chatLogStore }, event.query, event.limit);
+      hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
+        type: 'patch.search_chats.response',
+        sourceChatId: event.sourceChatId,
+        query: event.query,
+        ...answer,
       });
       return;
     }

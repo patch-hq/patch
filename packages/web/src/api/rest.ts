@@ -30,6 +30,15 @@ import type { OutgoingFile } from '../lib/sendQueue.js';
 /** The backends whose accounts are shared settings. */
 export type SharedBackendId = 'claude-code' | 'codex';
 
+/** What `GET /api/usage-report` answers: the window it covers, when it was read, and the figures. */
+export interface UsageReport {
+  since: number;
+  until: number;
+  at: number;
+  samples: (UsageSample & { hostId: string })[];
+  chats: (ChatTokenUsage & { hostId: string })[];
+}
+
 /** An uploaded attachment: the wire ref plus the relative URL to render it inline. */
 export type UploadedAttachment = AttachmentRef & { url: string };
 
@@ -222,6 +231,8 @@ export interface PadView {
   screensError: string | null;
   /** Signed, iframe-able URL of the editor. */
   frameUrl: string;
+  /** Read-only sharing; null while private. `url` is a path on this server. */
+  share: { mode: 'link' | 'public'; url: string } | null;
   thumbUrl: string | null;
   thumbError: string | null;
 }
@@ -282,8 +293,15 @@ export const api = {
       method: 'POST',
       body: { screens },
     }),
-  patchPad: (id: string, body: { name?: string; device?: 'desktop' | 'phone' }) =>
-    request<PadView>(`/api/pads/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  patchPad: (
+    id: string,
+    body: {
+      name?: string;
+      device?: 'desktop' | 'phone';
+      share?: 'private' | 'link' | 'public';
+      rotate?: boolean;
+    },
+  ) => request<PadView>(`/api/pads/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   deletePad: (id: string) =>
     request<null>(`/api/pads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
@@ -437,12 +455,16 @@ export const api = {
       nextCursor?: number;
     }>(`/api/tool-log?${qs.toString()}`);
   },
-  /** Settings → Usage: probe history and per-chat token totals for a window. */
-  usageReport: (params: { since: number; until: number }) =>
-    request<{
-      samples: (UsageSample & { hostId: string })[];
-      chats: (ChatTokenUsage & { hostId: string })[];
-    }>(`/api/usage-report?since=${params.since}&until=${params.until}`),
+  /**
+   * Settings → Usage: probe history and per-chat token totals. A named period
+   * is answered from the server's cache at once; a window is read live.
+   */
+  usageReport: (params: { period: 'day' | 'week' | 'month' } | { since: number; until: number }) =>
+    request<UsageReport>(
+      'period' in params
+        ? `/api/usage-report?period=${params.period}`
+        : `/api/usage-report?since=${params.since}&until=${params.until}`,
+    ),
   listHooks: () => request<{ hooks: Hook[] }>('/api/hooks'),
   getHook: (id: string) => request<Hook>(`/api/hooks/${id}`),
   createHook: (body: HookCreateBody) => request<Hook>('/api/hooks', { method: 'POST', body }),
@@ -911,11 +933,6 @@ export const api = {
       method: 'POST',
       body: { hostId },
     }),
-  adoptClaudeSettings: (hostId: string, target: 'shared' | 'darwin' | 'linux') =>
-    request<SharedState>('/api/settings/claude/adopt', {
-      method: 'POST',
-      body: { hostId, target },
-    }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every
   // connected surface (this one included) is also sent `host.removed
@@ -1137,6 +1154,13 @@ export const api = {
     request<{ stopped: boolean }>(`/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/stop`, {
       method: 'POST',
     }),
+  // Change how often a running task's owning agent is checked in with. The
+  // next check-in is one new interval from now.
+  watchCheckIn: (chatId: string, taskId: string, checkInSec: number) =>
+    request<{ updated: boolean }>(
+      `/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/check-in`,
+      { method: 'POST', body: JSON.stringify({ checkInSec }) },
+    ),
   // Selectable models for a new chat (spec/14 § Model selector). Live list —
   // the host reads it from Anthropic with its Claude OAuth credential, so a
   // newly released model is offered without a redeploy. NO FALLBACK: a failure
@@ -1273,42 +1297,15 @@ export const api = {
     request<{ os: string; version: string; targets: string[]; command: string }>(
       `/api/daemon/install-command?os=${encodeURIComponent(os)}`,
     ),
-  // GET /api/link-preview — server-side fetched title/description/image for a
-  // message link, powering the inline mini-preview toggle (spec/14 § Message
+  // POST /api/link-summary — the server fetches the linked page and a host
+  // summarises it with the account's link-summary prompt (spec/14 § Message
   // links). Fetched server-side because the target's CORS policy would
   // otherwise block the browser doing it directly.
-  linkPreview: (url: string) =>
-    request<{ url: string; title?: string; description?: string; image?: string }>(
-      `/api/link-preview?url=${encodeURIComponent(url)}`,
-    ),
-  // GET /api/link-preview/image — same reasoning as getFileRawBlob above: the
-  // CSP locks img-src down to 'self'/data:/blob:, so a preview's og:image (an
-  // arbitrary third-party URL) can't be a plain `<img src>` either way. Fetched
-  // here with the bearer header and turned into a Blob; the caller builds an
-  // object URL from it.
-  linkPreviewImage: async (url: string): Promise<Blob> => {
-    const cred = loadCredential();
-    const headers = new Headers();
-    if (cred) headers.set('authorization', `Bearer ${cred}`);
-    const res = await fetch(`/api/link-preview/image?url=${encodeURIComponent(url)}`, { headers });
-    if (!res.ok) {
-      const text = await res.text();
-      let parsed: unknown = null;
-      if (text.length > 0) {
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          parsed = text;
-        }
-      }
-      const errMsg =
-        parsed && typeof parsed === 'object' && 'error' in parsed
-          ? String((parsed as { error: unknown }).error)
-          : `HTTP ${res.status}`;
-      throw new ApiError(res.status, errMsg, parsed);
-    }
-    return res.blob();
-  },
+  linkSummary: (url: string) =>
+    request<{ url: string; summary: string }>('/api/link-summary', {
+      method: 'POST',
+      body: { url },
+    }),
   // spec/14 § Batch mode — one account-wide batch, held server-side.
   getBatch: () => request<BatchResponse>('/api/batch'),
   startBatch: (checkIn: BatchCheckInChoice) =>
@@ -1335,7 +1332,11 @@ export const api = {
 /** spec/09 § bell — one agent-sent notification. */
 export interface NotificationEntry {
   id: string;
-  chatId: string;
+  /** Absent on a job-failure entry. */
+  chatId?: string;
+  /** A job-failure entry: the job and the `ts` of the failed run. */
+  jobId?: string;
+  runTs?: number;
   message: string;
   importance: 'silent' | 'normal' | 'urgent';
   deepLink?: string;

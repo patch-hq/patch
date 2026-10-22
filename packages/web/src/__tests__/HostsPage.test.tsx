@@ -101,7 +101,7 @@ beforeEach(() => {
       return route ? Promise.resolve(route()) : new Promise<Response>(() => {});
     }),
   );
-  // Agent's model picker reads the home host's catalogue.
+  // Agent's model picker reads the default host's catalogue.
   vi.spyOn(api, 'models').mockResolvedValue({ models: [] } as never);
 });
 
@@ -113,7 +113,7 @@ afterEach(() => {
 describe('Settings → Hosts', () => {
   it('lists EVERY registered machine, not just one', () => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta-box', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
     renderPage('hosts');
     expect(screen.getByTestId('host-host-a-label')).toHaveTextContent('laptop');
     expect(screen.getByTestId('host-host-b-label')).toHaveTextContent('beta-box');
@@ -203,30 +203,16 @@ describe('Settings → Hosts', () => {
     expect(button).toHaveTextContent('Update');
   });
 
-  it('shows which machine is the home machine, and offers to move it', () => {
-    reportHost('host-a', { hostName: 'laptop', isHomeHost: true });
-    reportHost('host-b', { hostName: 'beta', isHomeHost: false });
-    usePresenceStore.getState().setHostOnline('host-b', true);
+  it('with no single online machine it opens the first by name, and clicking a row switches the detail', () => {
+    reportHost('host-a', { hostName: 'alpha', runsManager: false });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-home')).toBeInTheDocument();
-    expect(screen.queryByTestId('host-host-b-home')).toBeNull();
-    // The home machine's own detail has nothing to move.
-    expect(screen.getByTestId('host-detail-host-a')).toHaveTextContent('This is home');
-    expect(screen.queryByTestId('host-host-a-set-home')).toBeNull();
+    expect(screen.getByTestId('host-detail-host-a')).toBeInTheDocument();
     openRow('host-b');
-    fireEvent.click(screen.getByTestId('host-host-b-set-home'));
-    expect(send).toHaveBeenCalledWith({ type: 'host.set_home', hostId: 'host-b' });
-  });
-
-  it('opens on the home machine, and clicking another row switches the detail to it', () => {
-    reportHost('host-a', { hostName: 'alpha', isHomeHost: false });
-    reportHost('host-b', { hostName: 'beta', isHomeHost: true });
-    renderPage('hosts');
     expect(screen.getByTestId('host-detail-host-b')).toBeInTheDocument();
     expect(screen.queryByTestId('host-detail-host-a')).toBeNull();
     openRow('host-a');
     expect(screen.getByTestId('host-detail-host-a')).toBeInTheDocument();
-    expect(screen.queryByTestId('host-detail-host-b')).toBeNull();
     expect(screen.getByTestId('host-host-a')).toHaveClass('selected');
     expect(screen.getByTestId('host-host-b')).not.toHaveClass('selected');
     expect(screen.getByTestId('host-host-a-name-input')).toHaveValue('alpha');
@@ -314,23 +300,6 @@ describe('Settings → Hosts', () => {
     );
   });
 
-  it('a settings.json changed on the machine is shown, and can be kept for every host or discarded', async () => {
-    reportHost('host-a', { hostName: 'laptop', platform: 'linux' });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
-    const adopt = vi
-      .spyOn(api, 'adoptClaudeSettings')
-      .mockResolvedValue(sharedState({ version: 2 }));
-    renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-claude-drift-text')).toHaveTextContent(
-      '"model":"sonnet"',
-    );
-    fireEvent.click(screen.getByTestId('host-host-a-claude-drift-keep-os'));
-    await waitFor(() => expect(adopt).toHaveBeenCalledWith('host-a', 'linux'));
-    fireEvent.click(screen.getByTestId('host-host-a-claude-drift-discard'));
-    expect(send).toHaveBeenCalledWith({ type: 'host.claude_settings_discard', hostId: 'host-a' });
-  });
-
   it('shows a host on battery with its charge, and a plugged-in one as plugged in', () => {
     reportHost('host-a', { hostName: 'laptop', power: { onBattery: true, percent: 12 } });
     reportHost('host-b', { hostName: 'desk', power: { onBattery: false, percent: 80 } });
@@ -341,11 +310,12 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-c-power')).toBeNull();
   });
 
-  it('shows no drift for a machine whose settings.json is in step', () => {
+  it('shows nothing about settings.json: it is edited under Providers', () => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportClaudeSettings('host-a');
+    reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
     renderPage('hosts');
-    expect(screen.queryByTestId('host-host-a-claude-drift')).toBeNull();
+    expect(screen.queryByText(/settings\.json/)).toBeNull();
+    expect(screen.queryByText(/Keep for/)).toBeNull();
   });
 
   it('Sign in on a codex backend hands the host to the ChatGPT sign-in on Usage', () => {
@@ -408,10 +378,11 @@ describe('Settings → Hosts', () => {
 
   it('spec/02 § Browser — Route through: picker offers every OTHER host, not itself', () => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta-box', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
     usePresenceStore.getState().setHostOnline('host-b', true);
     renderPage('hosts');
+    openRow('host-a');
     const select = screen.getByTestId('host-host-a-route-through') as HTMLSelectElement;
     const optionLabels = Array.from(select.options).map((o) => o.textContent);
     expect(optionLabels).toEqual(['None', 'beta-box']);
@@ -419,10 +390,11 @@ describe('Settings → Hosts', () => {
 
   it('picking a host to route through sends host.settings, and the row says "via <host>"', () => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta-box', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
     usePresenceStore.getState().setHostOnline('host-b', true);
     renderPage('hosts');
+    openRow('host-a');
     expect(screen.queryByTestId('host-host-a-routed-via')).toBeNull();
 
     fireEvent.change(screen.getByTestId('host-host-a-route-through'), {
@@ -442,7 +414,7 @@ describe('Settings → Hosts', () => {
 
   it('the routing host OFFLINE shows a plain warning that browsing will fail, no fallback implied', () => {
     reportHost('host-a', { hostName: 'laptop', browserRouteThrough: 'host-b' });
-    reportHost('host-b', { hostName: 'beta-box', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
     usePresenceStore.getState().setHostOnline('host-b', false);
     renderPage('hosts');
@@ -453,10 +425,11 @@ describe('Settings → Hosts', () => {
 
   it('picking "None" sends browserRouteThrough: null, turning routing off', () => {
     reportHost('host-a', { hostName: 'laptop', browserRouteThrough: 'host-b' });
-    reportHost('host-b', { hostName: 'beta-box', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
     usePresenceStore.getState().setHostOnline('host-a', true);
     usePresenceStore.getState().setHostOnline('host-b', true);
     renderPage('hosts');
+    openRow('host-a');
     fireEvent.change(screen.getByTestId('host-host-a-route-through'), { target: { value: '' } });
     expect(send).toHaveBeenCalledWith({
       type: 'host.settings',
@@ -468,7 +441,7 @@ describe('Settings → Hosts', () => {
   it('states plainly when no machine is registered, and still offers to add one', () => {
     renderPage('hosts');
     // The empty state must point at the next action, not just report a void.
-    expect(screen.getByTestId('hosts-empty')).toHaveTextContent('No hosts yet');
+    expect(screen.getByTestId('hosts-empty')).toHaveTextContent('No machines yet');
     expect(screen.getByTestId('add-host')).toHaveTextContent('Add a host');
   });
 
@@ -579,7 +552,7 @@ describe('Settings → Hosts → a machine that reports while its page is open',
 describe('Settings → Hosts → remove', () => {
   beforeEach(() => {
     reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta', isHomeHost: false });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
   });
 
   const hostRemoveCalls = (): Array<{ url: string; method: string }> =>
@@ -587,6 +560,7 @@ describe('Settings → Hosts → remove', () => {
 
   it('asks first, and a cancelled confirm sends nothing', async () => {
     renderPage('hosts');
+    openRow('host-a');
     fireEvent.click(screen.getByTestId('host-host-a-remove'));
     const modal = await screen.findByTestId('confirm-modal');
     expect(modal).toHaveTextContent('Remove laptop');
@@ -600,6 +574,7 @@ describe('Settings → Hosts → remove', () => {
   it('confirmed, DELETEs /api/hosts/<id> and drops the host from the store and the page', async () => {
     fetchRoutes['DELETE /api/hosts/host-a'] = () => json(200, { ok: true, hosts: [] });
     renderPage('hosts');
+    openRow('host-a');
     fireEvent.click(screen.getByTestId('host-host-a-remove'));
     fireEvent.click(await screen.findByTestId('confirm-ok'));
     await waitFor(() => expect(screen.queryByTestId('host-host-a')).toBeNull());
@@ -625,6 +600,7 @@ describe('Settings → Hosts → remove', () => {
   it('a 404 says the server has no such host', async () => {
     fetchRoutes['DELETE /api/hosts/host-a'] = () => json(404, { error: 'host_not_found' });
     renderPage('hosts');
+    openRow('host-a');
     fireEvent.click(screen.getByTestId('host-host-a-remove'));
     fireEvent.click(await screen.findByTestId('confirm-ok'));
     await waitFor(() => expect(errors()).toContain('remove failed: the server has no host host-a'));
@@ -634,6 +610,7 @@ describe('Settings → Hosts → remove', () => {
   it('any other failure is said verbatim and the host stays', async () => {
     fetchRoutes['DELETE /api/hosts/host-a'] = () => json(500, { error: 'database_locked' });
     renderPage('hosts');
+    openRow('host-a');
     fireEvent.click(screen.getByTestId('host-host-a-remove'));
     fireEvent.click(await screen.findByTestId('confirm-ok'));
     await waitFor(() => expect(errors()).toContain('remove failed: database_locked'));

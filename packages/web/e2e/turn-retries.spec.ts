@@ -101,11 +101,11 @@ test.describe('a turn that recovered reads as one turn', () => {
     await expect(meta).toHaveCSS('opacity', '1');
   });
 
-  test('a turn that never went round again has no strip at all', async ({ page }) => {
+  test('a turn that never went round again says nothing about retries', async ({ page }) => {
     await page.goto(HARNESS);
     await applyEvent(page, userMessage(2));
     await page.getByTestId('msg').locator('.content').hover();
-    await expect(page.getByTestId('msg-meta')).toHaveCount(0);
+    await expect(page.getByTestId('msg-meta-retries')).toHaveCount(0);
   });
 });
 

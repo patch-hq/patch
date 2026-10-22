@@ -69,7 +69,7 @@ export function reportHost(
     updateAvailable: false,
     permissionModeDefault: 'default',
     permissionOverrides: 0,
-    isHomeHost: false,
+    runsManager: false,
     audioRelayHost: '127.0.0.1:3003',
     backends: [],
     components: [],

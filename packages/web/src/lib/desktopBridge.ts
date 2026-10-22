@@ -68,10 +68,38 @@ export interface PatchDesktopBridge {
    * predates it.
    */
   startSystemAudio?(): Promise<void>;
+  /**
+   * Where meeting mode's three macOS permissions stand (null off macOS). Call
+   * audio reads `unknown` until it has been tried. Absent on a shell that predates it.
+   */
+  getMeetingPermissions?(): Promise<MeetingPermissions | null>;
+  /** Ask macOS for one; rejects with the helper's message when call audio is refused. */
+  requestMeetingPermission?(kind: MeetingPermissionKind): Promise<MeetingPermissionState>;
   stopSystemAudio?(): void;
   onSystemAudio?(cb: (pcm: Uint8Array) => void): () => void;
   /** The tap stopped without being asked to. */
   onSystemAudioFailed?(cb: (e: { message: string }) => void): () => void;
+  /**
+   * Meeting mode: names who is lit up on the call, read from the calling app
+   * through macOS Accessibility. `onMeetingSpeakersFailed` carries the helper's
+   * own message (e.g. Accessibility not allowed). Absent on a shell that predates it.
+   */
+  /**
+   * spec/02 § Browser — In the Patch app. The agent's tabs, when the host on
+   * this machine keeps its browser in this app: a large view shows the tab
+   * itself laid over its place in the window. `onInput` says the user pressed
+   * or typed in a tab being shown. Absent on a shell that predates it.
+   */
+  agentBrowser?: {
+    owns(targetId: string): Promise<boolean>;
+    show(targetId: string, rect: { x: number; y: number; width: number; height: number }): void;
+    hide(targetId: string): void;
+    onInput(cb: (e: { targetId: string }) => void): () => void;
+  };
+  startMeetingSpeakers?(): void;
+  stopMeetingSpeakers?(): void;
+  onMeetingSpeakers?(cb: (e: { participants: string[]; speaking: string[] }) => void): () => void;
+  onMeetingSpeakersFailed?(cb: (e: { message: string }) => void): () => void;
   /** The shell saw a calling app open (`started`) or let go of (`ended`) the mic. */
   onMeetingSignal?(cb: (e: { phase: 'started' | 'ended'; app: string }) => void): () => void;
   /**
@@ -111,6 +139,19 @@ export interface PatchDesktopBridge {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   };
+  /**
+   * Put PNG bytes on the system clipboard as an image, via the shell's native
+   * clipboard. Chromium's async clipboard rejects an image write in the packaged
+   * app, so the desktop shell does it in the main process. Absent in a browser
+   * and on shells that predate it.
+   */
+  copyImagePng?(png: Uint8Array): Promise<void>;
+  /**
+   * Open a file with its default app, or reveal it in the file manager, on the
+   * machine the shell runs on. Only meaningful for a file the shell's own host
+   * wrote. Absent in a browser and on shells that predate it.
+   */
+  openPath?(path: string, mode: 'file' | 'folder'): Promise<void>;
   /** Run a check now and resolve with the resulting state. */
   checkForUpdates?(): Promise<DesktopUpdaterState>;
   /** Subscribe to state pushes from main (download progress, errors). */
@@ -237,3 +278,7 @@ export function useDesktopUpdaterState(): DesktopUpdaterState | null {
 
   return state;
 }
+
+export type MeetingPermissionKind = 'microphone' | 'callAudio' | 'accessibility';
+export type MeetingPermissionState = 'granted' | 'missing' | 'unknown';
+export type MeetingPermissions = Record<MeetingPermissionKind, MeetingPermissionState>;

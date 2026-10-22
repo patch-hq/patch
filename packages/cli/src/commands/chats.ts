@@ -94,6 +94,10 @@ export function registerChatsCommands(program: Command): void {
     .option('--name <name>', 'Optional chat name')
     .option('--model <model>', 'SDK model override (pass-through to host spawn)')
     .option(
+      '--account <account>',
+      'Stored account the chat starts on: id or label (label only on a machine with a host; REST needs the id)',
+    )
+    .option(
       '--dangerously-skip-permissions',
       'Run with permissionMode=bypassPermissions (pass-through to host spawn)',
     )
@@ -106,6 +110,7 @@ export function registerChatsCommands(program: Command): void {
           prompt?: string;
           name?: string;
           model?: string;
+          account?: string;
           dangerouslySkipPermissions?: boolean;
         },
         cmd: Command,
@@ -134,10 +139,12 @@ export function registerChatsCommands(program: Command): void {
           if (merged.model !== undefined) body['model'] = merged.model;
           if (merged.dangerouslySkipPermissions) body['permissionMode'] = 'bypassPermissions';
           if (t.kind === 'uds') {
+            if (opts.account !== undefined) body['account'] = opts.account;
             const res = await t.post<{ chatId: string }>('/internal/spawn', body);
             if (opts.json) emitJson(res);
             else emitText(`spawned ${res.chatId}`);
           } else {
+            if (opts.account !== undefined) body['preferredAccountId'] = opts.account;
             const res = await t.post<{ chatId: string; status: string }>('/api/chats', body);
             if (opts.json) emitJson(res);
             else emitText(`spawned ${res.chatId} (${res.status})`);

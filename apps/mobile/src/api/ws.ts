@@ -5,6 +5,7 @@
 // foregrounded. Spec/12: replay missed events with chat.replay on
 // reconnect. NO FALLBACK on auth — bad/missing JWT throws at hello-time.
 
+import { useNotificationsStore } from '../stores/notificationsStore';
 import { useViewPositionStore } from '../stores/viewPositionStore';
 import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import { CLOSE_AUTH_FAILED, decodeCompat, type WireEvent } from '@patch/wire';
@@ -61,6 +62,11 @@ export const STORE_BATCH_MS = 16;
  * `connection` flips on the close itself, for diagnostics and controls.
  */
 export const DISCONNECT_GRACE_MS = 3000;
+/**
+ * How long an outage must last, foreground, before it is called a lost server
+ * rather than a reconnect (spec/12 § Server lost). The banner changes wording.
+ */
+export const SERVER_LOST_MS = 60_000;
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -71,6 +77,8 @@ export class PatchWs {
   private heartbeatTimer: TimerHandle | null = null;
   /** Running while a foreground outage is inside its grace period. */
   private outageTimer: TimerHandle | null = null;
+  /** Running while a visible outage heads for `SERVER_LOST_MS`. */
+  private lostTimer: TimerHandle | null = null;
   private closed = false;
   private url: string;
   private appStateSub: NativeEventSubscription | null = null;
@@ -496,6 +504,12 @@ export class PatchWs {
       if (this.closed || this.currentAppState !== 'active') return;
       if (usePresenceStore.getState().connection === 'connected') return;
       usePresenceStore.getState().setOutageVisible(true);
+      this.lostTimer = setTimeout(() => {
+        this.lostTimer = null;
+        if (this.closed || this.currentAppState !== 'active') return;
+        if (usePresenceStore.getState().connection === 'connected') return;
+        usePresenceStore.getState().setServerLost(true);
+      }, SERVER_LOST_MS - DISCONNECT_GRACE_MS);
     }, DISCONNECT_GRACE_MS);
   }
 
@@ -505,7 +519,12 @@ export class PatchWs {
       clearTimeout(this.outageTimer);
       this.outageTimer = null;
     }
+    if (this.lostTimer !== null) {
+      clearTimeout(this.lostTimer);
+      this.lostTimer = null;
+    }
     usePresenceStore.getState().setOutageVisible(false);
+    usePresenceStore.getState().setServerLost(false);
   }
 
   private scheduleReconnect(): void {
@@ -622,7 +641,14 @@ export class PatchWs {
       // spec/02 § Claude Code settings — that host's settings.json + memory
       // entries, sent whole on connect and after every edit, so Settings →
       // Hosts settles on what the machine actually holds.
-      usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
+      usePresenceStore
+        .getState()
+        .setClaudeSettings(event.hostId, event.settingsJson, event.memories);
+      return;
+    }
+    // spec/09 § bell — the agent-notification log changed; refetch.
+    if (event.type === 'notifications.changed') {
+      void useNotificationsStore.getState().load();
       return;
     }
     // spec/03 § Settings — the shared settings, in the greeting and after every change.
@@ -690,6 +716,10 @@ export class PatchWs {
     }
     if (event.type === 'patch.browser_handoff.state') {
       useBrowserHandoffStore.getState().applyState(event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.form') {
+      useBrowserHandoffStore.getState().applyForm(event);
       return;
     }
     if (event.type === 'chat.call_request') {

@@ -1,0 +1,34 @@
+{
+ "screens": [
+  {
+   "id": "live",
+   "name": "Live",
+   "path": "live.html"
+  },
+  {
+   "id": "after",
+   "name": "After \u00b7 Summary",
+   "path": "after.html"
+  },
+  {
+   "id": "after-folded",
+   "name": "After \u00b7 folded away",
+   "path": "after-folded.html"
+  },
+  {
+   "id": "transcript",
+   "name": "After \u00b7 Transcript",
+   "path": "transcript.html"
+  },
+  {
+   "id": "setup-first-run",
+   "name": "Setup \u00b7 first run",
+   "path": "setup-first-run.html"
+  },
+  {
+   "id": "setup-start",
+   "name": "Setup \u00b7 at start",
+   "path": "setup-start.html"
+  }
+ ]
+}

@@ -157,4 +157,62 @@ test.describe('Screenshot markup', () => {
     const boxTool = (await page.getByLabel('Box tool').boundingBox())!;
     expect(boxTool.x).toBeLessThan(84);
   });
+
+  // Regression (Todoist: "patch this page is broken. cannot click on top
+  // buttons. doesn't draw, make shapes well"): marks must land where the drag
+  // went, in the chosen colour, at a sane thickness — on a big retina-sized
+  // screenshot as well as a tiny one — and the pen must leave a trail.
+  test('box and pen marks land under the pointer in the chosen colour on a large screenshot', async ({
+    page,
+  }) => {
+    await page.goto(HARNESS);
+    await attachPng(page, 'big.png', 2880, 1800, '#ffffff');
+    await page.getByTestId('composer-attachment').getByTestId('composer-attachment-markup').click();
+    const canvas = page.getByTestId('annotator-canvas');
+    // Wait for the 2880px decode to size the canvas before measuring it.
+    await expect
+      .poll(async () => canvas.evaluate((el) => (el as HTMLCanvasElement).width))
+      .toBe(2880);
+    const box = (await canvas.boundingBox())!;
+
+    const x1 = box.x + box.width * 0.2;
+    const y1 = box.y + box.height * 0.2;
+    const x2 = box.x + box.width * 0.6;
+    const y2 = box.y + box.height * 0.6;
+    await page.mouse.move(x1, y1);
+    await page.mouse.down();
+    await page.mouse.move(x2, y2, { steps: 8 });
+    await page.mouse.up();
+
+    await page.getByLabel('Freehand tool').click();
+    const px = box.x + box.width * 0.7;
+    await page.mouse.move(px, box.y + box.height * 0.2);
+    await page.mouse.down();
+    await page.mouse.move(px, box.y + box.height * 0.8, { steps: 10 });
+    await page.mouse.up();
+
+    const probe = await canvas.evaluate(
+      (el, pts) => {
+        const c = el as HTMLCanvasElement;
+        const ctx = c.getContext('2d')!;
+        const r = c.getBoundingClientRect();
+        const at = (cx: number, cy: number): number[] => {
+          const x = Math.round(((cx - r.left) / r.width) * c.width);
+          const y = Math.round(((cy - r.top) / r.height) * c.height);
+          return Array.from(ctx.getImageData(x, y, 1, 1).data);
+        };
+        // interior of the box (must still be untouched white), its top edge,
+        // the pen trail midpoint
+        return {
+          inside: at((pts[0]! + pts[2]!) / 2, (pts[1]! + pts[3]!) / 2),
+          topEdge: at((pts[0]! + pts[2]!) / 2, pts[1]!),
+          pen: at(pts[4]!, (pts[1]! + pts[3]!) / 2),
+        };
+      },
+      [x1, y1, x2, y2, px],
+    );
+    expect(probe.inside).toEqual([255, 255, 255, 255]);
+    expect(probe.topEdge.slice(0, 3)).toEqual([0xe0, 0x39, 0x3e]);
+    expect(probe.pen.slice(0, 3)).toEqual([0xe0, 0x39, 0x3e]);
+  });
 });

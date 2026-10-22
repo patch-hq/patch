@@ -299,7 +299,7 @@ describe('JobEditor — Skill Edit link', () => {
     await flush();
     pickOption(r, 'job-skill', 'life-coach');
     expect(queryHost(r.root, byTestId('job-skill-edit'))).toBeNull();
-    expect(hasText(r.root, 'host does not report skill files')).toBe(true);
+    expect(hasText(r.root, 'machine does not report skill files')).toBe(true);
   });
 
   it("for a message action, links through the RECIPIENT chat's host, not the spawn host", async () => {
@@ -388,7 +388,7 @@ describe('JobEditor — Model picker', () => {
     const r = renderRN(<JobEditor />);
     await flush();
     expect(api.models).toHaveBeenCalledWith(HOST);
-    expect(pickerLabel(r, 'job-spawn-model')).toBe('Host default'); // a new job pins nothing
+    expect(pickerLabel(r, 'job-spawn-model')).toBe('Machine default'); // a new job pins nothing
     openPicker(r, 'job-spawn-model');
     expect(findAllHost(r.root, byTestId('job-spawn-model-option-claude-opus-5')).length).toBe(1);
   });
@@ -403,7 +403,7 @@ describe('JobEditor — Model picker', () => {
     pickOption(r, 'job-spawn-model', 'claude-opus-5');
     expect(pickerLabel(r, 'job-spawn-model')).toBe('Opus 5');
     pickOption(r, 'job-spawn-model', '');
-    expect(pickerLabel(r, 'job-spawn-model')).toBe('Host default');
+    expect(pickerLabel(r, 'job-spawn-model')).toBe('Machine default');
   });
 
   it('offers a Codex model only the permission modes Codex can run, resetting `auto`', async () => {

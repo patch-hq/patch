@@ -31,6 +31,7 @@ import { PatchArtifactPublishRequestEvent, type WireEvent } from '@patch/wire';
 import { verifySurfaceCredential } from '@patch/auth';
 import type { HostLink } from './host-link.js';
 import type { Registry } from './registry.js';
+import { SIGNIN_PAGE_CSP, signInPage, wantsHtml } from './signin-page.js';
 
 const BRIDGE_SURFACE_ID = 'artifact-bridge';
 /** Ids are daemon-minted hex digests; charset-validate before touching the fs. */
@@ -49,6 +50,8 @@ export const ARTIFACT_CSP = 'sandbox allow-scripts allow-popups allow-popups-to-
  * GET route which of the two this id is — see `registerArtifactRoutes` below. */
 interface RawArtifactSidecar {
   contentType: string;
+  /** Present for a downloadable file: served as an attachment under this name. */
+  filename?: string;
 }
 
 export interface ArtifactRoutesDeps {
@@ -190,8 +193,8 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     if (event.type !== 'patch.artifact.publish_request') return;
     const parsed = PatchArtifactPublishRequestEvent.safeParse(event);
     // Answer the machine that asked. `send()` would route by the chat's registry
-    // entry or the account's home machine — a chat the server has not mapped yet,
-    // or one on a non-home machine, never got its answer and the host sat out its
+    // entry or the Manager machine — a chat the server has not mapped yet,
+    // or one on a non-Manager machine, never got its answer and the host sat out its
     // timeout (`502 view_file_publish_failed: artifact publish timed out`).
     const reply = (out: WireEvent): void => {
       if (fromHostId !== null) deps.hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, out);
@@ -243,7 +246,10 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         writeFileSync(join(dir, `${artifactId}.bin`), Buffer.from(raw.base64, 'base64'));
         writeFileSync(
           join(dir, `${artifactId}.meta.json`),
-          JSON.stringify({ contentType: raw.contentType } satisfies RawArtifactSidecar),
+          JSON.stringify({
+            contentType: raw.contentType,
+            ...(raw.filename !== undefined ? { filename: raw.filename } : {}),
+          } satisfies RawArtifactSidecar),
           'utf8',
         );
       } else {
@@ -316,6 +322,14 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       return reply.code(404).send({ error: 'artifact not found' });
     }
     if (!(await authorised(req, chatId, artifactId))) {
+      if (wantsHtml(req.headers.accept)) {
+        return reply
+          .code(401)
+          .header('content-type', 'text/html; charset=utf-8')
+          .header('content-security-policy', SIGNIN_PAGE_CSP)
+          .header('cache-control', 'no-store')
+          .send(signInPage(`/api/chats/${chatId}/artifact/${artifactId}/share`));
+      }
       return reply.code(401).send({ error: 'unauthenticated' });
     }
     const dir = join(deps.artifactsDir, chatId);
@@ -330,7 +344,24 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         return reply.code(404).send({ error: 'artifact not found' });
       }
       const meta = JSON.parse(readFileSync(metaFile, 'utf8')) as RawArtifactSidecar;
-      return reply.code(200).header('content-type', meta.contentType).send(readFileSync(binFile));
+      reply
+        .code(200)
+        .header('content-type', meta.contentType)
+        // The type is agent-chosen: sandbox it like a page so a `text/html`
+        // raw publish cannot run in the SPA's origin.
+        .header('content-security-policy', ARTIFACT_CSP)
+        .header('x-content-type-options', 'nosniff')
+        .header('referrer-policy', 'no-referrer');
+      if (meta.filename !== undefined) {
+        // RFC 5987 form carries any unicode/quote safely; the plain `filename`
+        // is the ASCII-only fallback older clients read.
+        const ascii = meta.filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+        reply.header(
+          'content-disposition',
+          `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.filename)}`,
+        );
+      }
+      return reply.send(readFileSync(binFile));
     }
     const file = join(dir, `${artifactId}.html`);
     if (!existsSync(file)) {
@@ -345,6 +376,9 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         .code(200)
         .header('content-type', 'text/html; charset=utf-8')
         .header('content-security-policy', ARTIFACT_CSP)
+        .header('x-content-type-options', 'nosniff')
+        // The signature is in the URL; outbound requests must not carry it.
+        .header('referrer-policy', 'no-referrer')
         // A republished page keeps its URL, so a reload must never be answered from cache.
         .header('cache-control', 'no-store')
         .send(injectShim(readFileSync(file, 'utf8'), shim))

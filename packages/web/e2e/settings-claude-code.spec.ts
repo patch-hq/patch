@@ -1,18 +1,11 @@
 import { test, expect } from '@playwright/test';
-import {
-  PREFERENCES,
-  reportHost,
-  setClaudeSettings,
-  settingsUrl,
-  stubSettingsApi,
-  wsSent,
-} from './settingsHarness.js';
+import { setClaudeSettings, settingsUrl, stubSettingsApi, wsSent } from './settingsHarness.js';
 
-// Real-browser e2e for Claude Code's settings.json (Settings → Agent → Layers)
-// — a shared setting, one text for every host plus an override per OS — and a
-// host's memory entries (Settings → Memories) and settings.json drift
-// (Settings → Hosts): spec/02 § Claude Code settings, spec/01 § Settings.
-const AGENT = settingsUrl('agent');
+// Real-browser e2e for a host's Claude Code settings.json (Settings →
+// Providers) — that machine's own file, edited in place — and its memory
+// entries (Settings → Memories): spec/02 § Claude Code settings.
+const PROVIDERS = settingsUrl('providers');
+const EDITOR = 'host-d1-claude-settings';
 const MEMORIES = settingsUrl('memories');
 
 const FEEDBACK = {
@@ -24,16 +17,13 @@ const FEEDBACK = {
   body: 'Write real tests.',
 };
 
-const claudeSettings = (shared: string) => ({
-  claudeSettings: { shared, darwin: '', linux: '' },
-});
-
-/** Open the shared settings.json editor on the Agent page, holding `json`. */
+/** Open the settings.json editor on the Providers page, holding `json`. */
 async function openEditor(page: import('@playwright/test').Page, json: string): Promise<void> {
-  await stubSettingsApi(page, { preferences: claudeSettings(json) });
-  await page.goto(AGENT);
-  await page.getByTestId('claude-settings-shared-edit').click();
-  await expect(page.getByTestId('claude-settings-shared-json')).toBeVisible();
+  await stubSettingsApi(page);
+  await page.goto(PROVIDERS);
+  await setClaudeSettings(page, [], { settingsJson: json });
+  await page.getByTestId(`${EDITOR}-edit`).click();
+  await expect(page.getByTestId(`${EDITOR}-json`)).toBeVisible();
 }
 
 test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', () => {
@@ -41,21 +31,23 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     await stubSettingsApi(page);
   });
 
-  test('the shared settings.json and each OS override are there with no host involved', async ({
+  test('settings.json is on Providers for the chosen host, and Hosts and Agent no longer carry it', async ({
     page,
   }) => {
-    await page.goto(AGENT);
-    await expect(page.getByTestId('claude-settings-shared')).toContainText('None');
-    await expect(page.getByTestId('claude-settings-darwin')).toBeVisible();
-    await expect(page.getByTestId('claude-settings-linux')).toBeVisible();
-    // Memories are a machine's own, and say when it has not sent them.
-    await page.getByTestId('settings-nav-memories').click();
-    await expect(page.getByTestId('host-d1-memory-unreported')).toBeVisible();
+    await page.goto(PROVIDERS);
+    await setClaudeSettings(page, [], { settingsJson: '{"model":"opus"}' });
+    await expect(page.getByTestId(EDITOR)).toContainText('Set');
+    await page.goto(settingsUrl('agent'));
+    await expect(page.getByTestId('claude-settings-shared')).toHaveCount(0);
+    await page.goto(settingsUrl('hosts'));
+    await setClaudeSettings(page, [], { settingsJson: '{"model":"sonnet"}' });
+    await expect(page.getByText('Keep for every host')).toHaveCount(0);
+    await expect(page.getByText('Discard')).toHaveCount(0);
   });
 
-  test('shows the shared settings.json and a host’s memory entries', async ({ page }) => {
+  test('shows the host’s file and its memory entries', async ({ page }) => {
     await openEditor(page, '{"model":"opus"}');
-    await expect(page.getByTestId('claude-settings-shared-json')).toHaveValue('{"model":"opus"}');
+    await expect(page.getByTestId(`${EDITOR}-json`)).toHaveValue('{"model":"opus"}');
     await page.getByTestId('settings-nav-memories').click();
     await setClaudeSettings(page, [FEEDBACK]);
     const entry = page.getByTestId('host-d1-memory-portfolio-feedback_tests.md');
@@ -63,46 +55,28 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     await expect(page.getByTestId('memory-rendered')).toHaveText('Write real tests.');
   });
 
-  test('saving writes the shared setting to the server and closes on its answer', async ({
-    page,
-  }) => {
-    const server = await stubSettingsApi(page, { preferences: claudeSettings('{"model":"opus"}') });
-    await page.goto(AGENT);
-    await page.getByTestId('claude-settings-shared-edit').click();
-    await page.getByTestId('claude-settings-shared-json').fill('{"model":"sonnet"}');
-    await page.getByTestId('claude-settings-shared-save').click();
-    await expect(page.getByTestId('claude-settings-shared-json')).toHaveCount(0);
-    expect(server.patches).toContainEqual({
-      claudeSettings: {
-        ...(PREFERENCES['claudeSettings'] as object),
-        shared: '{"model":"sonnet"}',
-      },
-    });
-    // Nothing went to any one host.
-    expect(await wsSent(page)).toEqual([]);
-  });
-
-  test('a host’s settings.json changed on the machine shows on Hosts, to keep or discard', async ({
+  test('saving sends the text to that host alone, and closes when the host reports the file', async ({
     page,
   }) => {
     const server = await stubSettingsApi(page);
-    await page.goto(settingsUrl('hosts'));
-    await reportHost(page, { platform: 'linux' });
-    await setClaudeSettings(page, [], { drift: '{"model":"sonnet"}' });
-    const drift = page.getByTestId('host-d1-claude-drift');
-    await expect(drift).toContainText('"model":"sonnet"');
-    await page.getByTestId('host-d1-claude-drift-keep-os').click();
-    await expect
-      .poll(() => server.writes.map((w) => w.path))
-      .toContain('/api/settings/claude/adopt');
-    expect(server.writes.find((w) => w.path === '/api/settings/claude/adopt')?.body).toEqual({
-      hostId: 'd1',
-      target: 'linux',
-    });
-    await page.getByTestId('host-d1-claude-drift-discard').click();
+    await page.goto(PROVIDERS);
+    await setClaudeSettings(page, [], { settingsJson: '{"model":"opus"}' });
+    await page.getByTestId(`${EDITOR}-edit`).click();
+    await page.getByTestId(`${EDITOR}-json`).fill('{"model":"sonnet"}');
+    await page.getByTestId(`${EDITOR}-save`).click();
     await expect
       .poll(async () => await wsSent(page))
-      .toContainEqual({ type: 'host.claude_settings_discard', hostId: 'd1' });
+      .toContainEqual({
+        type: 'host.claude_settings_set',
+        hostId: 'd1',
+        text: '{"model":"sonnet"}',
+      });
+    // Still open: nothing is shown as saved until the machine says so.
+    await expect(page.getByTestId(`${EDITOR}-json`)).toBeVisible();
+    await setClaudeSettings(page, [], { settingsJson: '{"model":"sonnet"}' });
+    await expect(page.getByTestId(`${EDITOR}-json`)).toHaveCount(0);
+    // The server's shared settings were never involved.
+    expect(server.patches).toEqual([]);
   });
 
   test('removing a memory entry asks, then sends host.claude_memory_delete naming it', async ({
@@ -139,7 +113,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     });
 
     test('the editor is still a visible box several lines tall', async ({ page }) => {
-      const box = await page.getByTestId('claude-settings-shared-json').evaluate((el) => {
+      const box = await page.getByTestId('host-d1-claude-settings-json').evaluate((el) => {
         const cs = getComputedStyle(el);
         const r = el.getBoundingClientRect();
         return {
@@ -177,16 +151,16 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     });
 
     test('the empty editor names what it holds with a placeholder', async ({ page }) => {
-      const json = page.getByTestId('claude-settings-shared-json');
+      const json = page.getByTestId('host-d1-claude-settings-json');
       await expect(json).toHaveValue('');
       await expect(json).toHaveAttribute('placeholder', '{}');
     });
 
     test('Save sits directly under the editor rather than floating orphaned', async ({ page }) => {
       const geom = await page.evaluate(() => {
-        const wrap = document.querySelector('[data-testid="claude-settings-shared"]');
-        const ta = document.querySelector('[data-testid="claude-settings-shared-json"]');
-        const save = document.querySelector('[data-testid="claude-settings-shared-save"]');
+        const wrap = document.querySelector('[data-testid="host-d1-claude-settings-row"]');
+        const ta = document.querySelector('[data-testid="host-d1-claude-settings-json"]');
+        const save = document.querySelector('[data-testid="host-d1-claude-settings-save"]');
         if (!wrap || !ta || !save) throw new Error('Claude Code settings subsection not rendered');
         const w = wrap.getBoundingClientRect();
         const t = ta.getBoundingClientRect();
@@ -215,7 +189,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     test('the editor is readable in the dark colour scheme too', async ({ page }) => {
       for (const scheme of ['light', 'dark'] as const) {
         await page.emulateMedia({ colorScheme: scheme });
-        const seen = await page.getByTestId('claude-settings-shared-json').evaluate((el) => {
+        const seen = await page.getByTestId('host-d1-claude-settings-json').evaluate((el) => {
           const cs = getComputedStyle(el);
           const parse = (c: string): [number, number, number] => {
             const n = c.match(/[\d.]+/g)?.map(Number) ?? [];
@@ -285,7 +259,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     );
 
     async function measure(page: import('@playwright/test').Page) {
-      return page.getByTestId('claude-settings-shared-json').evaluate((el) => {
+      return page.getByTestId('host-d1-claude-settings-json').evaluate((el) => {
         const ta = el as HTMLTextAreaElement;
         return {
           lineHeight: parseFloat(getComputedStyle(ta).lineHeight),
@@ -350,9 +324,11 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
       await openEditor(page, REAL);
       const w = await page.evaluate(() => {
         const ta = document.querySelector(
-          '[data-testid="claude-settings-shared-json"]',
+          '[data-testid="host-d1-claude-settings-json"]',
         ) as HTMLElement;
-        const row = document.querySelector('[data-testid="claude-settings-shared"]') as HTMLElement;
+        const row = document.querySelector(
+          '[data-testid="host-d1-claude-settings-row"]',
+        ) as HTMLElement;
         const cs = getComputedStyle(row);
         return {
           ta: ta.getBoundingClientRect().width,

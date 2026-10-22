@@ -9,7 +9,7 @@
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
-import { emitJson, emitText, getTransport, run } from './_common.js';
+import { emitJson, emitText, getTransport, parseLimit, run } from './_common.js';
 
 interface ActivityMessage {
   chatId: string;
@@ -38,6 +38,18 @@ interface ActivityResult {
   chatSessions?: ActivityChatSession[];
   sessionsTruncated?: boolean;
   nextSessionsCursor?: number;
+}
+
+/**
+ * A `--messages-cursor` value: the ms-epoch the server handed back with a
+ * truncated page, so a non-negative integer. Rejected here, with the flag
+ * named, rather than forwarded for the server to refuse opaquely.
+ */
+function parseCursor(raw: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`--messages-cursor must be a non-negative integer (got ${raw})`);
+  }
+  return Number(raw);
 }
 
 /** Accepts an ISO-8601 date/time, or a bare ms-epoch integer. */
@@ -86,10 +98,14 @@ export function registerActivityCommands(program: Command): void {
           const params = new URLSearchParams();
           params.set('since', String(since));
           params.set('until', String(until));
-          if (opts.messagesCursor !== undefined) params.set('messagesCursor', opts.messagesCursor);
+          // Validated client-side like every other --limit (parseLimit's
+          // contract), never forwarded as typed.
+          if (opts.messagesCursor !== undefined) {
+            params.set('messagesCursor', String(parseCursor(opts.messagesCursor)));
+          }
           if (opts.sessions) params.set('includeSessions', 'true');
           if (opts.sessionsCursor !== undefined) params.set('sessionsCursor', opts.sessionsCursor);
-          if (opts.limit !== undefined) params.set('limit', opts.limit);
+          if (opts.limit !== undefined) params.set('limit', String(parseLimit(opts.limit)));
           if (t.kind === 'uds') {
             const callerChatId = process.env['PATCH_CHAT_ID'];
             if (!callerChatId) {

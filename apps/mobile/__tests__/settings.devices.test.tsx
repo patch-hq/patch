@@ -358,7 +358,7 @@ describe('Voice devices', () => {
     const r = renderRN(<VoiceDevicesSection />);
     expect(hasText(r.root, 'Voice devices')).toBe(true);
     expect(textOf(findHost(r.root, byTestId('voice-devices-no-machines')))).toBe(
-      'Add a host first',
+      'Add a machine first',
     );
     expect(queryHost(r.root, byTestId('voice-devices-empty'))).toBeNull();
   });

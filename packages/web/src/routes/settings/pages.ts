@@ -3,39 +3,45 @@
 
 export type SettingsPageId =
   | 'usage'
+  | 'chats'
   | 'agent'
   | 'mcp'
   | 'memories'
   | 'manager'
   | 'goals'
+  | 'prompts'
   | 'voice'
   | 'hooks'
   | 'computer'
   | 'activity'
   | 'hosts'
   | 'identity'
-  | 'keys'
+  | 'providers'
   | 'notifications'
   | 'devices'
+  | 'shortcuts'
   | 'updates'
   | 'account';
 
 export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string }[] = [
   { id: 'usage', title: 'Usage', group: 'Agents' },
+  { id: 'chats', title: 'Chats', group: 'Agents' },
   { id: 'agent', title: 'Agent', group: 'Agents' },
   { id: 'mcp', title: 'MCP', group: 'Agents' },
   { id: 'memories', title: 'Memories', group: 'Agents' },
   { id: 'manager', title: 'Manager', group: 'Agents' },
   { id: 'goals', title: 'Goals', group: 'Agents' },
+  { id: 'prompts', title: 'Prompts', group: 'Agents' },
   { id: 'voice', title: 'Voice', group: 'Agents' },
   { id: 'hooks', title: 'Hooks', group: 'Agents' },
   { id: 'computer', title: 'Computer use', group: 'Agents' },
   { id: 'activity', title: 'Activity', group: 'Agents' },
-  { id: 'hosts', title: 'Hosts', group: 'Setup' },
+  { id: 'hosts', title: 'Machines', group: 'Setup' },
   { id: 'identity', title: 'Agent identity', group: 'Setup' },
-  { id: 'keys', title: 'Keys', group: 'Setup' },
+  { id: 'providers', title: 'Providers', group: 'Setup' },
   { id: 'notifications', title: 'Notifications', group: 'Setup' },
   { id: 'devices', title: 'Devices', group: 'Setup' },
+  { id: 'shortcuts', title: 'Shortcuts', group: 'Setup' },
   { id: 'updates', title: 'Updates', group: 'System' },
   { id: 'account', title: 'Account', group: 'System' },
 ];

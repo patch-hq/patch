@@ -241,8 +241,8 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
       title: entry.type === 'dir' ? 'Delete folder' : 'Delete file',
       message:
         entry.type === 'dir'
-          ? `Delete the folder "${entry.path}" from the host? Only an empty folder can be deleted, and this cannot be undone.`
-          : `Delete "${entry.path}" from the host? This cannot be undone.`,
+          ? `Delete the folder "${entry.path}" from the machine? Only an empty folder can be deleted, and this cannot be undone.`
+          : `Delete "${entry.path}" from the machine? This cannot be undone.`,
       confirmLabel: 'Delete',
       danger: true,
     });

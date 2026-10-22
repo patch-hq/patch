@@ -64,6 +64,9 @@ describe('readClaudeSettingsJson / writeClaudeSettingsJson', () => {
       expect(readClaudeSettingsJson(home)).toBe('{"model":"opus"}');
 
       expect(() => writeClaudeSettingsJson(home, '{not json')).toThrow(InvalidSettingsJsonError);
+      // Valid JSON that is not an object is no settings.json either.
+      expect(() => writeClaudeSettingsJson(home, '[1]')).toThrow(/must be a JSON object/);
+      expect(() => writeClaudeSettingsJson(home, 'null')).toThrow(InvalidSettingsJsonError);
       // NO FALLBACK: a refused write must leave the last-good file in place.
       expect(readClaudeSettingsJson(home)).toBe('{"model":"opus"}');
     } finally {

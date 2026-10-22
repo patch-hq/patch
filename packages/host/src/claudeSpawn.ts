@@ -1,5 +1,46 @@
 import { spawn } from 'node:child_process';
+import { existsSync, lstatSync, symlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, join } from 'node:path';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
+
+/** What a resumed chat needs from the user's own Claude config dir. */
+const USER_CONFIG_ENTRIES = [
+  'skills',
+  'agents',
+  'commands',
+  'plugins',
+  'settings.json',
+  'CLAUDE.md',
+];
+
+/**
+ * A chat resumed from the session store runs under a throwaway
+ * `CLAUDE_CONFIG_DIR` (`/tmp/claude-resume-<id>`) the SDK fills with only the
+ * transcript and credentials — so none of the user's own skills, agents,
+ * commands or settings load. Link them in from the real config dir. A no-op
+ * for any other config dir. Throws on a failed link: a resumed chat silently
+ * missing its skills is the bug this exists to prevent.
+ */
+export function linkUserConfigIntoResumeDir(
+  env: SpawnOptions['env'],
+  realDir: string = process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
+): void {
+  const dir = env['CLAUDE_CONFIG_DIR'];
+  if (dir === undefined || !basename(dir).startsWith('claude-resume-') || dir === realDir) return;
+  for (const name of USER_CONFIG_ENTRIES) {
+    const src = join(realDir, name);
+    const dest = join(dir, name);
+    if (!existsSync(src)) continue;
+    try {
+      lstatSync(dest);
+      continue; // already there
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+    symlinkSync(src, dest);
+  }
+}
 
 /**
  * Spawn the Claude Code process as the leader of its own process group, and
@@ -16,6 +57,7 @@ export function spawnClaudeInGroup(
   opts: SpawnOptions,
   onRefused?: (message: string) => void,
 ): SpawnedProcess {
+  linkUserConfigIntoResumeDir(opts.env);
   const child = spawn(opts.command, opts.args, {
     cwd: opts.cwd,
     env: opts.env,
