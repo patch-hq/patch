@@ -8,6 +8,8 @@ describe('classifyFailure', () => {
     ['API Error: 403 permission_error', 'permanent'],
     ['API Error: 404 not_found_error: model: x', 'permanent'],
     ['Prompt is too long', 'permanent'],
+    ['429 You exceeded your current quota (insufficient_quota)', 'permanent'],
+    ['Your credit balance is too low to access the Anthropic API', 'permanent'],
     ['API Error: 413 request_too_large', 'permanent'],
     ["ENOENT: no such file or directory, open '/x'", 'permanent'],
     ['API Error: 529 overloaded_error', 'transient'],
@@ -38,5 +40,15 @@ describe('backoffMs', () => {
     expect([1, 2, 3, 10].map((a) => backoffMs(a, 5_000, 60_000))).toEqual([
       5_000, 10_000, 20_000, 60_000,
     ]);
+  });
+});
+
+describe('out of credit', () => {
+  it('is a stated usage limit and an exhausted account, not a retry', async () => {
+    const { isRateLimitError } = await import('../src/limitFailure.js');
+    const { isAccountExhaustedError } = await import('../src/accountFailover.js');
+    const m = 'Error code: 429 - insufficient_quota: You exceeded your current quota';
+    expect(isRateLimitError(m)).toBe(true);
+    expect(isAccountExhaustedError(m)).toBe(true);
   });
 });

@@ -33,6 +33,18 @@ export function isOverloadedError(message: string): boolean {
 }
 
 /**
+ * The out-of-credit refusal the provider APIs standardise on, as it reads in
+ * the error text: OpenAI's `insufficient_quota` / "exceeded your current
+ * quota" (a 429 that no wait fixes), Anthropic's "credit balance is too low",
+ * and a 402 "payment required" / "insufficient credits" from gateways.
+ */
+export function isOutOfCreditError(message: string): boolean {
+  return /insufficient_quota|billing_hard_limit_reached|exceeded your current quota|credit balance is too low|insufficient (credits?|funds)|payment required|api error: 402|\b402\b.{0,20}payment/i.test(
+    message,
+  );
+}
+
+/**
  * A usage/rate-limit rejection read out of the error TEXT.
  *
  * The fallback half of the classification, for a provider that sends no
@@ -53,6 +65,7 @@ export function isRateLimitError(message: string): boolean {
     msg.includes('spend limit') ||
     msg.includes('weekly limit') ||
     msg.includes('monthly limit') ||
+    isOutOfCreditError(message) ||
     isOverloadedError(message)
   );
 }

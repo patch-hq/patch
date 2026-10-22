@@ -82,6 +82,13 @@ const RULES: readonly Rule[] = [
   // would otherwise match the `api_error_status` field and misname it.
   { reason: 'session_crash', kind: 'transient', test: /\[session_crash\]/i },
   { reason: 'overloaded', kind: 'transient', test: /overloaded_error|api error: 529/i },
+  // Before `rate_limited`: OpenAI sends `insufficient_quota` as a 429, and no
+  // wait or retry returns credit. The usage-limit path owns it, not the ladder.
+  {
+    reason: 'out_of_credit',
+    kind: 'permanent',
+    test: /insufficient_quota|billing_hard_limit_reached|exceeded your current quota|credit balance is too low|insufficient (credits?|funds)|payment required|api error: 402/i,
+  },
   {
     reason: 'rate_limited',
     kind: 'transient',

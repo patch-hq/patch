@@ -102,7 +102,8 @@ export function isAccountExhaustedError(message: string): boolean {
     msg.includes('weekly limit') ||
     msg.includes('monthly limit') ||
     msg.includes('out of credit') ||
-    msg.includes('insufficient credit')
+    msg.includes('insufficient credit') ||
+    isOutOfCreditError(message)
   );
 }
 
@@ -307,6 +308,7 @@ export function parseLimitResetsAt(message: string, now: number): number | undef
 }
 
 import type { AccountStrategy } from '@patch/wire';
+import { isOutOfCreditError } from './limitFailure.js';
 
 /** One account as failover sees it: its id, and whether it has a credential at all. */
 export interface FailoverAccount {
