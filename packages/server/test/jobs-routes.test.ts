@@ -474,6 +474,30 @@ describe('jobs REST routes', () => {
     }
   });
 
+  it('PATCH /api/jobs/:id sets timeoutMinutes, null clears it, and 0 is refused', async () => {
+    const { built, jwt } = await bootstrap();
+    try {
+      const job = built.jobs.create({
+        name: 'bounded',
+        trigger: { type: 'todoist' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
+        concurrency: 1,
+      });
+      const patch = (body: unknown) =>
+        built.app.inject({
+          method: 'PATCH',
+          url: `/api/jobs/${job.id}`,
+          headers: { authorization: `Bearer ${jwt}` },
+          payload: body as object,
+        });
+      expect((await patch({ timeoutMinutes: 30 })).json().timeoutMinutes).toBe(30);
+      expect((await patch({ timeoutMinutes: 0 })).statusCode).toBe(400);
+      expect((await patch({ timeoutMinutes: null })).json().timeoutMinutes).toBeUndefined();
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('a job with no limit reports a null concurrency and an empty queue', async () => {
     const { built, jwt } = await bootstrap();
     try {

@@ -260,6 +260,7 @@ export class JobStore implements JobsInterface {
       action: body.action,
       ...(body.concurrency !== undefined ? { concurrency: body.concurrency } : {}),
       ...(body.queueing !== undefined ? { queueing: body.queueing } : {}),
+      ...(body.timeoutMinutes !== undefined ? { timeoutMinutes: body.timeoutMinutes } : {}),
       ...(body.window !== undefined && body.window !== null ? { window: body.window } : {}),
       ...(body.oneOff !== undefined ? { oneOff: body.oneOff } : {}),
       ...(body.wakeHost !== undefined ? { wakeHost: body.wakeHost } : {}),
@@ -363,6 +364,8 @@ export class JobStore implements JobsInterface {
     // § Concurrency); omitting the key leaves whatever the job already has.
     if (body.concurrency === null) delete next.concurrency;
     else if (body.concurrency !== undefined) next.concurrency = body.concurrency;
+    if (body.timeoutMinutes === null) delete next.timeoutMinutes;
+    else if (body.timeoutMinutes !== undefined) next.timeoutMinutes = body.timeoutMinutes;
     // Same convention for the gate (spec/08 § Gate): null removes it.
     if (body.gate === null) delete next.gate;
     else if (body.gate !== undefined) next.gate = body.gate;

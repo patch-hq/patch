@@ -703,6 +703,9 @@ export function inRunWindow(window: RunWindow, nowMs: number): boolean {
 /** A concurrency limit is a count of simultaneous fires — at least one. */
 export const Concurrency = z.number().int().min(1);
 
+/** How long a fire's chat may hold its concurrency slot — whole minutes, at least one. */
+export const TimeoutMinutes = z.number().int().min(1);
+
 /**
  * How a job's fires relate to one another (spec/08 § Queueing). Three modes:
  *
@@ -775,6 +778,8 @@ export const Job = z
     concurrency: Concurrency.optional(),
     /** Hours fires may start in; outside them a fire is held (`RunWindow`). */
     window: RunWindow.optional(),
+    /** Minutes a fire's chat may hold its slot before it is stopped (default 240). */
+    timeoutMinutes: TimeoutMinutes.optional(),
     /** Parallel / queue / append (`Queueing`). Not combinable with `concurrency`. */
     queueing: Queueing.optional(),
     /**
@@ -953,6 +958,7 @@ export const JobCreateBody = z
     gate: JobGate.nullable().optional(),
     action: JobAction,
     concurrency: Concurrency.optional(),
+    timeoutMinutes: TimeoutMinutes.optional(),
     /** `null` is accepted so the editor's one body shape serves create and patch. */
     window: RunWindow.nullable().optional(),
     queueing: Queueing.optional(),
@@ -985,6 +991,8 @@ export const JobPatchBody = z
     action: JobAction.optional(),
     /** `null` removes the limit; omitted leaves it as it is. */
     concurrency: Concurrency.nullable().optional(),
+    /** `null` goes back to the default; omitted leaves it. */
+    timeoutMinutes: TimeoutMinutes.nullable().optional(),
     /** `null` removes the run window; omitted leaves it as it is. */
     window: RunWindow.nullable().optional(),
     /** `null` removes the queueing mode (back to parallel); omitted leaves it. */

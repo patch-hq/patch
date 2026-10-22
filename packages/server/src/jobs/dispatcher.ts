@@ -458,6 +458,8 @@ interface PendingEntry {
    * job's whole backlog, which is the stampede the limit exists to stop.
    */
   concurrency?: number;
+  /** The job's own slot bound in ms when the fire was made; absent → the dispatcher default. */
+  timeoutMs?: number;
   /**
    * The queue this fire is limited within, when that is narrower than the job:
    * `queueing: { mode: 'queue', key }` gives each subject its own limit, named
@@ -514,6 +516,8 @@ interface HeldSlotRecord {
   acquiredAt: number;
   /** The limit in force when it was taken — reseeds the limit on restart. */
   concurrency: number;
+  /** The job's own bound for this slot, ms; absent → the dispatcher default. */
+  timeoutMs?: number;
   /** The keyed scope it counts against; absent → the job (see `PendingEntry.scope`). */
   scope?: string;
   /**
@@ -1296,6 +1300,7 @@ export class JobDispatcher {
       localId: entry.localId,
       acquiredAt: this.nowMs(),
       concurrency,
+      ...(entry.timeoutMs !== undefined ? { timeoutMs: entry.timeoutMs } : {}),
       trigger: entry.trigger,
       actionType: entry.actionType,
       hostId: entry.hostId,
@@ -1323,7 +1328,8 @@ export class JobDispatcher {
    * under a dead chat would never reach the bound at all.
    */
   private armSlotTimer(slot: HeldSlot): void {
-    const remaining = Math.max(0, slot.acquiredAt + this.slotTimeoutMs - this.nowMs());
+    const boundMs = slot.timeoutMs ?? this.slotTimeoutMs;
+    const remaining = Math.max(0, slot.acquiredAt + boundMs - this.nowMs());
     const timer = setTimeout(() => {
       const taken = this.takeSlot(slot.chatId, slot.localId);
       if (!taken) return;
@@ -1332,7 +1338,7 @@ export class JobDispatcher {
         jobId: taken.jobId,
         status: 'slot-timeout',
         trigger: taken.trigger,
-        error: `chat ${taken.chatId} held a concurrency slot for ${this.slotTimeoutMs}ms without finishing — the slot was released so the job's queue could move`,
+        error: `chat ${taken.chatId} held a concurrency slot for ${boundMs}ms without finishing — the chat was stopped and the slot released so the job's queue could move`,
         action: {
           type: taken.actionType,
           chatId: taken.chatId,
@@ -1340,8 +1346,11 @@ export class JobDispatcher {
           ...(taken.folder !== undefined ? { folder: taken.folder } : {}),
         },
       });
+      // Stop the run itself, not only the bookkeeping: a chat left working
+      // would carry on beside the next fire the released slot starts.
+      this.hostLink.send(DISPATCH_SURFACE_ID, { type: 'chat.stop_request', chatId: taken.chatId });
       this.logger.error(
-        { jobId: taken.jobId, chatId: taken.chatId, slotTimeoutMs: this.slotTimeoutMs },
+        { jobId: taken.jobId, chatId: taken.chatId, slotTimeoutMs: boundMs },
         'jobs: concurrency slot held past the bound by a chat that never finished, released',
       );
       this.drain(scopeOf(taken));
@@ -2200,6 +2209,7 @@ export class JobDispatcher {
       hostId,
       ...(folder !== undefined ? { folder } : {}),
       ...(limit !== undefined ? { concurrency: limit } : {}),
+      ...(job.timeoutMinutes !== undefined ? { timeoutMs: job.timeoutMinutes * 60_000 } : {}),
       ...(scope !== undefined ? { scope } : {}),
       ...(ensureInput !== undefined ? { ensureInput } : {}),
       ...(action.type === 'continue' && action.model !== undefined ? { model: action.model } : {}),

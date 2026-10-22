@@ -380,6 +380,42 @@ describe('job concurrency gate', () => {
     vi.useRealTimers();
   });
 
+  it("a job's own timeoutMinutes bounds its slot and stops the chat", () => {
+    vi.useFakeTimers();
+    const link = new InProcessHostLink();
+    const disp = new JobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
+      logger: silentLogger,
+      idGenerator: seqIds(),
+    });
+    const sent: WireEvent[] = [];
+    link.onEvent(() => undefined);
+    const origSend = link.send.bind(link);
+    link.send = ((surfaceId: string, ev: WireEvent) => {
+      sent.push(ev);
+      return origSend(surfaceId, ev);
+    }) as typeof link.send;
+    const job = makeJob({ concurrency: 1, timeoutMinutes: 10 });
+    disp.dispatch(job, { n: 1 }, 'todoist');
+    disp.dispatch(job, { n: 2 }, 'todoist');
+    const first = spawnedChatIds(link)[0] as string;
+    link.emit(spawnedEvent(first));
+    link.emit(stateEvent(first, 'running'));
+
+    vi.advanceTimersByTime(10 * 60_000 - 1);
+    expect(spawnedChatIds(link)).toHaveLength(1);
+    vi.advanceTimersByTime(2);
+
+    expect(spawnedChatIds(link)).toHaveLength(2);
+    expect(sent).toContainEqual({ type: 'chat.stop_request', chatId: first });
+    const run = readRuns(dir).find((r) => r.status === 'slot-timeout');
+    expect(run?.error).toContain(first);
+    disp.close();
+    vi.useRealTimers();
+  });
+
   it('never refuses a fire, even well past the old cap — a fire waits, it is never refused', () => {
     const link = new InProcessHostLink();
     const disp = new JobDispatcher({
