@@ -122,7 +122,6 @@ import { useChatBadge } from './ChatStatusBadge.js';
 import { shortcutLabel, shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
 import { failed } from '../lib/errorCopy.js';
-import { startPadsPolling, usePadsStore } from '../stores/padsStore.js';
 
 // How long a row's badge must be QUIET before we show its new value.
 const BADGE_SETTLE_MS = 250;
@@ -1048,10 +1047,6 @@ function RegularSidebar({
 function BottomNav(): JSX.Element {
   const location = useLocation();
   const onPads = location.pathname.startsWith('/pads');
-  // Changes the user has made on Pads and not yet sent — what the row's count shows.
-  const pads = usePadsStore((s) => s.pads);
-  useEffect(() => startPadsPolling(15_000), []);
-  const pending = (pads ?? []).reduce((n, p) => n + p.pending, 0);
   const onJobs = location.pathname.startsWith('/jobs');
   const onSettings = location.pathname.startsWith('/settings');
   // spec/14 § File browser — open without a chat: the one entry point that
@@ -1081,11 +1076,6 @@ function BottomNav(): JSX.Element {
           data-testid="nav-pads"
         >
           <Layers size={16} aria-hidden className="nav-icon" /> Pads
-          {pending > 0 ? (
-            <span className="pads-navcount" data-testid="nav-pads-count">
-              {pending}
-            </span>
-          ) : null}
         </OpenableLink>
         <OpenableLink
           to="/jobs"

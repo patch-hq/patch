@@ -164,7 +164,7 @@ describe.skipIf(!BROWSER_LAYER)('pads in the app', () => {
     await page.getByTestId('pads-route').waitFor();
     await page.getByTestId('pads-group-Dog Log').waitFor();
     expect(await page.getByTestId(`pad-badge-${padId}`).textContent()).toBe('1 change');
-    await expect.poll(() => page.getByTestId('nav-pads-count').textContent()).toBe('1');
+    expect(await page.getByTestId('nav-pads-count').count()).toBe(0);
     await expect
       .poll(() => page.locator(`[data-testid=pad-tile-${padId}] img`).count(), { timeout: 20_000 })
       .toBe(1);
