@@ -48,11 +48,10 @@ import type { Job, JobTrigger } from '@patch/wire/jobs';
 import { describeTrigger } from '../lib/jobDescribe.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { loadTranscript, dropTranscript, setBranch, trimCache } from '../lib/transcriptCache.js';
-import { patchShared } from './settings/sharedWrite.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { ChatHeader } from '../components/ChatHeader.js';
-import { AccountControl, ModelControl } from '../components/ChatModelControl.js';
+import { RateLimitCard } from '../components/RateLimitCard.js';
 import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
 import { SnoozedBanner } from '../components/SnoozedBanner.js';
@@ -93,17 +92,7 @@ import type { PatchWs } from '../api/ws.js';
 import { getActiveWs } from '../api/ws.js';
 import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
 import { isMeetingShown, useMeetingStore } from '../stores/meetingStore.js';
-import {
-  EXTRA_USAGE_URL,
-  EXTRA_USAGE_OFF_SENTENCE,
-  OVERAGE_DISABLED_REASON,
-  LIMIT_NAME,
-  formatDurationWords,
-  formatReset,
-  formatResetDetail,
-  presentFailure,
-  routingSentence,
-} from '../lib/usage.js';
+import { presentFailure } from '../lib/usage.js';
 import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
@@ -2114,7 +2103,7 @@ export function ChatRoute({
                     turn you just sent — the reply that is not coming yet — so
                     it reads as the next thing in the conversation. Up in the
                     chrome it was one more permanent-looking strip among six. */}
-                <RateLimitBubble row={row} />
+                <RateLimitCard row={row} />
                 <WakeHoldBubble row={row} />
               </div>
               {showScrollDown ? (
@@ -5559,179 +5548,6 @@ function WakeHoldBubble({
         <p className="rate-limit-headline">
           Waiting for <strong>{host}</strong> to wake. This turn runs as soon as it does.
         </p>
-      </div>
-    </div>
-  );
-}
-
-function RateLimitBubble({
-  row,
-}: {
-  row: import('../stores/types.js').ChatRow;
-}): JSX.Element | null {
-  const resumingAt = row.rateLimitResumingAt;
-  const block = row.limitBlock ?? null;
-  // Shared by every host (spec/01 § Settings).
-  const autoResume = usePreferencesStore((s) => s.preferences.autoResumeRateLimit);
-
-  // When it lifts. The block's own figure where there is one — the window's
-  // reading, rather than the instant a resume happens to have been armed for.
-  // A non-positive value (epoch 0) is folded into null here too: `??` only
-  // treats null/undefined as absent, so a 0 that slipped past an upstream
-  // guard would otherwise survive as a "stated" reset and render as
-  // `now - 0`, a decades-old elapsed time (spec/12 § nothing said when
-  // nothing stated a reset — this is that case, not a real timestamp).
-  const rawResetsAt = block?.resetsAt ?? resumingAt ?? null;
-  const resetsAt = rawResetsAt !== null && rawResetsAt > 0 ? rawResetsAt : null;
-
-  // A countdown that does not count is a timestamp with extra steps. Ten
-  // seconds is under the minute it renders, so the number is never visibly
-  // stale, and it costs one render.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (resetsAt === null) return;
-    const id = window.setInterval(() => setNow(Date.now()), 10_000);
-    return () => window.clearInterval(id);
-  }, [resetsAt]);
-
-  // A limit with no resume armed still gets the notice (spec/12): auto-resume
-  // being off decides whether there is a countdown, not whether the reader is
-  // told what happened. Gating this on `resumingAt` alone is what left the
-  // unparked case showing the provider's sentence and nothing else.
-  if (!resumingAt && !block) return null;
-  // The limit's own instant has passed and the pause is still here, so the wait
-  // is no longer the thing standing between the user and their reply — the
-  // un-run turn is. `Try now` stops being one of three equal controls and
-  // becomes the action.
-  const pastReset = resetsAt !== null && resetsAt <= now;
-  const isOverload = row.resumeKind === 'overloaded';
-  const limitName = LIMIT_NAME[block?.scope ?? 'unknown'];
-  // A chat locked to an account is not moved by the strategy, so the strategy's
-  // "all accounts out" sentence would describe a rotation it is not in.
-  const locked = row.preferredAccountId != null;
-  const routing = block?.routing && !locked ? routingSentence(block.routing, now) : '';
-
-  const resumeNow = (): void => {
-    getActiveWs()?.send({ type: 'chat.resume_now_request', chatId: row.chatId });
-  };
-  const toggleAutoResume = (): void => {
-    void patchShared('auto-resume', { autoResumeRateLimit: !autoResume });
-  };
-
-  return (
-    <div className="msg msg-system rate-limit-bubble" data-testid="rate-limit-bar">
-      <div className="content">
-        <p className="rate-limit-headline" data-testid="rate-limit-headline">
-          {isOverload ? (
-            <>Claude is busy right now.</>
-          ) : (
-            <>
-              You&rsquo;ve reached your <strong>{limitName}</strong>
-              {block?.accountLabel ? (
-                <>
-                  {' on '}
-                  <span data-testid="rate-limit-account">{block.accountLabel}</span>
-                </>
-              ) : null}
-              .
-            </>
-          )}{' '}
-          {/* Nothing said when nothing stated a reset — an invented one reads
-              as a promise the limit has not made. */}
-          {resetsAt === null ? null : (
-            <span data-testid="rate-limit-countdown" title={formatResetDetail(resetsAt)}>
-              {resetsAt > now ? (
-                <>
-                  It resets in <strong>{formatDurationWords(resetsAt - now)}</strong>, at{' '}
-                  {formatReset(resetsAt, now)}.
-                </>
-              ) : (
-                /* Past the reset, and the notice is STILL up — which now means
-                   something definite rather than nothing: a chat whose turn has
-                   started clears the pause, so this turn demonstrably has not
-                   run. "It should be back now" said the opposite, and left the
-                   only thing left to do looking optional. */
-                <>
-                  {/* Floored at 1ms: `formatDurationWords(0)` is "any moment
-                      now", which lands on the tick the reset passes and reads
-                      as "That was any moment now ago". */}
-                  That was <strong>{formatDurationWords(Math.max(1, now - resetsAt))}</strong> ago
-                  and this turn has not run.
-                </>
-              )}
-            </span>
-          )}
-        </p>
-
-        {routing ? (
-          <p className="rate-limit-routing" data-testid="rate-limit-routing">
-            {routing}
-          </p>
-        ) : null}
-
-        {locked ? (
-          <p className="rate-limit-routing" data-testid="rate-limit-locked">
-            This chat is locked to {block?.accountLabel ?? 'its account'} and will not move to
-            another.
-          </p>
-        ) : null}
-
-        <div className="rate-limit-actions">
-          {/* No tooltip: the label says it (spec/14 § Copy — a tooltip names a
-              control, it does not explain one). */}
-          <label className="rate-limit-auto">
-            <input
-              type="checkbox"
-              checked={autoResume}
-              onChange={toggleAutoResume}
-              data-testid="rate-limit-auto-resume"
-            />
-            Resume when the limit resets
-          </label>
-          <button
-            type="button"
-            className={pastReset ? 'ctrl rate-limit-retry-now' : 'ctrl'}
-            data-testid="rate-limit-retry"
-            data-past-reset={pastReset ? 'true' : 'false'}
-            onClick={resumeNow}
-          >
-            Try now
-          </button>
-          {/* The same switch the composer has, offered where the limit is: a
-              different model may have headroom this one has not (spec/04 § Model). */}
-          <ModelControl
-            chatId={row.chatId}
-            testId="rate-limit-change-model"
-            triggerLabel="Change model"
-          />
-          {locked ? (
-            <AccountControl
-              chatId={row.chatId}
-              testId="rate-limit-change-account"
-              changeLabel="Change account"
-            />
-          ) : null}
-          {block?.overageBlocked ? (
-            <a
-              className="ctrl"
-              data-testid="rate-limit-extra-usage"
-              href={EXTRA_USAGE_URL}
-              target="_blank"
-              rel="noreferrer"
-              // Patch cannot flip this — it is an Anthropic account setting, so
-              // the control is a way there, not a switch that lies.
-              // One sentence for this state, shared with the Settings line —
-              // two wordings for it read as two different situations.
-              title={
-                block.overageReason === OVERAGE_DISABLED_REASON
-                  ? `${EXTRA_USAGE_OFF_SENTENCE} Opens your Claude usage settings.`
-                  : 'Extra usage did not cover this limit. Opens your Claude usage settings.'
-              }
-            >
-              Turn on extra usage
-            </a>
-          ) : null}
-        </div>
       </div>
     </div>
   );

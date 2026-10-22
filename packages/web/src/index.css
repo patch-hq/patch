@@ -13121,66 +13121,47 @@ input.browse-filter {
 .rate-limit-bubble .content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  /* A card, not body text: the app speaking rather than the agent, so it is
-     set apart from the reply it stands in for by a raised surface and a hairline
-     rather than a coloured edge. Real tokens, no literal fallbacks (dark). */
-  align-self: flex-start;
-  width: min(100%, 460px);
+  gap: 10px;
+  align-self: stretch;
+  width: 100%;
   box-sizing: border-box;
-  padding: 16px 18px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+  font-size: 14px;
   line-height: 1.5;
+}
+.limit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
 }
 .rate-limit-headline {
   margin: 0;
   font-size: 15px;
+  font-weight: 600;
   color: var(--ink);
 }
-.rate-limit-headline strong {
-  font-weight: 600;
-}
-.rate-limit-headline [data-testid='rate-limit-countdown'] {
-  display: block;
-  margin-top: 4px;
+.limit-when {
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
-.rate-limit-headline [data-testid='rate-limit-countdown'] strong {
-  color: var(--ink);
-}
-.rate-limit-routing {
-  margin: 0;
+.limit-unsent {
+  margin: -6px 0 0;
   color: var(--ink-3);
 }
-.rate-limit-actions {
+.limit-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-start;
   gap: 8px;
-  margin-top: 2px;
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--line-soft);
 }
-.rate-limit-auto {
-  /* Buttons first, the preference as a quiet footer beneath them. */
-  order: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 0 100%;
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.rate-limit-auto input {
-  accent-color: var(--accent);
-  margin: 0;
-}
-.rate-limit-actions .ctrl {
+.limit-btn {
   min-height: 34px;
   padding: 0 14px;
   border: 1px solid var(--line);
@@ -13189,18 +13170,65 @@ input.browse-filter {
   border-radius: var(--radius-pill);
   display: inline-flex;
   align-items: center;
-}
-.rate-limit-actions a.ctrl {
+  gap: 4px;
+  font: inherit;
+  font-size: 14px;
   text-decoration: none;
+  cursor: pointer;
 }
-/* Past the reset there is nothing left to wait for, so re-sending the turn is
-   the only thing that moves it on. It becomes the filled primary action
-   (spec/12 § A usage or rate limit). */
-.rate-limit-actions .ctrl.rate-limit-retry-now {
+.limit-btn-main {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
+}
+.limit-btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.limit-menu-wrap {
+  position: relative;
+}
+.limit-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 14%);
+}
+.limit-menu button {
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.limit-menu button:hover {
+  background: var(--bg-panel);
+}
+.limit-auto {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.limit-auto input {
+  accent-color: var(--accent);
+  margin: 0;
 }
 
 /* ---------- File-browser loading states (spec/14 § File browser) -- */
