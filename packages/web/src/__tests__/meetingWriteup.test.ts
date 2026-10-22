@@ -21,7 +21,7 @@ const body = (html: string): HTMLElement => {
 describe('meeting write-up body', () => {
   it('underlines fixed names with the original, escaping everything else', () => {
     const html = itemHtml('WECA funds <b>', [{ from: 'Weka', to: 'WECA' }]);
-    expect(html).toBe('<span class="fixed" title="was: Weka">WECA</span> funds &lt;b&gt;');
+    expect(html).toBe('<span class="name-fixed" title="was: Weka">WECA</span> funds &lt;b&gt;');
     expect(itemHtml('WECAs are fine', [{ from: 'x', to: 'WECA' }])).toBe('WECAs are fine');
   });
 

@@ -19,7 +19,7 @@ export function itemHtml(text: string, fixes: MeetingNameFix[]): string {
   let last = 0;
   for (const m of text.matchAll(re)) {
     out += escapeHtml(text.slice(last, m.index));
-    out += `<span class="fixed" title="was: ${escapeHtml(byTo.get(m[1]!)!)}">${escapeHtml(m[1]!)}</span>`;
+    out += `<span class="name-fixed" title="was: ${escapeHtml(byTo.get(m[1]!)!)}">${escapeHtml(m[1]!)}</span>`;
     last = m.index + m[0].length;
   }
   return out + escapeHtml(text.slice(last));

@@ -820,11 +820,21 @@ test.describe('meeting mode — after', () => {
     const li = page.getByTestId('meeting-writeup-body').locator('li');
     const ink = (i: number) => li.nth(i).evaluate((e) => getComputedStyle(e).color);
     expect(await ink(0)).not.toBe(await ink(1));
-    const fixed = page.getByTestId('meeting-writeup-body').locator('.fixed');
+    const fixed = page.getByTestId('meeting-writeup-body').locator('.name-fixed');
     await expect(fixed).toHaveText('WECA');
     await expect(fixed).toHaveAttribute('title', 'was: Weka');
     expect(await fixed.evaluate((e) => getComputedStyle(e).borderBottomStyle)).toBe('dotted');
     expect(await fixed.evaluate((e) => getComputedStyle(e).position)).toBe('static');
+    // The text after a fixed name starts to its right, never underneath it.
+    const clear = await fixed.evaluate((e) => {
+      const next = e.nextSibling;
+      if (!next || !next.textContent) return true;
+      const r = document.createRange();
+      r.setStart(next, 0);
+      r.setEnd(next, 1);
+      return r.getBoundingClientRect().left >= e.getBoundingClientRect().right - 0.5;
+    });
+    expect(clear).toBe(true);
   });
   test("editing the write-up saves it, and an edited line becomes Tom's", async ({ page }) => {
     await page.goto(URL_ENDED);

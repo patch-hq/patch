@@ -14329,9 +14329,8 @@ select.permission-mode.is-pending {
 .mm-sum li.mine {
   color: var(--ink);
 }
-.mm-sum .fixed {
-  /* Something outside this sheet also styles a bare `.fixed` as position: fixed. */
-  position: static;
+.mm-sum .name-fixed {
+  /* Not `.fixed`: Tailwind's utility of that name is position: fixed, which lifts the word out of the line. */
   border-bottom: 1px dotted var(--accent);
 }
 /* Something at the start of the composer's input box. */
