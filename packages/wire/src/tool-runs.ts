@@ -26,6 +26,16 @@ export function isGroupableToolCall(tool: string | undefined, args: unknown): bo
   ) {
     return false;
   }
+  // A background agent starting is an event the user watches for: it stays in
+  // the transcript, with its status pill, not behind a run's summary.
+  if (
+    tool === 'patch_agent' ||
+    tool === 'mcp__patch__patch_agent' ||
+    tool === 'patch_delegate' ||
+    tool === 'mcp__patch__patch_delegate'
+  ) {
+    return false;
+  }
   // The agent's plan is a checklist card in the transcript, not a command.
   if (tool === 'TodoWrite') return false;
   return !isEditToolCall(tool, args);

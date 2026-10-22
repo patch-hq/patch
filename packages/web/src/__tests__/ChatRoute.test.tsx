@@ -3917,6 +3917,38 @@ describe('ChatRoute regression', () => {
     expect(screen.getByText('go')).toBeInTheDocument();
   });
 
+  it('keeps a patch_agent start at the top level, outside the tool-run summary', () => {
+    seedChat('c-tool-agent', [
+      { seq: 1, kind: 'tool_call', tool: 'Read', toolArgs: { file_path: 'a.ts' }, at: 0 },
+      { seq: 2, kind: 'tool_result', tool: 'Read', toolResult: { ok: true }, at: 0 },
+      {
+        seq: 3,
+        kind: 'tool_call',
+        tool: 'mcp__patch__patch_agent',
+        toolArgs: { prompt: 'go' },
+        callId: 'g',
+        at: 0,
+      },
+      {
+        seq: 4,
+        kind: 'tool_result',
+        tool: 'mcp__patch__patch_agent',
+        toolResult: { id: 'x' },
+        callId: 'g',
+        at: 0,
+      },
+      { seq: 5, kind: 'tool_call', tool: 'Bash', toolArgs: { command: 'ls' }, at: 0 },
+      { seq: 6, kind: 'tool_result', tool: 'Bash', toolResult: { code: 0 }, at: 0 },
+    ]);
+    renderChat('c-tool-agent');
+    // The lone calls either side are single rows, not a run: nothing is folded,
+    // and the agent start is one of the visible top-level rows.
+    expect(screen.queryAllByTestId('tool-group')).toHaveLength(0);
+    expect(screen.getAllByTestId('tool-call').some((c) => /agent/i.test(c.textContent ?? ''))).toBe(
+      true,
+    );
+  });
+
   it('expands a tool-run group into the individual call and result rows', () => {
     seedChat('c-tool-run-open', [
       { seq: 1, kind: 'tool_call', tool: 'Read', toolArgs: { file_path: 'a.ts' }, at: 0 },

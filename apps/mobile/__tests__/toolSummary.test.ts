@@ -201,6 +201,23 @@ describe('groupToolRuns', () => {
     expect(drawn.some((e) => e.callId === 'b' && e.kind === 'tool_result')).toBe(true);
   });
 
+  it('keeps a patch_agent start as its own top-level row between grouped calls', () => {
+    const rows = groupToolRuns([
+      call(1, 'Read', { file_path: 'x' }, 'a'),
+      result(2, 'Read', 'a'),
+      call(3, 'mcp__patch__patch_agent', { prompt: 'go' }, 'g'),
+      call(4, 'Bash', { command: 'ls' }, 'b'),
+      result(5, 'mcp__patch__patch_agent', 'g'),
+      result(6, 'Bash', 'b'),
+    ]);
+    const agent = rows.find((r) => r.kind === 'entry' && r.entry.callId === 'g');
+    if (agent?.kind !== 'entry') throw new Error('expected the agent row');
+    expect(agent.result?.callId).toBe('g');
+    for (const r of rows) {
+      if (r.kind === 'group') expect(r.entries.some((e) => e.callId === 'g')).toBe(false);
+    }
+  });
+
   it('leaves a lone call as its own row — one call is not a run', () => {
     const rows = groupToolRuns([call(0, 'Read', { file_path: 'a.ts' }), result(1, 'Read')]);
     expect(rows.map((r) => r.kind)).toEqual(['entry', 'entry']);

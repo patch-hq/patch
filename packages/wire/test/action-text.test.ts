@@ -43,3 +43,16 @@ describe('isGroupableToolCall for patch_ask_human', () => {
     expect(isGroupableToolCall('patch_ask_human', {})).toBe(true);
   });
 });
+
+describe('isGroupableToolCall for patch_agent', () => {
+  it('keeps an agent start out of a run however the tool is named', () => {
+    for (const t of [
+      'patch_agent',
+      'mcp__patch__patch_agent',
+      'patch_delegate',
+      'mcp__patch__patch_delegate',
+    ]) {
+      expect(isGroupableToolCall(t, { prompt: 'x' })).toBe(false);
+    }
+  });
+});
