@@ -22,6 +22,7 @@ vi.mock('../api/rest.js', () => ({
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getChatHistory: vi.fn().mockResolvedValue({ events: [] }),
     uploadAttachment: vi.fn(),
+    detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
   },
 }));
 
