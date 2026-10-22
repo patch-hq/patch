@@ -91,8 +91,8 @@ describe('PatchWs dispatch — composer_draft.list', () => {
     fake.receive({
       type: 'composer_draft.list',
       drafts: [
-        { chatId: 'c1', text: 'first', updatedAt: 1 },
-        { chatId: 'c2', text: 'second', updatedAt: 2 },
+        { chatId: 'c1', text: 'first', attachments: [], updatedAt: 1 },
+        { chatId: 'c2', text: 'second', attachments: [], updatedAt: 2 },
       ],
     });
     expect(useComposerDraftStore.getState().drafts).toEqual({ c1: 'first', c2: 'second' });

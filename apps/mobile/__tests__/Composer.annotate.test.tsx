@@ -25,12 +25,19 @@ vi.mock('../src/lib/hookCheck', async (orig) => ({
   ...(await orig<typeof import('../src/lib/hookCheck')>()),
   checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
 }));
-vi.mock('../src/api/rest', () => ({
-  api: { skills: vi.fn().mockResolvedValue({ skills: [] }), uploadAttachment: vi.fn() },
-}));
-const { readSpy, writeSpy } = vi.hoisted(() => ({
+const { readSpy, writeSpy, uploadSpy, deleteSpy } = vi.hoisted(() => ({
   readSpy: vi.fn(),
   writeSpy: vi.fn(),
+  uploadSpy: vi.fn(),
+  deleteSpy: vi.fn(),
+}));
+vi.mock('../src/api/rest', () => ({
+  api: {
+    skills: vi.fn().mockResolvedValue({ skills: [] }),
+    uploadAttachment: uploadSpy,
+    deleteAttachment: deleteSpy,
+    detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
+  },
 }));
 vi.mock('expo-file-system', () => ({
   cacheDirectory: 'file:///cache/',
@@ -56,6 +63,12 @@ const DOC = {
   kind: 'file' as const,
 };
 
+// Attachments already uploaded to the chat's draft, as another attach would leave them.
+const seed = (list: Array<typeof IMG | typeof DOC>): void =>
+  useComposerAttachmentStore.setState({
+    byKey: { c1: list.map((a) => ({ ...a, status: 'uploaded' as const })) },
+  });
+
 const names = (): string[] =>
   (useComposerAttachmentStore.getState().byKey['c1'] ?? []).map((a) => a.name);
 
@@ -77,6 +90,21 @@ beforeEach(() => {
   _resetSendQueue();
   useComposerAttachmentStore.getState()._reset();
   useUiStore.setState({ errors: [] });
+  uploadSpy
+    .mockReset()
+    .mockImplementation((chatId: string, f: { name: string; mimeType: string }) =>
+      Promise.resolve({
+        ok: true,
+        ref: {
+          id: `srv-${f.name}`,
+          name: f.name,
+          mimeType: f.mimeType,
+          kind: 'image',
+          url: `/api/chats/${chatId}/attachment/srv-${f.name}`,
+        },
+      }),
+    );
+  deleteSpy.mockReset().mockResolvedValue({ ok: true });
   readSpy.mockReset().mockResolvedValue('QUJD');
   writeSpy.mockReset().mockResolvedValue(undefined);
 });
@@ -88,14 +116,14 @@ afterEach(() => {
 
 describe('Composer — annotate pencil', () => {
   it('is offered on an image chip and not on a file chip', () => {
-    actSync(() => useComposerAttachmentStore.getState().add('c1', [IMG, DOC]));
+    actSync(() => seed([IMG, DOC]));
     const r = mount();
     expect(findHost(r.root, byLabel('Annotate shot.png'))).toBeTruthy();
     expect(queryHost(r.root, byLabel('Annotate notes.pdf'))).toBeNull();
   });
 
   it('opens the annotator on the chosen image', async () => {
-    actSync(() => useComposerAttachmentStore.getState().add('c1', [DOC, IMG]));
+    actSync(() => seed([DOC, IMG]));
     const r = mount();
     expect(queryHost(r.root, byTestId('image-annotator'))).toBeNull();
     await actAsync(async () => {
@@ -107,11 +135,7 @@ describe('Composer — annotate pencil', () => {
   });
 
   it('Done replaces the attachment in place with the annotated PNG', async () => {
-    actSync(() =>
-      useComposerAttachmentStore
-        .getState()
-        .add('c1', [DOC, IMG, { ...DOC, key: 'doc-2', name: 'b.pdf' }]),
-    );
+    actSync(() => seed([DOC, IMG, { ...DOC, key: 'doc-2', name: 'b.pdf' }]));
     const r = mount();
     await actAsync(async () => {
       findHost(r.root, byLabel('Annotate shot.png')).props['onPress']();
@@ -134,7 +158,8 @@ describe('Composer — annotate pencil', () => {
     const next = useComposerAttachmentStore.getState().byKey['c1']![1]!;
     expect(next).toMatchObject({ mimeType: 'image/png', kind: 'image', width: 9, height: 7 });
     expect(next.key).not.toBe('img-1');
-    expect(next.uri.startsWith('file:///cache/')).toBe(true);
+    expect(next.uri?.startsWith('file:///cache/')).toBe(true);
+    expect(deleteSpy).toHaveBeenCalledWith('c1', 'img-1');
     // The chip re-renders as the annotated image, and the annotator has closed.
     expect(findHost(r.root, byLabel('Remove shot-annotated.png'))).toBeTruthy();
     expect(queryHost(r.root, byLabel('Remove shot.png'))).toBeNull();
@@ -142,7 +167,7 @@ describe('Composer — annotate pencil', () => {
   });
 
   it('Cancel leaves the attachment untouched and closes the annotator', async () => {
-    actSync(() => useComposerAttachmentStore.getState().add('c1', [IMG]));
+    actSync(() => seed([IMG]));
     const r = mount();
     await actAsync(async () => {
       findHost(r.root, byLabel('Annotate shot.png')).props['onPress']();
@@ -159,13 +184,15 @@ describe('Composer — annotate pencil', () => {
   });
 
   it('reports an annotation whose original was removed meanwhile', async () => {
-    actSync(() => useComposerAttachmentStore.getState().add('c1', [IMG]));
+    actSync(() => seed([IMG]));
     const r = mount();
     await actAsync(async () => {
       findHost(r.root, byLabel('Annotate shot.png')).props['onPress']();
       await flush();
     });
-    actSync(() => useComposerAttachmentStore.getState().remove('c1', 'img-1'));
+    actSync(() =>
+      useComposerAttachmentStore.getState().remove('c1', { kind: 'chat', chatId: 'c1' }, 'img-1'),
+    );
     await actAsync(async () => {
       (findHost(r.root, byTestId('annotator-webview')).props['onMessage'] as (e: unknown) => void)({
         nativeEvent: {
@@ -210,7 +237,7 @@ describe('Composer — sketch without a photo', () => {
   });
 
   it('Done attaches the drawing as a new sketch-*.png image chip', async () => {
-    actSync(() => useComposerAttachmentStore.getState().add('c1', [DOC]));
+    actSync(() => seed([DOC]));
     const r = mount();
     await actAsync(async () => {
       findHost(r.root, byLabel('Sketch')).props['onPress']();
@@ -224,9 +251,10 @@ describe('Composer — sketch without a photo', () => {
     });
     expect(names()).toHaveLength(2);
     expect(names()[0]).toBe('notes.pdf');
-    expect(names()[1]).toMatch(/^sketch-\d+\.png$/);
+    expect(names()[1]).toMatch(/^sketch-\d+\.(png|jpg)$/);
+    // The chip is the uploaded copy: the attach-time upload downscales an image,
+    // so its type and name come from the server's ref, not from the PNG drawn.
     expect(useComposerAttachmentStore.getState().byKey['c1']![1]).toMatchObject({
-      mimeType: 'image/png',
       kind: 'image',
       width: 1200,
       height: 1600,

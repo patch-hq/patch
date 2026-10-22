@@ -22,6 +22,7 @@ import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
 import { useSignInStore } from '../stores/signInStore.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
@@ -888,6 +889,17 @@ export class PatchWs {
       useDraftStore.getState().applyRemoved(event.id);
       return;
     }
+    if (event.type === 'new_chat_draft.attachments_list') {
+      useComposerAttachmentStore.getState().applyList(
+        event.drafts.map((d) => ({ draftKey: d.id, attachments: d.attachments })),
+        'new-chat-draft',
+      );
+      return;
+    }
+    if (event.type === 'new_chat_draft.attachments_changed') {
+      useComposerAttachmentStore.getState().applyAttachmentsChanged(event.id, event.attachments);
+      return;
+    }
     // spec/10 § Surface linking — a new device is asking to sign in.
     if (event.type === 'signin.requested') {
       useSignInStore
@@ -911,12 +923,26 @@ export class PatchWs {
       useComposerDraftStore.getState().applyDraftList(event.drafts);
       return;
     }
+    if (event.type === 'composer_draft.attachments_list') {
+      useComposerAttachmentStore.getState().applyList(
+        event.drafts.map((d) => ({ draftKey: d.chatId, attachments: d.attachments })),
+        'chat',
+      );
+      return;
+    }
     if (event.type === 'composer_draft.updated') {
       useComposerDraftStore.getState().applyDraftUpdated(event.chatId, event.text, event.updatedAt);
       return;
     }
     if (event.type === 'composer_draft.cleared') {
       useComposerDraftStore.getState().applyDraftCleared(event.chatId, event.updatedAt);
+      return;
+    }
+    // spec/14 & spec/15 § Composer → Attachments — independent of the draft text.
+    if (event.type === 'composer_draft.attachments_changed') {
+      useComposerAttachmentStore
+        .getState()
+        .applyAttachmentsChanged(event.chatId, event.attachments);
       return;
     }
     // spec/09 § `### desktop` — a desktop-channel notify becomes a native OS

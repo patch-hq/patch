@@ -28,13 +28,17 @@ import { __lastCopied, __resetClipboard, __setFail } from './stubs/expo-clipboar
 import { __resetMessageActions } from '../src/components/MessageActions';
 import { useUiStore } from '../src/stores/uiStore';
 
-const uploadAttachmentSpy = vi.fn();
+const { uploadAttachmentSpy } = vi.hoisted(() => ({ uploadAttachmentSpy: vi.fn() }));
 vi.mock('../src/api/rest', () => ({
   api: {
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     deleteChat: vi.fn(),
     pinChat: vi.fn(),
     uploadAttachment: uploadAttachmentSpy,
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — composerAttachmentStore.ts
+    // now imports `api` too, so every method it might call needs a mock here.
+    detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
+    deleteAttachment: vi.fn().mockResolvedValue({ ok: true }),
   },
 }));
 const sendMock = vi.fn();
@@ -1264,15 +1268,11 @@ describe('working indicator', () => {
     uploadAttachmentSpy.mockReturnValue(new Promise(() => {}));
     const r = renderRN(<ChatDetailScreen />);
     actSync(() => {
-      useComposerAttachmentStore.getState().add('c1', [
-        {
-          key: 'img',
-          uri: 'file:///cache/img.png',
-          name: 'img.png',
-          mimeType: 'image/png',
-          kind: 'image',
-        },
-      ]);
+      useComposerAttachmentStore
+        .getState()
+        .attach('c1', { kind: 'chat', chatId: 'c1' }, [
+          { uri: 'file:///cache/img.png', name: 'img.png', mimeType: 'image/png' },
+        ]);
     });
     update(r, <ChatDetailScreen />);
     await actAsync(async () => {

@@ -63,7 +63,7 @@ import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
 import { ImageAnnotator } from './ImageAnnotator.js';
 import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
-import type { PermissionMode } from '@patch/wire';
+import type { AttachmentRef, PermissionMode } from '@patch/wire';
 import {
   permissionModesFor,
   providerBuiltinCommands,
@@ -76,9 +76,11 @@ import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import {
-  NO_ATTACHMENTS,
   useComposerAttachmentStore,
-  type PendingAttachment,
+  waitForAttachmentUpload,
+  NO_ATTACHMENTS,
+  type AttachmentTarget,
+  type DraftAttachment,
 } from '../stores/composerAttachmentStore.js';
 import { getActiveWs } from '../api/ws.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -148,8 +150,12 @@ export const PERMISSION_MODES: readonly PermissionMode[] = [
   'plan',
 ];
 
-function kindForFile(file: File): 'image' | 'file' {
-  return file.type.startsWith('image/') ? 'image' : 'file';
+/** Attach a no-op `.catch` to `p` so a REJECTION doesn't surface as an
+ *  unhandled-rejection warning when nothing else ever awaits this exact
+ *  promise — harmless alongside whatever DOES await it (a separate handler
+ *  on the same promise; one doesn't swallow the rejection for the other). */
+function silenceUnlessAwaited(p: Promise<unknown>): void {
+  p.catch(() => {});
 }
 
 /** The chip a hover/tap is currently showing a preview for (spec/14 §
@@ -166,7 +172,7 @@ interface ChipPreviewState {
  *  a folder full of same-named files would collapse into one chip and the
  *  agent would have no way to tell which is which. Zips need none of this:
  *  a dropped `.zip` already arrives as a single flat `File` (its listing is
- *  never expanded), so `kindForFile` handles it like any other attachment. */
+ *  never expanded), so it attaches like any other file. */
 function withRelativeName(file: File, relativePath: string): File {
   if (relativePath === file.name) return file;
   return new File([file], relativePath, { type: file.type, lastModified: file.lastModified });
@@ -241,17 +247,6 @@ export function dragHasFiles(e: React.DragEvent): boolean {
   return Array.from(e.dataTransfer.types).includes('Files');
 }
 
-function makePending(file: File): PendingAttachment {
-  const kind = kindForFile(file);
-  return {
-    key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    file,
-    name: file.name || (kind === 'image' ? 'image' : 'file'),
-    kind,
-    ...(kind === 'image' ? { previewUrl: URL.createObjectURL(file) } : {}),
-  };
-}
-
 export interface ComposerProps {
   chatId: string;
   /**
@@ -311,6 +306,17 @@ export interface ComposerProps {
    * to hold a list yet.
    */
   onAddToTodo?(message: string, files: OutgoingFile[]): Promise<boolean>;
+  /**
+   * The new-chat draft's own id (spec/14 & spec/15 § Composer →
+   * Attachments) — only meaningful alongside `resolveChatId`. Attachments
+   * upload straight away, and a not-yet-spawned chat has no chatId to scope
+   * them under yet, so they're scoped under THIS instead, the same key
+   * `new_chat_draft.*` already addresses the draft by. Defaults to the
+   * literal `chatId` ("new") when omitted — fine for a caller with exactly
+   * one new-chat composer live at a time, wrong the moment two are (which is
+   * why NewChatRoute always passes the real one).
+   */
+  newChatDraftId?: string;
   /**
    * When provided, the mic runs in NOTE mode: it fires this to start a voice
    * NOTE (the overlay-driven, fire-a-turn flow) instead of transcribing into the
@@ -455,6 +461,7 @@ export const Composer = forwardRef(function Composer(
     resolveChatId,
     onScheduleSend,
     onAddToTodo,
+    newChatDraftId,
     onStartVoiceNote,
     onStartCall,
     recorderFactory,
@@ -656,17 +663,54 @@ export const Composer = forwardRef(function Composer(
   }, [value]);
   const pushError = useUiStore((s) => s.pushError);
   const dictateChord = useUiStore((s) => s.dictateChord);
-  // Attachments the user has added but not yet sent (spec/14 § Composer). They
-  // upload on send; a failed upload surfaces an error and keeps the attachment
-  // (NO FALLBACK — never silently dropped).
-  const attachments = useComposerAttachmentStore((s) => s.byChat[chatId] ?? NO_ATTACHMENTS);
-  const setAttachments = (
-    fn: PendingAttachment[] | ((cur: PendingAttachment[]) => PendingAttachment[]),
-  ): void =>
-    useComposerAttachmentStore.getState().update(chatId, typeof fn === 'function' ? fn : () => fn);
-  // A new-chat send with attachments waiting on the chat to be created
-  // (`resolveChatId`). Attachment uploads never hold the composer: the message
-  // is in the stream, counting them, the moment Send is pressed.
+  // Attachments the user (or another surface) has added but not yet sent
+  // (step 3 of 3 — spec/14 & spec/15 § Composer → Attachments). Each uploads
+  // the moment it's attached — server-owned, synced down onto every open
+  // surface — rather than waiting for Send; a failed upload keeps the chip,
+  // marked `failed`, with the file held for Retry (NO FALLBACK — never
+  // silently dropped). Scoped by `attachmentDraftKey`: an existing chat's own
+  // chatId, or (for a not-yet-spawned new chat) its draft's own id, since
+  // there's no chatId to scope under yet.
+  const attachmentDraftKey = resolveChatId ? (newChatDraftId ?? chatId) : chatId;
+  const attachmentTarget: AttachmentTarget = resolveChatId
+    ? { kind: 'new-chat-draft', draftId: attachmentDraftKey }
+    : { kind: 'chat', chatId };
+  const attachments = useComposerAttachmentStore(
+    (s) => s.byKey[attachmentDraftKey] ?? NO_ATTACHMENTS,
+  );
+  const attachAction = useComposerAttachmentStore((s) => s.attach);
+  const removeAttachmentAction = useComposerAttachmentStore((s) => s.remove);
+  const retryAttachmentAction = useComposerAttachmentStore((s) => s.retry);
+  const replaceAttachmentFileAction = useComposerAttachmentStore((s) => s.replaceFile);
+  const detachAttachments = useComposerAttachmentStore((s) => s.detach);
+
+  /** What a send took leaves the draft (bookkeeping only, never deleting a
+   *  byte); a file attached since stays. A file still uploading at Send is
+   *  released by the store once its upload lands. */
+  function releaseSent(pending: DraftAttachment[]): void {
+    const removed = detachAttachments(
+      attachmentDraftKey,
+      pending.map((a) => a.key),
+    );
+    // A new-chat draft is discarded wholesale by the caller once it spawns
+    // (removeDraft + new_chat_draft.discard) — only an existing chat's
+    // composer draft needs the server told.
+    if (resolveChatId) return;
+    // Read after the detach: a file that landed since Send is uploaded by now.
+    const ready = removed.filter((a) => a.status === 'uploaded').map((a) => a.key);
+    if (ready.length === 0) return;
+    api.detachAttachments(chatId, ready).catch((err: Error) => {
+      // The send itself went through; the server still lists the files as
+      // pending on the draft, so say so rather than leave it unexplained.
+      pushError(`couldn’t release the draft’s attachments: ${err.message}`);
+    });
+  }
+
+  // A new-chat send waiting on the chat to be created (`resolveChatId`) and
+  // its already-uploaded draft attachments promoted to it. Attachment
+  // UPLOADS never hold the composer (they started the moment each was
+  // attached) — this only covers the brief window between Send and the new
+  // chat existing.
   const [resolving, setResolving] = useState(false);
 
   // Skill autocomplete (spec/14 § Composer): typing `/` opens a dropdown of the
@@ -884,7 +928,7 @@ export const Composer = forwardRef(function Composer(
       useUiStore.getState().pushError('Files can’t be added while editing a message');
       return;
     }
-    setAttachments((cur) => [...cur, ...list.map(makePending)]);
+    attachAction(attachmentDraftKey, attachmentTarget, list);
   }
 
   // Drag-and-drop onto the composer (spec/14 § Composer — attach ANY file,
@@ -942,31 +986,28 @@ export const Composer = forwardRef(function Composer(
   }
 
   function removeAttachment(key: string): void {
-    setAttachments((cur) => {
-      const found = cur.find((a) => a.key === key);
-      if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl);
-      return cur.filter((a) => a.key !== key);
-    });
+    removeAttachmentAction(attachmentDraftKey, attachmentTarget, key);
   }
 
   // The pending image currently open in the markup editor (spec/14 § Composer
   // — screenshot markup). Swapping its `file`/`previewUrl` in place keeps the
   // same `key`, so it stays the same chip and flows through the ordinary
   // upload path unchanged.
-  const [annotating, setAnnotating] = useState<PendingAttachment | null>(null);
+  const [annotating, setAnnotating] = useState<DraftAttachment | null>(null);
   const [sketching, setSketching] = useState(false);
   // The pending image open in the full-screen preview (click its thumbnail).
-  const [previewing, setPreviewing] = useState<PendingAttachment | null>(null);
+  const [previewing, setPreviewing] = useState<DraftAttachment | null>(null);
 
   function replaceAttachmentFile(key: string, file: File): void {
-    setAttachments((cur) =>
-      cur.map((a) => {
-        if (a.key !== key) return a;
-        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-        return { ...a, file, name: file.name, previewUrl: URL.createObjectURL(file) };
-      }),
-    );
+    replaceAttachmentFileAction(attachmentDraftKey, attachmentTarget, key, file);
   }
+
+  // Attachments are now SERVER-owned and keyed by `attachmentDraftKey`, not
+  // component-local state — a composer unmounting (navigating away and back)
+  // must not revoke previews or drop chips still legitimately pending
+  // (step 3 of 3). The store itself revokes a preview exactly when an entry
+  // actually leaves it (remove/detach/reconciled-away), which now happens
+  // regardless of whether any composer is mounted to see it.
 
   // spec/14 § Composer — pasting a clipboard image (screenshot / copied image)
   // attaches it directly (⌘V / Ctrl V into the composer).
@@ -1541,12 +1582,18 @@ export const Composer = forwardRef(function Composer(
             icon: <ListPlus size={ICON_SIZE} aria-hidden />,
             run: () => {
               const text = value.trim();
-              const files = attachments;
-              if (!text && files.length === 0) return;
+              const held = attachments;
+              if (!text && held.length === 0) return;
+              const files = held.map((a) =>
+                toOutgoingFile(a, a.status === 'uploading' ? waitForOwnUpload(a) : undefined),
+              );
               void onAddToTodo(text, files).then((ok) => {
                 if (ok === false) return;
                 setValue('');
-                setAttachments([]);
+                if (held.length === 0) return;
+                // The files now belong to the todo item: detach from the draft
+                // (bookkeeping only, never deleting a byte).
+                releaseSent(held);
               });
             },
           },
@@ -1588,6 +1635,59 @@ export const Composer = forwardRef(function Composer(
     submitText(value, false, interrupt);
   }
 
+  /** Build the outgoing-message shape for one already-known attachment —
+   *  carries its `ref` when uploaded (step 3 of 3: sendQueue then uses it
+   *  as-is, never re-uploading), or `refPromise` (a caller-built wait) for
+   *  one Send raced ahead of. Anything else (a `failed` chip, or one that
+   *  never made it to the draft store — e.g. attached offline) carries bare
+   *  `file`, which sendQueue falls back to uploading itself. */
+  function toOutgoingFile(a: DraftAttachment, refPromise?: Promise<AttachmentRef>): OutgoingFile {
+    return {
+      ...(a.file ? { file: a.file } : {}),
+      name: a.name,
+      kind: a.kind,
+      ...(a.previewUrl ? { previewUrl: a.previewUrl } : a.url ? { previewUrl: a.url } : {}),
+      ...(a.status === 'uploaded'
+        ? {
+            ref: {
+              id: a.key,
+              name: a.name,
+              mimeType: a.mimeType ?? (a.kind === 'image' ? 'image/*' : 'application/octet-stream'),
+              kind: a.kind,
+            },
+          }
+        : refPromise
+          ? { refPromise }
+          : {}),
+    };
+  }
+
+  /** Build a promise that resolves once `a`'s attach-time upload (already in
+   *  flight, on THIS chat's composer draft) settles — for an existing chat's
+   *  composer only; a new-chat draft needs its own promote-after-wait (see
+   *  the resolveChatId branch below). Not every caller of `toOutgoingFile`
+   *  necessarily awaits the `refPromise` it's given (a test's bare `onSend`
+   *  mock, most notably) — `silenceUnlessAwaited` keeps a REJECTION from
+   *  surfacing as an unhandled-rejection warning in that case, without
+   *  affecting whatever DOES await the very same promise (sendQueue, in
+   *  production). */
+  function waitForOwnUpload(a: DraftAttachment): Promise<AttachmentRef> {
+    const p = waitForAttachmentUpload(attachmentDraftKey, a.key).then((settled) => {
+      if (settled?.status === 'uploaded') {
+        return {
+          id: settled.key,
+          name: settled.name,
+          mimeType:
+            settled.mimeType ?? (settled.kind === 'image' ? 'image/*' : 'application/octet-stream'),
+          kind: settled.kind,
+        };
+      }
+      throw new Error(`attachment upload failed: ${a.name}`);
+    });
+    silenceUnlessAwaited(p);
+    return p;
+  }
+
   /** Returns false when there was nothing to send or sending is blocked. */
   function submitText(text: string, afterTurn = false, interrupt = false): boolean {
     if (resolving) return false;
@@ -1607,11 +1707,6 @@ export const Composer = forwardRef(function Composer(
     // A turn is sendable when there's text OR at least one attachment.
     if (!trimmed && attachments.length === 0) return false;
 
-    // spec/15 § Composer → Attachments — a send with attachments reacts at
-    // once, exactly as a text send does: the composer clears and the caller
-    // echoes the message, uploading its files in the stream. The files change
-    // hands (their preview URLs are drawn in the stream now), so they are not
-    // revoked here.
     const pending = attachments;
     if (pending.length > 0 && resolveChatId) {
       // A brand-new chat (chatId === "new") has nowhere to upload to yet:
@@ -1621,23 +1716,70 @@ export const Composer = forwardRef(function Composer(
       setValue(text);
       setResolving(true);
       void (async () => {
+        let target: string | null;
         try {
-          const target = await resolveChatId();
-          if (!target) return;
-          setAttachments([]);
-          setValue('');
-          finishSend(trimmed, pending, target, afterTurn, interrupt);
+          target = await resolveChatId();
         } finally {
           setResolving(false);
         }
+        if (!target) return;
+        const realChatId = target;
+        // Step 3 of 3 — move whatever this draft ALREADY has uploaded
+        // server-side into the real chat + do the host hand-off, right
+        // now. The client never re-uploads a byte for this. Opens the chat
+        // at once either way (spec/14 § New chat) — an attachment still
+        // uploading is not waited for here; its OWN `refPromise` below
+        // covers it, exactly as an existing chat's does.
+        let promotedById = new Map<string, AttachmentRef>();
+        try {
+          const { refs } = await api.promoteNewChatDraftAttachments(attachmentDraftKey, realChatId);
+          promotedById = new Map(refs.map((r) => [r.id, r]));
+        } catch (err) {
+          pushError(`attachment upload failed: ${(err as Error).message}`);
+        }
+        const files = pending.map((a) => {
+          const promoted = promotedById.get(a.key);
+          if (promoted) return { ...toOutgoingFile(a), ref: promoted };
+          if (a.status === 'uploading') {
+            // Wait for the draft-scoped upload, then promote JUST this one
+            // — by the time it resolves, the draft holds only it (the loop
+            // above already moved everything that was ready then).
+            const refPromise = waitForAttachmentUpload(attachmentDraftKey, a.key).then(
+              async (settled) => {
+                if (settled?.status !== 'uploaded') {
+                  throw new Error(`attachment upload failed: ${a.name}`);
+                }
+                const { refs } = await api.promoteNewChatDraftAttachments(
+                  attachmentDraftKey,
+                  realChatId,
+                );
+                const match = refs.find((r) => r.id === settled.key);
+                if (!match) throw new Error(`attachment upload failed: ${a.name}`);
+                return match;
+              },
+            );
+            silenceUnlessAwaited(refPromise);
+            return toOutgoingFile(a, refPromise);
+          }
+          return toOutgoingFile(a);
+        });
+        setValue('');
+        finishSend(trimmed, files, pending, realChatId, afterTurn, interrupt);
       })();
       return true;
     }
 
-    // Clear optimistically, restore on a reported failure.
-    setAttachments([]);
     setValue('');
-    finishSend(trimmed, pending, pending.length > 0 ? chatId : undefined, afterTurn, interrupt);
+    finishSend(
+      trimmed,
+      pending.map((a) =>
+        toOutgoingFile(a, a.status === 'uploading' ? waitForOwnUpload(a) : undefined),
+      ),
+      pending,
+      pending.length > 0 ? chatId : undefined,
+      afterTurn,
+      interrupt,
+    );
     return true;
   }
 
@@ -1646,10 +1788,16 @@ export const Composer = forwardRef(function Composer(
   const submitRef = useRef(submitText);
   submitRef.current = submitText;
 
-  /** Fire onSend and restore the typed text (and files) if the send reports failure. */
+  /** Fire onSend, detach a successful send's attachments from the draft
+   *  (bookkeeping only — the files now belong to the sent message, so this
+   *  never deletes a byte), and restore the typed text on a reported
+   *  failure. Attachments are NOT touched on failure: nothing was detached,
+   *  so the chips are exactly as they were — already uploaded, ready to
+   *  retry the send. */
   function finishSend(
     trimmed: string,
-    files: PendingAttachment[],
+    files: OutgoingFile[],
+    pending: DraftAttachment[],
     resolvedChatId: string | undefined,
     afterTurn: boolean,
     interrupt = false,
@@ -1666,18 +1814,24 @@ export const Composer = forwardRef(function Composer(
           ? [trimmed, files, resolvedChatId]
           : [trimmed];
     if (!running && onStop) setPendingSend(true);
+    const onAccepted = (): void => {
+      if (pending.length === 0) return;
+      releaseSent(pending);
+    };
     const restore = (): void => {
       setPendingSend(false);
       setValue((cur) => (cur.length === 0 ? trimmed : cur));
-      if (hasFiles) setAttachments((cur) => [...files, ...cur]);
     };
     const result = onSend(...args);
     if (result instanceof Promise) {
       void result.then((ok) => {
         if (ok === false) restore();
+        else onAccepted();
       });
     } else if (result === false) {
       restore();
+    } else {
+      onAccepted();
     }
   }
 
@@ -1798,16 +1952,19 @@ export const Composer = forwardRef(function Composer(
           ))}
         </div>
       ) : null}
-      {/* Removable thumbnails/chips above the input (spec/14 § Composer). */}
+      {/* Removable thumbnails/chips above the input (spec/14 § Composer).
+          Step 3 of 3: each chip tracks its OWN upload independently — a
+          failed one reads "Not uploaded" with Retry (same pattern as a sent
+          message's failed upload), never blocking the others. */}
       {attachments.length > 0 ? (
         <div className="composer-attachments" data-testid="composer-attachments">
           {attachments.map((a) => (
             <div
               key={a.key}
-              className={`composer-attachment${resolving ? ' uploading' : ''}`}
+              className={`composer-attachment${resolving || a.status === 'uploading' ? ' uploading' : ''}${a.status === 'failed' ? ' failed' : ''}`}
               data-testid="composer-attachment"
             >
-              {a.kind === 'image' && a.previewUrl ? (
+              {a.kind === 'image' && (a.previewUrl ?? a.url) ? (
                 <button
                   type="button"
                   className="att-preview"
@@ -1816,13 +1973,32 @@ export const Composer = forwardRef(function Composer(
                   title="Preview image"
                   onClick={() => setPreviewing(a)}
                 >
-                  <img src={a.previewUrl} alt={a.name} />
+                  <img src={a.previewUrl ?? a.url} alt={a.name} />
                 </button>
               ) : (
                 <FileText size={18} aria-hidden />
               )}
               <span className="att-name">{a.name}</span>
-              {a.kind === 'image' ? (
+              {a.status === 'failed' ? (
+                <>
+                  <span className="att-status" data-testid="composer-attachment-not-uploaded">
+                    Not uploaded
+                  </span>
+                  <button
+                    type="button"
+                    className="att-retry"
+                    data-testid="composer-attachment-retry"
+                    aria-label={`retry ${a.name}`}
+                    title="Retry"
+                    onClick={() =>
+                      retryAttachmentAction(attachmentDraftKey, attachmentTarget, a.key)
+                    }
+                  >
+                    Retry
+                  </button>
+                </>
+              ) : null}
+              {a.kind === 'image' && a.file ? (
                 <button
                   type="button"
                   className="att-markup"
@@ -1850,15 +2026,15 @@ export const Composer = forwardRef(function Composer(
           ))}
         </div>
       ) : null}
-      {previewing?.previewUrl ? (
+      {previewing && (previewing.previewUrl ?? previewing.url) ? (
         <ImageLightbox
-          url={previewing.previewUrl}
+          url={(previewing.previewUrl ?? previewing.url)!}
           alt={previewing.name}
           downloadName={previewing.name}
           onClose={() => setPreviewing(null)}
         />
       ) : null}
-      {annotating ? (
+      {annotating?.file ? (
         <ImageAnnotator
           file={annotating.file}
           onCancel={() => setAnnotating(null)}

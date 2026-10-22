@@ -385,6 +385,28 @@ export type AttachmentRef = z.infer<typeof AttachmentRef>;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 /**
+ * An `AttachmentRef` that isn't attached to a chatId yet — it lives on a
+ * composer or new-chat DRAFT (spec/14 & spec/15 § Composer → Attachments).
+ * `url` rides explicitly (unlike a sent message's `AttachmentRef`, whose
+ * surface already has the chatId to build `/api/chats/:chatId/attachment/:id`
+ * from) because the two draft kinds serve their bytes from different routes —
+ * `/api/chats/:chatId/attachment/:id` for a composer draft (the chat already
+ * exists), `/api/new-chat-drafts/:draftId/attachment/:id` for a new-chat
+ * draft (it doesn't) — and a surface rendering the chip has no other way to
+ * know which.
+ */
+export const DraftAttachmentRef = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    mimeType: z.string().min(1),
+    kind: AttachmentKind,
+    url: z.string().min(1),
+  })
+  .strict();
+export type DraftAttachmentRef = z.infer<typeof DraftAttachmentRef>;
+
+/**
  * A single item on a chat's todo list (patch/todo.md § Features to add — "todo
  * list"). The host mirrors the agent's native TodoWrite list onto chat state
  * so surfaces can render it, and uses it to keep the agent focused: when a turn
@@ -3476,6 +3498,51 @@ export const ComposerDraftListEvent = z
 export type ComposerDraftListEvent = z.infer<typeof ComposerDraftListEvent>;
 
 /**
+ * Server → every surface: `chatId`'s draft ATTACHMENTS changed — the whole
+ * current list, since an add/remove race between two surfaces is resolved by
+ * whichever write reaches the server last, not by merging deltas. Sent as a
+ * side effect of the upload/delete REST routes (`POST`/`DELETE
+ * /api/chats/:chatId/attachment(/:id)`) — uploading is already an HTTP call,
+ * so registering the file on the draft happens in the same request. An empty
+ * list means the draft holds no attachments. `updatedAt` is the same
+ * newest-write-wins clock as `composer_draft.updated`, kept on its own axis:
+ * an attachment change never stamps over (or is stamped over by) a text edit.
+ * Text and attachments are independent: `composer_draft.cleared` clears the
+ * text only.
+ */
+export const ComposerDraftAttachmentsChangedEvent = z
+  .object({
+    type: z.literal('composer_draft.attachments_changed'),
+    chatId: z.string().min(1),
+    attachments: z.array(DraftAttachmentRef),
+    updatedAt: z.number(),
+  })
+  .strict();
+export type ComposerDraftAttachmentsChangedEvent = z.infer<
+  typeof ComposerDraftAttachmentsChangedEvent
+>;
+
+/**
+ * Server → surface, once, right after `auth.ok` and after `composer_draft.
+ * list`: every composer draft that holds attachments. Separate from the text
+ * snapshot so a draft with a file but no text (which `composer_draft.list`
+ * cannot carry) still reaches a surface that was away.
+ */
+export const ComposerDraftAttachmentsListEvent = z
+  .object({
+    type: z.literal('composer_draft.attachments_list'),
+    drafts: z.array(
+      z.object({
+        chatId: z.string().min(1),
+        attachments: z.array(DraftAttachmentRef).min(1),
+        updatedAt: z.number(),
+      }),
+    ),
+  })
+  .strict();
+export type ComposerDraftAttachmentsListEvent = z.infer<typeof ComposerDraftAttachmentsListEvent>;
+
+/**
  * Where on the app a surface is looking — the pages that exist on every
  * surface. `seq` is the message at the top edge of an open chat's transcript;
  * absent means "at the latest message".
@@ -3572,6 +3639,41 @@ export const NewChatDraftListEvent = z
   })
   .strict();
 export type NewChatDraftListEvent = z.infer<typeof NewChatDraftListEvent>;
+
+/**
+ * Server → every surface: new-chat draft `id`'s ATTACHMENTS changed — the
+ * whole current list, same reasoning as `composer_draft.attachments_changed`.
+ * Sent as a side effect of the upload/delete REST routes (`POST`/`DELETE
+ * /api/new-chat-drafts/:draftId/attachment(/:id)`). Independent of the draft's
+ * text: `new_chat_draft.removed` drops the whole draft, attachments included
+ * (and is followed by an empty `attachments_changed`).
+ */
+export const NewChatDraftAttachmentsChangedEvent = z
+  .object({
+    type: z.literal('new_chat_draft.attachments_changed'),
+    id: z.string().min(1),
+    attachments: z.array(DraftAttachmentRef),
+    updatedAt: z.number(),
+  })
+  .strict();
+export type NewChatDraftAttachmentsChangedEvent = z.infer<
+  typeof NewChatDraftAttachmentsChangedEvent
+>;
+
+/** Server → surface, once after `auth.ok`: every new-chat draft that holds attachments (see `composer_draft.attachments_list`). */
+export const NewChatDraftAttachmentsListEvent = z
+  .object({
+    type: z.literal('new_chat_draft.attachments_list'),
+    drafts: z.array(
+      z.object({
+        id: z.string().min(1),
+        attachments: z.array(DraftAttachmentRef).min(1),
+        updatedAt: z.number(),
+      }),
+    ),
+  })
+  .strict();
+export type NewChatDraftAttachmentsListEvent = z.infer<typeof NewChatDraftAttachmentsListEvent>;
 
 /** Surface → host: start, pause, resume or end the meeting in a chat. */
 export const MeetingControlRequestEvent = z
@@ -7423,6 +7525,40 @@ export const PatchAttachmentStoreResponseEvent = z
   .strict();
 export type PatchAttachmentStoreResponseEvent = z.infer<typeof PatchAttachmentStoreResponseEvent>;
 
+// A draft attachment removed BEFORE it was ever sent (spec/14 & spec/15 §
+// Composer → Attachments) has a host-side copy (`storeAttachment` ran at
+// attach time, not send time) that no turn will ever reference.
+// `patch.attachment.delete_request`/`_response` frees it, correlated by
+// `requestId` like the store pair. Best-effort from the server's side: the
+// remove has already succeeded server-side, so a host that is offline, older
+// than this event, or errors is logged rather than failing it.
+export const PatchAttachmentDeleteRequestEvent = z
+  .object({
+    type: z.literal('patch.attachment.delete_request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    id: z.string().min(1),
+    name: z.string().min(1),
+  })
+  .strict();
+export type PatchAttachmentDeleteRequestEvent = z.infer<typeof PatchAttachmentDeleteRequestEvent>;
+
+export const PatchAttachmentDeleteResponseEvent = z
+  .object({
+    type: z.literal('patch.attachment.delete_response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchAttachmentDeleteResponseEvent = z.infer<typeof PatchAttachmentDeleteResponseEvent>;
+
 // ---------------------------------------------------------------------------
 // Artifact publish (host → server request/response, spec/14 § Artifacts)
 //
@@ -8140,6 +8276,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   ComposerDraftUpdatedEvent,
   ComposerDraftClearedEvent,
   ComposerDraftListEvent,
+  ComposerDraftAttachmentsChangedEvent,
+  ComposerDraftAttachmentsListEvent,
   ViewPositionSetEvent,
   ViewPositionUpdatedEvent,
   NewChatDraftSetEvent,
@@ -8147,6 +8285,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   NewChatDraftUpdatedEvent,
   NewChatDraftRemovedEvent,
   NewChatDraftListEvent,
+  NewChatDraftAttachmentsChangedEvent,
+  NewChatDraftAttachmentsListEvent,
   // Host controls (spec/03 § Host events)
   HostRenameEvent,
   HostSetHomeEvent,
@@ -8345,6 +8485,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   // Composer attachment store
   PatchAttachmentStoreRequestEvent,
   PatchAttachmentStoreResponseEvent,
+  PatchAttachmentDeleteRequestEvent,
+  PatchAttachmentDeleteResponseEvent,
   // Artifacts
   PatchArtifactPublishRequestEvent,
   PatchArtifactPublishResponseEvent,
@@ -8419,6 +8561,8 @@ export const EVENT_SCHEMAS = {
   'composer_draft.updated': ComposerDraftUpdatedEvent,
   'composer_draft.cleared': ComposerDraftClearedEvent,
   'composer_draft.list': ComposerDraftListEvent,
+  'composer_draft.attachments_changed': ComposerDraftAttachmentsChangedEvent,
+  'composer_draft.attachments_list': ComposerDraftAttachmentsListEvent,
   'view_position.set': ViewPositionSetEvent,
   'view_position.updated': ViewPositionUpdatedEvent,
   'new_chat_draft.set': NewChatDraftSetEvent,
@@ -8426,6 +8570,8 @@ export const EVENT_SCHEMAS = {
   'new_chat_draft.updated': NewChatDraftUpdatedEvent,
   'new_chat_draft.removed': NewChatDraftRemovedEvent,
   'new_chat_draft.list': NewChatDraftListEvent,
+  'new_chat_draft.attachments_changed': NewChatDraftAttachmentsChangedEvent,
+  'new_chat_draft.attachments_list': NewChatDraftAttachmentsListEvent,
   'host.rename': HostRenameEvent,
   'host.set_home': HostSetHomeEvent,
   'host.removed': HostRemovedEvent,
@@ -8613,6 +8759,8 @@ export const EVENT_SCHEMAS = {
   'patch.voice.turn_check_response': PatchVoiceTurnCheckResponseEvent,
   'patch.attachment.store_request': PatchAttachmentStoreRequestEvent,
   'patch.attachment.store_response': PatchAttachmentStoreResponseEvent,
+  'patch.attachment.delete_request': PatchAttachmentDeleteRequestEvent,
+  'patch.attachment.delete_response': PatchAttachmentDeleteResponseEvent,
   'patch.artifact.publish_request': PatchArtifactPublishRequestEvent,
   'patch.artifact.publish_response': PatchArtifactPublishResponseEvent,
   'patch.pad.request': PatchPadRequestEvent,

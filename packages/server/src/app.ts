@@ -35,6 +35,7 @@ import { registerSettingsRoutes } from './settings-routes.js';
 import { ComposerDraftStore } from './composer-drafts.js';
 import { ViewPositionStore } from './view-position.js';
 import { NewChatDraftStore } from './new-chat-drafts.js';
+import { DraftAttachmentStore } from './draft-attachments.js';
 import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
 import { ChatLogStore } from './chat-log-store.js';
 import { CommitAcks } from './commit-acks.js';
@@ -171,6 +172,9 @@ export interface BuildOptions {
   viewPosition?: ViewPositionStore;
   /** Inject a new-chat-draft store (tests); otherwise constructed from dataDir. */
   newChatDrafts?: NewChatDraftStore;
+  /** Inject draft-attachment stores (tests); otherwise constructed from dataDir. */
+  composerAttachments?: DraftAttachmentStore;
+  newChatAttachments?: DraftAttachmentStore;
   /** Disable the chokidar watcher in tests. */
   jobsWatch?: boolean;
   /** Inject a hooks store (tests); otherwise constructed from dataDir. */
@@ -199,6 +203,8 @@ export interface BuiltApp {
   composerDrafts: ComposerDraftStore;
   viewPosition: ViewPositionStore;
   newChatDrafts: NewChatDraftStore;
+  composerAttachments: DraftAttachmentStore;
+  newChatAttachments: DraftAttachmentStore;
   folderRegistry: FolderRegistry;
   jobs: JobsInterface;
   jobDispatcher: JobDispatcher;
@@ -563,6 +569,36 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });
 
+  // The files attached to unsent drafts (spec/14 & spec/15 § Composer →
+  // Attachments): server-owned like the draft text, but a separate axis with
+  // its own stores. Serving copies live under `<dataDir>/attachments`
+  // (override with PATCH_ATTACHMENTS_DIR); a new-chat draft has no chat to
+  // scope under yet, so its files wait under a separate root until `promote`
+  // moves them into the real chat's directory. Hoisted here so the chat
+  // routes and the WS hub can free still-draft attachments when a chat is
+  // deleted or a draft is discarded.
+  const composerAttachments =
+    opts.composerAttachments ??
+    new DraftAttachmentStore({
+      fileName: 'composer-draft-attachments.json',
+      ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
+      logger: log.child({ component: 'composer-draft-attachments' }),
+      ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
+    });
+  const newChatAttachments =
+    opts.newChatAttachments ??
+    new DraftAttachmentStore({
+      fileName: 'new-chat-draft-attachments.json',
+      ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
+      logger: log.child({ component: 'new-chat-draft-attachments' }),
+      ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
+    });
+  const attachmentsDir =
+    process.env['PATCH_ATTACHMENTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'attachments');
+  const newChatDraftAttachmentsDir =
+    process.env['PATCH_NEW_CHAT_DRAFT_ATTACHMENTS_DIR'] ??
+    join(registry.dataDir ?? '/tmp', 'new-chat-draft-attachments');
+
   // ---- shared settings (spec/01 § Settings) + the Manager sweep ----
   // Same dataDir resolution as the jobs subsystem: absent one (a test that
   // injects a bare registry with no disk), there is nowhere to persist
@@ -783,6 +819,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     composerDrafts,
     viewPosition,
     newChatDrafts,
+    composerAttachments,
+    newChatAttachments,
     idGenerator,
     getAppVersion: () => appBundleVersion,
     serverVersion: VERSION,
@@ -1697,6 +1735,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     hostLink,
     chatRegistry,
     composerDrafts,
+    composerAttachments,
+    attachmentsDir,
     chatLogStore,
     idGenerator,
     // The account's default model, applied to any spawn that names none. Read
@@ -1758,8 +1798,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     hostLink,
     chatRegistry,
     chatLogStore,
-    attachmentsDir:
-      process.env['PATCH_ATTACHMENTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'attachments'),
+    attachmentsDir,
     idGenerator,
   });
 
@@ -1867,8 +1906,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     chatRegistry,
     hostLink,
     idGenerator,
-    attachmentsDir:
-      process.env['PATCH_ATTACHMENTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'attachments'),
+    attachmentsDir,
+    newChatDraftAttachmentsDir,
+    composerAttachments,
+    newChatAttachments,
   });
 
   // ---- artifacts (spec/14 § Artifacts) ----
@@ -2335,6 +2376,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     composerDrafts,
     viewPosition,
     newChatDrafts,
+    composerAttachments,
+    newChatAttachments,
     folderRegistry,
     jobs,
     jobDispatcher,

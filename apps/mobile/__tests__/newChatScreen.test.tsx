@@ -62,6 +62,13 @@ const { api, ApiErrorClass } = vi.hoisted(() => {
       models: vi.fn(),
       deleteChat: vi.fn(),
       uploadAttachment: vi.fn(),
+      // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — a
+      // new-chat draft's attachments upload here (no chatId exists yet),
+      // and `promoteNewChatDraftAttachments` is what moves them into the
+      // real chat on send.
+      uploadNewChatDraftAttachment: vi.fn(),
+      promoteNewChatDraftAttachments: vi.fn().mockResolvedValue({ ok: true, refs: [] }),
+      deleteNewChatDraftAttachment: vi.fn().mockResolvedValue({ ok: true }),
       skills: vi.fn(),
     },
   };
@@ -724,39 +731,58 @@ describe('NewChat — the first send creates the chat', () => {
   });
 
   it('a shared file waiting in the new-chat composer uploads into the NEW chat', async () => {
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — the share
+    // upload landed on the DRAFT already (before this test even renders the
+    // screen); send just promotes it into the real chat, never re-uploading.
     const draftId = seedDraft();
-    useComposerAttachmentStore.getState().add(draftId, [
-      {
-        key: 'k1',
-        uri: 'file:///c/doc.pdf',
+    api.uploadNewChatDraftAttachment.mockResolvedValue({
+      ok: true,
+      ref: {
+        id: 'draft-att1',
         name: 'doc.pdf',
         mimeType: 'application/pdf',
         kind: 'file',
+        url: '/x',
       },
-    ]);
-    api.uploadAttachment.mockResolvedValue({
-      ref: { id: 'att1', name: 'doc.pdf', mimeType: 'application/pdf', kind: 'file' },
     });
-    const r = await renderReady();
-    await send(r);
-    expect(api.uploadAttachment).toHaveBeenCalledWith('chat_new', {
+    useComposerAttachmentStore
+      .getState()
+      .attach(draftId, { kind: 'new-chat-draft', draftId }, [
+        { uri: 'file:///c/doc.pdf', name: 'doc.pdf', mimeType: 'application/pdf' },
+      ]);
+    await flush();
+    expect(api.uploadNewChatDraftAttachment).toHaveBeenCalledWith(draftId, {
       uri: 'file:///c/doc.pdf',
       name: 'doc.pdf',
       mimeType: 'application/pdf',
     });
+    expect(useComposerAttachmentStore.getState().byKey[draftId]?.[0]?.status).toBe('uploaded');
+    api.promoteNewChatDraftAttachments.mockResolvedValue({
+      ok: true,
+      refs: [{ id: 'att1', name: 'doc.pdf', mimeType: 'application/pdf', kind: 'file' }],
+    });
+    const r = await renderReady();
+    await send(r);
+    expect(api.promoteNewChatDraftAttachments).toHaveBeenCalledWith(draftId, 'chat_new');
+    // Never re-uploaded through the ordinary per-chat route.
+    expect(api.uploadAttachment).not.toHaveBeenCalled();
     expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_new?justCreated=1');
     expect(useComposerAttachmentStore.getState().byKey[draftId]).toBeUndefined();
   });
 
-  it('an attachment send navigates into the new chat at once, the message pending there while it uploads', async () => {
+  it('an attachment send navigates into the new chat at once, the message pending there while its draft upload finishes', async () => {
+    // Step 3 of 3 — Send races ahead of the draft-scoped upload (still
+    // in flight): the chat opens at once regardless, and the pending
+    // message's `refPromise` (wait, then promote just this file) is what
+    // eventually resolves it — never a second upload.
     const draftId = seedDraft();
+    let resolveUpload!: (v: unknown) => void;
+    api.uploadNewChatDraftAttachment.mockReturnValue(new Promise((res) => (resolveUpload = res)));
     useComposerAttachmentStore
       .getState()
-      .add(draftId, [
-        { key: 'k1', uri: 'file:///c/a.txt', name: 'a.txt', mimeType: 'text/plain', kind: 'file' },
+      .attach(draftId, { kind: 'new-chat-draft', draftId }, [
+        { uri: 'file:///c/a.txt', name: 'a.txt', mimeType: 'text/plain' },
       ]);
-    let resolveUpload!: (v: unknown) => void;
-    api.uploadAttachment.mockReturnValue(new Promise((res) => (resolveUpload = res)));
     const r = await renderReady();
     typeText(r, 'with a file');
     await send(r);
@@ -771,9 +797,14 @@ describe('NewChat — the first send creates the chat', () => {
     expect(entry?.upload).toEqual({ done: 0, total: 1, failed: false });
     expect(submitSpy).not.toHaveBeenCalled();
 
+    api.promoteNewChatDraftAttachments.mockResolvedValue({
+      ok: true,
+      refs: [{ id: 'att1', name: 'a.txt', mimeType: 'text/plain', kind: 'file' }],
+    });
     await actAsync(async () => {
       resolveUpload({
-        ref: { id: 'att1', name: 'a.txt', mimeType: 'text/plain', kind: 'file' },
+        ok: true,
+        ref: { id: 'att1', name: 'a.txt', mimeType: 'text/plain', kind: 'file', url: '/x' },
       });
       await flush();
     });
@@ -781,14 +812,19 @@ describe('NewChat — the first send creates the chat', () => {
     expect(submitSpy.mock.calls[0]?.[1]).toBe('with a file');
   });
 
-  it('a failed upload after create stays in the new chat as Not uploaded; the chat is kept', async () => {
+  it('a failed draft upload after create stays in the new chat as Not uploaded; the chat is kept', async () => {
+    // The draft upload has ALREADY failed by send time — falls through to
+    // the ordinary per-chat upload-on-send fallback (bare `uri`, no
+    // ref/refPromise), which is mocked to fail the same way here.
     const draftId = seedDraft();
+    api.uploadNewChatDraftAttachment.mockRejectedValue(new Error('413'));
+    api.uploadAttachment.mockRejectedValue(new Error('413'));
     useComposerAttachmentStore
       .getState()
-      .add(draftId, [
-        { key: 'k1', uri: 'file:///c/a.txt', name: 'a.txt', mimeType: 'text/plain', kind: 'file' },
+      .attach(draftId, { kind: 'new-chat-draft', draftId }, [
+        { uri: 'file:///c/a.txt', name: 'a.txt', mimeType: 'text/plain' },
       ]);
-    api.uploadAttachment.mockRejectedValue(new Error('413'));
+    await flush();
     const r = await renderReady();
     await send(r);
     expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_new?justCreated=1');

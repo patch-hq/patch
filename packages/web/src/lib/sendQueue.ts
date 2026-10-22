@@ -30,13 +30,27 @@ import { deliveryTracker } from './deliveryTracker.js';
 import { downscaleImageFile } from './imageResize.js';
 import { failed as failedSentence } from './errorCopy.js';
 
-/** A file a turn is sent with, as the local copy the user picked. */
+/**
+ * A file a turn is sent with. `file` is the local copy the user picked —
+ * absent when this surface never had the bytes itself (an
+ * attachment another surface put on the draft, sent from here). `ref` is set
+ * once the file is known to be uploaded already (attach-time
+ * upload, or a cross-surface attachment): present, `upload()` below uses it
+ * straight away instead of re-uploading a byte. `refPromise` covers the race
+ * in between — Send pressed while the attach-time upload is still in flight
+ * (existing chat), or a new-chat draft's attachment that needs a promote
+ * once its own upload lands: the composer builds whichever wait this
+ * particular file needs, and `upload()` just awaits it instead of starting a
+ * fresh `api.uploadAttachment` for the same file.
+ */
 export interface OutgoingFile {
-  file: File;
+  file?: File;
   name: string;
   kind: 'image' | 'file';
   /** Object URL of the local copy (images) — drawn in the stream while it uploads. */
   previewUrl?: string;
+  ref?: AttachmentRef;
+  refPromise?: Promise<AttachmentRef>;
 }
 
 export interface SendMessageOptions {
@@ -80,6 +94,12 @@ export function sendMessage(
   opts: SendMessageOptions = {},
 ): string {
   const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // (spec/14 & spec/15 § Composer → Attachments) — every file
+  // already carries its ref when it was uploaded at ATTACH time (this
+  // surface's own upload, or another surface's, synced down before Send was
+  // even pressed): nothing to upload, so skip the whole upload-staging dance
+  // and render exactly as an ordinary resolved send would.
+  const allResolved = files.length > 0 && files.every((f) => f.ref !== undefined);
   const item: Outgoing = {
     chatId,
     localId,
@@ -87,15 +107,24 @@ export function sendMessage(
     files,
     disabledTools: useToolsStore.getState().disabledFor(chatId),
     opts,
-    refs: files.length === 0 ? [] : null,
+    refs: files.length === 0 ? [] : allResolved ? files.map((f) => f.ref!) : null,
   };
-  useChatStore.getState().addLocalMessage(chatId, text, localId, opts.folder, undefined, {
-    localAttachments: files.map((f) => ({
-      name: f.name,
-      kind: f.kind,
-      ...(f.previewUrl !== undefined ? { url: f.previewUrl } : {}),
-    })),
-  });
+  useChatStore.getState().addLocalMessage(
+    chatId,
+    text,
+    localId,
+    opts.folder,
+    allResolved ? item.refs! : undefined,
+    allResolved
+      ? undefined
+      : {
+          localAttachments: files.map((f) => ({
+            name: f.name,
+            kind: f.kind,
+            ...(f.previewUrl !== undefined ? { url: f.previewUrl } : {}),
+          })),
+        },
+  );
   enqueue(item);
   return localId;
 }
@@ -164,11 +193,49 @@ async function upload(item: Outgoing): Promise<void> {
     const refs: AttachmentRef[] = [];
     // One at a time, so the count ticks visibly through a batch.
     for (const a of files) {
+      // already uploaded (this surface's own attach-time upload
+      // resolved after Send was pressed, or a mixed batch where some files
+      // came pre-resolved): nothing to upload, use the ref as-is.
+      if (a.ref) {
+        refs.push(a.ref);
+        useChatStore.getState().patchLocalMessage(chatId, localId, {
+          upload: { done: refs.length, total, failed: false },
+        });
+        continue;
+      }
+      // Send raced ahead of this file's own resolution: await
+      // whatever the composer already has in flight for it (an attach-time
+      // upload still running, or a new-chat draft's promote-once-uploaded)
+      // instead of starting a fresh `api.uploadAttachment` for the same
+      // file. One attempt, fail fast on rejection — same as an ordinary
+      // upload-on-send failure below (caught by this function's own
+      // try/catch, which marks the WHOLE turn `Not uploaded`); the existing
+      // Retry action re-enters `upload()` for a fresh attempt from `a.file`
+      // if the user asks (by which point `refPromise` is stale and this
+      // branch is skipped — Retry always rebuilds `OutgoingFile` from
+      // scratch without one).
+      if (a.refPromise) {
+        // Consumed BEFORE awaiting — a Retry reuses this same `OutgoingFile`
+        // object, and re-awaiting an already-settled (possibly rejected)
+        // promise would repeat the exact same outcome forever. Cleared here
+        // means a Retry instead falls through to an ordinary fresh upload
+        // attempt from `a.file` below.
+        const p = a.refPromise;
+        a.refPromise = undefined;
+        const ref = await p;
+        refs.push(ref);
+        useChatStore.getState().patchLocalMessage(chatId, localId, {
+          upload: { done: refs.length, total, failed: false },
+        });
+        continue;
+      }
       // spec/15 § Composer — the ORIGINAL is uploaded (it is what gets stored,
       // served and rendered) alongside a downscaled copy for the agent, which
       // has to stay within Claude's vision limits. `downscaleImageFile` hands
       // back the very same File when no resize was needed, so an identity
       // result means there is no second copy to send — as with any non-image.
+      if (!a.file)
+        throw new Error(`attachment ${a.name} has neither an uploaded ref nor its bytes`);
       const downscaled = a.kind === 'image' ? await downscaleImageFile(a.file) : a.file;
       const model = downscaled === a.file ? undefined : downscaled;
       const { ref } = await api.uploadAttachment(chatId, a.file, model);

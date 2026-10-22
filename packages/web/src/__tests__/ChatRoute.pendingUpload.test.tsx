@@ -1,15 +1,21 @@
 // Todoist "patch submitting message with an image doesnt go through
 // immediately. should react immediately, show as pending" — spec/15 § Composer
 // → Attachments (the cross-surface contract) on web/desktop. Driven through
-// the real chat route (composer + transcript) with only the network stubbed:
+// the real chat route (composer + transcript) with only the network stubbed.
 //
-//   - Send with an attachment clears the composer and puts the message in the
-//     stream AT ONCE, its image drawn from the local copy, marked `Uploading
-//     0/1` — nothing is on the wire yet
+// Step 3 of 3 moved the ordinary case's upload to ATTACH time (Composer.test.tsx
+// covers that) — this file exercises the fallback for when Send races ahead of
+// an attach-time upload still in flight (`deferredUploads()` never resolves
+// until the test says so, so every attach here stays `uploading` through Send):
+//
+//   - Send with an attachment (still uploading) clears the composer and puts
+//     the message in the stream AT ONCE, its image drawn from the local copy,
+//     marked `Uploading 0/1` — nothing is on the wire yet
 //   - once every upload has landed the turn goes out as an ordinary send, with
-//     every ref, under the bubble's own localId
+//     every ref, under the bubble's own localId — sendQueue WAITS for the
+//     already-running attach-time upload rather than starting a second one
 //   - a failed upload leaves the message `Not uploaded`, toasts the error, and
-//     offers Retry (upload the same files again, then send) and × (discard)
+//     offers Retry (upload the same file again, then send) and × (discard)
 //   - a text sent behind an uploading message shows at once but is delivered
 //     after it; a failed upload holds nothing up
 
@@ -131,7 +137,8 @@ describe('ChatRoute — a message with attachments shows at once, pending, while
     // unless the check blocks), but the message itself lands in the stream
     // once the (mocked, near-instant) hook check has cleared it to send.
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe('');
-    expect(screen.queryAllByTestId('composer-attachment')).toHaveLength(0);
+    // The chips detach once the send is accepted, which follows the hook check.
+    await waitFor(() => expect(screen.queryAllByTestId('composer-attachment')).toHaveLength(0));
     await waitFor(() => expect(userMsgs().at(-1)).toHaveTextContent('look at this'));
     const msg = userMsgs().at(-1)!;
     expect(within(msg).getByTestId('upload-status')).toHaveTextContent('Uploading 0/1');
@@ -146,13 +153,18 @@ describe('ChatRoute — a message with attachments shows at once, pending, while
   });
 
   it('once every upload has landed, sends the turn with every ref under the same localId', async () => {
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — each file
+    // uploads the moment it's attached, in PARALLEL (not one-at-a-time
+    // triggered by Send): both calls are already in flight before Send is
+    // even pressed. Send then just waits out whichever haven't landed yet,
+    // in order, same progression the old send-triggered upload showed.
     const uploads = deferredUploads();
     seedChat('c-pu-ok');
     renderChat('c-pu-ok', ws);
     attach('a.png');
     attach('b.png');
+    await waitFor(() => expect(uploads).toHaveLength(2));
     fireEvent.click(screen.getByTestId('send-btn'));
-    await waitFor(() => expect(uploads).toHaveLength(1));
     await act(async () => uploads[0]!.resolve(ref('a1', 'a.png')));
     await waitFor(() =>
       expect(within(userMsgs().at(-1)!).getByTestId('upload-status')).toHaveTextContent(
@@ -160,7 +172,6 @@ describe('ChatRoute — a message with attachments shows at once, pending, while
       ),
     );
     expect(inputs(send)).toHaveLength(0);
-    await waitFor(() => expect(uploads).toHaveLength(2));
     await act(async () => uploads[1]!.resolve(ref('b1', 'b.png')));
 
     await waitFor(() => expect(inputs(send)).toHaveLength(1));
@@ -188,9 +199,8 @@ describe('ChatRoute — a message with attachments shows at once, pending, while
     await waitFor(() =>
       expect(within(msg).getByTestId('upload-status')).toHaveTextContent('Not uploaded'),
     );
-    expect(useUiStore.getState().errors.some((e) => /413 too large/.test(e.detail ?? ''))).toBe(
-      true,
-    );
+    // The attach-time upload reports its own failure (store), so it is in the message.
+    expect(useUiStore.getState().errors.some((e) => /413 too large/.test(e.message))).toBe(true);
     expect(inputs(send)).toHaveLength(0);
 
     fireEvent.click(within(msg).getByTestId('upload-retry'));

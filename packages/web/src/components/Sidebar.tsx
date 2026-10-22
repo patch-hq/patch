@@ -120,6 +120,7 @@ import { shortcutLabel, shortcutTitle } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
 import { failed } from '../lib/errorCopy.js';
 import { startPadsPolling, usePadsStore } from '../stores/padsStore.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 
 // How long a row's badge must be QUIET before we show its new value.
 const BADGE_SETTLE_MS = 250;
@@ -1776,6 +1777,10 @@ function DraftsSection({ activeDraftId }: { activeDraftId: string | null }): JSX
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  // The files attached to it go too (nothing orphaned on disk).
+                  useComposerAttachmentStore
+                    .getState()
+                    .discardAll(d.id, { kind: 'new-chat-draft', draftId: d.id });
                   removeDraft(d.id);
                 }}
                 title="Discard draft"

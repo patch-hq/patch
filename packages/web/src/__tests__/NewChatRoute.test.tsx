@@ -43,6 +43,7 @@ function seedModelCatalog(): void {
 }
 import { useChatStore } from '../stores/chatStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -104,6 +105,7 @@ describe('/chats/new', () => {
     clearSharedAccounts();
     localStorage.removeItem('patch.newChat.last.v1');
     useChatStore.getState()._reset();
+    useComposerAttachmentStore.getState()._reset();
     useUiStore.getState().clearToasts();
     useLayoutStore.getState()._reset();
     // A fully-connected surface: WS up + host online. Voice-start needs the
@@ -1657,10 +1659,13 @@ describe('/chats/new', () => {
     expect(label).toHaveAttribute('title', '/home/tom/projects/portfolio');
   });
 
-  it('attaches to a NEW chat: creates the chat FIRST, uploads to the real id (not "new"), then sends', async () => {
-    // Regression for "attachment upload failed: chat not found: new": a first
-    // message WITH an attachment must create the chat, upload the file to the
-    // REAL chatId, then deliver the turn (spec/14 § New chat).
+  it('attaches to a NEW chat: uploads to the DRAFT at attach time, promotes to the real id on send, then delivers (step 3 of 3)', async () => {
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — no chatId
+    // exists yet when a file is attached to a new-chat draft, so it uploads
+    // to the DRAFT-scoped route straight away; only on send, once the chat is
+    // created, does `promote` move it over (the client never re-uploads a
+    // byte for that hop). Regression parent for "attachment upload failed:
+    // chat not found: new" (the original bug this replaced).
     const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
       const u = String(url);
       if (u === '/api/chats' && init?.method === 'POST') {
@@ -1669,11 +1674,27 @@ describe('/chats/new', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
-      if (u.includes('/attachment')) {
+      if (u.includes('/new-chat-drafts/') && u.includes('/attachment') && init?.method === 'POST') {
         return new Response(
           JSON.stringify({
             ok: true,
-            ref: { id: 'att1', name: 'notes.txt', mimeType: 'text/plain', kind: 'file', url: '/x' },
+            ref: {
+              id: 'att1',
+              name: 'notes.txt',
+              mimeType: 'text/plain',
+              kind: 'file',
+              url: `${u}/att1`,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (u.includes('/new-chat-drafts/') && u.includes('/promote')) {
+        expect(JSON.parse(String(init?.body))).toEqual({ chatId: 'c-att' });
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            refs: [{ id: 'att1', name: 'notes.txt', mimeType: 'text/plain', kind: 'file' }],
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
@@ -1699,15 +1720,24 @@ describe('/chats/new', () => {
     fireEvent.change(screen.getByTestId('new-chat-folder'), { target: { value: '~/x' } });
     const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
     fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+    // Uploaded to the DRAFT immediately — before the chat exists, before Send.
+    await waitFor(() => {
+      const uploadCall = fetchMock.mock.calls.find(
+        (c) => String(c[0]).includes('/new-chat-drafts/') && String(c[0]).includes('/attachment'),
+      );
+      expect(uploadCall).toBeDefined();
+      expect(String(uploadCall?.[0])).not.toContain('/api/chats/');
+    });
     const composer = screen.getByTestId('composer-input');
     fireEvent.change(composer, { target: { value: 'look at this' } });
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
 
     await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
-    const uploadCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/attachment'));
-    expect(uploadCall).toBeDefined();
-    expect(String(uploadCall?.[0])).toBe('/api/chats/c-att/attachment');
-    expect(String(uploadCall?.[0])).not.toContain('/new/');
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/promote'))).toBe(true);
+    // Never re-uploaded via the ordinary per-chat route — promote moved it.
+    expect(fetchMock.mock.calls.some((c) => String(c[0]) === '/api/chats/c-att/attachment')).toBe(
+      false,
+    );
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.input',
@@ -2239,8 +2269,14 @@ describe('/chats/new', () => {
   // into it straight away and the message waits there, pending, while its file
   // uploads. It is not held on the new-chat screen until the upload lands.
   it('a first message with an attachment opens the new chat at once, pending, while the file uploads', async () => {
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — the chat
+    // opens at once regardless of the attachment's own upload: the draft
+    // upload (gated here) resolves later, and the composer's `refPromise`
+    // (awaited inside sendQueue) is what then calls `promote` to move it
+    // into the real chat — not a second `/api/chats/:id/attachment` upload.
     let releaseUpload!: () => void;
     const uploadGate = new Promise<void>((r) => (releaseUpload = r));
+    let draftUploaded = false;
     const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
       const u = String(url);
       if (u === '/api/chats' && init?.method === 'POST') {
@@ -2249,12 +2285,24 @@ describe('/chats/new', () => {
           { status: 202, headers: { 'content-type': 'application/json' } },
         );
       }
-      if (u.includes('/attachment')) {
+      if (u.includes('/new-chat-drafts/') && u.includes('/attachment') && init?.method === 'POST') {
         await uploadGate;
+        draftUploaded = true;
         return new Response(
           JSON.stringify({
             ok: true,
             ref: { id: 'att-x', name: 'a.txt', mimeType: 'text/plain', kind: 'file', url: '/x' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (u.includes('/new-chat-drafts/') && u.includes('/promote')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            refs: draftUploaded
+              ? [{ id: 'att-x', name: 'a.txt', mimeType: 'text/plain', kind: 'file' }]
+              : [],
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
@@ -2591,6 +2639,7 @@ describe('/chats/new model defaulting', () => {
   beforeEach(() => {
     seedModelCatalog();
     useChatStore.getState()._reset();
+    useComposerAttachmentStore.getState()._reset();
     useUiStore.getState().clearToasts();
     usePresenceStore.getState().setConnection('connected');
     usePresenceStore.getState().setHostOnline('d1', true);
@@ -2718,6 +2767,7 @@ describe('/chats/new model picker treatment', () => {
   beforeEach(() => {
     seedModelCatalog();
     useChatStore.getState()._reset();
+    useComposerAttachmentStore.getState()._reset();
     useUiStore.getState().clearToasts();
     localStorage.removeItem('patch.drafts.v1');
     localStorage.removeItem('patch.newChat.last.v1');
@@ -2830,6 +2880,7 @@ describe('/chats/new model picker treatment', () => {
 describe('/chats/new terminal', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
+    useComposerAttachmentStore.getState()._reset();
     useUiStore.getState().clearToasts();
     localStorage.removeItem('patch.drafts.v1');
     localStorage.removeItem('patch.newChat.last.v1');

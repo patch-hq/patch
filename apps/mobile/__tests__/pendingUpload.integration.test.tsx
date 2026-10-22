@@ -53,6 +53,11 @@ vi.mock('../src/api/rest', () => ({
     pinChat: vi.fn(),
     skills: vi.fn().mockResolvedValue({ skills: [] }),
     uploadAttachment: uploadAttachmentSpy,
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — a
+    // successful send with attachments detaches them from the draft
+    // (bookkeeping only) once accepted.
+    detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
+    deleteAttachment: vi.fn().mockResolvedValue({ ok: true }),
   },
 }));
 vi.mock('../src/api/ws', () => ({
@@ -112,14 +117,13 @@ afterEach(() => {
 
 function attach(names: string[], kind: 'image' | 'file' = 'image'): void {
   actSync(() => {
-    useComposerAttachmentStore.getState().add(
+    useComposerAttachmentStore.getState().attach(
       'c1',
+      { kind: 'chat', chatId: 'c1' },
       names.map((name) => ({
-        key: `k-${name}`,
         uri: `file:///cache/${name}`,
         name,
         mimeType: kind === 'image' ? 'image/png' : 'application/pdf',
-        kind,
       })),
     );
   });

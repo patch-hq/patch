@@ -57,27 +57,46 @@ vi.mock('expo-image-picker', () => ({
 const { getDocumentSpy } = vi.hoisted(() => ({ getDocumentSpy: vi.fn() }));
 vi.mock('expo-document-picker', () => ({ getDocumentAsync: getDocumentSpy }));
 
-const { uploadAttachmentSpy } = vi.hoisted(() => ({ uploadAttachmentSpy: vi.fn() }));
+const {
+  uploadAttachmentSpy,
+  uploadNewChatDraftAttachmentSpy,
+  deleteAttachmentSpy,
+  deleteNewChatDraftAttachmentSpy,
+  detachAttachmentsSpy,
+  promoteNewChatDraftAttachmentsSpy,
+} = vi.hoisted(() => ({
+  uploadAttachmentSpy: vi.fn(),
+  uploadNewChatDraftAttachmentSpy: vi.fn(),
+  deleteAttachmentSpy: vi.fn(),
+  deleteNewChatDraftAttachmentSpy: vi.fn(),
+  detachAttachmentsSpy: vi.fn(),
+  promoteNewChatDraftAttachmentsSpy: vi.fn(),
+}));
 vi.mock('../src/api/rest', () => ({
   api: {
     skills: vi.fn().mockResolvedValue({ skills: [] }),
     uploadAttachment: uploadAttachmentSpy,
+    uploadNewChatDraftAttachment: uploadNewChatDraftAttachmentSpy,
+    deleteAttachment: deleteAttachmentSpy,
+    deleteNewChatDraftAttachment: deleteNewChatDraftAttachmentSpy,
+    detachAttachments: detachAttachmentsSpy,
+    promoteNewChatDraftAttachments: promoteNewChatDraftAttachmentsSpy,
   },
 }));
 
 import { Composer } from '../src/components/Composer';
 
-/** Put `count` image attachments in c1's composer, as a picker or paste would. */
+/** Put `count` image attachments in c1's composer, as a picker or paste would
+ *  — uploads immediately (step 3 of 3), same as the real attach path. */
 function seedImages(count: number): void {
   actSync(() => {
-    useComposerAttachmentStore.getState().add(
+    useComposerAttachmentStore.getState().attach(
       'c1',
+      { kind: 'chat', chatId: 'c1' },
       Array.from({ length: count }, (_, i) => ({
-        key: `seed-${i}`,
         uri: `file:///cache/img-${i}.png`,
         name: `pasted-image-${i}.png`,
         mimeType: 'image/png',
-        kind: 'image' as const,
       })),
     );
   });
@@ -109,7 +128,47 @@ beforeEach(() => {
   requestCameraPermSpy.mockReset().mockResolvedValue({ granted: true });
   launchCameraSpy.mockReset().mockResolvedValue({ canceled: true });
   getDocumentSpy.mockReset().mockResolvedValue({ canceled: true });
-  uploadAttachmentSpy.mockReset();
+  // Step 3 of 3 — attaching now uploads straight away. Default every
+  // upload/remove/detach/promote call to a fast, deterministic success so
+  // chip-rendering tests (which predate this and don't care about the
+  // network) stay quiet; a test that DOES care re-mocks these explicitly.
+  let uploadSeq = 0;
+  uploadAttachmentSpy
+    .mockReset()
+    .mockImplementation((chatId: string, f: { name: string; mimeType: string }) => {
+      uploadSeq += 1;
+      const id = `srv-${uploadSeq}`;
+      return Promise.resolve({
+        ok: true,
+        ref: {
+          id,
+          name: f.name,
+          mimeType: f.mimeType,
+          kind: f.mimeType.startsWith('image/') ? 'image' : 'file',
+          url: `/api/chats/${chatId}/attachment/${id}`,
+        },
+      });
+    });
+  uploadNewChatDraftAttachmentSpy
+    .mockReset()
+    .mockImplementation((draftId: string, f: { name: string; mimeType: string }) => {
+      uploadSeq += 1;
+      const id = `srv-${uploadSeq}`;
+      return Promise.resolve({
+        ok: true,
+        ref: {
+          id,
+          name: f.name,
+          mimeType: f.mimeType,
+          kind: f.mimeType.startsWith('image/') ? 'image' : 'file',
+          url: `/api/new-chat-drafts/${draftId}/attachment/${id}`,
+        },
+      });
+    });
+  deleteAttachmentSpy.mockReset().mockResolvedValue({ ok: true });
+  deleteNewChatDraftAttachmentSpy.mockReset().mockResolvedValue({ ok: true });
+  detachAttachmentsSpy.mockReset().mockResolvedValue({ ok: true });
+  promoteNewChatDraftAttachmentsSpy.mockReset().mockResolvedValue({ ok: true, refs: [] });
 });
 
 afterEach(() => {
@@ -255,7 +314,7 @@ describe('Composer — camera (take a photo)', () => {
     expect(errors.some((m) => /take photo failed: camera permission denied/.test(m))).toBe(true);
   });
 
-  it('uploads a captured photo through the same image path on send', async () => {
+  it('uploads a captured photo IMMEDIATELY (attach time); send just uses the already-uploaded ref', async () => {
     launchCameraSpy.mockResolvedValue({
       canceled: false,
       assets: [
@@ -270,7 +329,7 @@ describe('Composer — camera (take a photo)', () => {
     });
     uploadAttachmentSpy.mockResolvedValue({
       ok: true,
-      ref: { id: 'id-shot', name: 'shot.jpg', mimeType: 'image/jpeg', kind: 'image' },
+      ref: { id: 'id-shot', name: 'shot.jpg', mimeType: 'image/jpeg', kind: 'image', url: '/x' },
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
@@ -278,6 +337,8 @@ describe('Composer — camera (take a photo)', () => {
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
+    // Already uploaded before Send is ever pressed.
+    expect(uploadAttachmentSpy).toHaveBeenCalledTimes(1);
     await actAsync(async () => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
       await flush();
@@ -342,7 +403,7 @@ describe('Composer — phone file upload: multi-select pickers', () => {
     );
   });
 
-  it('uploads every picked file on send (each one gets its own ref)', async () => {
+  it('uploads every picked file IMMEDIATELY (attach time), each gets its own ref — never re-uploaded on send', async () => {
     getDocumentSpy.mockResolvedValue({
       canceled: false,
       assets: [
@@ -358,6 +419,7 @@ describe('Composer — phone file upload: multi-select pickers', () => {
           name: f.name,
           mimeType: 'application/octet-stream',
           kind: 'file',
+          url: `/x/${f.name}`,
         },
       }),
     );
@@ -367,10 +429,13 @@ describe('Composer — phone file upload: multi-select pickers', () => {
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
+    // Already uploaded before Send is ever pressed.
+    expect(uploadAttachmentSpy).toHaveBeenCalledTimes(2);
     await actAsync(async () => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
       await flush();
     });
+    // Never re-uploaded for the send.
     expect(uploadAttachmentSpy).toHaveBeenCalledTimes(2);
     const refs = submitSpy.mock.calls[0]![3] as Array<{ name: string }>;
     expect(refs.map((x) => x.name)).toEqual(['a.pdf', 'b.csv']);

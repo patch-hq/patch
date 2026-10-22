@@ -2231,6 +2231,13 @@ async function startHost(
         handleAttachmentStore(event, daemon, sender, logger);
         return;
       }
+      if (event.type === 'patch.attachment.delete_request') {
+        // Step 3 of 3 — a composer-draft attachment removed before it was
+        // ever sent frees its host-side copy too (nothing orphaned on
+        // disk).
+        handleAttachmentDelete(event, daemon, sender, logger);
+        return;
+      }
       if (
         event.type === 'patch.secrets.set_request' ||
         event.type === 'patch.secrets.delete_request'
@@ -5126,6 +5133,38 @@ export function handleAttachmentStore(
     );
     sender({
       type: 'patch.attachment.store_response',
+      requestId: event.requestId,
+      ok: false,
+      error: { code, message: (err as Error).message },
+    });
+  }
+}
+
+/**
+ * spec/14 & spec/15 § Composer → Attachments (step 3 of 3) — free a
+ * composer-draft attachment the server has already dropped, whose bytes
+ * live only on the host (Claude's cwd). Best-effort by design (see
+ * `host.deleteAttachment`'s doc): a missing file is already the desired
+ * end state, so only an unknown-chat/write failure is reported as a typed
+ * error — never swallowed, but never fatal to the caller either.
+ */
+export function handleAttachmentDelete(
+  event: import('@patch/wire').PatchAttachmentDeleteRequestEvent,
+  daemon: Daemon,
+  sender: (e: WireEvent) => void,
+  logger: Logger,
+): void {
+  try {
+    daemon.deleteAttachment({ chatId: event.chatId, id: event.id, name: event.name });
+    sender({ type: 'patch.attachment.delete_response', requestId: event.requestId, ok: true });
+  } catch (err) {
+    const code = err instanceof AttachmentChatNotFoundError ? 'chat_not_found' : 'internal';
+    logger.warn(
+      { err: (err as Error).message, chatId: event.chatId, id: event.id, code },
+      'patch.attachment.delete_request: delete failed',
+    );
+    sender({
+      type: 'patch.attachment.delete_response',
       requestId: event.requestId,
       ok: false,
       error: { code, message: (err as Error).message },

@@ -49,10 +49,27 @@ vi.mock('../src/lib/hookCheck', async (orig) => ({
   checkHooks: async () => ({ decision: 'pass' as const, results: [] }),
 }));
 
+// Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — attaching now
+// uploads straight away, so `uploadAttachment` needs a real resolved value.
 vi.mock('../src/api/rest', () => ({
   api: {
     skills: vi.fn().mockResolvedValue({ skills: [] }),
-    uploadAttachment: vi.fn(),
+    uploadAttachment: vi
+      .fn()
+      .mockImplementation((chatId: string, f: { name: string; mimeType: string }) =>
+        Promise.resolve({
+          ok: true,
+          ref: {
+            id: `id-${f.name}`,
+            name: f.name,
+            mimeType: f.mimeType,
+            kind: f.mimeType.startsWith('image/') ? 'image' : 'file',
+            url: `/api/chats/${chatId}/attachment/id-${f.name}`,
+          },
+        }),
+      ),
+    detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
+    deleteAttachment: vi.fn().mockResolvedValue({ ok: true }),
   },
 }));
 
@@ -880,15 +897,11 @@ describe('Composer — mic icon color follows the disabled flag', () => {
 describe('Composer — dictation never disturbs a pending attachment', () => {
   function seedOneAttachment(chatId: string): void {
     actSync(() => {
-      useComposerAttachmentStore.getState().add(chatId, [
-        {
-          key: 'seed-0',
-          uri: 'file:///cache/img-0.png',
-          name: 'pasted-image-0.png',
-          mimeType: 'image/png',
-          kind: 'image',
-        },
-      ]);
+      useComposerAttachmentStore
+        .getState()
+        .attach(chatId, { kind: 'chat', chatId }, [
+          { uri: 'file:///cache/img-0.png', name: 'pasted-image-0.png', mimeType: 'image/png' },
+        ]);
     });
   }
 

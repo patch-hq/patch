@@ -1156,6 +1156,18 @@ function writeManifestEntry(dir: string, ref: AttachmentRef): void {
   writeFileSync(manifestPathFor(dir), JSON.stringify(manifest), 'utf8');
 }
 
+/** The inverse of `writeManifestEntry` (spec/14 & spec/15 §
+ *  Composer → Attachments): a draft attachment removed before it was ever
+ *  sent must not leave a manifest entry a later replay could reconstruct a
+ *  ref for, pointing at bytes `deleteAttachment` is about to remove. A
+ *  missing entry is a harmless no-op — nothing to reconcile. */
+function removeManifestEntry(attachDir: string, id: string): void {
+  const manifest = readManifest(attachDir);
+  if (!(id in manifest)) return;
+  delete manifest[id];
+  writeFileSync(manifestPathFor(attachDir), JSON.stringify(manifest), 'utf8');
+}
+
 /**
  * Extract the attachment ids + parsed shape out of a persisted user message's
  * appended `[Attachments]` block, and return the message text with the block
@@ -11963,6 +11975,38 @@ export class Daemon {
       'attachment stored',
     );
     return { path: target };
+  }
+
+  /**
+   * spec/14 & spec/15 § Composer → Attachments (step 3 of 3) — free a
+   * composer-draft attachment removed BEFORE it was ever sent: its bytes
+   * were written at ATTACH time (`storeAttachment` above), not send time, so
+   * a chip pulled before Send leaves a stray file + manifest entry here that
+   * no turn will ever reference. Best-effort from the server's point of
+   * view (see `attachments.ts`'s `requestHostDelete`) — a missing file is
+   * already the desired end state, not an error. Throws on an unknown chat
+   * (NO FALLBACK — the server maps it to a typed error), same as
+   * `storeAttachment`.
+   */
+  deleteAttachment(opts: { chatId: string; id: string; name: string }): void {
+    const state = this.chatState.get(opts.chatId);
+    if (!state) {
+      throw new AttachmentChatNotFoundError(`chat not found: ${opts.chatId}`);
+    }
+    const dir = this.attachmentsDirFor(state.folder);
+    const target = join(dir, attachmentFileName(opts.id, opts.name));
+    try {
+      rmSync(target, { force: true });
+    } catch (err) {
+      // Best-effort cleanup only — logged, never thrown (the server doesn't
+      // fail the surface's already-completed removal over this).
+      this.opts.logger.warn(
+        { chatId: opts.chatId, id: opts.id, err: (err as Error).message },
+        'attachment delete: file removal failed',
+      );
+    }
+    removeManifestEntry(dir, opts.id);
+    this.opts.logger.info({ chatId: opts.chatId, id: opts.id, path: target }, 'attachment deleted');
   }
 
   /**

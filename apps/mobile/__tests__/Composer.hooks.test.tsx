@@ -26,7 +26,11 @@ vi.mock('../src/lib/hookCheck', async (orig) => ({
   checkHooks: (c: string, m: string, n?: unknown) => check(c, m, n),
 }));
 vi.mock('../src/api/rest', () => ({
-  api: { skills: vi.fn().mockResolvedValue({ skills: [] }), uploadAttachment: vi.fn() },
+  api: {
+    skills: vi.fn().mockResolvedValue({ skills: [] }),
+    uploadAttachment: vi.fn(),
+    detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
+  },
 }));
 
 import { Composer } from '../src/components/Composer';
@@ -115,12 +119,17 @@ describe('Composer — message hooks', () => {
       name: `${key}.txt`,
       mimeType: 'text/plain',
       kind: 'file' as const,
+      status: 'uploaded' as const,
     });
-    useComposerAttachmentStore.getState().add('c1', [att('a')]);
+    const seed = (...list: Array<ReturnType<typeof att>>): void =>
+      useComposerAttachmentStore.setState((s) => ({
+        byKey: { ...s.byKey, c1: [...(s.byKey['c1'] ?? []), ...list] },
+      }));
+    seed(att('a'));
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     type(r, 'hello');
     await press(r, 'Send message');
-    useComposerAttachmentStore.getState().add('c1', [att('b')]);
+    seed(att('b'));
     release({ decision: 'pass', results: [] });
     await flushMicrotasks();
     expect(useComposerAttachmentStore.getState().byKey['c1']?.map((a) => a.key)).toEqual(['b']);

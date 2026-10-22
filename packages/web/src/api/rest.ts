@@ -168,6 +168,58 @@ async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
   return parsed as T;
 }
 
+/** Shared multipart POST for both attachment-upload endpoints (composer draft
+ *  and new-chat draft) — `request` above is JSON-only, so this builds the
+ *  FormData and does its own fetch. `file` is the ORIGINAL; `model` is the
+ *  downscaled copy, sent only when a downscale actually happened. */
+async function uploadMultipart(
+  path: string,
+  file: File,
+  model?: File,
+): Promise<{ ok: true; ref: UploadedAttachment }> {
+  const cred = loadCredential();
+  const headers = new Headers();
+  if (cred) headers.set('authorization', `Bearer ${cred}`);
+  const form = new FormData();
+  form.append('file', file);
+  if (model) form.append('model', model);
+  // Bounded: an unanswered request must fail the upload visibly (Retry / ×),
+  // not leave it on "Uploading" forever. The server's own host wait is 30s.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ATTACHMENT_UPLOAD_TIMEOUT_MS);
+  let text: string;
+  let res: Response;
+  try {
+    res = await fetch(path, { method: 'POST', headers, body: form, signal: ctrl.signal });
+    text = await res.text();
+  } catch (e) {
+    if (ctrl.signal.aborted) {
+      throw new Error(
+        `attachment upload timed out after ${ATTACHMENT_UPLOAD_TIMEOUT_MS / 1000}s (${file.name}, ${file.size} bytes)`,
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+  let parsed: unknown = null;
+  if (text.length > 0) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+  }
+  if (!res.ok) {
+    const errMsg =
+      parsed && typeof parsed === 'object' && 'error' in parsed
+        ? String((parsed as { error: unknown }).error)
+        : `HTTP ${res.status}`;
+    throw new ApiError(res.status, errMsg, parsed);
+  }
+  return parsed as { ok: true; ref: UploadedAttachment };
+}
+
 /**
  * The shared settings (spec/01 § Settings): held on the server, sent to every
  * host, and the same on every surface.
@@ -1179,58 +1231,46 @@ export const api = {
   // `file` is the ORIGINAL — the copy that gets stored, served and rendered.
   // `model` is the downscaled copy the agent reads, passed only when a downscale
   // actually happened (spec/15 § Composer).
-  uploadAttachment: async (
-    chatId: string,
-    file: File,
-    model?: File,
-  ): Promise<{ ok: true; ref: UploadedAttachment }> => {
-    const cred = loadCredential();
-    const headers = new Headers();
-    if (cred) headers.set('authorization', `Bearer ${cred}`);
-    const form = new FormData();
-    form.append('file', file);
-    if (model) form.append('model', model);
-    // Bounded: an unanswered request must fail the turn visibly (Retry / ×),
-    // not leave it on "Uploading" forever. The server's own host wait is 30s.
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), ATTACHMENT_UPLOAD_TIMEOUT_MS);
-    let text: string;
-    let res: Response;
-    try {
-      res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/attachment`, {
-        method: 'POST',
-        headers,
-        body: form,
-        signal: ctrl.signal,
-      });
-      text = await res.text();
-    } catch (e) {
-      if (ctrl.signal.aborted) {
-        throw new Error(
-          `attachment upload timed out after ${ATTACHMENT_UPLOAD_TIMEOUT_MS / 1000}s (${file.name}, ${file.size} bytes)`,
-        );
-      }
-      throw e;
-    } finally {
-      clearTimeout(timer);
-    }
-    let parsed: unknown = null;
-    if (text.length > 0) {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
-      }
-    }
-    if (!res.ok) {
-      const errMsg =
-        parsed && typeof parsed === 'object' && 'error' in parsed
-          ? String((parsed as { error: unknown }).error)
-          : `HTTP ${res.status}`;
-      throw new ApiError(res.status, errMsg, parsed);
-    }
-    return parsed as { ok: true; ref: UploadedAttachment };
-  },
+  //
+  // Called at ATTACH time (spec/14 & spec/15 § Composer → Attachments): the server registers the upload onto the
+  // chat's composer draft as a side effect, which is what fans it out to
+  // every other open surface.
+  uploadAttachment: (chatId: string, file: File, model?: File) =>
+    uploadMultipart(`/api/chats/${encodeURIComponent(chatId)}/attachment`, file, model),
+  /** Remove a chip BEFORE it was ever sent (step 3 of 3) — 404s if `id` isn't
+   *  still in the chat's composer draft (a sent message's attachment is never
+   *  reachable through this route). */
+  deleteAttachment: (chatId: string, id: string) =>
+    request<{ ok: true }>(
+      `/api/chats/${encodeURIComponent(chatId)}/attachment/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
+  /** Bookkeeping-only: the ids just sent now belong to the message, not the
+   *  draft (step 3 of 3). NEVER deletes a byte. Only `ids` leave the draft, so
+   *  a file attached after Send was pressed stays as the next draft. */
+  detachAttachments: (chatId: string, ids: string[]) =>
+    request<{ ok: true }>(`/api/chats/${encodeURIComponent(chatId)}/attachments/detach`, {
+      method: 'POST',
+      body: { ids },
+    }),
+  // Step 3 of 3 — new-chat draft attachments. No chatId exists yet, so these
+  // upload SERVER-ONLY (no host round-trip); `promoteNewChatDraftAttachments`
+  // is the one hand-off, run once the draft becomes a real chat.
+  uploadNewChatDraftAttachment: (draftId: string, file: File, model?: File) =>
+    uploadMultipart(`/api/new-chat-drafts/${encodeURIComponent(draftId)}/attachment`, file, model),
+  deleteNewChatDraftAttachment: (draftId: string, id: string) =>
+    request<{ ok: true }>(
+      `/api/new-chat-drafts/${encodeURIComponent(draftId)}/attachment/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
+  /** Moves every attachment `draftId` still holds into `chatId`'s real
+   *  attachments dir and does the ONE host hand-off — the client never
+   *  re-uploads a byte for this. */
+  promoteNewChatDraftAttachments: (draftId: string, chatId: string) =>
+    request<{ ok: true; refs: AttachmentRef[] }>(
+      `/api/new-chat-drafts/${encodeURIComponent(draftId)}/promote`,
+      { method: 'POST', body: { chatId } },
+    ),
   // Host-owned folder list for cold-start (spec/04 § Folders) — the one-tap
   // shortcut list. Live updates arrive over the WS (`folders.list` /
   // `folders.updated`); this serves a surface without a live socket.

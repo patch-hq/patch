@@ -27,15 +27,41 @@ import { getWs } from '../api/ws';
 import { useChatStore } from '../stores/chatStore';
 import { useToolsStore } from '../stores/toolsStore';
 import { useUiStore } from '../stores/uiStore';
-import type { PendingAttachment } from '../stores/composerAttachmentStore';
 import { deliveryTracker } from './deliveryTracker';
 import { downscaleImage } from './imageResize';
+import { apiUrl } from '../config';
+
+/**
+ * A file a turn is sent with, as the composer hands it over at Send. `uri` is
+ * the local copy — absent when this device never had the bytes itself (step
+ * 3 of 3: an attachment another surface put on the draft, sent from here).
+ * `ref` is set once the file is known to be uploaded already (attach-time
+ * upload, or a cross-surface attachment): present, `upload()` uses it
+ * straight away instead of re-uploading. `refPromise` covers the race in
+ * between — Send pressed while the attach-time upload is still in flight
+ * (or a new-chat draft's promote-after-wait): the composer builds whichever
+ * wait this file needs, and `upload()` just awaits it.
+ */
+export interface OutgoingFile {
+  uri?: string;
+  /** Served URL — the fallback local-echo source when `uri` is absent (a
+   *  remote-only attachment, step 3 of 3): rendered from THIS instead of
+   *  nothing while the ref itself is still resolving. */
+  url?: string;
+  name: string;
+  mimeType: string;
+  kind: 'image' | 'file';
+  width?: number;
+  height?: number;
+  ref?: AttachmentRef;
+  refPromise?: Promise<AttachmentRef>;
+}
 
 interface Outgoing {
   chatId: string;
   localId: string;
   text: string;
-  files: PendingAttachment[];
+  files: OutgoingFile[];
   /** The Tools panel's OFF set captured at SEND time (see deliveryTracker). */
   disabledTools: string[];
   /** Original seq of the turn this re-runs: the host folds it into that bubble. */
@@ -56,25 +82,42 @@ const key = (chatId: string, localId: string): string => `${chatId} ${localId}`;
  * Send a turn into `chatId`: echo it now, upload `files` (if any), deliver it
  * once everything ahead of it in the chat has. Returns the turn's localId.
  */
-export function sendMessage(chatId: string, text: string, files: PendingAttachment[]): string {
+export function sendMessage(chatId: string, text: string, files: OutgoingFile[]): string {
   counter += 1;
   const localId = `m-${Date.now()}-${counter}`;
+  // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — every file
+  // already carries its ref when it was uploaded at ATTACH time: nothing to
+  // upload, so skip the whole upload-staging dance and render exactly as an
+  // ordinary resolved send would.
+  const allResolved = files.length > 0 && files.every((f) => f.ref !== undefined);
   const item: Outgoing = {
     chatId,
     localId,
     text,
     files,
     disabledTools: useToolsStore.getState().disabledFor(chatId),
-    refs: files.length === 0 ? [] : null,
+    refs: files.length === 0 ? [] : allResolved ? files.map((f) => f.ref!) : null,
   };
-  useChatStore.getState().appendLocalUserMessage(chatId, text, localId, undefined, {
-    localAttachments: files.map((f) => ({
-      uri: f.uri,
-      name: f.name,
-      mimeType: f.mimeType,
-      kind: f.kind,
-    })),
-  });
+  useChatStore.getState().appendLocalUserMessage(
+    chatId,
+    text,
+    localId,
+    allResolved ? item.refs! : undefined,
+    allResolved
+      ? undefined
+      : {
+          localAttachments: files.map((f) => ({
+            // Falls back to the served URL for a remote-only attachment
+            // (step 3 of 3 — another surface's, never downloaded here) —
+            // `apiUrl` makes it absolute, since RN's `Image` (unlike a
+            // browser) doesn't resolve a relative path against a base.
+            uri: f.uri ?? (f.url ? apiUrl(f.url) : ''),
+            name: f.name,
+            mimeType: f.mimeType,
+            kind: f.kind,
+          })),
+        },
+  );
   enqueue(item);
   return localId;
 }
@@ -193,8 +236,33 @@ async function upload(item: Outgoing): Promise<void> {
     const refs: AttachmentRef[] = [];
     // One at a time, so the count ticks visibly through a batch.
     for (const a of files) {
+      // Step 3 of 3 — already uploaded (this device's own attach-time upload
+      // resolved after Send was pressed, or a mixed batch where some files
+      // came pre-resolved): nothing to upload, use the ref as-is.
+      if (a.ref) {
+        refs.push(a.ref);
+        useChatStore.getState().patchLocalMessage(chatId, localId, {
+          upload: { done: refs.length, total, failed: false },
+        });
+        continue;
+      }
+      // Step 3 of 3 — Send raced ahead of this file's own resolution: await
+      // whatever the composer already has in flight for it instead of
+      // starting a fresh upload for the same file.
+      if (a.refPromise) {
+        const p = a.refPromise;
+        a.refPromise = undefined; // consumed — a Retry falls through below
+        const ref = await p;
+        refs.push(ref);
+        useChatStore.getState().patchLocalMessage(chatId, localId, {
+          upload: { done: refs.length, total, failed: false },
+        });
+        continue;
+      }
       // spec/15 § Composer — downscale/compress images so they're within the
       // backend's vision limits. Non-images upload as-is.
+      /* v8 ignore next -- defensive only: every OutgoingFile Composer builds carries `ref`, `refPromise`, or `uri` — never none of the three. */
+      if (!a.uri) continue;
       const up =
         a.kind === 'image'
           ? await downscaleImage({

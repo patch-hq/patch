@@ -24,6 +24,7 @@ import { useUiStore } from '../stores/uiStore';
 import { deliveryTracker } from '../lib/deliveryTracker';
 import { useComposerDraftStore } from '../lib/composerDraft';
 import { useNewChatDraftStore } from '../stores/newChatDraftStore';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { mobileBuildInfo } from '../lib/buildInfo';
 import { refreshRoster } from '../lib/rosterRefresh';
@@ -660,6 +661,13 @@ export class PatchWs {
       useComposerDraftStore.getState().applyDraftList(event.drafts);
       return;
     }
+    if (event.type === 'composer_draft.attachments_list') {
+      useComposerAttachmentStore.getState().applyList(
+        event.drafts.map((d) => ({ draftKey: d.chatId, attachments: d.attachments })),
+        'chat',
+      );
+      return;
+    }
     if (event.type === 'composer_draft.updated') {
       useComposerDraftStore.getState().applyDraftUpdated(event.chatId, event.text, event.updatedAt);
       return;
@@ -668,11 +676,25 @@ export class PatchWs {
       useComposerDraftStore.getState().applyDraftCleared(event.chatId, event.updatedAt);
       return;
     }
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments).
+    if (event.type === 'composer_draft.attachments_changed') {
+      useComposerAttachmentStore
+        .getState()
+        .applyAttachmentsChanged(event.chatId, event.attachments);
+      return;
+    }
     // spec/14 § New chat drafts — server-owned drafts. The cold-start
     // snapshot, sent once right after auth.ok, and the live updates that
     // follow.
     if (event.type === 'new_chat_draft.list') {
       useNewChatDraftStore.getState().applyDraftList(event.drafts);
+      return;
+    }
+    if (event.type === 'new_chat_draft.attachments_list') {
+      useComposerAttachmentStore.getState().applyList(
+        event.drafts.map((d) => ({ draftKey: d.id, attachments: d.attachments })),
+        'new-chat-draft',
+      );
       return;
     }
     if (event.type === 'new_chat_draft.updated') {
@@ -684,6 +706,10 @@ export class PatchWs {
     }
     if (event.type === 'new_chat_draft.removed') {
       useNewChatDraftStore.getState().applyDraftCleared(event.id, event.updatedAt);
+      return;
+    }
+    if (event.type === 'new_chat_draft.attachments_changed') {
+      useComposerAttachmentStore.getState().applyAttachmentsChanged(event.id, event.attachments);
       return;
     }
     if (

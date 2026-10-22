@@ -41,6 +41,7 @@ import {
   handleSkillsRequest,
   handleFoldersBrowseRequest,
   handleAttachmentStore,
+  handleAttachmentDelete,
   handleVoiceNoteTranscribe,
   handleSecretsMutation,
   handleFilesRequest,
@@ -3774,6 +3775,79 @@ describe('handleAttachmentStore', () => {
         mimeType: 'text/plain',
         kind: 'file',
         dataBase64: Buffer.from('hello').toString('base64'),
+      },
+      daemon,
+      sender,
+      silent,
+    );
+    expect(sent[0]).toMatchObject({ ok: false, error: { code: 'internal' } });
+  });
+});
+
+describe('handleAttachmentDelete', () => {
+  it('unknown chat -> chat_not_found', () => {
+    const { daemon } = makeHost();
+    const { sender, sent } = captureSender();
+    handleAttachmentDelete(
+      {
+        type: 'patch.attachment.delete_request',
+        requestId: 'd1',
+        chatId: 'no-such-chat',
+        id: 'att-1',
+        name: 'x.txt',
+      },
+      daemon,
+      sender,
+      silent,
+    );
+    expect(sent[0]).toMatchObject({ ok: false, error: { code: 'chat_not_found' } });
+  });
+
+  it('success -> ok, and the stored file is gone', async () => {
+    const { daemon } = makeHost();
+    const folder = makeFolder();
+    const chatId = await daemon.spawnChat({ folder });
+    const stored = daemon.storeAttachment({
+      chatId,
+      id: 'att-1',
+      name: 'x.txt',
+      mimeType: 'text/plain',
+      kind: 'file',
+      bytes: Buffer.from('hello'),
+    });
+    expect(existsSync(stored.path)).toBe(true);
+    const { sender, sent } = captureSender();
+    handleAttachmentDelete(
+      {
+        type: 'patch.attachment.delete_request',
+        requestId: 'd2',
+        chatId,
+        id: 'att-1',
+        name: 'x.txt',
+      },
+      daemon,
+      sender,
+      silent,
+    );
+    expect(sent[0]).toMatchObject({ ok: true });
+    expect(existsSync(stored.path)).toBe(false);
+  });
+
+  it('an unexpected (non-AttachmentChatNotFoundError) failure -> internal', async () => {
+    const { daemon } = makeHost();
+    const folder = makeFolder();
+    const chatId = await daemon.spawnChat({ folder });
+    vi.spyOn(daemon, 'deleteAttachment').mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    const { sender, sent } = captureSender();
+    handleAttachmentDelete(
+      {
+        type: 'patch.attachment.delete_request',
+        requestId: 'd3',
+        chatId,
+        id: 'att-1',
+        name: 'x.txt',
       },
       daemon,
       sender,

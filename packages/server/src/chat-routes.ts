@@ -31,8 +31,10 @@ import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ChatLogStore } from './chat-log-store.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
+import type { DraftAttachmentStore } from './draft-attachments.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from './host-addressing.js';
 import { unknownChatReply } from './unknown-chat.js';
+import { discardComposerDraftAttachments } from './attachments.js';
 
 /**
  * Does a client-supplied relative path climb out with a `..` SEGMENT? Two dots
@@ -145,6 +147,14 @@ export interface ChatRoutesDeps {
    * that governs its localStorage/MMKV predecessors.
    */
   composerDrafts: ComposerDraftStore;
+  /**
+   * The files attached to unsent composer drafts, and the root the server
+   * writes their serving copies under — a deleted chat's still-draft
+   * attachments are freed on the same "deleting the chat drops it" rule as
+   * its text (spec/14 & spec/15 § Composer → Attachments).
+   */
+  composerAttachments: DraftAttachmentStore;
+  attachmentsDir: string;
   /**
    * The transcripts the server has seen pass through it. Answers a history
    * read for a chat whose host is offline.
@@ -1900,6 +1910,18 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     // "One draft per chat. Deleting the chat drops it." (spec/14 § Composer) —
     // a soft-delete is not archiving, so unlike an archived chat this one does
     // not keep its draft for a restore.
+    // Its still-draft attachments (never sent, so never part of the chat's
+    // real history) are freed too, not just detached: nothing is orphaned on
+    // disk.
+    discardComposerDraftAttachments(
+      {
+        composerAttachments: deps.composerAttachments,
+        attachmentsDir: deps.attachmentsDir,
+        hostLink: deps.hostLink,
+      },
+      req.params.id,
+      auth.surfaceId,
+    );
     deps.composerDrafts.clear(req.params.id);
     return reply.code(200).send({ ok: true });
   });

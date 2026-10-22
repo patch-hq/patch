@@ -107,6 +107,39 @@ export interface CrashReport {
   occurredAt: number;
 }
 
+/** Shared multipart POST for both attachment-upload endpoints (composer draft
+ *  and new-chat draft) — `request` above is JSON-only, so this builds the
+ *  FormData itself (RN accepts a `{uri,name,type}` object as the file part,
+ *  the same shape voiceNote uses). */
+async function uploadMultipart(
+  path: string,
+  file: { uri: string; name: string; mimeType: string },
+): Promise<{ ok: true; ref: UploadedAttachment }> {
+  const cred = loadCredential();
+  const headers = new Headers();
+  if (cred) headers.set('authorization', `Bearer ${cred}`);
+  const form = new FormData();
+  form.append('file', { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+  const res = await fetch(apiUrl(path), {
+    method: 'POST',
+    headers,
+    body: form as unknown as BodyInit,
+  });
+  const text = await res.text();
+  let parsed: unknown = null;
+  if (text.length > 0) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, errorMessageFrom(parsed, res.status), parsed);
+  }
+  return parsed as { ok: true; ref: UploadedAttachment };
+}
+
 export interface ChatListEntry {
   chatId: string;
   name: string | null;
@@ -639,44 +672,53 @@ export const api = {
   },
   /**
    * spec/15 § Composer — upload one composer attachment (image or file) for a
-   * chat to `POST /api/chats/:chatId/attachment`. Multipart, so it builds the
-   * FormData itself (RN accepts a `{uri,name,type}` object as the file part, the
-   * same shape voiceNote uses). The server stores the file, hands a copy to the
-   * host (Claude reads it by path) and returns the ref + inline URL. Any
-   * non-2xx throws (NO FALLBACK — the attachment is never silently dropped).
+   * chat to `POST /api/chats/:chatId/attachment`. The server stores the file,
+   * hands a copy to the host (Claude reads it by path) and returns the ref +
+   * inline URL. NO FALLBACK — a non-2xx throws.
+   *
+   * Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — called at
+   * ATTACH time now, not send time: the server registers the upload onto the
+   * chat's composer draft as a side effect, fanning it out to every other
+   * open surface.
    */
-  uploadAttachment: async (
-    chatId: string,
-    file: { uri: string; name: string; mimeType: string },
-  ): Promise<{ ok: true; ref: UploadedAttachment }> => {
-    const cred = loadCredential();
-    const headers = new Headers();
-    if (cred) headers.set('authorization', `Bearer ${cred}`);
-    const form = new FormData();
-    form.append('file', {
-      uri: file.uri,
-      name: file.name,
-      type: file.mimeType,
-    } as unknown as Blob);
-    const res = await fetch(apiUrl(`/api/chats/${encodeURIComponent(chatId)}/attachment`), {
+  uploadAttachment: (chatId: string, file: { uri: string; name: string; mimeType: string }) =>
+    uploadMultipart(`/api/chats/${encodeURIComponent(chatId)}/attachment`, file),
+  /** Remove a chip BEFORE it was ever sent (step 3 of 3) — 404s if `id` isn't
+   *  still in the chat's composer draft (a sent message's attachment is never
+   *  reachable through this route). */
+  deleteAttachment: (chatId: string, id: string) =>
+    request<{ ok: true }>(
+      `/api/chats/${encodeURIComponent(chatId)}/attachment/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
+  /** Bookkeeping-only: the ids just sent now belong to the message, not the
+   *  draft (step 3 of 3). NEVER deletes a byte. Only `ids` leave the draft, so
+   *  a file attached after Send was pressed stays as the next draft. */
+  detachAttachments: (chatId: string, ids: string[]) =>
+    request<{ ok: true }>(`/api/chats/${encodeURIComponent(chatId)}/attachments/detach`, {
       method: 'POST',
-      headers,
-      body: form as unknown as BodyInit,
-    });
-    const text = await res.text();
-    let parsed: unknown = null;
-    if (text.length > 0) {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
-      }
-    }
-    if (!res.ok) {
-      throw new ApiError(res.status, errorMessageFrom(parsed, res.status), parsed);
-    }
-    return parsed as { ok: true; ref: UploadedAttachment };
-  },
+      body: { ids },
+    }),
+  // Step 3 of 3 — new-chat draft attachments. No chatId exists yet, so these
+  // upload SERVER-ONLY (no host round-trip); `promoteNewChatDraftAttachments`
+  // is the one hand-off, run once the draft becomes a real chat.
+  uploadNewChatDraftAttachment: (
+    draftId: string,
+    file: { uri: string; name: string; mimeType: string },
+  ) => uploadMultipart(`/api/new-chat-drafts/${encodeURIComponent(draftId)}/attachment`, file),
+  deleteNewChatDraftAttachment: (draftId: string, id: string) =>
+    request<{ ok: true }>(
+      `/api/new-chat-drafts/${encodeURIComponent(draftId)}/attachment/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
+  /** Moves every attachment `draftId` still holds into `chatId`'s real
+   *  attachments dir and does the ONE host hand-off — the client never
+   *  re-uploads a byte for this. */
+  promoteNewChatDraftAttachments: (draftId: string, chatId: string) =>
+    request<{ ok: true; refs: AttachmentRef[] }>(
+      `/api/new-chat-drafts/${encodeURIComponent(draftId)}/promote`,
+      { method: 'POST', body: { chatId } },
+    ),
   /** Report a caught crash to the server (`POST /api/client-crashes`). */
   reportCrash: (report: CrashReport) =>
     request<{ ok: true }>('/api/client-crashes', { method: 'POST', body: report }),

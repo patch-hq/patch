@@ -11,6 +11,7 @@ import { ChatRoute } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 import { setActiveWs } from '../api/ws.js';
 import { clearSharedAccounts, reportAccount, setSharedAccounts } from './presenceHelpers.js';
 
@@ -61,6 +62,7 @@ describe('ChatRoute — whole-chat drop zone', () => {
   beforeEach(() => {
     clearSharedAccounts();
     useChatStore.getState()._reset();
+    useComposerAttachmentStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
     usePresenceStore.getState().setHostOnline('d1', true);
     reportAccount('d1', true);

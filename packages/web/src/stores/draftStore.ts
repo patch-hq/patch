@@ -27,6 +27,7 @@ import { canonicalizeHostNames, type NewChatDraftBody } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { hasDraftText } from '../lib/draftText.js';
 import { useUiStore } from './uiStore.js';
+import { useComposerAttachmentStore } from './composerAttachmentStore.js';
 
 export interface Draft {
   id: string;
@@ -238,6 +239,11 @@ export const useDraftStore = create<DraftStore>((set, get) => ({
     const order = get().order.filter((x) => !dead.includes(x));
     persist(drafts, order);
     set({ drafts, order });
+    // A draft collected for having no text takes any file attached to it along
+    // (spec/14 § Composer → Attachments: nothing is orphaned).
+    for (const id of dead) {
+      useComposerAttachmentStore.getState().discardAll(id, { kind: 'new-chat-draft', draftId: id });
+    }
   },
 
   get(id) {

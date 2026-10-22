@@ -41,6 +41,7 @@ import type { ManagerFailover } from './manager-failover.js';
 import type { QueueTracker } from './queue-tracker.js';
 import type { ServerQueue } from './server-queue.js';
 import type { NewChatDraftStore } from './new-chat-drafts.js';
+import type { DraftAttachmentStore } from './draft-attachments.js';
 import { InputDedupe } from './dedupe.js';
 import { hostLockstep } from './host-lockstep.js';
 
@@ -194,6 +195,13 @@ export interface WsHubDeps {
   /** Server-owned new-chat drafts (spec/14 § New chat drafts). */
   newChatDrafts?: NewChatDraftStore;
   /**
+   * The files attached to unsent drafts (spec/14 & spec/15 § Composer →
+   * Attachments), one store per draft kind. Their changes fan out like the
+   * draft text's do. Optional for the same reason the draft stores are.
+   */
+  composerAttachments?: DraftAttachmentStore;
+  newChatAttachments?: DraftAttachmentStore;
+  /**
    * Bind the host's authenticated WS socket to the host link. Called by
    * the hello gate when a host presents a valid daemonKey. Production wires
    * `InboundHostLink.attach`; tests inject a spy. Absent → host hellos are
@@ -251,6 +259,8 @@ export class WsHub {
   private composerDraftsUnsub: (() => void) | null = null;
   private viewPositionUnsub: (() => void) | null = null;
   private newChatDraftsUnsub: (() => void) | null = null;
+  private composerAttachmentsUnsub: (() => void) | null = null;
+  private newChatAttachmentsUnsub: (() => void) | null = null;
   /**
    * The last `host.host` self-description each host reported, keyed by
    * hostId. A host emits it on link auth, so a surface that connects LATER
@@ -530,6 +540,26 @@ export class WsHub {
         }
         this.sendToAll(event);
       }) ?? null;
+    // Draft attachments: same account-wide fan-out, the whole current list
+    // each time (an empty list means the draft holds none).
+    this.composerAttachmentsUnsub =
+      deps.composerAttachments?.onChange((c) => {
+        this.sendToAll({
+          type: 'composer_draft.attachments_changed',
+          chatId: c.key,
+          attachments: c.attachments,
+          updatedAt: c.updatedAt,
+        });
+      }) ?? null;
+    this.newChatAttachmentsUnsub =
+      deps.newChatAttachments?.onChange((c) => {
+        this.sendToAll({
+          type: 'new_chat_draft.attachments_changed',
+          id: c.key,
+          attachments: c.attachments,
+          updatedAt: c.updatedAt,
+        });
+      }) ?? null;
   }
 
   /**
@@ -587,6 +617,8 @@ export class WsHub {
     this.composerDraftsUnsub?.();
     this.viewPositionUnsub?.();
     this.newChatDraftsUnsub?.();
+    this.composerAttachmentsUnsub?.();
+    this.newChatAttachmentsUnsub?.();
     for (const conn of this.allConns()) {
       try {
         conn.socket.close();
@@ -969,6 +1001,21 @@ export class WsHub {
       socket.send(encode({ type: 'composer_draft.list', drafts }));
     }
 
+    // Always sent (even empty), like the new-chat snapshot below, so a
+    // surface drops a chip removed elsewhere while it was away.
+    if (this.deps.composerAttachments) {
+      socket.send(
+        encode({
+          type: 'composer_draft.attachments_list',
+          drafts: this.deps.composerAttachments.list().map((e) => ({
+            chatId: e.key,
+            attachments: e.attachments,
+            updatedAt: e.updatedAt,
+          })),
+        }),
+      );
+    }
+
     const viewPosition = this.deps.viewPosition?.get();
     if (viewPosition) socket.send(encode({ type: 'view_position.updated', ...viewPosition }));
 
@@ -976,6 +1023,18 @@ export class WsHub {
     // that was deleted elsewhere while it was away.
     if (this.deps.newChatDrafts) {
       socket.send(encode({ type: 'new_chat_draft.list', drafts: this.deps.newChatDrafts.list() }));
+    }
+    if (this.deps.newChatAttachments) {
+      socket.send(
+        encode({
+          type: 'new_chat_draft.attachments_list',
+          drafts: this.deps.newChatAttachments.list().map((e) => ({
+            id: e.key,
+            attachments: e.attachments,
+            updatedAt: e.updatedAt,
+          })),
+        }),
+      );
     }
 
     // Greet with each registered host's presence. Every registered host is

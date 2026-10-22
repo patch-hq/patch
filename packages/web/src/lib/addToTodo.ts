@@ -18,6 +18,16 @@ export async function addToTodoList(
 ): Promise<void> {
   const refs: AttachmentRef[] = [];
   for (const a of files) {
+    // Already uploaded at attach time (or being so right now): use the ref.
+    if (a.ref) {
+      refs.push(a.ref);
+      continue;
+    }
+    if (a.refPromise) {
+      refs.push(await a.refPromise);
+      continue;
+    }
+    if (!a.file) throw new Error(`attachment ${a.name} has neither an uploaded ref nor its bytes`);
     const downscaled = a.kind === 'image' ? await downscaleImageFile(a.file) : a.file;
     const model = downscaled === a.file ? undefined : downscaled;
     const { ref } = await api.uploadAttachment(chatId, a.file, model);

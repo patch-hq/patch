@@ -8,7 +8,7 @@ import { isReadOnlyMirrorThread } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import type { SharedPayload } from './shareIntent';
 import { getComposerDraft, hasDraftText, setComposerDraft } from './composerDraft';
-import { newAttachmentKey, useComposerAttachmentStore } from '../stores/composerAttachmentStore';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore';
 import { useNewChatDraftStore } from '../stores/newChatDraftStore';
 
 /** Archived/deleted chats and read-only mirror threads (no composer, the host
@@ -23,11 +23,10 @@ export function shareableChats(chats: Record<string, ChatRow>): ChatRow[] {
 }
 
 /**
- * Put a share into the composer behind `draftKey` — a chat's, or the new-chat
- * screen's (a new-chat draft's own id). Nothing is sent: the text joins whatever is
- * already typed there (never overwriting it), and each file becomes an
- * ordinary attachment chip, uploaded by the composer's own path on Send
- * (spec/15 § Share into Patch).
+ * Put a share into the composer behind `draftKey` — an existing chat's. Nothing
+ * is sent: the text joins whatever is already typed there (never overwriting
+ * it), and each file becomes an ordinary attachment chip, uploaded straight
+ * away (spec/14 & spec/15 § Composer → Attachments; spec/15 § Share into Patch).
  */
 export function handShareToComposer(draftKey: string, share: SharedPayload): void {
   if (share.text !== null) {
@@ -37,23 +36,17 @@ export function handShareToComposer(draftKey: string, share: SharedPayload): voi
       hasDraftText(current) ? `${current.trimEnd()}\n\n${share.text}` : share.text,
     );
   }
-  useComposerAttachmentStore.getState().add(
-    draftKey,
-    share.files.map((f) => ({
-      key: newAttachmentKey(),
-      uri: f.uri,
-      name: f.name,
-      mimeType: f.mimeType,
-      kind: f.kind,
-    })),
-  );
+  useComposerAttachmentStore
+    .getState()
+    .attach(draftKey, { kind: 'chat', chatId: draftKey }, share.files);
 }
 
 /**
  * Same as `handShareToComposer`, but for the new-chat screen's draft (spec/14
  * § New chat drafts): the destination is a not-yet-spawned new chat, so its
  * text lives in the server-synced new-chat-draft store, keyed by the draft's
- * own id, not a chat's composer draft.
+ * own id, not a chat's composer draft — and its attachments upload to the
+ * draft-scoped route (no chatId exists yet).
  */
 export function handShareToNewChatDraft(draftId: string, share: SharedPayload): void {
   if (share.text !== null) {
@@ -63,14 +56,7 @@ export function handShareToNewChatDraft(draftId: string, share: SharedPayload): 
       text: hasDraftText(current) ? `${current.trimEnd()}\n\n${share.text}` : share.text,
     });
   }
-  useComposerAttachmentStore.getState().add(
-    draftId,
-    share.files.map((f) => ({
-      key: newAttachmentKey(),
-      uri: f.uri,
-      name: f.name,
-      mimeType: f.mimeType,
-      kind: f.kind,
-    })),
-  );
+  useComposerAttachmentStore
+    .getState()
+    .attach(draftId, { kind: 'new-chat-draft', draftId }, share.files);
 }

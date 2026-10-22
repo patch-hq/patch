@@ -23,8 +23,30 @@ import { useChatStore } from '../src/stores/chatStore';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { useUiStore } from '../src/stores/uiStore';
 
+// Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — attaching now
+// uploads straight away, so `uploadAttachment` needs a real resolved value
+// (not a bare `vi.fn()`) or the attach-time upload rejects and toasts an
+// error these tests don't expect.
 vi.mock('../src/api/rest', () => ({
-  api: { skills: vi.fn().mockResolvedValue({ skills: [] }), uploadAttachment: vi.fn() },
+  api: {
+    skills: vi.fn().mockResolvedValue({ skills: [] }),
+    uploadAttachment: vi
+      .fn()
+      .mockImplementation((chatId: string, f: { name: string; mimeType: string }) =>
+        Promise.resolve({
+          ok: true,
+          ref: {
+            id: `id-${f.name}`,
+            name: f.name,
+            mimeType: f.mimeType,
+            kind: f.mimeType.startsWith('image/') ? 'image' : 'file',
+            url: `/api/chats/${chatId}/attachment/id-${f.name}`,
+          },
+        }),
+      ),
+    detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
+    deleteAttachment: vi.fn().mockResolvedValue({ ok: true }),
+  },
 }));
 
 import { Composer } from '../src/components/Composer';
@@ -109,14 +131,20 @@ describe('Composer — image paste', () => {
       ],
       errors: [],
     });
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — attaching
+    // now uploads straight away: the LOCAL uri/width/height stay the
+    // original picked file's (still what the thumbnail draws from), but
+    // name/mimeType become whatever the server echoed back for the
+    // uploaded bytes — here, oversized (2400px tall > MAX_IMAGE_EDGE),
+    // so `downscaleImage` re-encoded it to JPEG before upload.
     expect(attachments()).toEqual([
       expect.objectContaining({
         uri: 'file:///cache/pasted-in/1-1-Screenshot.png',
-        name: 'Screenshot.png',
-        mimeType: 'image/png',
+        mimeType: 'image/jpeg',
         kind: 'image',
         width: 1080,
         height: 2400,
+        status: 'uploaded',
       }),
     ]);
     expect(errors()).toEqual([]);

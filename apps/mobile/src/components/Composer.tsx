@@ -104,7 +104,12 @@ import {
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { harnessForModel, providerBuiltinCommands, type PermissionMode } from '@patch/wire';
+import {
+  harnessForModel,
+  providerBuiltinCommands,
+  type AttachmentRef,
+  type PermissionMode,
+} from '@patch/wire';
 import { AnchoredMenu } from './AnchoredMenu';
 import { ImageAnnotatorModal, type AnnotatedImage } from './ImageAnnotatorModal';
 import { ModelPicker } from './ModelPicker';
@@ -143,7 +148,7 @@ import { startDictationMode, type DictationModeHandle } from '../lib/dictationMo
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
 import { hostControlsDisabled, hostControlDisabledReason } from '../lib/connection';
-import { sendMessage } from '../lib/sendQueue';
+import { sendMessage, type OutgoingFile } from '../lib/sendQueue';
 import { adviseNotes, checkHooks } from '../lib/hookCheck';
 import { HookBlockSheet } from './HookBlockSheet';
 import { ContextRing } from './ContextRing';
@@ -157,9 +162,9 @@ import { ensurePermission } from '../lib/permissionGate';
 import { enablePushNotifications } from '../lib/push';
 import {
   NO_ATTACHMENTS,
-  attachmentKindForMime,
-  newAttachmentKey,
   useComposerAttachmentStore,
+  waitForAttachmentUpload,
+  type AttachmentTarget,
   type PendingAttachment,
 } from '../stores/composerAttachmentStore';
 
@@ -258,9 +263,6 @@ export function permissionModeIcon(mode: PermissionMode | string): typeof Lock {
   }
 }
 
-const kindForMime = attachmentKindForMime;
-const newKey = newAttachmentKey;
-
 export function Composer({
   chatId,
   dictationChatId,
@@ -347,6 +349,12 @@ export function Composer({
   }, [chatId]);
   // Held per draft key in a store rather than here, so the share sheet can
   // drop a shared file into this composer (spec/15 § Share into Patch).
+  // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — `chatId` IS
+  // the draft key either way here (an existing chat's real chatId, or a
+  // new-chat draft's own id), but the two upload to different routes.
+  const attachmentTarget: AttachmentTarget = isNewChatDraft
+    ? { kind: 'new-chat-draft', draftId: chatId }
+    : { kind: 'chat', chatId };
   const storedAttachments = useComposerAttachmentStore((s) => s.byKey[chatId] ?? NO_ATTACHMENTS);
   const attachments = edit ? NO_ATTACHMENTS : storedAttachments;
   // This chat's row — the mode, model, host and activity the controls on the
@@ -902,11 +910,13 @@ export function Composer({
     if (handle) void handle.finish(false);
   }
 
-  const addAttachment = (a: PendingAttachment): void => {
-    useComposerAttachmentStore.getState().add(chatId, [a]);
+  const addAttachments = (
+    files: Array<{ uri: string; name: string; mimeType: string; width?: number; height?: number }>,
+  ): void => {
+    useComposerAttachmentStore.getState().attach(chatId, attachmentTarget, files);
   };
   const removeAttachment = (key: string): void => {
-    useComposerAttachmentStore.getState().remove(chatId, key);
+    useComposerAttachmentStore.getState().remove(chatId, attachmentTarget, key);
   };
   // The image being marked up (spec/15 § Composer — attachments). Done swaps
   // the annotated PNG in for it, in the same place in the chip row.
@@ -916,9 +926,7 @@ export function Composer({
     setAnnotating(null);
     if (original === null) return;
     try {
-      useComposerAttachmentStore
-        .getState()
-        .replace(chatId, original.key, { ...next, key: newKey(), kind: 'image' });
+      useComposerAttachmentStore.getState().replace(chatId, attachmentTarget, original.key, next);
     } catch (e) {
       useUiStore.getState().pushError(`annotate failed: ${(e as Error).message}`);
     }
@@ -929,7 +937,7 @@ export function Composer({
   const [sketching, setSketching] = React.useState(false);
   const finishSketch = (next: AnnotatedImage): void => {
     setSketching(false);
-    addAttachment({ ...next, key: newKey(), kind: 'image' });
+    addAttachments([next]);
   };
 
   // Image button → photo library. NO FALLBACK: a denied permission surfaces an
@@ -947,18 +955,15 @@ export function Composer({
         allowsMultipleSelection: true,
       });
       if (res.canceled) return;
-      for (const asset of res.assets) {
-        const mimeType = asset.mimeType ?? 'image/jpeg';
-        addAttachment({
-          key: newKey(),
+      addAttachments(
+        res.assets.map((asset) => ({
           uri: asset.uri,
           name: asset.fileName ?? `image-${Date.now()}.jpg`,
-          mimeType,
-          kind: 'image',
+          mimeType: asset.mimeType ?? 'image/jpeg',
           width: asset.width,
           height: asset.height,
-        });
-      }
+        })),
+      );
     } catch (e) {
       useUiStore.getState().pushError(`attach image failed: ${(e as Error).message}`);
     }
@@ -977,17 +982,15 @@ export function Composer({
         quality: 1,
       });
       if (res.canceled) return;
-      for (const asset of res.assets) {
-        addAttachment({
-          key: newKey(),
+      addAttachments(
+        res.assets.map((asset) => ({
           uri: asset.uri,
           name: asset.fileName ?? `photo-${Date.now()}.jpg`,
           mimeType: asset.mimeType ?? 'image/jpeg',
-          kind: 'image',
           width: asset.width,
           height: asset.height,
-        });
-      }
+        })),
+      );
     } catch (e) {
       useUiStore.getState().pushError(`take photo failed: ${(e as Error).message}`);
     }
@@ -1002,13 +1005,7 @@ export function Composer({
       await FileSystem.writeAsStringAsync(uri, inserted, {
         encoding: FileSystem.EncodingType.UTF8,
       });
-      addAttachment({
-        key: newKey(),
-        uri,
-        name: pastedTextName(inserted),
-        mimeType: 'text/markdown',
-        kind: 'file',
-      });
+      addAttachments([{ uri, name: pastedTextName(inserted), mimeType: 'text/markdown' }]);
     } catch (e) {
       useUiStore.getState().pushError(`attach pasted text failed: ${(e as Error).message}`);
     }
@@ -1027,16 +1024,13 @@ export function Composer({
         copyToCacheDirectory: true,
       });
       if (res.canceled) return;
-      for (const asset of res.assets) {
-        const mimeType = asset.mimeType ?? 'application/octet-stream';
-        addAttachment({
-          key: newKey(),
+      addAttachments(
+        res.assets.map((asset) => ({
           uri: asset.uri,
           name: asset.name,
-          mimeType,
-          kind: kindForMime(mimeType),
-        });
-      }
+          mimeType: asset.mimeType ?? 'application/octet-stream',
+        })),
+      );
     } catch (e) {
       useUiStore.getState().pushError(`attach file failed: ${(e as Error).message}`);
     }
@@ -1049,40 +1043,72 @@ export function Composer({
   React.useEffect(
     () =>
       receiveImagePaste(inputRef.current, {
-        onImages: (files) => {
-          for (const f of files) {
-            addAttachment({
-              key: newKey(),
-              uri: f.uri,
-              name: f.name,
-              mimeType: f.mimeType,
-              kind: 'image',
-              width: f.width,
-              height: f.height,
-            });
-          }
-        },
+        onImages: (files) => addAttachments(files),
         onError: (message) => useUiStore.getState().pushError(message),
       }),
-    // addAttachment closes over chatId only.
-    [chatId],
+    // addAttachments closes over chatId/attachmentTarget only.
+    [chatId, isNewChatDraft],
   );
+
+  // Build the outgoing-message shape for one already-known attachment —
+  // carries its `ref` when uploaded (step 3 of 3: sendQueue then uses it
+  // as-is, never re-uploading), or `refPromise` (a caller-built wait) for
+  // one Send raced ahead of. Anything else (a `failed` chip, or one that
+  // never made it to the draft store — e.g. attached offline) carries bare
+  // `uri`, which sendQueue falls back to uploading itself.
+  const toOutgoingFile = (
+    a: PendingAttachment,
+    refPromise?: Promise<AttachmentRef>,
+  ): OutgoingFile => ({
+    ...(a.uri ? { uri: a.uri } : {}),
+    ...(a.url ? { url: a.url } : {}),
+    name: a.name,
+    mimeType: a.mimeType,
+    kind: a.kind,
+    width: a.width,
+    height: a.height,
+    ...(a.status === 'uploaded'
+      ? { ref: { id: a.key, name: a.name, mimeType: a.mimeType, kind: a.kind } }
+      : refPromise
+        ? { refPromise }
+        : {}),
+  });
+
+  // Wait for `a`'s attach-time upload (already in flight, on THIS chat's
+  // composer draft) to settle — existing chat only; a new-chat draft needs
+  // its own promote-after-wait (see `sendDraft`'s `sendTarget` branch).
+  const waitForOwnUpload = (a: PendingAttachment): Promise<AttachmentRef> => {
+    const p = waitForAttachmentUpload(chatId, a.key).then((settled) => {
+      if (settled?.status === 'uploaded') {
+        return {
+          id: settled.key,
+          name: settled.name,
+          mimeType: settled.mimeType,
+          kind: settled.kind,
+        };
+      }
+      throw new Error(`attachment upload failed: ${a.name}`);
+    });
+    p.catch(() => {}); // a caller that never awaits this must not see an unhandled rejection
+    return p;
+  };
 
   // Echo + send (spec/15 § Composer → Attachments): the message is in the
   // stream at once — attachments from their local copies, uploading — and the
   // composer clears. lib/sendQueue.ts uploads and delivers it, in send order.
   // The send can finish well after Send was pressed (a hook check, creating a
-  // new chat), and the box stays editable meanwhile — so it clears only what
-  // was sent: the attachments that went, and the draft only if it is still the
-  // one that was sent. Anything added or typed since is the user's next message.
+  // new chat), and the box stays editable meanwhile, so it clears only the
+  // draft that was sent, and only if it is still the one that was sent.
+  // Anything typed since is the user's next message.
   const sendNow = (
     target: string,
     text: string,
+    files: OutgoingFile[],
     pending: PendingAttachment[],
     hookResults: HookRunResult[] = [],
     draftAtSend?: string,
   ): void => {
-    const localId = sendMessage(target, text, pending);
+    const localId = sendMessage(target, text, files);
     // First message is when a reply you might not be watching for becomes
     // possible: explain + ask for notifications now (once per session).
     void enablePushNotifications().catch((e: Error) =>
@@ -1092,10 +1118,26 @@ export function Composer({
     if (notes.length > 0) {
       useChatStore.getState().patchLocalMessage(target, localId, { hookAdvise: notes });
     }
-    const files = useComposerAttachmentStore.getState();
-    for (const a of pending) files.remove(chatId, a.key);
-    // Nothing left: drop the key, as a plain clear always did.
-    if (useComposerAttachmentStore.getState().byKey[chatId]?.length === 0) files.clear(chatId);
+    if (pending.length > 0) {
+      // Bookkeeping-only: the ids just sent now belong to the message, not
+      // the draft. NEVER deletes a byte. A file attached since stays.
+      // A file still uploading is released by the store once its upload lands.
+      const removed = useComposerAttachmentStore.getState().detach(
+        chatId,
+        pending.map((a) => a.key),
+      );
+      // A new-chat draft is discarded wholesale by the caller once it spawns
+      // — only an existing chat's composer draft needs the server told.
+      // Read after the detach: a file that landed since Send is uploaded by now.
+      const ready = removed.filter((a) => a.status === 'uploaded').map((a) => a.key);
+      if (sendTarget === undefined && ready.length > 0) {
+        api.detachAttachments(target, ready).catch((err: Error) => {
+          useUiStore
+            .getState()
+            .pushError(`couldn’t release the draft’s attachments: ${err.message}`);
+        });
+      }
+    }
     const now = draftRef.current;
     if (draftAtSend === undefined || now === draftAtSend) updateDraft('');
     // Typed on after what was sent: the sent part goes, the rest stays. Edited
@@ -1131,9 +1173,10 @@ export function Composer({
     const pending = attachments;
 
     // New chat (spec/15 § New chat flow): the chat is created by this first
-    // send, so resolve it before anything is uploaded or echoed — an upload
-    // needs a real chatId, never the draft key. Once it exists the send is
-    // the ordinary one, and the screen moves on without waiting for uploads.
+    // send. Opens at once either way (spec/14 § New chat) — an attachment
+    // still uploading to the draft is not waited for here; its OWN
+    // `refPromise` (wait, then promote just it) covers that, exactly as an
+    // existing chat's does.
     if (sendTarget !== undefined) {
       setResolving(true);
       void (async () => {
@@ -1146,7 +1189,36 @@ export function Composer({
           setResolving(false);
         }
         if (target === null) return;
-        sendNow(target, text, pending, [], draftAtSend);
+        const draftId = chatId;
+        let promotedById = new Map<string, AttachmentRef>();
+        try {
+          const { refs } = await api.promoteNewChatDraftAttachments(draftId, target);
+          promotedById = new Map(refs.map((r) => [r.id, r]));
+        } catch (e) {
+          useUiStore.getState().pushError(`attachment upload failed: ${(e as Error).message}`);
+        }
+        const files = pending.map((a) => {
+          const promoted = promotedById.get(a.key);
+          if (promoted) return { ...toOutgoingFile(a), ref: promoted };
+          if (a.status === 'uploading') {
+            // Wait for the draft-scoped upload, then promote JUST this one
+            // — by the time it resolves, the draft holds only it (the loop
+            // above already moved everything that was ready then).
+            const refPromise = waitForAttachmentUpload(draftId, a.key).then(async (settled) => {
+              if (settled?.status !== 'uploaded') {
+                throw new Error(`attachment upload failed: ${a.name}`);
+              }
+              const { refs } = await api.promoteNewChatDraftAttachments(draftId, target);
+              const match = refs.find((r) => r.id === settled.key);
+              if (!match) throw new Error(`attachment upload failed: ${a.name}`);
+              return match;
+            });
+            refPromise.catch(() => {});
+            return toOutgoingFile(a, refPromise);
+          }
+          return toOutgoingFile(a);
+        });
+        sendNow(target, text, files, pending, [], draftAtSend);
         onSent?.(target);
       })();
       return;
@@ -1215,7 +1287,10 @@ export function Composer({
         PENDING_SEND_TIMEOUT_MS,
       );
     }
-    sendNow(chatId, text, pending, hookResults, draftAtSend);
+    const files = pending.map((a) =>
+      toOutgoingFile(a, a.status === 'uploading' ? waitForOwnUpload(a) : undefined),
+    );
+    sendNow(chatId, text, files, pending, hookResults, draftAtSend);
   };
 
   // Send stays enabled whether it's the host or the LINK itself that's
@@ -1342,6 +1417,7 @@ export function Composer({
           {attachments.map((a) => (
             <View
               key={a.key}
+              testID="composer-attachment"
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -1350,13 +1426,16 @@ export function Composer({
                 paddingVertical: 4,
                 borderRadius: radii.sm,
                 borderWidth: 1,
-                borderColor: colors.divider,
+                borderColor: a.status === 'failed' ? colors.red : colors.divider,
                 backgroundColor: colors.paper,
-                maxWidth: 200,
+                maxWidth: 220,
               }}
             >
-              {a.kind === 'image' ? (
-                <Image source={{ uri: a.uri }} style={{ width: 36, height: 36, borderRadius: 4 }} />
+              {a.kind === 'image' && (a.uri ?? a.url) ? (
+                <Image
+                  source={{ uri: a.uri ?? a.url }}
+                  style={{ width: 36, height: 36, borderRadius: 4 }}
+                />
               ) : (
                 <FileText size={18} color={colors.ink2} />
               )}
@@ -1366,6 +1445,22 @@ export function Composer({
               >
                 {a.name}
               </Text>
+              {a.status === 'failed' ? (
+                <>
+                  <Text style={{ color: colors.red, fontSize: textMin }}>Not uploaded</Text>
+                  <Pressable
+                    testID="composer-attachment-retry"
+                    onPress={() =>
+                      useComposerAttachmentStore.getState().retry(chatId, attachmentTarget, a.key)
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retry ${a.name}`}
+                    hitSlop={8}
+                  >
+                    <Text style={{ color: colors.leaf, fontSize: textMin }}>Retry</Text>
+                  </Pressable>
+                </>
+              ) : null}
               {a.kind === 'image' ? (
                 <Pressable
                   onPress={() => setAnnotating(a)}

@@ -1458,6 +1458,10 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           folder={folder.trim()}
           resolveChatId={resolveNewChatId}
           onStartCall={() => void handleStartCall()}
+          // (spec/14 & spec/15 § Composer → Attachments) — scopes
+          // attach-time uploads under this draft's own id, since there's no
+          // chatId yet to scope them under.
+          newChatDraftId={draftId}
           autoFocus
           // Restore + persist the draft's unsent text (spec/14 § New chat drafts).
           // Keyed by draftId above, so switching drafts remounts + re-seeds.

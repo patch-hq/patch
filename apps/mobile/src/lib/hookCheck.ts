@@ -42,8 +42,13 @@ async function hookImages(
       problems.push(`too many images for hooks (max ${HOOK_IMAGES_MAX}): ${a.name} not checked`);
       continue;
     }
+    if (!a.uri) {
+      // Attached on another surface: this one never had the bytes to show a hook.
+      problems.push(`${a.name} not checked: attached on another device`);
+      continue;
+    }
     try {
-      const up = await downscaleImage(a);
+      const up = await downscaleImage({ ...a, uri: a.uri });
       if (!HOOK_IMAGE_TYPES.includes(up.mimeType)) {
         problems.push(`${up.name} (${up.mimeType}) is not an image type hooks can check`);
         continue;

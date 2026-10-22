@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent, AttachmentRef } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
@@ -287,5 +287,79 @@ describe('composer attachments — host', () => {
         bytes: Buffer.from([1]),
       }),
     ).toThrow(/chat not found/);
+  });
+
+  // ---- step 3 of 3: deleteAttachment (spec/14 & spec/15 § Composer → Attachments) ----
+
+  describe('deleteAttachment', () => {
+    it('removes the stored file and its manifest entry', async () => {
+      const { daemon, folder } = setup();
+      const chatId = await daemon.spawnChat({ folder });
+      const stored = daemon.storeAttachment({
+        chatId,
+        id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        kind: 'image',
+        bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      });
+      expect(existsSync(stored.path)).toBe(true);
+      const manifestPath = join(dirname(stored.path), 'manifest.json');
+      expect(
+        JSON.parse(readFileSync(manifestPath, 'utf8'))['01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+      ).toBeDefined();
+
+      daemon.deleteAttachment({
+        chatId,
+        id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+        name: 'shot.png',
+      });
+      expect(existsSync(stored.path)).toBe(false);
+      expect(
+        JSON.parse(readFileSync(manifestPath, 'utf8'))['01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+      ).toBeUndefined();
+    });
+
+    it('a re-sent attachment survives an unrelated id being deleted', async () => {
+      const { daemon, folder } = setup();
+      const chatId = await daemon.spawnChat({ folder });
+      daemon.storeAttachment({
+        chatId,
+        id: 'keep-me',
+        name: 'keep.png',
+        mimeType: 'image/png',
+        kind: 'image',
+        bytes: Buffer.from([1]),
+      });
+      const doomed = daemon.storeAttachment({
+        chatId,
+        id: 'remove-me',
+        name: 'remove.png',
+        mimeType: 'image/png',
+        kind: 'image',
+        bytes: Buffer.from([2]),
+      });
+      daemon.deleteAttachment({ chatId, id: 'remove-me', name: 'remove.png' });
+      expect(existsSync(doomed.path)).toBe(false);
+      const manifestPath = join(dirname(doomed.path), 'manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+      expect(manifest['keep-me']).toBeDefined();
+      expect(manifest['remove-me']).toBeUndefined();
+    });
+
+    it('deleting an id that was never stored is a harmless no-op', async () => {
+      const { daemon, folder } = setup();
+      const chatId = await daemon.spawnChat({ folder });
+      expect(() =>
+        daemon.deleteAttachment({ chatId, id: 'never-existed', name: 'ghost.png' }),
+      ).not.toThrow();
+    });
+
+    it('rejects deleteAttachment for an unknown chat', () => {
+      const { daemon } = setup();
+      expect(() => daemon.deleteAttachment({ chatId: 'nope', id: 'x', name: 'a.png' })).toThrow(
+        /chat not found/,
+      );
+    });
   });
 });

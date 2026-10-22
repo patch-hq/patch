@@ -373,6 +373,38 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     type: 'new_chat_draft.list',
     drafts: [{ id: 'draft-1', folder: '/p', text: 'hi', updatedAt: 1 }],
   },
+  'new_chat_draft.attachments_changed': {
+    type: 'new_chat_draft.attachments_changed',
+    id: 'draft-1',
+    attachments: [
+      {
+        id: 'att-1',
+        name: 'photo.png',
+        mimeType: 'image/png',
+        kind: 'image',
+        url: '/api/new-chat-drafts/draft-1/attachment/att-1',
+      },
+    ],
+    updatedAt: 1,
+  },
+  'new_chat_draft.attachments_list': {
+    type: 'new_chat_draft.attachments_list',
+    drafts: [
+      {
+        id: 'draft-1',
+        attachments: [
+          {
+            id: 'att-1',
+            name: 'photo.png',
+            mimeType: 'image/png',
+            kind: 'image',
+            url: '/api/new-chat-drafts/draft-1/attachment/att-1',
+          },
+        ],
+        updatedAt: 1,
+      },
+    ],
+  },
   'composer_draft.set': { type: 'composer_draft.set', chatId: 'c1', text: 'not sent yet' },
   'composer_draft.clear': { type: 'composer_draft.clear', chatId: 'c1' },
   'view_position.set': { type: 'view_position.set', page: 'chat', id: 'c1', seq: 12 },
@@ -398,6 +430,38 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'composer_draft.list': {
     type: 'composer_draft.list',
     drafts: [{ chatId: 'c1', text: 'not sent yet', updatedAt: 1_700_000_000_000 }],
+  },
+  'composer_draft.attachments_changed': {
+    type: 'composer_draft.attachments_changed',
+    chatId: 'c1',
+    attachments: [
+      {
+        id: 'att-1',
+        name: 'photo.png',
+        mimeType: 'image/png',
+        kind: 'image',
+        url: '/api/chats/c1/attachment/att-1',
+      },
+    ],
+    updatedAt: 1_700_000_000_000,
+  },
+  'composer_draft.attachments_list': {
+    type: 'composer_draft.attachments_list',
+    drafts: [
+      {
+        chatId: 'c1',
+        attachments: [
+          {
+            id: 'att-1',
+            name: 'photo.png',
+            mimeType: 'image/png',
+            kind: 'image',
+            url: '/api/chats/c1/attachment/att-1',
+          },
+        ],
+        updatedAt: 1_700_000_000_000,
+      },
+    ],
   },
   'chat.input': { type: 'chat.input', chatId: 'c1', message: 'hi', localId: 'lid-1' },
   'chat.settings': { type: 'chat.settings', chatId: 'c1', permissionMode: 'plan' },
@@ -1312,6 +1376,18 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'at1',
     ok: true,
     path: '/home/tom/proj/.patch/attachments/01ARZ3NDEKTSV4RRFFQ69G5FAV-screenshot.png',
+  },
+  'patch.attachment.delete_request': {
+    type: 'patch.attachment.delete_request',
+    requestId: 'at2',
+    chatId: 'chat_1',
+    id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    name: 'screenshot.png',
+  },
+  'patch.attachment.delete_response': {
+    type: 'patch.attachment.delete_response',
+    requestId: 'at2',
+    ok: true,
   },
   'patch.artifact.publish_request': {
     type: 'patch.artifact.publish_request',

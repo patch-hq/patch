@@ -73,15 +73,21 @@ export async function hookImages(files: OutgoingFile[]): Promise<HookImagesResul
     .map((f) => `${f.name} not checked: hooks see at most ${HOOK_IMAGES_MAX} images`);
   const images: HookImage[] = [];
   for (const f of all.slice(0, HOOK_IMAGES_MAX)) {
+    const file = f.file;
+    if (!file) {
+      // Attached on another surface: this one never had the bytes to show a hook.
+      skipped.push(`${f.name} not checked: attached on another device`);
+      continue;
+    }
     try {
-      if (MEDIA_TYPES.has(f.file.type)) {
-        const data = toBase64(await f.file.arrayBuffer());
+      if (MEDIA_TYPES.has(file.type)) {
+        const data = toBase64(await file.arrayBuffer());
         if (data.length <= HOOK_IMAGE_MAX_BASE64) {
-          images.push({ mediaType: f.file.type as HookImage['mediaType'], data });
+          images.push({ mediaType: file.type as HookImage['mediaType'], data });
           continue;
         }
       }
-      images.push(await shrink(f.file));
+      images.push(await shrink(file));
     } catch (err) {
       skipped.push(`${f.name} not checked: ${(err as Error).message}`);
     }

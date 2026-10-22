@@ -64,6 +64,11 @@ export function ImageAnnotatorModal({
     }
     let live = true;
     (async () => {
+      if (!attachment.uri) {
+        throw new Error(
+          `${attachment.name} was attached on another device and can't be annotated here`,
+        );
+      }
       const base64 = await FileSystem.readAsStringAsync(attachment.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });

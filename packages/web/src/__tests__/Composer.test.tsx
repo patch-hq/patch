@@ -12,6 +12,7 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { composerMicFor } from '../lib/composerMic.js';
 import { api } from '../api/rest.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 import * as imageResizeModule from '../lib/imageResize.js';
 import * as voiceRecorderModule from '../lib/voiceRecorder.js';
 import type { VoiceRecording } from '../lib/voiceRecorder.js';
@@ -62,6 +63,12 @@ describe('Composer', () => {
     reportAccount('d1', true);
     useVoiceStore.getState().endNote();
     useUiStore.getState().clearToasts();
+    // The attachment store is server-synced and module-level (step 3 of 3),
+    // so it outlives any one render — reset it for EVERY test in this file,
+    // not just the ones inside the "attachments" describe below, since a
+    // test elsewhere in this file (e.g. new-chat resolveChatId races) also
+    // attaches files under the shared `chatId="new"` draft key.
+    useComposerAttachmentStore.getState()._reset();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -1086,9 +1093,14 @@ describe('Composer', () => {
   describe('attachments', () => {
     let createObjectURLSpy: ReturnType<typeof vi.fn>;
     let revokeObjectURLSpy: ReturnType<typeof vi.fn>;
+    let uploadSeq: number;
     beforeEach(() => {
-      // jsdom doesn't implement these — stub them so makePending/removeAttachment
-      // (which call URL.createObjectURL/revokeObjectURL for image previews) work.
+      // The attachment store is server-synced and module-level (step 3 of 3),
+      // so it outlives any one render — reset it between tests the same way
+      // the chat/ui stores already are elsewhere in this suite.
+      useComposerAttachmentStore.getState()._reset();
+      // jsdom doesn't implement these — stub them so attach/remove (which call
+      // URL.createObjectURL/revokeObjectURL for image previews) work.
       createObjectURLSpy = vi.fn(() => 'blob:mock-url');
       revokeObjectURLSpy = vi.fn();
       vi.stubGlobal('URL', {
@@ -1102,11 +1114,58 @@ describe('Composer', () => {
       // passthrough here; the "non-image" test asserts it's NOT called, and any
       // test that cares about the resize call itself re-spies explicitly.
       vi.spyOn(imageResizeModule, 'downscaleImageFile').mockImplementation(async (f) => f);
+      // Step 3 of 3 — attaching now uploads straight away. Default every
+      // upload/remove/detach/promote call to a fast, deterministic success so
+      // chip-rendering tests (which predate this and don't care about the
+      // network) stay synchronous-ish and quiet; a test that DOES care
+      // re-spies these explicitly.
+      uploadSeq = 0;
+      vi.spyOn(api, 'uploadAttachment').mockImplementation(async (chatId, file) => {
+        uploadSeq += 1;
+        const id = `srv-${uploadSeq}`;
+        return {
+          ok: true,
+          ref: {
+            id,
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            kind: file.type.startsWith('image/') ? 'image' : 'file',
+            url: `/api/chats/${chatId}/attachment/${id}`,
+          },
+        };
+      });
+      vi.spyOn(api, 'uploadNewChatDraftAttachment').mockImplementation(async (draftId, file) => {
+        uploadSeq += 1;
+        const id = `srv-${uploadSeq}`;
+        return {
+          ok: true,
+          ref: {
+            id,
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            kind: file.type.startsWith('image/') ? 'image' : 'file',
+            url: `/api/new-chat-drafts/${draftId}/attachment/${id}`,
+          },
+        };
+      });
+      vi.spyOn(api, 'deleteAttachment').mockResolvedValue({ ok: true });
+      vi.spyOn(api, 'deleteNewChatDraftAttachment').mockResolvedValue({ ok: true });
+      vi.spyOn(api, 'detachAttachments').mockResolvedValue({ ok: true });
+      vi.spyOn(api, 'promoteNewChatDraftAttachments').mockImplementation(async (draftId) => ({
+        ok: true,
+        refs: (useComposerAttachmentStore.getState().byKey[draftId] ?? [])
+          .filter((a) => a.status === 'uploaded')
+          .map((a) => ({
+            id: a.key,
+            name: a.name,
+            mimeType: a.mimeType ?? 'application/octet-stream',
+            kind: a.kind,
+          })),
+      }));
     });
     afterEach(() => {
-      // Unmount (which fires the attachments-cleanup effect, still needing the
-      // stubbed URL.revokeObjectURL) BEFORE un-stubbing globals.
       cleanup();
+      useComposerAttachmentStore.getState()._reset();
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
     });
@@ -1361,15 +1420,18 @@ describe('Composer', () => {
       });
     });
 
-    // spec/15 § Composer → Attachments — the composer hands the files over at
-    // once and clears; uploading them is the caller's (lib/sendQueue.ts), so
-    // the message can be in the stream, pending, while they upload.
-    it('sends text + attachments together at once: onSend gets the files and the chatId, nothing is uploaded here', () => {
-      const uploadSpy = vi.spyOn(api, 'uploadAttachment');
+    // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — attaching
+    // uploads straight away; by the time Send is pressed the file is already
+    // up, so onSend's ref rides along and sendQueue never re-uploads it.
+    it('attaches upload immediately; by send time onSend gets the already-uploaded ref, and the draft is detached', async () => {
       const onSend = vi.fn();
       render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const file = new File(['bytes'], 'photo.png', { type: 'image/png' });
       fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+      await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledWith('c1', file, undefined));
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-attachment').className).not.toContain('uploading'),
+      );
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
       fireEvent.change(input, { target: { value: 'see this' } });
       fireEvent.click(screen.getByTestId('send-btn'));
@@ -1381,15 +1443,53 @@ describe('Composer', () => {
             name: 'photo.png',
             kind: 'image',
             previewUrl: expect.any(String),
+            ref: expect.objectContaining({ name: 'photo.png', kind: 'image' }),
           }),
         ],
         'c1',
       );
-      expect(uploadSpy).not.toHaveBeenCalled();
+      // Attached once, at attach time — never re-uploaded for the send.
+      expect(api.uploadAttachment).toHaveBeenCalledTimes(1);
       expect(screen.queryByTestId('composer-attachments')).toBeNull();
       expect(input.value).toBe('');
       // The preview now belongs to the message in the stream — not revoked.
       expect(revokeObjectURLSpy).not.toHaveBeenCalled();
+      // Bookkeeping-only: the draft is told its attachments are now the sent
+      // message's, without deleting a byte.
+      await waitFor(() =>
+        expect(api.detachAttachments).toHaveBeenCalledWith('c1', [expect.any(String)]),
+      );
+    });
+
+    it('remove (×) DELETEs an already-uploaded attachment and drops the chip', async () => {
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      fireEvent.change(screen.getByTestId('composer-file-input'), {
+        target: { files: [new File(['b'], 'photo.png', { type: 'image/png' })] },
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-attachment').className).not.toContain('uploading'),
+      );
+      fireEvent.click(screen.getByTestId('composer-attachment-remove'));
+      expect(screen.queryByTestId('composer-attachments')).toBeNull();
+      await waitFor(() =>
+        expect(api.deleteAttachment).toHaveBeenCalledWith('c1', expect.any(String)),
+      );
+    });
+
+    it('a failed upload reads "Not uploaded" with Retry, which uploads the same file again', async () => {
+      (api.uploadAttachment as Mock).mockRejectedValueOnce(new Error('disk full'));
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      const file = new File(['b'], 'photo.png', { type: 'image/png' });
+      fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } });
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-attachment-not-uploaded')).toBeInTheDocument(),
+      );
+      expect(screen.getByTestId('composer-attachment').className).toContain('failed');
+      fireEvent.click(screen.getByTestId('composer-attachment-retry'));
+      await waitFor(() =>
+        expect(screen.queryByTestId('composer-attachment-not-uploaded')).toBeNull(),
+      );
+      expect(api.uploadAttachment).toHaveBeenCalledTimes(2);
     });
 
     it('a false return from onSend puts the text and the files back', async () => {
@@ -1481,7 +1581,11 @@ describe('Composer', () => {
       await waitFor(() => expect(screen.queryByTestId('composer-attachment')).toBeNull());
     });
 
-    it('unmount keeps the chat s attachments (and their previews) for when you return', () => {
+    // Attachments are now server-synced and keyed by chatId,
+    // not component-local state: unmounting the composer (navigating away)
+    // must NOT revoke previews or drop chips still legitimately pending —
+    // re-opening the same chat has to find them exactly as they were.
+    it('unmount does NOT revoke the preview or drop the chip — the draft outlives the mount', () => {
       const { unmount } = render(
         <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />,
       );
@@ -1490,8 +1594,11 @@ describe('Composer', () => {
       });
       unmount();
       expect(revokeObjectURLSpy).not.toHaveBeenCalled();
+      expect(useComposerAttachmentStore.getState().byKey['c1']).toHaveLength(1);
+
+      // Re-mounting the same chat's composer sees the same chip.
       render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
-      expect(screen.getAllByTestId('composer-attachment')).toHaveLength(1);
+      expect(screen.getByTestId('composer-attachment')).toBeInTheDocument();
     });
 
     describe('preview', () => {
