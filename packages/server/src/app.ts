@@ -99,6 +99,7 @@ import { registerTodoistRoutes } from './jobs/todoist.js';
 import { registerJobRoutes } from './jobs/routes.js';
 import { attachJobsRpcBridge } from './jobs/rpc-bridge.js';
 import { attachAccountsRpcBridge } from './accounts-rpc-bridge.js';
+import { attachApiRpcBridge } from './api-rpc-bridge.js';
 import type { Job, JobsInterface } from './jobs/types.js';
 import { HookStore } from './hooks/store.js';
 import { HookRunner } from './hooks/runner.js';
@@ -2134,6 +2135,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       })
     : undefined;
 
+  // A host's own CLI manages patch through the link, with no paired credential.
+  const detachApiBridge = attachApiRpcBridge({
+    link: hostLink,
+    app,
+    registry,
+    logger: log.child({ component: 'api-rpc-bridge' }),
+  });
+
   registerJobRoutes(app, {
     logger: log.child({ component: 'jobs-routes' }),
     registry,
@@ -2200,6 +2209,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     jobDispatcher.close();
     detachJobsBridge();
     detachAccountsBridge?.();
+    detachApiBridge();
     if (jobs instanceof JobStore) await jobs.close();
     if (hooks instanceof HookStore) await hooks.close();
   });

@@ -68,6 +68,7 @@ import {
   AccountsRpcError,
   resolveAccountRef,
   type AccountsRpc,
+  type ServerApiRpc,
 } from './accountsClient.js';
 import {
   BrowserNotInstalledError,
@@ -184,6 +185,11 @@ export interface BuildOptions {
    * this machine. Unset, those endpoints 503.
    */
   accountsRpc?: AccountsRpc;
+  /**
+   * One REST call to the server over the link, for the machine's own CLI
+   * (`/server-api`). Unset, that endpoint 503s.
+   */
+  serverApi?: ServerApiRpc;
   /**
    * The accounts this machine holds for the backend a model runs on (Claude
    * when no model is named), so `account` on a spawn can be a label.
@@ -846,6 +852,13 @@ const SpawnBody = z
 
 const StopParams = z.object({ id: z.string().min(1) }).strict();
 
+const ServerApiBody = z
+  .object({
+    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+    path: z.string().min(1),
+    body: z.unknown().optional(),
+  })
+  .strict();
 const AccountsBackendParams = z.object({ backendId: z.enum(['claude-code', 'codex']) }).strict();
 const AccountsOrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).strict();
 const AccountsStrategyBody = z
@@ -1567,6 +1580,31 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
     }
   };
+  // The CLI's way to the server from this machine: relayed over the link, so
+  // it needs no credential of its own. The server decides what is relayable.
+  app.post('/server-api', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    if (!opts.serverApi) {
+      return reply.code(503).send({
+        error: 'server_api_unavailable',
+        message: 'the server link is not wired on this host',
+      });
+    }
+    const parsed = ServerApiBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    try {
+      const ans = await opts.serverApi(parsed.data);
+      return reply.code(ans.status).send(ans.body ?? '');
+    } catch (err) {
+      const code = err instanceof AccountsRpcError ? err.code : 'internal';
+      return reply
+        .code(code === 'link_offline' ? 503 : code === 'timeout' ? 504 : 500)
+        .send({ error: code, message: err instanceof Error ? err.message : String(err) });
+    }
+  });
   app.get('/accounts', async (req, reply) => {
     const auth = checkAuth(req);
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });

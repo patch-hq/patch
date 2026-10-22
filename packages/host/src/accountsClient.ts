@@ -122,3 +122,62 @@ export function resolveAccountRef(
 export class AccountRefError extends Error {
   override readonly name = 'AccountRefError';
 }
+
+export interface ServerApiCall {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  path: string;
+  body?: unknown;
+}
+export interface ServerApiAnswer {
+  status: number;
+  body?: unknown;
+}
+export type ServerApiRpc = (call: ServerApiCall) => Promise<ServerApiAnswer>;
+
+/** The host half of `patch.api.request`: one REST call to the server, over the link. */
+export class ServerApiClient {
+  private readonly pending = new Map<
+    string,
+    { resolve: (v: ServerApiAnswer) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+  >();
+  constructor(
+    private readonly o: {
+      emit: (event: WireEvent) => void;
+      isLinkOnline: () => boolean;
+      requestTimeoutMs?: number;
+      idGen?: () => string;
+    },
+  ) {}
+
+  handleResponse(event: WireEvent): boolean {
+    if (event.type !== 'patch.api.response') return false;
+    const waiter = this.pending.get(event.requestId);
+    if (!waiter) return false;
+    clearTimeout(waiter.timer);
+    this.pending.delete(event.requestId);
+    waiter.resolve({
+      status: event.status,
+      ...(event.body !== undefined ? { body: event.body } : {}),
+    });
+    return true;
+  }
+
+  request: ServerApiRpc = (call) => {
+    if (!this.o.isLinkOnline()) {
+      return Promise.reject(
+        new AccountsRpcError('link_offline', 'server api: host→server link is offline'),
+      );
+    }
+    const requestId = (this.o.idGen ?? randomUUID)();
+    const timeoutMs = this.o.requestTimeoutMs ?? 30_000;
+    return new Promise<ServerApiAnswer>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new AccountsRpcError('timeout', `server api: no answer within ${timeoutMs}ms`));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(requestId, { resolve, reject, timer });
+      this.o.emit({ type: 'patch.api.request', requestId, ...call } as WireEvent);
+    });
+  };
+}

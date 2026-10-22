@@ -8121,6 +8121,35 @@ export const PatchAccountsResponseEvent = z
 export type PatchAccountsResponseEvent = z.infer<typeof PatchAccountsResponseEvent>;
 
 // ---------------------------------------------------------------------------
+// Server API relay: the CLI on a host machine calls the server's REST API
+// through the host's link instead of holding its own paired credential. The
+// server answers as the account, for a short allowlist of management paths.
+// Consumed by the server's API bridge; never fanned out to surfaces.
+
+export const PatchApiRequestEvent = z
+  .object({
+    type: z.literal('patch.api.request'),
+    requestId: z.string().min(1),
+    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+    /** Path plus query, starting `/api/`. */
+    path: z.string().min(1),
+    body: z.unknown().optional(),
+  })
+  .strict();
+export type PatchApiRequestEvent = z.infer<typeof PatchApiRequestEvent>;
+
+export const PatchApiResponseEvent = z
+  .object({
+    type: z.literal('patch.api.response'),
+    requestId: z.string().min(1),
+    /** The HTTP status the server answered with. */
+    status: z.number().int(),
+    body: z.unknown().optional(),
+  })
+  .strict();
+export type PatchApiResponseEvent = z.infer<typeof PatchApiResponseEvent>;
+
+// ---------------------------------------------------------------------------
 // Secrets (spec/15 § Settings tab — Secrets)
 //
 // The host owns the key-value secret store (it injects them into chats), the
@@ -8957,6 +8986,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchPadResponseEvent,
   PatchAccountsRequestEvent,
   PatchAccountsResponseEvent,
+  PatchApiRequestEvent,
+  PatchApiResponseEvent,
   // Secrets
   SecretsListEvent,
   SecretsUpdatedEvent,
@@ -9241,6 +9272,8 @@ export const EVENT_SCHEMAS = {
   'patch.pad.response': PatchPadResponseEvent,
   'patch.accounts.request': PatchAccountsRequestEvent,
   'patch.accounts.response': PatchAccountsResponseEvent,
+  'patch.api.request': PatchApiRequestEvent,
+  'patch.api.response': PatchApiResponseEvent,
   'secrets.list': SecretsListEvent,
   'secrets.updated': SecretsUpdatedEvent,
   'patch.secrets.set_request': PatchSecretsSetRequestEvent,

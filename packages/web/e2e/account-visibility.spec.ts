@@ -98,7 +98,7 @@ test('a live chat with two accounts gets an account dropdown styled like the app
   });
   const select = page.getByTestId('chat-account');
   await expect(select).toHaveJSProperty('tagName', 'SELECT');
-  await expect(select.locator('option')).toHaveText(['Auto: work', 'work', 'personal']);
+  await expect(select.locator('option')).toHaveText(['Automatic: work', 'work', 'personal']);
   // The tooltip would sit over the open list, so it is off while focused.
   await expect(select).toHaveAttribute('title', /work account/);
   await select.focus();

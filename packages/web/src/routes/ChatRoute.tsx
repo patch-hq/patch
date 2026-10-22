@@ -52,7 +52,7 @@ import { patchShared } from './settings/sharedWrite.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { ChatHeader } from '../components/ChatHeader.js';
-import { ModelControl } from '../components/ChatModelControl.js';
+import { AccountControl, ModelControl } from '../components/ChatModelControl.js';
 import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
 import { SnoozedBanner } from '../components/SnoozedBanner.js';
@@ -5606,7 +5606,10 @@ function RateLimitBubble({
   const pastReset = resetsAt !== null && resetsAt <= now;
   const isOverload = row.resumeKind === 'overloaded';
   const limitName = LIMIT_NAME[block?.scope ?? 'unknown'];
-  const routing = block?.routing ? routingSentence(block.routing, now) : '';
+  // A chat locked to an account is not moved by the strategy, so the strategy's
+  // "all accounts out" sentence would describe a rotation it is not in.
+  const locked = row.preferredAccountId != null;
+  const routing = block?.routing && !locked ? routingSentence(block.routing, now) : '';
 
   const resumeNow = (): void => {
     getActiveWs()?.send({ type: 'chat.resume_now_request', chatId: row.chatId });
@@ -5666,6 +5669,13 @@ function RateLimitBubble({
           </p>
         ) : null}
 
+        {locked ? (
+          <p className="rate-limit-routing" data-testid="rate-limit-locked">
+            This chat is locked to {block?.accountLabel ?? 'its account'} and will not move to
+            another.
+          </p>
+        ) : null}
+
         <div className="rate-limit-actions">
           {/* No tooltip: the label says it (spec/14 § Copy — a tooltip names a
               control, it does not explain one). */}
@@ -5694,6 +5704,13 @@ function RateLimitBubble({
             testId="rate-limit-change-model"
             triggerLabel="Change model"
           />
+          {locked ? (
+            <AccountControl
+              chatId={row.chatId}
+              testId="rate-limit-change-account"
+              changeLabel="Change account"
+            />
+          ) : null}
           {block?.overageBlocked ? (
             <a
               className="ctrl"

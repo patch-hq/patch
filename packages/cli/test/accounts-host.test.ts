@@ -94,3 +94,20 @@ test('accounts list, order and strategy go over the host socket with no credenti
     );
   });
 });
+
+test('a server call from a host machine is relayed over the host socket, no credential', async () => {
+  await withHostSocket(async ({ seen }) => {
+    const { buildTransport } = await import('../src/transport/index.js');
+    const { loadConfig } = await import('../src/config.js');
+    const t = buildTransport(loadConfig(), { forceRest: true });
+    await t.put('/api/accounts/claude-code/order', { accountIds: ['a1'] });
+    assert.equal(seen[0]!.method, 'POST');
+    assert.equal(seen[0]!.url, '/server-api');
+    assert.equal(seen[0]!.auth, 'Bearer host-key');
+    assert.deepEqual(JSON.parse(seen[0]!.body), {
+      method: 'PUT',
+      path: '/api/accounts/claude-code/order',
+      body: { accountIds: ['a1'] },
+    });
+  });
+});

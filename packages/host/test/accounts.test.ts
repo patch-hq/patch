@@ -15,6 +15,7 @@ import { createMockSdkBackend } from '../src/sdkBackend.js';
 import {
   AccountsClient,
   AccountsRpcError,
+  ServerApiClient,
   resolveAccountRef,
   type AccountsRequest,
 } from '../src/accountsClient.js';
@@ -259,5 +260,52 @@ describe('AccountsClient', () => {
       requestTimeoutMs: 10,
     });
     await expect(client.request({ op: 'list' })).rejects.toMatchObject({ code: 'timeout' });
+  });
+});
+
+describe('/server-api', () => {
+  it('relays one REST call over the link and returns its status and body', async () => {
+    const { daemon, jobs } = setup();
+    const sent: WireEvent[] = [];
+    let n = 0;
+    const api = new ServerApiClient({
+      emit: (e) => {
+        sent.push(e);
+        queueMicrotask(() =>
+          api.handleResponse({
+            type: 'patch.api.response',
+            requestId: 'q1',
+            status: 409,
+            body: { error: 'invalid_order' },
+          }),
+        );
+      },
+      isLinkOnline: () => true,
+      idGen: () => `q${++n}`,
+    });
+    const app = await buildControl({ localKey: KEY, daemon, jobs, serverApi: api.request });
+    try {
+      const noKey = await app.inject({ method: 'POST', url: '/server-api', payload: {} });
+      expect(noKey.statusCode).toBe(401);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/server-api',
+        headers: AUTH,
+        payload: {
+          method: 'PUT',
+          path: '/api/accounts/claude-code/order',
+          body: { accountIds: ['a'] },
+        },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toEqual({ error: 'invalid_order' });
+      expect(sent[0]).toMatchObject({
+        type: 'patch.api.request',
+        method: 'PUT',
+        path: '/api/accounts/claude-code/order',
+      });
+    } finally {
+      await app.close();
+    }
   });
 });

@@ -150,6 +150,69 @@ describe('ChatRoute — the limit bubble', () => {
     });
   });
 
+  describe('a chat locked to an account', () => {
+    const accounts = [
+      { id: 'a1', label: 'work', connected: true },
+      { id: 'a2', label: 'personal', connected: true },
+    ];
+    function seedLocked(preferredAccountId: string | null): void {
+      seed(RESUME_AT, 'rate_limit', {
+        scope: 'session',
+        accountId: 'a1',
+        accountLabel: 'work',
+        routing: { strategy: 'priority', accounts: 2, exhausted: 1 },
+      } as never);
+      useChatStore.setState((st) => ({
+        chats: {
+          ...st.chats,
+          c1: { ...st.chats.c1!, model: 'claude-opus-5', preferredAccountId },
+        },
+      }));
+      usePreferencesStore.setState({
+        shared: { secrets: { claude: accounts, codex: [] } } as never,
+      });
+    }
+
+    it('says it is locked and offers Change account, which sends the pick', () => {
+      const sent: WireEvent[] = [];
+      setActiveWs({ send: (e: WireEvent) => void sent.push(e) } as never);
+      seedLocked('a1');
+      renderChat();
+      expect(screen.getByTestId('rate-limit-locked').textContent).toMatch(/locked to work/);
+      expect(screen.queryByTestId('rate-limit-routing')).toBeNull();
+      const select = screen.getByTestId('rate-limit-change-account');
+      expect(screen.getByTestId('rate-limit-bar').contains(select)).toBe(true);
+      expect(select.textContent).toMatch(/Change account/);
+      fireEvent.change(select, { target: { value: 'a2' } });
+      expect(sent).toContainEqual({
+        type: 'chat.account_request',
+        chatId: 'c1',
+        preferredAccountId: 'a2',
+      });
+    });
+
+    it('can hand the chat back to Automatic', () => {
+      const sent: WireEvent[] = [];
+      setActiveWs({ send: (e: WireEvent) => void sent.push(e) } as never);
+      seedLocked('a1');
+      renderChat();
+      fireEvent.change(screen.getByTestId('rate-limit-change-account'), { target: { value: '' } });
+      expect(sent).toContainEqual({
+        type: 'chat.account_request',
+        chatId: 'c1',
+        preferredAccountId: null,
+      });
+    });
+
+    it('an Automatic chat has no lock note and no Change account', () => {
+      seedLocked(null);
+      renderChat();
+      expect(screen.queryByTestId('rate-limit-locked')).toBeNull();
+      expect(screen.queryByTestId('rate-limit-change-account')).toBeNull();
+      expect(screen.getByTestId('rate-limit-routing')).toBeInTheDocument();
+    });
+  });
+
   it('disappears when rateLimitResumingAt is cleared via chat.state', () => {
     seed(RESUME_AT, 'rate_limit');
     renderChat();

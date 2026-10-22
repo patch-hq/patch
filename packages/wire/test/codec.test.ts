@@ -1462,6 +1462,19 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     result: { strategy: 'priority', claude: [], codex: [] },
   },
+  'patch.api.request': {
+    type: 'patch.api.request',
+    requestId: 'r1',
+    method: 'PUT',
+    path: '/api/accounts/claude-code/order',
+    body: { accountIds: ['a'] },
+  },
+  'patch.api.response': {
+    type: 'patch.api.response',
+    requestId: 'r1',
+    status: 200,
+    body: { version: 1 },
+  },
   'secrets.list': {
     type: 'secrets.list',
     secrets: [

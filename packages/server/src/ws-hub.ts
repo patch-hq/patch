@@ -1674,6 +1674,8 @@ export class WsHub {
       // Shared-accounts asks and answers: consumed by the accounts bridge.
       event.type === 'patch.accounts.request' ||
       event.type === 'patch.accounts.response' ||
+      event.type === 'patch.api.request' ||
+      event.type === 'patch.api.response' ||
       event.type === 'patch.host_files.response' ||
       // The summary is answered over REST to the one caller that asked.
       event.type === 'patch.link_summary.response' ||

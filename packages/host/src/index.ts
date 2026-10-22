@@ -1,4 +1,4 @@
-import { AccountsClient } from './accountsClient.js';
+import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
@@ -2118,6 +2118,10 @@ async function startHost(
         queuePull.handleResponse(event);
         return;
       }
+      if (event.type === 'patch.api.response') {
+        serverApiClient.handleResponse(event);
+        return;
+      }
       if (event.type === 'patch.accounts.response') {
         accountsClient.handleResponse(event);
         return;
@@ -3900,10 +3904,17 @@ async function startHost(
      * at all cannot tell, and answers `false`: there is no account for anything
      * to be out of credit ON, so nothing should behave as though there were.
      */
-    hostOutOfCredit: () => {
+    hostOutOfCredit: (chatId) => {
       const store = readPatchStore(oauthOpts);
       if (!store) return false;
-      const { accounts, route } = claudeRoute(store);
+      // A chat locked to an account has nowhere else to go: for it the host is
+      // out of credit when ITS account is.
+      const { accounts, route } = claudeRoute(
+        store,
+        chatId === undefined
+          ? undefined
+          : daemon.list().find((c) => c.chatId === chatId)?.preferredAccountId,
+      );
       return accountRotation.usableAccount(accounts, route) === undefined;
     },
     // The strategy and how many held keys are out, so a blocked chat says
@@ -4269,6 +4280,7 @@ async function startHost(
   const padClient = new PadClient({ emit, isLinkOnline: () => linkOnline });
   // The shared accounts, asked of the server over the same link.
   const accountsClient = new AccountsClient({ emit, isLinkOnline: () => linkOnline });
+  const serverApiClient = new ServerApiClient({ emit, isLinkOnline: () => linkOnline });
   // spec/04 § Message queueing — the server-run queue's tool-boundary pull.
   const queuePull = new QueuePullClient({ emit, isLinkOnline: () => linkOnline });
   pullQueuedFromServer = (chatId) => queuePull.pull(chatId);
@@ -4640,6 +4652,7 @@ async function startHost(
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,
     accountsRpc: accountsClient.request,
+    serverApi: serverApiClient.request,
     heldAccounts: heldAccountsFor,
     meetingAgentEdit: (chatId, edit) => meetings!.agentEdit(chatId, edit),
     // Live link diagnostics + spec/12 link-drop control on the control UDS.

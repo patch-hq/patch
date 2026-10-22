@@ -432,7 +432,7 @@ export interface HostOptions {
    * Absent (tests, hosts with no account store) means "cannot tell", which is
    * reported as `false`: the ladder behaves exactly as it did before.
    */
-  hostOutOfCredit?: () => boolean;
+  hostOutOfCredit?: (chatId?: string) => boolean;
   /**
    * The routing strategy in force and how far through the held accounts the
    * exhaustion has got, for the chat to say beside the limit ("Round robin —
@@ -9588,7 +9588,7 @@ export class Daemon {
         // of this error, so it is true for a turn that died of something else
         // entirely while every key was spent, and settled BEFORE the failover
         // walk below can mark another account and change the answer.
-        let hostOutOfCredit = this.opts.hostOutOfCredit?.() === true;
+        let hostOutOfCredit = this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           isAccountExhausted(limit, errMsg) &&
@@ -14871,8 +14871,8 @@ export class Daemon {
   }
 
   /**
-   * Start this chat's turns on another shared account from its next turn, or
-   * (`null`) hand the choice back to the account strategy (spec/10 § Backend
+   * Lock this chat to another shared account from its next turn, or (`null`)
+   * hand the choice back to the account strategy (spec/10 § Backend
    * credentials — preferred account). Written through to meta so it outlives
    * this host. Whether the host holds the account is the caller's check.
    */
@@ -14886,6 +14886,8 @@ export class Daemon {
       return accountId === null ? rest : { ...rest, preferredAccountId: accountId };
     });
     this.emitState(chatId);
+    // A chat waiting out its old account's limit has a new account to try.
+    if (this.creditParked(chatId)) this.resumeRateLimitedNow(chatId);
   }
 
   /**

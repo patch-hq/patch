@@ -39,14 +39,23 @@ export function ChatModelControl({ chatId }: { chatId: string }): JSX.Element | 
 }
 
 /**
- * Which account the chat's turns start on (spec/10 § Backend credentials —
- * preferred account). With more than one connected account for the chat's
+ * Which account the chat is locked to (spec/10 § Backend credentials —
+ * preferred account); Automatic follows the account strategy. With more than one connected account for the chat's
  * backend it is a select drawn like the approval-mode select beside it; with
  * one there is nothing to choose, so it stays a plain readout of the account
  * the latest turn ran on. The choice is held as pending until the host
  * confirms it on `chat.state`, and a host that never answers is reported.
  */
-function AccountControl({ chatId }: { chatId: string }): JSX.Element | null {
+export function AccountControl({
+  chatId,
+  changeLabel,
+  testId = 'chat-account',
+}: {
+  chatId: string;
+  /** Reads as an action ("Change account") instead of naming the choice. */
+  changeLabel?: string;
+  testId?: string;
+}): JSX.Element | null {
   const row = useChatStore((s) => s.chats[chatId])!;
   const pushError = useUiStore((s) => s.pushError);
   const hostLabel = usePresenceStore((s) =>
@@ -72,6 +81,7 @@ function AccountControl({ chatId }: { chatId: string }): JSX.Element | null {
   }, [pending, hostLabel, pushError]);
 
   if (choices.length < 2) {
+    if (changeLabel !== undefined) return null;
     return row.account ? (
       <span
         className="model-pill chat-account"
@@ -87,7 +97,7 @@ function AccountControl({ chatId }: { chatId: string }): JSX.Element | null {
     <div className="permission-mode-wrap chat-account-wrap">
       <select
         className={pending !== undefined ? 'permission-mode is-pending' : 'permission-mode'}
-        data-testid="chat-account"
+        data-testid={testId}
         aria-label="Account"
         // A native tooltip would draw over the open option list.
         title={
@@ -95,12 +105,13 @@ function AccountControl({ chatId }: { chatId: string }): JSX.Element | null {
             ? undefined
             : row.account
               ? `The latest turn ran on the ${row.account.label} account`
-              : 'The account this chat starts on'
+              : 'The account this chat is locked to'
         }
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        value={shown ?? ''}
+        value={changeLabel !== undefined ? '__change' : (shown ?? '')}
         onChange={(e) => {
+          if (e.target.value === '__change') return;
           const next = e.target.value === '' ? null : e.target.value;
           if (next === settled) return;
           setPending(next);
@@ -111,8 +122,13 @@ function AccountControl({ chatId }: { chatId: string }): JSX.Element | null {
           });
         }}
       >
+        {changeLabel !== undefined ? (
+          <option value="__change" disabled hidden>
+            {changeLabel}
+          </option>
+        ) : null}
         <option value="">
-          {row.account && settled === null ? `Auto: ${row.account.label}` : 'Auto account'}
+          {row.account && settled === null ? `Automatic: ${row.account.label}` : 'Automatic'}
         </option>
         {choices.map((a) => (
           <option key={a.id} value={a.id}>

@@ -352,10 +352,11 @@ interface Exhaustion {
 export interface RouteOptions {
   strategy?: AccountStrategy;
   /**
-   * The key the chat asked to start on. Put first; the rest follow in the
-   * strategy's order. A preference, not a pin — a spent preferred key is walked
-   * past exactly like any other. An id the store no longer holds is ignored
-   * here: the chat keeps running on the host's keys rather than on nothing.
+   * The key the chat is locked to. It is the ONLY candidate: when it is spent
+   * the chat waits or shows the limit card, it does not move to another key.
+   * Only the absence of a lock (Automatic) follows the strategy. An id the store
+   * no longer holds is ignored here: the chat runs on the host's keys rather
+   * than on nothing.
    */
   preferred?: string;
   /**
@@ -552,7 +553,7 @@ export class AccountRotation {
    * moves the round-robin on. Everything else (failover asking where the re-run
    * will land, a one-shot, a report) peeks, so asking does not skip a key.
    *
-   * A chat with a preferred account does not move it: its turn was never the
+   * A chat locked to an account does not move it: its turn was never the
    * rotation's to hand out.
    */
   startTurn(accounts: readonly FailoverAccount[], route: RouteOptions = {}): string | undefined {
@@ -608,8 +609,8 @@ export class AccountRotation {
         break;
       }
     }
-    const preferred = ordered.find((a) => a.id === route.preferred);
-    return preferred ? [preferred, ...ordered.filter((a) => a !== preferred)] : ordered;
+    const locked = ordered.find((a) => a.id === route.preferred);
+    return locked ? [locked] : ordered;
   }
 
   /**
