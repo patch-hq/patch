@@ -3113,7 +3113,7 @@ function MessageEntry({
         // partway through. Same treatment as an undelivered message (not a
         // separate error line): the failure reads as "this message needs
         // resending", regardless of which hop actually broke.
-        <TurnFailedStatus entry={entry} onRetryTurn={onRetryTurn} />
+        <TurnFailedStatus entry={entry} onRetryTurn={onRetryTurn} onContinueTurn={onContinueTurn} />
       ) : entry.turnInterrupted ? (
         // spec/14 § Running-turn controls — a newer message got promoted ahead
         // of this one. The agent DID see it (the promoted turn resumed the same
@@ -5588,9 +5588,11 @@ function WakeHoldBubble({
 function TurnFailedStatus({
   entry,
   onRetryTurn,
+  onContinueTurn,
 }: {
   entry: ChatEventEntry;
   onRetryTurn: ((entry: ChatEventEntry) => void) | undefined;
+  onContinueTurn: (() => void) | undefined;
 }): JSX.Element {
   const detail =
     entry.turnErrorMessage === undefined ? undefined : presentFailure(entry.turnErrorMessage);
@@ -5611,6 +5613,16 @@ function TurnFailedStatus({
             onClick={() => onRetryTurn(entry)}
           >
             {summary?.permanent ? 'Retry anyway' : 'Tap to retry'}
+          </button>
+        ) : null}
+        {onContinueTurn && !summary?.permanent ? (
+          <button
+            type="button"
+            className="delivery-retry"
+            data-testid="turn-failed-continue"
+            onClick={() => onContinueTurn()}
+          >
+            Continue
           </button>
         ) : null}
       </div>

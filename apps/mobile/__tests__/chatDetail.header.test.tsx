@@ -247,6 +247,26 @@ describe('chat-detail header', () => {
     expect(hasText(r.root, 'no_model_catalogue')).toBe(true);
   });
 
+  it('an sdk_error row offers Continue (nudge turn, keeps the work done) next to Retry (spec/12 § Retry vs Continue)', () => {
+    useChatStore.getState().ensureChat('c_fail', '/home/tom/work');
+    useChatStore.getState().applyEvent({
+      type: 'chat.error',
+      chatId: 'c_fail',
+      seq: 0,
+      error: { code: 'sdk_error', message: 'something broke' },
+    });
+    __setLocalSearchParams({ chatId: 'c_fail' });
+    wsMock.send.mockClear();
+    wsMock.safeSend.mockClear();
+    const r = renderRN(<ChatDetailScreen />);
+    // No earlier user message here, so there is nothing for Retry to re-run.
+    findHost(r.root, byTestId('turn-error-continue'))!.props.onPress();
+    const sent = [...wsMock.send.mock.calls, ...wsMock.safeSend.mock.calls].map((c) => c[0]);
+    expect(sent).toContainEqual(
+      expect.objectContaining({ type: 'chat.input', message: 'Continue' }),
+    );
+  });
+
   it('back button navigates back', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });

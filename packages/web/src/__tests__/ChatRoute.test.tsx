@@ -2091,6 +2091,57 @@ describe('ChatRoute regression', () => {
     expect(tl.some((e) => e.localId === sentLocalId)).toBe(false);
   });
 
+  // spec/12 § Retry vs Continue — a turn that failed partway (e.g. out of usage
+  // an hour in) offers both: Retry restarts from the message, Continue keeps the
+  // work done so far and nudges the agent on.
+  it('a turnFailed message offers Continue, which sends a fresh nudge turn and keeps the failed bubble', () => {
+    const send = vi.fn();
+    seedChat('c-turn-fail-continue', [
+      {
+        seq: 1,
+        kind: 'message',
+        role: 'user',
+        content: 'do the long thing',
+        localId: 'L-fail-old',
+        turnFailed: true,
+        turnErrorMessage: 'something broke',
+        turnFailedSeq: 5,
+        at: 0,
+      },
+    ]);
+    renderChat('c-turn-fail-continue', { send, requestReplay() {} } as unknown as Parameters<
+      typeof ChatRoute
+    >[0]['ws']);
+    expect(screen.getByTestId('turn-retry')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('turn-failed-continue'));
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'chat.input',
+        chatId: 'c-turn-fail-continue',
+        message: 'Continue',
+      }),
+    );
+    expect(send.mock.calls[0]?.[0]?.retryOfSeq).toBeUndefined();
+  });
+
+  it('a permanent turn failure (context too large) offers no Continue', () => {
+    seedChat('c-turn-fail-perm', [
+      {
+        seq: 1,
+        kind: 'message',
+        role: 'user',
+        content: 'x',
+        localId: 'L-perm',
+        turnFailed: true,
+        turnErrorMessage: '400 context_length_exceeded: Your input exceeds the context window.',
+        turnFailedSeq: 5,
+        at: 0,
+      },
+    ]);
+    renderChat('c-turn-fail-perm');
+    expect(screen.queryByTestId('turn-failed-continue')).not.toBeInTheDocument();
+  });
+
   // spec/14 § Running-turn controls — a bare-stopped turn is an outcome. The
   // host emits no reply and no error for it, so the message must say it was
   // stopped and offer Continue — never "retry", which would resubmit text the

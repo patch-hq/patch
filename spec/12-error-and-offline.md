@@ -323,6 +323,15 @@ sent again.
   Retry is pressed, not when the host answers: the earlier reply leaves the
   transcript at once (one `<` away), and only the new run's content appears. A
   retry that never reaches the host takes the page back off.
+- **Retry vs Continue.** A turn that failed partway (out of usage, a dropped
+  connection, a crash) offers BOTH on the failed message and on the phone's
+  error row. Retry restarts from that message: the text runs again as a new
+  attempt, and what the first attempt did is set aside. Continue keeps it — it
+  sends a fresh "Continue" turn into the same session so the agent picks up
+  where it got to. A long turn may be an hour in when it dies, so Continue is
+  always offered beside Retry and never replaced by it. Neither is offered for a
+  failure that will recur unchanged (input too large): there only "Retry
+  anyway" is drawn.
 - The link between attempts is written to the chat's `retryMarks` and spliced
   back on at replay. The agent's own transcript records each attempt as an
   ordinary user turn and knows nothing about the one it repeats, so without this

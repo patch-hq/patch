@@ -71,7 +71,13 @@ import { usePresenceStore } from '../../src/stores/presenceStore';
 import { deliveryTracker } from '../../src/lib/deliveryTracker';
 import { permissionDeliveryTracker } from '../../src/lib/permissionDeliveryTracker';
 import { openExistingSideThread } from '../../src/lib/sideThreadActions';
-import { discardUpload, retrySource, retryTurn, retryUpload } from '../../src/lib/sendQueue';
+import {
+  discardUpload,
+  retrySource,
+  retryTurn,
+  retryUpload,
+  sendMessage,
+} from '../../src/lib/sendQueue';
 import { Composer } from '../../src/components/Composer';
 import {
   queueChipLabel,
@@ -2870,6 +2876,30 @@ const TimelineItem = React.memo(function TimelineItem({
           >
             {entry.errorCode}
           </Text>
+        ) : null}
+        {entry.errorCode === 'sdk_error' ? (
+          // spec/12 § Retry vs Continue — Retry re-runs the message from the
+          // top; Continue keeps the work done so far and nudges the agent on.
+          <View
+            style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginTop: space.sm }}
+          >
+            {retrySource(chatId, entry) !== null ? (
+              <Pressable
+                accessibilityRole="button"
+                testID="turn-error-retry"
+                onPress={() => retryTurn(chatId, entry)}
+              >
+                <Text style={{ color: colors.red, textDecorationLine: 'underline' }}>Retry</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              testID="turn-error-continue"
+              onPress={() => sendMessage(chatId, 'Continue', [])}
+            >
+              <Text style={{ color: colors.red, textDecorationLine: 'underline' }}>Continue</Text>
+            </Pressable>
+          </View>
         ) : null}
         {entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
           <View
