@@ -460,4 +460,76 @@ describe('ServerQueue', () => {
       expect(injected.at(-1)).toMatchObject({ queueSeq: 1 });
     });
   });
+  // spec/02 § Questions are not approvals — a message typed while the agent's
+  // question is on screen must reach the host at once (which cancels the
+  // question), not wait here for a tool boundary the blocked turn never reaches.
+  describe('open AskUserQuestion', () => {
+    const ask = (requestId = 'r1'): WireEvent =>
+      ({
+        type: 'chat.permission_request',
+        chatId: 'c1',
+        requestId,
+        request: { tool: 'AskUserQuestion', args: {} },
+        seq: 3,
+        ts: 0,
+      }) as unknown as WireEvent;
+    const answered = (requestId = 'r1'): WireEvent =>
+      ({
+        type: 'chat.permission_response',
+        chatId: 'c1',
+        requestId,
+        approve: false,
+      }) as unknown as WireEvent;
+
+    test('a message sent while a question is open goes to the host, not the queue', () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      hostFrame(q, ask());
+      hostFrame(q, state('awaiting-permission'));
+      expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(false);
+      expect(q.hasWaiting('c1')).toBe(false);
+    });
+
+    test('queues again once the question is answered', () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      hostFrame(q, ask());
+      hostFrame(q, answered());
+      expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(true);
+    });
+
+    test('an ordinary approval does not bypass the queue', () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      hostFrame(q, {
+        type: 'chat.permission_request',
+        chatId: 'c1',
+        requestId: 'r2',
+        request: { tool: 'Bash', args: {} },
+        seq: 3,
+        ts: 0,
+      } as unknown as WireEvent);
+      expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(true);
+    });
+
+    test('messages already waiting are released to the host when a question opens', () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      q.enqueueIfBusy('srf-1', input('L1'));
+      q.enqueueIfBusy('srf-1', input('L2'));
+      hostFrame(q, ask());
+      expect(sent.map((s) => (s.event as ChatInputEvent).localId)).toEqual(['L1', 'L2']);
+      expect(q.hasWaiting('c1')).toBe(false);
+      expect(injected.filter((e) => e.type === 'chat.dequeued')).toHaveLength(2);
+    });
+
+    test('the open question is forgotten when the chat goes idle', () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      hostFrame(q, ask());
+      hostFrame(q, state('idle'));
+      hostFrame(q, state('running'));
+      expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(true);
+    });
+  });
 });

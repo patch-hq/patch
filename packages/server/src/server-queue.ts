@@ -55,6 +55,14 @@ export class ServerQueue {
   private seqs = new Map<string, number>();
   /** Chats whose next message was just handed to the host; it has not reported `running` yet. */
   private readonly releasing = new Map<string, number>();
+  /**
+   * Chats with an AskUserQuestion on screen, by request id. The turn is blocked
+   * inside the question, so it never reaches a tool boundary: anything held here
+   * would wait for a pull that cannot come. A message sent now IS the answer
+   * (spec/02 § Questions are not approvals), and only the host can cancel the
+   * question with it, so it must go there.
+   */
+  private readonly openQuestions = new Map<string, Set<string>>();
   private readonly path: string | null;
   private readonly now: () => number;
 
@@ -82,6 +90,7 @@ export class ServerQueue {
    */
   enqueueIfBusy(surfaceId: string, event: ChatInputEvent): boolean {
     if (!this.takes(event)) return false;
+    if (this.openQuestions.has(event.chatId)) return false;
     const chat = this.deps.chats.get(event.chatId)!;
     const existing = this.queues.get(event.chatId)?.find((i) => i.localId === event.localId);
     if (existing) {
@@ -137,8 +146,21 @@ export class ServerQueue {
       }
       return event;
     }
+    if (event.type === 'chat.permission_request') {
+      if (event.request.tool === 'AskUserQuestion')
+        this.openQuestion(event.chatId, event.requestId, fromHostId);
+      return event;
+    }
+    if (event.type === 'chat.permission_response') {
+      if (event.chatId !== undefined && event.requestId !== undefined)
+        this.closeQuestion(event.chatId, event.requestId);
+      return event;
+    }
     if (event.type !== 'chat.state') return event;
     const chatId = event.chatId;
+    if (event.activity === 'idle' || (event.status !== undefined && event.status !== 'active')) {
+      this.openQuestions.delete(chatId);
+    }
     if (event.status !== undefined && event.status !== 'active') {
       this.clear(chatId);
       return event;
@@ -153,6 +175,28 @@ export class ServerQueue {
     const host = fromHostId ?? this.deps.chats.get(chatId)?.hostId ?? null;
     queueMicrotask(() => this.release(chatId, host));
     return { ...event, activity: 'running' };
+  }
+
+  private openQuestion(chatId: string, requestId: string, fromHostId: string | null): void {
+    const ids = this.openQuestions.get(chatId) ?? new Set<string>();
+    ids.add(requestId);
+    this.openQuestions.set(chatId, ids);
+    // Messages already waiting are answers too; hand them over in order. The
+    // host queues them behind the blocked turn after cancelling the question.
+    const host = fromHostId ?? this.deps.chats.get(chatId)?.hostId ?? null;
+    if (host === null || !this.deps.isOnline(host)) return;
+    for (const item of this.queues.get(chatId) ?? []) {
+      this.deps.inject({ type: 'chat.dequeued', chatId, localId: item.localId, reason: 'running' });
+      this.deps.sendTo(host, item.surfaceId, item.event);
+    }
+    if (this.queues.delete(chatId)) this.save();
+  }
+
+  private closeQuestion(chatId: string, requestId: string): void {
+    const ids = this.openQuestions.get(chatId);
+    if (!ids) return;
+    ids.delete(requestId);
+    if (ids.size === 0) this.openQuestions.delete(chatId);
   }
 
   /** The host asked, at a tool boundary: everything waiting for this chat, oldest first. */
