@@ -10535,7 +10535,7 @@ main.empty-state p {
   padding: 8px 10px;
   font: inherit;
   color: var(--ink-2);
-  background: var(--bg-1, transparent);
+  background: transparent;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
