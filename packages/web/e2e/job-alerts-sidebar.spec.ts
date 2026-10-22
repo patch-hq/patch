@@ -14,8 +14,8 @@ const chatgptAlert = {
   jobName: 'Cadence monitor agents',
   status: 'dispatch-error',
   ts: 1760860800000,
-  reason: 'ChatGPT is not signed in on the host that runs this job.',
-  fix: 'Sign in to ChatGPT in Settings → Hosts.',
+  reason: 'Codex is not signed in on the host that runs this job.',
+  fix: 'Sign in to Codex in Settings → Hosts.',
   detail: 'host H refused the action: chatgpt_login_required: x',
   fixPath: '/settings/hosts',
 };
@@ -49,9 +49,9 @@ test.describe('Job alerts in the sidebar', () => {
     await expect(items).toHaveCount(2);
     const first = items.nth(0);
     await expect(first.getByTestId('job-alert-name')).toHaveText('Cadence monitor agents');
-    await expect(first.getByTestId('job-alert-reason')).toContainText('ChatGPT is not signed in');
+    await expect(first.getByTestId('job-alert-reason')).toContainText('Codex is not signed in');
     await expect(first.getByTestId('job-alert-fix')).toContainText(
-      'Sign in to ChatGPT in Settings → Hosts.',
+      'Sign in to Codex in Settings → Hosts.',
     );
     await expect(first.getByTestId('job-alert-fix').locator('a')).toHaveAttribute(
       'href',

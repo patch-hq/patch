@@ -34,8 +34,8 @@ describe('describeFailure', () => {
       'dispatch-error',
       'host H1 refused the action: chatgpt_login_required: not signed in',
     );
-    expect(d.reason).toMatch(/ChatGPT is not signed in/);
-    expect(d.fix).toBe('Sign in to ChatGPT in Settings → Hosts.');
+    expect(d.reason).toMatch(/Codex is not signed in/);
+    expect(d.fix).toBe('Sign in to Codex in Settings → Hosts.');
     expect(d.fixPath).toBe('/settings/hosts');
   });
 
@@ -213,7 +213,7 @@ describe('job alerts through a running server', () => {
         jobId,
         jobName: 'Cadence monitor agents',
         status: 'dispatch-error',
-        fix: 'Sign in to ChatGPT in Settings → Hosts.',
+        fix: 'Sign in to Codex in Settings → Hosts.',
       });
 
       // Next run succeeds: alert goes.

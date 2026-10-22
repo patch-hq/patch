@@ -10184,6 +10184,12 @@ main.empty-state p {
 .out-of-usage-banner .out-of-usage-switch {
   margin-left: auto;
   flex: none;
+}
+.out-of-usage-banner .out-of-usage-switch-btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.out-of-usage-banner .out-of-usage-switch-btn {
   background: transparent;
   color: inherit;
   border: 1px solid currentColor;

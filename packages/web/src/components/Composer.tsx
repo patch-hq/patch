@@ -2212,7 +2212,7 @@ export const Composer = forwardRef(function Composer(
             disabled={claudeDisconnected}
             {...(claudeDisconnected
               ? {
-                  title: `${accountModel?.startsWith('openai/') ? 'OpenAI' : 'Claude'} isn’t connected. Connect in Settings.`,
+                  title: `${accountModel?.startsWith('openai/') ? 'Codex' : 'Claude'} isn’t connected. Connect in Settings.`,
                 }
               : {})}
             rows={1}

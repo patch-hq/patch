@@ -15,7 +15,7 @@ import { fonts, radii, space, textMin, useTheme, type ThemeColors } from '../lib
 
 const BACKENDS = [
   { id: 'claude-code', name: 'Claude' },
-  { id: 'codex', name: 'ChatGPT' },
+  { id: 'codex', name: 'Codex' },
 ] as const;
 
 /** How many accounts show at once; the rest are a page away. */

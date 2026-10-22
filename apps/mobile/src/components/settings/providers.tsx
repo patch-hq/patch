@@ -42,7 +42,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
   },
   {
     id: 'codex',
-    name: 'ChatGPT',
+    name: 'Codex',
     strategyKey: 'codex',
     windows: ['session', 'week'],
     pasteToken: false,

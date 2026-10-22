@@ -6398,7 +6398,7 @@ export async function handleServerEvent(
               // Short and actionable. This lands in a toast and in the chat, so
               // dumping the provider's raw OAuth JSON at a person tells them
               // nothing they can act on — the reason goes to the log instead.
-              message: `${machine} isn't signed in to ${isCodexModel(event.model) ? 'ChatGPT' : 'Claude'}. Sign in from Settings → Hosts.`,
+              message: `${machine} isn't signed in to ${isCodexModel(event.model) ? 'Codex' : 'Claude'}. Sign in from Settings → Hosts.`,
             },
             seq: OUT_OF_BAND_SEQ,
           });
@@ -6410,7 +6410,7 @@ export async function handleServerEvent(
         if (event.preferredAccountId !== undefined) {
           const held = accounts?.heldAccounts(event.model) ?? [];
           if (!held.includes(event.preferredAccountId)) {
-            const problem = `preferred account ${event.preferredAccountId} is not one of ${daemon.hostId}'s ${isCodexModel(event.model) ? 'OpenAI' : 'Claude'} accounts (holds: ${held.join(', ') || 'none'})`;
+            const problem = `preferred account ${event.preferredAccountId} is not one of ${daemon.hostId}'s ${isCodexModel(event.model) ? 'Codex' : 'Claude'} accounts (holds: ${held.join(', ') || 'none'})`;
             logger.error({ op, folder: event.folder }, `chat.spawn_request refused: ${problem}`);
             sender({
               type: 'chat.error',

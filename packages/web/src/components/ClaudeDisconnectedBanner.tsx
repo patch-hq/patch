@@ -31,7 +31,7 @@ export function ClaudeDisconnectedBanner({ model }: { model?: string }): JSX.Ele
     >
       <span className="dot" aria-hidden />
       <span>
-        Not signed in to {model?.startsWith('openai/') ? 'OpenAI' : 'Claude'}. Chats can’t run.{' '}
+        Not signed in to {model?.startsWith('openai/') ? 'Codex' : 'Claude'}. Chats can’t run.{' '}
         <Link to="/settings/usage">Sign in</Link>
       </span>
     </div>

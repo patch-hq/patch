@@ -30,7 +30,7 @@ export function ClaudeDisconnectedBar({ model }: { model: string | null }): Reac
     <BarShell testID="claude-disconnected-bar" tone="alert" role="alert">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <Text style={{ flex: 1, color: colors.ink, fontSize: textMin }}>
-          Not signed in to {openai ? 'OpenAI' : 'Claude'}. Chats can’t run.
+          Not signed in to {openai ? 'Codex' : 'Claude'}. Chats can’t run.
         </Text>
         <Pressable
           testID="claude-disconnected-signin"

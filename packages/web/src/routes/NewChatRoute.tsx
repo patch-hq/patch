@@ -1424,7 +1424,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             {signedOut ? (
               <div className="new-chat-blocked" data-testid="new-chat-blocked" role="alert">
                 <p className="new-chat-blocked-title">
-                  Not signed in to {effectiveModel?.startsWith('openai/') ? 'OpenAI' : 'Claude'}
+                  Not signed in to {effectiveModel?.startsWith('openai/') ? 'Codex' : 'Claude'}
                 </p>
                 <Link to="/settings/usage">Sign in</Link>
               </div>
