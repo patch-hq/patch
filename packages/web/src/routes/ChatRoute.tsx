@@ -1100,7 +1100,12 @@ export function ChatRoute({
     // away from the user faster than they are scrolling, so "still within 50px
     // of the bottom" is true for the first few wheel notches of a deliberate
     // scroll up — and re-engaging follow there is exactly the yank.
-    followRef.current = movedUp ? false : atBottom;
+    // Already following and not moving up: stay following, whatever the
+    // position says. A pin of ours can be overtaken by late layout (an
+    // attachment image decoding) before its scroll event is dispatched, so
+    // the event reports a position short of the grown bottom. Reading that
+    // as "scrolled away" dropped follow and stranded the chat short of it.
+    followRef.current = movedUp ? false : followRef.current || atBottom;
     setShowScrollDown(!followRef.current);
     // Remember this chat's position so reopening restores it (spec/14 § Main
     // chat panel) — anchored to whichever message is at the top edge rather
