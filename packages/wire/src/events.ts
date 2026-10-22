@@ -3304,10 +3304,10 @@ export const ChatSpawnRequestEvent = z
      */
     permissionMode: PermissionMode.optional(),
     /**
-     * The shared account this chat's turns START on (spec/10 § Backend
-     * credentials — preferred account). A preference, not a pin: a turn walks
-     * past it when it has no credit, and a failure is attributed to the key
-     * the turn actually ran on. Fixed for the chat's life. An id the host does
+     * The shared account this chat is LOCKED to (spec/10 § Backend
+     * credentials — preferred account): a turn waits on it when it has no
+     * credit rather than moving on, and a failure is attributed to the key the
+     * turn actually ran on. Fixed for the chat's life. An id the host does
      * not hold is refused.
      *
      * Not `accountId`: that key is a retired pin still sitting in old chat

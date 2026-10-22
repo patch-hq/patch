@@ -990,10 +990,9 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             </div>
           </>
         ) : null}
-        {/* The account this chat's turns START on (spec/10 § Backend
-            credentials — preferred account). A preference, not a pin: a spent
-            account is walked past. Auto leaves the choice to the account
-            strategy. Only the chosen model's backend's accounts are offered,
+        {/* The account this chat is LOCKED to (spec/10 § Backend
+            credentials — preferred account): a spent account is waited on, not
+            walked past. Auto leaves the choice to the account strategy. Only the chosen model's backend's accounts are offered,
             and only once there is more than one to choose between. */}
         {preferableAccounts.length > 1 ? (
           <>

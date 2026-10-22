@@ -1119,7 +1119,7 @@ export default function JobEditor(): React.ReactElement {
                     )}
                   </Field>
                   {/* The account the job's chat starts on (spec/08 § Action,
-                  spec/10 — preferred account). A preference, not a pin. */}
+                  spec/10 — preferred account). A lock: a spent account is waited on. */}
                   {accountOptions.length > 2 ? (
                     <Field label="Start on account">
                       <OptionPicker

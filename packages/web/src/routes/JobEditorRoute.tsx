@@ -1233,9 +1233,9 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // may be empty, still loading, or the host offline, and an edit to an
   // unrelated field must never silently unpin a saved model.
   /**
-   * The account the job's chat starts on (spec/08 § Action, spec/10 § Backend
-   * credentials — preferred account). A preference, not a pin: a spent account
-   * is walked past. Fixed when the chat is created, like the model.
+   * The account the job's chat is locked to (spec/08 § Action, spec/10 § Backend
+   * credentials — preferred account): a spent account is waited on, not walked
+   * past. Fixed when the chat is created, like the model.
    */
   function accountField(): JSX.Element | null {
     const codex = form.spawnModel.startsWith('openai/');

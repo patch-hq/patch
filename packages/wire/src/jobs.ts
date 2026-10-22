@@ -168,9 +168,9 @@ export type JobTrigger = z.infer<typeof JobTrigger>;
 const jobActionModelField = { model: z.string().min(1).optional() };
 
 /**
- * The stored account the action's chat starts its turns on (spec/08 § Action,
- * spec/10 § Backend credentials — preferred account). A preference, not a pin:
- * a spent account is walked past like any other. Fixed when the chat is
+ * The stored account the action's chat is locked to (spec/08 § Action,
+ * spec/10 § Backend credentials — preferred account): a spent account is
+ * waited on, not walked past. Fixed when the chat is
  * created, like `model`, so on `continue` it reaches the NEXT chat the job
  * creates. Omitted, the host's strategy alone decides.
  */

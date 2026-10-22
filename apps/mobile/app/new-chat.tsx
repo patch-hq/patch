@@ -316,7 +316,7 @@ export default function NewChat(): React.ReactElement {
           keyboardShouldPersistTaps="handled"
         >
           {/* The account the chat's turns START on (spec/10 § Backend
-              credentials — preferred account). A preference, not a pin. */}
+              credentials — preferred account). A lock: a spent account is waited on. */}
           {preferable.length > 1 ? (
             <PickRow label="Account">
               <Chip
