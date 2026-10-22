@@ -38,34 +38,22 @@ test.describe('the limit notice once the limit has reset', () => {
     await page.goto(HARNESS);
     const bar = page.getByTestId('rate-limit-bar');
     await expect(bar).toBeVisible();
-    await expect(page.getByTestId('rate-limit-headline')).toContainText(
-      /reached your session limit/i,
-    );
+    await expect(page.getByTestId('rate-limit-headline')).toContainText(/Session limit reset/);
     // The exact figure is pinned against a frozen clock in the unit test; here
     // the harness seeds "20 minutes ago" at load and the page renders a second
     // or two later, and the elapsed time rounds UP to the minute.
-    await expect(page.getByTestId('rate-limit-countdown')).toContainText(
-      /That was 2[01] minutes ago and this turn has not run\./i,
-    );
+    await expect(page.getByTestId('rate-limit-countdown')).toContainText(/^2[01] min ago$/);
+    await expect(page.getByTestId('rate-limit-unsent')).toHaveText('Message not sent');
     // The sentence that reads as "nothing to do here" is gone.
     await expect(bar).not.toContainText(/should be back now/i);
   });
 
-  test('makes Try now the action once there is nothing left to wait for', async ({ page }) => {
+  test('makes Send the filled action once there is nothing left to wait for', async ({ page }) => {
     await page.goto(HARNESS);
-    const retry = page.getByTestId('rate-limit-retry');
-    await expect(retry).toBeVisible();
-    await expect(retry).toHaveAttribute('data-past-reset', 'true');
-    // Not one of three equal controls any more.
-    await expect(retry).toHaveCSS('font-weight', '600');
-  });
-
-  test('leaves it an ordinary control while the wait is still running', async ({ page }) => {
-    await page.goto('/app/dev-harness.html?chat=chat_limit_blocked');
-    const retry = page.getByTestId('rate-limit-retry');
-    await expect(retry).toBeVisible();
-    await expect(retry).toHaveAttribute('data-past-reset', 'false');
-    await expect(retry).not.toHaveCSS('font-weight', '600');
+    const send = page.getByTestId('rate-limit-send');
+    await expect(send).toBeVisible();
+    await expect(send).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(send).toHaveCSS('font-weight', '600');
   });
 
   test('withdraws itself the moment the chat reports a turn in flight', async ({ page }) => {
@@ -94,7 +82,7 @@ test.describe('the limit notice once the limit has reset', () => {
     await chatState(page, 'idle');
     await page.waitForTimeout(1000);
     await expect(page.getByTestId('rate-limit-bar')).toBeVisible();
-    await expect(page.getByTestId('rate-limit-retry')).toBeVisible();
+    await expect(page.getByTestId('rate-limit-send')).toBeVisible();
   });
 });
 
@@ -107,9 +95,7 @@ test.describe('a limitBlock whose resetsAt is epoch 0', () => {
   test('shows no countdown or elapsed-time text at all', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_limit_epoch_reset');
     await expect(page.getByTestId('rate-limit-bar')).toBeVisible();
-    await expect(page.getByTestId('rate-limit-headline')).toContainText(
-      /reached your session limit/i,
-    );
+    await expect(page.getByTestId('rate-limit-headline')).toContainText(/Session limit/);
     await expect(page.getByTestId('rate-limit-countdown')).toHaveCount(0);
     await expect(page.getByTestId('rate-limit-bar')).not.toContainText(/ago/i);
   });

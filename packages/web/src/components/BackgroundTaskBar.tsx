@@ -26,7 +26,7 @@
 // all checkbox on the title row brings the ends back as struck-through rows
 // under the running ones.
 
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { Fragment, useEffect, useRef, useState, type JSX } from 'react';
 import { ChevronDown, ChevronUp, LoaderCircle, X } from 'lucide-react';
 import type { WatchTaskRow } from '@patch/wire';
 import { headCodePoints } from '@patch/wire';
@@ -111,6 +111,34 @@ function CommandPreview({
   );
 }
 
+/** Local HH:MM for a check-in time. */
+function formatClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+/** Silence after which a running row is flagged — matches the host's nudge to the agent. */
+const QUIET_AFTER_MS = 60 * 60 * 1000;
+
+/** The task's last output line, or a warning when it has gone quiet for a long time. */
+function ProgressLine({ task, now }: { task: WatchTaskRow; now: number }): JSX.Element | null {
+  const quietMs = now - Math.max(task.startedAt, task.lastOutputAt ?? 0);
+  const quiet = quietMs >= QUIET_AFTER_MS;
+  if (!quiet && task.lastLine === undefined) return null;
+  const text = quiet
+    ? `no output for ${Math.floor(quietMs / QUIET_AFTER_MS)}h${task.lastLine ? ` · ${task.lastLine}` : ''}`
+    : task.lastLine;
+  return (
+    <span
+      className="background-task-bar-progress"
+      data-testid="background-task-bar-progress"
+      data-quiet={quiet ? 'true' : 'false'}
+      title={task.lastLine}
+    >
+      {text}
+    </span>
+  );
+}
+
 function useWatchTasks(chatId: string, enabled: boolean): WatchTaskRow[] {
   const [tasks, setTasks] = useState<WatchTaskRow[]>([]);
 
@@ -157,6 +185,8 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
   const queuePending = useTerminalStore((s) => s.queuePending);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [killing, setKilling] = useState<Set<string>>(new Set());
+  const [editingCheckIn, setEditingCheckIn] = useState<string | null>(null);
+  const [checkInMinutes, setCheckInMinutes] = useState('60');
 
   const [now, setNow] = useState(() => Date.now());
 
@@ -218,6 +248,22 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
     setOverride(null);
   }, [tasks]);
 
+  function openCheckInEditor(task: WatchTaskRow): void {
+    const current =
+      task.checkInSec ?? Math.max(60, Math.round(((task.nextCheckInAt ?? 0) - now) / 60_000) * 60);
+    setCheckInMinutes(String(Math.max(1, Math.round(current / 60))));
+    setEditingCheckIn(task.taskId);
+  }
+
+  async function saveCheckIn(task: WatchTaskRow): Promise<void> {
+    const minutes = Number(checkInMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1) return;
+    await api.watchCheckIn(chatId, task.taskId, minutes * 60);
+    setEditingCheckIn(null);
+    const res = await api.watchList(chatId);
+    setTasksOverride(res.tasks);
+  }
+
   function toggleExpanded(taskId: string): void {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -266,71 +312,119 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
                 ? `Show what "${task.description}" did in the terminal`
                 : `Show what "${task.description}" is doing in the terminal`;
               return (
-                <button
-                  key={task.taskId}
-                  type="button"
-                  className="background-task-bar-row"
-                  data-testid="background-task-bar-task"
-                  data-ended={ended ? 'true' : 'false'}
-                  aria-label={label}
-                  title={label}
-                  onClick={() => showTask(task)}
-                >
-                  {ended ? (
-                    <span className="background-task-bar-nospinner" aria-hidden />
-                  ) : (
-                    <Spinner />
-                  )}
-                  <span
-                    className="background-task-bar-description"
-                    data-testid="background-task-bar-description"
+                <Fragment key={task.taskId}>
+                  <button
+                    type="button"
+                    className="background-task-bar-row"
+                    data-testid="background-task-bar-task"
+                    data-ended={ended ? 'true' : 'false'}
+                    aria-label={label}
+                    title={label}
+                    onClick={() => showTask(task)}
                   >
-                    {task.description}
-                  </span>
-                  {ended ? null : (
+                    {ended ? (
+                      <span className="background-task-bar-nospinner" aria-hidden />
+                    ) : (
+                      <Spinner />
+                    )}
                     <span
-                      className="background-task-bar-elapsed"
-                      data-testid="background-task-bar-elapsed"
+                      className="background-task-bar-description"
+                      data-testid="background-task-bar-description"
                     >
-                      {formatElapsed(task.startedAt, now)}
+                      {task.description}
                     </span>
-                  )}
-                  <CommandPreview
-                    command={task.command}
-                    expanded={isExpanded}
-                    onToggle={() => toggleExpanded(task.taskId)}
-                  />
-                  {ended ? null : (
-                    // A plain span, not a nested `<button>`: this row IS a
-                    // button (spec/14 — "every task row is a real button"),
-                    // and interactive content inside interactive content is
-                    // invalid HTML that browsers silently reparent out of the
-                    // row, breaking the layout this bar depends on.
-                    <span
-                      className="background-task-bar-kill"
-                      data-testid="background-task-bar-kill"
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Kill "${task.description}"`}
-                      title={`Kill "${task.description}"`}
-                      aria-disabled={killing.has(task.taskId)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (killing.has(task.taskId)) return;
-                        void killTask(task);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                    {ended ? null : <ProgressLine task={task} now={now} />}
+                    {ended || task.nextCheckInAt === undefined ? null : (
+                      <span
+                        className="background-task-bar-checkin"
+                        data-testid="background-task-bar-checkin"
+                        role="button"
+                        tabIndex={0}
+                        title="Check-in interval"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openCheckInEditor(task);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openCheckInEditor(task);
+                        }}
+                      >
+                        {`next check-in at ${formatClock(task.nextCheckInAt)}`}
+                      </span>
+                    )}
+                    {ended ? null : (
+                      <span
+                        className="background-task-bar-elapsed"
+                        data-testid="background-task-bar-elapsed"
+                      >
+                        {formatElapsed(task.startedAt, now)}
+                      </span>
+                    )}
+                    <CommandPreview
+                      command={task.command}
+                      expanded={isExpanded}
+                      onToggle={() => toggleExpanded(task.taskId)}
+                    />
+                    {ended ? null : (
+                      // A plain span, not a nested `<button>`: this row IS a
+                      // button (spec/14 — "every task row is a real button"),
+                      // and interactive content inside interactive content is
+                      // invalid HTML that browsers silently reparent out of the
+                      // row, breaking the layout this bar depends on.
+                      <span
+                        className="background-task-bar-kill"
+                        data-testid="background-task-bar-kill"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Kill "${task.description}"`}
+                        title={`Kill "${task.description}"`}
+                        aria-disabled={killing.has(task.taskId)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (killing.has(task.taskId)) return;
+                          void killTask(task);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (killing.has(task.taskId)) return;
+                          void killTask(task);
+                        }}
+                      >
+                        <X size={14} aria-hidden />
+                      </span>
+                    )}
+                  </button>
+                  {editingCheckIn === task.taskId ? (
+                    <form
+                      className="background-task-bar-row background-task-bar-checkin-edit"
+                      data-testid="background-task-bar-checkin-form"
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        e.stopPropagation();
-                        if (killing.has(task.taskId)) return;
-                        void killTask(task);
+                        void saveCheckIn(task);
                       }}
                     >
-                      <X size={14} aria-hidden />
-                    </span>
-                  )}
-                </button>
+                      <span>Check in every</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={checkInMinutes}
+                        onChange={(e) => setCheckInMinutes(e.target.value)}
+                        data-testid="background-task-bar-checkin-input"
+                        aria-label="Check-in interval in minutes"
+                      />
+                      <span>min</span>
+                      <button type="submit" data-testid="background-task-bar-checkin-save">
+                        Set
+                      </button>
+                    </form>
+                  ) : null}
+                </Fragment>
               );
             })}
       </div>

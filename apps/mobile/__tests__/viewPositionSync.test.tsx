@@ -88,7 +88,7 @@ describe('ViewPositionSync', () => {
     resetViewPositionSync();
     send.mockClear();
     vi.mocked(getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
-    useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null });
+    useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null, received: false });
     usePresenceStore.setState({ surfaceId: 'phone' });
     seedSettings();
   });
@@ -127,11 +127,25 @@ describe('ViewPositionSync', () => {
     expect(routerMock.navigate).not.toHaveBeenCalled();
   });
 
-  it("ignores its own surface's echo", () => {
+  it('restores its own last position when the launch snapshot is its own (a restart)', () => {
     mount();
     actSync(() =>
       useViewPositionStore.getState().applyUpdated(remote({ surfaceId: 'phone' }), 'phone'),
     );
+    expect(routerMock.navigate).toHaveBeenCalledWith('/chats/c9?seq=5');
+  });
+
+  it("ignores its own surface's echo once the launch snapshot has arrived", () => {
+    mount();
+    actSync(() => useViewPositionStore.getState().applyUpdated(remote({ updatedAt: 50 }), 'phone'));
+    routerMock.navigate.mockClear();
+    actSync(() =>
+      useViewPositionStore
+        .getState()
+        .applyUpdated(remote({ surfaceId: 'phone', id: 'c2', updatedAt: 200 }), 'phone'),
+    );
+    actSync(() => __emitAppStateChange('background'));
+    actSync(() => __emitAppStateChange('active'));
     expect(routerMock.navigate).not.toHaveBeenCalled();
   });
 
@@ -183,6 +197,16 @@ describe('ViewPositionSync', () => {
       id: 'c1',
       seq: 33,
     });
+  });
+
+  it('reports the open chat on first touch even when nothing else changes', () => {
+    mount();
+    actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
+    expect(send).not.toHaveBeenCalled();
+    // Same chat, no navigation, no scroll: the touch alone makes it the live position.
+    actSync(() => noteUserInput());
+    actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
+    expect(send).toHaveBeenCalledWith({ type: 'view_position.set', page: 'chat', id: 'c1' });
   });
 
   it('reports a job editor with its id param', () => {

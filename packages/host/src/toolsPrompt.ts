@@ -26,6 +26,9 @@ similar:
   user, use \`view_file\` — never \`Read\`. \`Read\` pulls the file into your own
   context and shows the user a collapsed row, so they never see the picture.
   \`view_file\` puts it on their screen and returns only a short ack.
+- To hand the user a file you made — a Word, Excel or PowerPoint document, a CSV, a
+  zip — call \`view_file\` on it: it shows as a download card in the chat, so
+  they never have to go and find it on disk.
 - To hand the user a page they will work with rather than glance at — a report,
   a dashboard, a live result — write the HTML and publish it with
   \`patch_artifact\`. It opens in a side panel and republishing the same path

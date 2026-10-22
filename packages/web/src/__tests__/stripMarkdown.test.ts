@@ -20,6 +20,13 @@ describe('stripMarkdown', () => {
       'see my_file_name.txt and snake_case_var',
     );
     expect(stripMarkdown('https://x.com/a_b_c')).toBe('https://x.com/a_b_c');
+    // A run of underscores attached to the end of a word is part of the name:
+    // CommonMark cannot open emphasis on a `_` that follows a letter. This used
+    // to come out as `file__name.txt`.
+    expect(stripMarkdown('fix file__name__.txt and __init__.py imports')).toBe(
+      'fix file__name__.txt and init.py imports',
+    );
+    expect(stripMarkdown('trailing_ underscore')).toBe('trailing_ underscore');
   });
 
   it('still strips underscore emphasis around whole words', () => {

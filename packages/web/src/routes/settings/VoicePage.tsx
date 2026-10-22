@@ -353,7 +353,10 @@ function SpeakingGroup(): JSX.Element {
 
   return (
     <Group label="Speaking" testid="voice-speaking">
-      <Row title="Voice" sub={kokoroVoice === undefined ? 'Each host’s Kokoro default' : undefined}>
+      <Row
+        title="Voice"
+        sub={kokoroVoice === undefined ? 'Each machine’s Kokoro default' : undefined}
+      >
         <select
           aria-label="Voice"
           data-testid="kokoro-voice"

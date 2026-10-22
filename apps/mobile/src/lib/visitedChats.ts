@@ -1,5 +1,5 @@
-// When each chat was last opened on this phone (spec/14 § Status badges — the
-// `read` / `done` split). MMKV, like the roster cache beside it.
+// The read watermark of each chat on this phone: the highest seq seen on its
+// last visit (spec/14 § Status badges — the `read` / `done` split). MMKV, like the roster cache beside it.
 //
 // Without it a relaunch forgets every visit: the roster arrives with each
 // chat's `lastUpdated`, nothing says it was seen, and every chat reads "New
@@ -10,7 +10,7 @@
 import { store, VISITED_KEY } from './credential';
 import { useUiStore } from '../stores/uiStore';
 
-/** chatId -> epoch ms last opened. Unreadable content is reported and dropped, never thrown on the launch path. */
+/** chatId -> highest seq seen on the last visit. Unreadable content is reported and dropped, never thrown on the launch path. */
 export function loadVisited(): Record<string, number> {
   const raw = store().getString(VISITED_KEY);
   if (raw === undefined) return {};

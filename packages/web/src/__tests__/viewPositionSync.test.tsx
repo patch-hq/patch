@@ -58,7 +58,7 @@ const remote = (over: Record<string, unknown> = {}) => ({
 describe('ViewPositionSync', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null });
+    useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null, received: false });
     usePresenceStore.setState({ surfaceId: 'desk' });
     usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES, loaded: true });
   });
@@ -73,10 +73,40 @@ describe('ViewPositionSync', () => {
     expect(where()).toBe('/chats/c9?seq=5');
   });
 
-  it("ignores its own surface's echo", () => {
-    mount('/jobs');
+  it.each(['/jobs?tabWindow=1&capture=1', '/jobs?tabWindow=1'])(
+    'keeps the requested screen isolated in %s',
+    (path) => {
+      const { send } = mount(path);
+      act(() => useViewPositionStore.getState().applyUpdated(remote(), 'desk'));
+      expect(where()).toBe(path);
+      fireEvent.pointerDown(window);
+      act(() => window.dispatchEvent(new Event('focus')));
+      act(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
+      expect(where()).toBe(path);
+      expect(send).not.toHaveBeenCalled();
+      expect(useViewPositionStore.getState().handledAt).toBe(0);
+    },
+  );
+
+  it('restores its own last position when the launch snapshot is its own (a restart)', () => {
+    mount('/');
     act(() => useViewPositionStore.getState().applyUpdated(remote({ surfaceId: 'desk' }), 'desk'));
-    expect(where()).toBe('/jobs');
+    expect(where()).toBe('/chats/c9?seq=5');
+  });
+
+  it("ignores its own surface's echo once the launch snapshot has arrived", () => {
+    mount('/jobs');
+    act(() => useViewPositionStore.getState().applyUpdated(remote({ updatedAt: 50 }), 'desk'));
+    expect(where()).toBe('/chats/c9?seq=5');
+    act(() =>
+      useViewPositionStore
+        .getState()
+        .applyUpdated(remote({ surfaceId: 'desk', id: 'c2', updatedAt: 200 }), 'desk'),
+    );
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(where()).toBe('/chats/c9?seq=5');
   });
 
   it('does not move a screen the user has already touched, until it returns to the foreground', () => {
@@ -117,6 +147,19 @@ describe('ViewPositionSync', () => {
       id: 'c1',
       seq: 33,
     });
+  });
+
+  it('reports the open chat on first touch even when nothing else changes', () => {
+    const { send } = mount('/chats/c1');
+    act(() => {
+      vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1);
+    });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.pointerDown(window);
+    act(() => {
+      vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1);
+    });
+    expect(send).toHaveBeenCalledWith({ type: 'view_position.set', page: 'chat', id: 'c1' });
   });
 
   it('reports a chat at the latest message with no seq', () => {

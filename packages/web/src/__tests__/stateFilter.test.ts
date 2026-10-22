@@ -145,3 +145,11 @@ describe('matchesStateFilter', () => {
     }
   });
 });
+
+describe('a freshly spawned chat is pending, not Ready', () => {
+  it('keeps a chat with no events yet out of Ready and in Working', () => {
+    const fresh = row({ lastSeq: 0, lastReadSeq: 0, lastUpdated: 0 });
+    expect(matchesStateFilter(fresh, 'done')).toBe(false);
+    expect(matchesStateFilter(fresh, 'working')).toBe(true);
+  });
+});

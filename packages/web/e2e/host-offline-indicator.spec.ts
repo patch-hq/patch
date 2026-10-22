@@ -58,14 +58,23 @@ test.describe('host offline indicator', () => {
     await page.goto(JOBS_ROUTE);
     const dot = page.getByTestId('conn-dot');
     await expect(dot).not.toHaveClass(/offline/);
-    await expect(dot).toHaveAttribute('title', /^Connected/);
+    await expect(dot).toHaveAttribute(
+      'title',
+      /This surface \(web\): connected\nServer: reachable\nHost dev-host: online/,
+    );
 
     await setHostOnline(page, false);
     await expect(dot).toHaveClass(/offline/);
-    await expect(dot).toHaveAttribute('title', /^Agent offline/);
+    await expect(dot).toHaveAttribute(
+      'title',
+      /This surface \(web\): connected\nServer: reachable\nHost dev-host: offline/,
+    );
 
     await setHostOnline(page, true);
     await expect(dot).not.toHaveClass(/offline/);
-    await expect(dot).toHaveAttribute('title', /^Connected/);
+    await expect(dot).toHaveAttribute(
+      'title',
+      /This surface \(web\): connected\nServer: reachable\nHost dev-host: online/,
+    );
   });
 });

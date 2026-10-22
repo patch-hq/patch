@@ -1555,6 +1555,41 @@ describe('JobDispatcher', () => {
       disp.close();
     });
 
+    it('reads the fire\u2019s own trigger back off its run row when the job holds no slot', () => {
+      // Without a slot the trigger used to be guessed as `manual`, so a 03:00
+      // cron fire whose chat died read as someone's click in the run log.
+      const links = new Map<string, string>();
+      const link = new InProcessHostLink();
+      const logs = new JobLogs(dir);
+      const disp = new JobDispatcher({
+        dataDir: dir,
+        logs,
+        hostLink: link,
+        logger: silentLogger,
+        idGenerator: () => 'fire1',
+        ackTimeoutMs: 50,
+        chatLinks: {
+          record: (chatId: string, jobId: string) => links.set(chatId, jobId),
+          get: (chatId: string) => links.get(chatId) ?? null,
+        },
+      });
+      const result = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'cron');
+      const chatId = result.event.chatId as string;
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
+      link.emit({
+        type: 'chat.error',
+        chatId,
+        error: { code: 'sdk_error', message: 'socket hang up' },
+        seq: 3,
+      });
+      const runs = logs.readRuns(JOB_ID);
+      expect(runs[0]?.status).toBe('chat-error');
+      expect(runs[0]?.trigger).toBe('cron');
+      expect(runs[0]?.action?.type).toBe('spawn');
+      expect(runs[0]?.action?.folder).toBe('/work');
+      disp.close();
+    });
+
     it('chat.input_ack settles a message fire as ok', () => {
       const { link, logs, disp } = setup();
       disp.dispatch(

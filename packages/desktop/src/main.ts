@@ -37,16 +37,18 @@ import {
   dialog,
   screen,
   shell,
+  systemPreferences,
   autoUpdater as squirrel,
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { hostname } from 'node:os';
 import { realpathSync, existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import {
   diagnoseUpdater,
   emptyPersisted,
   createInstaller,
+  createLatestInstaller,
   initialUpdaterState,
   parsePersisted,
   persistedOf,
@@ -60,6 +62,7 @@ import {
 import { buildContextMenuTemplate } from './context-menu';
 import { buildAppMenuTemplate } from './app-menu';
 import { InAppBrowser } from './in-app-browser';
+import { AgentBrowser, agentBrowserEndpointFile } from './agent-browser';
 import { PANEL_WIDTH_FRACTION } from './in-app-browser-layout';
 import { routeLink, routeWindowOpen } from './link-policy';
 import { parseWindowSize, type ChildWindowSize } from './window-size';
@@ -68,6 +71,7 @@ import { parseSavedPlacement, resolvePlacement, type DisplayInfo } from './windo
 import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
+import { readHostLink, serverLostText, watchServerLink } from './server-watch';
 import { installLocalHost, localHostStatus, serverOrigin } from './local-host';
 import { SystemPresence } from './system-presence';
 import { loadFirstRun, type SetupChoice } from './first-run-api';
@@ -77,8 +81,16 @@ import {
   SystemAudio,
   callingAppsIn,
   helperPath,
+  probeSystemAudio,
   watchMicrophone,
 } from './meeting-audio';
+import {
+  readMeetingPermissions,
+  requestMeetingPermission,
+  type MeetingPermissionDeps,
+  type MeetingPermissionKind,
+} from './meeting-permissions';
+import { watchSpeakers } from './meeting-speakers';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -157,6 +169,16 @@ let trayPopover: BrowserWindow | null = null;
 let popoverHiddenAt = 0;
 let voiceOverlay: BrowserWindow | null = null;
 let tray: Tray | null = null;
+/** The agent's browser, when a host on this machine uses it (agent-browser.ts). */
+let agentBrowser: AgentBrowser | null = null;
+
+/** What a host starts to bring this app up: the .app bundle on a Mac, the binary elsewhere. */
+function appLaunchPath(): string {
+  if (process.platform === 'darwin' && app.isPackaged) {
+    return join(process.execPath, '..', '..', '..');
+  }
+  return process.execPath;
+}
 
 // The embedded web panel (spec/14 § Links and the web panel), bound to the main
 // window. Lazily created the first time PATCH asks to show a page, so a session
@@ -245,7 +267,9 @@ export interface DesktopEvent {
     | 'window:load-retry'
     | 'window:load-failed'
     | 'window:render-process-gone'
-    | 'meeting:detection-off';
+    | 'meeting:detection-off'
+    | 'meeting:auto-ended'
+    | 'server-watch:error';
   ts: number;
   payload?: Record<string, unknown>;
 }
@@ -610,6 +634,39 @@ function showTrayPopover(): void {
   sendPopoverVisibility(true);
 }
 
+/** spec/12 § Server lost: surface a host that has been without its server for a minute. */
+function startServerLostWatch(): void {
+  const patchHome = join(app.getPath('home'), '.patch');
+  let lastError = '';
+  watchServerLink({
+    // Only a Mac that runs a host has a link to watch.
+    read: async () => {
+      if (!localHostStatus(app.getPath('home')).installed) {
+        return { online: true, offlineSince: null };
+      }
+      return readHostLink(patchHome);
+    },
+    onLost: (sinceMs) => {
+      const text = serverLostText(sinceMs);
+      tray?.setToolTip(`Patch: server unreachable`);
+      if (!serverLostNotified) {
+        serverLostNotified = true;
+        new Notification({ title: 'Patch server unreachable', body: text }).show();
+      }
+    },
+    onRestored: () => {
+      serverLostNotified = false;
+      tray?.setToolTip('Patch');
+    },
+    onError: (e) => {
+      if (e.message === lastError) return;
+      lastError = e.message;
+      logDesktopEvent({ type: 'server-watch:error', payload: { message: e.message } });
+    },
+  });
+}
+let serverLostNotified = false;
+
 function createTray(): Tray {
   // Group 20 fix DX-12: ship a real template image (mac auto-tints
   // light/dark) at build/trayIconTemplate.png. NO FALLBACK: if the asset
@@ -806,10 +863,10 @@ let stopMicWatch: (() => void) | null = null;
 /** Held while shown: an unreferenced Notification can be collected before it is clicked. */
 const meetingToasts = new Set<Notification>();
 
-function showMeetingToast(phase: 'started' | 'ended', appName: string): void {
+function showMeetingToast(phase: 'started', appName: string): void {
   const n = new Notification({
-    title: phase === 'started' ? `Meeting started — ${appName}` : `Meeting ended — ${appName}`,
-    body: phase === 'started' ? 'Click to start a Patch meeting' : 'Click to end the Patch meeting',
+    title: `Meeting started — ${appName}`,
+    body: 'Click to start a Patch meeting',
     ...toastSound('normal'),
   });
   n.on('click', () => {
@@ -824,6 +881,16 @@ function showMeetingToast(phase: 'started' | 'ended', appName: string): void {
   n.show();
 }
 
+/** The call is over: end the meeting Patch is capturing, no click needed. The
+ *  renderer's `ended` handler stops capture and tells the host. */
+function endMeetingForCall(appName: string): void {
+  if (!systemAudio.running) return;
+  if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createMainWindow();
+  sendWhenReady(mainWindow, 'patch:meeting-signal', { phase: 'ended', app: appName });
+  logDesktopEvent({ type: 'meeting:auto-ended', payload: { app: appName } });
+  new Notification({ title: `Meeting ended — ${appName}`, body: 'Patch ended the meeting' }).show();
+}
+
 /** NO FALLBACK: detection that cannot run says so, once, instead of going quiet. */
 function startMeetingDetection(): void {
   const detector = new MeetingDetector({
@@ -832,9 +899,7 @@ function startMeetingDetection(): void {
     started: (appName) => {
       if (!systemAudio.running) showMeetingToast('started', appName);
     },
-    ended: (appName) => {
-      if (systemAudio.running) showMeetingToast('ended', appName);
-    },
+    ended: (appName) => endMeetingForCall(appName),
   });
   try {
     const binary = helperPath({
@@ -1063,6 +1128,33 @@ export function raiseMainWindow(): void {
 }
 
 function registerIpc(): void {
+  // spec/02 § Browser — In the Patch app: a large view of an agent tab shows
+  // the tab itself, laid over the view's place in the window.
+  ipcMain.handle(
+    'patch:agent-browser:owns',
+    (_e, targetId: unknown) =>
+      typeof targetId === 'string' && agentBrowser !== null && agentBrowser.owns(targetId),
+  );
+  ipcMain.on('patch:agent-browser:show', (e, payload: unknown) => {
+    const p = payload as {
+      targetId?: unknown;
+      rect?: { x: number; y: number; width: number; height: number };
+    };
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!agentBrowser || !win || typeof p.targetId !== 'string' || !p.rect) return;
+    // The page measures in CSS pixels; the window lays views out in its own.
+    const z = e.sender.getZoomFactor();
+    agentBrowser.show(p.targetId, win, {
+      x: p.rect.x * z,
+      y: p.rect.y * z,
+      width: p.rect.width * z,
+      height: p.rect.height * z,
+    });
+  });
+  ipcMain.on('patch:agent-browser:hide', (_e, payload: unknown) => {
+    const targetId = (payload as { targetId?: unknown }).targetId;
+    if (agentBrowser && typeof targetId === 'string') agentBrowser.hide(targetId);
+  });
   panelWidthFraction = loadPanelWidthFraction();
   ipcMain.on('patch:request-raise', () => {
     raiseMainWindow();
@@ -1156,6 +1248,33 @@ function registerIpc(): void {
     },
   );
   ipcMain.handle('patch:get-events', () => eventLog);
+  // The lightbox's Copy image: Chromium's async clipboard rejects an image write
+  // in the packaged app, so the renderer hands over PNG bytes to write natively.
+  ipcMain.handle('patch:copy-image', (_e, png: unknown) => {
+    if (!(png instanceof Uint8Array)) throw new Error('copy-image: expected PNG bytes');
+    const img = nativeImage.createFromBuffer(Buffer.from(png));
+    if (img.isEmpty()) throw new Error('copy-image: bytes are not a decodable image');
+    clipboard.writeImage(img);
+  });
+  // A view_file card's "open file" / "open folder": the host reported where the
+  // file sits on disk, and this runs on the machine the host runs on. The
+  // renderer only offers these when this Mac's own host owns the chat. A path
+  // that is not absolute, or that no longer exists, throws back to the card.
+  ipcMain.handle('patch:open-path', async (_e, payload: { path?: unknown; mode?: unknown }) => {
+    const path = payload?.path;
+    const mode = payload?.mode;
+    if (typeof path !== 'string' || !isAbsolute(path)) {
+      throw new Error('open-path: expected an absolute path');
+    }
+    if (mode !== 'file' && mode !== 'folder') throw new Error('open-path: mode is file or folder');
+    if (!existsSync(path)) throw new Error(`open-path: ${path} no longer exists`);
+    if (mode === 'folder') {
+      shell.showItemInFolder(path);
+      return;
+    }
+    const failure = await shell.openPath(path);
+    if (failure !== '') throw new Error(`open-path: ${failure}`);
+  });
   // spec/14 § New windows — the renderer's explicit "open in new window"
   // actions (lib/newWindow.ts), never a link the user clicked (those stay on
   // the `setWindowOpenHandler` deny-and-hand-to-browser path above). A
@@ -1276,6 +1395,19 @@ const installUpdate = createInstaller({
     }),
 });
 
+const installLatest = createLatestInstaller({
+  check: () => checkForUpdates(),
+  getState: () => updaterState as UpdaterState,
+  install: installUpdate,
+  onError: (err) =>
+    applyUpdaterEvent({
+      type: 'error',
+      kind: 'install',
+      message: err.message,
+      at: new Date().toISOString(),
+    }),
+});
+
 function setupAutoUpdater(): void {
   const build = readDesktopBuildInfo();
   const updateConfig = join(process.resourcesPath, 'app-update.yml');
@@ -1350,9 +1482,66 @@ function setupAutoUpdater(): void {
         if (!sender.isDestroyed()) sender.send('patch:system-audio-failed', { message });
       },
     });
+    meetingPermissionDeps.rememberCallAudio();
     sender.once('destroyed', () => systemAudio.stop());
   });
+  // Meeting mode: where the three macOS permissions stand, and asking for one.
+  // Null off macOS, where there is nothing to set up.
+  const callAudioMark = join(app.getPath('userData'), 'call-audio-allowed');
+  const meetingPermissionDeps: MeetingPermissionDeps = {
+    micStatus: () => systemPreferences.getMediaAccessStatus('microphone'),
+    askMic: () => systemPreferences.askForMediaAccess('microphone'),
+    accessibilityTrusted: (prompt) => systemPreferences.isTrustedAccessibilityClient(prompt),
+    probeCallAudio: () =>
+      probeSystemAudio(
+        helperPath({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          devDir: __dirname,
+        }),
+      ),
+    callAudioKnown: () => existsSync(callAudioMark),
+    rememberCallAudio: () => writeFileSync(callAudioMark, ''),
+  };
+  ipcMain.handle('patch:meeting-permissions', () =>
+    process.platform === 'darwin' ? readMeetingPermissions(meetingPermissionDeps) : null,
+  );
+  ipcMain.handle('patch:meeting-permission:request', (_e, kind: MeetingPermissionKind) =>
+    requestMeetingPermission(kind, meetingPermissionDeps),
+  );
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
+  // Meeting mode: who is lit up on the call, read through macOS Accessibility.
+  // A failure (e.g. permission not granted) is sent to the renderer to show.
+  let stopSpeakers: (() => void) | null = null;
+  const endSpeakers = (): void => {
+    stopSpeakers?.();
+    stopSpeakers = null;
+  };
+  ipcMain.on('patch:meeting-speakers:start', (e) => {
+    const sender = e.sender;
+    endSpeakers();
+    try {
+      stopSpeakers = watchSpeakers(
+        helperPath({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          devDir: __dirname,
+        }),
+        {
+          onSnapshot: (snapshot) => {
+            if (!sender.isDestroyed()) sender.send('patch:meeting-speakers', snapshot);
+          },
+          onFailed: (message) => {
+            if (!sender.isDestroyed()) sender.send('patch:meeting-speakers-failed', { message });
+          },
+        },
+      );
+    } catch (err) {
+      sender.send('patch:meeting-speakers-failed', { message: (err as Error).message });
+    }
+    sender.once('destroyed', endSpeakers);
+  });
+  ipcMain.on('patch:meeting-speakers:stop', endSpeakers);
   // spec/02 § Desktop app and the local host — whether this Mac runs a
   // host, and installing one with a pairing code the SPA just minted.
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
@@ -1379,7 +1568,7 @@ function setupAutoUpdater(): void {
   // an update; everything else waits for an ordinary quit
   // (autoInstallOnAppQuit, left at its default true).
   ipcMain.on('patch:updater:install', () => {
-    if (updaterState) installUpdate(updaterState);
+    void installLatest();
   });
 
   // An unusable updater is wired for reporting but never asked to check — calling
@@ -1619,6 +1808,10 @@ function webUrlForHelp(): string | undefined {
 }
 
 export function bootstrap(): void {
+  // The agent's tabs keep drawing while no window shows them, so the host's
+  // live view and screenshots of a hidden tab work (agent-browser.ts).
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
   // One process owns the profile. A second copy cannot open Chromium's locked
   // localStorage database and otherwise misleadingly renders the pairing page.
   if (!app.requestSingleInstanceLock()) {
@@ -1680,11 +1873,26 @@ export function bootstrap(): void {
     // packaged app while working in a browser. NO FALLBACK: anything else, and
     // anything from another origin, is refused (permissions.ts).
     configurePermissions(session.defaultSession, SERVER_URL);
+    agentBrowser = new AgentBrowser({
+      endpointFile: agentBrowserEndpointFile(),
+      appPath: appLaunchPath(),
+      version: app.getVersion(),
+      log: (message, extra) => console.warn(`[patch] ${message}`, extra ?? ''),
+      onUserInput: (win, targetId) => {
+        if (!win.isDestroyed()) win.webContents.send('patch:agent-browser:input', { targetId });
+      },
+    });
+    // NO FALLBACK: a browser that cannot listen says so; the host then fails loudly too.
+    await agentBrowser.start().catch((err: unknown) => {
+      console.error('[patch] agent browser: could not start', err);
+      agentBrowser = null;
+    });
     mainWindow = createMainWindow();
     tray = createTray();
     registerGlobalHotkeys();
     registerIpc();
     startMeetingDetection();
+    startServerLostWatch();
     setupAutoUpdater();
 
     app.on('activate', () => {
@@ -1698,6 +1906,16 @@ export function bootstrap(): void {
   });
 
   app.on('will-quit', (e) => {
+    // The agent browser's endpoint file is cleared and its tabs closed at once;
+    // its socket closes with the process. Never hold the quit for it: a second
+    // app.quit() while this one is still unwinding is ignored, and the app hangs.
+    if (agentBrowser) {
+      const browser = agentBrowser;
+      agentBrowser = null;
+      browser.stop().catch((err: unknown) => {
+        console.error('[patch] agent browser: stopping failed', err);
+      });
+    }
     globalShortcut.unregisterAll();
     systemAudio.stop();
     stopMicWatch?.();

@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  DEFAULT_CHAT_ORDERING,
   chatsInProject,
   groupChats,
   nextChatAfterArchive,
@@ -170,6 +171,21 @@ describe('groupChats — hidden', () => {
     expect(g.folders.flatMap((f) => f.rows).map((c) => c.chatId)).toEqual(['plain']);
   });
 
+  it('orders hidden: running first (oldest first), then settled newest first', () => {
+    const chats = [
+      row({ chatId: 'old-idle', hidden: true, activity: 'idle', lastUpdated: 100 }),
+      row({ chatId: 'new-idle', hidden: true, activity: 'idle', lastUpdated: 300 }),
+      row({ chatId: 'run-b', hidden: true, activity: 'running', lastUpdated: 250 }),
+      row({ chatId: 'run-a', hidden: true, activity: 'running', lastUpdated: 200 }),
+    ];
+    expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual([
+      'run-a',
+      'run-b',
+      'new-idle',
+      'old-idle',
+    ]);
+  });
+
   it('draws a chat that is both hidden and snoozed once, under hidden', () => {
     const chats = [row({ chatId: 'both', hidden: true, snoozedUntil: Date.now() + 60_000 })];
     const g = groupChats(chats);
@@ -196,10 +212,10 @@ describe('groupChats — hidden', () => {
     ).toEqual(['shown', 'unknown']);
   });
 
-  it('orders hidden chats oldest first, so a run updating settles at the bottom', () => {
+  it('orders running hidden chats oldest first, so a run updating settles at the bottom', () => {
     const chats = [
-      row({ chatId: 'newer', hidden: true, lastUpdated: 300 }),
-      row({ chatId: 'older', hidden: true, lastUpdated: 100 }),
+      row({ chatId: 'newer', hidden: true, activity: 'running', lastUpdated: 300 }),
+      row({ chatId: 'older', hidden: true, activity: 'running', lastUpdated: 100 }),
     ];
     expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual(['older', 'newer']);
   });
@@ -326,6 +342,21 @@ describe('sortAttentionQueue', () => {
   });
 });
 
+describe('groupChats — hosts', () => {
+  it('keeps the same path on two hosts as two projects', () => {
+    const all = [
+      row({ chatId: 'a', folder: '~/p', hostId: 'd1', lastUpdated: 300 }),
+      row({ chatId: 'b', folder: '~/p', hostId: 'd2', lastUpdated: 200 }),
+    ];
+    const folders = groupChats(all).folders;
+    expect(folders.map((f) => [f.hostId, f.rows.map((r) => r.chatId)])).toEqual([
+      ['d1', ['a']],
+      ['d2', ['b']],
+    ]);
+    expect(new Set(folders.map((f) => f.key)).size).toBe(2);
+  });
+});
+
 // chatsInProject — the set behind "archive all in project" (spec/14 § Sidebar →
 // Folders). The point of it is that it is WIDER than grouped.folders[].rows.
 describe('chatsInProject', () => {
@@ -343,7 +374,11 @@ describe('chatsInProject', () => {
     // The drawn rows are only ever the plain one...
     expect(groupChats(all).folders[0]?.rows.map((c) => c.chatId)).toEqual(['plain']);
     // ...while archive-all reaches all three.
-    expect(chatsInProject(all, '~/p').map((c) => c.chatId)).toEqual(['plain', 'pin', 'snoozed']);
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual([
+      'plain',
+      'pin',
+      'snoozed',
+    ]);
   });
 
   it('leaves already-archived and soft-deleted chats alone', () => {
@@ -352,7 +387,15 @@ describe('chatsInProject', () => {
       row({ chatId: 'gone', folder: '~/p', status: 'archived', lastUpdated: 200 }),
       row({ chatId: 'binned', folder: '~/p', status: 'deleted', lastUpdated: 100 }),
     ];
-    expect(chatsInProject(all, '~/p').map((c) => c.chatId)).toEqual(['active']);
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual(['active']);
+  });
+
+  it('never reaches into the same path on another host', () => {
+    const all = [
+      row({ chatId: 'here', folder: '~/p', hostId: 'd1', lastUpdated: 300 }),
+      row({ chatId: 'there', folder: '~/p', hostId: 'd2', lastUpdated: 200 }),
+    ];
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual(['here']);
   });
 
   it('never includes special threads, and never reaches into another folder', () => {
@@ -362,7 +405,7 @@ describe('chatsInProject', () => {
       row({ chatId: SPECIAL_THREAD_IDS.speakers, folder: '~/p', lastUpdated: 120 }),
       row({ chatId: 'elsewhere', folder: '~/other', lastUpdated: 100 }),
     ];
-    expect(chatsInProject(all, '~/p').map((c) => c.chatId)).toEqual(['mine']);
+    expect(chatsInProject(all, '~/p', 'd1').map((c) => c.chatId)).toEqual(['mine']);
   });
 });
 
@@ -382,7 +425,7 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
     expect(groupChats(chats).recentFolders).toEqual([]);
     // ~/live is already drawn as an open Folders section, so only ~/arch is
     // offered as a recent — the "don't list it twice" filter still applies.
-    expect(groupChats(chats, roster).recentFolders).toEqual(['~/arch']);
+    expect(groupChats(chats, roster).recentFolders.map((f) => f.folder)).toEqual(['~/arch']);
   });
 
   it('orders roster and live folders together, most-recent-first', () => {
@@ -395,7 +438,7 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
       { folder: '~/mid', hostId: 'd1', lastUpdated: 40 },
     ];
     const { recentFolders } = groupChats(chats, roster);
-    expect(recentFolders).toEqual(['~/new', '~/mid', '~/old']);
+    expect(recentFolders.map((f) => f.folder)).toEqual(['~/new', '~/mid', '~/old']);
   });
 
   it('a live row beats the roster when it is newer (the roster is a cold-start floor, not a ceiling)', () => {
@@ -407,7 +450,7 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
       { folder: '~/other', hostId: 'd1', lastUpdated: 500 },
     ];
     const { recentFolders } = groupChats(chats, roster);
-    expect(recentFolders).toEqual(['~/proj', '~/other']);
+    expect(recentFolders.map((f) => f.folder)).toEqual(['~/proj', '~/other']);
   });
 
   it('a folder deleted since boot still drops out, roster or not', () => {
@@ -418,16 +461,37 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
     expect(groupChats(chats, roster).recentFolders).toEqual([]);
   });
 
+  it('keeps the same path on two hosts as two recents, each carrying its host', () => {
+    const roster = [
+      { folder: '~/proj', hostId: 'd1', lastUpdated: 5 },
+      { folder: '~/proj', hostId: 'd2', lastUpdated: 9 },
+    ];
+    const { recentFolders } = groupChats([], roster);
+    expect(recentFolders.map((f) => [f.hostId, f.folder])).toEqual([
+      ['d2', '~/proj'],
+      ['d1', '~/proj'],
+    ]);
+    expect(new Set(recentFolders.map((f) => f.key)).size).toBe(2);
+  });
+
+  it('a project open on one host does not hide the same path on another host', () => {
+    const chats = [row({ chatId: 'a', folder: '~/proj', hostId: 'd1', lastUpdated: 9 })];
+    const roster = [{ folder: '~/proj', hostId: 'd2', lastUpdated: 5 }];
+    expect(groupChats(chats, roster).recentFolders.map((f) => [f.hostId, f.folder])).toEqual([
+      ['d2', '~/proj'],
+    ]);
+  });
+
   it('never offers a special thread\u2019s folder', () => {
     const chats: ChatRow[] = [];
     const roster = [{ folder: '~/proj', hostId: 'd1', lastUpdated: 5 }];
-    expect(groupChats(chats, roster).recentFolders).toEqual(['~/proj']);
+    expect(groupChats(chats, roster).recentFolders.map((f) => f.folder)).toEqual(['~/proj']);
     // Manager/Speakers folders are filtered server-side, but the
     // store's own special rows must not sneak one in either.
     const withSpecial = [
       row({ chatId: SPECIAL_THREAD_IDS.speakers, folder: '~/speakers', lastUpdated: 99 }),
     ];
-    expect(groupChats(withSpecial, roster).recentFolders).toEqual(['~/proj']);
+    expect(groupChats(withSpecial, roster).recentFolders.map((f) => f.folder)).toEqual(['~/proj']);
   });
 });
 
@@ -585,5 +649,67 @@ describe('stepVisibleChat', () => {
   });
   it('returns null when nothing is drawn', () => {
     expect(stepVisibleChat([], 'a', 1)).toBeNull();
+  });
+});
+
+describe('rows held in place after archiving (spec/14 § Row tools)', () => {
+  // Archiving from a row's chip keeps the row exactly where it was until the
+  // pointer leaves the sidebar, so the list cannot reflow under a stationary
+  // pointer. The grouping is the only place that decides where a row is drawn,
+  // so that is where the hold has to be honoured.
+  const held = (...ids: string[]): ReadonlySet<string> => new Set(ids);
+
+  it('keeps an archived row in its folder slot while it is held', () => {
+    const chats = three.map((c) => (c.chatId === 'r2' ? { ...c, status: 'archived' as const } : c));
+    const { folders, archived } = groupChats(chats, [], DEFAULT_CHAT_ORDERING, held('r2'));
+    expect(folders[0]?.rows.map((c) => c.chatId)).toEqual(['r1', 'r2', 'r3']);
+    // Not in two places at once — it is drawn in the list OR under Archived.
+    expect(archived).toEqual([]);
+  });
+
+  it('drops the row into Archived once it is no longer held', () => {
+    const chats = three.map((c) => (c.chatId === 'r2' ? { ...c, status: 'archived' as const } : c));
+    const { folders, archived } = groupChats(chats, [], DEFAULT_CHAT_ORDERING, held());
+    expect(folders[0]?.rows.map((c) => c.chatId)).toEqual(['r1', 'r3']);
+    expect(archived.map((c) => c.chatId)).toEqual(['r2']);
+  });
+
+  it('holds several rows at once, so working down a list moves nothing', () => {
+    const chats = three.map((c) =>
+      c.chatId === 'r3' || c.chatId === 'r1' ? { ...c, status: 'archived' as const } : c,
+    );
+    const { folders } = groupChats(chats, [], DEFAULT_CHAT_ORDERING, held('r1', 'r3'));
+    expect(folders[0]?.rows.map((c) => c.chatId)).toEqual(['r1', 'r2', 'r3']);
+  });
+
+  it('keeps the folder section alive while its last row is held', () => {
+    const chats = [row({ chatId: 'only', folder: '~/solo', status: 'archived', lastUpdated: 9 })];
+    expect(
+      groupChats(chats, [], DEFAULT_CHAT_ORDERING, held('only')).folders.map((f) => f.folder),
+    ).toEqual(['~/solo']);
+    expect(groupChats(chats, [], DEFAULT_CHAT_ORDERING, held()).folders).toEqual([]);
+  });
+
+  it('holds a pinned row in the Pinned section rather than its folder', () => {
+    const chats = [
+      row({ chatId: 'p', pinned: true, pinnedAt: 5, status: 'archived', lastUpdated: 9 }),
+    ];
+    expect(
+      groupChats(chats, [], DEFAULT_CHAT_ORDERING, held('p')).pinned.map((c) => c.chatId),
+    ).toEqual(['p']);
+  });
+
+  it('never resurrects a deleted chat, held or not', () => {
+    const chats = [row({ chatId: 'gone', status: 'deleted', lastUpdated: 9 })];
+    const { folders, deleted } = groupChats(chats, [], DEFAULT_CHAT_ORDERING, held('gone'));
+    expect(folders).toEqual([]);
+    expect(deleted.map((c) => c.chatId)).toEqual(['gone']);
+  });
+
+  it('leaves the navigation target alone — a held row is still archived', () => {
+    // nextChatAfterArchive answers where archiving takes you. The hold is a
+    // drawing concern only; it must not make an archived chat a destination.
+    const chats = three.map((c) => (c.chatId === 'r2' ? { ...c, status: 'archived' as const } : c));
+    expect(nextChatAfterArchive(chats, 'r1', ['r1'], false)).toBe('r3');
   });
 });

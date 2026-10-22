@@ -343,3 +343,57 @@ describe('which account a turn ran on is said (spec/10 § Backend credentials)',
     expect(turns[0]).toEqual({ chatId, preferredAccountId: 'a2' });
   });
 });
+
+describe('an account switch carries the conversation over', () => {
+  it('reseeds the new account’s session from the chat log and does not replay the message', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-failover-carry-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-failover-carryf-')));
+    const events: WireEvent[] = [];
+    const seen: SdkRunOptions[] = [];
+    let account = 'a1';
+    let failNext = false;
+    let id = 0;
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: {
+        run: (opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> => {
+          seen.push(opts);
+          const fail = failNext;
+          failNext = false;
+          async function* gen(): AsyncGenerator<SdkEnvelope> {
+            if (fail) {
+              account = 'a2';
+              throw new Error(SPEND_LIMIT);
+            }
+            yield { type: 'assistant', content: 'reply', raw: {} };
+            yield { type: 'result', sessionId: 'sess-a', content: 'reply', raw: {} };
+          }
+          return gen();
+        },
+      },
+      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: account }),
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => Date.now(),
+      generateChatId: () => `chat-${++id}`,
+      nextAccountAfterExhausted: () => 'a2',
+    });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    failNext = true;
+    await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
+    const rerun = seen[2]!;
+    expect(rerun.claudeSessionStore?.reseed?.events.length ?? 0).toBeGreaterThan(0);
+    // The message is folded into its original bubble, not drawn a second time.
+    const userMsgs = events.filter(
+      (e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'second question',
+    );
+    expect(userMsgs.length).toBeGreaterThan(0);
+    expect(
+      userMsgs.slice(1).every((e) => e.type === 'chat.message' && e.retryOfSeq !== undefined),
+    ).toBe(true);
+  });
+});

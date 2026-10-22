@@ -103,7 +103,7 @@ describe('validateForm', () => {
           spawnPrompt: 'go',
         }),
       ),
-    ).toMatch(/which host/i);
+    ).toMatch(/which machine/i);
   });
 
   it('requires a host for an ensure action', () => {
@@ -117,7 +117,7 @@ describe('validateForm', () => {
           spawnPrompt: 'go',
         }),
       ),
-    ).toMatch(/which host/i);
+    ).toMatch(/which machine/i);
   });
 
   it('requires a folder for a spawn action', () => {
@@ -839,7 +839,7 @@ describe('resolveSkillEditTarget', () => {
 
   it('gives a reason when the host answers with no paths at all (an older host)', () => {
     expect(resolveSkillEditTarget({ skill: 'life-coach', paths: undefined, hostId: 'd1' })).toEqual(
-      { reason: 'host does not report skill files' },
+      { reason: 'machine does not report skill files' },
     );
   });
 
@@ -871,7 +871,7 @@ describe('structured recurrence builder helpers', () => {
     for (const rule of [
       'FREQ=WEEKLY;BYDAY=MO,FR;BYHOUR=8;BYMINUTE=30',
       'FREQ=MONTHLY;BYDAY=SU;BYSETPOS=3;BYHOUR=9;BYMINUTE=0',
-      'FREQ=YEARLY;BYDAY=SA;BYSETPOS=-1;BYMONTH=3,10;BYHOUR=1;BYMINUTE=0',
+      'FREQ=YEARLY;BYDAY=SA;BYSETPOS=-1;BYMONTH=10;BYHOUR=1;BYMINUTE=0',
     ]) {
       expect(recurrenceFieldsToRule(parseRecurrenceFields(rule)!)).toBe(rule);
     }
@@ -895,6 +895,25 @@ describe('structured recurrence builder helpers', () => {
     expect(j.toggleRecurrenceDay(w, 'TU').days).toEqual(['MO', 'TU']);
     const m = parseRecurrenceFields('FREQ=MONTHLY;BYDAY=SU;BYSETPOS=1;BYHOUR=8;BYMINUTE=0')!;
     expect(j.toggleRecurrenceDay(m, 'TU').days).toEqual(['TU']);
+  });
+
+  it('a yearly rule holds exactly one month: a month pick replaces, and a frequency change keeps the first', async () => {
+    // FREQ=YEARLY;BYMONTH=5,6;BYSETPOS=1 fires once a year (BYSETPOS counts
+    // over the whole year's set), not once in each month — so several months
+    // under Yearly is a schedule the builder must not be able to build.
+    const { parseRecurrenceFields } = await import('@patch/wire');
+    const j = await import('../src/lib/jobEditor');
+    const y = parseRecurrenceFields(
+      'FREQ=YEARLY;BYDAY=MO;BYSETPOS=1;BYMONTH=5;BYHOUR=9;BYMINUTE=0',
+    )!;
+    expect(j.toggleRecurrenceMonth(y, 6).months).toEqual([6]);
+    expect(j.toggleRecurrenceMonth(y, 5).months).toEqual([5]);
+    const m = parseRecurrenceFields(
+      'FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1;BYMONTH=5,6,7;BYHOUR=9;BYMINUTE=0',
+    )!;
+    const toYearly = j.withRecurrenceFrequency(m, 'YEARLY');
+    expect(toYearly.months).toEqual([5]);
+    expect(parseRecurrenceFields(j.recurrenceFieldsToRule(toYearly))).not.toBeNull();
   });
 
   it('parses 24h times strictly', async () => {

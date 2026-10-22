@@ -235,6 +235,8 @@ export function useWindowDimensions(): typeof _window {
 }
 
 // ── StyleSheet ────────────────────────────────────────────────────────────
+export const PixelRatio = { get: (): number => 2 };
+
 export const StyleSheet = {
   create<T extends Record<string, unknown>>(styles: T): T {
     return styles;

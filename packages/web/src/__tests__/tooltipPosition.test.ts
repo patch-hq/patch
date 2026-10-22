@@ -2,7 +2,7 @@
 // opposite side of its control rather than clipping".
 
 import { describe, it, expect } from 'vitest';
-import { computeTooltipPosition, type Rect } from '../lib/tooltipPosition.js';
+import { computeTooltipPosition, pickLineRect, type Rect } from '../lib/tooltipPosition.js';
 
 function rect(partial: Partial<Rect>): Rect {
   return { top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, ...partial };
@@ -44,5 +44,24 @@ describe('computeTooltipPosition', () => {
     const trigger = rect({ top: 400, left: 100, bottom: 420, right: 140, width: 40, height: 20 });
     const pos = computeTooltipPosition(trigger, tallTooltip, VIEWPORT);
     expect(pos.placement).toBe('below');
+  });
+});
+
+describe('pickLineRect', () => {
+  const l1 = rect({ top: 100, bottom: 120, left: 200, right: 300, width: 100, height: 20 });
+  const l2 = rect({ top: 120, bottom: 140, left: 20, right: 60, width: 40, height: 20 });
+  const bounding = rect({ top: 100, bottom: 140, left: 20, right: 300, width: 280, height: 40 });
+
+  it('uses the single rect of an unwrapped element', () => {
+    expect(pickLineRect([l1], l1, { x: 250, y: 110 })).toBe(l1);
+  });
+
+  it('uses the line fragment under the pointer, not the box spanning every line', () => {
+    expect(pickLineRect([l1, l2], bounding, { x: 30, y: 130 })).toBe(l2);
+    expect(pickLineRect([l1, l2], bounding, { x: 250, y: 110 })).toBe(l1);
+  });
+
+  it('uses the first fragment when there is no pointer', () => {
+    expect(pickLineRect([l1, l2], bounding, null)).toBe(l1);
   });
 });

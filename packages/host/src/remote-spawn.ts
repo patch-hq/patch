@@ -38,6 +38,7 @@ export interface RemoteSpawnRequest {
   folder: string;
   model?: string;
   prompt?: string;
+  preferredAccountId?: string;
 }
 
 export interface RemoteSpawnCoordinator {
@@ -102,6 +103,9 @@ export function createRemoteSpawnCoordinator(deps: {
           folder: req.folder,
           ...(req.model !== undefined ? { model: req.model } : {}),
           prompt: req.prompt ?? '',
+          ...(req.preferredAccountId !== undefined
+            ? { preferredAccountId: req.preferredAccountId }
+            : {}),
           requestId,
         });
       });

@@ -16,7 +16,7 @@ const SURFACE_KEY = 'patch.surfaceId.v1';
  * than re-declaring it; the dependency runs one way only (cache -> credential).
  */
 export const CHAT_LIST_KEY = 'patch.chatList.v1';
-export const VISITED_KEY = 'patch.visitedChats.v1';
+export const VISITED_KEY = 'patch.readSeq.v1';
 
 let _store: MMKV | null = null;
 

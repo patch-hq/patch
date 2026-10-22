@@ -140,6 +140,12 @@ export interface ServerLinkDiagnostics {
   bufferSize: number;
   /** Per-chat configured cap (DEFAULT_BUFFER_PER_CHAT in production). */
   bufferMaxPerChat: number;
+  /**
+   * Epoch ms the link has been down since: the last time it was lost, or when
+   * the host started if it has not yet connected. `null` while online. How a
+   * surface on this machine tells "briefly reconnecting" from "server lost".
+   */
+  offlineSince: number | null;
 }
 
 export interface ServerLink {
@@ -236,6 +242,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 
   let ws: WebSocket | undefined;
   let online = false;
+  // Down since the host started until the first auth.ok, then since each loss.
+  let offlineSince: number | null = Date.now();
   let stopped = false;
   let attempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -389,6 +397,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       // online: reset backoff, flush the offline buffer, notify the host.
       if (!online && event.type === 'auth.ok') {
         online = true;
+        offlineSince = null;
         attempt = 0;
         log.info('server-link: authenticated (auth.ok)');
         flushBuffer();
@@ -402,6 +411,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     socket.on('close', (code: number, reason: Buffer) => {
       const wasOnline = online;
       online = false;
+      if (wasOnline) offlineSince = Date.now();
       // Guard matches the `ws` clear just below: a STALE close from a socket
       // already superseded by a newer one must not tear down the newer
       // socket's own heartbeat timer.
@@ -441,6 +451,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         online,
         bufferSize: buffer.size(),
         bufferMaxPerChat: opts.bufferMaxPerChat ?? DEFAULT_BUFFER_PER_CHAT,
+        offlineSince: online ? null : (offlineSince ?? Date.now()),
       };
     },
     dropLink(): boolean {
@@ -452,6 +463,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       // until reconnect.
       const wasOnline = online;
       online = false;
+      if (wasOnline) offlineSince = Date.now();
       if (wasOnline) opts.onDisconnected?.();
       socket.close();
       return true;

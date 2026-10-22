@@ -51,19 +51,15 @@ describe('read state', () => {
     first.useChatStore.getState().setActiveChat('c1');
 
     const second = await freshStore();
-    second.useChatStore
-      .getState()
-      .hydrate([second.toChatListRow({ ...ENTRY, lastUpdated: Date.now() + 60_000 })]);
+    second.useChatStore.getState().hydrate([second.toChatListRow(ENTRY)]);
+    second.useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 5,
+      role: 'assistant',
+      content: 'news',
+    });
     expect(second.deriveBadge(second.useChatStore.getState().chats['c1']!)).toBe('done');
-  });
-
-  it('reading a chat whose server clock is ahead of the phone marks it read', async () => {
-    const s = await freshStore();
-    s.useChatStore
-      .getState()
-      .hydrate([s.toChatListRow({ ...ENTRY, lastUpdated: Date.now() + 30_000 })]);
-    s.useChatStore.getState().setActiveChat('c1');
-    expect(s.deriveBadge(s.useChatStore.getState().chats['c1']!)).toBe('read');
   });
 
   it('a deleted chat leaves no read mark to be inherited by nothing', async () => {
@@ -74,6 +70,6 @@ describe('read state', () => {
 
     const second = await freshStore();
     second.useChatStore.getState().hydrate([second.toChatListRow(ENTRY)]);
-    expect(second.useChatStore.getState().chats['c1']!.lastVisitedAt).toBe(0);
+    expect(second.useChatStore.getState().chats['c1']!.lastReadSeq).toBe(-1);
   });
 });

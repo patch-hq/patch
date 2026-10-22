@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, configFilePath, configHomeDir } from '../src/config.js';
+import { loadConfig, configFilePath, configHomeDir, defaultHostSocketPath } from '../src/config.js';
 
 // Every env var loadConfig reads. The helper clears ALL of them rather than just
 // pointing PATCH_HOME at a temp dir: an ambient PATCH_SERVER_URL outranks the
@@ -167,5 +167,13 @@ test('loadConfig: invalid PATCH_SERVER_URL throws, naming the env var', () => {
   withTempPatchHome(() => {
     process.env.PATCH_SERVER_URL = 'not a url';
     assert.throws(() => loadConfig(), /PATCH_SERVER_URL/);
+  });
+});
+
+test('default host socket: a file in the home on Unix, a per-home named pipe on Windows (same name the host derives)', () => {
+  withTempPatchHome((dir) => {
+    assert.equal(defaultHostSocketPath('linux'), join(dir, 'host.sock'));
+    process.env.PATCH_HOME = 'C:\\Users\\A\\.patch';
+    assert.equal(defaultHostSocketPath('win32'), '\\\\.\\pipe\\patch-host-add03206a464');
   });
 });

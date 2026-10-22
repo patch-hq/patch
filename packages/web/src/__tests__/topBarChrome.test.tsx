@@ -57,6 +57,7 @@ function row(): ChatRow {
     lastSeq: 0,
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
   };
@@ -197,6 +198,15 @@ describe('the top row stylesheet', () => {
     expect(css).toMatch(
       /\.overlay-titlebar \.annotator-toolbar\s*\{[^}]*padding-left:\s*var\(--overlay-titlebar-inset\);/,
     );
+  });
+
+  it('opts the whole annotator overlay out of the desktop drag regions', () => {
+    // The overlay is portalled to <body>, over the chat header's `drag`
+    // rectangle. Drag is native hit-testing by geometry, so without this the
+    // header swallows clicks on the annotator toolbar ("cannot click on top
+    // buttons"). Chromium drops the property from the CSSOM, so read the source.
+    expect(css).toMatch(/\.annotator-backdrop\s*\{[^}]*-webkit-app-region:\s*no-drag;/);
+    expect(css).toMatch(/\.annotator-toolbar\s*\{[^}]*-webkit-app-region:\s*no-drag;/);
   });
 
   it('makes the Jobs / Settings / editor page head drag the window, with its controls punched out', () => {

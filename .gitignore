@@ -72,3 +72,9 @@ deploy/web-bot-auth.env
 # generated secrets, never tracked
 packages/server/artifacts/.link-secret
 .env.bak*
+# Captured app shell for design mockups (regenerated from the dev harness)
+design/*/shell.html
+design/*/app.css
+design/*/fonts/
+design/meeting-mode-v3/*.html
+design/meeting-mode-v4/*.html

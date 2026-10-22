@@ -181,6 +181,7 @@ function makeChatRow(chatId: string, folder: string, name: string | null = null)
     lastSeq: 0,
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
   };
@@ -4557,12 +4558,12 @@ describe('resolveSkillLink', () => {
   // Todoist 6hfrrmrhG6GM3V36 — `paths` undefined (an old host with no
   // `paths` field at all) and `paths` present but missing one skill's key (a
   // machine-level skill, e.g. chrome-cdp, genuinely absent from THIS host's
-  // fetch) were conflated into the same "host does not report skill files"
+  // fetch) were conflated into the same "machine does not report skill files"
   // message, which read as the host being incapable even when it answered
   // fine for every other skill.
   it('distinguishes an old host (no paths at all) from a skill missing on this host', () => {
     expect(resolveSkillLink({ ...base, skill: 'chrome-cdp', paths: undefined })).toEqual({
-      reason: 'host does not report skill files',
+      reason: 'machine does not report skill files',
     });
     // `plant` resolves fine from the SAME `paths` map that has no `chrome-cdp`
     // key — proving the fetch succeeded and this one skill simply isn't on
@@ -4792,6 +4793,39 @@ describe('JobEditorRoute — recurrence trigger', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fri' }));
     expect(screen.getByTestId('job-recurrence-value')).toHaveTextContent('BYDAY=FR');
     expect(screen.getByTestId('job-recurrence-value')).not.toHaveTextContent('BYDAY=FR,SU');
+  });
+
+  it('YEARLY keeps exactly one month: a second month pick replaces the first', () => {
+    // FREQ=YEARLY with BYMONTH=5,6 and BYSETPOS=1 fires once a year, not once
+    // in each month: BYSETPOS counts over the whole year's set. The picker
+    // used to let several months accumulate and the preview said "May
+    // through August" for a rule that only ever fired in May.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => defaultRoute(String(url))),
+    );
+    renderNew();
+    fireEvent.change(screen.getByTestId('job-trigger-type'), { target: { value: 'recurrence' } });
+    fireEvent.change(screen.getByTestId('job-recurrence-frequency'), {
+      target: { value: 'YEARLY' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'May' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Jun' }));
+    expect(screen.getByTestId('job-recurrence-value')).toHaveTextContent('BYMONTH=6;');
+    expect(screen.getByTestId('job-recurrence-value')).not.toHaveTextContent('BYMONTH=5,6');
+    expect(screen.getByTestId('job-recurrence-computed')).toHaveTextContent(
+      'every year on the 1st Sunday of June at 9am',
+    );
+    // Switching from MONTHLY with several months to YEARLY keeps only the first.
+    fireEvent.change(screen.getByTestId('job-recurrence-frequency'), {
+      target: { value: 'MONTHLY' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Aug' }));
+    expect(screen.getByTestId('job-recurrence-value')).toHaveTextContent('BYMONTH=6,8;');
+    fireEvent.change(screen.getByTestId('job-recurrence-frequency'), {
+      target: { value: 'YEARLY' },
+    });
+    expect(screen.getByTestId('job-recurrence-value')).toHaveTextContent('BYMONTH=6;');
   });
 
   it('editing the revealed raw RRULE directly updates the field, independent of the builder', () => {

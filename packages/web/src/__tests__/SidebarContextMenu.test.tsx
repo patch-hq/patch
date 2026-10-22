@@ -122,6 +122,15 @@ describe('sidebar row context menu', () => {
     expect(menu.style.top).toBe('200px');
   });
 
+  it('cmd-click on a row opens a new window and does not open a tab here', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    useChatStore.getState().hydrate([rowFixture()]);
+    renderSidebar();
+    fireEvent.click(screen.getByTestId('chat-row-c1'), { metaKey: true });
+    expect(open.mock.calls[0]![0]).toBe('/app/chats/c1?sidebar=hidden');
+    expect(JSON.stringify(useLayoutStore.getState().root)).not.toContain('c1');
+  });
+
   it('Rename prompts seeded with the stored name and renames optimistically', async () => {
     useChatStore.getState().hydrate([rowFixture({ name: 'old name' })]);
     const spy = vi.spyOn(api, 'renameChat').mockResolvedValue(undefined as never);

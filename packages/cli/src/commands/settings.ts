@@ -5,7 +5,6 @@
 // CLI runs — never a machine's own socket. With no server reachable they fail,
 // naming it, rather than changing one machine behind the others' backs.
 
-import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
 import { emitJson, emitText, getTransport, run } from './_common.js';
@@ -34,6 +33,7 @@ const SETTING_KEYS: Record<string, string> = {
   'question-expiry': 'questionExpiry',
   'question-expiry-seconds': 'questionExpirySeconds',
   'auto-resume': 'autoResumeRateLimit',
+  'auto-update': 'autoUpdateHosts',
   'chat-name-interval': 'chatNameInterval',
   'title-generation': 'titleGenerationEnabled',
   'status-generation': 'statusGenerationEnabled',
@@ -59,9 +59,47 @@ function backendOf(name: string): 'claude-code' | 'codex' {
   throw new Error(`no backend "${name}" (claude or codex)`);
 }
 
-function printAccounts(state: SharedState, backend: 'claude-code' | 'codex'): void {
-  const list = backend === 'codex' ? state.secrets.codex : state.secrets.claude;
-  const strategy = state.settings.accountStrategy[backend === 'codex' ? 'codex' : 'claude'];
+/** The shared accounts in order, as `patch accounts` shows and `--json` returns them. */
+interface AccountsView {
+  strategy: { claude: string; codex: string };
+  claude: Array<{ id: string; label: string; connected: boolean; email?: string }>;
+  codex: Array<{ id: string; label: string; connected: boolean; email?: string }>;
+}
+
+const viewOf = (state: SharedState): AccountsView => ({
+  strategy: state.settings.accountStrategy,
+  claude: state.secrets.claude,
+  codex: state.secrets.codex,
+});
+
+/**
+ * List / reorder / set strategy for the shared accounts. On a machine with a
+ * running host this goes over the host's own socket — the host relays it to the
+ * server on its existing link, so no separate login is needed. Anywhere else it
+ * is REST with the paired credential. One path is chosen up front, never both.
+ */
+const accountsApi = (opts: CommonOpts) => {
+  const t = getTransport(opts);
+  const uds = t.kind === 'uds';
+  return {
+    list: async (): Promise<AccountsView> =>
+      uds
+        ? t.get<AccountsView>('/accounts')
+        : viewOf(await t.get<SharedState>('/api/settings/shared')),
+    order: async (id: 'claude-code' | 'codex', accountIds: string[]): Promise<AccountsView> =>
+      uds
+        ? t.put<AccountsView>(`/accounts/${id}/order`, { accountIds })
+        : viewOf(await t.put<SharedState>(`/api/accounts/${id}/order`, { accountIds })),
+    strategy: async (id: 'claude-code' | 'codex', strategy: string): Promise<AccountsView> =>
+      uds
+        ? t.put<AccountsView>(`/accounts/${id}/strategy`, { strategy })
+        : viewOf(await t.put<SharedState>(`/api/accounts/${id}/strategy`, { strategy })),
+  };
+};
+
+function printAccounts(view: AccountsView, backend: 'claude-code' | 'codex'): void {
+  const list = backend === 'codex' ? view.codex : view.claude;
+  const strategy = view.strategy[backend === 'codex' ? 'codex' : 'claude'];
   emitText(`${backend === 'codex' ? 'ChatGPT' : 'Claude'} — strategy: ${strategy}`);
   if (list.length === 0) emitText('  (no accounts)');
   list.forEach((a, i) =>
@@ -114,28 +152,6 @@ export function registerSettingsCommands(program: Command): void {
       });
     });
 
-  settings
-    .command('claude <file>')
-    .description("Replace the shared Claude Code settings.json from a file (or '-' for none)")
-    .option('--os <os>', 'set the override for darwin or linux instead of the shared text')
-    .option('--json', 'JSON output')
-    .action(async (file: string, opts: CommonOpts & { os?: string }) => {
-      await run(opts, async () => {
-        const which = opts.os ?? 'shared';
-        if (!['shared', 'darwin', 'linux'].includes(which)) {
-          throw new Error(`--os must be darwin or linux (got ${which})`);
-        }
-        const t = server(opts);
-        const current = await t.get<SharedState>('/api/settings/shared');
-        const text = file === '-' ? '' : readFileSync(file, 'utf8');
-        const claudeSettings = {
-          ...(current.settings['claudeSettings'] as Record<string, string>),
-          [which]: text,
-        };
-        emitJson(await t.patch<unknown>('/api/settings', { claudeSettings }));
-      });
-    });
-
   const accounts = program
     .command('accounts')
     .description('The Claude and ChatGPT accounts every host draws from');
@@ -146,15 +162,15 @@ export function registerSettingsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (backend: string | undefined, opts: CommonOpts) => {
       await run(opts, async () => {
-        const state = await server(opts).get<SharedState>('/api/settings/shared');
+        const view = await accountsApi(opts).list();
         if (opts.json) {
-          emitJson(state.secrets);
+          emitJson(view);
           return;
         }
-        if (backend !== undefined) printAccounts(state, backendOf(backend));
+        if (backend !== undefined) printAccounts(view, backendOf(backend));
         else {
-          printAccounts(state, 'claude-code');
-          printAccounts(state, 'codex');
+          printAccounts(view, 'claude-code');
+          printAccounts(view, 'codex');
         }
       });
     });
@@ -180,7 +196,7 @@ export function registerSettingsCommands(program: Command): void {
           };
           const state = await server(opts).post<SharedState>(`/api/accounts/${id}`, body);
           if (opts.json) emitJson(state);
-          else printAccounts(state, id);
+          else printAccounts(viewOf(state), id);
         });
       },
     );
@@ -236,11 +252,9 @@ export function registerSettingsCommands(program: Command): void {
     .action(async (backend: string, accountIds: string[], opts: CommonOpts) => {
       await run(opts, async () => {
         const id = backendOf(backend);
-        const state = await server(opts).put<SharedState>(`/api/accounts/${id}/order`, {
-          accountIds,
-        });
-        if (opts.json) emitJson(state);
-        else printAccounts(state, id);
+        const view = await accountsApi(opts).order(id, accountIds);
+        if (opts.json) emitJson(view);
+        else printAccounts(view, id);
       });
     });
 
@@ -251,28 +265,26 @@ export function registerSettingsCommands(program: Command): void {
     .action(async (backend: string, strategy: string, opts: CommonOpts) => {
       await run(opts, async () => {
         const id = backendOf(backend);
-        const state = await server(opts).put<SharedState>(`/api/accounts/${id}/strategy`, {
-          strategy,
-        });
-        if (opts.json) emitJson(state);
-        else printAccounts(state, id);
+        const view = await accountsApi(opts).strategy(id, strategy);
+        if (opts.json) emitJson(view);
+        else printAccounts(view, id);
       });
     });
 
   accounts
     .command('adopt <backend>')
     .description("Store a machine's own login as a shared account")
-    .option('--host <h>', 'machine name or hostId prefix (default: the home host)')
+    .option('--host <h>', 'machine name or hostId prefix (default: the only machine online)')
     .option('--json', 'JSON output')
     .action(async (backend: string, opts: CommonOpts & { host?: string }) => {
       await run(opts, async () => {
-        const hostId = await hostOrHome(opts);
+        const hostId = await onlineHost(opts);
         const id = backendOf(backend);
         const state = await server(opts).post<SharedState>(`/api/accounts/${id}/adopt`, {
           hostId,
         });
         if (opts.json) emitJson(state);
-        else printAccounts(state, id);
+        else printAccounts(viewOf(state), id);
       });
     });
 
@@ -310,7 +322,7 @@ export function registerSettingsCommands(program: Command): void {
           const res =
             value !== undefined
               ? await t.put<unknown>(path, { value })
-              : await t.post<unknown>(`${path}/adopt`, { hostId: await hostOrHome(opts) });
+              : await t.post<unknown>(`${path}/adopt`, { hostId: await onlineHost(opts) });
           if (opts.json) emitJson(res);
           else emitText(`${keyId}: set`);
         });
@@ -332,13 +344,17 @@ export function registerSettingsCommands(program: Command): void {
     });
 }
 
-/** `--host`, or the account's home host when none is named. */
-async function hostOrHome(opts: CommonOpts & { host?: string }): Promise<string> {
+/** `--host`, or the only machine that is online when none is named. */
+async function onlineHost(opts: CommonOpts & { host?: string }): Promise<string> {
   if (opts.host !== undefined) return resolveHost(opts);
   const { hosts } = await server(opts).get<{
-    hosts: Array<{ hostId: string; isHomeHost: boolean }>;
+    hosts: Array<{ hostId: string; online: boolean }>;
   }>('/api/hosts');
-  const home = hosts.find((h) => h.isHomeHost);
-  if (!home) throw new Error('no home host — name one with --host');
-  return home.hostId;
+  const online = hosts.filter((h) => h.online);
+  if (online.length !== 1) {
+    throw new Error(
+      `${online.length === 0 ? 'no machine is online' : 'more than one machine is online'} — name one with --host`,
+    );
+  }
+  return (online[0] as { hostId: string }).hostId;
 }

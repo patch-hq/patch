@@ -18,6 +18,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
+import { useHostSearchStore } from '../stores/hostSearchStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
@@ -684,6 +685,12 @@ export class PatchWs {
       useTerminalStore.getState().ingest(event);
       return;
     }
+    // Host search stream (spec/14 § File browser — ⌘⇧F). Per-surface by the
+    // same construction as terminal output above.
+    if (event.type === 'patch.host_search.result' || event.type === 'patch.host_search.done') {
+      useHostSearchStore.getState().ingest(event);
+      return;
+    }
     // spec/14 § File browser — live updates: a file on this chat's folder
     // just landed a real write on disk (the editor's own save, another
     // surface's save, or the agent's own Edit/Write/NotebookEdit). Not a
@@ -856,7 +863,9 @@ export class PatchWs {
       return;
     }
     if (event.type === 'claude_settings.list' || event.type === 'claude_settings.updated') {
-      usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
+      usePresenceStore
+        .getState()
+        .setClaudeSettings(event.hostId, event.settingsJson, event.memories);
       return;
     }
     // Agent browser live view and hand-off: live-only, never a timeline entry.
@@ -870,6 +879,25 @@ export class PatchWs {
     }
     if (event.type === 'patch.browser_handoff.state') {
       useBrowserHandoffStore.getState().applyState(event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.form') {
+      useBrowserHandoffStore.getState().applyForm(event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.clipboard') {
+      // The answer to this window's own Copy: only the window the user is in writes the clipboard.
+      if (event.text !== '' && document.hasFocus()) {
+        navigator.clipboard.writeText(event.text).catch((err: unknown) => {
+          useUiStore
+            .getState()
+            .pushError(
+              'Couldn’t copy from the browser',
+              undefined,
+              err instanceof Error ? err.message : String(err),
+            );
+        });
+      }
       return;
     }
     if (event.type === 'meeting.state') {

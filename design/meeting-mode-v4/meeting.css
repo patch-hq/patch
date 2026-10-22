@@ -1,0 +1,108 @@
+/* Meeting mode v4 — chat on the left stays a plain chat; everything about the meeting lives in the right panel. */
+.mm{display:flex;height:100%;min-height:0;background:var(--bg-elevated);color:var(--ink);font-size:14px;line-height:1.45}
+.mm *{box-sizing:border-box}
+.mm .i{width:16px;height:16px;flex:none}
+.mm .ib{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius-sm);color:var(--ink-3);cursor:pointer}
+.mm .ib:hover{color:var(--ink);background:var(--bg-soft)}
+.mm .tm{color:var(--ink-faint);font-size:12px;font-family:"JetBrains Mono Variable",ui-monospace,monospace;width:40px;flex:none;padding-top:2px}
+.mm ul{list-style:disc;margin:2px 0 0;padding-left:18px}.mm li{display:list-item}
+
+/* left: the ordinary chat */
+.mm .chat{flex:1;min-width:0;display:flex;flex-direction:column}
+.mm .head{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line-soft);flex:none}
+.mm .head .nav{color:var(--ink-faint);font-size:15px}
+.mm .head h1{flex:1;margin:0;text-align:center;font-family:"Fraunces Variable",Georgia,serif;font-weight:400;font-size:17px}
+.mm .head .ic{color:var(--ink-3);display:flex;gap:14px}
+.mm .stream{flex:1;overflow:auto;min-height:0}
+.mm .stream .col{max-width:720px;margin:0 auto;padding:18px 24px}
+.mm .msg{margin:10px 0}
+.mm .msg.u{background:var(--bg-soft);border-radius:var(--radius-lg);padding:8px 12px;margin-left:auto;width:fit-content;max-width:75%}
+.mm .msg.a{color:var(--ink)}
+.mm .comp{max-width:720px;width:100%;margin:0 auto;padding:4px 24px 14px;flex:none}
+.mm .box{border:1px solid var(--line);border-radius:var(--radius-lg);padding:10px 14px;display:flex;align-items:center;gap:10px}
+.mm .box .ph{flex:1;color:var(--ink-faint)}
+.mm .mode{display:inline-flex;background:var(--bg-soft);border-radius:var(--radius-pill);padding:2px;flex:none}
+.mm .mode span{font-size:12px;font-weight:600;color:var(--ink-3);padding:2px 10px;border-radius:var(--radius-pill)}
+.mm .mode span.on{background:var(--ink);color:#fff}
+.mm .tools{display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--ink-3);font-size:12px}
+.mm .tools .t{width:30px;height:30px;border:1px solid var(--line);border-radius:var(--radius-sm);display:inline-flex;align-items:center;justify-content:center}
+.mm .tools .t.hot{border-color:var(--voice);background:var(--voice);color:#fff}
+.mm .tools .dd{padding:0 6px;white-space:nowrap}
+.mm .tools .sp{flex:1}
+
+/* right: the meeting panel, flush to the edge, no box */
+.mm .side{width:420px;flex:none;display:flex;flex-direction:column;border-left:1px solid var(--line-soft);background:var(--bg-panel);min-height:0}
+.mm .sh{display:flex;align-items:center;gap:8px;padding:10px 12px 8px 16px;flex:none}
+.mm .pill{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px;color:var(--voice);white-space:nowrap}
+.mm .pill.done{color:var(--ink-3)}
+.mm .dot{width:7px;height:7px;border-radius:50%;background:var(--voice)}
+.mm .ppl{flex:1;min-width:0;font-size:12px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mm .btn{border:1px solid var(--line);background:var(--bg-elevated);color:var(--ink-2);border-radius:var(--radius-pill);padding:2px 10px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.mm .btn.end{background:var(--voice);border-color:var(--voice);color:#fff;font-weight:600}
+.mm .tabs{display:flex;gap:18px;padding:0 16px;border-bottom:1px solid var(--line-soft);flex:none}
+.mm .tabs a{font-size:15px;font-weight:600;color:var(--ink-3);padding:8px 0 9px;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.mm .tabs a.on{color:var(--ink);border-color:var(--ink)}
+.mm .tabs a b{font-weight:600;color:var(--ink-faint);margin-left:5px;font-size:14px}
+.mm .err{display:flex;gap:8px;align-items:baseline;padding:6px 16px;font-size:12px;color:var(--danger, #b42318);border-bottom:1px solid var(--line-soft);flex:none}
+.mm .err span{flex:1}
+.mm .err a{color:inherit;font-weight:600}
+.mm .pane{flex:1;overflow:auto;min-height:0;padding:8px 8px 16px}
+
+/* notes stream: points, your notes and research in one timeline */
+.mm .pt{display:flex;gap:8px;padding:5px 8px;border-radius:var(--radius)}
+.mm .pt .c{flex:1;min-width:0;color:var(--ink-2)}
+.mm .pt ul{color:var(--ink-3)}
+.mm .who{font-weight:600}
+.mm .pt.mine .c{color:var(--ink);font-weight:500}
+.mm .pt.now{background:var(--accent-tint)}
+.mm .pt.now .c{color:var(--ink)}
+.mm .res{margin:2px 8px 6px 56px;padding:6px 10px;border-radius:var(--radius);background:var(--bg-elevated);border:1px solid var(--line-soft);font-size:13px}
+.mm .res .h{display:flex;gap:8px;align-items:baseline}
+.mm .res .q{flex:1;font-weight:600;color:var(--ink)}
+.mm .verdict{font-size:11px;font-weight:600;border-radius:var(--radius-pill);padding:0 7px;background:var(--accent-tint);color:var(--accent-strong);white-space:nowrap}
+.mm .verdict.off{background:#fbe9e7;color:#a03a2a}
+.mm .res .b{color:var(--ink-2);margin-top:2px}
+.mm .res .src{font-size:12px;color:var(--ink-faint);margin-top:2px}
+.mm .tail{margin-top:6px;padding:6px 8px 0;border-top:1px dashed var(--line)}
+.mm .tl{display:flex;gap:8px;padding:2px 0;color:var(--ink-3);font-size:13px}
+.mm .tl.prov{font-style:italic;color:var(--ink-faint)}
+.mm .tl b{font-style:normal;color:var(--ink-2);margin-right:4px}
+
+/* closing summary sits at the top of Notes once the meeting ends */
+.mm .sum{padding:6px 8px 12px;margin-bottom:6px;border-bottom:1px solid var(--line-soft)}
+.mm .sum .h{display:flex;align-items:center;gap:6px}
+.mm .sum h2{flex:1;margin:0;font-family:"Fraunces Variable",Georgia,serif;font-weight:500;font-size:18px}
+.mm .meta{font-size:12px;color:var(--ink-3)}
+.mm .sum ul{color:var(--ink)}
+.mm .sum li{margin:3px 0}
+
+/* actions */
+.mm .grp{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding:10px 8px 4px}
+.mm .act{display:flex;gap:10px;align-items:flex-start;padding:6px 8px;border-radius:var(--radius)}
+.mm .act:hover{background:var(--bg-soft)}
+.mm .act .c{flex:1;min-width:0}
+.mm .act .o{font-size:12px;color:var(--ink-3)}
+.mm .act .st{font-size:12px;font-weight:600;color:var(--accent-strong);white-space:nowrap}
+.mm .box2{width:15px;height:15px;border:1.5px solid var(--line);border-radius:4px;flex:none;margin-top:3px}
+.mm .agentrow{display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:12px;color:var(--ink-3)}
+
+/* transcript */
+.mm .ln{display:flex;gap:8px;padding:4px 8px;font-size:13px;color:var(--ink-2)}
+.mm .ln b{color:var(--ink);margin-right:4px}
+.mm a.btn{text-decoration:none;display:inline-block}
+.mm .ib.on{color:var(--ink);background:var(--bg-soft)}
+/* my notes: own tab, own write box */
+.mm .mine-wrap{display:flex;flex-direction:column;min-height:100%}
+.mm .mine-list{flex:1}
+.mm .pt.mine .c{font-size:15px}
+.mm .write{position:sticky;bottom:0;margin:8px 8px 0;border:1px solid var(--line);border-radius:var(--radius-lg);padding:9px 12px;background:var(--bg-elevated);color:var(--ink-faint)}
+/* settings */
+.mm .set{display:flex;align-items:center;gap:12px;padding:8px}
+.mm .set .c{flex:1;min-width:0}
+.mm .set small{display:block;font-size:12px;color:var(--ink-3)}
+.mm .set.col{flex-direction:column;align-items:stretch;gap:4px}
+.mm .sel{border:1px solid var(--line);border-radius:var(--radius-sm);padding:5px 10px;background:var(--bg-elevated);color:var(--ink-2);font-size:13px}
+.mm .sw{width:34px;height:20px;border-radius:10px;background:var(--line);position:relative;flex:none}
+.mm .sw i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+.mm .sw.on{background:var(--accent)}
+.mm .sw.on i{left:16px}

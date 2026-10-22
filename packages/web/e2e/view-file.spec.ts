@@ -6,6 +6,7 @@ import { test, expect } from '@playwright/test';
 // pulls bytes into the agent's context.
 const VIEW_FILE_CHAT = '/app/dev-harness.html?chat=chat_view_file';
 const VIEW_FILE_IMAGE_CHAT = '/app/dev-harness.html?chat=chat_view_file_image';
+const VIEW_FILE_DOCX_CHAT = '/app/dev-harness.html?chat=chat_view_file_docx';
 const VIEW_FILE_PDF_CHAT = '/app/dev-harness.html?chat=chat_view_file_pdf';
 
 // A 1x1 red PNG, served for the artifact URL so the <img> really decodes.
@@ -118,5 +119,23 @@ test.describe('view_file', () => {
     await expect(card).toHaveAttribute('data-expanded', 'true');
     const after = (await frame.boundingBox())!.height;
     expect(after).toBeGreaterThan(before);
+  });
+
+  test('a Word document renders as a download card with name, size and a download link', async ({
+    page,
+  }) => {
+    await page.goto(VIEW_FILE_DOCX_CHAT);
+
+    const card = page.getByTestId('view-file');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-kind', 'file');
+    await expect(page.getByTestId('tool-call')).toHaveCount(0);
+    await expect(page.getByTestId('view-file-frame')).toHaveCount(0);
+    await expect(page.getByTestId('view-file-filename')).toHaveText('Report Q3.docx');
+    await expect(page.getByTestId('view-file-size')).toContainText('47');
+
+    const link = page.getByTestId('view-file-download');
+    await expect(link).toHaveAttribute('href', '/api/chats/chat_view_file_docx/artifact/doc001');
+    await expect(link).toHaveAttribute('download', 'Report Q3.docx');
   });
 });

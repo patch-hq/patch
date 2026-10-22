@@ -75,6 +75,12 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [draft, setDraft] = useState<Shape | null>(null);
   const drawingRef = useRef(false);
+  // The in-progress mark, kept in a ref as well as state: pointer events can
+  // arrive several times between renders (a full-resolution screenshot canvas
+  // is slow to repaint), and a handler reading `draft` from its own render
+  // would build each update on a stale shape — dropping pen points and leaving
+  // a box short of where the drag ended.
+  const draftRef = useRef<Shape | null>(null);
   const [textEditor, setTextEditor] = useState<{
     x: number;
     y: number;
@@ -208,24 +214,32 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
     }
     drawingRef.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
-    if (tool === 'box') setDraft({ kind: 'box', x: p.x, y: p.y, w: 0, h: 0, color });
-    else if (tool === 'arrow')
-      setDraft({ kind: 'arrow', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color });
-    else if (tool === 'pen') setDraft({ kind: 'pen', points: [p], color });
+    let start: Shape;
+    if (tool === 'box') start = { kind: 'box', x: p.x, y: p.y, w: 0, h: 0, color };
+    else if (tool === 'arrow') start = { kind: 'arrow', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color };
+    else start = { kind: 'pen', points: [p], color };
+    draftRef.current = start;
+    setDraft(start);
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>): void {
-    if (!drawingRef.current || !draft) return;
+    const cur = draftRef.current;
+    if (!drawingRef.current || !cur) return;
     const p = toCanvasPoint(e);
-    if (draft.kind === 'box') setDraft({ ...draft, w: p.x - draft.x, h: p.y - draft.y });
-    else if (draft.kind === 'arrow') setDraft({ ...draft, x2: p.x, y2: p.y });
-    else if (draft.kind === 'pen') setDraft({ ...draft, points: [...draft.points, p] });
+    let next: Shape = cur;
+    if (cur.kind === 'box') next = { ...cur, w: p.x - cur.x, h: p.y - cur.y };
+    else if (cur.kind === 'arrow') next = { ...cur, x2: p.x, y2: p.y };
+    else if (cur.kind === 'pen') next = { ...cur, points: [...cur.points, p] };
+    draftRef.current = next;
+    setDraft(next);
   }
 
   function onPointerUp(): void {
-    if (!drawingRef.current || !draft) return;
+    const done = draftRef.current;
+    if (!drawingRef.current || !done) return;
     drawingRef.current = false;
-    setShapes((cur) => [...cur, draft]);
+    draftRef.current = null;
+    setShapes((cur) => [...cur, done]);
     setDraft(null);
   }
 
@@ -354,6 +368,7 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
         />
         {textEditor ? (
           <input
@@ -418,8 +433,13 @@ function drawShape(
     drawArrow(ctx, s.x1, s.y1, s.x2, s.y2, lineWidth);
   } else if (s.kind === 'pen') {
     const [first, ...rest] = s.points;
-    if (!first || rest.length === 0) return;
+    if (!first) return;
     ctx.beginPath();
+    if (rest.length === 0) {
+      ctx.arc(first.x, first.y, lineWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
     ctx.moveTo(first.x, first.y);
     for (const p of rest) ctx.lineTo(p.x, p.y);
     ctx.stroke();

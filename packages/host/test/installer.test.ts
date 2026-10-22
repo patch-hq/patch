@@ -185,13 +185,26 @@ describe('the service unit', () => {
     env: { HOME: '/home/u', USER: 'u', PATCH_SERVER_URL: 'http://s' },
   };
 
-  it('systemd: restart-on-failure, start-at-boot, and NO working directory', () => {
+  it('systemd: always-restart, start-at-boot, and NO working directory', () => {
     const unit = systemdUnit(def);
-    expect(unit).toContain('Restart=on-failure');
+    expect(unit).toContain('Restart=always');
     expect(unit).toContain('WantedBy=default.target');
     expect(unit).toContain('ExecStart=/home/u/.patch/versions/1/node');
     expect(unit).not.toContain('WorkingDirectory');
     expect(unit).toContain('Environment="HOME=/home/u"');
+  });
+
+  it('systemd: a restart kills only the host, so patch_watch tasks (detached children) survive it', () => {
+    expect(systemdUnit(def)).toContain('KillMode=process');
+  });
+
+  it("launchd: a restart does not kill the host's detached children (patch_watch tasks)", () => {
+    expect(launchdPlist(def)).toContain('<key>AbandonProcessGroup</key><true/>');
+  });
+
+  it('systemd: one child OOM-killed does not fail the unit, and the unit stays up', () => {
+    const unit = systemdUnit(def);
+    expect(unit).toContain('OOMPolicy=continue');
   });
 
   it('systemd: Environment= values escape backslash, quote and the % specifier', () => {
@@ -217,10 +230,11 @@ describe('the service unit', () => {
     expect(launchdPlist({ ...def, secretEnv: { GROQ_API_KEY: 'gsk_abc' } })).toContain('gsk_abc');
   });
 
-  it('launchd: start-at-boot, restart-on-failure, and NO working directory', () => {
+  it('launchd: start-at-boot, always-restart, and NO working directory', () => {
     const plist = launchdPlist(def);
     expect(plist).toContain('<key>RunAtLoad</key><true/>');
-    expect(plist).toContain('<key>SuccessfulExit</key><false/>');
+    expect(plist).toContain('<key>KeepAlive</key><true/>');
+    expect(plist).not.toContain('SuccessfulExit');
     expect(plist).not.toContain('WorkingDirectory');
     // An agent job inherits the invoking user; it must NOT name one.
     expect(plist).not.toContain('UserName');

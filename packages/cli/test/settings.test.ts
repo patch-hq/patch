@@ -19,14 +19,11 @@ const group = (name: string): Command => {
   return cmd;
 };
 
-test('settings has show (default), set and claude', () => {
+test('settings has show (default) and set', () => {
   const subs = group('settings').commands.map((c) => c.name());
-  for (const name of ['show', 'set', 'claude']) assert.ok(subs.includes(name), `settings ${name}`);
-  const claude = group('settings').commands.find((c) => c.name() === 'claude');
-  assert.ok(
-    claude?.options.some((o) => o.long === '--os'),
-    'settings claude takes --os',
-  );
+  for (const name of ['show', 'set']) assert.ok(subs.includes(name), `settings ${name}`);
+  // Claude Code's settings.json is per host now: `patch hosts claude-settings`.
+  assert.ok(!subs.includes('claude'), 'settings claude is gone');
 });
 
 test('accounts covers the whole account list: list, add, connect, disconnect, remove, order, strategy, adopt', () => {

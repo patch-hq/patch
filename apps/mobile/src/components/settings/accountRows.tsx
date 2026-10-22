@@ -4,7 +4,7 @@
 // themselves are shared settings (spec/01 § Settings), changed on the server.
 
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
 import { CLAUDE_BACKEND_ID, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../lib/theme';
 import {
@@ -12,6 +12,7 @@ import {
   formatReadAt,
   formatUtilization,
   OVERAGE_DISABLED_REASON,
+  OVERAGE_ORG_DISABLED_REASON,
   SCOPE_LABEL,
   SCOPE_ORDER,
   type AccountUsage,
@@ -117,6 +118,35 @@ export function TokenEntry({
   );
 }
 
+/** A name field revealed by Rename, sending on its own button. */
+export function RenameEntry({
+  testID,
+  current,
+  onSubmit,
+}: {
+  testID: string;
+  current: string;
+  onSubmit: (label: string) => void;
+}): React.ReactElement {
+  const [label, setLabel] = React.useState(current);
+  return (
+    <View style={{ marginTop: space.sm, gap: space.sm }}>
+      <Field
+        testID={`${testID}-input`}
+        accessibilityLabel="Account name"
+        value={label}
+        onChangeText={setLabel}
+        placeholder={current}
+      />
+      <SettingsButton
+        testID={`${testID}-submit`}
+        label="Rename"
+        onPress={() => onSubmit(label.trim())}
+      />
+    </View>
+  );
+}
+
 /** The rank circle: accent-filled on the account the host is using now. */
 export function Rank({ n, active }: { n: number; active: boolean }): React.ReactElement {
   const colors = useTheme();
@@ -208,10 +238,13 @@ export function UsageLine({
   scope,
   win,
   testID,
+  manageUrl,
 }: {
   scope: UsageScope;
   win: RateLimitWindow | undefined;
   testID: string;
+  /** Where this window's add-on is turned on. */
+  manageUrl?: string;
 }): React.ReactElement | null {
   const colors = useTheme();
   if (!win) return null;
@@ -221,14 +254,18 @@ export function UsageLine({
   const warn = state === 'warn';
   const fill = blocked ? colors.red : warn ? colors.amber : off ? colors.ink3 : colors.leaf;
   const pct = Math.min(100, Math.round((win.utilization ?? 0) * 100));
+  // Extra usage is one line: where to turn it on when it was never taken out,
+  // or that organisation policy prevents it, in place of a reset time.
+  const neverTakenOut = scope === 'overage' && win.disabledReason === OVERAGE_DISABLED_REASON;
+  const orgDisabled = scope === 'overage' && win.disabledReason === OVERAGE_ORG_DISABLED_REASON;
   const reason =
-    win.disabledReason !== undefined && win.disabledReason !== OVERAGE_DISABLED_REASON
+    win.disabledReason !== undefined && !neverTakenOut && !orgDisabled
       ? describeDisabledReason(win.disabledReason)
       : null;
   return (
     <View testID={testID} style={{ marginTop: space.xs }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <Text style={{ ...typography.meta, color: colors.ink3, width: 76 }}>
+        <Text numberOfLines={1} style={{ ...typography.meta, color: colors.ink3, width: 96 }}>
           {SCOPE_LABEL[scope]}
         </Text>
         <View
@@ -253,6 +290,18 @@ export function UsageLine({
           {off ? 'off' : formatUtilization(win)}
           {blocked ? ' · blocked' : ''}
         </Text>
+        {neverTakenOut && manageUrl ? (
+          <Pressable
+            testID={`${testID}-manage`}
+            accessibilityRole="link"
+            accessibilityLabel="Turn on Extra usage"
+            onPress={() => void Linking.openURL(manageUrl)}
+          >
+            <Text style={{ ...typography.meta, color: colors.leaf }}>Turn on ↗</Text>
+          </Pressable>
+        ) : orgDisabled ? (
+          <Text style={{ ...typography.meta, color: colors.ink3 }}>disabled by organisation</Text>
+        ) : null}
       </View>
       {reason ? <Muted>{reason}</Muted> : null}
     </View>
@@ -266,6 +315,7 @@ export function UsageBars({
   refreshing,
   onRefresh,
   scopes = SCOPE_ORDER,
+  extraUsageUrl,
 }: {
   usage: AccountUsage | undefined;
   testID: string;
@@ -273,6 +323,8 @@ export function UsageBars({
   /** Present on a row with no ⋯ to put Refresh in (the legacy single account). */
   onRefresh?: () => void;
   scopes?: readonly UsageScope[];
+  /** Where Extra usage is turned on and managed. */
+  extraUsageUrl?: string;
 }): React.ReactElement {
   const colors = useTheme();
   const readAt = formatReadAt(usage?.at);
@@ -282,7 +334,13 @@ export function UsageBars({
         <Muted testID={`${testID}-empty`}>Usage not read yet</Muted>
       ) : (
         scopes.map((scope) => (
-          <UsageLine key={scope} scope={scope} win={usage[scope]} testID={`${testID}-${scope}`} />
+          <UsageLine
+            key={scope}
+            scope={scope}
+            win={usage[scope]}
+            testID={`${testID}-${scope}`}
+            manageUrl={scope === 'overage' ? extraUsageUrl : undefined}
+          />
         ))
       )}
       <View

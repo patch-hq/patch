@@ -40,6 +40,7 @@ function row(chatId: string, overrides: Partial<ChatRow> = {}): ChatRow {
     lastSeq: 0,
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
     ...overrides,

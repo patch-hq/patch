@@ -254,15 +254,21 @@ export function summariseUsage(
   };
 }
 
-/** `read 2 min ago` — so a stale figure cannot pass for a live one. */
-export function formatReadAt(at: number | undefined, now: number = Date.now()): string | null {
+/** `2 min ago` — how old a reading is, beside the thing it is a reading of. */
+export function formatAgo(at: number | undefined, now: number = Date.now()): string | null {
   if (at === undefined || at === 0) return null;
   const min = Math.floor((now - at) / 60_000);
-  if (min < 1) return 'read just now';
-  if (min < 60) return `read ${min} min ago`;
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
   const h = Math.floor(min / 60);
-  if (h < 24) return `read ${h} h ago`;
-  return `read ${Math.floor(h / 24)} d ago`;
+  if (h < 24) return `${h} h ago`;
+  return `${Math.floor(h / 24)} d ago`;
+}
+
+/** `read 2 min ago` — the same, where the line needs to say it is a reading. */
+export function formatReadAt(at: number | undefined, now: number = Date.now()): string | null {
+  const ago = formatAgo(at, now);
+  return ago === null ? null : `read ${ago}`;
 }
 
 /**

@@ -107,19 +107,27 @@ export class JobAlerts {
     this.alerts = this.load();
   }
 
-  /** Feed every run-log entry here: a failure raises the alert, an `ok` clears it. */
-  onRun(entry: RunLogEntry): void {
+  /**
+   * Feed every run-log entry here: a failure raises the alert, an `ok` clears it.
+   * Returns true when a failure raised a NEW alert (none was standing for the job),
+   * so a gate that breaks every few minutes is announced once, not every fire.
+   */
+  onRun(entry: RunLogEntry): boolean {
     if (entry.status === 'dispatch-error' || entry.status === 'gate-error') {
+      const fresh = !this.alerts[entry.jobId];
       this.alerts[entry.jobId] = {
         status: entry.status,
         ts: entry.ts,
         error: entry.error ?? '',
       };
       this.save();
-    } else if (entry.status === 'ok' && this.alerts[entry.jobId]) {
+      return fresh;
+    }
+    if (entry.status === 'ok' && this.alerts[entry.jobId]) {
       delete this.alerts[entry.jobId];
       this.save();
     }
+    return false;
   }
 
   /** Newest first. A job that no longer exists has no alert. */

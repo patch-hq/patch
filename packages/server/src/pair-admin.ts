@@ -8,12 +8,16 @@
 // to open each pairing window.
 
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { join } from 'node:path';
 import { generateUserKeypair } from '@patch/auth';
 import { encodePairingUri } from '@patch/wire';
 
 export interface PairAdminOptions {
-  /** The running server, as this machine reaches it (`http://127.0.0.1:3000`). */
+  /**
+   * The running server, as this machine reaches it (`http://127.0.0.1:3970`), or
+   * `unix:/run/patch/server.sock` for a server listening on a Unix socket.
+   */
   baseUrl: string;
   dataDir: string;
   /**
@@ -40,12 +44,32 @@ async function call<T>(
   body: unknown,
   bearer?: string,
 ): Promise<{ status: number; json: T }> {
+  const headers = {
+    'content-type': 'application/json',
+    ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+  };
+  if (baseUrl.startsWith('unix:')) {
+    const socketPath = baseUrl.slice('unix:'.length);
+    return new Promise((resolve, reject) => {
+      const req = request({ socketPath, path, method: 'POST', headers }, (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (c: string) => (text += c));
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode ?? 0, json: JSON.parse(text) as T });
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+      req.on('error', reject);
+      req.end(JSON.stringify(body));
+    });
+  }
   const res = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
-    },
+    headers,
     body: JSON.stringify(body),
   });
   return { status: res.status, json: (await res.json()) as T };

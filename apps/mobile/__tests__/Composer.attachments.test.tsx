@@ -535,7 +535,7 @@ describe('Composer — attach handler internal disabled guards (defensive, norma
       .find(
         (p) =>
           p.props['accessibilityLabel'] ===
-          'Take photo unavailable — Host offline — paused until your Hetzner box reconnects.',
+          'Take photo unavailable — Machine offline — paused until your Hetzner box reconnects.',
       );
     (btn!.props['onPress'] as () => void)();
     expect(requestCameraPermSpy).not.toHaveBeenCalled();
@@ -555,7 +555,7 @@ describe('Composer — attach handler internal disabled guards (defensive, norma
       .find(
         (p) =>
           p.props['accessibilityLabel'] ===
-          'Attach unavailable — Host offline — paused until your Hetzner box reconnects.',
+          'Attach unavailable — Machine offline — paused until your Hetzner box reconnects.',
       );
     (btn!.props['onPress'] as () => void)();
     expect(requestPermSpy).not.toHaveBeenCalled();
@@ -574,7 +574,7 @@ describe('Composer — attach handler internal disabled guards (defensive, norma
       .filter(
         (p) =>
           p.props['accessibilityLabel'] ===
-          'Attach unavailable — Host offline — paused until your Hetzner box reconnects.',
+          'Attach unavailable — Machine offline — paused until your Hetzner box reconnects.',
       );
     // Both attach buttons share the label; the file button is the second one.
     (btns[1]!.props['onPress'] as () => void)();

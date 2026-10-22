@@ -73,6 +73,10 @@ function parseTimeWindow(text: string): { startH: number; endH: number } | 'inva
   return { startH: start.h, endH: end.h };
 }
 
+/** Every unambiguous clock time in a phrase: am/pm, a colon or dot, noon, midnight. */
+const CLOCK_TOKEN =
+  /\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\b|\b\d{1,2}[:.]\d{2}\b|\bnoon\b|\bmidnight\b/g;
+
 const DAY_ALT = Object.keys(DOW_NAME)
   .sort((a, b) => b.length - a.length)
   .join('|');
@@ -130,6 +134,12 @@ export function parseNaturalSchedule(input: string): string | null {
   ) {
     return null;
   }
+
+  // A word that changes the meaning of everything around it and that cron
+  // cannot express ("except friday", "9am or 10pm"): refuse the whole phrase.
+  // Reading past it produced the OPPOSITE schedule — "every hour between 9am
+  // and 5pm except weekends" came out as `0 9-17 * * 0,6`.
+  if (/\b(?:except|excluding|but not|or)\b/.test(text)) return null;
 
   // An optional time-of-day window ("between 9am and 5pm") and day-of-week
   // ("on weekdays") constrain the interval forms below. The hour field is the
@@ -192,6 +202,13 @@ export function parseNaturalSchedule(input: string): string | null {
     const t = tail ? parseTime(tail[1]!) : null;
     if (t) times = [t];
   }
+  // Every clock time in the phrase must have been read into `times`. A second
+  // time outside the "at" list ("at 9am and at 5pm", "8am and 5pm every day",
+  // "monday at 8:30 and tuesday at 9") is not expressible as one cron, and a
+  // cron carrying only the first would be a guess dressed up as a parse.
+  const clockTokens = text.match(CLOCK_TOKEN)?.length ?? 0;
+  const atCount = text.match(/\bat\b/g)?.length ?? 0;
+  if (clockTokens > times.length || atCount > 1) return null;
   const time =
     times.length > 0
       ? { m: times[0]!.m, h: [...new Set(times.map((t) => t.h))].sort((a, b) => a - b).join(',') }

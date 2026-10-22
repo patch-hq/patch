@@ -46,7 +46,15 @@ export interface ChatRow {
    */
   lastUserActivity: number;
   awaitingPermission: boolean;
-  lastVisitedAt: number;
+  /**
+   * Highest `lastSeq` this phone has seen on a visit (the read watermark). A chat
+   * is unread when `lastSeq > lastReadSeq`; -1 until first opened.
+   */
+  lastReadSeq: number;
+  /** Tool calls started but not yet resulted; a positive count means the chat is working. */
+  openToolCalls?: number;
+  /** Set on a send into a settled chat so the row reads `working` before the host's first state frame; cleared by that frame or a failed delivery. */
+  optimisticSend?: boolean;
   preview: string | null;
   pendingPermissions: PendingPermission[];
   lastSeq: number;
@@ -58,6 +66,14 @@ export interface ChatRow {
    * wasn't forgotten.
    */
   pendingWake: PendingWake | null;
+  /**
+   * Out-of-credit pause (`chat.state`, spec/04 § Message queueing): when a limit
+   * parked the turn, the resume instant, the pause kind and the block's own reset.
+   * Optional so the row fixtures that say nothing about it need not declare them.
+   */
+  rateLimitResumingAt?: number | null;
+  resumeKind?: 'rate_limit' | 'overloaded' | null;
+  limitBlock?: { resetsAt?: number } | null;
   /**
    * The chat's wake time (spec/04 § Snooze), ms epoch, or `null` when it is not
    * snoozed. Never read as a boolean — snoozed is `snoozedUntil > now`, derived
@@ -148,7 +164,7 @@ export interface ChatRow {
  * about a chat WITHOUT its transcript. This is exactly what the roster fetch
  * returns per chat, what `chatStore.hydrate()` takes, and what the on-device
  * read cache persists (spec/15 § Instant open (read cache)). The derived/local
- * fields (`preview`, `lastVisitedAt`, `pendingPermissions`, `lastSeq`,
+ * fields (`preview`, `lastReadSeq`, `pendingPermissions`, `lastSeq`,
  * `awaitingPermission`) are deliberately not part of it.
  *
  * A field is optional-with-default only if it is BOTH named in the `Omit<...>`
@@ -158,7 +174,7 @@ export interface ChatRow {
 export type ChatListRow = Omit<
   ChatRow,
   | 'awaitingPermission'
-  | 'lastVisitedAt'
+  | 'lastReadSeq'
   | 'preview'
   | 'pendingPermissions'
   | 'lastSeq'
@@ -250,8 +266,11 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   if (row.activity === 'awaiting-permission') return 'permission';
   if (row.statusKind === 'question' && row.statusDeclared) return 'permission';
   if (row.activity === 'errored' || row.status === 'errored') return 'errored';
-  if (row.activity === 'running') return 'working';
-  if (row.lastUpdated > row.lastVisitedAt) return 'done';
+  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend) {
+    return 'working';
+  }
+  // Unread beats a background job or self-wake loop.
+  if (row.lastSeq > row.lastReadSeq) return 'done';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
   if (row.pendingWake) return 'monitoring';
   return 'read';

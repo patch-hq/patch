@@ -43,11 +43,11 @@ import { installApk, useApkInstallStore } from '../src/lib/apkInstall';
 import { updateSourceProblem } from '../src/lib/updateSource';
 import * as Updates from 'expo-updates';
 import { __setUseUpdates, __resetUseUpdates, __setEnabled } from './stubs/expo-updates';
-import { reportHost, resetHosts } from './testUtils/settingsFixtures';
+import { reportHost, resetHosts, seedSettings } from './testUtils/settingsFixtures';
 
 const wsMock = { send: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
-vi.mock('../src/api/rest', () => ({ api: { version: vi.fn() } }));
+vi.mock('../src/api/rest', () => ({ api: { version: vi.fn(), setPreferences: vi.fn() } }));
 vi.mock('../src/lib/bootstrap', () => ({ teardown: vi.fn() }));
 vi.mock('../src/lib/buildInfo', () => ({ mobileBuildInfo: vi.fn() }));
 vi.mock('../src/lib/updateCheck', () => ({
@@ -393,6 +393,39 @@ describe('Settings — Updates — hosts behind', () => {
     expect(wsMock.send).not.toHaveBeenCalled();
     expect(__getLastAlert()?.title).toBe('Update failed');
     expect(__getLastAlert()?.message).toMatch(/h1 is offline/);
+  });
+});
+
+describe('Settings — Updates — update mode', () => {
+  it('automatic by default; the toggle writes the shared setting', async () => {
+    seedSettings();
+    vi.mocked(api.setPreferences).mockResolvedValue({ preferences: {} } as never);
+    const r = await mount();
+    const toggle = findHost(r.root, byTestId('auto-update'));
+    expect(toggle.props.value).toBe(true);
+    await actAsync(async () => {
+      toggle.props.onValueChange(false);
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ autoUpdateHosts: false });
+  });
+
+  it('Update all updates every online host that is behind, and no other', async () => {
+    reportHost('h1', { updateAvailable: true });
+    reportHost('h2', { updateAvailable: true });
+    reportHost('h3', { updateAvailable: false });
+    reportHost('h4', { updateAvailable: true }, false);
+    const r = await mount();
+    await actAsync(() => findHost(r.root, byTestId('update-all')).props.onPress());
+    expect(wsMock.send).toHaveBeenCalledTimes(2);
+    expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'h1' });
+    expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'h2' });
+  });
+
+  it('has no Update all when no host is behind', async () => {
+    reportHost('h1', { updateAvailable: false });
+    const r = await mount();
+    expect(queryHost(r.root, byTestId('update-all'))).toBeNull();
   });
 });
 

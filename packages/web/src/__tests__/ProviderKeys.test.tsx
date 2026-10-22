@@ -1,4 +1,4 @@
-// Settings → Keys → Provider keys (spec/02 § Provider keys, spec/01 § Settings).
+// Settings → Providers → Provider keys (spec/02 § Provider keys, spec/01 § Settings).
 //
 // The keys are shared settings: held on the server, sent to every host. A row
 // states whether a key is set, with its last four characters — never the value
@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { KeysPage } from '../routes/settings/KeysPage.js';
+import { ProvidersPage } from '../routes/settings/ProvidersPage.js';
 import { ErrorToasts } from '../components/ErrorToasts.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -24,8 +24,8 @@ function renderSection(): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/settings/keys']}>
-        <KeysPage />
+      <MemoryRouter initialEntries={['/settings/providers']}>
+        <ProvidersPage />
         <ErrorToasts />
         <ConfirmModal />
       </MemoryRouter>
@@ -41,7 +41,7 @@ const KEYS = {
   ],
 };
 
-describe('Settings → Keys → Provider keys', () => {
+describe('Settings → Providers → Provider keys', () => {
   beforeEach(() => {
     clearHosts();
     resetShared();

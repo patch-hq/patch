@@ -69,7 +69,7 @@ Stays "flat files" per spec, but with explicit shape:
 - `/data/runs/<jobId>.jsonl` — per-job run log.
 - `/data/webhooks/<jobId>.jsonl` — per-job inbound webhook log.
 - `/data/undelivered.jsonl` — failed notifications.
-- `/data/broadcasts/<thread>.jsonl` — broadcast log per channel-mediating thread, written as the server routes each notify and read by the home host when the user replies (`09-notifications.md` § The broadcast log).
+- `/data/broadcasts/<thread>.jsonl` — broadcast log per channel-mediating thread, written as the server routes each notify and read by the Manager host when the user replies (`09-notifications.md` § The broadcast log).
 - `~/.patch/chats/<chatId>/` — daemon-managed per-chat state (NOT under `/data` — daemon-local): `meta.json` (chat metadata), `seq` (the persisted sequence counter) and `wake.json` (a pending self-wake), per `02-daemon.md`.
 
 A daemon-local file is written and read by the same machine. Anything one machine writes and another reads is server state under `/data`.

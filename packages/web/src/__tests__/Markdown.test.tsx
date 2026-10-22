@@ -94,15 +94,15 @@ describe('Markdown', () => {
     expect(code!.innerHTML).toContain('&amp;');
   });
 
-  // spec/14 § Message links — the preview toggle icon rides alongside a link,
+  // spec/14 § Message links — the Summarise button rides alongside a link,
   // without disturbing the link's own href/navigation.
-  it('adds a preview toggle next to an http(s) link', () => {
+  it('adds a Summarise button next to an http(s) link', () => {
     const { container, getByRole } = render(
       <Markdown content={'see https://example.com/article for more'} />,
     );
     const link = container.querySelector('a');
     expect(link?.getAttribute('href')).toBe('https://example.com/article');
-    expect(getByRole('button', { name: /preview link/i })).toBeTruthy();
+    expect(getByRole('button', { name: /summarise link/i })).toBeTruthy();
   });
 
   // spec/14 § Main chat panel — a fenced code block carries a copy control.
@@ -193,12 +193,12 @@ describe('Markdown', () => {
     });
   });
 
-  it('does not add a preview toggle next to a mailto link', () => {
+  it('does not add a Summarise button next to a mailto link', () => {
     const { container, queryByTestId } = render(
       <Markdown content={'[email me](mailto:tom@example.com)'} />,
     );
     expect(container.querySelector('a')?.getAttribute('href')).toBe('mailto:tom@example.com');
-    expect(queryByTestId('link-preview-toggle')).toBeNull();
+    expect(queryByTestId('link-summary-toggle')).toBeNull();
   });
 
   // Todoist: "Patch back button is really slow" — navigating away from a chat
@@ -399,7 +399,7 @@ describe('Markdown chat links', () => {
     const { container, queryByTestId } = renderLinked(md);
     const a = container.querySelector('a[data-chat-link]');
     expect(a?.getAttribute('href')).toBe(href);
-    expect(queryByTestId('link-preview-toggle')).toBeNull();
+    expect(queryByTestId('link-summary-toggle')).toBeNull();
   });
 
   it('a plain click navigates in-app without a page load', () => {

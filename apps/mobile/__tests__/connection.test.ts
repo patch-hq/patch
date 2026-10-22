@@ -37,6 +37,11 @@ describe('offlineBannerText — no offline flash on load', () => {
     expect(offlineBannerText('reconnecting', true)).toBe('Reconnecting…');
     expect(offlineBannerText('offline', true)).toBe('Offline');
   });
+  it('says the server is unreachable once the outage has lasted a minute', () => {
+    expect(offlineBannerText('reconnecting', true, true)).toBe('Server unreachable. Retrying');
+    expect(offlineBannerText('offline', true, true)).toBe('Server unreachable. Retrying');
+    expect(offlineBannerText('connected', true, true)).toBeNull();
+  });
   it('renders nothing while the outage is still inside its grace period', () => {
     expect(offlineBannerText('reconnecting', false)).toBeNull();
     expect(offlineBannerText('offline', false)).toBeNull();
@@ -86,7 +91,7 @@ describe('daemon-dependent controls disable with an attributed reason', () => {
   it('names the host as the reason when the WS is up but the host is down', () => {
     const reason = hostControlDisabledReason('connected', 'offline');
     expect(reason).not.toBeNull();
-    expect(reason!.toLowerCase()).toContain('host');
+    expect(reason!.toLowerCase()).toContain('machine');
   });
 
   it('names the connection as the reason when the WS itself is down', () => {
@@ -103,7 +108,7 @@ describe('daemon-dependent controls disable with an attributed reason', () => {
   });
 
   it('names the host as "connecting" when the WS is up but host presence is not yet known', () => {
-    expect(hostControlDisabledReason('connected', 'unknown')).toBe('Connecting to host…');
+    expect(hostControlDisabledReason('connected', 'unknown')).toBe('Connecting to machine…');
   });
 
   it('names the refused credential when the link is unauthenticated, whatever the host says', () => {

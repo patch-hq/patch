@@ -24,9 +24,10 @@ const ALLOWED: Record<string, [number, string]> = {
   'src/components/ChatMarkdown.tsx': [3, 'inline code, code blocks and fences'],
   'src/components/UnifiedDiff.tsx': [1, 'diff lines'],
   'app/chats/[chatId].tsx': [
-    4,
+    5,
     "a tool call's raw args, its folded result, a background task's raw block, " +
-      "and a patch_delegate row's own raw-args fallback before its ack lands",
+      "a patch_delegate row's own raw-args fallback before its ack lands, " +
+      "and a patch_ask_human card's device code",
   ],
   'src/components/BackgroundTaskBar.tsx': [
     2,

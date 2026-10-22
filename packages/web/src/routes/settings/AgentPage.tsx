@@ -10,6 +10,7 @@ import {
   QUESTION_EXPIRY_SECONDS_MAX,
   QUESTION_EXPIRY_SECONDS_MIN,
   DEFAULT_PROVIDER_ID,
+  DEFAULT_LINK_SUMMARY_PROMPT,
   HARNESS_PERMISSION_MODES,
   PROVIDERS,
   type PermissionMode,
@@ -42,6 +43,7 @@ export function AgentPage(): JSX.Element {
       </Group>
       <QuestionsGroup />
       <ChatsGroup />
+      <LinkSummaryGroup />
       <LayersGroup />
     </SettingsPage>
   );
@@ -234,6 +236,35 @@ function QuestionsGroup(): JSX.Element {
   );
 }
 
+/** The prompt the Summarise button beside a message link runs with. */
+function LinkSummaryGroup(): JSX.Element {
+  const prompt = usePreferencesStore((s) => s.preferences.linkSummaryPrompt);
+  return (
+    <Group label="Link summary" testid="settings-link-summary">
+      <LayerEditor
+        title="Summarise prompt"
+        sub={
+          prompt === DEFAULT_LINK_SUMMARY_PROMPT
+            ? 'Built-in default'
+            : (prompt.split('\n')[0] ?? '')
+        }
+        initial={prompt}
+        testid="link-summary-prompt"
+        placeholder={DEFAULT_LINK_SUMMARY_PROMPT}
+        onSave={(text) => patchShared('link summary prompt', { linkSummaryPrompt: text })}
+        onReset={
+          prompt === DEFAULT_LINK_SUMMARY_PROMPT
+            ? undefined
+            : () =>
+                patchShared('link summary prompt', {
+                  linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
+                })
+        }
+      />
+    </Group>
+  );
+}
+
 /** Account-wide chat preferences. */
 function ChatsGroup(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
@@ -320,9 +351,6 @@ function LayersGroup(): JSX.Element {
         // Empty string clears the override (reverts to SDK default).
         onSave={(text) => patchShared('system prompt', { harnessSystemPrompt: text })}
       />
-      <ClaudeSettingsEditor which="shared" title="Claude Code settings.json" />
-      <ClaudeSettingsEditor which="darwin" title="settings.json on macOS" />
-      <ClaudeSettingsEditor which="linux" title="settings.json on Linux" />
     </Group>
   );
 }
@@ -420,97 +448,6 @@ export function LayerEditor({
               onClick={save}
             >
               Save
-            </button>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Claude Code's `settings.json` as a shared setting (spec/02 § Claude Code
- * settings): one text for every host, and an override per OS whose top-level
- * keys replace the shared ones. The server refuses text that is not a JSON
- * object and says why; the editor stays open with the text until it commits.
- */
-function ClaudeSettingsEditor({
-  which,
-  title,
-}: {
-  which: 'shared' | 'darwin' | 'linux';
-  title: string;
-}): JSX.Element {
-  const setting = usePreferencesStore((s) => s.preferences.claudeSettings);
-  const loaded = usePreferencesStore((s) => s.loaded);
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const value = setting[which];
-  const id = `claude-settings-${which}`;
-
-  function save(): void {
-    if (draft === null) return;
-    setSaving(true);
-    void patchShared(title, { claudeSettings: { ...setting, [which]: draft } }).then((ok) => {
-      setSaving(false);
-      if (ok) setDraft(null);
-    });
-  }
-
-  return (
-    <div className={`set-row${draft === null ? '' : ' stack'}`} data-testid={id}>
-      <div className="set-row-head">
-        <div className="set-row-text">
-          <span className="set-row-title">{title}</span>
-          <span className="set-sub">{value.trim() === '' ? 'None' : 'Set'}</span>
-        </div>
-        {draft === null ? (
-          <button
-            type="button"
-            className="set-btn"
-            data-testid={`${id}-edit`}
-            disabled={!loaded}
-            onClick={() => setDraft(value)}
-          >
-            Edit
-          </button>
-        ) : null}
-      </div>
-      {draft !== null ? (
-        <>
-          <textarea
-            className="claude-settings-json"
-            aria-label={title}
-            data-testid={`${id}-json`}
-            rows={12}
-            placeholder="{}"
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (!isSubmitChord(e)) return;
-              e.preventDefault();
-              save();
-            }}
-          />
-          <div className="set-actions">
-            <button
-              type="button"
-              className="set-btn ghost"
-              onClick={() => setDraft(null)}
-              data-testid={`${id}-cancel`}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="set-btn primary"
-              data-testid={`${id}-save`}
-              disabled={saving || draft === value}
-              title={shortcutLabel('⌘↵')}
-              onClick={save}
-            >
-              {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </>

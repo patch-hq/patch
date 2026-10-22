@@ -28,6 +28,7 @@ import { relativeTime } from '../lib/relativeTime.js';
 import { groupJobs, isArchivedJob, isExpiredJob, type JobGroups } from '../lib/jobGroups.js';
 import { groupByUserGroup } from '../lib/jobUserGroups.js';
 import { JOB_SORTS, sortJobs, type JobSort } from '../lib/jobSort.js';
+import { OpenableLink } from '../components/OpenableLink.js';
 import { shortcutTitle } from '../lib/shortcuts.js';
 import {
   JOB_STATUS_FILTERS,
@@ -567,7 +568,11 @@ function JobRow({
       data-testid={`job-${job.id}`}
     >
       <div className="job-row-main">
-        <Link to={`/jobs/${job.id}`} className="job-link">
+        <OpenableLink
+          to={`/jobs/${job.id}`}
+          opens={{ kind: 'page', page: 'job', jobId: job.id }}
+          className="job-link"
+        >
           <span className="job-name display">{job.name}</span>
           <span className="job-trigger" data-testid={`job-trigger-${job.id}`}>
             {jobTriggerLabel(job)}
@@ -583,7 +588,7 @@ function JobRow({
               {actionTarget(job.action, actionHostName(job.action, hostNames))}
             </span>
           </span>
-        </Link>
+        </OpenableLink>
         <span className="job-last-fired" data-testid={`job-last-fired-${job.id}`}>
           {latest ? relativeTime(latest.ts) : 'never'}
         </span>
@@ -593,14 +598,15 @@ function JobRow({
           </span>
         ) : null}
         {chatId ? (
-          <Link
+          <OpenableLink
             to={`/chats/${chatId}`}
+            opens={{ kind: 'chat', chatId }}
             className="job-chat-link"
             data-testid={`job-chat-${job.id}`}
             title="Open chat"
           >
             open chat
-          </Link>
+          </OpenableLink>
         ) : null}
         <button
           type="button"
@@ -680,9 +686,13 @@ function InlineRuns({ jobId }: { jobId: string }): JSX.Element {
               <span className="run-when">{new Date(r.ts).toLocaleString()}</span>
               <span className={`run-status status-${r.status}`}>{r.status}</span>
               {r.action?.chatId ? (
-                <Link className="run-chat-link" to={`/chats/${r.action.chatId}`}>
+                <OpenableLink
+                  className="run-chat-link"
+                  to={`/chats/${r.action.chatId}`}
+                  opens={{ kind: 'chat', chatId: r.action.chatId }}
+                >
                   open chat
-                </Link>
+                </OpenableLink>
               ) : null}
               {r.error ? <span className="run-error">{r.error}</span> : null}
             </li>

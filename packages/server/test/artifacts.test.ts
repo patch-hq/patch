@@ -158,7 +158,7 @@ describe('artifacts', () => {
     }
   });
 
-  it('serves a `raw` publish with its own content-type and exact bytes, no CSP', async () => {
+  it('serves a `raw` publish with its own content-type and exact bytes, still sandboxed', async () => {
     const { built, hostLink } = await makeApp();
     try {
       const png = Buffer.from(
@@ -179,8 +179,97 @@ describe('artifacts', () => {
       const get = await built.app.inject({ method: 'GET', url: res.url! });
       expect(get.statusCode).toBe(200);
       expect(get.headers['content-type']).toBe('image/png');
-      expect(get.headers['content-security-policy']).toBeUndefined();
+      expect(get.headers['content-security-policy']).toBe(
+        'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox',
+      );
+      expect(get.headers['x-content-type-options']).toBe('nosniff');
       expect(get.rawPayload.equals(png)).toBe(true);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  // A raw publish carries an agent-chosen content-type. Served bare, a
+  // `text/html` one would run script in the SPA's own origin and could read the
+  // stored credential, so every response is sandboxed regardless of type.
+  it('sandboxes a raw publish that claims to be html, and never lets a type be sniffed', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab02',
+          html: undefined,
+          raw: {
+            contentType: 'text/html',
+            base64: Buffer.from('<script>1</script>').toString('base64'),
+          },
+        }),
+      );
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.statusCode).toBe(200);
+      expect(get.headers['content-security-policy']).toContain('sandbox');
+      expect(get.headers['x-content-type-options']).toBe('nosniff');
+      expect(get.headers['referrer-policy']).toBe('no-referrer');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('serves a html page with nosniff and no-referrer so the signed URL is not leaked', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const res = await publish(hostLink, publishRequest());
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.headers['x-content-type-options']).toBe('nosniff');
+      expect(get.headers['referrer-policy']).toBe('no-referrer');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('serves a raw publish carrying a filename as an attachment', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const bytes = Buffer.from('PK-fake-docx');
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab02',
+          html: undefined,
+          raw: {
+            contentType: 'application/msword',
+            base64: bytes.toString('base64'),
+            filename: 'Q3 report "final".docx',
+          },
+        }),
+      );
+      expect(res.ok).toBe(true);
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.statusCode).toBe(200);
+      expect(get.headers['content-type']).toBe('application/msword');
+      const disposition = String(get.headers['content-disposition']);
+      expect(disposition).toMatch(/^attachment;/);
+      expect(disposition).toContain("filename*=UTF-8''Q3%20report%20%22final%22.docx");
+      expect(get.rawPayload.equals(bytes)).toBe(true);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('sends no content-disposition for a raw publish without a filename', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab03',
+          html: undefined,
+          raw: { contentType: 'image/png', base64: Buffer.from('x').toString('base64') },
+        }),
+      );
+      const get = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(get.headers['content-disposition']).toBeUndefined();
     } finally {
       await built.app.close();
     }
@@ -348,6 +437,30 @@ describe('artifacts', () => {
     }
   });
   describe('access control', () => {
+    it('answers a browser navigation with a styled sign-in page, not JSON', async () => {
+      const { built, hostLink } = await makeApp();
+      try {
+        await publish(hostLink, publishRequest());
+        const base = '/api/chats/c1/artifact/a1';
+        const browser = await built.app.inject({
+          method: 'GET',
+          url: base,
+          headers: { accept: 'text/html,application/xhtml+xml' },
+        });
+        expect(browser.statusCode).toBe(401);
+        expect(browser.headers['content-type']).toContain('text/html');
+        expect(browser.body).toContain('Sign in to Patch');
+        expect(browser.body).toContain('patch.credential.v1');
+        expect(browser.body).toContain(`${base}/share`);
+        expect(browser.headers['content-security-policy']).toBeDefined();
+        // API clients still get the JSON error.
+        const api = await built.app.inject({ method: 'GET', url: base });
+        expect(api.statusCode).toBe(401);
+        expect(api.json()).toEqual({ error: 'unauthenticated' });
+      } finally {
+        await built.app.close();
+      }
+    });
     it('refuses an unsigned, mis-signed or tampered request', async () => {
       const { built, hostLink } = await makeApp();
       try {

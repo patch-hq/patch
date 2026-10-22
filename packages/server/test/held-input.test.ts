@@ -2,7 +2,7 @@
 // delivered when the host comes back. It has to survive a server restart.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -99,6 +99,22 @@ describe('messages held for an offline host', () => {
     const socket = new FakeSocket();
     makeLink(() => now).attach(socket as never, 'd1');
     expect(socket.sent).toEqual([]);
+  });
+
+  it('drops a message past the limit from memory and disk, not just from view', () => {
+    // all() hid an expired message but kept it, so a host that never came
+    // back left its messages in held-input.json for ever.
+    let now = 1_000;
+    const store = new HeldInputStore({ dataDir: dir, logger, now: () => now });
+    store.add('d1', 'srf-1', input('L1'));
+    now += HELD_INPUT_MAX_AGE_MS + 1;
+    store.add('d2', 'srf-1', input('L2'));
+    const onDisk = JSON.parse(readFileSync(join(dir, 'held-input.json'), 'utf8')) as {
+      hostId: string;
+    }[];
+    expect(onDisk.map((h) => h.hostId)).toEqual(['d2']);
+    const reloaded = new HeldInputStore({ dataDir: dir, logger, now: () => now });
+    expect(reloaded.all().map((h) => h.hostId)).toEqual(['d2']);
   });
 
   it('starts empty and says so when the held file is damaged', () => {

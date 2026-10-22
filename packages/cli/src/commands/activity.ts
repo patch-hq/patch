@@ -9,7 +9,7 @@
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
-import { emitJson, emitText, getTransport, run } from './_common.js';
+import { emitJson, emitText, getTransport, parseLimit, run } from './_common.js';
 
 interface ActivityMessage {
   chatId: string;
@@ -20,10 +20,36 @@ interface ActivityMessage {
   ts: number;
 }
 
+interface ActivityChatSession {
+  chatId: string;
+  chatName: string | null;
+  hostId: string;
+  folder: string;
+  start: number;
+  end: number;
+  durationMs: number;
+}
+
 interface ActivityResult {
   messages: ActivityMessage[];
   messagesTruncated: boolean;
   nextMessagesCursor?: number;
+  /** Present only with --sessions / --sessions-cursor. */
+  chatSessions?: ActivityChatSession[];
+  sessionsTruncated?: boolean;
+  nextSessionsCursor?: number;
+}
+
+/**
+ * A `--messages-cursor` value: the ms-epoch the server handed back with a
+ * truncated page, so a non-negative integer. Rejected here, with the flag
+ * named, rather than forwarded for the server to refuse opaquely.
+ */
+function parseCursor(raw: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`--messages-cursor must be a non-negative integer (got ${raw})`);
+  }
+  return Number(raw);
 }
 
 /** Accepts an ISO-8601 date/time, or a bare ms-epoch integer. */
@@ -43,6 +69,11 @@ export function registerActivityCommands(program: Command): void {
     .option('--since <when>', 'ISO-8601 or ms-epoch; default 24h before --until')
     .option('--until <when>', 'ISO-8601 or ms-epoch; default now')
     .option('--messages-cursor <ms>', 'resume a truncated messages page')
+    .option(
+      '--sessions',
+      'also return chat dwell sessions (chats open on a focused, visible surface)',
+    )
+    .option('--sessions-cursor <ms>', 'resume a truncated sessions page (implies --sessions)')
     .option('--limit <n>', 'max rows per list (server-capped)')
     .option('--json', 'JSON output')
     .action(
@@ -51,6 +82,8 @@ export function registerActivityCommands(program: Command): void {
           since?: string;
           until?: string;
           messagesCursor?: string;
+          sessions?: boolean;
+          sessionsCursor?: string;
           limit?: string;
         },
       ) => {
@@ -65,8 +98,14 @@ export function registerActivityCommands(program: Command): void {
           const params = new URLSearchParams();
           params.set('since', String(since));
           params.set('until', String(until));
-          if (opts.messagesCursor !== undefined) params.set('messagesCursor', opts.messagesCursor);
-          if (opts.limit !== undefined) params.set('limit', opts.limit);
+          // Validated client-side like every other --limit (parseLimit's
+          // contract), never forwarded as typed.
+          if (opts.messagesCursor !== undefined) {
+            params.set('messagesCursor', String(parseCursor(opts.messagesCursor)));
+          }
+          if (opts.sessions) params.set('includeSessions', 'true');
+          if (opts.sessionsCursor !== undefined) params.set('sessionsCursor', opts.sessionsCursor);
+          if (opts.limit !== undefined) params.set('limit', String(parseLimit(opts.limit)));
           if (t.kind === 'uds') {
             const callerChatId = process.env['PATCH_CHAT_ID'];
             if (!callerChatId) {
@@ -83,10 +122,20 @@ export function registerActivityCommands(program: Command): void {
             emitJson(res);
             return;
           }
-          if (res.messages.length === 0) {
+          const sessions = res.chatSessions ?? [];
+          if (res.messages.length === 0 && sessions.length === 0) {
             emitText('(no activity in this window)');
             return;
           }
+          for (const s of sessions) {
+            emitText(
+              `[open]    ${new Date(s.start).toISOString()}  ${Math.round(s.durationMs / 1000)}s  ${s.folder}  ${s.chatName ?? s.chatId}`,
+            );
+          }
+          if (res.sessionsTruncated)
+            emitText(
+              `(sessions truncated — resume with --sessions-cursor ${res.nextSessionsCursor})`,
+            );
           for (const m of res.messages) {
             emitText(`[sent]    ${new Date(m.ts).toISOString()}  ${m.folder}  ${m.text}`);
           }

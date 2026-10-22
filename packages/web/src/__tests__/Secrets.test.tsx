@@ -1,4 +1,4 @@
-// Settings → Keys → Secrets (spec/15 § Settings tab — Secrets).
+// Settings → Providers → Secrets (spec/15 § Settings tab — Secrets).
 //
 // Key/value pairs the host injects into chats, read from and written to
 // /api/secrets. Values are masked in the list and appear only in the editor; a
@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { KeysPage } from '../routes/settings/KeysPage.js';
+import { ProvidersPage } from '../routes/settings/ProvidersPage.js';
 import { useSettingsHostStore } from '../routes/settings/hostScope.js';
 import { ErrorToasts } from '../components/ErrorToasts.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
@@ -74,8 +74,8 @@ function renderPage(): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/settings/keys']}>
-        <KeysPage />
+      <MemoryRouter initialEntries={['/settings/providers']}>
+        <ProvidersPage />
         <ErrorToasts />
         <ConfirmModal />
       </MemoryRouter>
@@ -96,7 +96,7 @@ afterEach(() => {
   setActiveWs(null);
 });
 
-describe('Settings → Keys → Secrets', () => {
+describe('Settings → Providers → Secrets', () => {
   it('says Loading… until the list arrives', async () => {
     let release!: () => void;
     vi.stubGlobal(

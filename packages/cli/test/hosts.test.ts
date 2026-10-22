@@ -30,7 +30,6 @@ test('every hosts subcommand the spec names is registered', () => {
     'get',
     'add',
     'rename',
-    'set-home',
     'folders',
     'backends',
     'models',
@@ -83,13 +82,13 @@ test('folders has add and remove under it', () => {
   assert.ok(subs.includes('remove'));
 });
 
-test('claude-settings has get (default) and discard under it, both taking --host', () => {
+test('claude-settings has get (default) and set under it, both taking --host', () => {
   const claudeSettings = hostsCmd(build()).commands.find((c) => c.name() === 'claude-settings');
   assert.ok(claudeSettings);
   const subs = claudeSettings.commands.map((c) => c.name());
   assert.ok(subs.includes('get'));
-  assert.ok(subs.includes('discard'));
-  for (const name of ['get', 'discard']) {
+  assert.ok(subs.includes('set'));
+  for (const name of ['get', 'set']) {
     const cmd = claudeSettings.commands.find((c) => c.name() === name);
     assert.ok(cmd);
     assert.ok(
@@ -120,7 +119,7 @@ test('no hosts command changes a shared setting', () => {
 
 test('pickHost: an empty --host names no machine, even with one host registered', async () => {
   const { pickHost } = await import('../src/commands/hosts.js');
-  const hosts = [{ hostId: 'd-abc', hostName: 'mac', online: true, isHomeHost: true }];
+  const hosts = [{ hostId: 'd-abc', hostName: 'mac', online: true, runsManager: true }];
   assert.throws(() => pickHost(hosts, ''), /--host must not be empty/);
   assert.equal(pickHost(hosts, 'mac'), 'd-abc');
   assert.equal(pickHost(hosts, 'd-a'), 'd-abc');

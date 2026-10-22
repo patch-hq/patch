@@ -67,6 +67,13 @@ const CLAUDE_NATIVE_TOOLS = new Set([
   'ExitPlanMode',
 ]);
 
+/** An `mcp__` tool is reconstructed as a real tool_use/tool_result pair too:
+ * history blocks need not resolve against the session's current tool list, and
+ * text stand-ins render as raw lines in the transcript. */
+function isClaudeTool(tool: string): boolean {
+  return CLAUDE_NATIVE_TOOLS.has(tool) || tool.startsWith('mcp__');
+}
+
 export interface TrackEntry {
   record: { seq: number; at: number };
   event: LoggedEvent;
@@ -147,7 +154,7 @@ export function toClaudeSessionEntries(
         },
       });
     } else if (event.type === 'chat.tool_call') {
-      if (CLAUDE_NATIVE_TOOLS.has(event.tool)) {
+      if (isClaudeTool(event.tool)) {
         push(record.seq, {
           type: 'assistant',
           timestamp,
@@ -167,7 +174,7 @@ export function toClaudeSessionEntries(
         });
       }
     } else if (event.type === 'chat.tool_result') {
-      if (CLAUDE_NATIVE_TOOLS.has(event.tool)) {
+      if (isClaudeTool(event.tool)) {
         push(record.seq, {
           type: 'user',
           timestamp,

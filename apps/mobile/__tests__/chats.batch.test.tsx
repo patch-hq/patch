@@ -55,7 +55,7 @@ vi.mock('../src/api/rest', () => ({
       deleted: 0,
       automations: 0,
     }),
-    listArchivedChats: vi.fn().mockResolvedValue({ chats: [] }),
+    listArchivedChats: vi.fn().mockResolvedValue({ chats: [], nextOffset: null }),
     listHiddenChats: vi.fn().mockResolvedValue({ chats: [] }),
     archiveChat: archiveChatSpy,
     pinChat: pinChatSpy,
@@ -275,8 +275,8 @@ describe('Unread option (spec/15 § Needs attention)', () => {
         row({ chatId: 'done-row', folder: 'work', lastUpdated: 100 }),
         row({ chatId: 'read-row', folder: 'work', lastUpdated: 1 }),
       ]);
-    // Mark "read-row" as read (visited after its last update) and leave
-    // "done-row" unread (lastUpdated stays ahead of the default lastVisitedAt 0).
+    // Mark "read-row" as read (visited) and leave
+    // "done-row" unread (unvisited, so its seq is ahead of the read mark).
     useChatStore.getState().setActiveChat('read-row');
     useChatStore.getState().setActiveChat(null);
     const r = renderRN(<ChatsScreen />);
@@ -355,7 +355,7 @@ describe('State filter options (Working / Waiting on you / Failed)', () => {
       .getState()
       .hydrate([
         row({ chatId: 'working-row', folder: 'work', activity: 'running' }),
-        row({ chatId: 'idle-row', folder: 'work' }),
+        row({ chatId: 'idle-row', folder: 'work', lastUpdated: 1 }),
       ]);
     const r = renderRN(<ChatsScreen />);
     selectView(r, 'working');

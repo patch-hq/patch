@@ -59,27 +59,9 @@ function definedOnly(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 }
 
+/** The one browser tool that is always listed; calling it enables the others. */
+const BROWSER_ENTRY_TOOL = 'patch_browser_open';
 const TAB_ID_PARAM = 'The tabId returned by patch_browser_open (or listed by patch_browser_tabs).';
-const JOB_ID_PARAM = "The job's id (from patch_job_list).";
-const JOB_LIMIT_PARAM =
-  'Max entries to return, newest first. Default 50; above 200 is clamped to 200.';
-const JOB_ACTION_PARAM =
-  'What a fire does — one of four shapes. Every one except script needs a `prompt`, a `skill`, or both (the first user turn). ' +
-  '{type:"spawn", hostId, folder, prompt?, skill?, model?, permissionMode?, startHidden?, notifyOnComplete?, includePayload?, goal?} starts a fresh chat in `folder` on machine `hostId` each fire. ' +
-  '{type:"continue", hostId, folder, prompt?, skill?, key?, model?, startHidden?, notifyOnComplete?, includePayload?, goal?} messages ONE durable chat, creating it on the first fire; `key` (a mustache template such as "{{payload.event_data.id}}") gives each distinct subject its own chat, unkeyed means one chat for every fire. ' +
-  '{type:"message", chatId, prompt?, skill?, includePayload?} delivers into an existing chat, which supplies its own host, folder and model. ' +
-  '{type:"script", hostId, folder, command, timeoutMs?} runs a shell command with no chat or agent turn (timeoutMs 1000-600000, default 60000). ' +
-  "includePayload:false stops a todoist/webhook fire's event JSON being appended after the prompt (default: appended). " +
-  'hostId comes from patch_list_chats. An unknown field or shape is rejected with the reason.';
-const JOB_TRIGGER_PARAM =
-  'What fires the job — one of five shapes. {type:"follows", jobId, on?:"success"|"any"} fires after another job\'s run settles (default: only on success). {type:"cron", expression, timezone?} and {type:"recurrence", rrule, timezone} are described in the tool description. ' +
-  '{type:"webhook", scheme, secret?, path?} fires on an inbound HTTP POST to the job\'s own URL (unguessable, derived from the jobId); `scheme` is "none", "hmac-sha256", "github", "stripe" or "todoist" and picks how the signature is checked, `secret` is the shared secret and is required for every scheme but "none", `path` is only a label. ' +
-  'Todoist is not a trigger of its own: use scheme "todoist" with the Todoist app\'s client secret as `secret`, and narrow it with the job-level JSONata `filter`. Todoist\'s one callback URL is `/api/webhooks/todoist`, which fans out to every such job.';
-const JOB_FILTER_PARAM =
-  "Optional JSONata expression evaluated against the trigger's payload; a fire only proceeds when it is truthy. Use gate instead for a question about the world rather than the payload.";
-const JOB_CONCURRENCY_PARAM =
-  'Max simultaneous fires of this job (at least 1). Prefer queueing, which also supports a per-key limit; the two cannot be combined.';
-
 /**
  * Build the MCP server with the full patch tool catalogue. Caller wires it
  * to a transport (stdio in production, in-memory pair in tests).
@@ -95,6 +77,29 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   );
   const callerChatId = opts.chatId;
   const callerBranchId = opts.branchId;
+
+  // The browser toolset is ~25 tools most sessions never touch, so only
+  // `patch_browser_open` is listed up front. Calling it switches the rest on
+  // (the server tells the client the tool list changed); until then they do
+  // not exist for the session.
+  const gatedBrowserTools: Array<{ enable: () => void }> = [];
+  const registerTool = server.registerTool.bind(server) as typeof server.registerTool;
+  server.registerTool = ((name: string, ...rest: unknown[]) => {
+    const tool = (
+      registerTool as (n: string, ...r: unknown[]) => { enable: () => void; disable: () => void }
+    )(name, ...rest);
+    if (name.startsWith('patch_browser_') && name !== BROWSER_ENTRY_TOOL) {
+      tool.disable();
+      gatedBrowserTools.push(tool);
+    }
+    return tool;
+  }) as typeof server.registerTool;
+  let browserEnabled = false;
+  const enableBrowserTools = (): void => {
+    if (browserEnabled) return;
+    browserEnabled = true;
+    for (const t of gatedBrowserTools) t.enable();
+  };
 
   function uds<T>(req: UdsRequestOptions): Promise<T> {
     return udsRequest<T>(opts.hostSocketPath, { ...req, localKey: opts.localKey });
@@ -294,18 +299,20 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_spawn',
     {
       description:
-        "Create a brand-new persistent chat in a folder, optionally on ANOTHER machine. Returns the new chatId and the machine it was created on; a spawn the target machine refuses (unknown folder, no model catalogue there) fails with that machine's own reason, so a result you get back is a chat that really exists. Use when the user wants a new long-lived, user-visible chat as an artifact — not for work that should finish inside this turn. `host` is the hostId of the machine to create it on (see patch_list_chats for which machines chats live on); omitted means this machine. `model` is optional — the target machine picks its own last-used model.",
+        "Create a brand-new persistent chat in a folder, optionally on ANOTHER machine. Returns the new chatId and the machine it was created on; a spawn the target machine refuses (unknown folder, no model catalogue there) fails with that machine's own reason, so a result you get back is a chat that really exists. Use when the user wants a new long-lived, user-visible chat as an artifact — not for work that should finish inside this turn. `host` is the hostId of the machine to create it on (see patch_list_chats for which machines chats live on); omitted means this machine. `model` is optional — the target machine picks its own last-used model. `account` is optional — the id or label of the stored Claude/ChatGPT account the chat starts on (see patch_list_accounts); omitted, the chat runs on whichever account is first in the shared order. An account the machine does not hold is refused, never ignored.",
       inputSchema: {
         folder: z.string().min(1),
         host: z.string().min(1).optional(),
         name: z.string().min(1).optional(),
         prompt: z.string().min(1).optional(),
         model: z.string().min(1).optional(),
+        account: z.string().min(1).optional(),
       },
     },
-    async ({ folder, host, name, prompt, model }) => {
+    async ({ folder, host, name, prompt, model, account }) => {
       const body: Record<string, unknown> = { folder, callerChatId };
       if (host !== undefined) body['host'] = host;
+      if (account !== undefined) body['account'] = account;
       if (model !== undefined) body['model'] = model;
       if (name !== undefined) body['name'] = name;
       if (prompt !== undefined) body['prompt'] = prompt;
@@ -329,6 +336,20 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
             : `patch_spawn failed, no chat was created: ${message}`,
         );
       }
+    },
+  );
+
+  // ---- patch_list_accounts ------------------------------------------------
+  server.registerTool(
+    'patch_list_accounts',
+    {
+      description:
+        "List the shared Claude and ChatGPT accounts every machine draws from, in the order a chat with no account of its own tries them, with each backend's routing strategy. Each account has an `id` and a `label` — either is accepted as `account` on patch_spawn. Reordering is a CLI job (`patch accounts order`).",
+      inputSchema: {},
+    },
+    async () => {
+      const res = await uds<unknown>({ method: 'GET', path: '/internal/accounts' });
+      return toolResult(res);
     },
   );
 
@@ -471,6 +492,8 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         'background and, once it exits, delivers a `[watch]`-prefixed message into THIS chat as a new ' +
         'turn (survives a host restart either way — the task keeps running and is re-attached). Use ' +
         'for anything that takes longer than you want to wait: a build, a long test run, a download. ' +
+        "Every line the command prints is its progress: the last one shows in the user's task strip, so print short status lines. " +
+        'A `timeoutSec` is required, and every hour you are sent a check-in asking whether it is still working as intended. ' +
         "`cwd` defaults to this chat's own folder.",
       inputSchema: {
         command: z.string().min(1),
@@ -480,11 +503,32 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .describe(
             'Short human label for what this task is, shown in patch_watch_list and the chat.',
           ),
+        timeoutSec: z
+          .number()
+          .int()
+          .positive()
+          .describe(
+            'REQUIRED maximum run time in seconds. The host kills the task when it is exceeded. Pick a realistic ceiling, not a huge one.',
+          ),
+        checkInMinutes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            'How often, in minutes, you are sent a check-in while this runs. Omit for the default (an hour). A long wait warrants a longer interval, e.g. a 10-hour wait every 5 hours.',
+          ),
         cwd: z.string().min(1).optional(),
       },
     },
-    async ({ command, description, cwd }) => {
-      const body: Record<string, unknown> = { chatId: callerChatId, command, description };
+    async ({ command, description, timeoutSec, checkInMinutes, cwd }) => {
+      const body: Record<string, unknown> = {
+        chatId: callerChatId,
+        command,
+        description,
+        timeoutSec,
+        ...(checkInMinutes !== undefined ? { checkInSec: checkInMinutes * 60 } : {}),
+      };
       if (cwd !== undefined) body['cwd'] = cwd;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/watch', body });
       return toolResult(res);
@@ -604,7 +648,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_browser_open',
     {
       description:
-        'Open a URL in a REAL browser on this host (Chrome/Chromium, never headless, a normal fingerprint with no automation flags) and return a tabId for the other patch_browser_* tools. `profile` (default "logged-in") picks which cookies it carries: "logged-in" is the ONE persistent profile shared by every chat on this host, so a site logged into once stays logged in; "logged-out" is a throwaway profile with no cookies, for a task that must run signed out. Fails clearly, with no fallback to another browser, if the host has no browser component installed. Use patch_browser_read next to see the page.',
+        'Open a URL in a REAL browser on this host (Chrome/Chromium, never headless, a normal fingerprint with no automation flags) and return a tabId for the other patch_browser_* tools. `profile` (default "logged-in") picks which cookies it carries: "logged-in" is the ONE persistent profile shared by every chat on this host, so a site logged into once stays logged in; "logged-out" is a throwaway profile with no cookies, for a task that must run signed out. Fails clearly, with no fallback to another browser, if the host has no browser component installed. This is the entry point to the browser: the rest of the patch_browser_* tools (read, click, type, navigate, screenshot, …) are switched on for the session by the first successful call here. Use patch_browser_read next to see the page. The user can watch any tab live and take it over at any time: while they drive it your patch_browser_* calls on that tab wait, and when they hand it back the call that waited fails with `user_was_driving` — read the page again before acting, because they may have changed it.',
       inputSchema: {
         url: z.string().min(1),
         profile: z.enum(['logged-in', 'logged-out']).optional(),
@@ -614,6 +658,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       const body: Record<string, unknown> = { chatId: callerChatId, url };
       if (profile !== undefined) body['profile'] = profile;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/browser/open', body });
+      enableBrowserTools();
       return toolResult(res);
     },
   );
@@ -829,16 +874,18 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_browser_handoff',
     {
       description:
-        'Hand a browser tab to the user so THEY can do what you must not or cannot: type a password, pass 2FA, solve a captcha, approve an OAuth consent screen. The user sees the tab live in this chat, clicks and types into it, and taps Done; this call blocks until they do (or decline, or `timeoutSeconds` passes, default 600) and returns { outcome: done|cancelled|timeout|tab_closed|callback, url }. What they see and type is NEVER shown to you, and `url` has its query and fragment removed. While the hand-off is open every other patch_browser_* tool refuses that tab. Afterwards call patch_browser_read to see where the page ended up. For an OAuth flow whose redirect is http://localhost:<port>/…, pass that port as `callbackPort` (the process listening on it must already be running on this host): the redirect is delivered to it for you without you ever seeing the authorization code, and the hand-off ends with outcome `callback`. `reason` is shown to the user — say plainly what they need to do.',
+        'Hand a browser tab to the user so THEY can do what you must not or cannot: type a password, pass 2FA, solve a captcha, approve an OAuth consent screen. The user sees the tab live in this chat, clicks and types into it, and taps Done; this call blocks until they do (or decline, or `timeoutSeconds` passes, default 600) and returns { outcome: done|cancelled|timeout|tab_closed|callback, url }. What they see and type is NEVER shown to you, and `url` has its query and fragment removed. While the hand-off is open every other patch_browser_* tool refuses that tab. Afterwards call patch_browser_read to see where the page ended up. For an OAuth flow whose redirect is http://localhost:<port>/…, pass that port as `callbackPort` (the process listening on it must already be running on this host): the redirect is delivered to it for you without you ever seeing the authorization code, and the hand-off ends with outcome `callback`. `reason` is shown to the user — say plainly what they need to do. To let the user LOOK at a page for review (a local app on this headless host, say) set `share: true`: the call returns at once with { shared, handoffId, url }, the tab stays open to them with no timeout, you keep full use of the tab and see its content as usual, and their feedback arrives as ordinary chat messages. It ends when they close the view or the tab closes; do not combine with `callbackPort` or `timeoutSeconds`.',
       inputSchema: {
         tabId: z.string().min(1).describe(TAB_ID_PARAM),
         reason: z.string().min(1),
         callbackPort: z.number().int().min(1).max(65535).optional(),
         timeoutSeconds: z.number().int().min(10).max(3600).optional(),
+        share: z.boolean().optional(),
       },
     },
-    async ({ tabId, reason, callbackPort, timeoutSeconds }) => {
+    async ({ tabId, reason, callbackPort, timeoutSeconds, share }) => {
       const body: Record<string, unknown> = { chatId: callerChatId, tabId, reason };
+      if (share !== undefined) body['share'] = share;
       if (callbackPort !== undefined) body['callbackPort'] = callbackPort;
       if (timeoutSeconds !== undefined) body['timeoutSeconds'] = timeoutSeconds;
       const res = await uds<unknown>({
@@ -1105,7 +1152,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_list_chats',
     {
       description:
-        "List all chats the user has, ACROSS every machine on the account. Each entry names the machine it lives on (hostId). Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
+        "List all chats the user has, ACROSS every machine on the account, identically whichever machine a chat lives on. Each entry has chatId, hostId, name, folder, status, activity, pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
       inputSchema: { archived: z.enum(['only', 'include']).optional() },
     },
     async ({ archived }) => {
@@ -1121,50 +1168,67 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     },
   );
 
+  // ---- patch_search_chats --------------------------------------------------
+  server.registerTool(
+    'patch_search_chats',
+    {
+      description:
+        'Search every chat on the account, on ANY machine, through the Patch server. Case-insensitive substring match on chat name, folder, status summary and message text. Returns { results, truncated, chatsWithoutLog }: results are best first (name matches outrank body matches, then most recent), each with chatId, hostId, name, folder, status, matchedIn and up to three message excerpts (seq, role, text). chatsWithoutLog counts chats the server holds no message log for — those were matched on metadata only, so a miss is not proof a chat never said it. Follow up with patch_history for the full chat. Read-only.',
+      inputSchema: {
+        query: z
+          .string()
+          .min(1)
+          .describe('Text to find in chat names, folders, summaries and messages.'),
+        limit: z.number().int().positive().max(100).optional().describe('Max chats, default 20.'),
+      },
+    },
+    async ({ query, limit }) => {
+      const params = new URLSearchParams();
+      params.set('callerChatId', callerChatId);
+      params.set('query', query);
+      if (limit !== undefined) params.set('limit', String(limit));
+      const res = await uds<unknown>({
+        method: 'GET',
+        path: `/internal/search-chats?${params.toString()}`,
+      });
+      return toolResult(res);
+    },
+  );
+
   // ---- patch_activity ------------------------------------------------------
   server.registerTool(
     'patch_activity',
     {
       description:
-        "Read the USER'S OWN messages for a window — not agent output, which is already reachable via patch_peek/patch_history. Returns { messages, messagesTruncated, nextMessagesCursor? }. messages are role='user' turns, oldest first, across every host (chatId, chatName, hostId, folder, text, ts — ms-epoch, kind?). `kind` is absent when a person actually typed the message (composer, voice, a fork/side message); otherwise it names what the host fired on its own behalf instead: 'job' (a job's fire into an existing chat), 'hook' (an agent-response hook's resubmit), 'goal' (a goal evaluator's not-met resubmit), or 'machine' (a self-wake, a Manager-sweep nudge/wake, a patch_delegate relay, a `patch chats send-to` from the CLI, a cut-off turn re-sent as 'Carry on' after a host restart, or the todo list advancing — e.g. the 'Carry on'/'Checking in — still working?' lines a stalled chat gets nudged with). Filter on `kind` being absent to see only what a person wrote. `since`/`until` are ms-epoch and the window is capped server-side (30 days) regardless of what you ask for. If `messagesTruncated` is true, re-call with `nextMessagesCursor` as `messagesCursor` (same since/until) to continue. Read-only.",
+        "Read the USER'S OWN messages for a window — not agent output, which is already reachable via patch_peek/patch_history. Returns { messages, messagesTruncated, nextMessagesCursor? }. messages are role='user' turns, oldest first, across every host (chatId, chatName, hostId, folder, text, ts — ms-epoch, kind?). `kind` is absent when a person actually typed the message (composer, voice, a fork/side message); otherwise it names what the host fired on its own behalf instead: 'job' (a job's fire into an existing chat), 'hook' (an agent-response hook's resubmit), 'goal' (a goal evaluator's not-met resubmit), or 'machine' (a self-wake, a Manager-sweep nudge/wake, a patch_delegate relay, a `patch chats send-to` from the CLI, a cut-off turn re-sent as 'Carry on' after a host restart, or the todo list advancing — e.g. the 'Carry on'/'Checking in — still working?' lines a stalled chat gets nudged with). Filter on `kind` being absent to see only what a person wrote. `since`/`until` are ms-epoch and the window is capped server-side (30 days) regardless of what you ask for. If `messagesTruncated` is true, re-call with `nextMessagesCursor` as `messagesCursor` (same since/until) to continue. Pass includeSessions:true to ALSO get the user's chat dwell time: `chatSessions` (chatId, chatName, hostId, folder, start, end, durationMs — ms-epoch) are periods a chat was open on a FOCUSED, VISIBLE surface, with `sessionsTruncated` and `nextSessionsCursor?`; page it with `sessionsCursor` (independent of messagesCursor — a list that was not truncated is re-read from `since`). Without includeSessions the result has no session fields. Read-only.",
       inputSchema: {
         since: z.number().int().nonnegative(),
         until: z.number().int().nonnegative(),
         messagesCursor: z.number().int().nonnegative().optional(),
+        includeSessions: z.boolean().optional(),
+        sessionsCursor: z.number().int().nonnegative().optional(),
         limit: z
           .number()
           .int()
           .positive()
           .max(500)
           .optional()
-          .describe('Max messages per page, up to 500; page on with messagesCursor.'),
+          .describe('Max rows per list per page, up to 500; page on with messagesCursor.'),
       },
     },
-    async ({ since, until, messagesCursor, limit }) => {
+    async ({ since, until, messagesCursor, includeSessions, sessionsCursor, limit }) => {
       const params = new URLSearchParams();
       params.set('callerChatId', callerChatId);
       params.set('since', String(since));
       params.set('until', String(until));
       if (messagesCursor !== undefined) params.set('messagesCursor', String(messagesCursor));
+      if (includeSessions !== undefined) params.set('includeSessions', String(includeSessions));
+      if (sessionsCursor !== undefined) params.set('sessionsCursor', String(sessionsCursor));
       if (limit !== undefined) params.set('limit', String(limit));
       const res = await uds<unknown>({
         method: 'GET',
         path: `/internal/activity?${params.toString()}`,
       });
-      return toolResult(res);
-    },
-  );
-
-  // ---- patch_list_devices -------------------------------------------------
-  server.registerTool(
-    'patch_list_devices',
-    {
-      description:
-        'List the registered physical voice devices (HA Voice PE units) with live presence: deviceId, name, online, muted, lastUsedAt. Use to pick a deviceId for patch_speak({ message, deviceId }) or to check which speaker is currently reachable. Read-only.',
-      inputSchema: {},
-    },
-    async () => {
-      const res = await uds<unknown>({ method: 'GET', path: '/internal/devices' });
       return toolResult(res);
     },
   );
@@ -1339,6 +1403,31 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   );
 
   server.registerTool(
+    'patch_meeting_notes',
+    {
+      description:
+        'Change the notes of the meeting running in this chat, when the user asks you to. op "add_point" adds a point (title is "<Speaker>: the main thrust", optional bullets, decided); op "edit_point" rewrites a point by topicId (the id in the meeting context); op "add_research" appends researched bullets to a point, with source {name,url}; op "set_summary" rewrites the summary. Any figure must carry the source you read it from: without one the call is refused. The user sees a chip on your reply saying what changed, so say it in a line too. Fails when this chat has no meeting or the point does not exist.',
+      inputSchema: {
+        op: z.enum(['add_point', 'edit_point', 'add_research', 'set_summary']),
+        title: z.string().min(1).optional(),
+        topicId: z.string().min(1).optional(),
+        bullets: z.array(z.string().min(1)).max(3).optional(),
+        decided: z.boolean().optional(),
+        headline: z.string().min(1).optional().describe('Replacement summary for set_summary.'),
+        source: z.object({ name: z.string().min(1), url: z.string().url() }).optional(),
+      },
+    },
+    async (args) =>
+      toolResult(
+        await uds({
+          method: 'POST',
+          path: '/internal/meeting-notes',
+          body: { callerChatId, edit: definedOnly(args) },
+        }),
+      ),
+  );
+
+  server.registerTool(
     'patch_pad_list',
     {
       description:
@@ -1368,7 +1457,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'view_file',
     {
       description:
-        "Show a file to the USER, inline in the chat. The opposite of Read: Read pulls a file into YOUR context to work on; view_file puts it on the user's screen and returns only a short ack, so the contents never enter your context. Use it whenever you want them to LOOK at something — a screenshot or diagram you made or found, a chart, a rendered HTML page, a PDF. Images (.png .jpg .jpeg .gif .webp .svg) render as a picture; .pdf renders in a viewer; .html renders as a live page. Images and PDFs 1.4 MB max, pages 2 MB max. file_path may be absolute or relative to the chat folder, but must resolve inside it. Returns { kind, url, name } — having shown it, do not also Read it back to describe it unless asked; they can see it.",
+        "Show a file to the USER, inline in the chat. The opposite of Read: Read pulls a file into YOUR context to work on; view_file puts it on the user's screen and returns only a short ack, so the contents never enter your context. Use it whenever you want them to LOOK at something — a screenshot or diagram you made or found, a chart, a rendered HTML page, a PDF, or a document you made for them. Images (.png .jpg .jpeg .gif .webp .svg) render as a picture; .pdf renders in a viewer; .html renders as a live page; Word/Excel/PowerPoint/OpenDocument, .rtf .epub .csv .tsv .txt .md .json and .zip show as a download card (name, size, download link) — use that to hand over a file you produced instead of telling them a path. Images, PDFs and files 7 MB max, pages 2 MB max. file_path may be absolute or relative to the chat folder, but must resolve inside it. Returns { kind, url, name } — having shown it, do not also Read it back to describe it unless asked; they can see it.",
       inputSchema: {
         file_path: z.string().min(1),
       },
@@ -1399,317 +1488,6 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       if (chatId !== undefined) body['chatId'] = chatId;
       if (message !== undefined) body['message'] = message;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/call', body });
-      return toolResult(res);
-    },
-  );
-
-  // ---- patch_job_list -----------------------------------------------------
-  server.registerTool(
-    'patch_job_list',
-    {
-      description:
-        "List the user's persistent jobs (cross-session automations). Each job has a trigger (cron/recurrence/webhook/todoist) and an action (spawn/continue/message/script).",
-      inputSchema: {},
-    },
-    async () => {
-      const res = await uds<unknown>({ method: 'GET', path: '/internal/jobs' });
-      return toolResult(res);
-    },
-  );
-
-  // ---- patch_job_create ---------------------------------------------------
-  // spec/08 § Gate. Written once and used by create and update so the two can
-  // never describe the same field differently.
-  const GATE_TOOL_DESCRIPTION =
-    'A shell command asked BEFORE each fire, which decides whether the action runs at all: ' +
-    '{hostId, folder, command, timeoutMs?}. `exit 0` runs the action. `exit 1` holds it, and MUST ' +
-    "print why on stdout — that line becomes the run's headline. Any other exit code, a bare `exit 1` " +
-    'with nothing printed, or a timeout is a FAULT and is recorded loudly, because a gate that has ' +
-    'quietly stopped deciding otherwise looks exactly like a quiet week. Use one for a watcher that ' +
-    'should cost nothing on most fires (is there a new photo, is anything due) rather than spawning a ' +
-    'chat to discover there is no work. `null` removes a gate.';
-  // spec/08 § Run window.
-  const RUN_WINDOW_TOOL_DESCRIPTION =
-    "Hours the job may START a fire: {start:'HH:MM', end:'HH:MM', timezone:'<IANA zone>'}, 24-hour wall-clock, start inclusive, end exclusive; an end earlier than the start wraps midnight (22:00-06:00). A fire arriving outside the window is held and runs when it next opens - e.g. a task that arrives at night runs in the morning. A manual run ignores it. On update, null removes the window.";
-  // spec/08 § Autonomy prompt. Written once and used by create and update so
-  // the two can never describe the field differently.
-  const QUEUEING_TOOL_DESCRIPTION =
-    'How this job\'s fires relate to each other. One of: { mode: "parallel" } (every fire runs at once — the default); { mode: "queue", concurrency?: N (default 1), key?: mustache template } (fires wait their turn N at a time; with a key the limit applies per subject, e.g. "{{event_data.id}}", and a key that renders empty is refused); { mode: "append", idleTimeoutMs?, resetAfterMs?, resetAfterMessages? } (every fire is delivered into one durable chat — action type "continue" only — which starts afresh after it has been idle that long, has lived that long, or has been sent that many fires). Do not combine with `concurrency`.';
-
-  const AUTONOMY_PROMPT_TOOL_DESCRIPTION =
-    'Text prepended to this job’s first user-turn, replacing the account-wide autonomy prompt ' +
-    '(set once in Settings → Jobs; by default "You are running autonomously, don’t stop to ask ' +
-    'the user questions"). Every job fires unattended, so every fire carries one — there is no ' +
-    'way to turn it off, only to override it for this job. Omit to use the account-wide one.';
-  server.registerTool(
-    'patch_job_create',
-    {
-      description:
-        "Create a persistent job. Use for cross-session automations: 'every weekday 7am, spawn a fresh bus-watch chat'. For a same-conversation reminder use patch_wake_me (or patch_loop for a fixed-cadence repeat) instead — those end this turn and re-invoke THIS chat; a job always spawns or messages a chat independently of this turn. " +
-        "A cron trigger is {type:'cron', expression:'<5-field cron>', timezone:'<IANA zone>'}: write the expression in the user's OWN wall-clock time and name their zone (e.g. 'Europe/London') — it is evaluated there and tracks DST. Omit `timezone` only if you mean UTC. " +
-        "For a schedule cron cannot express — an nth-weekday or a date-range pattern like 'every 3rd Sunday, May through August' — use a recurrence trigger instead: {type:'recurrence', rrule:'<bare RRULE value, e.g. FREQ=MONTHLY;BYDAY=SU;BYSETPOS=3;BYMONTH=5,6,7,8;BYHOUR=9;BYMINUTE=0>', timezone:'<IANA zone>'}. No `RRULE:` label and no `DTSTART` — timezone is REQUIRED here (unlike cron's optional one).",
-      inputSchema: {
-        trigger: z.unknown().describe(JOB_TRIGGER_PARAM),
-        action: z.unknown().describe(JOB_ACTION_PARAM),
-        filter: z.string().min(1).optional().describe(JOB_FILTER_PARAM),
-        gate: z.unknown().optional().describe(GATE_TOOL_DESCRIPTION),
-        name: z.string().min(1).optional(),
-        concurrency: z.number().int().min(1).optional().describe(JOB_CONCURRENCY_PARAM),
-        queueing: z.unknown().optional().describe(QUEUEING_TOOL_DESCRIPTION),
-        window: z.unknown().optional().describe(RUN_WINDOW_TOOL_DESCRIPTION),
-        oneOff: z
-          .boolean()
-          .optional()
-          .describe(
-            'Run once, then expire. The first fire that the host confirms landed disables the job and stamps it expired; it stays visible (folded away in the Jobs view) so its run and its chat remain reachable. Use this for a single-purpose job — "when the parcel webhook arrives, spawn a chat about it" — rather than leaving a spent job enabled for ever. A fire that fails to dispatch does NOT expire it, so it will try again. To re-invoke THIS chat later, use patch_wake_me instead: it is still the right tool for an in-chat reminder.',
-          ),
-        wakeHost: z
-          .boolean()
-          .optional()
-          .describe(
-            "macOS hosts on AC power only: have the job's host schedule a wake from sleep a minute before each cron fire, so a closed lid does not hold the run. Needs passwordless `sudo pmset`; a host that cannot schedule it reports why in a notification.",
-          ),
-        group: z
-          .string()
-          .optional()
-          .describe(
-            'Optional free-text group name for organising this job in the Jobs view, e.g. "Home", "Finance", "Watchers". Purely organisational — never affects whether or how the job fires.',
-          ),
-        autonomyPrompt: z.string().min(1).optional().describe(AUTONOMY_PROMPT_TOOL_DESCRIPTION),
-      },
-    },
-    async ({
-      trigger,
-      action,
-      filter,
-      gate,
-      name,
-      concurrency,
-      queueing,
-      window,
-      oneOff,
-      wakeHost,
-      group,
-      autonomyPrompt,
-    }) => {
-      const body: Record<string, unknown> = { trigger, action };
-      if (filter !== undefined) body['filter'] = filter;
-      if (gate !== undefined) body['gate'] = gate;
-      if (name !== undefined) body['name'] = name;
-      if (concurrency !== undefined) body['concurrency'] = concurrency;
-      if (queueing !== undefined) body['queueing'] = queueing;
-      // `null` removes the window on update; omitting the key leaves it.
-      if (window !== undefined) body['window'] = window;
-      if (oneOff !== undefined) body['oneOff'] = oneOff;
-      if (wakeHost !== undefined) body['wakeHost'] = wakeHost;
-      if (group !== undefined) body['group'] = group;
-      if (autonomyPrompt !== undefined) body['autonomyPrompt'] = autonomyPrompt;
-      const res = await uds<unknown>({ method: 'POST', path: '/internal/jobs', body });
-      return toolResult(res);
-    },
-  );
-
-  // ---- patch_job_update ---------------------------------------------------
-  server.registerTool(
-    'patch_job_update',
-    {
-      description:
-        'Patch fields of an existing job. Pass only the fields to change. ' +
-        "`trigger` is replaced wholesale, not merged — re-send a cron trigger's `timezone` alongside its `expression` or the job silently reverts to being evaluated in UTC.",
-      inputSchema: {
-        jobId: z.string().min(1).describe(JOB_ID_PARAM),
-        trigger: z.unknown().optional().describe(JOB_TRIGGER_PARAM),
-        action: z.unknown().optional().describe(JOB_ACTION_PARAM),
-        filter: z.string().min(1).optional().describe(JOB_FILTER_PARAM),
-        gate: z.unknown().optional().describe(GATE_TOOL_DESCRIPTION),
-        name: z.string().min(1).optional(),
-        enabled: z
-          .boolean()
-          .optional()
-          .describe(
-            'true re-enables the job, false pauses it (same as patch_job_enable / patch_job_disable).',
-          ),
-        /** `null` removes the limit; omitted leaves it as it is. */
-        concurrency: z
-          .number()
-          .int()
-          .min(1)
-          .nullable()
-          .optional()
-          .describe(JOB_CONCURRENCY_PARAM + ' null clears it.'),
-        queueing: z
-          .unknown()
-          .optional()
-          .describe(`${QUEUEING_TOOL_DESCRIPTION} \`null\` removes it (back to parallel).`),
-        window: z.unknown().optional().describe(RUN_WINDOW_TOOL_DESCRIPTION),
-        oneOff: z
-          .boolean()
-          .optional()
-          .describe(
-            'Make this job run once and then expire, or (false) make a one-off job recurring again. Clearing it does not un-expire a job that has already fired — setting `enabled: true` is what re-arms one for another single fire.',
-          ),
-        archived: z
-          .boolean()
-          .optional()
-          .describe(
-            'Put this job away, or (false) bring it back. An archived job does not fire at all and folds out of the jobs list, keeping its run history. Separate from `enabled`, which it never changes — un-archiving restores the job exactly as it was.',
-          ),
-        wakeHost: z
-          .boolean()
-          .optional()
-          .describe(
-            "macOS hosts on AC power only: have the job's host schedule a wake from sleep a minute before each cron fire, so a closed lid does not hold the run. Needs passwordless `sudo pmset`; a host that cannot schedule it reports why in a notification.",
-          ),
-        group: z
-          .string()
-          .optional()
-          .describe(
-            'Change or clear this job\'s free-text organisational group. `""` clears it to ungrouped. Purely organisational — never affects whether or how the job fires.',
-          ),
-        /** `null` clears back to the default; omitted leaves it as it is. */
-        autonomyPrompt: z
-          .string()
-          .min(1)
-          .nullable()
-          .optional()
-          .describe(`${AUTONOMY_PROMPT_TOOL_DESCRIPTION} \`null\` clears a custom one back to it.`),
-      },
-    },
-    async ({
-      jobId,
-      trigger,
-      action,
-      filter,
-      gate,
-      name,
-      enabled,
-      concurrency,
-      queueing,
-      window,
-      oneOff,
-      wakeHost,
-      archived,
-      group,
-      autonomyPrompt,
-    }) => {
-      const body: Record<string, unknown> = {};
-      if (trigger !== undefined) body['trigger'] = trigger;
-      if (action !== undefined) body['action'] = action;
-      if (filter !== undefined) body['filter'] = filter;
-      // `null` is meaningful here and must survive: it REMOVES the gate, where
-      // omitting the key leaves the stored one alone.
-      if (gate !== undefined) body['gate'] = gate;
-      if (name !== undefined) body['name'] = name;
-      if (enabled !== undefined) body['enabled'] = enabled;
-      if (concurrency !== undefined) body['concurrency'] = concurrency;
-      if (queueing !== undefined) body['queueing'] = queueing;
-      // `null` removes the window on update; omitting the key leaves it.
-      if (window !== undefined) body['window'] = window;
-      if (oneOff !== undefined) body['oneOff'] = oneOff;
-      if (wakeHost !== undefined) body['wakeHost'] = wakeHost;
-      if (archived !== undefined) body['archived'] = archived;
-      if (group !== undefined) body['group'] = group;
-      // `null` is meaningful here too — it clears a custom prompt back to the
-      // default, where omitting the key leaves whatever the job already has.
-      if (autonomyPrompt !== undefined) body['autonomyPrompt'] = autonomyPrompt;
-      const res = await uds<unknown>({
-        method: 'PATCH',
-        path: `/internal/jobs/${encodeURIComponent(jobId)}`,
-        body,
-      });
-      return toolResult(res);
-    },
-  );
-
-  // ---- patch_job_delete ---------------------------------------------------
-  server.registerTool(
-    'patch_job_delete',
-    {
-      description: 'Permanently delete a job.',
-      inputSchema: { jobId: z.string().min(1).describe(JOB_ID_PARAM) },
-    },
-    async ({ jobId }) => {
-      const res = await uds<unknown>({
-        method: 'DELETE',
-        path: `/internal/jobs/${encodeURIComponent(jobId)}`,
-      });
-      return toolResult(res);
-    },
-  );
-
-  // ---- patch_job_enable / disable -----------------------------------------
-  server.registerTool(
-    'patch_job_enable',
-    {
-      description: 'Re-enable a previously disabled job.',
-      inputSchema: { jobId: z.string().min(1).describe(JOB_ID_PARAM) },
-    },
-    async ({ jobId }) => {
-      const res = await uds<unknown>({
-        method: 'POST',
-        path: `/internal/jobs/${encodeURIComponent(jobId)}/enable`,
-      });
-      return toolResult(res);
-    },
-  );
-
-  server.registerTool(
-    'patch_job_disable',
-    {
-      description:
-        'Pause a job without deleting it. Triggers will be ignored until patch_job_enable.',
-      inputSchema: { jobId: z.string().min(1).describe(JOB_ID_PARAM) },
-    },
-    async ({ jobId }) => {
-      const res = await uds<unknown>({
-        method: 'POST',
-        path: `/internal/jobs/${encodeURIComponent(jobId)}/disable`,
-      });
-      return toolResult(res);
-    },
-  );
-
-  // ---- patch_job_runs / patch_job_webhooks --------------------------------
-  server.registerTool(
-    'patch_job_runs',
-    {
-      description:
-        "Read a job's recent run log entries (every fire — cron, webhook, todoist). Newest first. limit defaults to 50; values above the 200 hard cap are clamped to 200 (not rejected).",
-      inputSchema: {
-        jobId: z.string().min(1).describe(JOB_ID_PARAM),
-        limit: z.number().int().positive().optional().describe(JOB_LIMIT_PARAM),
-      },
-    },
-    async ({ jobId, limit }) => {
-      const params = new URLSearchParams();
-      if (limit !== undefined) params.set('limit', String(limit));
-      const qs = params.toString();
-      const res = await uds<unknown>({
-        method: 'GET',
-        path: `/internal/jobs/${encodeURIComponent(jobId)}/runs${qs ? `?${qs}` : ''}`,
-      });
-      return toolResult(res);
-    },
-  );
-
-  server.registerTool(
-    'patch_job_webhooks',
-    {
-      description:
-        "Read a job's recent inbound-webhook log entries (signature pass/fail, filter pass/fail). Newest first. limit defaults to 50; values above the 200 hard cap are clamped to 200 (not rejected).",
-      inputSchema: {
-        jobId: z.string().min(1).describe(JOB_ID_PARAM),
-        limit: z.number().int().positive().optional().describe(JOB_LIMIT_PARAM),
-      },
-    },
-    async ({ jobId, limit }) => {
-      const params = new URLSearchParams();
-      if (limit !== undefined) params.set('limit', String(limit));
-      const qs = params.toString();
-      const res = await uds<unknown>({
-        method: 'GET',
-        path: `/internal/jobs/${encodeURIComponent(jobId)}/webhooks${qs ? `?${qs}` : ''}`,
-      });
       return toolResult(res);
     },
   );

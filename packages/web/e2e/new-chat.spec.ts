@@ -241,7 +241,7 @@ test.describe('new chat header', () => {
     await page.goto(NEW);
     const setup = page.getByTestId('new-chat-setup');
     const quick = setup.locator('.folder-quick');
-    await expect(quick).toHaveCount(3);
+    await expect(quick).toHaveCount(4);
     // No pop-up involved — that is the whole point of the shortcut.
     await expect(page.getByTestId('folder-popup')).toHaveCount(0);
 
@@ -269,13 +269,13 @@ test.describe('new chat header', () => {
     // Sitting on the same line as the pill, not stacked above it.
     expect(Math.abs(metrics.q.top - metrics.pill.top)).toBeLessThanOrEqual(2);
 
-    // One click selects: the pill takes the project's name, and the button
-    // reads as pressed with a visibly different fill from its unpressed peers.
+    // One click selects: the button reads as pressed with a visibly different
+    // fill from its unpressed peers, and the pill — no longer carrying the
+    // choice — is only the way to the rest of the list.
     const second = quick.nth(1);
-    const label = (await second.textContent())!.trim();
     await second.click();
     await expect(second).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('.folder-pill-label')).toHaveText(label);
+    await expect(page.locator('.folder-pill-label')).toHaveText('Other…');
     const fills = await quick.evaluateAll((els) =>
       els.map((el) => getComputedStyle(el).backgroundColor),
     );
@@ -284,7 +284,35 @@ test.describe('new chat header', () => {
     // Clicking it again keeps it chosen.
     await second.click();
     await expect(second).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('.folder-pill-label')).toHaveText(label);
+
+    // No tooltip on any chip or pill: the name is the whole story.
+    for (const el of await setup.locator('.folder-quick, .folder-pill, .model-pill').all()) {
+      await expect(el).not.toHaveAttribute('title', /.*/);
+    }
+  });
+
+  // Tom: "when you hover on something that's green it goes black and the
+  // contrast is lost". A pressed chip keeps white text under the pointer.
+  test('hovering a pressed chip keeps its text white on a deeper green', async ({ page }) => {
+    await page.goto(NEW);
+    const quick = page.getByTestId('new-chat-setup').locator('.folder-quick');
+    const first = quick.nth(0);
+    await first.click();
+    await expect(first).toHaveAttribute('aria-pressed', 'true');
+    // The click left the pointer on the chip; read the resting colours with
+    // it elsewhere.
+    await page.mouse.move(0, 0);
+    const rest = await first.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { color: cs.color, bg: cs.backgroundColor };
+    });
+    await first.hover();
+    await expect
+      .poll(async () => first.evaluate((el) => getComputedStyle(el).backgroundColor))
+      .not.toBe(rest.bg);
+    const hovered = await first.evaluate((el) => getComputedStyle(el).color);
+    expect(hovered).toBe(rest.color);
+    expect(hovered).toBe('rgb(255, 255, 255)');
   });
 
   // Todoist: "on a new chat page arrow keys left and right should allow user
@@ -295,33 +323,31 @@ test.describe('new chat header', () => {
     await page.goto(NEW);
     const setup = page.getByTestId('new-chat-setup');
     const quick = setup.locator('.folder-quick');
-    await expect(quick).toHaveCount(3);
-    const labels = await quick.allInnerTexts();
-    // The MRU-seeded default is the first (most-recently-used) toggle.
+    await expect(quick).toHaveCount(4);
+    await quick.nth(0).click();
     await expect(quick.nth(0)).toHaveAttribute('aria-pressed', 'true');
 
     await quick.nth(0).focus();
     await page.keyboard.press('ArrowRight');
     await expect(quick.nth(1)).toHaveAttribute('aria-pressed', 'true');
     await expect(quick.nth(0)).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.locator('.folder-pill-label')).toHaveText(labels[1]);
     // Focus moved onto the newly-selected toggle, so a second press keeps
     // working without needing to re-tab into the row.
     await expect(quick.nth(1)).toBeFocused();
 
     await page.keyboard.press('ArrowRight');
     await expect(quick.nth(2)).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('.folder-pill-label')).toHaveText(labels[2]);
+
+    await page.keyboard.press('ArrowRight');
+    await expect(quick.nth(3)).toHaveAttribute('aria-pressed', 'true');
 
     // Wraps past the last toggle back to the first.
     await page.keyboard.press('ArrowRight');
     await expect(quick.nth(0)).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('.folder-pill-label')).toHaveText(labels[0]);
 
     // ArrowLeft wraps the other way, back to the last toggle.
     await page.keyboard.press('ArrowLeft');
-    await expect(quick.nth(2)).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('.folder-pill-label')).toHaveText(labels[2]);
+    await expect(quick.nth(3)).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('header exposes Editor, and it spawns-then-acts', async ({ page }) => {

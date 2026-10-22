@@ -2,10 +2,10 @@
 // chats, replacing the per-event Manager watch loop that used to run a full
 // Manager turn for every chat event.
 //
-// Deterministic here, judged on the home host: this tracks which chats
+// Deterministic here, judged on the Manager host: this tracks which chats
 // changed and why (the gate), decides WHEN a sweep is due (interval, or an
 // early event-wake, debounced), and builds the candidate list. It never
-// reads a transcript or calls a model itself — that happens on the home
+// reads a transcript or calls a model itself — that happens on the Manager
 // host (`managerSweepGen.ts`, `ChatRunner.runManagerSweep`), the one
 // component with both local and cross-host read access and the account's
 // OAuth. The sweep's actions (nudge/wake/flag) are therefore also executed
@@ -63,9 +63,9 @@ export interface SweepRunStore {
 export interface ManagerSweeperDeps {
   chats: ChatRegistry;
   settings: () => AccountSettings;
-  /** The home host to run the sweep on, or undefined if none is registered yet. */
-  homeHostId: () => string | undefined;
-  /** Ask the home host to run a sweep (fire-and-forget — the result arrives later via `onResult`). */
+  /** The Manager host to run the sweep on, or undefined if none is registered yet. */
+  managerHostId: () => string | undefined;
+  /** Ask the Manager host to run a sweep (fire-and-forget — the result arrives later via `onResult`). */
   runSweep: (req: {
     runId: string;
     candidates: ManagerSweepCandidate[];
@@ -270,8 +270,8 @@ export class ManagerSweeper {
       );
       this.inFlightRunId = undefined;
     }
-    const homeHostId = this.deps.homeHostId();
-    if (!homeHostId) return false;
+    const managerHostId = this.deps.managerHostId();
+    if (!managerHostId) return false;
     const candidates = [...this.pending.entries()]
       .map(([chatId, edge]) => this.toCandidate(chatId, edge))
       .filter((c): c is ManagerSweepCandidate => c !== undefined);
@@ -314,7 +314,7 @@ export class ManagerSweeper {
     return this.attemptFire();
   }
 
-  /** The home host's report of what a run did (spec/06 § Sweep — Visible). */
+  /** The Manager host's report of what a run did (spec/06 § Sweep — Visible). */
   onResult(event: {
     runId: string;
     actions: ManagerSweepAction[];

@@ -32,10 +32,15 @@ WHISPER_REPO="Systran/faster-whisper-medium.en"
 # defaults to silero), so the model must be present for a real host boot.
 VAD_URL="https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
 
+# Speaker-embedding model for meeting voice separation (sherpa-onnx, one ONNX
+# file, ~27 MB). Point DIARISE_MODEL_PATH at it to turn separation on.
+DIARISE_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx"
+
 # Sentinel files that mark a model as fully present.
 KOKORO_SENTINEL="$MODELS_DIR/kokoro/kokoro-v1_0.pth"
 WHISPER_SENTINEL="$MODELS_DIR/whisper/medium.en/model.bin"
 VAD_SENTINEL="$MODELS_DIR/vad/silero_vad.onnx"
+DIARISE_SENTINEL="$MODELS_DIR/diarise/speaker.onnx"
 
 MODE="fetch"
 case "${1:-}" in
@@ -60,8 +65,9 @@ if [[ "$MODE" == "check" ]]; then
   report "kokoro"        "$KOKORO_SENTINEL"
   report "whisper-medium.en" "$WHISPER_SENTINEL"
   report "silero-vad"    "$VAD_SENTINEL"
+  report "speaker-embedding" "$DIARISE_SENTINEL"
   # Exit non-zero if anything is missing, so callers can gate on it.
-  present "$KOKORO_SENTINEL" && present "$WHISPER_SENTINEL" && present "$VAD_SENTINEL"
+  present "$KOKORO_SENTINEL" && present "$WHISPER_SENTINEL" && present "$VAD_SENTINEL" && present "$DIARISE_SENTINEL"
   exit $?
 fi
 
@@ -111,5 +117,6 @@ fetch_url() {
 fetch_one "kokoro"            "$KOKORO_REPO"  "$KOKORO_SENTINEL"  "$MODELS_DIR/kokoro"
 fetch_one "whisper-medium.en" "$WHISPER_REPO" "$WHISPER_SENTINEL" "$MODELS_DIR/whisper/medium.en"
 fetch_url "silero-vad"        "$VAD_URL"      "$VAD_SENTINEL"
+fetch_url "speaker-embedding" "$DIARISE_URL"  "$DIARISE_SENTINEL"
 
 echo "==> all models present in $MODELS_DIR"

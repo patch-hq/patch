@@ -53,11 +53,12 @@ export class HeldInputStore {
 
   /** Messages still worth delivering, oldest first. */
   all(): HeldInput[] {
-    const cutoff = this.now() - HELD_INPUT_MAX_AGE_MS;
-    return this.held.filter((h) => h.at >= cutoff);
+    this.prune();
+    return [...this.held];
   }
 
   add(hostId: string, surfaceId: string, event: WireEvent): void {
+    this.prune();
     this.held.push({ hostId, surfaceId, event, at: this.now() });
     this.save();
   }
@@ -65,8 +66,19 @@ export class HeldInputStore {
   /** The host took everything held for it, or the message was delivered another way. */
   clearHost(hostId: string): void {
     const before = this.held.length;
+    this.prune();
     this.held = this.held.filter((h) => h.hostId !== hostId);
     if (this.held.length !== before) this.save();
+  }
+
+  /**
+   * Forget what has waited past the limit. A message nobody picked up is not
+   * hidden and kept — a host that never returns must not leave its messages
+   * in memory and on disk for ever.
+   */
+  private prune(): void {
+    const cutoff = this.now() - HELD_INPUT_MAX_AGE_MS;
+    this.held = this.held.filter((h) => h.at >= cutoff);
   }
 
   private save(): void {

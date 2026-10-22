@@ -41,7 +41,7 @@ export interface RecursiveFileEntry {
 // poking around the whole repo — `.env.local` / `.claude/skills/...` are
 // exactly the kind of thing someone opens it to find. `.git` itself is still
 // always hidden (structural, not a normal browsable directory).
-const HARD_SKIP = new Set(['node_modules', '.git', 'dist', 'release', '.cadence']);
+export const HARD_SKIP = new Set(['node_modules', '.git', 'dist', 'release', '.cadence']);
 
 /**
  * Fallback walk for a folder that is genuinely not a git work-tree (NO

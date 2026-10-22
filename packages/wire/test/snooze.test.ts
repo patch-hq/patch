@@ -5,6 +5,9 @@ import {
   deriveSnoozeOutcome,
   formatSnoozeDuration,
   openSnoozeRecord,
+  SNOOZE_UNTIL_COMPLETE,
+  formatWakeAt,
+  snoozeDividerText,
   type SnoozeRecord,
 } from '../src/index.js';
 
@@ -97,5 +100,13 @@ describe('formatSnoozeDuration', () => {
     expect(formatSnoozeDuration(12 * 3_600_000)).toBe('12h');
     expect(formatSnoozeDuration(3 * 86_400_000)).toBe('3d');
     expect(formatSnoozeDuration(1000)).toBe('1m');
+  });
+});
+
+describe('until complete', () => {
+  it('reads as "when done" and the open divider says until complete', () => {
+    expect(formatWakeAt(SNOOZE_UNTIL_COMPLETE)).toBe('when done');
+    const open = rec({ until: SNOOZE_UNTIL_COMPLETE, endedAt: null, startedAt: 1_700_000_000_000 });
+    expect(snoozeDividerText(open)).toMatch(/^Snoozed \d\d:\d\d – until complete$/);
   });
 });

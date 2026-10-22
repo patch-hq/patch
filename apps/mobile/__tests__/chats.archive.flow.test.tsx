@@ -73,7 +73,7 @@ beforeEach(() => {
   countsSpy
     .mockReset()
     .mockResolvedValue({ archived: 0, snoozed: 0, hidden: 0, deleted: 0, automations: 0 });
-  listArchivedSpy.mockReset().mockResolvedValue({ chats: [] });
+  listArchivedSpy.mockReset().mockResolvedValue({ chats: [], nextOffset: null });
   listHiddenSpy.mockReset().mockResolvedValue({ chats: [] });
   archiveChatSpy.mockReset().mockResolvedValue(undefined);
   useChatStore.getState()._reset();
@@ -164,6 +164,7 @@ describe('unarchiving from the Archived section', () => {
           snoozedUntil: null,
         },
       ],
+      nextOffset: null,
     });
     const r = renderRN(<ChatsScreen />);
     await actAsync(async () => {});

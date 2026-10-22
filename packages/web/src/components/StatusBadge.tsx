@@ -1,7 +1,23 @@
 // StatusBadge — universal sidebar/header badge per spec/14 ## Status badges.
 //
+// ONE FOOTPRINT. Every state sits in the same 16px box (`.badge` in
+// index.css): the dot states (`working`, `permission`, `done`) are a 10px
+// disc, and the drawn states (`read`, `errored`, `background`, `monitoring`)
+// are a glyph of matching optical weight centred in that box. The sizes below
+// are tuned so a hollow circle, a disc and a line glyph read as the same
+// mark in a different state, not as three different-sized things — the list
+// used to draw them at 8, 9, 13, 14 and 15px and looked like it had no
+// system at all.
+//
 // Visuals are driven by the design tokens; class names map to the `.badge`
 // styling in `index.css` (lifted from design/hi-fi-tokens.css).
+//
+// ONE FOOTPRINT. Every state is drawn inside the same 16px box (`.badge` in
+// index.css): the dot states are a 10px disc, the drawn states (read circle,
+// terminal, clock, triangle) are a 12–14px glyph centred in that box. The
+// sizes below are chosen so the hollow `read` circle has the same outer
+// diameter as the filled dots — the list reads as one column of equal marks
+// that differ by hue and shape, not by size.
 //
 // The variant class is NAMESPACED (`badge-permission`, not `permission`) and
 // must stay that way. It used to be bare, and `index.css` also carries an
@@ -34,8 +50,11 @@ const BADGE_TITLE: Record<DisplayBadge, string> = {
 export function StatusBadge({
   badge,
   pendingWake,
+  failureReason,
 }: {
   badge: DisplayBadge;
+  /** Only meaningful when `badge === 'errored'` — the tooltip says why instead of "Failed". */
+  failureReason?: string | null;
   /** Only meaningful when `badge === 'monitoring'` — powers the hover countdown. */
   pendingWake?: PendingWake | null;
 }): JSX.Element {
@@ -44,7 +63,7 @@ export function StatusBadge({
     // A grey outline circle, empty: read is the quiet resting state.
     return (
       <span className="badge badge-read" data-testid="badge-read" aria-label="read" title={title}>
-        <Circle size={15} strokeWidth={2} aria-hidden />
+        <Circle size={12} strokeWidth={2} aria-hidden />
       </span>
     );
   }
@@ -68,7 +87,7 @@ export function StatusBadge({
         aria-label="background job running"
         title={title}
       >
-        <Terminal size={13} strokeWidth={2.5} aria-hidden />
+        <Terminal size={13} strokeWidth={2.25} aria-hidden />
       </span>
     );
   }
@@ -98,9 +117,10 @@ export function StatusBadge({
         className="badge badge-errored"
         data-testid="badge-errored"
         aria-label="failed"
-        title={title}
+        title={failureReason || title}
+        data-tooltip-full={failureReason ? '' : undefined}
       >
-        <TriangleAlert size={15} strokeWidth={2.5} aria-hidden />
+        <TriangleAlert size={14} strokeWidth={2.25} aria-hidden />
       </span>
     );
   }
@@ -147,7 +167,7 @@ function MonitoringBadge({
       aria-label="monitoring"
       title={label}
     >
-      <Clock size={14} strokeWidth={2.5} aria-hidden />
+      <Clock size={13} strokeWidth={2.25} aria-hidden />
     </span>
   );
 }

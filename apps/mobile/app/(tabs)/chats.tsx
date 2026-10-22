@@ -10,6 +10,7 @@ import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   AlarmClock,
+  Bell,
   Bot,
   Ear,
   FileText,
@@ -21,6 +22,8 @@ import {
   X,
 } from 'lucide-react-native';
 import { SPECIAL_THREAD_IDS, folderBackPill } from '@patch/wire';
+import { showNotificationsDrawer } from '../../src/components/NotificationsDrawer';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { showSnoozeSheet } from '../../src/components/SnoozeSheet';
 import type { ChatSearchHit, ChatSearchHostResult } from '@patch/wire';
 import { useChatStore } from '../../src/stores/chatStore';
@@ -64,7 +67,8 @@ import { fonts, radii, space, textMin, typography, useTheme } from '../../src/li
 import { startVoiceNote, releaseVoiceNoteIfHeld } from '../../src/lib/voiceNote';
 import { startVoiceCall } from '../../src/lib/voiceCall';
 import type { ChatRow, DisplayBadge } from '../../src/stores/types';
-import { deriveBadge, isHidden, isSnoozed } from '../../src/stores/types';
+import { useChatBadge } from '../../src/lib/chatBadge';
+import { isHidden, isSnoozed } from '../../src/stores/types';
 import { badgeColor } from '../../src/lib/badge';
 import { getSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
 import type { CollapsibleSection } from '../../src/lib/sectionCollapse';
@@ -102,7 +106,7 @@ function ManagerRow({ row }: { row: ChatRow }): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
   const preview = useSettledPreview(row);
-  const badge = deriveBadge(row);
+  const badge = useChatBadge(row);
   const statusColor = badgeColor(badge, colors);
   const actionButton = {
     flex: 1,
@@ -290,6 +294,7 @@ function ChatsHeader({
   // The dot reflects the WS link ONLY (spec/15 § Offline / error states); the
   // host being down is its own app-level banner, never this dot.
   const conn = usePresenceStore((s) => s.connection);
+  const unread = useNotificationsStore((s) => s.unread);
   const dotColor = connectionDotColor(conn, colors);
   // spec/14 § New chat drafts, spec/15 § New chat flow — the full Drafts list,
   // same as desktop's sidebar section. A draft only counts here while it has
@@ -395,6 +400,14 @@ function ChatsHeader({
               </View>
             </Pressable>
           ) : null}
+          <Pressable
+            onPress={showNotificationsDrawer}
+            accessibilityRole="button"
+            accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+            style={iconButton}
+          >
+            <Bell size={20} color={unread > 0 ? colors.ink : colors.ink2} />
+          </Pressable>
           <Pressable
             onPress={onOpenSearch}
             accessibilityRole="button"
@@ -847,7 +860,7 @@ export default function ChatsScreen(): React.ReactElement {
   // Hidden and archived rows are not in the cold-start roster; fetch each
   // whenever it could be drawn — its section is open, or a search covers it.
   useHiddenChats(open.hidden || searching);
-  useArchivedChats(open.archived || searching);
+  const { loadMore: loadMoreArchived } = useArchivedChats(open.archived || searching, searching);
 
   // Batch mode (spec/15 § Batch view): the `Batch` tab swaps the whole column
   // for BatchView, which owns its own scroll region — the Chats tab's own
@@ -934,6 +947,8 @@ export default function ChatsScreen(): React.ReactElement {
       ) : (
         <FlatList
           data={items}
+          onEndReached={open.archived ? loadMoreArchived : undefined}
+          onEndReachedThreshold={1}
           keyboardShouldPersistTaps="handled"
           keyExtractor={(item, idx) =>
             item.kind === 'header'

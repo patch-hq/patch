@@ -1,7 +1,7 @@
 // A layer Patch adds to Claude Code, full screen: the Patch tools prompt, the
-// System prompt override or Claude Code's settings.json — shared, or one OS's
-// override (Settings → Agent → Layers added to Claude Code → Edit). All shared
-// settings (spec/01 § Settings), so no host is named.
+// System prompt override or the goal judge prompt (Settings → Agent → Layers
+// added to Claude Code → Edit). All shared settings (spec/01 § Settings), so no
+// host is named.
 
 import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
@@ -10,10 +10,14 @@ import { LayerEditor, type Layer } from '../../src/components/settings/AgentBeha
 const LAYERS: readonly Layer[] = [
   'tools',
   'system',
-  'claude-shared',
-  'claude-darwin',
-  'claude-linux',
   'goal-judge',
+  'link-summary',
+  'watch-check-in',
+  'sweep',
+  'job-autonomy',
+  'meeting-now',
+  'meeting-notes',
+  'meeting-actions',
 ];
 
 export default function LayerEditorScreen(): React.ReactElement {

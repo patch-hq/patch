@@ -28,7 +28,11 @@ test.describe('new chat — which machine', () => {
     await expect(mac).toHaveAttribute('aria-checked', 'true');
     await expect(home).toHaveAttribute('aria-checked', 'false');
     await page.getByTestId('folder-quick-/Users/dev/code').click();
-    await expect(page.locator('.folder-pill-label')).toHaveText('code');
+    await expect(page.getByTestId('folder-quick-/Users/dev/code')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.locator('.folder-pill-label')).toHaveText('Other…');
 
     const composer = page.getByTestId('composer-input');
     await composer.fill('hello mac');
@@ -36,10 +40,16 @@ test.describe('new chat — which machine', () => {
     await expect.poll(() => spawnBody).toMatchObject({ hostId: 'd2', folder: '/Users/dev/code' });
   });
 
-  test('the machine row and the project row do not overlap', async ({ page }) => {
+  test('the machine row sits above the project row, each with its label', async ({ page }) => {
     await page.goto(NEW);
     const machines = (await page.getByTestId('new-chat-machines').boundingBox())!;
     const pill = (await page.getByTestId('new-chat-folder-pill').boundingBox())!;
     expect(machines.y + machines.height).toBeLessThanOrEqual(pill.y + 1);
+    await expect(
+      page.getByTestId('new-chat-setup-grid').locator('.new-chat-setup-label'),
+    ).toHaveText(['Machine', 'Project', 'Model']);
+    // Says Machine, never host — and nothing hides in a tooltip.
+    await expect(page.getByTestId('new-chat-host')).toHaveAttribute('aria-label', 'Machine');
+    await expect(page.getByTestId('host-option-d2')).not.toHaveAttribute('title', /.*/);
   });
 });

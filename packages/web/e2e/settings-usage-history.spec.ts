@@ -2,10 +2,15 @@ import { test, expect } from '@playwright/test';
 import { settingsUrl, stubSettingsApi } from './settingsHarness.js';
 
 // Settings → Usage: the allowance burndown for a chosen period, and chats
-// ranked by tokens. The harness stubs GET /api/usage-report.
+// ranked by tokens. The harness stubs GET /api/usage-report. A named period
+// is asked for by name (the server answers from its cache); a custom range
+// by its bounds.
 
 const now = Date.now();
 const REPORT = {
+  since: now - 7 * 86_400_000,
+  until: now,
+  at: now,
   samples: [
     { ts: now - 3 * 3_600_000, accountId: 'a1', label: 'Work', hostId: 'd1', week: 0.2 },
     { ts: now - 2 * 3_600_000, accountId: 'a1', label: 'Work', hostId: 'd1', week: 0.35 },
@@ -51,19 +56,24 @@ test.describe('settings — usage history', () => {
     expect(urls.length).toBeGreaterThan(0);
   });
 
-  test('switching period re-queries a wider window', async ({ page }) => {
-    const spans: number[] = [];
+  test('a named period is asked for by name, so the server can answer from its cache', async ({
+    page,
+  }) => {
+    const periods: string[] = [];
     await page.route('**/api/usage-report**', (r) => {
       const u = new URL(r.request().url());
-      spans.push(Number(u.searchParams.get('until')) - Number(u.searchParams.get('since')));
+      periods.push(u.searchParams.get('period') ?? '');
       return r.fulfill({ contentType: 'application/json', body: JSON.stringify(REPORT) });
     });
     await page.goto(settingsUrl('usage'));
     await expect(page.getByTestId('usage-burndown')).toBeVisible();
+    expect(periods).toContain('week');
     await page.getByTestId('usage-period-day').click();
-    await expect.poll(() => spans.some((s) => s === 86_400_000)).toBe(true);
+    await expect.poll(() => periods.includes('day')).toBe(true);
     await page.getByTestId('usage-period-month').click();
-    await expect.poll(() => spans.some((s) => s === 30 * 86_400_000)).toBe(true);
+    await expect.poll(() => periods.includes('month')).toBe(true);
+    // The chart stays up while the next period loads: no flash of "Reading…".
+    await expect(page.getByTestId('usage-burndown')).toBeVisible();
   });
 
   test('custom asks for dates, then queries that range', async ({ page }) => {
@@ -80,6 +90,9 @@ test.describe('settings — usage history', () => {
     await page.getByTestId('usage-to').fill('2026-10-05');
     await expect(page.getByTestId('usage-burndown')).toBeVisible();
     expect(seen.length).toBeGreaterThan(before);
+    const last = new URL(seen[seen.length - 1]!);
+    expect(last.searchParams.get('period')).toBeNull();
+    expect(Number(last.searchParams.get('since'))).toBeGreaterThan(0);
   });
 
   test('says so when there are no readings or chats', async ({ page }) => {

@@ -54,7 +54,7 @@ beforeEach(() => {
   resetHosts();
   reportHost('d1', {
     hostName: 'laptop',
-    isHomeHost: true,
+    runsManager: true,
     harnessMcpServers: [playwright, devtools],
   });
 });

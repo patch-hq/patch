@@ -1,20 +1,16 @@
-// spec/14 § Message links — clicking the toggle icon fetches and renders the
-// linked page's title/description/image inline; a failed fetch surfaces an
-// error rather than silently showing nothing.
+// spec/14 § Message links — clicking the Summarise button fetches and renders
+// a summary of the linked page inline; a failed fetch surfaces an error rather
+// than silently showing nothing.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LinkPreviewToggle } from '../components/LinkPreview.js';
-import { api } from '../api/rest.js';
-import { ApiError } from '../api/rest.js';
+import { api, ApiError } from '../api/rest.js';
 
 vi.mock('../api/rest.js', async () => {
   const actual = await vi.importActual<typeof import('../api/rest.js')>('../api/rest.js');
-  return {
-    ...actual,
-    api: { linkPreview: vi.fn(), linkPreviewImage: vi.fn() },
-  };
+  return { ...actual, api: { linkSummary: vi.fn() } };
 });
 
 function renderToggle(url: string) {
@@ -26,77 +22,57 @@ function renderToggle(url: string) {
   );
 }
 
-let createObjectURLSpy: ReturnType<typeof vi.fn>;
-let revokeObjectURLSpy: ReturnType<typeof vi.fn>;
-
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
-describe('LinkPreviewToggle', () => {
-  it('is collapsed by default — no fetch until clicked', () => {
+describe('LinkPreviewToggle (Summarise)', () => {
+  it('is collapsed by default — nothing is fetched until clicked', () => {
     renderToggle('https://example.com/');
-    expect(api.linkPreview).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('link-preview-card')).toBeNull();
+    expect(api.linkSummary).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('link-summary-card')).toBeNull();
   });
 
-  it("fetches and renders the preview on click, fetching the image through the auth'd proxy", async () => {
-    createObjectURLSpy = vi.fn(() => 'blob:mock-url');
-    revokeObjectURLSpy = vi.fn();
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: createObjectURLSpy,
-      revokeObjectURL: revokeObjectURLSpy,
-    });
-    vi.mocked(api.linkPreview).mockResolvedValue({
+  it('fetches and renders the summary on click', async () => {
+    vi.mocked(api.linkSummary).mockResolvedValue({
       url: 'https://example.com/article',
-      title: 'Example Title',
-      description: 'An example description',
-      image: 'https://example.com/thumb.png',
+      summary: 'A short summary.',
     });
-    const fakeBlob = new Blob(['x'], { type: 'image/png' });
-    vi.mocked(api.linkPreviewImage).mockResolvedValue(fakeBlob);
-    const { container } = renderToggle('https://example.com/article');
-
-    fireEvent.click(screen.getByRole('button', { name: /preview link/i }));
-
-    expect(api.linkPreview).toHaveBeenCalledWith('https://example.com/article');
-    await waitFor(() => expect(screen.getByText('Example Title')).toBeTruthy());
-    expect(screen.getByText('An example description')).toBeTruthy();
+    renderToggle('https://example.com/article');
+    fireEvent.click(screen.getByRole('button', { name: /summarise link/i }));
+    expect(api.linkSummary).toHaveBeenCalledWith('https://example.com/article');
+    expect(screen.getByText('Summarising…')).toBeTruthy();
     await waitFor(() =>
-      expect(api.linkPreviewImage).toHaveBeenCalledWith('https://example.com/thumb.png'),
+      expect(screen.getByTestId('link-summary-text').textContent).toBe('A short summary.'),
     );
-    await waitFor(() => {
-      const img = container.querySelector('img.link-preview-image') as HTMLImageElement;
-      expect(img.src).toBe('blob:mock-url');
-    });
+    expect(screen.getByText('example.com')).toBeTruthy();
   });
 
   it('clicking again collapses the card', async () => {
-    vi.mocked(api.linkPreview).mockResolvedValue({
-      url: 'https://example.com/',
-      title: 'T',
-    });
+    vi.mocked(api.linkSummary).mockResolvedValue({ url: 'https://example.com/', summary: 'S' });
     renderToggle('https://example.com/');
-    const btn = screen.getByRole('button', { name: /preview link/i });
-    fireEvent.click(btn);
-    await waitFor(() => expect(screen.getByTestId('link-preview-card')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /hide link preview/i }));
-    expect(screen.queryByTestId('link-preview-card')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /summarise link/i }));
+    await waitFor(() => expect(screen.getByTestId('link-summary-text')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /hide link summary/i }));
+    expect(screen.queryByTestId('link-summary-card')).toBeNull();
   });
 
-  it('shows the error rather than a silent empty card when the fetch fails', async () => {
-    vi.mocked(api.linkPreview).mockRejectedValue(new ApiError(502, 'fetch_failed', null));
+  it('shows the error rather than a silent empty card when the summary fails', async () => {
+    vi.mocked(api.linkSummary).mockRejectedValue(new ApiError(502, 'summary_failed', null));
     renderToggle('https://example.com/broken');
-
-    fireEvent.click(screen.getByRole('button', { name: /preview link/i }));
-
-    await waitFor(() => expect(screen.getByText('fetch_failed')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /summarise link/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId('link-summary-error').textContent).toBe('summary_failed'),
+    );
   });
 
-  it('renders an "open in browser" link to the right of the preview toggle, pointed at the real URL', () => {
+  it('renders no button for a non-http link', () => {
+    renderToggle('mailto:a@b.c');
+    expect(screen.queryByTestId('link-summary-toggle')).toBeNull();
+  });
+
+  it('renders an "open in browser" link pointed at the real URL', () => {
     renderToggle('https://example.com/article');
     const link = screen.getByTestId('link-preview-external') as HTMLAnchorElement;
     expect(link.href).toBe('https://example.com/article');
@@ -104,9 +80,7 @@ describe('LinkPreviewToggle', () => {
     expect(link.rel).toContain('noopener');
   });
 
-  // Todoist: "patch open in browser is not copying over the query string" —
-  // the desktop panel's half was fixed in the shell; this is the message
-  // link's own open-in-browser icon.
+  // Todoist: "patch open in browser is not copying over the query string".
   it('"open in browser" keeps the query string and fragment', () => {
     renderToggle('https://example.com/app/chats/c1?sidebar=hidden&seq=4#m4');
     const link = screen.getByTestId('link-preview-external') as HTMLAnchorElement;

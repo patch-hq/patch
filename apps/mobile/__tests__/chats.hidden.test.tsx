@@ -38,7 +38,7 @@ const { countsSpy, listHiddenSpy, hideChatSpy } = vi.hoisted(() => ({
 vi.mock('../src/api/rest', () => ({
   api: {
     chatSectionCounts: countsSpy,
-    listArchivedChats: vi.fn().mockResolvedValue({ chats: [] }),
+    listArchivedChats: vi.fn().mockResolvedValue({ chats: [], nextOffset: null }),
     listHiddenChats: listHiddenSpy,
     hideChat: hideChatSpy,
   },

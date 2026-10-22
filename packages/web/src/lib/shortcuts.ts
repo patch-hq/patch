@@ -31,6 +31,7 @@ import { useEffect, useRef } from 'react';
 
 import { useUiStore } from '../stores/uiStore.js';
 import { matchesChord } from './dictateChord.js';
+import { actionGlyphs, matchesAction, type ActionId } from './keymap.js';
 import { isMacKeyboard, type KeyboardPlatformProbe } from './sendChord.js';
 import type { SearchChord } from './searchTarget.js';
 
@@ -52,8 +53,14 @@ export interface ShortcutHandlers {
   onArchiveCurrent(): void;
   onFilePicker(): void;
   onDiffViewer(): void;
-  /** G3-8: ⌘⇧' opens the per-chat file browser. */
+  /**
+   * ⌘⇧' opens the file browser — the chat's own folder when a chat is
+   * focused, or the host-wide browser when there isn't one (spec/14 § File
+   * browser — open without a chat).
+   */
   onFileBrowser(): void;
+  /** ⌘⇧F — search in files under the host browser's current folder (spec/14 § File browser). */
+  onSearchInFiles(): void;
   /** `at`: the keydown's `timeStamp`, the clock every hold is measured on. */
   onVoiceHoldStart(at: number): void;
   /** `heldMs` is how long the chord was down — a tap and a press-and-hold are
@@ -90,7 +97,13 @@ const MODIFIER_WORDS: Record<string, string> = {
 };
 
 /** Glyph keys that have a name worth reading when the modifiers are words. */
-const KEY_WORDS: Record<string, string> = { '↵': 'Enter', '↑': 'Up', '↓': 'Down' };
+const KEY_WORDS: Record<string, string> = {
+  '↵': 'Enter',
+  '↑': 'Up',
+  '↓': 'Down',
+  '←': 'Left',
+  '→': 'Right',
+};
 
 /**
  * The chord as this keyboard should see it (spec/14 § Discoverability).
@@ -181,42 +194,90 @@ export interface ShortcutEntry {
   keys: string;
   action: string;
   scope: ShortcutScope;
+  /** The rebindable actions this row draws, in order; `keys` is the default. */
+  ids?: ActionId[];
   /** The row's keys are the rebindable dictate chord, not `keys`. */
   dictate?: true;
 }
 
 /** Source-of-truth list rendered by the cheat-sheet modal. */
 export const SHORTCUT_TABLE: ShortcutEntry[] = [
-  { keys: '⌘ ?', action: 'Open keyboard cheat-sheet', scope: ANYWHERE },
-  { keys: '⌘ K', action: 'Focus search', scope: ANYWHERE },
-  { keys: '⌘ F', action: 'Focus search', scope: other('Page with a search field') },
-  { keys: '⌘ /', action: 'Toggle sidebar', scope: ANYWHERE },
-  { keys: '⌘ N', action: 'New chat', scope: ANYWHERE },
-  { keys: '⌘ ⇧ N', action: 'New chat with folder picker', scope: ANYWHERE },
-  { keys: '⌘ ↑ / ⌘ ↓', action: 'Prev / next chat', scope: CHAT_VIEW },
-  { keys: '⌘ ⇧ ↑ / ⌘ ⇧ ↓', action: 'Prev / next folder section', scope: CHAT_VIEW },
+  { keys: '⌘ ?', ids: ['cheatSheet'], action: 'Open keyboard cheat-sheet', scope: ANYWHERE },
+  { keys: '⌘ K', ids: ['search'], action: 'Focus search', scope: ANYWHERE },
+  {
+    keys: '⌘ F',
+    ids: ['searchFind'],
+    action: 'Focus search',
+    scope: other('Page with a search field'),
+  },
+  { keys: '⌘ /', ids: ['toggleSidebar'], action: 'Toggle sidebar', scope: ANYWHERE },
+  { keys: '⌘ N', ids: ['newChat'], action: 'New chat', scope: ANYWHERE },
+  { keys: '⌘ ⇧ N', ids: ['newChatPicker'], action: 'New chat with folder picker', scope: ANYWHERE },
+  {
+    keys: '⌘ ↑ / ⌘ ↓',
+    ids: ['prevChat', 'nextChat'],
+    action: 'Prev / next chat',
+    scope: CHAT_VIEW,
+  },
+  {
+    keys: '⌘ ⇧ ↑ / ⌘ ⇧ ↓',
+    ids: ['prevFolder', 'nextFolder'],
+    action: 'Prev / next folder section',
+    scope: CHAT_VIEW,
+  },
   {
     keys: '⌘ ← / ⌘ →',
+    ids: ['historyBack', 'historyForward'],
     action: 'Back / Forward through the navigation history',
     // Enforced by NavHistoryControls itself (mounted only on a chat view) —
     // not by this file's handler.
     scope: other('Chat panel shown, no field focused'),
   },
-  { keys: '⌘ 1', action: 'Jump to Manager', scope: CHAT_VIEW },
-  { keys: '⌘ 2', action: 'Toggle Channels', scope: CHAT_VIEW },
-  { keys: '⌘ J', action: 'Jump to oldest unread chat', scope: CHAT_VIEW },
-  { keys: '⌘ ⌥ A', action: 'Archive current chat', scope: CHAT_VIEW },
-  { keys: '⌘ ⇧ A', action: 'Toggle archived view', scope: CHAT_VIEW },
+  { keys: '⌘ 1', ids: ['jumpManager'], action: 'Jump to Manager', scope: CHAT_VIEW },
+  { keys: '⌘ 2', ids: ['toggleChannels'], action: 'Toggle Channels', scope: CHAT_VIEW },
+  { keys: '⌘ J', ids: ['jumpUnread'], action: 'Jump to oldest unread chat', scope: CHAT_VIEW },
+  { keys: '⌘ ⌥ A', ids: ['archiveCurrent'], action: 'Archive current chat', scope: CHAT_VIEW },
+  { keys: '⌘ ⇧ A', ids: ['toggleArchived'], action: 'Toggle archived view', scope: CHAT_VIEW },
   { keys: '⌘ ⇧ E', action: 'Toggle fullscreen editor', scope: other('Editor open') },
-  { keys: "⌘ ⇧ '", action: 'Open file browser', scope: ANYWHERE },
+  { keys: "⌘ ⇧ '", ids: ['fileBrowser'], action: 'Open file browser', scope: ANYWHERE },
   { keys: 'Esc', action: 'Exit fullscreen / cancel modal', scope: ANYWHERE },
-  { keys: '⌥ E', action: 'Toggle editor rail', scope: other('Composer focused') },
-  { keys: "⌘ '", action: 'Open diff for last edit', scope: other('Chat focused') },
-  { keys: '⌃ `', action: 'Toggle terminal', scope: other('Chat focused') },
-  { keys: '⌘ W', action: 'Close tab', scope: ANYWHERE },
-  { keys: '⌘ ⌥ ← / ⌘ ⌥ →', action: 'Previous / next tab', scope: CHAT_VIEW },
-  { keys: '⌘ \\', action: 'Split pane', scope: CHAT_VIEW },
-  { keys: '⌘ P', action: 'File picker (project-wide)', scope: ANYWHERE },
+  {
+    keys: '⌥ E',
+    ids: ['toggleEditor'],
+    action: 'Toggle editor rail',
+    scope: other('Composer focused'),
+  },
+  {
+    keys: "⌘ '",
+    ids: ['diffViewer'],
+    action: 'Open diff for last edit',
+    scope: other('Chat focused'),
+  },
+  { keys: '⌃ `', ids: ['toggleTerminal'], action: 'Toggle terminal', scope: other('Chat focused') },
+  { keys: '⌘ W', ids: ['closeTab'], action: 'Close tab', scope: ANYWHERE },
+  {
+    keys: '⌘ ⌥ ← / ⌘ ⌥ →',
+    ids: ['prevTab', 'nextTab'],
+    action: 'Previous / next tab',
+    scope: CHAT_VIEW,
+  },
+  { keys: '⌘ \\', ids: ['splitPane'], action: 'Split pane', scope: CHAT_VIEW },
+  { keys: '⌘ P', ids: ['filePicker'], action: 'File picker (project-wide)', scope: ANYWHERE },
+  {
+    keys: '⌘ ⇧ F',
+    ids: ['searchInFiles'],
+    action: 'Search in files',
+    scope: other('File browser open'),
+  },
+  {
+    keys: '⌃ G',
+    action: 'Go to line',
+    // Monaco's own built-in action (`editor.action.gotoLine`) — not bound by
+    // this file's handler, which is why it is listed here rather than wired
+    // into `handleKeyDown` below (spec/14 § Keyboard shortcuts).
+    scope: other('Editor showing a file'),
+  },
+  { keys: '⌘ E', action: 'Recent files', scope: other('File browser open') },
   { keys: '⌘ S', action: 'Save the open file', scope: other('Editor showing a file') },
   // The rule the app used to state only for the composer (spec/14 § Keyboard
   // shortcuts): wherever a field has a save action, the chord runs it.
@@ -245,6 +306,7 @@ export const SHORTCUT_TABLE: ShortcutEntry[] = [
   },
   {
     keys: '⌃ Space',
+    ids: ['globalVoice'],
     action: 'Voice note to Manager (hold to talk, tap to keep listening)',
     scope: other('Menu-bar'),
   },
@@ -257,10 +319,6 @@ export const SHORTCUT_TABLE: ShortcutEntry[] = [
   },
 ];
 
-function isMod(e: KeyboardEvent): boolean {
-  return e.metaKey || e.ctrlKey;
-}
-
 /** A "chat view" is `/`, `/chats/new`, or `/chats/:chatId` — not its
  *  editor-window pop-out (`/chats/:chatId/editor-window`), which has no chat
  *  panel to navigate (spec/14 § Discoverability). */
@@ -271,6 +329,13 @@ export function isChatViewPath(pathname: string): boolean {
 /** What the caller currently shows — the one fact `chat-view` scope needs. */
 export interface ShortcutScopeState {
   isChatView: boolean;
+}
+
+/** An action's chord in macOS glyphs, following the user's override — what a
+ *  control's tooltip passes to `shortcutTitle` / `shortcutLabel`. */
+export function useActionGlyphs(id: ActionId): string {
+  const overrides = useUiStore((st) => st.shortcutOverrides);
+  return actionGlyphs(id, overrides);
 }
 
 function isTextFieldTarget(e: KeyboardEvent): boolean {
@@ -294,7 +359,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
   // effect re-runs whenever `handlers` is a new object (every render of a
   // caller passing it inline), and a hold in progress must survive that.
   const dictateHeldRef = useRef<{ at: number | null; code: string }>({ at: null, code: '' });
-  const ctrlSpaceHeldRef = useRef<{ at: number | null }>({ at: null });
+  const ctrlSpaceHeldRef = useRef<{ at: number | null; code: string }>({ at: null, code: '' });
   useEffect(() => {
     const dictateHeld = dictateHeldRef.current;
     const ctrlSpaceHeld = ctrlSpaceHeldRef.current;
@@ -313,12 +378,14 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         handlers.onVoiceHoldStart(e.timeStamp);
         return;
       }
-      if (isMod(e) && e.key === '?') {
+      const overrides = useUiStore.getState().shortcutOverrides;
+      const is = (id: ActionId): boolean => matchesAction(e, id, overrides);
+      if (is('cheatSheet')) {
         e.preventDefault();
         handlers.onCheatSheet();
         return;
       }
-      if (isMod(e) && e.key.toLowerCase() === 'k') {
+      if (is('search')) {
         e.preventDefault();
         handlers.onSearch('k');
         return;
@@ -328,71 +395,75 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       // conditional on `onSearch()` reporting that it actually took focus: with
       // no search field on the page the chord is untouched and the browser's
       // own find bar opens, exactly as before.
-      if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+      if (is('searchFind')) {
         if (handlers.onSearch('f')) e.preventDefault();
         return;
       }
-      if (isMod(e) && e.key === '/') {
+      if (is('searchInFiles')) {
+        e.preventDefault();
+        handlers.onSearchInFiles();
+        return;
+      }
+      if (is('toggleSidebar')) {
         e.preventDefault();
         handlers.onToggleSidebar();
         return;
       }
-      // ⌘⇧N must be checked before plain ⌘N (the bare check would swallow it).
-      if (isMod(e) && e.shiftKey && e.key.toLowerCase() === 'n') {
+      if (is('newChatPicker')) {
         e.preventDefault();
         handlers.onNewChatPicker();
         return;
       }
-      if (isMod(e) && e.key.toLowerCase() === 'n') {
+      if (is('newChat')) {
         e.preventDefault();
         handlers.onNewChat();
         return;
       }
-      // Arrow chords: ⌘⇧↑/↓ jump folder sections, ⌘↑/↓ step chat rows. Both are
-      // `chat-view` scoped (spec/14 § Discoverability): a text field keeps them.
-      if (isMod(e) && e.key === 'ArrowUp') {
-        if (e.shiftKey) {
-          if (!scopeAllows(CHAT_VIEW, e, scope)) return;
-          e.preventDefault();
-          handlers.onPrevFolder();
-        } else {
-          if (!scopeAllows(CHAT_VIEW, e, scope)) return;
-          e.preventDefault();
-          handlers.onPrevChat();
-        }
+      // Chat-list chords are `chat-view` scoped (spec/14 § Discoverability): a
+      // text field keeps them.
+      if (is('prevFolder')) {
+        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
+        e.preventDefault();
+        handlers.onPrevFolder();
         return;
       }
-      if (isMod(e) && e.key === 'ArrowDown') {
-        if (e.shiftKey) {
-          if (!scopeAllows(CHAT_VIEW, e, scope)) return;
-          e.preventDefault();
-          handlers.onNextFolder();
-        } else {
-          if (!scopeAllows(CHAT_VIEW, e, scope)) return;
-          e.preventDefault();
-          handlers.onNextChat();
-        }
+      if (is('prevChat')) {
+        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
+        e.preventDefault();
+        handlers.onPrevChat();
         return;
       }
-      if (isMod(e) && e.key === '1') {
+      if (is('nextFolder')) {
+        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
+        e.preventDefault();
+        handlers.onNextFolder();
+        return;
+      }
+      if (is('nextChat')) {
+        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
+        e.preventDefault();
+        handlers.onNextChat();
+        return;
+      }
+      if (is('jumpManager')) {
         if (!scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onJumpManager();
         return;
       }
-      if (isMod(e) && e.key === '2') {
+      if (is('toggleChannels')) {
         if (!scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onToggleChannels();
         return;
       }
-      if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === 'j') {
+      if (is('jumpUnread')) {
         if (!scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onJumpOldestUnread();
         return;
       }
-      if (isMod(e) && e.shiftKey && e.key.toLowerCase() === 'a') {
+      if (is('toggleArchived')) {
         if (!scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onToggleArchived();
@@ -400,63 +471,64 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       }
       // Archive lives on ⌘⌥A, NOT ⌘A (spec/14 § Reserved OS chords). ⌘A is
       // select-all everywhere — including over the transcript, where selecting
-      // the whole conversation to copy it is exactly what the user means. So
-      // this handler must never fire on a bare ⌘A, in or out of a text field.
-      // macOS reports ⌥A as 'å', so match the physical key.
-      if (isMod(e) && e.altKey && (e.code === 'KeyA' || e.key.toLowerCase() === 'a')) {
+      // the whole conversation to copy it is exactly what the user means. The
+      // default never matches a bare ⌘A, in or out of a text field.
+      if (is('archiveCurrent')) {
         if (!scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onArchiveCurrent();
         return;
       }
-      if (isMod(e) && e.key.toLowerCase() === 'p') {
+      if (is('filePicker')) {
         e.preventDefault();
         handlers.onFilePicker();
         return;
       }
-      // The `'` key shortcuts: ⌘' opens the last-edit diff, ⌘⇧' opens the file
-      // browser. Match on the physical key (`e.code === 'Quote'`) so we stay
-      // layout-independent and don't depend on whether the shifted character is
-      // reported as `'` or `"` — then disambiguate purely on `e.shiftKey`.
-      if (isMod(e) && (e.code === 'Quote' || e.key === "'" || e.key === '"')) {
+      // ⌘⇧' (file browser) is checked before ⌘' (last-edit diff): both default
+      // to the same physical key and differ only in shift.
+      if (is('fileBrowser')) {
         e.preventDefault();
-        if (e.shiftKey) handlers.onFileBrowser();
-        else handlers.onDiffViewer();
+        handlers.onFileBrowser();
+        return;
+      }
+      if (is('diffViewer')) {
+        e.preventDefault();
+        handlers.onDiffViewer();
         return;
       }
       // ⌃` — the terminal drawer, on the key every terminal-bearing app uses.
       // Checked before the ⌃Space voice hold so neither swallows the other.
-      if (e.ctrlKey && e.key === '`') {
+      if (is('toggleTerminal')) {
         e.preventDefault();
         handlers.onToggleTerminal();
         return;
       }
-      if (e.altKey && (e.code === 'KeyE' || e.key.toLowerCase() === 'e')) {
+      if (is('toggleEditor')) {
         e.preventDefault();
         handlers.onToggleEditor();
         return;
       }
-      if (e.ctrlKey && e.code === 'Space' && ctrlSpaceHeld.at === null) {
+      if (is('globalVoice') && ctrlSpaceHeld.at === null) {
         e.preventDefault();
         ctrlSpaceHeld.at = e.timeStamp;
+        ctrlSpaceHeld.code = e.code;
         handlers.onGlobalVoiceStart();
         return;
       }
-      // Panes and tabs (spec/14 § Keyboard shortcuts): ⌘⌥←/→ switch tabs,
-      // ⌘W closes one, ⌘\ splits the active pane. Scoped to a chat view, but
-      // — unlike the chat-list chords above — NOT ceded to a focused text
+      // Panes and tabs (spec/14 § Keyboard shortcuts). Scoped to a chat view,
+      // but — unlike the chat-list chords above — NOT ceded to a focused text
       // field: `scopeAllows`'s text-field exception exists so a field keeps
-      // its native editing keys, and none of these four collide with one —
-      // no field anywhere binds ⌘-plus-⌥-plus-arrow or ⌘\. Going through it
-      // anyway would mean never firing in the ordinary case, since opening a
-      // chat puts the cursor straight into the composer (spec/14 § Composer).
-      if (isMod(e) && e.altKey && e.key === 'ArrowLeft') {
+      // its native editing keys, and none of these default chords collide with
+      // one. Going through it anyway would mean never firing in the ordinary
+      // case, since opening a chat puts the cursor straight into the composer
+      // (spec/14 § Composer).
+      if (is('prevTab')) {
         if (!scope.isChatView) return;
         e.preventDefault();
         handlers.onPrevTab();
         return;
       }
-      if (isMod(e) && e.altKey && e.key === 'ArrowRight') {
+      if (is('nextTab')) {
         if (!scope.isChatView) return;
         e.preventDefault();
         handlers.onNextTab();
@@ -465,12 +537,12 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       // ⌘W is claimed unconditionally — not even gated on `isChatView` — like
       // ⌘P/⌘K/⌘/ above: never left to fall through to the OS, which would
       // close the real browser tab/window rather than the app's own one.
-      if (isMod(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') {
+      if (is('closeTab')) {
         e.preventDefault();
         handlers.onCloseTab();
         return;
       }
-      if (isMod(e) && (e.code === 'Backslash' || e.key === '\\')) {
+      if (is('splitPane')) {
         if (!scope.isChatView) return;
         e.preventDefault();
         handlers.onSplitPane();
@@ -488,7 +560,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         dictateHeld.at = null;
         handlers.onVoiceHoldEnd(held, e.timeStamp);
       }
-      if ((e.code === 'Space' || modUp) && ctrlSpaceHeld.at !== null) {
+      if ((e.code === ctrlSpaceHeld.code || modUp) && ctrlSpaceHeld.at !== null) {
         const held = e.timeStamp - ctrlSpaceHeld.at;
         ctrlSpaceHeld.at = null;
         handlers.onGlobalVoiceEnd(held);

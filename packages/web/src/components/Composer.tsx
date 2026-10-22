@@ -29,7 +29,7 @@
 // Composer — skill autocomplete).
 
 import { LONG_PASTE_CHARS, pastedTextName } from '../lib/pastedText';
-import type { JSX, Ref } from 'react';
+import type { JSX, ReactNode, Ref } from 'react';
 import {
   forwardRef,
   useEffect,
@@ -56,8 +56,11 @@ import {
   Clock,
   Zap,
 } from 'lucide-react';
-import { endMeeting, startMeeting } from '../lib/meetingControl.js';
+import { endMeeting } from '../lib/meetingControl.js';
+import { beginMeeting, maybeIntroduceMeetings } from '../lib/meetingSetup.js';
+import { MeetingSetupPopover } from './MeetingSetup.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
+import { EffortControl } from './EffortControl.js';
 import { CloseIcon } from './icons.js';
 import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
 import { ImageAnnotator } from './ImageAnnotator.js';
@@ -126,11 +129,11 @@ import { failed } from '../lib/errorCopy.js';
 const ICON_SIZE = 18;
 
 /** Height cap for the auto-growing composer input, as a fraction of the window
- *  height — MUST match the CSS `max-height` (50vh) on `.composer-input`. Under
+ *  height — MUST match the CSS `max-height` (30vh) on `.composer-input`. Under
  *  this the field expands/contracts to fit with NO scrollbar; only once content
  *  exceeds the cap does it scroll internally, so a long paste can't push the
  *  chat off-screen (spec/14 § Composer). */
-const MAX_INPUT_HEIGHT_FRACTION = 0.5;
+const MAX_INPUT_HEIGHT_FRACTION = 0.3;
 const maxInputHeight = (): number => Math.round(window.innerHeight * MAX_INPUT_HEIGHT_FRACTION);
 
 /**
@@ -338,6 +341,12 @@ export interface ComposerProps {
    * for it to exist on its host and open it before a call can bind to it.
    */
   onStartCall?(): void;
+  /**
+   * When provided, the Meeting button hands over to this instead of starting a
+   * meeting in the composer's own chat. Used by NewChatRoute, which must create
+   * the chat and open it before a meeting can bind to it.
+   */
+  onStartMeeting?(): void;
   /** Test seam (transcribe mode): inject the mic recorder factory. */
   recorderFactory?(deps?: VoiceRecorderDeps): Promise<VoiceRecording>;
   /** Test seam (transcribe mode): inject the clip→transcript upload call. */
@@ -392,6 +401,10 @@ export interface ComposerProps {
   checking?: boolean;
   /** The hook name(s) a `checking` state is waiting on, for the button's label. */
   checkingHookNames?: string[];
+  /** Replaces "Type a message" (a meeting's Note mode writes a note, not a message). */
+  placeholder?: string;
+  /** Drawn at the start of the input row, before the text (the meeting's Note / Ask switch). */
+  leading?: ReactNode;
   /**
    * Edit mode (spec/04 § Branching): this composer edits the text
    * of a message already in the transcript instead of composing a new one. It
@@ -404,6 +417,13 @@ export interface ComposerProps {
    * disabled until there is text. Seed the text with `initialValue`.
    */
   edit?: { onSave(text: string): void; onCancel(): void; allowEmpty?: boolean };
+  /**
+   * spec/04 § Branching — this MAIN composer is carrying an earlier user turn
+   * back for re-sending (the transcript from that turn down is greyed). Unlike
+   * `edit`, every control stays: model, approval mode, attachments, dropdowns.
+   * Send forks from the turn via `onSend`; Cancel or Esc calls `onCancel`.
+   */
+  editingTurn?: { onCancel(): void };
 }
 
 /**
@@ -464,6 +484,7 @@ export const Composer = forwardRef(function Composer(
     newChatDraftId,
     onStartVoiceNote,
     onStartCall,
+    onStartMeeting,
     recorderFactory,
     transcribeClip,
     previewFactory,
@@ -477,7 +498,10 @@ export const Composer = forwardRef(function Composer(
     onStop,
     checking = false,
     checkingHookNames,
+    placeholder: placeholderText = 'Type a message',
+    leading,
     edit,
+    editingTurn,
   }: ComposerProps,
   ref: Ref<ComposerHandle>,
 ): JSX.Element {
@@ -638,29 +662,23 @@ export const Composer = forwardRef(function Composer(
   }, [replaceNonce, replaceText]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
-  // unreliable in the desktop shell, so size it here: reset to `auto` (allows
-  // shrinking), then to scrollHeight (clamped at the cap). Crucially, keep
-  // overflow HIDDEN while the content fits under the cap — the field simply
-  // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
-  // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
-  // can't push the chat off-screen.
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    // `scrollHeight` is the content+padding box; with `box-sizing: border-box`
-    // the style height also includes the border, so add the border delta —
-    // otherwise the box lands 1–2px short of the content and clips it (which is
-    // exactly what makes a spurious scrollbar flicker in). offsetHeight -
-    // clientHeight is that border total (overflow is hidden here, so no
-    // scrollbar contributes to it).
-    const border = el.offsetHeight - el.clientHeight;
-    const contentHeight = el.scrollHeight + border;
-    const cap = maxInputHeight();
-    el.style.height = `${Math.min(contentHeight, cap)}px`;
-    el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
-  }, [value]);
+  // The dictation preview and chip mirror paint the text over a transparent
+  // textarea, so they must scroll with it and wrap at the same width: once the
+  // textarea scrolls past its cap it gains a scrollbar (narrower text column),
+  // and the mirrors, which never scroll, would clip the text and wrap it
+  // differently from the caret.
+  function syncMirrors(el: HTMLTextAreaElement): void {
+    const wrap = el.parentElement;
+    if (!wrap) return;
+    const bar = el.offsetWidth - el.clientWidth - 2; // 2 = left+right border
+    wrap
+      .querySelectorAll<HTMLElement>('.composer-live-preview, .composer-chip-mirror')
+      .forEach((m) => {
+        m.style.paddingRight = `${14 + Math.max(0, bar)}px`;
+        m.scrollTop = el.scrollTop;
+      });
+  }
+
   const pushError = useUiStore((s) => s.pushError);
   const dictateChord = useUiStore((s) => s.dictateChord);
   // Attachments the user (or another surface) has added but not yet sent
@@ -1046,6 +1064,16 @@ export const Composer = forwardRef(function Composer(
   const noteActive = useVoiceStore((s) => s.note !== null);
   const onCall = useVoiceStore((s) => s.call !== null && s.call.chatId === chatId);
   const inMeeting = useMeetingStore((s) => isMeetingOpen(s.byChat[chatId]));
+  // Once ever: introduce what a meeting needs on this Mac, on the Meeting button.
+  const hasMeetingButton = !edit && (chatId !== 'new' || onStartMeeting !== undefined);
+  useEffect(() => {
+    if (!hasMeetingButton) return;
+    maybeIntroduceMeetings(chatId).catch((err: unknown) =>
+      useUiStore
+        .getState()
+        .pushError(`Could not check meeting permissions: ${(err as Error).message}`),
+    );
+  }, [chatId, hasMeetingButton]);
   // A note that failed or was cancelled hands back the text it lifted out of a
   // composer when it started (voiceStore § composerRestore). Take it back into
   // the input so the user can retry or send it by hand — NO FALLBACK: a note
@@ -1080,6 +1108,38 @@ export const Composer = forwardRef(function Composer(
   const recordingRef = useRef<VoiceRecording | null>(null);
   const previewRef = useRef<DictationPreview | null>(null);
   const showLivePreview = micState === 'recording' && livePartial.length > 0;
+
+  // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
+  // unreliable in the desktop shell, so size it here: reset to `auto` (allows
+  // shrinking), then to scrollHeight (clamped at the cap). Crucially, keep
+  // overflow HIDDEN while the content fits under the cap — the field simply
+  // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
+  // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
+  // can't push the chat off-screen.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    // `scrollHeight` is the content+padding box; with `box-sizing: border-box`
+    // the style height also includes the border, so add the border delta —
+    // otherwise the box lands 1–2px short of the content and clips it (which is
+    // exactly what makes a spurious scrollbar flicker in). offsetHeight -
+    // clientHeight is that border total (overflow is hidden here, so no
+    // scrollbar contributes to it).
+    const border = el.offsetHeight - el.clientHeight;
+    // While dictating, the interim transcript is painted by the mirror, not
+    // held by the textarea, so its text never reaches `el.scrollHeight`: size
+    // to whichever is taller. The mirror is absolutely filling the wrapper
+    // (now at the textarea's `auto` height), so its scrollHeight is its content.
+    const mirror = el.parentElement?.querySelector<HTMLElement>(
+      '.composer-live-preview, .composer-chip-mirror',
+    );
+    const contentHeight = Math.max(el.scrollHeight, mirror?.scrollHeight ?? 0) + border;
+    const cap = maxInputHeight();
+    el.style.height = `${Math.min(contentHeight, cap)}px`;
+    el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
+    syncMirrors(el);
+  }, [value, livePartial, showLivePreview]);
   // Seconds spent waiting on the transcript, so a slow upload visibly counts
   // up instead of looking identical to recording.
   const [transcribeSecs, setTranscribeSecs] = useState(0);
@@ -1095,6 +1155,11 @@ export const Composer = forwardRef(function Composer(
   // — a chip typed while dictating simply isn't boxed until the dictation
   // preview ends, since both would otherwise fight over the same technique).
   const showChipMirror = !showLivePreview && chipTokens.length > 0;
+  // Layout effect: the mirror mounts and the textarea resizes in the same
+  // commit, and the mirror must be sized before the browser paints.
+  useLayoutEffect(() => {
+    if (inputRef.current) syncMirrors(inputRef.current);
+  }, [value, showLivePreview, showChipMirror]);
   const [chipPreview, setChipPreview] = useState<ChipPreviewState | null>(null);
   const chipPreviewRef = useRef<HTMLDivElement>(null);
   const [chipPreviewPos, setChipPreviewPos] = useState<TooltipPosition | null>(null);
@@ -1117,7 +1182,25 @@ export const Composer = forwardRef(function Composer(
     );
   }, [chipPreview]);
 
+  // Leaving the chip does not close the popover at once: the pointer has to be
+  // able to cross the gap to it (its Edit link is only reachable that way).
+  // Entering the popover cancels the close; leaving the popover restarts it.
+  const chipPreviewCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function cancelChipPreviewClose(): void {
+    if (chipPreviewCloseTimer.current) clearTimeout(chipPreviewCloseTimer.current);
+    chipPreviewCloseTimer.current = null;
+  }
+  function scheduleChipPreviewClose(name?: string): void {
+    cancelChipPreviewClose();
+    chipPreviewCloseTimer.current = setTimeout(() => {
+      chipPreviewCloseTimer.current = null;
+      setChipPreview((cur) => (name === undefined || cur?.name === name ? null : cur));
+    }, 250);
+  }
+  useEffect(() => cancelChipPreviewClose, []);
+
   function showChipPreview(name: string, target: HTMLElement): void {
+    cancelChipPreviewClose();
     setChipPreview({
       name,
       isBuiltin: BUILTIN_COMMANDS.some((c) => c.name === name),
@@ -1142,7 +1225,7 @@ export const Composer = forwardRef(function Composer(
           data-testid="composer-chip"
           data-skill={chip.name}
           onMouseEnter={(e) => showChipPreview(chip.name, e.currentTarget)}
-          onMouseLeave={() => setChipPreview((cur) => (cur?.name === chip.name ? null : cur))}
+          onMouseLeave={() => scheduleChipPreviewClose(chip.name)}
           onClick={(e) => {
             e.preventDefault();
             const target = e.currentTarget;
@@ -1500,6 +1583,9 @@ export const Composer = forwardRef(function Composer(
     // Focus on the autoFocus→ready transition (not on every keystroke — value
     // is intentionally not a dependency).
     if (!autoFocus || offline) return;
+    // Touch devices: focusing raises the soft keyboard over the transcript.
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+      return;
     // At most once per mount. `offline` has to stay a dependency (the composer
     // routinely mounts before the socket connects), but a LATER reconnect must
     // not yank the cursor back out of wherever the user has since moved it.
@@ -1838,7 +1924,7 @@ export const Composer = forwardRef(function Composer(
   return (
     <form
       ref={formRef}
-      className={`composer${dragDepth > 0 ? ' composer-drag-active' : ''}${edit ? ' composer-editing' : ''}`}
+      className={`composer${dragDepth > 0 ? ' composer-drag-active' : ''}${edit ? ' composer-editing' : ''}${editingTurn ? ' composer-editing-turn' : ''}`}
       data-testid={edit ? 'msg-editor' : 'composer'}
       data-chat-id={chatId}
       onSubmit={(e) => {
@@ -1850,6 +1936,19 @@ export const Composer = forwardRef(function Composer(
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {editingTurn ? (
+        <div className="composer-edit-banner" data-testid="composer-edit-banner">
+          <span>Editing from this message</span>
+          <button
+            type="button"
+            className="msg-edit-cancel"
+            data-testid="composer-edit-cancel"
+            onClick={editingTurn.onCancel}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
       {dragDepth > 0 ? (
         <div className="composer-drop-hint" data-testid="composer-drop-hint" aria-hidden>
           {dropDisabled ? 'Can’t attach right now' : 'Drop to attach'}
@@ -2092,7 +2191,8 @@ export const Composer = forwardRef(function Composer(
       <div className="composer-row">
         {/* The input and its live-dictation mirror share one positioned box so
             the greyed preview sits exactly over the real text. */}
-        <div className="composer-input-wrap">
+        <div className={leading ? 'composer-input-wrap has-leading' : 'composer-input-wrap'}>
+          {leading ? <div className="composer-leading">{leading}</div> : null}
           {/* Live-dictation preview (spec/07 § Dictation into the composer):
               what is already in the input, in normal ink, plus the host's
               interim transcript GREYED behind a text-transparent textarea, so
@@ -2128,7 +2228,7 @@ export const Composer = forwardRef(function Composer(
              button's own `Send (↵)` tooltip and the ⌘? cheat-sheet carry that.
              `Reconnecting…` is the one permitted swap — state, not teaching. */
             placeholder={
-              suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : 'Type a message'
+              suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : placeholderText
             }
             onChange={(e) => {
               setValue(joinQuotes(quotes, e.target.value));
@@ -2140,6 +2240,7 @@ export const Composer = forwardRef(function Composer(
             onKeyUp={(e) => syncCursor(e.currentTarget)}
             onSelect={(e) => syncCursor(e.currentTarget)}
             onPaste={onPaste}
+            onScroll={(e) => syncMirrors(e.currentTarget)}
             onFocus={() => {
               if (!edit) useComposerDraftStore.getState().setFocused(chatId, true);
             }}
@@ -2233,6 +2334,12 @@ export const Composer = forwardRef(function Composer(
                 e.preventDefault();
                 e.stopPropagation();
                 cancelRecording();
+                return;
+              }
+              if (e.key === 'Escape' && editingTurn) {
+                e.preventDefault();
+                e.stopPropagation();
+                editingTurn.onCancel();
                 return;
               }
               if (e.key === 'Escape' && edit) {
@@ -2383,19 +2490,28 @@ export const Composer = forwardRef(function Composer(
               </button>
               {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
-              {chatId === 'new' ? null : (
-                <button
-                  type="button"
-                  className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
-                  data-testid="meeting-btn"
-                  aria-pressed={inMeeting}
-                  aria-label={inMeeting ? 'end meeting' : 'meeting'}
-                  title={inMeeting ? 'End meeting' : 'Meeting'}
-                  onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
-                  disabled={voiceDisabled && !inMeeting}
-                >
-                  <AudioLines size={ICON_SIZE} aria-hidden />
-                </button>
+              {chatId === 'new' && !onStartMeeting ? null : (
+                <span className="mm-setup-anchor">
+                  <button
+                    type="button"
+                    className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
+                    data-testid="meeting-btn"
+                    aria-pressed={inMeeting}
+                    aria-label={inMeeting ? 'end meeting' : 'meeting'}
+                    title={inMeeting ? 'End meeting' : 'Meeting'}
+                    onClick={() =>
+                      onStartMeeting
+                        ? onStartMeeting()
+                        : inMeeting
+                          ? endMeeting(chatId)
+                          : void beginMeeting(chatId)
+                    }
+                    disabled={voiceDisabled && !inMeeting}
+                  >
+                    <AudioLines size={ICON_SIZE} aria-hidden />
+                  </button>
+                  <MeetingSetupPopover chatId={chatId} />
+                </span>
               )}
               {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
               chat's next turn will use, last in the utility group so it reads
@@ -2448,6 +2564,7 @@ export const Composer = forwardRef(function Composer(
                 </div>
               )}
               <ChatModelControl chatId={chatId} />
+              <EffortControl chatId={chatId} />
               {/* spec/14 § Composer — context ring, immediately left of stop/send. */}
               <ContextRing chatId={chatId} />
             </>
@@ -2513,7 +2630,13 @@ export const Composer = forwardRef(function Composer(
               aria-label="send message"
               /* `↵` is the primary key and `⌘↵` also works — name the primary one
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
-              title={running ? shortcutTitle('Queue', '↵') : shortcutTitle('Send', '↵')}
+              title={
+                editingTurn
+                  ? shortcutTitle('Save edit', '↵')
+                  : running
+                    ? shortcutTitle('Queue', '↵')
+                    : shortcutTitle('Send', '↵')
+              }
               disabled={sendBlocked || resolving || !hasContent}
               onContextMenu={sendMenu.openAt}
             >
@@ -2572,6 +2695,8 @@ export const Composer = forwardRef(function Composer(
               ref={chipPreviewRef}
               className="composer-chip-preview-popover"
               data-testid="composer-chip-preview-popover"
+              onMouseEnter={cancelChipPreviewClose}
+              onMouseLeave={() => scheduleChipPreviewClose()}
               style={{
                 position: 'fixed',
                 top: chipPreviewPos?.top ?? 0,

@@ -29,6 +29,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import {
   closeSync,
+  statSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -42,6 +43,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { z } from 'zod';
+import { DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 
 /** A background task, persisted at `<chatDir>/watch/<taskId>.json`. */
 export const WatchRecord = z
@@ -58,6 +60,15 @@ export const WatchRecord = z
     /** The detached process-group leader's pid (== its pgid). */
     pid: z.number().int(),
     startedAt: z.number().int(),
+    /** Required wall-clock limit: the host kills the group when it is exceeded. */
+    /** Optional only so records persisted before the limit existed still load; `start` always sets it. */
+    timeoutSec: z.number().int().positive().optional(),
+    /** Set once the host killed the task for exceeding `timeoutSec`. */
+    timedOut: z.boolean().optional(),
+    /** Per-watch check-in interval (seconds), set by the agent at start or by the user in the bar; absent = the daemon default. */
+    checkInSec: z.number().int().positive().optional(),
+    /** When the periodic check-in last went to the chat. */
+    lastCheckInAt: z.number().int().optional(),
     status: z.enum(['running', 'exited', 'stopped', 'failed']),
     /** Set once the task leaves `running`. Undefined = unknown (e.g. a
      *  restart re-attached to the pid and only ever observed it vanish). */
@@ -84,6 +95,12 @@ export interface WatchSchedulerDeps {
   isAlive?(pid: number): boolean;
   /** How often the resident poll runs. Default 3000ms. */
   pollMs?: number;
+  /**
+   * The periodic check-in, read afresh each tick so a settings change applies
+   * to tasks already running. `prompt` may use {description}, {running},
+   * {lastOutput} and {taskId}. Default: every hour, `DEFAULT_CHECK_IN_PROMPT`.
+   */
+  checkIn?(): { intervalMs: number; prompt: string };
   setIntervalFn?(cb: () => void, ms: number): ReturnType<typeof setInterval>;
   clearIntervalFn?(t: ReturnType<typeof setInterval>): void;
 }
@@ -92,6 +109,36 @@ const WATCH_DIR = 'watch';
 /** Metadata tag on the delivered turn — data not directive, like wake.ts's `[wake]`. */
 export const WATCH_PREFIX = '[watch]';
 const DEFAULT_POLL_MS = 3_000;
+export const DEFAULT_CHECK_IN_MS = 60 * 60 * 1000;
+export const DEFAULT_CHECK_IN_PROMPT = DEFAULT_WATCH_CHECK_IN_PROMPT;
+
+/** What a running watch last printed: its final non-empty line and when it was written. */
+export interface WatchProgress {
+  lastLine?: string;
+  lastOutputAt?: number;
+}
+
+export function readProgress(outputFile: string): WatchProgress {
+  if (!existsSync(outputFile)) return {};
+  const lines = readFileSync(outputFile, 'utf8').split('\n');
+  let last: string | undefined;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = (lines[i] ?? '').trim();
+    if (l !== '') {
+      last = l;
+      break;
+    }
+  }
+  return {
+    ...(last !== undefined ? { lastLine: last } : {}),
+    lastOutputAt: Math.floor(statSync(outputFile).mtimeMs),
+  };
+}
+
+function formatDuration(ms: number): string {
+  const m = Math.floor(ms / 60_000);
+  return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+}
 
 function defaultIsAlive(pid: number): boolean {
   try {
@@ -160,7 +207,14 @@ export class WatchScheduler {
    * resolved by the caller (Daemon.startWatch defaults it to the chat's own
    * folder); this class has no opinion about it.
    */
-  start(opts: { chatId: string; command: string; description: string; cwd: string }): WatchRecord {
+  start(opts: {
+    chatId: string;
+    command: string;
+    description: string;
+    cwd: string;
+    timeoutSec: number;
+    checkInSec?: number;
+  }): WatchRecord {
     const taskId = this.generateTaskId();
     const dir = this.dirFor(opts.chatId);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -202,6 +256,8 @@ export class WatchScheduler {
       outputFile,
       pid,
       startedAt: this.deps.now(),
+      timeoutSec: opts.timeoutSec,
+      ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
       status: 'running',
     };
     this.writeRecord(rec);
@@ -300,6 +356,14 @@ export class WatchScheduler {
     for (const chatId of this.deps.allChatIds()) {
       for (const rec of this.list(chatId)) {
         if (rec.status !== 'running') continue;
+        if (
+          rec.timeoutSec !== undefined &&
+          this.deps.now() - rec.startedAt > rec.timeoutSec * 1000
+        ) {
+          await this.timeOut(rec);
+          continue;
+        }
+        await this.checkInIfDue(rec);
         const handle = this.liveHandles.get(rec.taskId);
         if (handle) {
           // Node tracks a spawned child's exit internally regardless of
@@ -317,6 +381,80 @@ export class WatchScheduler {
           await this.complete(rec, null, null);
         }
       }
+    }
+  }
+
+  private async timeOut(rec: WatchRecord): Promise<void> {
+    try {
+      process.kill(-rec.pid, 'SIGKILL');
+    } catch {
+      // Group already gone — nothing to signal.
+    }
+    this.liveHandles.delete(rec.taskId);
+    this.writeRecord({
+      ...rec,
+      status: 'failed',
+      timedOut: true,
+      signal: 'SIGKILL',
+      endedAt: this.deps.now(),
+    });
+    await this.send(
+      rec,
+      `${WATCH_PREFIX} "${rec.description}" timed out after ${formatDuration((rec.timeoutSec ?? 0) * 1000)} and was killed. ` +
+        `Command: ${rec.command}. Call patch_watch_output("${rec.taskId}") to read its output.`,
+    );
+  }
+
+  private checkInConfig(): { intervalMs: number; prompt: string } {
+    return (
+      this.deps.checkIn?.() ?? { intervalMs: DEFAULT_CHECK_IN_MS, prompt: DEFAULT_CHECK_IN_PROMPT }
+    );
+  }
+
+  /** When the next check-in for a running task is due. */
+  nextCheckInAt(rec: WatchRecord): number {
+    const intervalMs =
+      rec.checkInSec !== undefined ? rec.checkInSec * 1000 : this.checkInConfig().intervalMs;
+    return (rec.lastCheckInAt ?? rec.startedAt) + intervalMs;
+  }
+
+  /**
+   * Change a running task's check-in interval. The clock restarts now, so the
+   * next check-in is one new interval away rather than possibly already due.
+   */
+  setCheckIn(chatId: string, taskId: string, checkInSec: number): boolean {
+    const rec = this.readOne(chatId, taskId);
+    if (!rec || rec.status !== 'running') return false;
+    this.writeRecord({ ...rec, checkInSec, lastCheckInAt: this.deps.now() });
+    return true;
+  }
+
+  /** Whenever a task's check-in is due while it is still running, ask the owning agent whether it is healthy. */
+  private async checkInIfDue(rec: WatchRecord): Promise<void> {
+    const now = this.deps.now();
+    if (now < this.nextCheckInAt(rec)) return;
+    const cfg = this.checkInConfig();
+    this.writeRecord({ ...rec, lastCheckInAt: now });
+    const vars: Record<string, string> = {
+      description: rec.description,
+      running: formatDuration(now - rec.startedAt),
+      lastOutput: readProgress(rec.outputFile).lastLine ?? 'none yet',
+      taskId: rec.taskId,
+    };
+    await this.send(
+      rec,
+      `${WATCH_PREFIX} ` + cfg.prompt.replace(/\{(\w+)\}/g, (m, k: string) => vars[k] ?? m),
+    );
+  }
+
+  private async send(rec: WatchRecord, message: string): Promise<void> {
+    try {
+      await this.deps.deliver(rec.chatId, message);
+    } catch (err) {
+      this.deps.logger.error(
+        { chatId: rec.chatId, taskId: rec.taskId, err },
+        'watch: delivery failed',
+      );
     }
   }
 

@@ -420,7 +420,12 @@ async function bootMain(
   } = {},
 ): Promise<Boot> {
   const home = mkdtempSync(join(tmpdir(), 'patch-main-home-'));
-  if (opts.hostJson) writeFileSync(join(home, 'host.json'), JSON.stringify(opts.hostJson));
+  // The server says which machine runs the Manager; a test boots as that machine
+  // (remembered from an earlier `host.set_manager`) unless it asks not to.
+  const runsManager = envOverrides['__NOT_MANAGER__'] === undefined;
+  if (opts.hostJson || runsManager) {
+    writeFileSync(join(home, 'host.json'), JSON.stringify({ runsManager, ...opts.hostJson }));
+  }
   if (opts.claudeStore) {
     writeFileSync(join(home, 'claude-oauth.json'), JSON.stringify(opts.claudeStore), {
       mode: 0o600,
@@ -455,8 +460,6 @@ async function bootMain(
   const savedEnv: Record<string, string | undefined> = {};
   const env: Record<string, string | undefined> = {
     PATCH_HOME: home,
-    // The Manager and Speakers exist only on the home machine (spec/06).
-    PATCH_IS_HOME_HOST: '1',
     PATCH_DAEMON_SOCKET: join(home, 'daemon.sock'),
     PATCH_DAEMON_HEALTHZ_PORT: String(healthzPort),
     PATCH_DAEMON_HEALTHZ_HOST: '127.0.0.1',
@@ -495,6 +498,7 @@ async function bootMain(
     ...envOverrides,
   };
   delete env['__NO_DAEMON_KEY__'];
+  delete env['__NOT_MANAGER__'];
   for (const [k, v] of Object.entries(env)) {
     savedEnv[k] = process.env[k];
     if (v === undefined) delete process.env[k];
@@ -1802,6 +1806,18 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
+  it('with no healthz port configured the host opens no TCP listener and answers on its socket', async () => {
+    const boot = await bootMain({ PATCH_DAEMON_HEALTHZ_PORT: undefined });
+    try {
+      const res = await boot.ready.app.inject({ method: 'GET', url: '/healthz' });
+      expect(res.statusCode).toBe(200);
+      // The port bootMain reserved for this host stays unbound.
+      await expect(httpGet(boot.healthzPort, '/healthz')).rejects.toThrow(/ECONNREFUSED/);
+    } finally {
+      await boot.cleanup();
+    }
+  });
+
   it('a malformed daemon.key (no payload segment / missing sub) rejects boot before any listener starts', async () => {
     // Both cases fail inside main() BEFORE any socket/port is bound, so there
     // is nothing to clean up beyond the temp dirs bootMain itself made before
@@ -2072,14 +2088,14 @@ describe('src/index.ts main() — full host boot', () => {
     rmSync(kokoroModelHome, { recursive: true, force: true });
   });
 
-  it('a machine that is not the home machine creates no Manager or Speakers, and does once it becomes home', async () => {
-    const boot = await bootMain({ PATCH_IS_HOME_HOST: '0' });
+  it('a machine the server has not given the Manager creates no Manager or Speakers, and does once told it runs it', async () => {
+    const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       expect(boot.ready.daemon.chatState.has('thread_manager')).toBe(false);
       expect(boot.ready.daemon.chatState.has('thread_speakers')).toBe(false);
 
-      boot.fakeServer.send({ type: 'host.set_home', hostId: 'd1' });
+      boot.fakeServer.send({ type: 'host.set_manager', hostId: 'd1' });
       await waitFor(() => boot.ready.daemon.chatState.has('thread_manager'));
       expect(boot.ready.daemon.chatState.has('thread_speakers')).toBe(true);
       // The server learns of them, or no surface would ever see the new Manager.
@@ -2160,7 +2176,7 @@ describe('src/index.ts main() — full host boot', () => {
   }, 30_000);
 
   it('a machine told to stand in for the Manager creates it, remembers the takeover once, and lets go on release', async () => {
-    const boot = await bootMain({ PATCH_IS_HOME_HOST: '0' });
+    const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       expect(boot.ready.daemon.chatState.has('thread_manager')).toBe(false);
@@ -2200,7 +2216,7 @@ describe('src/index.ts main() — full host boot', () => {
   }, 30_000);
 
   it('ignores a takeover addressed to another machine', async () => {
-    const boot = await bootMain({ PATCH_IS_HOME_HOST: '0' });
+    const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       boot.fakeServer.send({
@@ -2453,16 +2469,19 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
-  // spec/02 § Claude Code settings: the host publishes this host's memory
-  // entries on connect; settings.json is written from the shared settings'
-  // snapshot, except when changed on the machine, which is reported as drift
-  // until it is discarded; memory edits land on disk and republish.
-  it('publishes memory on connect, writes settings.json from the snapshot, reports drift, and memory frames write through', async () => {
+  // spec/02 § Claude Code settings: the host publishes its settings.json text
+  // and memory entries on connect; settings.json is the machine's own file,
+  // written only by a `host.claude_settings_set` (a refused edit leaves it
+  // alone) and left alone by shared-settings snapshots; memory edits land on
+  // disk and republish.
+  it('publishes settings.json and memory on connect, writes settings.json only from a set frame, and memory frames write through', async () => {
     const boot = await bootMain();
     try {
       const claudeProjectsRoot = join(boot.home, 'claude-projects');
       const memoryDir = join(claudeProjectsRoot, 'my-project', 'memory');
       mkdirSync(memoryDir, { recursive: true });
+      const settingsPath = join(boot.home, 'settings.json');
+      writeFileSync(settingsPath, '{"model":"sonnet"}');
       writeFileSync(
         join(memoryDir, 'feedback_tests.md'),
         '---\nname: feedback_tests\ndescription: a seeded memory\ntype: feedback\n---\n\nBody text.\n',
@@ -2476,6 +2495,7 @@ describe('src/index.ts main() — full host boot', () => {
         (e) => e.type === 'claude_settings.list' && e.hostId === 'd1',
       );
       expect(listFrame).toMatchObject({
+        settingsJson: '{"model":"sonnet"}',
         memories: [
           {
             project: 'my-project',
@@ -2488,42 +2508,56 @@ describe('src/index.ts main() — full host boot', () => {
           },
         ],
       });
-      expect(listFrame).not.toHaveProperty('drift');
 
-      const snapshot = (version: number, shared: string, hostId = 'd1'): WireEvent => ({
+      // A shared-settings snapshot does not touch the machine's file.
+      boot.fakeServer.send({
         type: 'settings.snapshot',
-        hostId,
-        version,
-        settings: { ...DEFAULT_SHARED_SETTINGS, claudeSettings: { shared, darwin: '', linux: '' } },
+        hostId: 'd1',
+        version: 1,
+        settings: DEFAULT_SHARED_SETTINGS,
         secrets: { claude: [], codex: [], providerKeys: {} },
       });
-      const settingsPath = join(boot.home, 'settings.json');
-
-      // The shared text is written where Claude Code reads it.
-      boot.fakeServer.send(snapshot(1, '{"model":"opus"}'));
       await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
-      expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({ model: 'opus' });
-
-      // Changed on the machine: the next snapshot leaves it alone and reports it.
-      writeFileSync(settingsPath, '{"model":"sonnet"}');
-      boot.fakeServer.send(snapshot(2, '{"model":"haiku"}'));
-      const drifted = await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'claude_settings.updated' && e.hostId === 'd1' && 'drift' in e,
-      );
-      expect(drifted).toMatchObject({ drift: '{"model":"sonnet"}' });
       expect(readFileSync(settingsPath, 'utf8')).toBe('{"model":"sonnet"}');
 
-      // Discard rewrites it from the snapshot.
-      boot.fakeServer.send({ type: 'host.claude_settings_discard', hostId: 'd1' });
-      await vi.waitFor(() =>
-        expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({ model: 'haiku' }),
+      // A set frame writes the file and republishes its text.
+      boot.fakeServer.send({
+        type: 'host.claude_settings_set',
+        hostId: 'd1',
+        text: '{"model":"haiku"}',
+      });
+      await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'claude_settings.updated' &&
+          e.hostId === 'd1' &&
+          (e as { settingsJson: string }).settingsJson === '{"model":"haiku"}',
       );
+      expect(readFileSync(settingsPath, 'utf8')).toBe('{"model":"haiku"}');
 
-      // A snapshot naming a different machine is not applied here.
-      boot.fakeServer.send(snapshot(3, '{"model":"should-not-land"}', 'some-other-host'));
-      boot.fakeServer.send(snapshot(4, '{"model":"sonnet"}'));
-      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 4);
-      expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({ model: 'sonnet' });
+      // Text that is not a JSON object is refused, named, and the file stays.
+      boot.fakeServer.send({ type: 'host.claude_settings_set', hostId: 'd1', text: '[1]' });
+      const refused = await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'chat.error' &&
+          e.error.code === 'claude_settings_invalid' &&
+          e.error.message.includes('host.claude_settings_set'),
+      );
+      expect((refused as { error: { message: string } }).error.message).toContain('JSON object');
+      expect(readFileSync(settingsPath, 'utf8')).toBe('{"model":"haiku"}');
+
+      // A set frame naming a different machine is not applied here.
+      boot.fakeServer.send({
+        type: 'host.claude_settings_set',
+        hostId: 'some-other-host',
+        text: '{"model":"should-not-land"}',
+      });
+      boot.fakeServer.send({ type: 'host.claude_settings_set', hostId: 'd1', text: '{}' });
+      await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'claude_settings.updated' &&
+          (e as { settingsJson: string }).settingsJson === '{}',
+      );
+      expect(readFileSync(settingsPath, 'utf8')).toBe('{}');
 
       // host.claude_memory_set rewrites the text under the same frontmatter
       // and republishes the entry with its new body.
@@ -3526,6 +3560,43 @@ describe('src/index.ts main() — scheduled self-update actually applies', () =>
       const refusal = lines.find((l) => l.includes('self-update: scheduled apply refused'))!;
       expect(refusal).toContain('sha256');
       expect(refusal).toContain('does not match the manifest');
+    } finally {
+      await boot.cleanup();
+    }
+  });
+
+  it('does not pull a published build on its own when auto-update is off', async () => {
+    const lines: string[] = [];
+    const artifactBytes = Buffer.from('not a real host tarball');
+    const manifest: HostManifest = {
+      version: '9.9.9',
+      gitSha: 'deadbeef',
+      builtAt: new Date().toISOString(),
+      signingPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      artifacts: [
+        {
+          target: 'linux-x64',
+          file: 'patch-host-linux-x64.tar.gz',
+          bytes: artifactBytes.length,
+          sha256: '0'.repeat(64),
+          sig: 'invalid-sig',
+        },
+      ],
+    };
+    const boot = await bootMain(
+      {},
+      {
+        hostJson: { autoUpdateHosts: false },
+        logStream: { write: (chunk: string) => void lines.push(chunk) },
+        selfUpdateManifest: { manifest, files: { 'patch-host-linux-x64.tar.gz': artifactBytes } },
+      },
+    );
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      await waitFor(() => lines.some((l) => l.includes('self-update: availability changed')));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(lines.some((l) => l.includes('self-update: scheduled apply refused'))).toBe(false);
     } finally {
       await boot.cleanup();
     }

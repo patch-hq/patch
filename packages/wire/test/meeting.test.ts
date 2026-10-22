@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { EVENT_SCHEMAS, formatMeetingClock, meetingElapsedMs, MeetingState } from '../src/index.js';
+import {
+  EVENT_SCHEMAS,
+  formatMeetingClock,
+  meetingElapsedMs,
+  meetingSpeakerLabel,
+  MeetingCard,
+  MeetingState,
+} from '../src/index.js';
 
 const state = {
   status: 'live',
@@ -18,9 +25,37 @@ describe('meeting wire', () => {
   it('accepts every meeting event shape', () => {
     const ok = [
       { type: 'meeting.control_request', chatId: 'c', action: 'start' },
+      { type: 'meeting.control_request', chatId: 'c', action: 'name_voice', voice: 2, name: 'P' },
       { type: 'meeting.get_request', chatId: 'c' },
       { type: 'meeting.audio', chatId: 'c', source: 'mic', audioBase64: 'AA==' },
+      {
+        type: 'meeting.audio',
+        chatId: 'c',
+        source: 'system',
+        audioBase64: 'AA==',
+        speakerName: 'Priya',
+      },
       { type: 'meeting.action_request', chatId: 'c', actionId: 'a', decision: 'do' },
+      {
+        type: 'meeting.notes_request',
+        chatId: 'c',
+        edit: { op: 'set_title', topicId: 't', text: 'x' },
+      },
+      {
+        type: 'meeting.notes_request',
+        chatId: 'c',
+        edit: { op: 'insert', aboveTopicId: 't', id: 'n' },
+      },
+      { type: 'meeting.my_notes_request', chatId: 'c', text: 'Ask Priya about the rollout' },
+      { type: 'meeting.writeup_request', chatId: 'c', regenerate: true },
+      {
+        type: 'meeting.writeup_request',
+        chatId: 'c',
+        writeup: {
+          title: 'Rollout',
+          sections: [{ heading: 'Plan', items: [{ text: 'Ship', mine: true }] }],
+        },
+      },
       { type: 'meeting.state', chatId: 'c', meeting: state },
       { type: 'meeting.state', chatId: 'c', meeting: null },
     ];
@@ -49,5 +84,64 @@ describe('meeting wire', () => {
     ).toBe(1000);
     expect(formatMeetingClock(65_000)).toBe('01:05');
     expect(formatMeetingClock(3_725_000)).toBe('1:02:05');
+  });
+});
+
+describe('meetingSpeakerLabel', () => {
+  it('labels you, an unseparated them, a numbered voice and a named voice', () => {
+    expect(meetingSpeakerLabel({ speaker: 'you' })).toBe('You');
+    expect(meetingSpeakerLabel({ speaker: 'them' })).toBe('Them');
+    expect(meetingSpeakerLabel({ speaker: 'them', voice: 2 })).toBe('Them 2');
+    expect(meetingSpeakerLabel({ speaker: 'them', voice: 2 }, { '2': 'Priya' })).toBe('Priya');
+  });
+
+  it('accepts a state with voiced lines and a voice name map', () => {
+    const ok = MeetingState.safeParse({
+      ...state,
+      transcript: [{ at: 0, speaker: 'them', voice: 1, text: 'hi' }],
+      voices: { '1': 'Priya' },
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it('prefers the name the call app gave over a numbered voice', () => {
+    expect(meetingSpeakerLabel({ speaker: 'them', name: 'Priya' })).toBe('Priya');
+    expect(meetingSpeakerLabel({ speaker: 'them', voice: 2, name: 'Priya' })).toBe('Priya');
+    expect(meetingSpeakerLabel({ speaker: 'you', name: 'Priya' })).toBe('You');
+  });
+
+  it('a transcript line may carry a name', () => {
+    const line = { at: 1, speaker: 'them', text: 'hi', name: 'Priya' };
+    expect(MeetingState.safeParse({ ...state, transcript: [line] }).success).toBe(true);
+  });
+});
+
+describe('research cards', () => {
+  const src = { name: 'Authority', url: 'https://example.org/p' };
+  const base = { id: 'k', key: 'k', at: 0 };
+  it('accepts a sourced fact check and rejects an unsourced figure or a non-http link', () => {
+    expect(
+      MeetingCard.safeParse({
+        ...base,
+        kind: 'fact',
+        title: '"40 cars"',
+        verdict: 'correct',
+        bullets: ['Deck holds 40 cars'],
+        source: src,
+      }).success,
+    ).toBe(true);
+    expect(
+      MeetingCard.safeParse({ ...base, kind: 'answer', title: 'q', bullets: ['It takes 5 min'] })
+        .success,
+    ).toBe(false);
+    expect(
+      MeetingCard.safeParse({
+        ...base,
+        kind: 'answer',
+        title: 'q',
+        bullets: ['x'],
+        source: { name: 'n', url: 'javascript:alert(1)' },
+      }).success,
+    ).toBe(false);
   });
 });

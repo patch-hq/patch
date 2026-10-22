@@ -76,7 +76,11 @@ describe('chat.state carries the running patch_watch count', () => {
     await daemon.spawnChat({ folder, prompt: 'build it in the background' });
     events.length = 0;
 
-    daemon.startWatch('chat-1', { command: 'sleep 5', description: 'a slow build' });
+    daemon.startWatch('chat-1', {
+      command: 'sleep 5',
+      description: 'a slow build',
+      timeoutSec: 600,
+    });
     const after = states(events).at(-1);
     expect(after?.backgroundTasks).toBe(1);
 
@@ -90,7 +94,11 @@ describe('chat.state carries the running patch_watch count', () => {
       { type: 'assistant', content: 'kicked it off', sessionId: 'sess-A' },
     ]);
     await daemon.spawnChat({ folder, prompt: 'build it in the background' });
-    const rec = daemon.startWatch('chat-1', { command: 'sleep 5', description: 'a slow build' });
+    const rec = daemon.startWatch('chat-1', {
+      command: 'sleep 5',
+      description: 'a slow build',
+      timeoutSec: 600,
+    });
     expect(daemon.listWatch('chat-1').find((r) => r.taskId === rec.taskId)?.status).toBe('running');
 
     events.length = 0;
@@ -106,7 +114,11 @@ describe('chat.state carries the running patch_watch count', () => {
       { type: 'assistant', content: 'kicked it off', sessionId: 'sess-A' },
     ]);
     await daemon.spawnChat({ folder, prompt: 'build it in the background' });
-    const rec = daemon.startWatch('chat-1', { command: 'sleep 5', description: 'a slow build' });
+    const rec = daemon.startWatch('chat-1', {
+      command: 'sleep 5',
+      description: 'a slow build',
+      timeoutSec: 600,
+    });
     daemon.stopWatch('chat-1', rec.taskId);
     expect(daemon.stopWatch('chat-1', rec.taskId)).toBe(false);
   });
@@ -124,9 +136,9 @@ describe('chat.state carries the running patch_watch count', () => {
     ]);
     await daemon.spawnChat({ folder, prompt: 'build B' });
 
-    daemon.startWatch('chat-1', { command: 'sleep 5', description: 'a' });
-    daemon.startWatch('chat-2', { command: 'sleep 5', description: 'b1' });
-    daemon.startWatch('chat-2', { command: 'sleep 5', description: 'b2' });
+    daemon.startWatch('chat-1', { command: 'sleep 5', description: 'a', timeoutSec: 600 });
+    daemon.startWatch('chat-2', { command: 'sleep 5', description: 'b1', timeoutSec: 600 });
+    daemon.startWatch('chat-2', { command: 'sleep 5', description: 'b2', timeoutSec: 600 });
 
     const chat1State = [...states(events)].reverse().find((s) => s.chatId === 'chat-1');
     const chat2State = [...states(events)].reverse().find((s) => s.chatId === 'chat-2');

@@ -411,6 +411,34 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
     });
   });
 
+  it('gives research calls web search and nothing else of the coding agent', async () => {
+    const calls: Array<{ options: Record<string, unknown> }> = [];
+    const { createRealSdkBackend } = await loadRealBackend((args) => {
+      calls.push(args as { options: Record<string, unknown> });
+      return (async function* () {
+        yield { type: 'result', session_id: 's' };
+      })();
+    });
+    await drain(
+      createRealSdkBackend().run({
+        prompt: 'Check this',
+        inferenceProfile: 'research',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+        permissionMode: 'bypassPermissions',
+      }),
+    );
+    expect(calls[0]!.options).toMatchObject({
+      tools: ['WebSearch', 'WebFetch'],
+      skills: [],
+      settingSources: [],
+      persistSession: false,
+      mcpServers: {},
+    });
+    expect(calls[0]!.options['maxTurns']).toBeGreaterThan(1);
+  });
+
   it('omits model + mcpServers when unset and defaults permissionMode; includes them when set', async () => {
     const calls: Array<{ prompt: unknown; options: Record<string, unknown> }> = [];
     const { createRealSdkBackend } = await loadRealBackend((args) => {
@@ -1422,6 +1450,18 @@ describe('createRealSdkBackend — an error result is a failed turn, not a quiet
         errors: ['tool crashed', 'and again'],
       }),
     ).rejects.toThrow(/tool crashed; and again/);
+  });
+
+  it('drops the blank entry Claude Code pads a session crash with', async () => {
+    const err = await runWith({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      errors: ['', '[session_crash] error_name=AbortError api_error_status=none cause_name=none'],
+    }).catch((e: unknown) => e as Error);
+    expect(err.message).toBe(
+      'Claude Code returned an error result: [session_crash] error_name=AbortError api_error_status=none cause_name=none',
+    );
   });
 
   it('fails on an error_* subtype even when is_error is absent', async () => {

@@ -147,20 +147,24 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
     return result;
   }
 
-  app.get<{ Params: { hostId: string }; Querystring: { path?: string } }>(
-    '/api/hosts/:hostId/files',
-    async (req, reply) => {
-      const path = (req.query?.path ?? '').toString();
-      const res = await roundTrip(req, reply, () => ({
-        op: 'list',
-        ...(path ? { path } : {}),
-      }));
-      if (!res) return reply;
-      return reply
-        .code(200)
-        .send({ path: res.path, parent: res.parent ?? null, entries: res.entries ?? [] });
-    },
-  );
+  app.get<{
+    Params: { hostId: string };
+    Querystring: { path?: string; recursive?: string; maxEntries?: string };
+  }>('/api/hosts/:hostId/files', async (req, reply) => {
+    const path = (req.query?.path ?? '').toString();
+    const recursive = req.query?.recursive === '1' || req.query?.recursive === 'true';
+    const maxEntries = req.query?.maxEntries ? Number(req.query.maxEntries) : undefined;
+    const res = await roundTrip(req, reply, () => ({
+      op: 'list',
+      ...(path ? { path } : {}),
+      ...(recursive ? { recursive: true } : {}),
+      ...(maxEntries !== undefined && Number.isFinite(maxEntries) ? { maxEntries } : {}),
+    }));
+    if (!res) return reply;
+    return reply
+      .code(200)
+      .send({ path: res.path, parent: res.parent ?? null, entries: res.entries ?? [] });
+  });
 
   app.get<{ Params: { hostId: string }; Querystring: { path?: string } }>(
     '/api/hosts/:hostId/files/content',

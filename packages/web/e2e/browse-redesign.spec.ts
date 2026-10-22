@@ -59,8 +59,11 @@ test.describe('file browser — redesigned tree', () => {
     await page.getByTestId('tree-row-src').click();
     await page.getByTestId('tree-row-src/components').click();
     await expect(page.getByTestId('tree-row-src/components/Panel.tsx')).toBeVisible();
-    // No breadcrumb — the tree is hierarchical now, there is no "current directory".
-    await expect(page.getByTestId('browse-breadcrumb')).toHaveCount(0);
+    // The tree itself has no "current directory" row — still hierarchical.
+    // The breadcrumb above it (climb out of the repo, spec/14 § File browser)
+    // DOES exist: it runs from `/` down to the chat's own folder.
+    await expect(page.getByTestId('browse-breadcrumb')).toBeVisible();
+    await expect(page.getByTestId('browse-breadcrumb-current')).toHaveText('bus');
     await expect(page.getByTestId('tree-up')).toHaveCount(0);
 
     // Collapsing the top-level `src` row hides everything nested under it.

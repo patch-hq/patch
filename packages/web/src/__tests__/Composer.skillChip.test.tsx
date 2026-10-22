@@ -142,6 +142,22 @@ describe('Composer — skill chips', () => {
     await waitFor(() => expect(screen.queryByTestId('composer-chip-preview-popover')).toBeNull());
   });
 
+  it('keeps the preview open while the pointer crosses from the chip onto it', async () => {
+    const input = renderComposer();
+    fireEvent.change(input, { target: { value: '/plant ' } });
+    const chip = await screen.findByTestId('composer-chip');
+    fireEvent.mouseEnter(chip);
+    const popover = await screen.findByTestId('composer-chip-preview-popover');
+    fireEvent.mouseLeave(chip);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(screen.getByTestId('composer-chip-preview-popover')).toBeInTheDocument();
+    fireEvent.mouseEnter(popover);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.getByTestId('composer-chip-preview-popover')).toBeInTheDocument();
+    fireEvent.mouseLeave(popover);
+    await waitFor(() => expect(screen.queryByTestId('composer-chip-preview-popover')).toBeNull());
+  });
+
   it('shows the preview on click too (tap, on a touch surface)', async () => {
     const input = renderComposer();
     fireEvent.change(input, { target: { value: '/plant ' } });

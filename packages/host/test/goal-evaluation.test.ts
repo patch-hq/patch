@@ -335,7 +335,11 @@ describe('maybeEvaluateGoal — deferred while patch_watch is running', () => {
     const chatId = await daemon.spawnChat({ folder });
     await tick();
     await daemon.setGoal(chatId, 'Do the thing');
-    daemon.startWatch(chatId, { command: 'sleep 0.2', description: 'a slow background task' });
+    daemon.startWatch(chatId, {
+      command: 'sleep 0.2',
+      description: 'a slow background task',
+      timeoutSec: 600,
+    });
 
     await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
     await tick(30);

@@ -56,7 +56,6 @@ in the response is `*Truncated`, resume it with `--sessions-cursor`/
 patch hosts list --json                          # every registered machine
 patch hosts get [--host H] --json                # platform, backends, components, permission mode
 patch hosts rename <name> [--host H] --json
-patch hosts set-home [--host H] --json           # the machine the special threads run on
 patch settings set permission-mode <mode> --json   # shared by every host
 patch hosts folders [--host H] --json
 patch hosts folders add <path> [--host H] --json

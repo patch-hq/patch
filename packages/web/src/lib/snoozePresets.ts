@@ -5,6 +5,8 @@
 // clock at the moment of choosing into an absolute timestamp — the host
 // only ever stores that, so a slow request can't drift the wake time.
 
+import { SNOOZE_UNTIL_COMPLETE, formatWakeAt } from '@patch/wire';
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -52,13 +54,22 @@ export const SNOOZE_PRESETS: ReadonlyArray<SnoozePreset> = [
   { id: 'next-monday', label: 'Next Monday', resolve: () => resolveNextMondayAt(8) },
 ];
 
-/** Wake time as a short local date+time, e.g. `Tue 09:30`. */
+/** "Until complete": wakes when the chat's work is done, not at a time. Offered only for a chat with work to wait for. */
+export const UNTIL_COMPLETE_PRESET: SnoozePreset = {
+  id: 'until-complete',
+  label: 'Until complete',
+  resolve: () => SNOOZE_UNTIL_COMPLETE,
+};
+
+/**
+ * A wake time wherever a surface names one outside the sheet — the sidebar's
+ * Snoozed rows, the banner on an open snoozed chat, the header tooltip. The
+ * same wording as the sheet (spec/04 § Snooze): `HH:MM` today, `Fri 08:00`
+ * within six days, `Thu 22 Oct` beyond, always 24-hour; "when done" for a
+ * snooze until complete.
+ */
 export function formatWakeTime(at: number): string {
-  const d = new Date(at);
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  const sameDay = new Date().toDateString() === d.toDateString();
-  if (sameDay) return time;
-  return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  return formatWakeAt(at);
 }
 
 export { formatWakeAt, formatSnoozeMoment, formatElapsed } from '@patch/wire';

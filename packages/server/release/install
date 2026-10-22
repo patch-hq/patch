@@ -2,7 +2,7 @@
 # Install (or upgrade to) the Patch server release this file sits in.
 #
 #   ./install [--home DIR] [--no-service] [--system [--user NAME]]
-#             [--public-url URL] [--host ADDR]
+#             [--public-url URL] [--host ADDR] [--socket PATH]
 #
 # --home        the install home (default ~/.patch-server)
 # --no-service  lay the release out and stop there: no systemd unit, no start.
@@ -16,6 +16,10 @@
 #               address to carry.
 # --host        the address the server listens on (default 127.0.0.1, behind a
 #               TLS proxy; 0.0.0.0 to serve a LAN directly). First install only.
+# --socket      listen on this Unix socket (absolute path) instead of a port, for a
+#               reverse proxy on the same box. Nothing can find or kill it by
+#               port. Under /run/<dir>/ systemd creates the directory. Written
+#               to server.env on every install that passes it.
 #
 # The install home holds the running app and nothing else — it is never a git
 # checkout, so nothing done to source code can touch it:
@@ -41,6 +45,7 @@ SYSTEM=0
 RUN_USER=$(id -un)
 PUBLIC_URL=""
 LISTEN_HOST="127.0.0.1"
+SOCKET=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --home) HOME_DIR="$2"; shift 2 ;;
@@ -53,6 +58,8 @@ while [ $# -gt 0 ]; do
     --public-url=*) PUBLIC_URL="${1#--public-url=}"; shift ;;
     --host) LISTEN_HOST="$2"; shift 2 ;;
     --host=*) LISTEN_HOST="${1#--host=}"; shift ;;
+    --socket) SOCKET="$2"; shift 2 ;;
+    --socket=*) SOCKET="${1#--socket=}"; shift ;;
     *) echo "install: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -93,6 +100,11 @@ if [ ! -f "${ENV_FILE}" ]; then
   rm -f "${ENV_TMP}"
 fi
 grep -q "^PORT=..*" "${ENV_FILE}" || die "PORT is empty in ${ENV_FILE}"
+if [ -n "${SOCKET}" ]; then
+  case "${SOCKET}" in /*) ;; *) die "--socket needs an absolute path, got ${SOCKET}" ;; esac
+  sed -i.bak '/^#\{0,1\} \{0,1\}PATCH_SOCKET=/d' "${ENV_FILE}" && rm -f "${ENV_FILE}.bak"
+  printf 'PATCH_SOCKET=%s\n' "${SOCKET}" >> "${ENV_FILE}"
+fi
 
 # Never install half a release: `current` must only ever point at a tree the
 # launcher will accept (the same check patch-server makes).
@@ -177,6 +189,17 @@ else
   RUN_AS=""
 fi
 mkdir -p "${UNIT_DIR}"
+SOCKET_ENV=$(sed -n 's/^PATCH_SOCKET=//p' "${ENV_FILE}" | tail -n 1)
+RUNTIME_DIR=""
+case "${SOCKET_ENV}" in
+  /run/*/*) RUNTIME_DIR=$(printf '%s' "${SOCKET_ENV}" | cut -d/ -f3) ;;
+esac
+RUNTIME_LINES=""
+if [ "${SYSTEM}" = 1 ] && [ -n "${RUNTIME_DIR}" ]; then
+  RUNTIME_LINES="RuntimeDirectory=${RUNTIME_DIR}
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes"
+fi
 cat > "${UNIT_DIR}/patch-server.service" <<EOF
 # Written by the Patch server installer. Re-running it rewrites this file.
 [Unit]
@@ -186,12 +209,13 @@ After=network-online.target
 [Service]
 Type=simple
 ${RUN_AS}
+${RUNTIME_LINES}
 EnvironmentFile=${ENV_FILE}
 Environment="PATCH_SERVER_HOME=${HOME_DIR}"
 Environment="PATCH_NODE=${NODE}"
 Environment="PATH=${PATH}"
 ExecStart=${HOME_DIR}/current/patch-server
-Restart=on-failure
+Restart=always
 RestartSec=3s
 StandardOutput=append:${HOME_DIR}/logs/server.log
 StandardError=append:${HOME_DIR}/logs/server.log
@@ -205,18 +229,25 @@ ${SYSTEMCTL} restart patch-server
 
 PORT=$(sed -n 's/^PORT=//p' "${ENV_FILE}" | tail -n 1)
 [ -n "${PORT}" ] || die "PORT is not set in ${ENV_FILE}"
+if [ -n "${SOCKET_ENV}" ]; then
+  HEALTH_CURL="curl -sf --unix-socket ${SOCKET_ENV} http://localhost/api/healthz"
+  WHERE="${SOCKET_ENV}"
+else
+  HEALTH_CURL="curl -sf http://127.0.0.1:${PORT}/api/healthz"
+  WHERE=":${PORT}"
+fi
 i=0
 while :; do
-  SERVED=$(curl -sf "http://127.0.0.1:${PORT}/api/healthz" 2>/dev/null | "${NODE}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).gitSha??'')}catch{}})" || true)
+  SERVED=$(${HEALTH_CURL} 2>/dev/null | "${NODE}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).gitSha??'')}catch{}})" || true)
   [ "${SERVED}" = "${GIT_SHA}" ] && break
   i=$((i + 1))
   if [ "${i}" -ge 60 ]; then
     tail -n 30 "${HOME_DIR}/logs/server.log" >&2 || true
-    die "server did not come up on :${PORT} reporting ${GIT_SHA} within 60s (last answer: '${SERVED}')"
+    die "server did not come up on ${WHERE} reporting ${GIT_SHA} within 60s (last answer: '${SERVED}')"
   fi
   sleep 1
 done
-echo "patch-server is up on :${PORT} serving ${GIT_SHA}"
+echo "patch-server is up on ${WHERE} serving ${GIT_SHA}"
 
 if [ "${SYSTEM}" = 0 ] && command -v loginctl >/dev/null && [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)" != yes ]; then
   echo "NOTE: lingering is off for $(id -un), so the server stops when you log out. To keep it running: sudo loginctl enable-linger $(id -un)"

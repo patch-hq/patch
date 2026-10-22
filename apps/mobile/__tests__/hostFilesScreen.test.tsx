@@ -25,7 +25,7 @@ function reportHost(): void {
     updateAvailable: false,
     permissionModeDefault: 'default',
     permissionOverrides: 0,
-    isHomeHost: true,
+    runsManager: true,
     backends: [],
     components: [],
   });

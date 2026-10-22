@@ -240,4 +240,58 @@ describe('composer drafts — surface → server → every other surface', () =>
       await cleanUp(ctx);
     }
   });
+  it('sending a message into a chat drops its draft and tells every surface', async () => {
+    const ctx = await setUp();
+    try {
+      const a = await ctx.clientFor('srf-a');
+      const b = await ctx.clientFor('srf-b');
+      try {
+        a.send({ type: 'composer_draft.set', chatId: 'c1', text: 'about to send' });
+        await b.waitFor('composer_draft.updated');
+
+        const gotClear = b.waitFor('composer_draft.cleared');
+        a.sendInput({ chatId: 'c1', message: 'about to send' });
+        const event = await gotClear;
+        expect(event).toMatchObject({ type: 'composer_draft.cleared', chatId: 'c1' });
+        expect(ctx.built.composerDrafts.get('c1')).toBeUndefined();
+      } finally {
+        await a.close();
+        await b.close();
+      }
+    } finally {
+      await cleanUp(ctx);
+    }
+  });
+
+  it('a redelivered chat.input (same localId) does not clear a newer draft', async () => {
+    const ctx = await setUp();
+    try {
+      const a = await ctx.clientFor('srf-a');
+      const b = await ctx.clientFor('srf-b');
+      try {
+        a.send({ type: 'composer_draft.set', chatId: 'c1', text: 'first' });
+        await b.waitFor('composer_draft.updated');
+        const firstClear = b.waitFor('composer_draft.cleared');
+        a.sendInput({ chatId: 'c1', message: 'first', localId: 'redeliver-1' });
+        await firstClear;
+
+        // The user starts a new draft, then the surface's retry lands.
+        const gotNew = b.waitFor('composer_draft.updated');
+        a.send({ type: 'composer_draft.set', chatId: 'c1', text: 'typed since' });
+        await gotNew;
+        a.sendInput({ chatId: 'c1', message: 'first', localId: 'redeliver-1' });
+        // Barrier: a later frame on the same socket is processed after the retry.
+        const barrier = b.waitFor('composer_draft.updated');
+        a.send({ type: 'composer_draft.set', chatId: 'c2', text: 'barrier' });
+        await barrier;
+
+        expect(ctx.built.composerDrafts.get('c1')?.text).toBe('typed since');
+      } finally {
+        await a.close();
+        await b.close();
+      }
+    } finally {
+      await cleanUp(ctx);
+    }
+  });
 });

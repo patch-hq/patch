@@ -37,7 +37,7 @@ machine, and deploy and update independently.
 
 ```
    ┌─────────────────────────────────────┐
-   │  patch-server (deployed)     :443   │  Caddy → :3000
+   │  patch-server (deployed)     :443   │  Caddy → :3970
    │  relay · registry · webhooks        │  the only public component
    └───────▲──────────────────────▲──────┘
            │ outbound WS          │ outbound WS
@@ -143,11 +143,19 @@ first pairing code, and leaves `patch-server` on the path for the next
 
 Every download is checked against its published checksum before anything
 installs, and a failure at any step stops it with the reason. `--no-https`
-serves plain HTTP on `:3000` for a LAN or an existing proxy; `--user-mode`
+serves plain HTTP on `:3970` for a LAN or an existing proxy; `--user-mode`
 installs for the current user with no root and no HTTPS, to try it out.
 
 Put a TLS reverse proxy in front of `PORT` (Caddy, nginx), sending `/device/*`
-to the host's port and everything else — `/audio/*` included — to the server, which relays each voice session to the host that owns the chat (`07-voice-app.md` § Reaching a non-home host's audio WSS).
+to the host's port and everything else — `/audio/*` included — to the server, which relays each voice session to the host that owns the chat (`07-voice-app.md` § Reaching a non-Manager host's audio WSS).
+
+Instead of a port, the server can listen on a Unix socket (`PATCH_SOCKET`, an
+absolute path; the port stays the default). Nothing that clears ports can find
+or kill a socket. It cannot be combined with a relay, which tunnels to a TCP
+port. The installer offers it with `--socket [PATH]` (default
+`/run/patch/server.sock`, HTTPS installs only): systemd creates the directory,
+Caddy joins the server's group and proxies with `reverse_proxy unix//run/...`,
+and `patch-server pair` follows `PATCH_SOCKET`.
 
 ## Relay
 
@@ -218,9 +226,9 @@ TODOIST_WEBHOOK_SECRET=...
 
 # Voice
 WHISPER_BACKEND=groq         # or "local" for self-hosted
-GROQ_API_KEY=...             # groq backend; or set it in Settings → Keys
+GROQ_API_KEY=...             # groq backend; or set it in Settings → Providers
 # GEMINI_API_KEY / OPENAI_REALTIME_API_KEY — hosted voice. Optional here:
-# provider keys can be set from Settings → Keys instead (shared by every
+# provider keys can be set from Settings → Providers instead (shared by every
 # host, stored on the server), which wins over the environment
 # (02-daemon.md § Provider keys).
 # Voice model files are downloaded by the daemon on demand into its own
@@ -237,8 +245,8 @@ CLAUDE_CODE_OAUTH_TOKEN=...
 
 `WHISPER_BACKEND`, `GROQ_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are read by the
 daemon, so they are set in the environment of each host's service rather than in
-the server's compose env — or, for the provider keys, from Settings → Hosts →
-Keys, which stores them on the host and never on the server. The rest are the
+the server's compose env — or, for the provider keys, from Settings →
+Providers, which stores them on the host and never on the server. The rest are the
 server's.
 
 ## Deploy guide
@@ -407,6 +415,10 @@ Rules.
   drift between them, with a remedy per item. It re-reads the mounted web-dist
   and downloads dir per request, so a check reflects the box as it is now.
   `/api/healthz` stays the public, minimal LB probe.
+- Settings → Updates is one list of components, each with a version and a status, a
+  single Update control per host that is behind, Update all, and the
+  auto-update toggle. Hosts on different builds are not drift: each row says
+  whether it is behind. No standing text about signing limits or host mismatch.
 - Unknown reads as unknown. An unstamped, missing or unreadable layer is
   reported as such. A malformed report is rejected at the client boundary
   (`assertVersionReport`) so a partial response reaches the panel's error state

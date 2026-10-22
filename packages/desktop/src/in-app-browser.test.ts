@@ -121,7 +121,9 @@ test('a fraction chosen at one window width keeps its SHARE at another (window r
 
 test('the toolbar carries an open-in-browser button wired to the bridge', () => {
   // spec/14: "open in browser" is the escape hatch out of the embedded panel.
-  assert.match(TOOLBAR_HTML, /title="Open in browser"/);
+  assert.match(TOOLBAR_HTML, /aria-label="Open in browser"/);
+  // The toolbar strip is too short to draw a styled bubble, and the browser's own would be the one default-styled tooltip left in the app.
+  assert.doesNotMatch(TOOLBAR_HTML, /title="/);
   assert.match(TOOLBAR_HTML, /window\.iab\.openExternal\(\)/);
 });
 

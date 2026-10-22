@@ -17,6 +17,13 @@ import {
 } from '../lib/chatGroups.js';
 import { DEFAULT_JOB_SORT, type JobSort } from '../lib/jobSort.js';
 import { NO_JOB_FILTER, type JobFilter } from '../lib/jobFilter.js';
+import {
+  loadOverrides,
+  saveOverrides,
+  type ActionId,
+  type Chord,
+  type Overrides,
+} from '../lib/keymap.js';
 import { loadDictateChord, saveDictateChord, type DictateChord } from '../lib/dictateChord.js';
 import type { SettingsPageId } from '../routes/settings/pages.js';
 import { useLayoutStore } from './layoutStore.js';
@@ -206,6 +213,8 @@ function persistBool(key: string, value: boolean): void {
 // a few megabytes for the whole app.
 const BROWSE_STATE_KEY = 'patch.browse.byChat.v1';
 const BROWSE_STATE_MAX = 12;
+const HOST_BROWSE_KEY = 'patch.browse.host.v1';
+const RECENT_HOST_FILES_KEY = 'patch.browse.host.recent.v1';
 
 // spec/14 § New windows: a window opened via one of the explicit "open in new
 // window" actions (lib/newWindow.ts) carries `?sidebar=hidden` and starts with
@@ -349,6 +358,41 @@ export const EMPTY_BROWSE_STATE: BrowseChatState = {
   touch: 0,
 };
 
+/**
+ * The host-wide browser's position (spec/14 § File browser — climb out of
+ * the repo / open without a chat). `hostId: null` means no host is chosen
+ * yet (a standalone open with more than one host shows the picker);
+ * `path: null` means that host's home directory.
+ */
+export interface HostBrowseState {
+  hostId: string | null;
+  path: string | null;
+  openFile: { name: string; path: string } | null;
+  /** In-memory draft of `openFile`'s content — same "never persisted" reasoning as `BrowseChatState.draft`. */
+  draft: string | null;
+  /** The `version` (SHA-256) the open draft was read at — what a save echoes back as `baseVersion`. */
+  version: string | null;
+}
+
+export const EMPTY_HOST_BROWSE_STATE: HostBrowseState = {
+  hostId: null,
+  path: null,
+  openFile: null,
+  draft: null,
+  version: null,
+};
+
+/** One entry in the host-wide browser's recent-files list. */
+export interface RecentHostFile {
+  hostId: string;
+  path: string;
+  name: string;
+  touch: number;
+}
+
+/** Recent-files list cap (mirrors `BROWSE_STATE_MAX`'s reasoning — a few are useful, hundreds are noise). */
+export const RECENT_HOST_FILES_MAX = 20;
+
 // Monotonic within a session and carried through localStorage, so a restored
 // map keeps the order it was saved in rather than restarting from zero and
 // evicting the entries it just loaded.
@@ -454,6 +498,67 @@ function persistBrowseState(map: Record<string, BrowseChatState>): void {
     };
   }
   localStorage.setItem(BROWSE_STATE_KEY, JSON.stringify(out));
+}
+
+/** Read the host-wide browser's last position back. Draft/version are never persisted — see `HostBrowseState`. */
+export function loadHostBrowseState(): HostBrowseState {
+  /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
+  if (typeof localStorage === 'undefined') return EMPTY_HOST_BROWSE_STATE;
+  const raw = localStorage.getItem(HOST_BROWSE_KEY);
+  if (raw === null) return EMPTY_HOST_BROWSE_STATE;
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    const hostId = typeof v['hostId'] === 'string' ? v['hostId'] : null;
+    const path = typeof v['path'] === 'string' ? v['path'] : null;
+    const of = v['openFile'];
+    let openFile: HostBrowseState['openFile'] = null;
+    if (typeof of === 'object' && of !== null) {
+      const o = of as Record<string, unknown>;
+      if (typeof o['name'] === 'string' && typeof o['path'] === 'string') {
+        openFile = { name: o['name'], path: o['path'] };
+      }
+    }
+    return { hostId, path, openFile, draft: null, version: null };
+  } catch {
+    return EMPTY_HOST_BROWSE_STATE;
+  }
+}
+
+function persistHostBrowseState(s: HostBrowseState): void {
+  /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(
+    HOST_BROWSE_KEY,
+    JSON.stringify({ hostId: s.hostId, path: s.path, openFile: s.openFile }),
+  );
+}
+
+export function loadRecentHostFiles(): RecentHostFile[] {
+  /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
+  if (typeof localStorage === 'undefined') return [];
+  const raw = localStorage.getItem(RECENT_HOST_FILES_KEY);
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e): e is RecentHostFile =>
+        typeof e === 'object' &&
+        e !== null &&
+        typeof (e as RecentHostFile).hostId === 'string' &&
+        typeof (e as RecentHostFile).path === 'string' &&
+        typeof (e as RecentHostFile).name === 'string' &&
+        typeof (e as RecentHostFile).touch === 'number',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function persistRecentHostFiles(list: RecentHostFile[]): void {
+  /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(RECENT_HOST_FILES_KEY, JSON.stringify(list));
 }
 
 /**
@@ -578,7 +683,7 @@ const TOAST_TTL_MS = 6000;
 /** What the Snooze sheet is open for (spec/14 § Snooze sheet). */
 export type SnoozeSheetTarget =
   | { kind: 'chat'; chatId: string }
-  | { kind: 'project'; folder: string; name: string }
+  | { kind: 'project'; folder: string; hostId: string; name: string }
   | { kind: 'chats'; chatIds: string[] };
 
 interface UiState {
@@ -699,6 +804,10 @@ interface UiState {
   resetToolsPanelWidth(): void;
   /** The dictate shortcut on this machine (lib/dictateChord.ts). */
   dictateChord: DictateChord;
+  /** Per-machine shortcut overrides (lib/keymap.ts); absent = the default. */
+  shortcutOverrides: Overrides;
+  /** Rebind one action; `null` puts it back to its default. */
+  setShortcutChord: (id: ActionId, chord: Chord | null) => void;
   /** F1: width (px) of the file-browser directory tree column (resizable). */
   browseTreeWidth: number;
   /** F1: whether the file-browser directory tree is collapsed to a thin strip. */
@@ -746,6 +855,24 @@ interface UiState {
   /** Group 20 fix DX-8: global flag — when true the editor rail's file
    *  picker opens immediately (regardless of the rail's current mode). */
   filePickerOpen: boolean;
+  /**
+   * Where the host-wide browser was left: the hostId it's showing (null =
+   * no host chosen yet, so a standalone open with more than one host shows
+   * the picker), the absolute path it's rooted at (null = that host's home),
+   * and the open file. Global, not per-chat — a host path means the same
+   * thing regardless of which chat (if any) climbed out to reach it.
+   */
+  hostBrowse: HostBrowseState;
+  /**
+   * A chat's folder didn't have the full tree view — up to
+   * `RECENT_FILES_MAX` files most recently opened in the host-wide browser,
+   * newest first, each `{hostId, path, name}`. Backs ⌘E and ⌘P's empty
+   * state (spec/14 § File browser — recent files). Persisted; capped like
+   * `browseByChat`.
+   */
+  recentHostFiles: RecentHostFile[];
+  /** ⌘⇧F — the host-wide browser's search-in-files panel is open. */
+  searchInFilesOpen: boolean;
   /**
    * patch/todo.md — "Show the tools in the chat … allow the user to turn them on
    * and off". The chatId whose Tools panel is open (a modal listing every tool,
@@ -834,6 +961,11 @@ interface UiState {
    * marks it most-recently-used and persists the bounded map.
    */
   setBrowseState(chatId: string, patch: Partial<Omit<BrowseChatState, 'touch'>>): void;
+  /** Merges into the host-wide browser's position and persists it (minus draft/version). */
+  setHostBrowse(patch: Partial<HostBrowseState>): void;
+  /** Record a file just opened in the host-wide browser — ⌘E / ⌘P's empty state. */
+  addRecentHostFile(entry: Omit<RecentHostFile, 'touch'>): void;
+  setSearchInFilesOpen(v: boolean): void;
   /**
    * spec/14 § File browser — live updates: record a `patch.file_changed` push
    * for `chatId`. Called from `ws.ts`'s dispatch on every inbound frame of
@@ -917,6 +1049,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   threadsPanelWidth: loadWidth(THREADS_PANEL_W_KEY, DEFAULT_THREADS_PANEL_W),
   toolsPanelWidth: loadWidth(TOOLS_PANEL_W_KEY, DEFAULT_TOOLS_PANEL_W),
   dictateChord: loadDictateChord(),
+  shortcutOverrides: loadOverrides(),
+  setShortcutChord(id, chord) {
+    const next = { ...get().shortcutOverrides };
+    if (chord) next[id] = chord;
+    else delete next[id];
+    saveOverrides(next);
+    set({ shortcutOverrides: next });
+  },
   browseTreeWidth: loadWidth(BROWSE_TREE_W_KEY, DEFAULT_BROWSE_TREE_W),
   browseTreeCollapsed: loadBool(BROWSE_TREE_COLLAPSED_KEY),
   backgroundTasksCollapsed: loadBool(BACKGROUND_TASKS_COLLAPSED_KEY),
@@ -927,6 +1067,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   browseByChat: loadBrowseState(),
   lastFileChanged: {},
   filePickerOpen: false,
+  hostBrowse: loadHostBrowseState(),
+  recentHostFiles: loadRecentHostFiles(),
+  searchInFilesOpen: false,
   toolsPanelChatId: null,
   taskAddChatId: null,
   errors: [],
@@ -1129,6 +1272,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     const merged = trimBrowseState({ ...get().browseByChat, [chatId]: next });
     persistBrowseState(merged);
     set({ browseByChat: merged });
+  },
+  setHostBrowse(patch) {
+    const next: HostBrowseState = { ...get().hostBrowse, ...patch };
+    persistHostBrowseState(next);
+    set({ hostBrowse: next });
+  },
+  addRecentHostFile(entry) {
+    const touch = nextBrowseTouch();
+    const withoutDup = get().recentHostFiles.filter(
+      (f) => !(f.hostId === entry.hostId && f.path === entry.path),
+    );
+    const next = [{ ...entry, touch }, ...withoutDup].slice(0, RECENT_HOST_FILES_MAX);
+    persistRecentHostFiles(next);
+    set({ recentHostFiles: next });
+  },
+  setSearchInFilesOpen(v) {
+    set({ searchInFilesOpen: v });
   },
   recordFileChanged(chatId, path) {
     set({

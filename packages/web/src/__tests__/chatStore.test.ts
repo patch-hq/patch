@@ -462,6 +462,28 @@ describe('chatStore reducer', () => {
     expect(deriveBadge(row!)).toBe('permission');
   });
 
+  it('chat.state keeps why a chat failed, and drops it once the chat is no longer errored', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    s.applyEvent({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions' as const,
+      chatId: 'c1',
+      activity: 'errored',
+      lastUpdated: 10,
+      lastError: { code: 'sdk_error', message: 'Out of credit', at: 10 },
+    });
+    expect(useChatStore.getState().chats['c1']?.lastError?.message).toBe('Out of credit');
+    s.applyEvent({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions' as const,
+      chatId: 'c1',
+      activity: 'running',
+      lastUpdated: 11,
+    });
+    expect(useChatStore.getState().chats['c1']?.lastError).toBeNull();
+  });
+
   it('chat.state carries the current-status summary + kind, and only an OMITTED field is preserved', () => {
     const s = useChatStore.getState();
     s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
@@ -650,6 +672,38 @@ describe('chatStore reducer', () => {
     });
     const tl = useChatStore.getState().timelines['c1'] ?? [];
     expect(tl[0]).not.toHaveProperty('permissionExpiry');
+  });
+
+  it('an answered question replayed as request + response stays answered, and a re-delivery does not reopen it', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    const request = {
+      type: 'chat.permission_request' as const,
+      chatId: 'c1',
+      requestId: 'r1',
+      request: { tool: 'AskUserQuestion', args: { questions: [] } },
+      seq: 1,
+    };
+    const response = {
+      type: 'chat.permission_response' as const,
+      chatId: 'c1',
+      requestId: 'r1',
+      approve: true,
+      decision: 'approve_with_edits' as const,
+      answers: { 'Which?': 'Luxon' },
+    };
+    s.applyEvent(request);
+    s.resolvePermission('c1', 'r1', 'approve', response.answers);
+    // A later replay hands the same pair again.
+    useChatStore.getState().applyEvent(request);
+    useChatStore.getState().resolvePermission('c1', 'r1', 'approve', response.answers);
+    const entries = (useChatStore.getState().timelines['c1'] ?? []).filter(
+      (e) => e.kind === 'permission',
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.permissionResolved).toBe('approve');
+    expect(entries[0]?.permissionAnswers).toEqual({ 'Which?': 'Luxon' });
+    expect(useChatStore.getState().chats['c1']?.pendingPermissions).toEqual([]);
   });
 
   it('a trailing idle chat.state does NOT clear an unresolved permission', () => {
@@ -3501,5 +3555,76 @@ describe('pending message is not swallowed by an older same-text echo', () => {
     expect(pending).toBeDefined();
     expect(pending?.deliveryPending).toBe(true);
     expect(tl.filter((e) => e.role === 'user')).toHaveLength(3);
+  });
+});
+
+describe('chatStore — provider-switch handoff rows (spec/04 § Handoff budget)', () => {
+  beforeEach(() => {
+    useChatStore.setState({ chats: {}, timelines: {} });
+  });
+  const divider = {
+    type: 'chat.message' as const,
+    chatId: 'c1',
+    seq: 4,
+    role: 'system' as const,
+    content: 'Handed off to openai/gpt-6-astra — carried 12 of 80 entries',
+    sessionChange: {
+      harness: 'codex' as const,
+      model: 'openai/gpt-6-astra',
+      seededMessages: 12,
+      handoff: {
+        carriedEntries: 12,
+        totalEntries: 80,
+        estimatedTokens: 1000,
+        availableTokens: 5000,
+        summary: false,
+      },
+    },
+  };
+
+  it('a handoff divider is furniture carrying the host wording, drawn once on a replay', () => {
+    useChatStore.getState().applyEvent(divider);
+    useChatStore.getState().applyEvent(divider);
+    const entries = useChatStore.getState().timelines['c1']!;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: 'handoff', content: divider.content });
+  });
+
+  it('a switch without a handoff stays the quiet empty divider it was', () => {
+    useChatStore.getState().applyEvent({
+      ...divider,
+      content: '',
+      sessionChange: { harness: 'codex', model: 'x', seededMessages: 2 },
+    });
+    const entries = useChatStore.getState().timelines['c1'] ?? [];
+    expect(entries.some((e) => e.kind === 'handoff')).toBe(false);
+  });
+
+  it('a linked-chat row remembers the chat it points at', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 9,
+      role: 'system',
+      content: 'Continued in a linked fresh chat',
+      handoffLink: { chatId: 'c2' },
+    });
+    expect(useChatStore.getState().timelines['c1']![0]).toMatchObject({
+      kind: 'handoff_link',
+      linkedChatId: 'c2',
+    });
+  });
+
+  it('a handoff error is a standalone row carrying its code', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.error',
+      chatId: 'c1',
+      seq: 5,
+      error: { code: 'handoff_too_large', message: 'too big' },
+    });
+    expect(useChatStore.getState().timelines['c1']![0]).toMatchObject({
+      kind: 'error',
+      errorCode: 'handoff_too_large',
+    });
   });
 });

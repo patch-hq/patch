@@ -299,12 +299,10 @@ export interface PadCreateBody {
   /** Screens of earlier Pads to start from. */
   from?: { padId: string; screenId: string }[];
 }
-/** GET /api/link-preview — the OpenGraph summary of a link in a message. */
-export interface LinkPreviewData {
+/** POST /api/link-summary — a model's summary of a link in a message. */
+export interface LinkSummaryData {
   url: string;
-  title?: string;
-  description?: string;
-  image?: string;
+  summary: string;
 }
 
 /** spec/06 § Sweep — one completed sweep run. */
@@ -330,7 +328,25 @@ export type ComputerUseHost = {
   error?: string;
 };
 
+/** spec/09 § bell — one agent-sent notification. */
+export interface NotificationEntry {
+  id: string;
+  chatId: string;
+  message: string;
+  importance: 'silent' | 'normal' | 'urgent';
+  deepLink?: string;
+  sentAt: number;
+  readAt: number | null;
+}
+export interface NotificationsResponse {
+  items: NotificationEntry[];
+  unread: number;
+}
+
 export const api = {
+  getNotifications: () => request<NotificationsResponse>('/api/notifications'),
+  markNotificationsRead: (target: { ids: string[] } | { all: true }) =>
+    request<NotificationsResponse>('/api/notifications/read', { method: 'POST', body: target }),
   /** Settings → Usage: probe history and per-chat token totals for a window. */
   usageReport: (params: { since: number; until: number }) =>
     request<{
@@ -346,8 +362,8 @@ export const api = {
   getPad: (id: string) => request<PadView>(`/api/pads/${encodeURIComponent(id)}`),
   padLibrary: () => request<PadLibrary>('/api/pads/library'),
   createPad: (body: PadCreateBody) => request<PadView>('/api/pads', { method: 'POST', body }),
-  linkPreview: (url: string) =>
-    request<LinkPreviewData>(`/api/link-preview?url=${encodeURIComponent(url)}`),
+  linkSummary: (url: string) =>
+    request<LinkSummaryData>('/api/link-summary', { method: 'POST', body: { url } }),
   patchPad: (id: string, body: { name?: string; device?: 'desktop' | 'phone' }) =>
     request<PadView>(`/api/pads/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   deletePad: (id: string) =>
@@ -402,7 +418,10 @@ export const api = {
   // GET /api/chats?archived=only — the Archived section's own list, fetched
   // when the section opens or a search starts (spec/15 ## Chats tab §7). The
   // cold-start roster above excludes archived chats, and they are unbounded.
-  listArchivedChats: () => request<{ chats: ChatListEntry[] }>('/api/chats?archived=only'),
+  listArchivedChats: (opts: { limit: number; offset: number }) =>
+    request<{ chats: ChatListEntry[]; nextOffset: number | null }>(
+      `/api/chats?archived=only&limit=${opts.limit}&offset=${opts.offset}`,
+    ),
   // GET /api/chats?hidden=only — the Hidden section's own list (spec/04 §
   // Hidden), fetched when the section opens or a search starts. The cold-start
   // roster above leaves hidden chats out, exactly as it does archived ones.
@@ -959,11 +978,6 @@ export const api = {
     request<SharedState>(`/api/accounts/${backendId}/adopt`, {
       method: 'POST',
       body: { hostId },
-    }),
-  adoptClaudeSettings: (hostId: string, target: 'shared' | 'darwin' | 'linux') =>
-    request<SharedState>('/api/settings/claude/adopt', {
-      method: 'POST',
-      body: { hostId, target },
     }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every

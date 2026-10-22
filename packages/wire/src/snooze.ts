@@ -41,6 +41,17 @@ export const SnoozeRecord = z
   .strict();
 export type SnoozeRecord = z.infer<typeof SnoozeRecord>;
 
+/**
+ * `snoozedUntil` for "Until complete" (spec/04 § Snooze): the largest time a JS
+ * Date can hold, so "snoozed ⇔ snoozedUntil > now" stays true everywhere with no
+ * second field. The host ends it when the chat's work completes, not at a time.
+ */
+export const SNOOZE_UNTIL_COMPLETE = 8_640_000_000_000_000;
+
+export function isSnoozeUntilComplete(until: number | null | undefined): boolean {
+  return until === SNOOZE_UNTIL_COMPLETE;
+}
+
 /** How many records a chat keeps. */
 export const MAX_SNOOZE_RECORDS = 20;
 

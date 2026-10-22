@@ -30,6 +30,7 @@ function makeHandlers(): ShortcutHandlers {
     onFilePicker: vi.fn(),
     onDiffViewer: vi.fn(),
     onFileBrowser: vi.fn(),
+    onSearchInFiles: vi.fn(),
     onVoiceHoldStart: vi.fn(),
     onVoiceHoldEnd: vi.fn(),
     onGlobalVoiceStart: vi.fn(),
@@ -421,6 +422,12 @@ describe('useShortcuts — quote / voice / editor chords', () => {
     expect(handlers.onDiffViewer).toHaveBeenCalledTimes(1);
     press({ key: '"', metaKey: true, shiftKey: true });
     expect(handlers.onFileBrowser).toHaveBeenCalledTimes(1);
+  });
+
+  it('⌘⇧F opens search in files, distinct from the bare ⌘F page-search chord', () => {
+    press({ key: 'f', metaKey: true, shiftKey: true });
+    expect(handlers.onSearchInFiles).toHaveBeenCalledTimes(1);
+    expect(handlers.onSearch).not.toHaveBeenCalled();
   });
 
   it('⌘⇧D (hold) starts dictation; releasing D ends it', () => {

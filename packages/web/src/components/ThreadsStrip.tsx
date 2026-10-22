@@ -14,7 +14,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Square, ArrowRight, ExternalLink } from 'lucide-react';
 import { threadRowState as rowState, threadRows as sharedThreadRows } from '@patch/wire';
-import { deriveBadge, useChatStore } from '../stores/chatStore.js';
+import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { getActiveWs } from '../api/ws.js';
@@ -22,7 +22,8 @@ import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { nudgeContinue } from '../lib/carryOn.js';
 import { parseAskUserQuestion, ASK_USER_QUESTION } from '../lib/askUserQuestion.js';
-import { StatusBadge } from './StatusBadge.js';
+import { ChatStatusBadge } from './ChatStatusBadge.js';
+import { OpenableButton } from './OpenableLink.js';
 import { ReachSwitch } from './ReachSwitch.js';
 import { SweepStatusLine } from './SweepStatusLine.js';
 import type { ChatRow, PendingPermission } from '../stores/types.js';
@@ -171,7 +172,7 @@ export function ThreadsStrip(): JSX.Element {
             const hostName = hosts[row.hostId]?.host?.hostName ?? row.hostId;
             return (
               <div className="thread-row" data-testid={`thread-row-${row.chatId}`} key={row.chatId}>
-                <StatusBadge badge={deriveBadge(row)} pendingWake={row.pendingWake} />
+                <ChatStatusBadge row={row} />
                 <div className="thread-body">
                   <div className="thread-title">
                     {deriveChatTitle(row.name)}
@@ -233,15 +234,15 @@ export function ThreadsStrip(): JSX.Element {
                       <Square size={12} aria-hidden /> Stop
                     </button>
                   ) : null}
-                  <button
-                    type="button"
+                  <OpenableButton
+                    opens={{ kind: 'chat', chatId: row.chatId }}
                     className="thread-btn ghost"
                     data-testid={`thread-open-${row.chatId}`}
                     aria-label={`open ${deriveChatTitle(row.name)}`}
-                    onClick={() => navigate(`/chats/${row.chatId}`)}
+                    onOpen={() => navigate(`/chats/${row.chatId}`)}
                   >
                     <ExternalLink size={14} aria-hidden />
-                  </button>
+                  </OpenableButton>
                 </div>
               </div>
             );

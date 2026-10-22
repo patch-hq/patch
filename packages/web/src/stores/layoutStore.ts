@@ -15,16 +15,28 @@ import { create } from 'zustand';
  *  OS-level second window (`lib/artifactPanel.ts`) — they are not DOM content
  *  this app renders, so there is nothing for a pane to host; they keep their
  *  existing opening mechanism unchanged. */
-export type PageKind = 'jobs' | 'job' | 'settings' | 'files' | 'pads' | 'pad' | 'new-pad';
+export type PageKind =
+  | 'jobs'
+  | 'job'
+  | 'settings'
+  | 'files'
+  | 'host-files'
+  | 'pads'
+  | 'pad'
+  | 'new-pad';
 
 export type TabDescriptor =
   | { kind: 'chat'; chatId: string }
   | { kind: 'terminal'; chatId: string }
+  /** The chat's agent browser, large, beside the chat (spec/14 § Browser). */
+  | { kind: 'browser'; chatId: string }
   | { kind: 'file'; chatId: string; path: string }
   | { kind: 'page'; page: 'jobs' }
   | { kind: 'page'; page: 'job'; jobId: string }
   | { kind: 'page'; page: 'settings' }
   | { kind: 'page'; page: 'files'; chatId: string }
+  /** A machine's filesystem by absolute path, no chat (spec/14 § File browser). Singleton. */
+  | { kind: 'page'; page: 'host-files' }
   | { kind: 'page'; page: 'pads' }
   | { kind: 'page'; page: 'pad'; padId: string }
   | { kind: 'page'; page: 'new-pad'; chatId?: string };
@@ -93,6 +105,8 @@ export function tabKey(descriptor: TabDescriptor): string {
       return `chat:${descriptor.chatId}`;
     case 'terminal':
       return `terminal:${descriptor.chatId}`;
+    case 'browser':
+      return `browser:${descriptor.chatId}`;
     case 'file':
       return `file:${descriptor.chatId}:${descriptor.path}`;
     case 'page':
@@ -229,6 +243,8 @@ interface LayoutState {
   /** Open (or focus) a tab per `opts` (spec/14 § Opening things). */
   openTab(descriptor: TabDescriptor, opts?: OpenTabOptions): void;
   closeTab(paneId: string, tabId: string): void;
+  /** Close a whole pane and every tab in it; the last pane left is emptied, not removed. */
+  closePane(paneId: string): void;
   setActiveTab(paneId: string, tabId: string): void;
   setActivePane(paneId: string): void;
   /** Reorder a tab within its own pane. */
@@ -292,6 +308,7 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
   switch (d['kind']) {
     case 'chat':
     case 'terminal':
+    case 'browser':
       return typeof d['chatId'] === 'string';
     case 'file':
       return typeof d['chatId'] === 'string' && typeof d['path'] === 'string';
@@ -300,6 +317,7 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
         case 'jobs':
         case 'settings':
         case 'pads':
+        case 'host-files':
           return true;
         case 'job':
           return typeof d['jobId'] === 'string';
@@ -449,6 +467,24 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
 
       if (opts.placement === 'split') {
         const edge = opts.edge ?? 'right';
+        // A pane already sits on that side: use it rather than subdividing again.
+        const neighbour = neighbourLeaf(state.root, target.id, edge);
+        if (neighbour) {
+          const neighbourActive = neighbour.tabs.find((t) => t.id === neighbour.activeTabId);
+          const replaceNeighbour = neighbourActive !== undefined && !isTabDirty(neighbourActive);
+          const root =
+            rebuild(state.root, neighbour.id, (pane) => {
+              if (pane.type !== 'leaf') return pane;
+              const tabs = pane.tabs.slice();
+              const at = replaceNeighbour ? tabs.findIndex((t) => t.id === pane.activeTabId) : -1;
+              if (at === -1) tabs.push(tab);
+              else tabs[at] = tab;
+              return { ...pane, tabs, activeTabId: tab.id };
+            }) ?? state.root;
+          set({ root, activePaneId: neighbour.id });
+          persist(root, neighbour.id);
+          return;
+        }
         const newLeaf = makeLeaf([tab], tab.id);
         const root = splitTree(state.root, target.id, newLeaf, edge);
         set({ root, activePaneId: newLeaf.id });
@@ -505,6 +541,21 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         : firstLeaf(finalRoot).id;
       set({ root: finalRoot, activePaneId });
       persist(finalRoot, activePaneId);
+    },
+
+    closePane(paneId) {
+      const state = get();
+      const pane = findPane(state.root, paneId);
+      if (!pane || pane.type !== 'leaf') return;
+      const root =
+        pane.id === state.root.id
+          ? { ...pane, tabs: [], activeTabId: null }
+          : (rebuild(state.root, paneId, () => null) ?? defaultRoot());
+      const activePaneId = findPane(root, state.activePaneId)
+        ? state.activePaneId
+        : firstLeaf(root).id;
+      set({ root, activePaneId });
+      persist(root, activePaneId);
     },
 
     setActiveTab(paneId, tabId) {
@@ -682,6 +733,40 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
     },
   };
 });
+
+/** The leaf directly beside `paneId` on `edge`, or null when nothing sits there.
+ *  Looks through the nearest ancestor split running that axis with a sibling on
+ *  that side, and takes the sibling's edge-most leaf. */
+function neighbourLeaf(root: PaneNode, paneId: string, edge: SplitEdge): LeafPane | null {
+  const direction = edge === 'left' || edge === 'right' ? 'row' : 'column';
+  const step = edge === 'left' || edge === 'top' ? -1 : 1;
+  const path: { split: SplitPane; index: number }[] = [];
+  const walk = (node: PaneNode): boolean => {
+    if (node.id === paneId) return true;
+    if (node.type === 'leaf') return false;
+    for (let i = 0; i < node.children.length; i++) {
+      path.push({ split: node, index: i });
+      if (walk(node.children[i]!.pane)) return true;
+      path.pop();
+    }
+    return false;
+  };
+  if (!walk(root)) return null;
+  for (let i = path.length - 1; i >= 0; i--) {
+    const { split, index } = path[i]!;
+    if (split.direction !== direction) continue;
+    const sibling = split.children[index + step]?.pane;
+    if (!sibling) continue;
+    let leaf: PaneNode = sibling;
+    while (leaf.type === 'split') {
+      const kids: { pane: PaneNode; size: number }[] = leaf.children;
+      const last = leaf.direction === direction && step === -1;
+      leaf = (last ? kids[kids.length - 1] : kids[0])!.pane;
+    }
+    return leaf;
+  }
+  return null;
+}
 
 function findFirstMatch(node: PaneNode, pred: (d: TabDescriptor) => boolean): Found | null {
   if (node.type === 'leaf') {

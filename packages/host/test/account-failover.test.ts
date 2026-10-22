@@ -554,15 +554,20 @@ describe('AccountRotation — strategies (spec/10 § Backend credentials — acc
     ).toEqual(['c', 'a', 'b']);
   });
 
-  it('a preferred account goes first, the rest keep the strategy’s order, and it is walked past when spent', () => {
+  it('a chosen account is a lock: it is the only candidate, and a spent one is not walked past', () => {
     const r = new AccountRotation();
-    expect(ids(r.order([A, B, C], { strategy: 'priority', preferred: 'c' }))).toEqual([
-      'c',
-      'a',
-      'b',
-    ]);
+    for (const strategy of ['priority', 'round-robin', 'soonest-reset', 'least-used'] as const) {
+      expect(ids(r.order([A, B, C], { strategy, preferred: 'c' })), strategy).toEqual(['c']);
+    }
     r.markExhausted('c', 'spent');
-    expect(r.startTurn([A, B, C], { strategy: 'priority', preferred: 'c' })).toBe('a');
+    const route = { strategy: 'priority', preferred: 'c' } as const;
+    // Nothing usable: the caller waits or shows the limit card, it does not move on.
+    expect(r.usableAccount([A, B, C], route)).toBeUndefined();
+    expect(r.usableAccounts([A, B, C], route)).toEqual([]);
+    // The turn still resolves to the locked key so it fails with the provider's own words.
+    expect(r.startTurn([A, B, C], route)).toBe('c');
+    // Automatic (no preference) still moves between accounts.
+    expect(r.startTurn([A, B, C], { strategy: 'priority' })).toBe('a');
   });
 
   it('a chat with a preferred account does not move the round-robin', () => {

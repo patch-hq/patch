@@ -18,7 +18,7 @@ describe('host.host from a host that predates the audio relay', () => {
     permissionModeDefault: 'bypassPermissions',
     permissionOverrides: 0,
     defaultModel: 'claude-opus-5-5',
-    isHomeHost: true,
+    runsManager: true,
     backends: [{ id: 'claude-code', label: 'Claude Code', version: '2.1.220', state: 'present' }],
     components: [{ id: 'kokoro', label: 'Kokoro TTS', bytes: 340_000_000, state: 'installed' }],
     voiceKeys: { gemini: false, openai: false },
