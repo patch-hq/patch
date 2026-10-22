@@ -4141,10 +4141,12 @@ button.nav-row {
 /* Wide panel: the strip moves out of the 16px tail into the right-hand gutter,
    stacked and top-aligned with the turn, so the message keeps its padding and
    time / host / model get room to read. It starts just past the measure edge. Narrower
-   panels have no gutter to lend and keep the strip in the tail. */
+   panels have no gutter to lend and keep the strip in the tail. A turn holding a
+   table keeps it in the tail too: a wide table borrows those same gutters, and
+   the strip hung on top of its last column on hover (Todoist: "patch big table
+   overlaps hover state"). */
 @container (min-width: 1100px) {
-  .msg-meta,
-  .msg-user .msg-meta {
+  .msg:not(:has(.md-table-wrap)) .msg-meta {
     top: 2px;
     bottom: auto;
     inset-inline-start: auto;

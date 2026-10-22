@@ -206,4 +206,38 @@ test.describe('wide transcript tables', () => {
     });
     expect(hit).toEqual({ left: true, right: true });
   });
+
+  test('the hover meta strip never sits on top of a wide table', async ({ page }) => {
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await page.goto(TABLE);
+    const table = page.locator(wideTable);
+    await expect(table).toBeVisible();
+    // Todoist: "patch big table overlaps hover state". On a wide panel the
+    // strip (time / host / model / copy) hangs in the right-hand gutter, which
+    // a wide table has borrowed — so on hover it was painted over the table's
+    // last column.
+    // The harness turn carries only a time; a real one also lists host and
+    // model, which stack the strip down into the table's rows.
+    await page.evaluate(() => {
+      const m = document.querySelector('.msg-assistant .msg-meta') as HTMLElement;
+      for (const text of ['Netcup', 'claude-sonnet-5-5', 'extra']) {
+        const span = document.createElement('span');
+        span.textContent = text;
+        m.append(span);
+      }
+    });
+    await table.hover();
+    const meta = page.locator('.msg-assistant .msg-meta >> nth=0');
+    await expect(meta).toHaveCSS('opacity', '1');
+    const rects = await page.evaluate(() => {
+      const t = document.querySelector('.msg-assistant .content table') as HTMLElement;
+      const m = document.querySelector('.msg-assistant .msg-meta') as HTMLElement;
+      const a = t.getBoundingClientRect();
+      const b = m.getBoundingClientRect();
+      return {
+        overlap: a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom,
+      };
+    });
+    expect(rects.overlap).toBe(false);
+  });
 });
