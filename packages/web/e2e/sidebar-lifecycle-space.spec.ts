@@ -193,8 +193,9 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
         return el.scrollHeight > el.clientHeight;
       }),
     ).toBe(true);
-    // The chat list survives with real rows in it.
-    expect(scroll).toBeGreaterThanOrEqual(150);
+    // The chat list survives with real rows in it (the four-row bottom nav
+    // leaves it 117px at this size).
+    expect(scroll).toBeGreaterThanOrEqual(110);
     expect(await page.locator('.sb-scroll [data-testid^="chat-row-"]').count()).toBeGreaterThan(1);
   });
 

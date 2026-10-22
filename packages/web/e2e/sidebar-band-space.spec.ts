@@ -77,7 +77,9 @@ test('the band is taller than the chrome used to leave it', async ({ page }) => 
   // content at the original 800px window. The chrome's stacked margins were
   // 10px of that deficit, and the band takes every pixel the chrome gives back
   // (`flex: 1 1000 auto`, and the chrome is nowhere near its content height).
-  expect(band.clientHeight).toBeGreaterThanOrEqual(221);
+  // The bottom nav has since grown to four rows (Pads, Jobs, Files, Settings),
+  // which takes the same state to a 180px band.
+  expect(band.clientHeight).toBeGreaterThanOrEqual(180);
   // The band still carries the overflow — nothing here moved it onto the aside.
   expect(band.scrollHeight).toBeGreaterThan(band.clientHeight);
 });
