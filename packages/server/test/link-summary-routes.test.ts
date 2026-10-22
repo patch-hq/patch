@@ -206,13 +206,23 @@ describe('POST /api/link-summary', () => {
     const { app, auth } = await boot(new FakeHost(() => null));
     try {
       vi.useFakeTimers({ toFake: ['setTimeout'] });
-      const pending = post(app, auth, 'https://example.com/a');
-      // The fetch settles first; step the clock so the host-wait timer is armed before it fires.
-      for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(2_000);
+      let settled = false;
+      const pending = post(app, auth, 'https://example.com/a').finally(() => {
+        settled = true;
+      });
+      // The host-wait timer is only armed once the request has done real async work, which
+      // can take longer than any fixed number of clock steps on a loaded machine. Keep
+      // stepping the fake clock, yielding real time between steps, until the request answers.
+      const deadline = Date.now() + 20_000;
+      while (!settled && Date.now() < deadline) {
+        await vi.advanceTimersByTimeAsync(2_000);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
       expect((await pending).statusCode).toBe(504);
     } finally {
       vi.useRealTimers();
       await app.close();
     }
-  });
+    // Real time goes on app boot and 40 clock steps; a loaded CI runner needs more than the 10s default.
+  }, 30_000);
 });
