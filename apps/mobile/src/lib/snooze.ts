@@ -1,11 +1,11 @@
 // Snooze primitives (spec/04 § Snooze) — shared by the row-actions sheet, the
 // Snoozed section and the chat-detail banner.
 //
-// Most presets are a DELTA (e.g. "5 minutes"); two ("5pm", "Tomorrow 8am")
+// Most presets are a DELTA (e.g. "30 minutes"); two ("5pm", "Tomorrow 8am")
 // are wall-clock targets. Both kinds resolve here, against the clock at the
 // moment of choosing, to the SAME absolute timestamp the host stores: a
 // delta sent as-is would drift by however long the request spends in flight,
-// so "5 minutes" would mean something different at each end.
+// so "30 minutes" would mean something different at each end.
 //
 // Custom is typed as `YYYY-MM-DD HH:mm` (parseCustomSnooze) — no native date
 // picker, which would need a new APK (spec/15 § Row tools).
@@ -50,8 +50,6 @@ function resolveNextMondayAt(hour: number): number {
 }
 
 export const SNOOZE_PRESETS: readonly SnoozePreset[] = [
-  { id: '2-minutes', label: '2 minutes', resolve: () => Date.now() + 2 * MINUTE },
-  { id: '5-minutes', label: '5 minutes', resolve: () => Date.now() + 5 * MINUTE },
   { id: '30-minutes', label: '30 minutes', resolve: () => Date.now() + 30 * MINUTE },
   { id: '1-hour', label: '1 hour', resolve: () => Date.now() + HOUR },
   { id: '5pm', label: '5pm', resolve: () => resolveTodayAt(17) },

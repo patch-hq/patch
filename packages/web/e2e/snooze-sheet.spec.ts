@@ -73,8 +73,6 @@ test.describe('snooze sheet', () => {
     await expect(page.getByTestId('snooze-sheet-title')).toHaveText('Snooze');
     await expect(page.getByTestId('snooze-sheet-subtitle')).toHaveText('Migrate billing');
     for (const label of [
-      '2 minutes',
-      '5 minutes',
       '30 minutes',
       '1 hour',
       '5pm',
@@ -238,7 +236,7 @@ test.describe('snooze sheet', () => {
     await seed(page, THREE());
     await page.getByTestId('action-more').click();
     await page.getByTestId('action-snooze').click();
-    await page.getByTestId('snooze-sheet-preset-5-minutes').click();
+    await page.getByTestId('snooze-sheet-preset-30-minutes').click();
     await page.getByTestId('snooze-sheet-confirm').click();
     const toast = page.getByTestId('snooze-toast');
     await expect(toast).toContainText('Migrate billing snoozed until');

@@ -24,8 +24,6 @@ afterEach(() => {
 describe('SNOOZE_PRESETS', () => {
   it('is the spec/04 ladder, in order, with no custom entry (Custom is a separate page)', () => {
     expect(SNOOZE_PRESETS.map((p) => p.label)).toEqual([
-      '2 minutes',
-      '5 minutes',
       '30 minutes',
       '1 hour',
       '5pm',
@@ -40,8 +38,6 @@ describe('SNOOZE_PRESETS', () => {
     vi.setSystemTime(new Date('2026-08-25T10:00:00Z'));
     const now = Date.now();
     const byLabel = Object.fromEntries(SNOOZE_PRESETS.map((p) => [p.label, p.resolve() - now]));
-    expect(byLabel['2 minutes']).toBe(2 * 60_000);
-    expect(byLabel['5 minutes']).toBe(5 * 60_000);
     expect(byLabel['30 minutes']).toBe(30 * 60_000);
     expect(byLabel['1 hour']).toBe(60 * 60_000);
     expect(byLabel['1 day']).toBe(24 * 60 * 60_000);

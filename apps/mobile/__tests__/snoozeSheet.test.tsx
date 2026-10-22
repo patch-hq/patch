@@ -143,7 +143,7 @@ describe('the Snooze sheet', () => {
     actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'a' }));
     expect(textOf(findHost(r.root, byTestId('snooze-sheet-title')))).toBe('Snooze');
     expect(textOf(findHost(r.root, byTestId('snooze-sheet-subtitle')))).toBe('Migrate billing');
-    for (const l of ['2 minutes', '1 hour', '5pm', 'Tomorrow 8am', 'Next Monday', 'Custom…']) {
+    for (const l of ['30 minutes', '1 hour', '5pm', 'Tomorrow 8am', 'Next Monday', 'Custom…']) {
       expect(hasText(r.root, l)).toBe(true);
     }
     expect(hasText(findHost(r.root, byTestId('snooze-sheet-preset-1-hour')), '17:05')).toBe(true);
@@ -218,7 +218,7 @@ describe('the Snooze sheet', () => {
     seedThree();
     const r = renderRN(<SnoozeSheet />);
     actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'a' }));
-    press(r, 'snooze-sheet-preset-5-minutes');
+    press(r, 'snooze-sheet-preset-30-minutes');
     press(r, 'snooze-sheet-confirm');
     expect(useUiStore.getState().errors.find((e) => e.snooze)?.snooze?.subline).toBe(
       'Running in background',
@@ -226,7 +226,7 @@ describe('the Snooze sheet', () => {
 
     useUiStore.setState({ errors: [] });
     actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
-    press(r, 'snooze-sheet-preset-5-minutes');
+    press(r, 'snooze-sheet-preset-30-minutes');
     press(r, 'snooze-sheet-confirm');
     expect(useUiStore.getState().errors.find((e) => e.snooze)?.snooze?.subline).toBeNull();
   });

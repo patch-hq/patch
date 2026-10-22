@@ -86,6 +86,13 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
     rootRef.current?.focus();
   }, []);
 
+  // Custom opens the browser's own date-time picker straight away — one click,
+  // not "choose Custom, then click the field".
+  const customRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (selected === CUSTOM) customRef.current?.showPicker();
+  }, [selected]);
+
   function confirm(): void {
     if (!canConfirm) return;
     let at: number;
@@ -192,6 +199,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
             data-testid="snooze-sheet-custom-input"
             aria-label={isProject ? 'snooze all until' : 'snooze until'}
             value={customValue}
+            ref={customRef}
             autoFocus
             onChange={(e) => setCustomValue(e.target.value)}
           />

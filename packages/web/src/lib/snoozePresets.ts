@@ -44,8 +44,6 @@ export interface SnoozePreset {
 
 /** The Gmail-shaped presets, in menu order (spec/14 § Chat panel header). */
 export const SNOOZE_PRESETS: ReadonlyArray<SnoozePreset> = [
-  { id: '2-minutes', label: '2 minutes', resolve: () => Date.now() + 2 * MINUTE },
-  { id: '5-minutes', label: '5 minutes', resolve: () => Date.now() + 5 * MINUTE },
   { id: '30-minutes', label: '30 minutes', resolve: () => Date.now() + 30 * MINUTE },
   { id: '1-hour', label: '1 hour', resolve: () => Date.now() + HOUR },
   { id: '5pm', label: '5pm', resolve: () => resolveTodayAt(17) },

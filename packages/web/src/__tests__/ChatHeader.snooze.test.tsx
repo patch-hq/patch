@@ -90,6 +90,8 @@ function seed(r: ChatRow): void {
 
 describe('ChatHeader — snooze', () => {
   beforeEach(() => {
+    // jsdom has no picker; the sheet opens it on choosing Custom.
+    HTMLInputElement.prototype.showPicker = vi.fn();
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
     useUiStore.getState().closeSnoozeSheet();
@@ -111,8 +113,6 @@ describe('ChatHeader — snooze', () => {
     fireEvent.click(screen.getByTestId('action-snooze'));
     const menu = screen.getByTestId('snooze-sheet');
     for (const label of [
-      '2 minutes',
-      '5 minutes',
       '30 minutes',
       '1 hour',
       '5pm',
@@ -159,8 +159,6 @@ describe('ChatHeader — snooze', () => {
 
   it('each preset resolves to its own delta', async () => {
     const cases: Array<[string, number]> = [
-      ['snooze-sheet-preset-2-minutes', 2 * 60_000],
-      ['snooze-sheet-preset-5-minutes', 5 * 60_000],
       ['snooze-sheet-preset-30-minutes', 30 * 60_000],
       ['snooze-sheet-preset-1-day', 24 * 3_600_000],
     ];

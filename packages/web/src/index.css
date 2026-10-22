@@ -3307,12 +3307,22 @@ button.nav-row {
 .snooze-custom-input {
   flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   font: inherit;
+  font-variant-numeric: tabular-nums;
   color: var(--ink);
-  background: var(--bg-soft);
+  background: var(--bg-elevated);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  padding: 4px 6px;
+  padding: 9px 12px;
+  margin-top: 6px;
+  color-scheme: light dark;
+  cursor: pointer;
+}
+.snooze-custom-input:focus {
+  outline: none;
+  border-color: var(--ink);
 }
 .files-btn {
   display: inline-flex;
