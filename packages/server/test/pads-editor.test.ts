@@ -306,6 +306,93 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   }, 30_000);
 
+  it('notes stay visible while the frame reloads, and each is positioned by its own anchor', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    const addNote = async (sel: string, text: string) => {
+      await page.keyboard.press('n');
+      const bb = (await design.locator(sel).boundingBox())!;
+      await page.mouse.click(bb.x + 5, bb.y + 5);
+      await page.keyboard.type(text);
+      await page.keyboard.press('Enter');
+    };
+    await addNote('#t', 'first');
+    await addNote('#b', 'second');
+    await expect.poll(async () => (await pending(frameUrl)).length).toBe(2);
+    const pos = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('.note')].map((n) => {
+          const r = n.getBoundingClientRect();
+          return `${n.querySelector('.body')!.textContent}:${Math.round(r.x)},${Math.round(r.y)}:${getComputedStyle(n).display}`;
+        }),
+      );
+    await expect.poll(async () => (await pos()).length).toBe(2);
+    const before = await pos();
+    // Watch every frame for a hidden note while another device forces a reload.
+    await page.evaluate(() => {
+      (window as unknown as { hid: number }).hid = 0;
+      const tick = () => {
+        document.querySelectorAll('.note').forEach((n) => {
+          if (getComputedStyle(n).display === 'none') (window as unknown as { hid: number }).hid++;
+        });
+        const c = document.querySelectorAll('.note').length;
+        if (c < 2) (window as unknown as { hid: number }).hid++;
+        requestAnimationFrame(tick);
+      };
+      tick();
+    });
+    const other = await (
+      await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    ).newPage();
+    await other.goto(frameUrl);
+    await other.frameLocator('#frame').locator('#p').waitFor();
+    const pb = (await other.frameLocator('#frame').locator('#p').boundingBox())!;
+    await other.mouse.click(pb.x + 5, pb.y + 5);
+    await other.keyboard.press('n');
+    await other.mouse.click(pb.x + 5, pb.y + 5);
+    await other.keyboard.type('third');
+    await other.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).length).toBe(3);
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => (window as unknown as { hid: number }).hid)).toBe(0);
+    expect((await pos()).slice(0, 2)).toEqual(before);
+    await ctx.close();
+  }, 30_000);
+
+  it('notes of a screen are not drawn over the previous screen while the new one loads', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    await page.keyboard.press('n');
+    const bb = (await design.locator('#b').boundingBox())!;
+    await page.mouse.click(bb.x + 5, bb.y + 5);
+    await page.keyboard.type('on home');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).length).toBe(1);
+    await page.locator('#screens button:not(.add-screen)').nth(1).click();
+    await expect.poll(() => page.locator('.note').count()).toBe(0);
+    await design.locator('#b').waitFor();
+    // Back to the first screen: in the same task as the click, nothing of it may be drawn yet.
+    const during = await page.evaluate(() => {
+      (document.querySelectorAll('#screens button:not(.add-screen)')[0] as HTMLElement).click();
+      return [...document.querySelectorAll('.note')].filter(
+        (n) =>
+          getComputedStyle(n).display !== 'none' &&
+          getComputedStyle(n.parentElement!).visibility !== 'hidden',
+      ).length;
+    });
+    expect(during).toBe(0);
+    await expect.poll(() => page.locator('.note').count()).toBe(1);
+    await ctx.close();
+  }, 30_000);
+
   it('desktop and phone: shape tools draw a rectangle, ellipse, line and arrow as shape strokes', async () => {
     const frameUrl = await newPad();
     for (const opts of [{ viewport: { width: 1280, height: 800 } }, { ...pw.devices['Pixel 7'] }]) {

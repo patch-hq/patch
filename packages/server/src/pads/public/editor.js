@@ -25,6 +25,7 @@
   var sig = '';            // signature of the change list this frame reflects
   var restoring = null;    // scroll positions to put back after a reload
   var notesDirty = true;
+  var frameReady = false;  // the frame has loaded the screen we are on; until then its DOM is not the one the notes belong to
 
   // ---------- small helpers ----------
   function doc() { return frame.contentDocument; }
@@ -167,6 +168,7 @@
   }
   function reloadFrame() {
     restoring = saveScroll();
+    frameReady = false;
     sel = null; hoverEl = null;
     if (screen) frame.src = screenUrl(screen);
     else win().location.reload();
@@ -200,6 +202,7 @@
     closeScreenSheet();
     if (s === screen) return;
     screen = s; sel = null; hoverEl = null;
+    frameReady = false; notesLayer.style.visibility = 'hidden';
     try { localStorage.setItem(screenKey(), s.id); } catch (e) { /* ignore */ }
     renderScreens(); draw();
     frame.src = screenUrl(s);
@@ -280,6 +283,7 @@
   var observer = null;
   frame.addEventListener('load', function () {
     var d = doc();
+    frameReady = true; notesLayer.style.visibility = '';
     applyPreviews();
     if (restoring) {
       var r = restoring; restoring = null;
@@ -359,6 +363,9 @@
 
   var noteEls = {};
   function drawNotes() {
+    // Mid-load the frame holds the previous document: positional selectors
+    // would miss (notes vanish) or match the wrong screen (notes jump).
+    if (!frameReady) return;
     var notes = live().filter(function (c) { return c.kind === 'note'; });
     var keep = {};
     notes.forEach(function (c) {
