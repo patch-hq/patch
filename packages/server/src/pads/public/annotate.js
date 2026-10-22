@@ -14,7 +14,12 @@ function annotate({ others, cur, n }) {
     if (c.kind === 'note' || c.kind === 'draw') continue;
     const el = q(c.target.selector);
     if (!el) continue;
-    if (c.kind === 'duplicate') {
+    if (c.kind === 'add') {
+      const t = document.createElement('div');
+      t.textContent = c.text;
+      el.appendChild(t);
+      if (c.id === cur.id) copyOfCur = t;
+    } else if (c.kind === 'duplicate') {
       const copy = el.cloneNode(true);
       copy.removeAttribute('id');
       el.after(copy);
@@ -44,7 +49,7 @@ function annotate({ others, cur, n }) {
     add(`position:fixed;left:${x - 13}px;top:${y - 13}px;width:26px;height:26px;border-radius:50%;background:${RED};color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);font:700 13px/22px system-ui,sans-serif;text-align:center`, String(n));
 
   // For a duplicate, the thing to show is the copy.
-  const el = cur.kind === 'duplicate' ? copyOfCur : q(cur.target.selector);
+  const el = cur.kind === 'duplicate' || cur.kind === 'add' ? copyOfCur : q(cur.target.selector);
   if (!el) {
     caption(`${n}. Couldn't find ${cur.target.label} on this screen any more`);
     return { found: false, needHeight: 0 };
@@ -85,7 +90,7 @@ function annotate({ others, cur, n }) {
   if (cur.kind === 'move') {
     box({ left: r.left - cur.dx, top: r.top - cur.dy, width: r.width, height: r.height }, `border:2px dashed ${RED};opacity:.8`);
     box(r, `border:3px solid ${RED}`);
-  } else if (cur.kind === 'duplicate') {
+  } else if (cur.kind === 'duplicate' || cur.kind === 'add') {
     box(r, `border:3px dashed ${RED};background:rgba(229,72,77,.08)`);
   } else if (cur.kind === 'delete') {
     box(r, `border:3px solid ${RED};background:repeating-linear-gradient(135deg,rgba(229,72,77,.28) 0 6px,transparent 6px 12px)`);

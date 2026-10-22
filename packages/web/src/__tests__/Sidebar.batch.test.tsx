@@ -48,6 +48,7 @@ function seedChat(chatId: string, name: string): void {
     lastSeq: 9, // done — unseen activity
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
   };

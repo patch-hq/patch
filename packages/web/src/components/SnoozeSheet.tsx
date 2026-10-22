@@ -61,7 +61,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   const isProject = target.kind !== 'chat';
   const targets: ChatRow[] =
     target.kind === 'project'
-      ? chatsInProject(Object.values(chats), target.folder)
+      ? chatsInProject(Object.values(chats), target.folder, target.hostId)
       : target.kind === 'chats'
         ? target.chatIds.flatMap((id) => (chats[id] ? [chats[id]!] : []))
         : chats[target.chatId]

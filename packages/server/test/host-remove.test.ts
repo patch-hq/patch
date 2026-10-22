@@ -93,7 +93,7 @@ describe('DELETE /api/hosts/:hostId', () => {
         updateAvailable: false,
         permissionModeDefault: 'auto',
         permissionOverrides: 0,
-        isHomeHost: false,
+        runsManager: false,
         audioRelayHost: '127.0.0.1:3003',
         backends: [],
         components: [],
@@ -196,29 +196,27 @@ describe('DELETE /api/hosts/:hostId', () => {
     }
   });
 
-  it('passes home to the next machine when the home machine is removed, and says so everywhere', async () => {
+  it('passes the Manager to the next machine when its machine is removed, and tells that machine', async () => {
     const hostLink = new InProcessHostLink();
     hostLink.setHostId('host-a');
     hostLink.addOnlineHost('host-b');
     const s = await setup({ hostLink });
-    s.registry.setHomeHostId('host-b');
+    s.registry.setManagerHostId('host-b');
     const surface = new WireTestClient({ url: s.url, auth: s.surfaceJwt });
     try {
       await surface.connect();
       await surface.waitFor('auth.ok');
-      const newHome = surface.waitFor('host.set_home');
       const before = hostLink.sent.length;
 
       expect((await s.remove('host-b')).statusCode).toBe(200);
 
       expect(hostLink.forgotten).toEqual(['host-b']);
-      expect(s.registry.homeHostId()).toBe('host-a');
-      expect(await newHome).toEqual({ type: 'host.set_home', hostId: 'host-a' });
-      // The machine that is now home is told, so its own flag agrees.
+      expect(s.registry.managerHostId()).toBe('host-a');
+      // The machine now running the Manager is told, so its own flag agrees.
       expect(
         hostLink.sent
           .slice(before)
-          .filter((m) => m.event.type === 'host.set_home')
+          .filter((m) => m.event.type === 'host.set_manager')
           .map((m) => [m.hostId, (m.event as { hostId: string }).hostId]),
       ).toEqual([['host-a', 'host-a']]);
     } finally {

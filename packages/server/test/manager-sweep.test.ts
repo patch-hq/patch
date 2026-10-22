@@ -1,6 +1,6 @@
 // The Manager sweep (spec/06 § Sweep) — the server-side gate: which chats
 // changed and why, and when a run is actually due. The decision/execution
-// half lives on the home host (`managerSweepGen.ts`,
+// half lives on the Manager host (`managerSweepGen.ts`,
 // `ChatRunner.runManagerSweep`, tested there); this covers the DONE-WHEN
 // behaviours that are the gate's own job: nothing changed = no run, stalled
 // detection, event-wake debounce, "Check now", and per-event watch gone.
@@ -78,7 +78,7 @@ describe('ManagerSweeper', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeHostId: () => 'd1',
+      managerHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs: memoryRunStore(),
       logger,
@@ -349,11 +349,11 @@ describe('ManagerSweeper', () => {
     expect(requested.map((r) => r.runId)).toEqual(['run-0', 'run-1']);
   });
 
-  test('without a home host registered, a sweep never fires', () => {
+  test('without a Manager host registered, a sweep never fires', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeHostId: () => undefined,
+      managerHostId: () => undefined,
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs: memoryRunStore(),
       logger,
@@ -383,7 +383,7 @@ describe('ManagerSweeper', () => {
     sweeper = new ManagerSweeper({
       chats,
       settings: () => settings,
-      homeHostId: () => 'd1',
+      managerHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
       runs,
       logger,

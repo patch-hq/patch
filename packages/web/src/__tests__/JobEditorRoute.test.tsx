@@ -181,6 +181,7 @@ function makeChatRow(chatId: string, folder: string, name: string | null = null)
     lastSeq: 0,
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
   };
@@ -4557,12 +4558,12 @@ describe('resolveSkillLink', () => {
   // Todoist 6hfrrmrhG6GM3V36 — `paths` undefined (an old host with no
   // `paths` field at all) and `paths` present but missing one skill's key (a
   // machine-level skill, e.g. chrome-cdp, genuinely absent from THIS host's
-  // fetch) were conflated into the same "host does not report skill files"
+  // fetch) were conflated into the same "machine does not report skill files"
   // message, which read as the host being incapable even when it answered
   // fine for every other skill.
   it('distinguishes an old host (no paths at all) from a skill missing on this host', () => {
     expect(resolveSkillLink({ ...base, skill: 'chrome-cdp', paths: undefined })).toEqual({
-      reason: 'host does not report skill files',
+      reason: 'machine does not report skill files',
     });
     // `plant` resolves fine from the SAME `paths` map that has no `chrome-cdp`
     // key — proving the fetch succeeded and this one skill simply isn't on

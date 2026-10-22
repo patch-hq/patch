@@ -131,7 +131,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_spawn',
     category: 'patch',
     description: 'Creates a brand-new persistent chat in a folder and returns its id.',
-    params: 'folder: string, host?: string, name?: string, prompt?: string, model?: string',
+    params:
+      'folder: string, host?: string, name?: string, prompt?: string, model?: string, account?: string',
   },
   {
     name: patchToolId('patch_send_to'),
@@ -195,6 +196,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description: 'Answers the batch of changes sent from a Pad and marks them done.',
     params: 'padId: string, text: string',
+  },
+  {
+    name: patchToolId('patch_meeting_notes'),
+    label: 'patch_meeting_notes',
+    category: 'patch',
+    description: 'Adds or edits meeting points, research and the summary in this chat.',
+    params:
+      'op: string, title?: string, topicId?: string, bullets?: string[], decided?: boolean, headline?: string, source?: object',
   },
   {
     name: patchToolId('patch_pad_list'),
@@ -304,8 +313,9 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_watch',
     category: 'patch',
     description:
-      'Runs a shell command as a durable background task the host itself owns, holds a real pid for, and can kill.',
-    params: 'command: string, description: string, cwd?: string',
+      'Runs a shell command as a durable background task the machine itself owns, holds a real pid for, and can kill.',
+    params:
+      'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number',
   },
   {
     name: patchToolId('patch_watch_list'),
@@ -359,10 +369,11 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'since: number, until: number, messagesCursor?: number, limit?: number',
   },
   {
-    name: patchToolId('patch_list_devices'),
-    label: 'patch_list_devices',
+    name: patchToolId('patch_list_accounts'),
+    label: 'patch_list_accounts',
     category: 'patch',
-    description: 'Lists the registered voice devices and whether each is online.',
+    description:
+      'Lists the shared Claude and ChatGPT accounts in the order chats try them, with ids and labels.',
     params: '(no params)',
   },
   {
@@ -403,70 +414,11 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'chatId?: string, message?: string',
   },
   {
-    name: patchToolId('patch_job_list'),
-    label: 'patch_job_list',
-    category: 'patch',
-    description: "Lists the user's persistent jobs (cross-session automations).",
-    params: '(no params)',
-  },
-  {
-    name: patchToolId('patch_job_create'),
-    label: 'patch_job_create',
-    category: 'patch',
-    description:
-      'Creates a recurring or triggered job (cron / webhook / todoist) that spawns work over time.',
-    params:
-      'trigger: object, action: object, filter?: string, gate?: object, name?: string, concurrency?: number, queueing?: object, window?: object, oneOff?: boolean, group?: string, autonomyPrompt?: string, wakeHost?: boolean',
-  },
-  {
-    name: patchToolId('patch_job_update'),
-    label: 'patch_job_update',
-    category: 'patch',
-    description: 'Patches fields of an existing job.',
-    params:
-      'jobId: string, trigger?: object, action?: object, filter?: string, gate?: object, name?: string, enabled?: boolean, concurrency?: number, queueing?: object, window?: object, oneOff?: boolean, archived?: boolean, group?: string, autonomyPrompt?: string, wakeHost?: boolean',
-  },
-  {
-    name: patchToolId('patch_job_delete'),
-    label: 'patch_job_delete',
-    category: 'patch',
-    description: 'Deletes a job permanently.',
-    params: 'jobId: string',
-  },
-  {
-    name: patchToolId('patch_job_enable'),
-    label: 'patch_job_enable',
-    category: 'patch',
-    description: 'Enables a previously disabled job again.',
-    params: 'jobId: string',
-  },
-  {
-    name: patchToolId('patch_job_disable'),
-    label: 'patch_job_disable',
-    category: 'patch',
-    description: 'Pauses a job without deleting it.',
-    params: 'jobId: string',
-  },
-  {
-    name: patchToolId('patch_job_runs'),
-    label: 'patch_job_runs',
-    category: 'patch',
-    description: "Reads a job's recent run log entries.",
-    params: 'jobId: string, limit?: number',
-  },
-  {
-    name: patchToolId('patch_job_webhooks'),
-    label: 'patch_job_webhooks',
-    category: 'patch',
-    description: "Reads a job's recent inbound-webhook log entries.",
-    params: 'jobId: string, limit?: number',
-  },
-  {
     name: patchToolId('patch_browser_open'),
     label: 'patch_browser_open',
     category: 'patch',
     description:
-      'Opens a URL in a real browser on the host and returns a tabId for the other browser tools.',
+      'Opens a URL in a real browser on the machine and returns a tabId for the other browser tools.',
     params: "url: string, profile?: 'logged-in' | 'logged-out'",
   },
   {
@@ -541,13 +493,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description:
       'Hands a browser tab to the user to sign in, pass 2FA or approve consent, and waits for them to finish without seeing what they enter.',
-    params: 'tabId: string, reason: string, callbackPort?: number, timeoutSeconds?: number',
+    params:
+      'tabId: string, reason: string, callbackPort?: number, timeoutSeconds?: number, share?: boolean',
   },
   {
     name: patchToolId('patch_browser_tabs'),
     label: 'patch_browser_tabs',
     category: 'patch',
-    description: 'Lists every open browser tab on this host.',
+    description: 'Lists every open browser tab on this machine.',
     params: '(no params)',
   },
   {
@@ -593,7 +546,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_browser_downloads'),
     label: 'patch_browser_downloads',
     category: 'patch',
-    description: 'Lists files the browser downloaded, saved on the host.',
+    description: 'Lists files the browser downloaded, saved on the machine.',
     params: 'tabId?: string, waitSeconds?: number',
   },
   {

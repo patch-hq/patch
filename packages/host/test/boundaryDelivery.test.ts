@@ -360,7 +360,7 @@ describe('standing in for the Manager (spec/06 § Manager failover)', () => {
     expect(after).toBeGreaterThan(before);
   });
 
-  it('forgets a handoff when the Manager goes back to its home host', async () => {
+  it('forgets a handoff when the Manager goes back to its Manager host', async () => {
     const prompts: string[] = [];
     const backend: SdkBackend = {
       async *run(opts): AsyncIterable<{ type: string; [k: string]: unknown }> {

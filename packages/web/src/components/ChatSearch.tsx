@@ -11,7 +11,7 @@
 
 import type { JSX } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { OpenableLink } from './OpenableLink.js';
 import type { ChatSearchHit, ChatSearchHostResult } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -331,8 +331,9 @@ function SearchHitRow({
     .filter((p): p is string => p !== null && p !== '')
     .join(' · ');
   return (
-    <Link
+    <OpenableLink
       to={searchHitPath(hit)}
+      opens={{ kind: 'chat', chatId: hit.chatId }}
       className={`sb-row search-hit${active === hit.chatId ? ' active' : ''}`}
       data-testid={testId}
       data-chat-id={hit.chatId}
@@ -357,6 +358,6 @@ function SearchHitRow({
           <span className="search-more-count"> · +{hit.messageMatches - 1} more</span>
         ) : null}
       </span>
-    </Link>
+    </OpenableLink>
   );
 }

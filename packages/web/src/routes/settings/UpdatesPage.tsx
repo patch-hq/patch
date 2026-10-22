@@ -1,15 +1,13 @@
-// Settings → Updates: what is behind, what every layer is running, and when
-// that was last checked (spec/11 § Version reporting).
+// Settings → Updates: one list of what Patch is running, a version and a status
+// for each, and how updates are applied (spec/11 § Version reporting).
 //
-// Problems first, each with its remedy: a machine with a newer host waiting,
-// a disagreement between layers the server reports as drift, a desktop shell
-// that cannot update itself. Empty in the normal case, so the page is a quiet
-// list of versions until something actually needs doing — and the nav's pip
-// says so from every other page.
+// Hosts update themselves by default; the toggle turns that off, and then each
+// host's Update button (or Update all) is the way. Genuine drift between layers
+// the server reports is listed first, with its remedy; otherwise there is
+// nothing above the list.
 //
-// The version list is what caught a stale deploy in the first place: the
-// window runs a UI build of its own, so "This app" states the window's build
-// and "Server" the server's, side by side.
+// The window runs a UI build of its own, so "This app" states the window's
+// build and "Server" the server's, side by side.
 
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
@@ -19,9 +17,12 @@ import { api } from '../../api/rest.js';
 import { BUILD_INFO } from '../../lib/buildInfo.js';
 import { getDesktopBridge, type DesktopUpdaterState } from '../../lib/desktopBridge.js';
 import { relativeIso } from '../../lib/relativeTime.js';
+import { Toggle } from '../../components/Toggle.js';
+import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
 import { hostLabel, sortHosts } from './hostScope.js';
-import { useHostUpdate } from './hostWrite.js';
+import { sendToHost, useHostUpdate } from './hostWrite.js';
+import { patchShared } from './sharedWrite.js';
 import { Group, Note, Row, SettingsPage } from './ui.js';
 
 /** `0.1.317 · 9b8635f`. */
@@ -109,6 +110,10 @@ export function UpdatesPage(): JSX.Element {
   const { shell, checkShell } = useShell();
   const behind = useBehind();
   const hosts = usePresenceStore((s) => s.hosts);
+  const autoUpdate = usePreferencesStore((s) => s.preferences.autoUpdateHosts);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const drift = behind.filter((b) => b.kind === 'drift');
+  const updatable = behind.flatMap((b) => (b.kind === 'host' && b.host.online ? [b.host] : []));
   // The host build the behind hosts would update TO: the published channel's
   // version. Only read while something is behind; unread, the row states just
   // the version the host runs rather than guessing a target.
@@ -154,58 +159,45 @@ export function UpdatesPage(): JSX.Element {
         </Group>
       ) : null}
 
-      {behind.length > 0 ||
-      shell?.disabledReason ||
-      (shell?.lastResult === 'error' && shell.lastError) ? (
+      {drift.length > 0 ? (
         <Group label="Behind" testid="version-drift">
-          {behind.map((b) =>
-            b.kind === 'host' ? (
-              <Row
-                key={b.host.hostId}
-                title={`${hostLabel(b.host)} host`}
-                sub={[
-                  b.host.host && published?.version
-                    ? `${b.host.host.hostVersion} → ${published.version}`
-                    : b.host.host?.hostVersion,
-                  b.host.online ? null : 'offline',
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-                testid={`version-behind-${b.host.hostId}`}
-              >
-                <HostUpdateButton host={b.host} />
-              </Row>
-            ) : (
-              <Row
-                key={b.key}
-                title={b.detail}
-                sub={<code>{b.remedy}</code>}
-                testid={`version-drift-${b.driftKind}`}
-              />
-            ),
-          )}
-          {shell?.disabledReason ? (
+          {drift.map((d) => (
             <Row
-              title="Desktop app can’t self-update"
-              sub={shell.disabledReason}
-              testid="version-shell-disabled"
+              key={d.key}
+              title={d.detail}
+              sub={<code>{d.remedy}</code>}
+              testid={`version-drift-${d.driftKind}`}
             />
-          ) : null}
-          {shell?.lastResult === 'error' && shell.lastError ? (
-            <Row
-              title={
-                shell.lastErrorKind === 'install'
-                  ? 'Last update install failed'
-                  : 'Last update check failed'
-              }
-              sub={shell.lastError}
-              testid="version-shell-error"
-            />
-          ) : null}
+          ))}
         </Group>
       ) : null}
 
-      <Group label="Versions" testid="version-rows">
+      <Group>
+        <Row title="Update hosts automatically" testid="auto-update">
+          <Toggle
+            checked={autoUpdate}
+            disabled={!loaded}
+            onChange={(next) => void patchShared('auto-update', { autoUpdateHosts: next })}
+            testid="auto-update-toggle"
+          />
+        </Row>
+        {updatable.length > 0 ? (
+          <Row title={`${updatable.length} host${updatable.length === 1 ? '' : 's'} behind`}>
+            <button
+              type="button"
+              className="set-btn"
+              data-testid="update-all"
+              onClick={() =>
+                updatable.forEach((h) => sendToHost(h, { type: 'host.update', hostId: h.hostId }))
+              }
+            >
+              Update all
+            </button>
+          </Row>
+        ) : null}
+      </Group>
+
+      <Group label="Components" testid="version-rows">
         <Row
           title="This app"
           testid="version-app"
@@ -227,6 +219,17 @@ export function UpdatesPage(): JSX.Element {
             }
           />
         ) : null}
+        {shell?.lastResult === 'error' && shell.lastError ? (
+          <Row
+            title={
+              shell.lastErrorKind === 'install'
+                ? 'Last update install failed'
+                : 'Last update check failed'
+            }
+            sub={shell.lastError}
+            testid="version-shell-error"
+          />
+        ) : null}
         {report ? (
           <Row
             title="Server"
@@ -238,14 +241,29 @@ export function UpdatesPage(): JSX.Element {
             }
           />
         ) : null}
-        {sortHosts(Object.values(hosts)).map((h) => (
-          <Row
-            key={h.hostId}
-            title={`${hostLabel(h)} host`}
-            testid={`version-host-${h.hostId}`}
-            sub={h.host ? <code>{h.host.hostVersion}</code> : 'not reported'}
-          />
-        ))}
+        {sortHosts(Object.values(hosts)).map((h) => {
+          const behindNow = h.host?.updateAvailable === true;
+          const target = behindNow && published?.version ? ` → ${published.version}` : '';
+          return (
+            <Row
+              key={h.hostId}
+              title={`${hostLabel(h)} host`}
+              testid={`version-host-${h.hostId}`}
+              sub={
+                h.host ? (
+                  <>
+                    <code>{`${h.host.hostVersion}${target}`}</code>
+                    {` · ${behindNow ? 'behind' : 'up to date'}${h.online ? '' : ' · offline'}`}
+                  </>
+                ) : (
+                  'not reported'
+                )
+              }
+            >
+              {behindNow ? <HostUpdateButton host={h} /> : null}
+            </Row>
+          );
+        })}
         {report?.desktop ? (
           <Row
             title="Desktop on the update feed"

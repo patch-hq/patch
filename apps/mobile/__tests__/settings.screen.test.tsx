@@ -88,7 +88,7 @@ beforeEach(() => {
   vi.mocked(api.listSecrets).mockReset().mockResolvedValue({ secrets: [] });
   useSettingsStore.getState()._reset();
   resetHosts();
-  reportHost('d1', { hostName: 'laptop', isHomeHost: true });
+  reportHost('d1', { hostName: 'laptop', runsManager: true });
 });
 
 afterEach(() => {
@@ -115,17 +115,19 @@ describe('Settings tab — the list', () => {
     expect(headers).toEqual(['Settings', 'Agents', 'Setup', 'System']);
     expect(rowTitles(r)).toEqual([
       'Usage',
+      'Chats',
       'Agent',
       'MCP',
       'Memories',
       'Manager',
       'Goals',
+      'Prompts',
       'Voice',
       'Hooks',
       'Computer use',
-      'Hosts',
+      'Machines',
       'Agent identity',
-      'Keys',
+      'Providers',
       'Devices',
       'Updates',
       'Account',
@@ -136,16 +138,18 @@ describe('Settings tab — the list', () => {
       ).map((i) => String(i.props.accessibilityLabel));
     expect(inGroup('Agents')).toEqual([
       'Usage',
+      'Chats',
       'Agent',
       'MCP',
       'Memories',
       'Manager',
       'Goals',
+      'Prompts',
       'Voice',
       'Hooks',
       'Computer use',
     ]);
-    expect(inGroup('Setup')).toEqual(['Hosts', 'Agent identity', 'Keys', 'Devices']);
+    expect(inGroup('Setup')).toEqual(['Machines', 'Agent identity', 'Providers', 'Devices']);
     expect(inGroup('System')).toEqual(['Updates', 'Account']);
   });
 
@@ -348,7 +352,7 @@ describe('/settings/[page]', () => {
 
 describe('the pages’ own routes', () => {
   it('layer, memory, mcp-server and a host page render their screens from params', async () => {
-    reportHost('d1', { hostName: 'laptop', isHomeHost: true, harnessMcpServers: [] });
+    reportHost('d1', { hostName: 'laptop', runsManager: true, harnessMcpServers: [] });
     __setLocalSearchParams({ layer: 'system' });
     let r = render(<LayerEditorScreen />);
     expect(findHost(r.root, byTestId('settings-layer-editor'))).toBeTruthy();

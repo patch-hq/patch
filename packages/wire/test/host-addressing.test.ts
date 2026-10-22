@@ -32,7 +32,7 @@ import {
   isHostAddressedSurfaceEvent,
   HostBackendUsageRefreshEvent,
   HostClaudeMemoryDeleteEvent,
-  HostClaudeSettingsDiscardEvent,
+  HostClaudeSettingsSetEvent,
   HostComponentInstallEvent,
   HostFolderAddEvent,
   HostRenameEvent,
@@ -106,9 +106,9 @@ describe('a frame that names no machine is rejected, not defaulted', () => {
       ],
       ['host.folder_add', HostFolderAddEvent, { type: 'host.folder_add', path: '/work' }],
       [
-        'host.claude_settings_discard',
-        HostClaudeSettingsDiscardEvent,
-        { type: 'host.claude_settings_discard' },
+        'host.claude_settings_set',
+        HostClaudeSettingsSetEvent,
+        { type: 'host.claude_settings_set', text: '{}' },
       ],
       [
         'host.backend_usage_refresh',
@@ -252,7 +252,7 @@ describe("a host's self-description", () => {
     updateAvailable: false,
     permissionModeDefault: 'bypassPermissions' as const,
     permissionOverrides: 0,
-    isHomeHost: false,
+    runsManager: false,
     audioRelayHost: '127.0.0.1:3003',
     backends: [],
     components: [],
@@ -316,7 +316,7 @@ describe('the greeting carries every registered machine', () => {
     updateAvailable: false,
     permissionModeDefault: 'bypassPermissions' as const,
     permissionOverrides: 2,
-    isHomeHost: true,
+    runsManager: true,
     audioRelayHost: '127.0.0.1:3003',
     backends: [
       { id: 'claude-code', label: 'Claude Code', version: '2.1.0', state: 'present' as const },
@@ -634,13 +634,12 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
         'host.backend_usage_refresh',
         'host.claude_memory_delete',
         'host.claude_memory_set',
-        'host.claude_settings_discard',
+        'host.claude_settings_set',
         'host.component_install',
         'host.component_remove',
         'host.folder_add',
         'host.folder_remove',
         'host.rename',
-        'host.set_home',
         'host.settings',
         'host.update',
         'patch.folders.browse.request',
@@ -714,36 +713,43 @@ describe("a host's Claude Code settings + memory (spec/02 § Claude Code setting
     expect(res.success).toBe(true);
   });
 
-  it('claude_settings.list / .updated carry the full memory list and any drift, hostId required', () => {
+  it('claude_settings.list / .updated carry the settings.json text and the full memory list, hostId required', () => {
     for (const type of ['claude_settings.list', 'claude_settings.updated'] as const) {
       const schema = EVENT_SCHEMAS[type];
       const ok = schema.safeParse({
         type,
         hostId: 'd1',
-        drift: '{"model":"opus"}',
+        settingsJson: '{"model":"opus"}',
         memories: [memory],
       });
       expect(ok.success, JSON.stringify(ok.success ? {} : ok.error?.issues)).toBe(true);
-      expect(schema.safeParse({ type, hostId: 'd1', memories: [] }).success).toBe(true);
-      expect(schema.safeParse({ type, memories: [] }).success).toBe(false);
+      expect(schema.safeParse({ type, hostId: 'd1', settingsJson: '', memories: [] }).success).toBe(
+        true,
+      );
+      expect(schema.safeParse({ type, hostId: 'd1', memories: [] }).success).toBe(false);
+      expect(schema.safeParse({ type, settingsJson: '', memories: [] }).success).toBe(false);
     }
   });
 
   it('round-trips claude_settings.updated through the codec unchanged', () => {
-    const ev: WireEvent = { type: 'claude_settings.updated', hostId: 'd1', memories: [memory] };
+    const ev: WireEvent = {
+      type: 'claude_settings.updated',
+      hostId: 'd1',
+      settingsJson: '{}',
+      memories: [memory],
+    };
     expect(decode(encode(ev))).toEqual(ev);
   });
 
-  it('host.claude_settings_discard requires hostId', () => {
-    expect(
-      HostClaudeSettingsDiscardEvent.safeParse({ type: 'host.claude_settings_discard' }).success,
-    ).toBe(false);
-    expect(
-      HostClaudeSettingsDiscardEvent.safeParse({
-        type: 'host.claude_settings_discard',
-        hostId: 'd1',
-      }).success,
-    ).toBe(true);
+  it('host.claude_settings_set requires hostId and text, and takes nothing else', () => {
+    const base = { type: 'host.claude_settings_set' as const, hostId: 'd1', text: '{}' };
+    expect(HostClaudeSettingsSetEvent.safeParse(base).success).toBe(true);
+    expect(HostClaudeSettingsSetEvent.safeParse({ ...base, text: '' }).success).toBe(true);
+    expect(HostClaudeSettingsSetEvent.safeParse({ ...base, hostId: '' }).success).toBe(false);
+    expect(HostClaudeSettingsSetEvent.safeParse({ type: base.type, hostId: 'd1' }).success).toBe(
+      false,
+    );
+    expect(HostClaudeSettingsSetEvent.safeParse({ ...base, target: 'shared' }).success).toBe(false);
   });
 
   it('host.claude_memory_delete requires hostId, project and file — none may be empty', () => {

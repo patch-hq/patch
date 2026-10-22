@@ -225,6 +225,60 @@ describe('runManagerSweep', () => {
     }
   });
 
+  it('disabled Manager: no decision call is made and nothing is delivered or flagged', async () => {
+    const decide = vi.fn(async () =>
+      result([{ chatId: 'chat-x', action: 'nudge', message: 'go' }]),
+    );
+    const sendToRemoteChat = vi.fn(async () => {});
+    const { daemon, events, folder } = setupWithManager(decide, { sendToRemoteChat });
+    await daemon.spawnChat({ folder });
+    await daemon.setDisabled(SPECIAL_THREAD_IDS.manager, true);
+    events.length = 0;
+    const out = await daemon.runManagerSweep({
+      runId: 'r1',
+      candidates: [candidate({ chatId: 'chat-x' })],
+      messagesPerChat: 3,
+      prompt: 'decide',
+      model: 'claude-sonnet-5',
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'leave' }]);
+    expect(sendToRemoteChat).not.toHaveBeenCalled();
+    expect(events.filter((e) => e.type === 'chat.message')).toEqual([]);
+  });
+
+  it('disabled mid-run: a decision already in flight delivers and flags nothing', async () => {
+    const sendToRemoteChat = vi.fn(async () => {});
+    let disable: () => Promise<void> = async () => {};
+    const decide = vi.fn(async () => {
+      await disable();
+      return result([
+        { chatId: 'chat-remote', action: 'wake', message: 'still there?' },
+        { chatId: 'chat-x', action: 'flag', flagText: 'look' },
+      ]);
+    });
+    const { daemon, events, folder } = setupWithManager(decide, { sendToRemoteChat });
+    await daemon.spawnChat({ folder });
+    disable = () => daemon.setDisabled(SPECIAL_THREAD_IDS.manager, true);
+    events.length = 0;
+    const out = await daemon.runManagerSweep({
+      runId: 'r1',
+      candidates: [
+        candidate({ chatId: 'chat-remote', hostId: 'd2' }),
+        candidate({ chatId: 'chat-x' }),
+      ],
+      messagesPerChat: 3,
+      prompt: 'decide',
+      model: 'claude-sonnet-5',
+    });
+    expect(out.actions).toEqual([
+      { chatId: 'chat-remote', action: 'leave' },
+      { chatId: 'chat-x', action: 'leave' },
+    ]);
+    expect(sendToRemoteChat).not.toHaveBeenCalled();
+    expect(events.filter((e) => e.type === 'chat.message')).toEqual([]);
+  });
+
   it('leave: a candidate decided "leave" does nothing observable', async () => {
     const decide = vi.fn(async () => result([{ chatId: 'chat-x', action: 'leave' }]));
     const { daemon, events } = setup(decide);

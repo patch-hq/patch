@@ -372,6 +372,30 @@ describe('serverLink', () => {
     expect(entry?.['wait']).toBe(30_000);
   });
 
+  describe('offlineSince', () => {
+    it('is set from startup while never connected, and clears once authed, resets on loss', async () => {
+      const server = await startFakeServer();
+      servers.push(server);
+      const before = Date.now();
+      const link = track(
+        createServerLink({
+          url: server.url,
+          daemonKey: 'k',
+          clientVersion: '1',
+          logger: silent,
+        }),
+      );
+      const initial = link.diagnostics().offlineSince;
+      expect(initial).not.toBeNull();
+      expect(initial!).toBeGreaterThanOrEqual(before);
+      link.start();
+      await waitFor(() => link.isOnline());
+      expect(link.diagnostics().offlineSince).toBeNull();
+      link.dropLink();
+      expect(link.diagnostics().offlineSince).toBeGreaterThanOrEqual(before);
+    });
+  });
+
   describe('dropLink()', () => {
     it('returns false when nothing has ever connected', () => {
       const link = track(

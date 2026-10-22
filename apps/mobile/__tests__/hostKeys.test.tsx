@@ -1,4 +1,4 @@
-// Settings → Keys on mobile (design/settings-redesign; spec/02 § Provider keys,
+// Settings → Providers on mobile (design/settings-redesign; spec/02 § Provider keys,
 // spec/15 § Settings tab). The account's provider keys, shared by every
 // host — where each value comes from and its last four characters, never the
 // value. Add/Replace takes a write-only value, Revoke asks first, an
@@ -18,7 +18,7 @@ import {
   actAsync,
   flush,
 } from './testUtils/render';
-import { KeysPage } from '../src/components/settings/HostsSection';
+import { ProvidersPage } from '../src/components/settings/HostsSection';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { api, ApiError } from '../src/api/rest';
@@ -67,7 +67,7 @@ function state(providerKeys = KEYS) {
 
 const mounted: ReactTestRenderer[] = [];
 async function openKeys(): Promise<ReactTestRenderer> {
-  const r = renderRN(<KeysPage />);
+  const r = renderRN(<ProvidersPage />);
   mounted.push(r);
   await flush(); // SecretsSection's load
   return r;
@@ -94,10 +94,10 @@ beforeEach(() => {
   });
 });
 
-describe('mobile Settings → Keys → provider keys (shared, spec/01 § Settings)', () => {
+describe('mobile Settings → Providers → provider keys (shared, spec/01 § Settings)', () => {
   it('lists every key: set with its last four, or not set — never the value', async () => {
     const r = await openKeys();
-    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Keys');
+    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Providers');
     expect(textOf(findHost(r.root, byTestId('provider-key-gemini-status')))).toBe(
       'Set · ends WXYZ',
     );

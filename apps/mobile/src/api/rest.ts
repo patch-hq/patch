@@ -385,7 +385,10 @@ export const api = {
   // GET /api/chats?archived=only — the Archived section's own list, fetched
   // when the section opens or a search starts (spec/15 ## Chats tab §7). The
   // cold-start roster above excludes archived chats, and they are unbounded.
-  listArchivedChats: () => request<{ chats: ChatListEntry[] }>('/api/chats?archived=only'),
+  listArchivedChats: (opts: { limit: number; offset: number }) =>
+    request<{ chats: ChatListEntry[]; nextOffset: number | null }>(
+      `/api/chats?archived=only&limit=${opts.limit}&offset=${opts.offset}`,
+    ),
   // GET /api/chats?hidden=only — the Hidden section's own list (spec/04 §
   // Hidden), fetched when the section opens or a search starts. The cold-start
   // roster above leaves hidden chats out, exactly as it does archived ones.
@@ -933,11 +936,6 @@ export const api = {
     request<SharedState>(`/api/accounts/${backendId}/adopt`, {
       method: 'POST',
       body: { hostId },
-    }),
-  adoptClaudeSettings: (hostId: string, target: 'shared' | 'darwin' | 'linux') =>
-    request<SharedState>('/api/settings/claude/adopt', {
-      method: 'POST',
-      body: { hostId, target },
     }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every

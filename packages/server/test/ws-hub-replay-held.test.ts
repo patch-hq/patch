@@ -1,6 +1,6 @@
 // How the hub answers a replay request from the server's own log (spec/01 §
 // Message log), driven directly: it answers when the chat's host is offline, adds
-// the stretch a home host's log is missing for the Manager, sends in chunks to a
+// the stretch a Manager host's log is missing for the Manager, sends in chunks to a
 // surface that asked for batches, and says nothing when it has nothing to say.
 
 import { describe, it, expect } from 'vitest';

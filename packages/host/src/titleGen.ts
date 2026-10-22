@@ -21,8 +21,8 @@ export const TITLE_MODEL = 'claude-haiku-4-5-20251001';
 /** Abort a hung title call so it never leaks a warm SDK query. */
 const TITLE_TIMEOUT_MS = 60_000;
 
-/** Hard cap on the returned title. */
-const MAX_TITLE_LEN = 48;
+/** Hard cap on the returned title; only a runaway reply reaches it, so the name stays whole in the window title. */
+const MAX_TITLE_LEN = 120;
 
 export interface GenerateTitleInput {
   chatId: string;

@@ -3,9 +3,8 @@
 //   Defaults — Model for new chats and the Permission mode new chats start in.
 //   Questions — whether an unanswered question expires, and when.
 //   Chats — Warn before switching provider, Provider-level context.
-//   Layers added to Claude Code — the Patch tools prompt, the System prompt
-//              override and Claude Code's settings.json (shared, and per OS),
-//              each opened in a full-screen editor (LayerEditor,
+//   Layers added to Claude Code — the Patch tools prompt and the System prompt
+//              override, each opened in a full-screen editor (LayerEditor,
 //              app/settings/layer.tsx).
 //
 // Every row is a shared setting (spec/01 § Settings): written to the server,
@@ -13,7 +12,16 @@
 
 import React from 'react';
 import { Alert, View } from 'react-native';
-import { DEFAULT_GOAL_EVAL_PROMPT, DEFAULT_LINK_SUMMARY_PROMPT } from '@patch/wire';
+import {
+  DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
+  DEFAULT_SWEEP_PROMPT,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
+} from '@patch/wire';
+import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
 import { useRouter } from 'expo-router';
 import {
   QUESTION_EXPIRY_SECONDS_MAX,
@@ -66,38 +74,56 @@ const VERBOSITY_LABEL: Record<(typeof VERBOSITY)[number], string> = {
 export type Layer =
   | 'tools'
   | 'system'
-  | 'claude-shared'
-  | 'claude-darwin'
-  | 'claude-linux'
   | 'goal-judge'
-  | 'link-summary';
+  | 'link-summary'
+  | 'watch-check-in'
+  | 'sweep'
+  | 'job-autonomy'
+  | 'meeting-now'
+  | 'meeting-notes'
+  | 'meeting-actions';
 
 export const LAYER_TITLE: Record<Layer, string> = {
   tools: 'Patch tools prompt',
   system: 'System prompt override',
-  'claude-shared': 'Claude Code settings.json',
-  'claude-darwin': 'settings.json on macOS',
-  'claude-linux': 'settings.json on Linux',
   'goal-judge': 'Goal judge prompt',
   'link-summary': 'Summarise prompt',
+  'watch-check-in': 'Background task check-in',
+  sweep: 'Manager sweep',
+  'job-autonomy': 'Job autonomy',
+  'meeting-now': 'Meeting: Now',
+  'meeting-notes': 'Meeting: Notes',
+  'meeting-actions': 'Meeting: Actions',
 };
 
 /** What a layer's editor is titled: short enough to fit the header. */
 const EDITOR_TITLE: Record<Layer, string> = {
   tools: 'Tools prompt',
   system: 'System prompt',
-  'claude-shared': 'settings.json',
-  'claude-darwin': 'macOS settings.json',
-  'claude-linux': 'Linux settings.json',
   'goal-judge': 'Judge prompt',
   'link-summary': 'Summarise prompt',
+  'watch-check-in': 'Check-in prompt',
+  sweep: 'Sweep prompt',
+  'job-autonomy': 'Autonomy prompt',
+  'meeting-now': 'Meeting Now prompt',
+  'meeting-notes': 'Meeting notes prompt',
+  'meeting-actions': 'Meeting actions prompt',
 };
 
-const CLAUDE_PART = {
-  'claude-shared': 'shared',
-  'claude-darwin': 'darwin',
-  'claude-linux': 'linux',
+/** The prompts whose shared setting is plain text with a built-in default. */
+export const TEXT_PROMPTS = {
+  'goal-judge': { key: 'goalEvalPrompt', fallback: DEFAULT_GOAL_EVAL_PROMPT },
+  'link-summary': { key: 'linkSummaryPrompt', fallback: DEFAULT_LINK_SUMMARY_PROMPT },
+  'watch-check-in': { key: 'watchCheckInPrompt', fallback: DEFAULT_WATCH_CHECK_IN_PROMPT },
+  sweep: { key: 'sweepPrompt', fallback: DEFAULT_SWEEP_PROMPT },
+  'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
+  'meeting-now': { key: 'meetingNowPrompt', fallback: DEFAULT_MEETING_NOW_PROMPT },
+  'meeting-notes': { key: 'meetingNotesPrompt', fallback: DEFAULT_MEETING_NOTES_PROMPT },
+  'meeting-actions': { key: 'meetingActionsPrompt', fallback: DEFAULT_MEETING_ACTIONS_PROMPT },
 } as const;
+
+/** The meeting prompts, listed under their own heading on the Prompts page. */
+export const MEETING_PROMPTS = ['meeting-now', 'meeting-notes', 'meeting-actions'] as const;
 
 export function AgentPage(): React.ReactElement {
   return (
@@ -352,14 +378,10 @@ function Layers({ preferences }: { preferences: AccountPreferences }): React.Rea
       }
     />
   );
-  const cs = preferences.claudeSettings;
   return (
     <SettingsSection title="Layers added to Claude Code" testID="harness-config">
       {row('tools', toolsPromptSummary(preferences.harnessToolsPrompt, toolsDefault))}
       {row('system', promptSummary(preferences.harnessSystemPrompt))}
-      {row('claude-shared', cs.shared.trim() === '' ? 'None' : 'Set')}
-      {row('claude-darwin', cs.darwin.trim() === '' ? 'None' : 'Set')}
-      {row('claude-linux', cs.linux.trim() === '' ? 'None' : 'Set')}
     </SettingsSection>
   );
 }
@@ -381,11 +403,7 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
         ? (preferences.harnessToolsPrompt ?? toolsDefault)
         : layer === 'system'
           ? preferences.harnessSystemPrompt
-          : layer === 'goal-judge'
-            ? preferences.goalEvalPrompt
-            : layer === 'link-summary'
-              ? preferences.linkSummaryPrompt
-              : preferences.claudeSettings[CLAUDE_PART[layer]];
+          : preferences[TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key];
   const [draft, setDraft] = React.useState(initial);
   const [saving, setSaving] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -418,12 +436,7 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
     if (layer === 'tools') void write({ harnessToolsPrompt: draft });
     // An empty string clears the override (the SDK default).
     else if (layer === 'system') void write({ harnessSystemPrompt: draft });
-    else if (layer === 'goal-judge') void write({ goalEvalPrompt: draft });
-    else if (layer === 'link-summary') void write({ linkSummaryPrompt: draft });
-    else
-      void write({
-        claudeSettings: { ...preferences.claudeSettings, [CLAUDE_PART[layer]]: draft },
-      });
+    else void write({ [TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key]: draft });
   };
 
   return (
@@ -443,10 +456,8 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
         testID="layer-editor-text"
         accessibilityLabel={LAYER_TITLE[layer]}
         multiline
-        code={layer.startsWith('claude-')}
         value={draft}
         onChangeText={setDraft}
-        placeholder={layer.startsWith('claude-') ? '{}' : ''}
         style={{
           minHeight: 360,
           textAlignVertical: 'top',
@@ -462,22 +473,21 @@ export function LayerEditor({ layer }: { layer: Layer }): React.ReactElement {
             variant="quiet"
             onPress={() => router.back()}
           />
-          {layer === 'goal-judge' ? (
+          {layer in TEXT_PROMPTS ? (
             <SettingsButton
               testID="layer-editor-reset"
               label="Reset to default"
               variant="quiet"
-              disabled={preferences.goalEvalPrompt === DEFAULT_GOAL_EVAL_PROMPT}
-              onPress={() => void write({ goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT })}
-            />
-          ) : null}
-          {layer === 'link-summary' ? (
-            <SettingsButton
-              testID="layer-editor-reset"
-              label="Reset to default"
-              variant="quiet"
-              disabled={preferences.linkSummaryPrompt === DEFAULT_LINK_SUMMARY_PROMPT}
-              onPress={() => void write({ linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT })}
+              disabled={
+                preferences[TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key] ===
+                TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].fallback
+              }
+              onPress={() =>
+                void write({
+                  [TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].key]:
+                    TEXT_PROMPTS[layer as keyof typeof TEXT_PROMPTS].fallback,
+                })
+              }
             />
           ) : null}
           {layer === 'tools' ? (

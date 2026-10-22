@@ -62,6 +62,15 @@ A surface tracks two independent things and shows them as two indicators: the WS
 - Disconnect grace: idle is not a disconnect. The link state is always reported truthfully and immediately (diagnostics, composer, connection dot), but the reconnecting/offline banner only appears once the app has been in the foreground with the link down for 3s. Mobile OSes drop a backgrounded app's socket, so a close while backgrounded arms nothing, and on returning to the foreground a surface with no live socket dials at once (skipping any pending backoff step) and starts the 3s grace from there — a resume reconnect that lands within it never shows the banner. Backgrounding hides a banner already up; if the link is still down on return, it reappears after a fresh grace. A successful reconnect clears it.
 - The host should dial the server as early as startup allows, and its first reconnect backoff step is short (≤1s) so a transient miss recovers within about a second.
 
+### Server lost
+
+A surface already shows its own dropped link (the banner, after the 3s grace). What it cannot show is that the server has been gone for a while, so two things escalate at one minute:
+
+- The host reports how long its link has been down (`offlineSince` in `/internal/diag/link`: since the loss, or since start if it never connected; `null` while online).
+- The desktop app, on a Mac that runs a host, reads that from the host's control socket every 15s from its main process. Past one minute it sets the tray tooltip to "server unreachable" and raises one native notification, and clears both when the link returns. A host it cannot read is logged, never treated as healthy.
+- When the server is shutting down to restart (a deploy or self-update) it closes every surface socket with code 4503 (`CLOSE_SERVER_RESTARTING`). Unlike 4401 this is retryable; the surface keeps dialling, but its banner reads "Server is updating — back in a moment" instead of "Reconnecting…" until a later close that is not a restart, or a reconnect, replaces it. A server killed without a clean shutdown still shows "Reconnecting…".
+- The phone's banner, after a minute of foreground outage, changes from "Reconnecting…" to "Server unreachable. Retrying", and reverts on reconnect.
+
 ### Hosts fail independently
 
 Offline is per host:
@@ -72,7 +81,7 @@ Offline is per host:
   keyed per host and flushed when that host reconnects.
 - A chat, job or voice request stays with its own host, whose folders, tools and
   state are the ones it needs (`04-chats-and-folders.md`).
-- While the home host is offline, Manager and Speakers are unavailable,
+- While the Manager host is offline, Manager and Speakers are unavailable,
   and the surfaces say so (`06-threads-manager-speakers.md`). Announcements
   on the channels those threads mediate still go out from the hosts that own them
   and are still recorded, so the thread has them as context on its next reply
@@ -205,7 +214,7 @@ waited out:
   AUTO-RESUME DECIDES WHETHER A TIMER IS SET, NOT WHETHER THE FAILURE IS
   UNDERSTOOD. With it off, or once a retry budget is spent, the turn is still
   owed and still carries the same structured notice — without a resume time,
-  because none was scheduled. `Try now` re-sends the owed turn. A stated limit
+  because none was scheduled. `Send` re-sends the owed turn. A stated limit
   never goes on the generic retry ladder below: the window resets hours away,
   so three attempts a minute apart only fail three more times, each one saying
   so again everywhere a failure is reported.
@@ -222,47 +231,48 @@ waited out:
   a sentence about a limit nobody reached that suggests no action. A rejected
   overage on its own blocks nothing and must not read as blocked anywhere.
 
-  THE WAIT IS A COUNTDOWN, IN WORDS, AND IT TICKS — "It resets in 1 hour 3
-  minutes, at 15:40". Not `1 h`: a unit symbol is not something a person says,
-  and this is read by someone who is stuck. A countdown that does not count is
-  a timestamp with extra steps. Where nothing stated a reset there is no
-  countdown at all, rather than an invented one: a promise the limit has not
-  made is worse than an open-ended wait. Only a reset the provider stated — on
-  the failing message, or from the account's own windows — reaches the notice.
-  The delay an auto-resume happens to be armed for is not one: with nothing
-  stated it is a made-up minute, and publishing it makes every unstated limit
-  claim to be over sixty seconds later while the account is still spent.
+  THE CARD IS FULL WIDTH. Its heading is the limit and account — "Session limit
+  · Work" — with "Resets in 16 min · 15:00" on the right, ticking. Where nothing
+  stated a reset there is no countdown, rather than an invented one; only a reset
+  the provider stated (on the failing message, or from the account's own windows)
+  reaches the card. Once the reset passes and the card is still there, no pause
+  is left, so the turn demonstrably has not run: the heading reads "Session
+  limit reset · Work", the corner "4 min ago", and "Message not sent" sits under
+  it. All text is at least 14px.
 
-  AND WHEN THE RESET PASSES AND THE NOTICE IS STILL THERE, IT SAYS THE TRUE
-  THING. A chat whose turn has started has no pause left, so a notice standing
-  past its own reset means the turn demonstrably has not run: "That was 20
-  minutes ago and this turn has not run", and `Try now` becomes the action
-  rather than one of three equal controls. Not "it should be back now", which
-  describes a limit as over while leaving the reply it is standing in for
-  un-sent, with nothing to say what to do about it.
+  THE SAME CONTROLS ARE ALWAYS DRAWN, plus the `Auto-resume` toggle (bound to
+  the shared `autoResumeRateLimit`). One that cannot help is greyed out with a
+  tooltip saying why, never hidden:
+  - `Send` (`chat.resume_now_request`) — disabled until the reset ("Available at
+    15:00"); re-sends the parked turn.
+  - `Change account` (menu) — the connected accounts of the chat's provider
+    with usage left, other than the one that ran out. Choosing one locks the
+    chat to it and re-sends. Disabled when there is none ("No other account has
+    usage left").
+  - `Change provider` (menu) — every connected provider with usage left, other
+    than the chat's own; not a fixed pair. Choosing one moves the chat to one of
+    its models (with the usual cross-provider warning) and re-sends. Disabled
+    when none ("No other provider has usage left").
+  - `Extra usage ↗` — a link to the provider's usage settings, because patch
+    cannot flip an account setting. Disabled when extra usage did not fail to
+    cover the limit ("Extra usage is already on").
+    The filled button is the first enabled of `Change account`, `Change provider`,
+    `Send`. There is no model picker: a session or weekly limit covers every model
+    on the account, so a model change cannot escape it. There is no "N other
+    accounts available" line; the controls say it.
 
-  WHAT CAN BE DONE ABOUT IT IS CONTROLS, NOT PROSE. `Try now`
-  (`chat.resume_now_request`) abandons the wait and re-sends the parked turn on
-  whatever account the host now resolves to, because the usual reason to press
-  it is that the situation has changed. Whenever the pause ends the notice is
-  withdrawn from every surface — when an armed wait elapses, whether or not
-  there is still a turn to re-send, and when `Try now` finds nothing owed —
-  because a notice that outlives its limit leaves a control that does nothing
-  when pressed. A surface withdraws it on its own account too, the moment the
-  chat reports a turn in flight (`running` or `awaiting-permission`): a running
-  turn and a limit pause are mutually exclusive states of one chat, so that
-  report is proof the pause is over whatever fields came with it, and a host
-  path that forgets to publish the clear cannot strand a ghost notice. An
-  `idle` or `errored` chat does not clear it. A usage limit is `errored` whether
-  or not a resume is armed — the badge is the failure triangle and the
-  notification a failure, never the green tick of a finished turn; only the
-  transcript bubble differs, and no `chat.error` row is added for a parked one.
-  (A 529 overload backoff is transient load and stays `idle`.) A `Resume automatically` checkbox binds
-  to the host's own `autoResumeRateLimit` rather than inventing a second
-  setting. And when extra usage is what failed to cover the limit, a link to the
-  Claude usage settings carries that explanation in its tooltip — a link,
-  because patch cannot flip an Anthropic account setting and a control that
-  pretends to is worse than none.
+  Whenever the pause ends the notice is withdrawn from every surface — when an
+  armed wait elapses, whether or not there is still a turn to re-send, and when
+  `Send` finds nothing owed — because a notice that outlives its limit leaves a
+  control that does nothing when pressed. A surface withdraws it on its own
+  account too, the moment the chat reports a turn in flight (`running` or
+  `awaiting-permission`): a running turn and a limit pause are mutually
+  exclusive states of one chat, so that report is proof the pause is over
+  whatever fields came with it. An `idle` or `errored` chat does not clear it. A
+  usage limit is `errored` whether or not a resume is armed — the badge is the
+  failure triangle and the notification a failure, never the green tick of a
+  finished turn; no `chat.error` row is added for a parked one. (A 529 overload
+  backoff is transient load and stays `idle`.)
 
   WHERE PATCH STATES A FAILURE ITSELF, THE PROVIDER'S SENTENCE IS NOT COPY
   ANYWHERE. A failure the provider states structurally is reported in patch's

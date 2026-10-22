@@ -420,7 +420,7 @@ function Speaking({ preferences }: { preferences: AccountPreferences }): React.R
       <Row
         title="Voice"
         testID="voice-settings"
-        subtitle={currentVoice === undefined ? 'Each host’s Kokoro default' : undefined}
+        subtitle={currentVoice === undefined ? 'Each machine’s Kokoro default' : undefined}
         right={
           <OptionPicker
             testID="kokoro-voice"

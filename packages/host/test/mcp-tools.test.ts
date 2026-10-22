@@ -92,30 +92,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_activity',
         'patch_artifact',
         'patch_ask_human',
-        'patch_browser_click',
-        'patch_browser_close',
-        'patch_browser_console',
-        'patch_browser_dialog',
-        'patch_browser_downloads',
-        'patch_browser_eval',
-        'patch_browser_fill_form',
-        'patch_browser_handoff',
-        'patch_browser_interact',
-        'patch_browser_key',
-        'patch_browser_mouse',
-        'patch_browser_navigate',
-        'patch_browser_network',
         'patch_browser_open',
-        'patch_browser_read',
-        'patch_browser_screenshot',
-        'patch_browser_select',
-        'patch_browser_state',
-        'patch_browser_switch_tab',
-        'patch_browser_tabs',
-        'patch_browser_type',
-        'patch_browser_upload',
-        'patch_browser_viewport',
-        'patch_browser_wait',
         'patch_call',
         'patch_cancel_wake',
         'patch_doc_comment',
@@ -127,18 +104,11 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_goal_get',
         'patch_goal_set',
         'patch_history',
-        'patch_job_create',
-        'patch_job_delete',
-        'patch_job_disable',
-        'patch_job_enable',
-        'patch_job_list',
-        'patch_job_runs',
-        'patch_job_update',
-        'patch_job_webhooks',
         'patch_agent',
+        'patch_list_accounts',
         'patch_list_chats',
-        'patch_list_devices',
         'patch_loop',
+        'patch_meeting_notes',
         'patch_notify',
         'patch_pad_collect',
         'patch_pad_create',
@@ -349,166 +319,11 @@ describe('patch-tools MCP server — full client round-trip', () => {
     expect(res.content[0]!.text).toMatch(/activity not configured/i);
   });
 
-  it('patch_list_devices returns registered devices with presence', async () => {
-    const res = (await client.callTool({
-      name: 'patch_list_devices',
-      arguments: {},
-    })) as { content: { text: string }[] };
-    const parsed = JSON.parse(res.content[0]!.text) as {
-      devices: { deviceId: string; name: string; online: boolean; muted: boolean }[];
-    };
-    expect(Array.isArray(parsed.devices)).toBe(true);
-    expect(parsed.devices[0]).toMatchObject({
-      deviceId: 'kitchen',
-      name: 'Kitchen',
-      online: true,
-      muted: false,
-    });
-  });
-
-  it('patch_job_create + list + delete via MCP', async () => {
-    const created = (await client.callTool({
-      name: 'patch_job_create',
-      arguments: {
-        trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', hostId: 'd1', folder: '/work/bus', skill: 'bus-watch' },
-        name: 'morning bus',
-        // spec/08 § Groups — unlike `archived`, settable at birth.
-        group: 'Home',
-      },
-    })) as { content: { text: string }[] };
-    const { jobId } = JSON.parse(created.content[0]!.text) as { jobId: string };
-    expect(typeof jobId).toBe('string');
-    expect(JSON.parse(created.content[0]!.text).job.group).toBe('Home');
-
-    const listed = (await client.callTool({
-      name: 'patch_job_list',
-      arguments: {},
-    })) as { content: { text: string }[] };
-    const { jobs: jl } = JSON.parse(listed.content[0]!.text) as {
-      jobs: { id: string }[];
-    };
-    expect(jl.find((j) => j.id === jobId)).toBeDefined();
-
-    const disabled = (await client.callTool({
-      name: 'patch_job_disable',
-      arguments: { jobId },
-    })) as { content: { text: string }[] };
-    expect(JSON.parse(disabled.content[0]!.text).job.enabled).toBe(false);
-
-    const enabled = (await client.callTool({
-      name: 'patch_job_enable',
-      arguments: { jobId },
-    })) as { content: { text: string }[] };
-    expect(JSON.parse(enabled.content[0]!.text).job.enabled).toBe(true);
-
-    const updated = (await client.callTool({
-      name: 'patch_job_update',
-      arguments: { jobId, name: 'renamed' },
-    })) as { content: { text: string }[] };
-    expect(JSON.parse(updated.content[0]!.text).job.name).toBe('renamed');
-
-    // An agent can put a job away and bring it back (spec/08 § Archived jobs),
-    // and archiving leaves `enabled` exactly as it was.
-    const archived = (await client.callTool({
-      name: 'patch_job_update',
-      arguments: { jobId, archived: true },
-    })) as { content: { text: string }[] };
-    expect(JSON.parse(archived.content[0]!.text).job.archived).toBe(true);
-    expect(JSON.parse(archived.content[0]!.text).job.enabled).toBe(true);
-
-    const unarchived = (await client.callTool({
-      name: 'patch_job_update',
-      arguments: { jobId, archived: false },
-    })) as { content: { text: string }[] };
-    expect(JSON.parse(unarchived.content[0]!.text).job.archived).toBe(false);
-
-    const del = (await client.callTool({
-      name: 'patch_job_delete',
-      arguments: { jobId },
-    })) as { content: { text: string }[] };
-    expect(JSON.parse(del.content[0]!.text)).toEqual({ ok: true });
-  });
-
-  // Regression (C2-12): patch_job_runs / patch_job_webhooks must CLAMP a
-  // limit > 200 to the hard cap, not REJECT it at MCP-schema validation. The
-  // spec says "capped at 200 regardless of the requested limit" — a .max(200)
-  // on the tool schema would 32602 the limit:5000 call before the control-side
-  // clamp (parseRunsLimit) ever runs. This test fails if .max(200) is
-  // reinstated on either tool's inputSchema.
-  it('patch_job_runs / patch_job_webhooks accept limit > 200 and clamp it', async () => {
-    // A standalone UDS app whose jobs store records the limit it was asked for.
-    const seen: { runs?: number; webhooks?: number } = {};
-    const clampingJobs = {
-      list: async () => [],
-      create: async () => {
-        throw new Error('unused');
-      },
-      patch: async () => {
-        throw new Error('unused');
-      },
-      delete: async () => true,
-      enable: async () => {
-        throw new Error('unused');
-      },
-      disable: async () => {
-        throw new Error('unused');
-      },
-      runs: async (_id: string, limit?: number) => {
-        seen.runs = limit;
-        return [];
-      },
-      webhooks: async (_id: string, limit?: number) => {
-        seen.webhooks = limit;
-        return [];
-      },
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const app2: any = await buildControl({
-      localKey: LOCAL_KEY,
-      daemon,
-      jobs: clampingJobs as any,
-    });
-    const sock2 = join(home, 'host2.sock');
-    await app2.listen({ path: sock2 });
-    try {
-      const server2 = buildPatchToolsServer({
-        hostSocketPath: sock2,
-        chatId: 'caller-2',
-        localKey: LOCAL_KEY,
-      });
-      const [ct, st] = InMemoryTransport.createLinkedPair();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const c2: any = new Client({ name: 'test2', version: '0.0.0' });
-      await Promise.all([server2.connect(st), c2.connect(ct)]);
-
-      const runsRes = (await c2.callTool({
-        name: 'patch_job_runs',
-        arguments: { jobId: 'j1', limit: 5000 },
-      })) as { isError?: boolean; content: { text: string }[] };
-      expect(runsRes.isError).toBeFalsy();
-      expect(JSON.parse(runsRes.content[0]!.text)).toEqual({ runs: [] });
-      expect(seen.runs).toBe(200); // control-side parseRunsLimit clamp
-
-      const hooksRes = (await c2.callTool({
-        name: 'patch_job_webhooks',
-        arguments: { jobId: 'j1', limit: 5000 },
-      })) as { isError?: boolean; content: { text: string }[] };
-      expect(hooksRes.isError).toBeFalsy();
-      expect(JSON.parse(hooksRes.content[0]!.text)).toEqual({ webhooks: [] });
-      expect(seen.webhooks).toBe(200);
-
-      await c2.close();
-    } finally {
-      await app2.close();
-    }
-  });
-
   // Every tool above was exercised with its OPTIONAL fields at their default
   // (omitted) — this test flips every one of those `!== undefined` spreads to
   // its TRUE side in one pass, so each tool's mcp.ts wrapper gets both branch
   // arms covered.
-  it('every optional tool argument, set: limit/fromSeq/archived/voicePrefix/localId/name/prompt/at/notAfter/filter/trigger/action/enabled', async () => {
+  it('every optional tool argument, set: limit/fromSeq/archived/voicePrefix/localId/name/prompt/at/notAfter/filter/at/notAfter', async () => {
     const peeked = (await client.callTool({
       name: 'patch_peek',
       arguments: { chatId: 'caller-1', limit: 5 },
@@ -561,105 +376,6 @@ describe('patch-tools MCP server — full client round-trip', () => {
     // `notAfter` in the past voids the wake — the host-side response shape
     // isn't the point here, only that mcp.ts forwarded both optional fields.
     expect(wakeSet.content[0]!.text.length).toBeGreaterThan(0);
-
-    const jobCreated = (await client.callTool({
-      name: 'patch_job_create',
-      arguments: {
-        trigger: { type: 'cron', expression: '0 8 * * *' },
-        action: { type: 'spawn', hostId: 'd1', folder, skill: 'x' },
-        name: 'with a filter',
-        filter: 'only when raining',
-      },
-    })) as { content: { text: string }[] };
-    const { jobId: filteredJobId } = JSON.parse(jobCreated.content[0]!.text) as { jobId: string };
-
-    const jobUpdated = (await client.callTool({
-      name: 'patch_job_update',
-      arguments: {
-        jobId: filteredJobId,
-        trigger: { type: 'cron', expression: '0 9 * * *' },
-        action: { type: 'spawn', hostId: 'd1', folder, skill: 'y' },
-        filter: 'only when sunny',
-        enabled: false,
-      },
-    })) as { content: { text: string }[] };
-    const updatedJob = JSON.parse(jobUpdated.content[0]!.text) as {
-      job: { enabled: boolean; filter: string | null };
-    };
-    expect(updatedJob.job.enabled).toBe(false);
-    expect(updatedJob.job.filter).toBe('only when sunny');
-
-    await client.callTool({ name: 'patch_job_delete', arguments: { jobId: filteredJobId } });
-  });
-
-  // patch_job_runs / patch_job_webhooks WITHOUT a limit — the clamping test
-  // above always passes one, leaving the "no query params at all" path
-  // (`qs` empty -> the bare, unparameterised URL) untested. Needs its own
-  // jobs store (like the clamping test) since `MemoryJobsStore` doesn't
-  // implement `runs`/`webhooks` at all.
-  it('patch_job_runs / patch_job_webhooks with no limit at all', async () => {
-    const seen: { runs?: number; webhooks?: number } = {};
-    const noLimitJobs = {
-      list: async () => [],
-      create: async () => {
-        throw new Error('unused');
-      },
-      patch: async () => {
-        throw new Error('unused');
-      },
-      delete: async () => true,
-      enable: async () => {
-        throw new Error('unused');
-      },
-      disable: async () => {
-        throw new Error('unused');
-      },
-      runs: async (_id: string, limit?: number) => {
-        seen.runs = limit;
-        return [];
-      },
-      webhooks: async (_id: string, limit?: number) => {
-        seen.webhooks = limit;
-        return [];
-      },
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const app4: any = await buildControl({ localKey: LOCAL_KEY, daemon, jobs: noLimitJobs as any });
-    const sock4 = join(home, 'host4.sock');
-    await app4.listen({ path: sock4 });
-    try {
-      const server4 = buildPatchToolsServer({
-        hostSocketPath: sock4,
-        chatId: 'caller-4',
-        localKey: LOCAL_KEY,
-      });
-      const [ct4, st4] = InMemoryTransport.createLinkedPair();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const c4: any = new Client({ name: 'test4', version: '0.0.0' });
-      await Promise.all([server4.connect(st4), c4.connect(ct4)]);
-
-      const runs = (await c4.callTool({
-        name: 'patch_job_runs',
-        arguments: { jobId: 'j1' },
-      })) as { isError?: boolean; content: { text: string }[] };
-      expect(runs.isError).toBeFalsy();
-      expect(JSON.parse(runs.content[0]!.text)).toEqual({ runs: [] });
-      // No `limit` argument -> mcp.ts's URL carries no `?limit=` query param at
-      // all; control.ts's own default (50) is what the store actually sees.
-      expect(seen.runs).toBe(50);
-
-      const webhooks = (await c4.callTool({
-        name: 'patch_job_webhooks',
-        arguments: { jobId: 'j1' },
-      })) as { isError?: boolean; content: { text: string }[] };
-      expect(webhooks.isError).toBeFalsy();
-      expect(JSON.parse(webhooks.content[0]!.text)).toEqual({ webhooks: [] });
-      expect(seen.webhooks).toBe(50);
-
-      await c4.close();
-    } finally {
-      await app4.close();
-    }
   });
 
   // patch_notify / patch_call — untouched by every test above. Both need a

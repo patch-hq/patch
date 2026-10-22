@@ -8,10 +8,10 @@
 // The editor tells this pane what it holds (`pad:state`) so the Pads list and
 // the sidebar count follow edits at once instead of waiting for their poll.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MessageSquare, Trash2 } from 'lucide-react';
+import { MessageSquare, Share2, Trash2 } from 'lucide-react';
 import { api } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
@@ -50,6 +50,22 @@ export function PadPane({ padId }: { padId: string }): JSX.Element {
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [padId, qc]);
+
+  const [sharing, setSharing] = useState(false);
+  const share = useMutation({
+    mutationFn: (body: { share: 'private' | 'link' | 'public'; rotate?: boolean }) =>
+      api.patchPad(padId, body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['pad', padId] }),
+    onError: (e) => pushError(failed('share'), undefined, (e as Error).message),
+  });
+
+  async function copyLink(path: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(new URL(path, window.location.origin).href);
+    } catch (e) {
+      pushError(failed('copy'), undefined, (e as Error).message);
+    }
+  }
 
   const rename = useMutation({
     mutationFn: (name: string) => api.patchPad(padId, { name }),
@@ -122,6 +138,17 @@ export function PadPane({ padId }: { padId: string }): JSX.Element {
           <button
             type="button"
             className="head-action"
+            data-testid="pad-share"
+            aria-label="Share pad"
+            aria-expanded={sharing}
+            title="Share"
+            onClick={() => setSharing((v) => !v)}
+          >
+            <Share2 size={16} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="head-action"
             data-testid="pad-delete"
             aria-label="Delete pad"
             title="Delete"
@@ -131,6 +158,53 @@ export function PadPane({ padId }: { padId: string }): JSX.Element {
           </button>
         </div>
       </header>
+      {sharing ? (
+        <div className="pad-share" data-testid="pad-share-panel">
+          <label>
+            Who can view
+            <select
+              data-testid="pad-share-mode"
+              value={pad.share?.mode ?? 'private'}
+              disabled={share.isPending}
+              onChange={(e) =>
+                share.mutate({ share: e.target.value as 'private' | 'link' | 'public' })
+              }
+            >
+              <option value="private">Only me</option>
+              <option value="link">Anyone with the link</option>
+              <option value="public">Public</option>
+            </select>
+          </label>
+          {pad.share ? (
+            <>
+              <input
+                readOnly
+                aria-label="Share link"
+                data-testid="pad-share-url"
+                value={new URL(pad.share.url, window.location.origin).href}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button
+                type="button"
+                data-testid="pad-share-copy"
+                onClick={() => void copyLink(pad.share!.url)}
+              >
+                Copy
+              </button>
+              {pad.share.mode === 'link' ? (
+                <button
+                  type="button"
+                  data-testid="pad-share-rotate"
+                  disabled={share.isPending}
+                  onClick={() => share.mutate({ share: 'link', rotate: true })}
+                >
+                  New link
+                </button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
       {pad.screensError ? (
         <div className="route-error" data-testid="pad-screens-error">
           This pad's screens could not be read: {pad.screensError}

@@ -60,7 +60,7 @@ export interface HostPresence {
    * Absent/null until the host has reported it — Settings then draws no editor
    * rather than an empty one that would read as "this machine has none".
    */
-  claudeSettings?: { drift?: string; memories: ClaudeMemoryEntry[] } | null;
+  claudeSettings?: { settingsJson: string; memories: ClaudeMemoryEntry[] } | null;
 }
 
 /**
@@ -104,6 +104,12 @@ interface PresenceState {
    */
   outageVisible: boolean;
   setOutageVisible(v: boolean): void;
+  /**
+   * The link has stayed down past `SERVER_LOST_MS` (api/ws.ts) with the app in
+   * the foreground: the server is lost, not a blip. Escalates the banner's wording.
+   */
+  serverLost: boolean;
+  setServerLost(v: boolean): void;
   /**
    * Every registered host, keyed by hostId, seeded from the `auth.ok`
    * greeting so the list is complete even for machines that are asleep.
@@ -153,7 +159,7 @@ interface PresenceState {
    */
   removeHost(hostId: string): void;
   /** One host's Claude Code settings + memory snapshot (`claude_settings.*`). */
-  setClaudeSettings(hostId: string, drift: string | undefined, memories: ClaudeMemoryEntry[]): void;
+  setClaudeSettings(hostId: string, settingsJson: string, memories: ClaudeMemoryEntry[]): void;
   /** A socket reached OPEN: clears the failure counters. */
   noteWsOpen(url: string): void;
   /** A socket closed (or a connect attempt failed): records why, counts it. */
@@ -171,16 +177,18 @@ const anyOnline = (hosts: Record<string, HostPresence>): boolean =>
 
 /**
  * The host a host-scoped action targets when the user has not picked one: the
- * account's HOME host, else the only registered one. With several and no home
- * marked there is no right answer, so this returns null and the caller refuses
+ * only registered host, else the only online one. With several candidates there
+ * is no right answer, so this returns null and the caller refuses
  * — sending a host-scoped edit to a guessed machine is precisely what
  * `hostId` exists to prevent.
  */
 export function defaultHostId(hosts: Record<string, HostPresence>): string | null {
   const all = Object.values(hosts);
-  const home = all.find((h) => h.host?.isHomeHost === true);
-  if (home) return home.hostId;
-  return all.length === 1 ? (all[0] as HostPresence).hostId : null;
+  if (all.length === 1) return (all[0] as HostPresence).hostId;
+  // Hosts come and go: with several registered, the one live machine is the
+  // unambiguous target; two live machines are a choice, not a guess.
+  const online = all.filter((h) => h.online);
+  return online.length === 1 ? (online[0] as HostPresence).hostId : null;
 }
 
 export const usePresenceStore = create<PresenceState>((set, get) => ({
@@ -188,6 +196,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   // presence so the first paint shows a neutral, quiet indicator.
   connection: 'connecting',
   outageVisible: false,
+  serverLost: false,
   authRejected: null,
   hosts: {},
   daemon: 'unknown',
@@ -206,6 +215,9 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   },
   setOutageVisible(v) {
     set({ outageVisible: v });
+  },
+  setServerLost(v) {
+    set({ serverLost: v });
   },
   setHost(p) {
     set({ daemon: p });
@@ -272,7 +284,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
       return { hosts, daemon: anyOnline(hosts) ? 'online' : 'offline' };
     });
   },
-  setClaudeSettings(hostId, drift, memories) {
+  setClaudeSettings(hostId, settingsJson, memories) {
     set((s) => {
       const prev = s.hosts[hostId] ?? blankHost(hostId);
       return {
@@ -280,7 +292,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
           ...s.hosts,
           [hostId]: {
             ...prev,
-            claudeSettings: { ...(drift !== undefined ? { drift } : {}), memories },
+            claudeSettings: { settingsJson, memories },
           },
         },
       };

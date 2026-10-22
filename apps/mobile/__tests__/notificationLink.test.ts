@@ -32,12 +32,6 @@ describe('resolveNotificationAction — chat routing', () => {
     ).toEqual({ action: null });
   });
 
-  it('resolves a handover push to the chat list — it names several chats, so opens none', () => {
-    expect(resolveNotificationAction({ kind: 'handover' }, NO_TEXT)).toEqual({
-      action: { type: 'chats' },
-    });
-  });
-
   it('resolves a batch notification to the batch action (spec/15 § Batch view) — never a chat', () => {
     expect(resolveNotificationAction({ kind: 'batch' }, NO_TEXT)).toEqual({
       action: { type: 'batch' },

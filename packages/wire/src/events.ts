@@ -11,13 +11,30 @@ import { z } from 'zod';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_MODEL,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
+} from './meeting-prompts.js';
+import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
 } from './goal-prompt.js';
-import { MeetingState } from './meeting.js';
+import {
+  DEFAULT_MEETING_RESEARCH_SECONDS,
+  DEFAULT_MEETING_SETTINGS,
+  MeetingNotesOp,
+  MeetingSettings,
+  MeetingState,
+  MeetingWriteup,
+} from './meeting.js';
 import { SnoozeRecord } from './snooze.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
+import {
+  DEFAULT_WATCH_CHECK_IN_MINUTES,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
+} from './watch-check-in-prompt.js';
 import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
 import { PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
@@ -38,6 +55,12 @@ import {
  */
 export const CLOSE_MALFORMED_FRAME = 4400;
 export const CLOSE_AUTH_FAILED = 4401;
+/**
+ * The server is shutting down to restart (a deploy or self-update). Unlike
+ * CLOSE_AUTH_FAILED this IS retryable: surfaces keep dialling, but tell the
+ * person the server is updating rather than showing a bare "Reconnecting…".
+ */
+export const CLOSE_SERVER_RESTARTING = 4503;
 
 // ---------------------------------------------------------------------------
 // Shared atoms
@@ -269,6 +292,19 @@ export const ChatErrorCode = z.enum([
   // named a branch with no parent (the root), or one that has already sent
   // back once. Mirrors the refusal the `patch_send_back` tool itself gives.
   'send_back_failed',
+  // spec/04 § Effort — a `chat.effort_request` landed on a chat whose current
+  // model is not on the Claude backend. The chat's effort is unchanged; NEVER
+  // silently dropped.
+  'effort_not_supported',
+  // spec/04 § Handoff budget — a provider switch whose handoff cannot fit the
+  // target model even as a ledger alone, refused BEFORE any request. The chat
+  // stays on the model it was on; the error offers retry, switch back and a
+  // linked fresh chat.
+  'handoff_too_large',
+  // spec/04 § Handoff budget — the target rejected the handoff as over its
+  // context window, once again after one tighter re-plan. Same recovery actions.
+  'handoff_overflow',
+  'fork_empty_message',
 ]);
 export type ChatErrorCode = z.infer<typeof ChatErrorCode>;
 
@@ -463,6 +499,15 @@ export const PermissionMode = z.enum([
   'plan',
 ]);
 export type PermissionMode = z.infer<typeof PermissionMode>;
+
+/**
+ * Claude's thinking-effort levels (spec/02 § Agent backends, spec/04 §
+ * Effort), taken as-is from the SDK's own `EffortLevel`. Claude-backend only
+ * — Codex has no equivalent option on this wire, so a chat on that backend
+ * has no effort to set.
+ */
+export const EffortLevel = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
+export type EffortLevel = z.infer<typeof EffortLevel>;
 
 /**
  * The Claude Code backend's id (spec/02 § Agent backends: "The backend in use
@@ -798,7 +843,37 @@ export const ChatMessageEvent = z
          * Codex has no auto-compaction of its own for an injected thread).
          */
         trimmedRecords: z.number().int().positive().optional(),
+        /**
+         * Present when the switch went through the budgeted handoff (spec/04
+         * § Handoff budget). `carriedEntries` of `totalEntries` track entries
+         * went over verbatim; the rest are readable on demand from
+         * `omittedFromSeq`–`omittedToSeq`. `summary` says whether a
+         * model-written narrative rode along, and `summaryNote` why not.
+         */
+        handoff: z
+          .object({
+            carriedEntries: z.number().int().nonnegative(),
+            totalEntries: z.number().int().nonnegative(),
+            omittedFromSeq: z.number().int().optional(),
+            omittedToSeq: z.number().int().optional(),
+            estimatedTokens: z.number().int().nonnegative(),
+            availableTokens: z.number().int().nonnegative(),
+            summary: z.boolean(),
+            summaryNote: z.string().optional(),
+            /** True on the divider of an attempt re-planned smaller after an overflow. */
+            replanned: z.literal(true).optional(),
+          })
+          .strict()
+          .optional(),
       })
+      .strict()
+      .optional(),
+    /**
+     * Present ONLY on the quiet row that says this chat was continued in a
+     * linked fresh chat (spec/04 § Handoff budget). Surfaces open `chatId`.
+     */
+    handoffLink: z
+      .object({ chatId: z.string().min(1) })
       .strict()
       .optional(),
     /**
@@ -1262,6 +1337,19 @@ export const ChatStateEvent = z
      */
     model: z.string().min(1).optional(),
     /**
+     * The thinking-effort level the chat's NEXT turn will run at (spec/04 §
+     * Effort), Claude backend only. Carried on every state emit for the same
+     * reason `model` is — a surface that joins late or reconnects converges on
+     * it, and it doubles as the acknowledgement of a `chat.effort_request`.
+     *
+     * Three-valued like `model`/`permissionMode` are two-valued, but with an
+     * extra layer: absent means "unchanged, don't guess" (a daemon predating
+     * this field, or a backend with nothing to report); `null` means the chat
+     * genuinely has no override set and runs at the model's own default; a
+     * level means that override is in force.
+     */
+    effort: EffortLevel.nullable().optional(),
+    /**
      * Who started the turn this state belongs to (spec/09 § Whose turn it was).
      * The server reads it on the running → idle edge to decide whether the turn
      * settling is worth a chat-completion notification: a `machine` turn — a
@@ -1517,6 +1605,13 @@ export const ChatStateEvent = z
      * `rateLimitResumingAt` is null. Optional for back-compat.
      */
     resumeKind: z.enum(['rate_limit', 'overloaded']).optional(),
+    /**
+     * ms-epoch since when this chat's turn has been held because its machine is
+     * in a dark wake (a Mac with its lid shut, waking briefly for maintenance).
+     * The turn runs as soon as the machine is fully awake; `null` when nothing
+     * is held. Optional for back-compat: absent means the host predates it.
+     */
+    waitingForWakeSince: z.number().int().nullable().optional(),
     /**
      * WHY this chat is blocked, in figures rather than in Anthropic's prose.
      *
@@ -1936,21 +2031,6 @@ export type SendToPhoneAfter = z.infer<typeof SendToPhoneAfter>;
 const TimeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
 /**
- * Claude Code's `settings.json` as a shared setting (spec/02 § Claude Code
- * settings): one text for every host, and an optional override per OS whose
- * top-level keys replace the shared ones on hosts of that OS. Each is JSON text
- * (`''` meaning none), validated as a JSON object on the way in.
- */
-export const ClaudeSettingsSetting = z
-  .object({
-    shared: z.string(),
-    darwin: z.string(),
-    linux: z.string(),
-  })
-  .strict();
-export type ClaudeSettingsSetting = z.infer<typeof ClaudeSettingsSetting>;
-
-/**
  * Every setting that is not tied to one machine (spec/01 § Settings). The
  * server stores it, every host runs from the copy in the last snapshot.
  */
@@ -1988,9 +2068,31 @@ export const SharedSettings = z
     sweepModel: z.string().min(1),
     /** The instructions the message-link Summarise button runs with; "Reset to default" writes `DEFAULT_LINK_SUMMARY_PROMPT` back. */
     linkSummaryPrompt: z.string().min(1),
+    /** Meeting-mode instructions for the live "now" block; "Reset to default" writes `DEFAULT_MEETING_NOW_PROMPT` back. */
+    meetingNowPrompt: z.string().min(1),
+    /** Meeting-mode instructions for the topic notes (`DEFAULT_MEETING_NOTES_PROMPT`). */
+    meetingNotesPrompt: z.string().min(1),
+    /** Meeting-mode instructions for action cards (`DEFAULT_MEETING_ACTIONS_PROMPT`). */
+    meetingActionsPrompt: z.string().min(1),
+    /** The model the meeting notes pass runs on. */
+    meetingAnalysisModel: z.string().min(1),
+    /** The model that repairs mis-heard names in transcript lines before analysis. */
+    meetingCleanupModel: z.string().min(1),
+    /** The speech-to-text model for meetings: a faster-whisper model directory (local) or a Groq model name. Empty is the host's own configured model. */
+    meetingTranscriptionModel: z.string(),
+    /** Seconds between analysis passes at the Normal meeting speed. */
+    meetingAnalyseSeconds: z.number().int().min(5).max(300),
+    /** The model the live research pass (web search) runs on. */
+    meetingResearchModel: z.string().min(1),
+    /** The least number of seconds between live research passes: each one is a model plus web search. */
+    meetingResearchSeconds: z.number().int().min(15).max(900),
     // ---- goals (spec/04 § Goals), applied on every host ----
     /** The goal judge's instructions; "Reset to default" writes `DEFAULT_GOAL_EVAL_PROMPT` back. */
     goalEvalPrompt: z.string().min(1),
+    /** The check-in a running background task sends its agent; "Back to default" writes `DEFAULT_WATCH_CHECK_IN_PROMPT` back. */
+    watchCheckInPrompt: z.string().min(1),
+    /** Minutes between check-ins for a background task that has not set its own. */
+    watchCheckInMinutes: z.number().int().positive(),
     /** The model that judges every chat's goal, whichever provider the chat runs on. */
     goalModel: z.string().min(1),
     /** Consecutive refusals after which a goal stops pushing the agent. */
@@ -2044,6 +2146,12 @@ export const SharedSettings = z
     statusGenerationEnabled: z.boolean(),
     autoResumeRateLimit: z.boolean(),
     /**
+     * Whether hosts install a published host build on their own (spec/02 §
+     * Self-update). Off: a host stays on its build until someone presses Update
+     * for it (or Update all) in Settings → Updates.
+     */
+    autoUpdateHosts: z.boolean(),
+    /**
      * Whether the page and chat scroll position follows the user between
      * surfaces (spec/05 § Handover). Off: no surface reports its position and
      * none adopts another's.
@@ -2062,7 +2170,6 @@ export const SharedSettings = z
     /** `null` = no explicit configuration. */
     harnessSkills: z.union([z.array(z.string().min(1)), z.literal('all')]).nullable(),
     harnessMemoryEnabled: z.boolean(),
-    claudeSettings: ClaudeSettingsSetting,
     accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
   })
   .strict();
@@ -2088,7 +2195,18 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Mid-size by default (spec/06 § Settings).
   sweepModel: 'claude-sonnet-5',
   linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
+  meetingNowPrompt: DEFAULT_MEETING_NOW_PROMPT,
+  meetingNotesPrompt: DEFAULT_MEETING_NOTES_PROMPT,
+  meetingActionsPrompt: DEFAULT_MEETING_ACTIONS_PROMPT,
+  meetingAnalysisModel: DEFAULT_MEETING_MODEL,
+  meetingCleanupModel: DEFAULT_MEETING_MODEL,
+  meetingTranscriptionModel: '',
+  meetingAnalyseSeconds: DEFAULT_MEETING_SETTINGS.analyseSeconds,
+  meetingResearchModel: DEFAULT_MEETING_MODEL,
+  meetingResearchSeconds: DEFAULT_MEETING_RESEARCH_SECONDS,
   goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT,
+  watchCheckInPrompt: DEFAULT_WATCH_CHECK_IN_PROMPT,
+  watchCheckInMinutes: DEFAULT_WATCH_CHECK_IN_MINUTES,
   goalModel: DEFAULT_GOAL_MODEL,
   goalRefusalLimit: DEFAULT_GOAL_REFUSAL_LIMIT,
   quietHoursStart: '23:00',
@@ -2123,6 +2241,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // On: a chat that hits a limit waits for the reset rather than being
   // silently abandoned mid-task.
   autoResumeRateLimit: true,
+  autoUpdateHosts: true,
   syncPosition: true,
   questionExpiry: true,
   questionExpirySeconds: QUESTION_EXPIRY_SECONDS_DEFAULT,
@@ -2130,7 +2249,6 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   harnessToolsPrompt: null,
   harnessSkills: null,
   harnessMemoryEnabled: false,
-  claudeSettings: { shared: '', darwin: '', linux: '' },
   accountStrategy: { claude: 'priority', codex: 'priority' },
   jobAutonomyPrompt: DEFAULT_JOB_AUTONOMY_PROMPT,
 };
@@ -2319,7 +2437,6 @@ export type SettingsSecretUpdateEvent = z.infer<typeof SettingsSecretUpdateEvent
  * - `claude-login` / `codex-login` — the backend's own login on this machine.
  * - `codex-signin` — run a ChatGPT device sign-in here and send its result.
  * - `provider-key` — the key of `id` in the host's environment.
- * - `claude-settings` — this machine's drifted `settings.json` text.
  */
 export const SettingsAdoptKind = z.enum([
   'import',
@@ -2327,7 +2444,6 @@ export const SettingsAdoptKind = z.enum([
   'codex-login',
   'codex-signin',
   'provider-key',
-  'claude-settings',
 ]);
 export type SettingsAdoptKind = z.infer<typeof SettingsAdoptKind>;
 
@@ -2371,7 +2487,6 @@ export const SettingsAdoptResponseEvent = z
         z
           .object({ kind: z.literal('provider-key'), id: ProviderKeyId, value: z.string().min(1) })
           .strict(),
-        z.object({ kind: z.literal('claude-settings'), text: z.string() }).strict(),
       ])
       .optional(),
     error: z.string().min(1).optional(),
@@ -2379,14 +2494,19 @@ export const SettingsAdoptResponseEvent = z
   .strict();
 export type SettingsAdoptResponseEvent = z.infer<typeof SettingsAdoptResponseEvent>;
 
-/** Surface → host: rewrite a drifted `settings.json` from the snapshot. */
-export const HostClaudeSettingsDiscardEvent = z
+/**
+ * Surface → host: replace that host's Claude Code `settings.json` with `text`
+ * (spec/02 § Claude Code settings). Text that is not a JSON object is refused
+ * with `claude_settings_invalid`, and the file is left as it was.
+ */
+export const HostClaudeSettingsSetEvent = z
   .object({
-    type: z.literal('host.claude_settings_discard'),
+    type: z.literal('host.claude_settings_set'),
     hostId: z.string().min(1),
+    text: z.string(),
   })
   .strict();
-export type HostClaudeSettingsDiscardEvent = z.infer<typeof HostClaudeSettingsDiscardEvent>;
+export type HostClaudeSettingsSetEvent = z.infer<typeof HostClaudeSettingsSetEvent>;
 
 /**
  * Host → server: a ChatGPT sign-in run on this host (`host.backend_add_account`)
@@ -2451,8 +2571,8 @@ export const HostInfoEvent = z
      * model on a host with none is an error saying so, never a guess.
      */
     defaultModel: z.string().min(1).optional(),
-    /** The one host running the special threads (spec/06). */
-    isHomeHost: z.boolean(),
+    /** Whether the server has this host running the special threads (spec/06). */
+    runsManager: z.boolean(),
     /**
      * This host can take the messages waiting behind a running turn from the
      * server, at a tool boundary (`patch.queue_pull.*`), when the server is
@@ -3190,10 +3310,10 @@ export const ChatSpawnRequestEvent = z
      */
     permissionMode: PermissionMode.optional(),
     /**
-     * The shared account this chat's turns START on (spec/10 § Backend
-     * credentials — preferred account). A preference, not a pin: a turn walks
-     * past it when it has no credit, and a failure is attributed to the key
-     * the turn actually ran on. Fixed for the chat's life. An id the host does
+     * The shared account this chat is LOCKED to (spec/10 § Backend
+     * credentials — preferred account): a turn waits on it when it has no
+     * credit rather than moving on, and a failure is attributed to the key the
+     * turn actually ran on. Fixed for the chat's life. An id the host does
      * not hold is refused.
      *
      * Not `accountId`: that key is a retired pin still sitting in old chat
@@ -3336,7 +3456,8 @@ export const ChatForkRequestEvent = z
     type: z.literal('chat.fork_request'),
     chatId: z.string().min(1),
     seq: z.number().int().nonnegative(),
-    message: z.string().min(1),
+    /** May be empty when `attachments` carry the turn, as on `chat.input`; the host refuses empty with no attachments. */
+    message: z.string(),
     localId: z.string().min(1),
     /** Attachments for the replacement turn (same refs and limits as `chat.input`). */
     attachments: z.array(AttachmentRef).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
@@ -3586,7 +3707,12 @@ export const MeetingControlRequestEvent = z
   .object({
     type: z.literal('meeting.control_request'),
     chatId: z.string().min(1),
-    action: z.enum(['start', 'pause', 'resume', 'end']),
+    action: z.enum(['start', 'pause', 'resume', 'end', 'tune', 'name_voice']),
+    /** With `start` and `tune`: how often the notes update. */
+    settings: MeetingSettings.optional(),
+    /** With `name_voice`: which `them` voice, and the name to show for it. */
+    voice: z.number().int().min(1).optional(),
+    name: z.string().trim().min(1).max(60).optional(),
   })
   .strict();
 export type MeetingControlRequestEvent = z.infer<typeof MeetingControlRequestEvent>;
@@ -3604,20 +3730,70 @@ export const MeetingAudioEvent = z
     chatId: z.string().min(1),
     source: z.enum(['mic', 'system']),
     audioBase64: z.string().min(1),
+    /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
+    speakerName: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
 
-/** Surface → host: run (`do`) or drop (`dismiss`) an action card. */
+/**
+ * Surface → host: act on an action row. `do` runs an agent action in a linked
+ * chat, `chat` starts a chat on one of Tom's own, `dismiss` drops any of them.
+ * `owner` reassigns someone else's action (a speaker's name or `Everyone`);
+ * `agentRuns` is the tray's checkbox. Exactly one of the four is given.
+ */
 export const MeetingActionRequestEvent = z
   .object({
     type: z.literal('meeting.action_request'),
     chatId: z.string().min(1),
-    actionId: z.string().min(1),
-    decision: z.enum(['do', 'dismiss']),
+    actionId: z.string().min(1).optional(),
+    decision: z.enum(['do', 'chat', 'dismiss']).optional(),
+    owner: z.string().min(1).optional(),
+    agentRuns: z.boolean().optional(),
   })
   .strict();
 export type MeetingActionRequestEvent = z.infer<typeof MeetingActionRequestEvent>;
+
+/** Surface → host: the user edited the points panel (edit a point or bullet, insert a point). */
+export const MeetingNotesRequestEvent = z
+  .object({
+    type: z.literal('meeting.notes_request'),
+    chatId: z.string().min(1),
+    edit: MeetingNotesOp,
+  })
+  .strict();
+export type MeetingNotesRequestEvent = z.infer<typeof MeetingNotesRequestEvent>;
+
+/** Surface → host: the "Research as we go" checkbox. */
+export const MeetingResearchRequestEvent = z
+  .object({
+    type: z.literal('meeting.research_request'),
+    chatId: z.string().min(1),
+    on: z.boolean(),
+  })
+  .strict();
+export type MeetingResearchRequestEvent = z.infer<typeof MeetingResearchRequestEvent>;
+
+/** Surface → host: the user's My notes text, replacing what was stored. */
+export const MeetingMyNotesRequestEvent = z
+  .object({
+    type: z.literal('meeting.my_notes_request'),
+    chatId: z.string().min(1),
+    text: z.string().max(100_000),
+  })
+  .strict();
+export type MeetingMyNotesRequestEvent = z.infer<typeof MeetingMyNotesRequestEvent>;
+
+/** Surface → host: edit the final write-up (`writeup` replaces it) or write it again (`regenerate`). Exactly one. */
+export const MeetingWriteupRequestEvent = z
+  .object({
+    type: z.literal('meeting.writeup_request'),
+    chatId: z.string().min(1),
+    writeup: MeetingWriteup.optional(),
+    regenerate: z.literal(true).optional(),
+  })
+  .strict();
+export type MeetingWriteupRequestEvent = z.infer<typeof MeetingWriteupRequestEvent>;
 
 /** Host → surfaces: the chat's full meeting state (`null` = no meeting). */
 export const MeetingStateEvent = z
@@ -3679,7 +3855,7 @@ export type ChatRotateRequestEvent = z.infer<typeof ChatRotateRequestEvent>;
 /**
  * One chat a sweep found changed, and why (spec/06 § Sweep — Gate). Carries no
  * message content — the digest's transcript snippets are assembled on the
- * HOME host (the one component with both local and cross-host read access
+ * Manager host (the one component with both local and cross-host read access
  * via `patch_history`), not here; the server's cross-host view only ever
  * covers chat STATE, never transcripts.
  */
@@ -3695,7 +3871,7 @@ export const ManagerSweepCandidate = z
 export type ManagerSweepCandidate = z.infer<typeof ManagerSweepCandidate>;
 
 /**
- * Server → home host: run a sweep (spec/06 § Sweep). Fire-and-forget, same
+ * Server → Manager host: run a sweep (spec/06 § Sweep). Fire-and-forget, same
  * shape as `chat.rotate_request` — the gate has already decided this is due;
  * the host assembles the digest (fetching each candidate's recent messages,
  * local or cross-host), makes the one decision call, and executes it.
@@ -3722,7 +3898,7 @@ export const ManagerSweepAction = z
 export type ManagerSweepAction = z.infer<typeof ManagerSweepAction>;
 
 /**
- * Home host → server: what a sweep did (spec/06 § Sweep — Visible). Fire-
+ * Manager host → server: what a sweep did (spec/06 § Sweep — Visible). Fire-
  * and-forget report, same direction/shape as a job's run outcome — the
  * server records it for the Manager view's "Last sweep" line and the sweep-
  * runs list, but nothing here blocks on the server's reply.
@@ -3921,6 +4097,24 @@ export type ChatLoopRequestEvent = z.infer<typeof ChatLoopRequestEvent>;
  * (spec/14 § Model selector). `ChatStateEvent.model` never arriving is the
  * observable signal — an older host cannot send it.
  */
+/**
+ * spec/04 § Handoff budget — the three recoveries a failed provider switch
+ * offers. `retry` runs the pending message again (re-planned, same handoff
+ * key); `switch_back` returns the chat to the model it was switched from,
+ * resuming that session with only the delta; `linked_chat` plans the same
+ * handoff for the chat's current model, spawns a new chat seeded with it (its
+ * meta records `continuedFrom`) and posts a `handoffLink` row into this one.
+ * The old chat stays intact in every case.
+ */
+export const ChatHandoffRecoverRequestEvent = z
+  .object({
+    type: z.literal('chat.handoff_recover_request'),
+    chatId: z.string().min(1),
+    action: z.enum(['retry', 'switch_back', 'linked_chat']),
+  })
+  .strict();
+export type ChatHandoffRecoverRequestEvent = z.infer<typeof ChatHandoffRecoverRequestEvent>;
+
 export const ChatModelRequestEvent = z
   .object({
     type: z.literal('chat.model_request'),
@@ -3953,6 +4147,31 @@ export const ChatAccountRequestEvent = z
   })
   .strict();
 export type ChatAccountRequestEvent = z.infer<typeof ChatAccountRequestEvent>;
+
+/**
+ * Surface → host thinking-effort change (spec/04 § Effort) — the same shape
+ * as `chat.model_request`, for Claude's effort levels. Runs the chat's NEXT
+ * turn at `effort`, read fresh as that turn starts so a turn already running
+ * is left alone.
+ *
+ * `effort` is REQUIRED but nullable: `null` is a real, requestable value —
+ * "no override, let the model decide" — not "no change" (unlike
+ * `chat.settings`' omitted-means-clear fields), so there is no absent case to
+ * confuse it with.
+ *
+ * Refused with `chat.error` when the chat's current model is not on the
+ * Claude backend (`effort_not_supported`) — Codex has no equivalent option.
+ * The daemon answers with the chat's state carrying the new `effort`
+ * (`ChatStateEvent.effort`), exactly as a model change is acknowledged.
+ */
+export const ChatEffortRequestEvent = z
+  .object({
+    type: z.literal('chat.effort_request'),
+    chatId: z.string().min(1),
+    effort: EffortLevel.nullable(),
+  })
+  .strict();
+export type ChatEffortRequestEvent = z.infer<typeof ChatEffortRequestEvent>;
 
 export const FileWriteEvent = z
   .object({
@@ -4009,6 +4228,14 @@ export const PatchBrowserViewFrameEvent = z
     /** Address without query or fragment (they can carry authorization codes). */
     url: z.string(),
     title: z.string(),
+    /**
+     * The host's live-view input version. Absent: only `patch.browser_handoff.input`
+     * during a hand-off. `2`: `patch.browser_view.input` and `.drive` at any time.
+     */
+    inputVersion: z.number().int().positive().optional(),
+    /** Whether the tab can go back / forward, for the view's toolbar. */
+    canGoBack: z.boolean().optional(),
+    canGoForward: z.boolean().optional(),
   })
   .strict();
 export type PatchBrowserViewFrameEvent = z.infer<typeof PatchBrowserViewFrameEvent>;
@@ -4026,6 +4253,26 @@ export const PatchBrowserViewWatchEvent = z
     /** Absent: the chat's most recently opened tab. */
     tabId: z.string().min(1).optional(),
     watch: z.boolean(),
+    /**
+     * One open view on one surface, minted by that view. Lets the host tell a
+     * large view on the phone from a preview on the desktop, so one's renewals
+     * never undo the other's size. Absent: an older surface's single view.
+     */
+    viewerId: z.string().min(1).max(64).optional(),
+    /**
+     * The large view's size, in CSS pixels at the viewer's pixel ratio. Present
+     * only while the tab is shown large: the host lays the page out at that size
+     * and sends frames at full resolution, and puts the agent's own size back
+     * when no large view asks for it. Absent: a preview, sent at the tab's size.
+     */
+    viewport: z
+      .object({
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        scale: z.number().positive().max(4),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type PatchBrowserViewWatchEvent = z.infer<typeof PatchBrowserViewWatchEvent>;
@@ -4050,9 +4297,23 @@ export const PatchBrowserViewStatusEvent = z
           tabId: z.string().min(1),
           url: z.string(),
           handedOff: z.boolean(),
+          /** Who is using the tab: the agent, or the user after Take over. Absent: the agent. */
+          driver: z.enum(['agent', 'user']).optional(),
+          /**
+           * The tab's DevTools target in the Patch app, when the host on that
+           * app's machine keeps its browser there: the app shows the tab itself.
+           */
+          appTarget: z.string().min(1).optional(),
+          /** Where the agent last pointed, in viewport CSS pixels, and when (ms epoch). */
+          cursor: z
+            .object({ x: z.number(), y: z.number(), at: z.number().int().nonnegative() })
+            .strict()
+            .optional(),
         })
         .strict(),
     ),
+    /** When the chat's oldest open tab was opened (ms epoch): how long it has been browsing. */
+    since: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type PatchBrowserViewStatusEvent = z.infer<typeof PatchBrowserViewStatusEvent>;
@@ -4096,6 +4357,8 @@ export const PatchBrowserHandoffStateEvent = z
     reason: z.string(),
     startedAt: z.number().int().nonnegative(),
     outcome: BrowserHandoffOutcome.optional(),
+    /** A shared view for review: the agent was not blocked and still has the tab. */
+    shared: z.boolean().optional(),
   })
   .strict();
 export type PatchBrowserHandoffStateEvent = z.infer<typeof PatchBrowserHandoffStateEvent>;
@@ -4149,6 +4412,149 @@ export const PatchBrowserHandoffControlEvent = z
   .strict();
 export type PatchBrowserHandoffControlEvent = z.infer<typeof PatchBrowserHandoffControlEvent>;
 
+/** Held modifier keys on a live-view pointer or key input. */
+export const BrowserViewModifier = z.enum(['Alt', 'Control', 'Meta', 'Shift']);
+export type BrowserViewModifier = z.infer<typeof BrowserViewModifier>;
+
+/**
+ * What the user does in the live view (`patch.browser_view.input`), at viewport
+ * CSS pixels. A superset of {@link BrowserHandoffInput}: presses and releases
+ * so a drag selects text or moves a slider, held keys, the toolbar's
+ * navigation, copying the page's selection out, and filling a sign-in form
+ * from the surface's own fields.
+ */
+export const BrowserViewInput = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('pointer'),
+      action: z.enum(['move', 'down', 'up', 'click', 'double_click', 'right_click']),
+      x: z.number(),
+      y: z.number(),
+      button: z.enum(['left', 'right', 'middle']).optional(),
+      /** 2 for the second press of a double click, 3 for a triple. */
+      clickCount: z.number().int().min(1).max(3).optional(),
+      modifiers: z.array(BrowserViewModifier).max(4).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('scroll'),
+      x: z.number(),
+      y: z.number(),
+      dx: z.number(),
+      dy: z.number(),
+    })
+    .strict(),
+  /** Literal text, typed into whatever has focus. Never logged. */
+  z.object({ kind: z.literal('text'), text: z.string().min(1) }).strict(),
+  /** A key name or chord ("Enter", "Control+a"); `down`/`up` hold and release it. */
+  z
+    .object({
+      kind: z.literal('key'),
+      key: z.string().min(1),
+      action: z.enum(['press', 'down', 'up']).optional(),
+    })
+    .strict(),
+  /** The toolbar: back, forward, reload, or go to an address the user typed. */
+  z
+    .object({
+      kind: z.literal('nav'),
+      action: z.enum(['back', 'forward', 'reload', 'goto']),
+      url: z.string().min(1).max(8192).optional(),
+    })
+    .strict(),
+  /** Copy the page's selection to the user's clipboard (`patch.browser_view.clipboard`). */
+  z.object({ kind: z.literal('copy') }).strict(),
+  /**
+   * The surface's own sign-in card (`patch.browser_view.form`): the values go
+   * into the page's fields and are never logged or shown to the agent.
+   */
+  z
+    .object({
+      kind: z.literal('fill'),
+      formId: z.string().min(1),
+      values: z
+        .array(z.object({ field: z.string().min(1), value: z.string() }).strict())
+        .min(1)
+        .max(8),
+      submit: z.boolean(),
+    })
+    .strict(),
+]);
+export type BrowserViewInput = z.infer<typeof BrowserViewInput>;
+
+/**
+ * Surface → host: the user's input to a chat's tab, at any time — not only in
+ * a hand-off. A press, a key, text or navigation also takes the tab over (the
+ * agent pauses, `driver: 'user'`); moves and scrolls do not. Hosts that say
+ * `inputVersion: 2` on their frames accept it.
+ */
+export const PatchBrowserViewInputEvent = z
+  .object({
+    type: z.literal('patch.browser_view.input'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    input: BrowserViewInput,
+  })
+  .strict();
+export type PatchBrowserViewInputEvent = z.infer<typeof PatchBrowserViewInputEvent>;
+
+/**
+ * Surface → host: Take over (`user`) or Hand back (`agent`). While the user
+ * drives, the agent's browser tools on that tab wait; when it is handed back
+ * the one that waited fails telling the agent to read the page again, since
+ * the user may have changed it.
+ */
+export const PatchBrowserViewDriveEvent = z
+  .object({
+    type: z.literal('patch.browser_view.drive'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    driver: z.enum(['agent', 'user']),
+  })
+  .strict();
+export type PatchBrowserViewDriveEvent = z.infer<typeof PatchBrowserViewDriveEvent>;
+
+/** Host → surfaces: the page's selection, for the surface to put on the user's clipboard. */
+export const PatchBrowserViewClipboardEvent = z
+  .object({
+    type: z.literal('patch.browser_view.clipboard'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    text: z.string(),
+  })
+  .strict();
+export type PatchBrowserViewClipboardEvent = z.infer<typeof PatchBrowserViewClipboardEvent>;
+
+/**
+ * Host → surfaces: the sign-in form on a tab the agent handed to the user, so
+ * a phone can show its own fields instead of a small picture of the page's.
+ * Labels only, never values. `fields: []` means the page has no such form now.
+ */
+export const PatchBrowserViewFormEvent = z
+  .object({
+    type: z.literal('patch.browser_view.form'),
+    chatId: z.string().min(1),
+    tabId: z.string().min(1),
+    /** Changes whenever the form does (a password step after an email step). */
+    formId: z.string().min(1),
+    /** The site, as the user would name it ("gwr.com"). */
+    site: z.string(),
+    fields: z
+      .array(
+        z
+          .object({
+            field: z.string().min(1),
+            label: z.string(),
+            kind: z.enum(['text', 'email', 'password', 'code']),
+          })
+          .strict(),
+      )
+      .max(8),
+  })
+  .strict();
+export type PatchBrowserViewFormEvent = z.infer<typeof PatchBrowserViewFormEvent>;
+
 export const SurfaceHeartbeatEvent = z
   .object({
     type: z.literal('surface.heartbeat'),
@@ -4182,9 +4588,9 @@ export type SurfaceHeartbeatAckEvent = z.infer<typeof SurfaceHeartbeatAckEvent>;
 // frame inward. The folder registry was the case that was previously
 // outward-only.
 //
-// Two of these go to the SERVER rather than to a host, because the server owns
-// the registry entry rather than the machine: renaming a host and marking one
-// the home host. The rest are addressed to the named machine.
+// One of these goes to the SERVER rather than to a host, because the server owns
+// the registry entry rather than the machine: renaming a host. The rest are
+// addressed to the named machine.
 
 /** Surface → server: set a host's user-editable label. */
 export const HostRenameEvent = z
@@ -4201,14 +4607,18 @@ export const HostRenameEvent = z
   .strict();
 export type HostRenameEvent = z.infer<typeof HostRenameEvent>;
 
-/** Surface → server: make this host the account's home host (spec/06). */
-export const HostSetHomeEvent = z
+/**
+ * Server → host: this machine does (or does not) run the Manager and Speakers.
+ * The server decides, sent as each machine attaches and when the Manager moves
+ * (spec/06); no surface can send it.
+ */
+export const HostSetManagerEvent = z
   .object({
-    type: z.literal('host.set_home'),
+    type: z.literal('host.set_manager'),
     ...hostIdField,
   })
   .strict();
-export type HostSetHomeEvent = z.infer<typeof HostSetHomeEvent>;
+export type HostSetManagerEvent = z.infer<typeof HostSetManagerEvent>;
 
 /**
  * Server → surfaces: this host was removed from the account
@@ -4407,11 +4817,7 @@ const claudeSettingsFields = {
    * pass-through, not a second source of truth for it. Empty string when the
    * host has no such file.
    */
-  /**
-   * This machine's `settings.json` text when it no longer matches what the
-   * last snapshot wrote (spec/02 § Claude Code settings). Absent when in step.
-   */
-  drift: z.string().optional(),
+  settingsJson: z.string(),
   /** Every memory entry found under that host's `~/.claude/projects/*\/memory/`. */
   memories: z.array(ClaudeMemoryEntry),
 };
@@ -4665,6 +5071,8 @@ export const PatchSpawnEvent = z
     /** Optional; omitted takes the NAMED host's last-used model (spec/04 § Spawn). */
     model: z.string().min(1).optional(),
     prompt: z.string(),
+    /** The stored account the new chat starts on; the named host refuses one it does not hold. */
+    preferredAccountId: z.string().min(1).optional(),
     /**
      * Correlates the named host's `patch.spawn.response` with THIS call.
      * Present only when the frame is a cross-host REQUEST the caller is waiting
@@ -5669,6 +6077,16 @@ export const WatchTaskRow = z
     status: z.enum(['running', 'exited', 'stopped', 'failed']),
     /** Epoch ms — the bar computes elapsed time from this, ticking locally. */
     startedAt: z.number().int(),
+    /** The limit the host enforces; the bar shows elapsed against it. */
+    timeoutSec: z.number().int().positive().optional(),
+    timedOut: z.boolean().optional(),
+    /** The task's last non-empty output line, shown in the bar as its progress. */
+    lastLine: z.string().optional(),
+    /** Minutes between check-ins to the owning agent, and when the next one is due (running tasks). */
+    checkInSec: z.number().int().positive().optional(),
+    nextCheckInAt: z.number().int().optional(),
+    /** Epoch ms of the task's last output; the bar flags a long silence. */
+    lastOutputAt: z.number().int().optional(),
     endedAt: z.number().int().optional(),
     exitCode: z.number().int().nullable().optional(),
     signal: z.string().nullable().optional(),
@@ -5730,6 +6148,36 @@ export const PatchWatchStopResponseEvent = z
   })
   .strict();
 export type PatchWatchStopResponseEvent = z.infer<typeof PatchWatchStopResponseEvent>;
+
+// Change a running task's check-in interval (the bar's "next check-in" control).
+export const PatchWatchCheckInRequestEvent = z
+  .object({
+    type: z.literal('patch.watch_checkin.request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    taskId: z.string().min(1),
+    checkInSec: z.number().int().positive(),
+  })
+  .strict();
+export type PatchWatchCheckInRequestEvent = z.infer<typeof PatchWatchCheckInRequestEvent>;
+
+export const PatchWatchCheckInResponseEvent = z
+  .object({
+    type: z.literal('patch.watch_checkin.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** False when the task is not running (already ended or unknown). */
+    updated: z.boolean().optional(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchWatchCheckInResponseEvent = z.infer<typeof PatchWatchCheckInResponseEvent>;
 
 // ---------------------------------------------------------------------------
 // Chat history REST RPC (server → host → server).
@@ -5827,7 +6275,7 @@ export const ChatCommittedEvent = z
 export type ChatCommittedEvent = z.infer<typeof ChatCommittedEvent>;
 
 /**
- * Server -> host: this host runs the Manager now, because the home host has
+ * Server -> host: this host runs the Manager now, because its previous host has
  * been offline for a while (spec/06 § Manager failover). `handoff` is the
  * recent conversation as the server holds it, given to the Manager with its
  * next message; `nextSeq` is where the Manager's own numbering carries on, so
@@ -5845,7 +6293,7 @@ export const HostManagerAdoptEvent = z
   .strict();
 export type HostManagerAdoptEvent = z.infer<typeof HostManagerAdoptEvent>;
 
-/** Server -> host: the Manager is back on its home host; stop running it here. */
+/** Server -> host: the Manager has moved to another host; stop running it here. */
 export const HostManagerReleaseEvent = z
   .object({
     type: z.literal('host.manager_release'),
@@ -7639,6 +8087,75 @@ export const PatchPadResponseEvent = z
 export type PatchPadResponseEvent = z.infer<typeof PatchPadResponseEvent>;
 
 // ---------------------------------------------------------------------------
+// Shared accounts RPC: a host asks the server for the shared accounts (the
+// order and strategy every host draws from) or changes that order/strategy.
+// The server owns them, so a machine's own CLI and agents go through this
+// link rather than needing a separate login (spec/17 § Commands).
+// Consumed by the server's accounts bridge; never fanned out to surfaces.
+
+export const PatchAccountsRequestEvent = z
+  .object({
+    type: z.literal('patch.accounts.request'),
+    requestId: z.string().min(1),
+    op: z.enum(['list', 'order', 'strategy']),
+    /** order/strategy (and an optional filter for list). */
+    backendId: z.enum(['claude-code', 'codex']).optional(),
+    /** order: every account id, each once, first to last. */
+    accountIds: z.array(z.string().min(1)).optional(),
+    /** strategy. */
+    strategy: AccountStrategy.optional(),
+  })
+  .strict();
+export type PatchAccountsRequestEvent = z.infer<typeof PatchAccountsRequestEvent>;
+
+export const PatchAccountsResponseEvent = z
+  .object({
+    type: z.literal('patch.accounts.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** The shared accounts after the call: `{ strategy, claude: [...], codex: [...] }`. */
+    result: z.unknown().optional(),
+    error: z
+      .object({
+        code: z.string().min(1),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchAccountsResponseEvent = z.infer<typeof PatchAccountsResponseEvent>;
+
+// ---------------------------------------------------------------------------
+// Server API relay: the CLI on a host machine calls the server's REST API
+// through the host's link instead of holding its own paired credential. The
+// server answers as the account, for a short allowlist of management paths.
+// Consumed by the server's API bridge; never fanned out to surfaces.
+
+export const PatchApiRequestEvent = z
+  .object({
+    type: z.literal('patch.api.request'),
+    requestId: z.string().min(1),
+    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+    /** Path plus query, starting `/api/`. */
+    path: z.string().min(1),
+    body: z.unknown().optional(),
+  })
+  .strict();
+export type PatchApiRequestEvent = z.infer<typeof PatchApiRequestEvent>;
+
+export const PatchApiResponseEvent = z
+  .object({
+    type: z.literal('patch.api.response'),
+    requestId: z.string().min(1),
+    /** The HTTP status the server answered with. */
+    status: z.number().int(),
+    body: z.unknown().optional(),
+  })
+  .strict();
+export type PatchApiResponseEvent = z.infer<typeof PatchApiResponseEvent>;
+
+// ---------------------------------------------------------------------------
 // Secrets (spec/15 § Settings tab — Secrets)
 //
 // The host owns the key-value secret store (it injects them into chats), the
@@ -8178,7 +8695,6 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'chat.spawn_request',
   'patch.spawn',
   'host.rename',
-  'host.set_home',
   'host.settings',
   'host.component_install',
   'host.component_remove',
@@ -8186,7 +8702,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'host.folder_add',
   'host.folder_remove',
   'host.claude_memory_delete',
-  'host.claude_settings_discard',
+  'host.claude_settings_set',
   'host.claude_memory_set',
   'host.backend_add_account',
   'host.backend_usage_refresh',
@@ -8256,7 +8772,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   NewChatDraftListEvent,
   // Host controls (spec/03 § Host events)
   HostRenameEvent,
-  HostSetHomeEvent,
+  HostSetManagerEvent,
   HostRemovedEvent,
   SigninRequestedEvent,
   SigninResolvedEvent,
@@ -8276,7 +8792,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   SettingsAdoptRequestEvent,
   SettingsAdoptResponseEvent,
   SettingsAccountSignedInEvent,
-  HostClaudeSettingsDiscardEvent,
+  HostClaudeSettingsSetEvent,
   HostClaudeMemorySetEvent,
   HostBackendAddAccountEvent,
   HostBackendUsageRefreshEvent,
@@ -8302,6 +8818,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   MeetingGetRequestEvent,
   MeetingAudioEvent,
   MeetingActionRequestEvent,
+  MeetingNotesRequestEvent,
+  MeetingMyNotesRequestEvent,
+  MeetingWriteupRequestEvent,
+  MeetingResearchRequestEvent,
   MeetingStateEvent,
   ChatArchiveRequestEvent,
   ChatDisableRequestEvent,
@@ -8318,7 +8838,9 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatReminderRequestEvent,
   ChatLoopRequestEvent,
   ChatModelRequestEvent,
+  ChatHandoffRecoverRequestEvent,
   ChatAccountRequestEvent,
+  ChatEffortRequestEvent,
   FileWriteEvent,
   PatchFileChangedEvent,
   PatchBrowserViewFrameEvent,
@@ -8328,6 +8850,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchBrowserHandoffStateEvent,
   PatchBrowserHandoffInputEvent,
   PatchBrowserHandoffControlEvent,
+  PatchBrowserViewInputEvent,
+  PatchBrowserViewDriveEvent,
+  PatchBrowserViewClipboardEvent,
+  PatchBrowserViewFormEvent,
   SurfaceHeartbeatEvent,
   SurfaceHeartbeatAckEvent,
   SurfaceForegroundedEvent,
@@ -8381,6 +8907,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchWatchListResponseEvent,
   PatchWatchStopRequestEvent,
   PatchWatchStopResponseEvent,
+  PatchWatchCheckInRequestEvent,
+  PatchWatchCheckInResponseEvent,
   ServerQueueModeEvent,
   PatchLogSyncRequestEvent,
   PatchLogSyncBatchEvent,
@@ -8462,6 +8990,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   // Pads
   PatchPadRequestEvent,
   PatchPadResponseEvent,
+  PatchAccountsRequestEvent,
+  PatchAccountsResponseEvent,
+  PatchApiRequestEvent,
+  PatchApiResponseEvent,
   // Secrets
   SecretsListEvent,
   SecretsUpdatedEvent,
@@ -8538,7 +9070,7 @@ export const EVENT_SCHEMAS = {
   'new_chat_draft.removed': NewChatDraftRemovedEvent,
   'new_chat_draft.list': NewChatDraftListEvent,
   'host.rename': HostRenameEvent,
-  'host.set_home': HostSetHomeEvent,
+  'host.set_manager': HostSetManagerEvent,
   'host.removed': HostRemovedEvent,
   'signin.requested': SigninRequestedEvent,
   'signin.resolved': SigninResolvedEvent,
@@ -8558,7 +9090,7 @@ export const EVENT_SCHEMAS = {
   'settings.adopt.request': SettingsAdoptRequestEvent,
   'settings.adopt.response': SettingsAdoptResponseEvent,
   'settings.account_signed_in': SettingsAccountSignedInEvent,
-  'host.claude_settings_discard': HostClaudeSettingsDiscardEvent,
+  'host.claude_settings_set': HostClaudeSettingsSetEvent,
   'host.claude_memory_set': HostClaudeMemorySetEvent,
   'host.backend_add_account': HostBackendAddAccountEvent,
   'host.backend_usage_refresh': HostBackendUsageRefreshEvent,
@@ -8583,6 +9115,10 @@ export const EVENT_SCHEMAS = {
   'meeting.get_request': MeetingGetRequestEvent,
   'meeting.audio': MeetingAudioEvent,
   'meeting.action_request': MeetingActionRequestEvent,
+  'meeting.notes_request': MeetingNotesRequestEvent,
+  'meeting.my_notes_request': MeetingMyNotesRequestEvent,
+  'meeting.writeup_request': MeetingWriteupRequestEvent,
+  'meeting.research_request': MeetingResearchRequestEvent,
   'meeting.state': MeetingStateEvent,
   'chat.archive_request': ChatArchiveRequestEvent,
   'chat.disable_request': ChatDisableRequestEvent,
@@ -8599,7 +9135,9 @@ export const EVENT_SCHEMAS = {
   'chat.reminder_request': ChatReminderRequestEvent,
   'chat.loop_request': ChatLoopRequestEvent,
   'chat.model_request': ChatModelRequestEvent,
+  'chat.handoff_recover_request': ChatHandoffRecoverRequestEvent,
   'chat.account_request': ChatAccountRequestEvent,
+  'chat.effort_request': ChatEffortRequestEvent,
   'file.write': FileWriteEvent,
   'patch.file_changed': PatchFileChangedEvent,
   'patch.browser_view.frame': PatchBrowserViewFrameEvent,
@@ -8609,6 +9147,10 @@ export const EVENT_SCHEMAS = {
   'patch.browser_handoff.state': PatchBrowserHandoffStateEvent,
   'patch.browser_handoff.input': PatchBrowserHandoffInputEvent,
   'patch.browser_handoff.control': PatchBrowserHandoffControlEvent,
+  'patch.browser_view.input': PatchBrowserViewInputEvent,
+  'patch.browser_view.drive': PatchBrowserViewDriveEvent,
+  'patch.browser_view.clipboard': PatchBrowserViewClipboardEvent,
+  'patch.browser_view.form': PatchBrowserViewFormEvent,
   'surface.heartbeat': SurfaceHeartbeatEvent,
   'surface.heartbeat_ack': SurfaceHeartbeatAckEvent,
   'surface.foregrounded': SurfaceForegroundedEvent,
@@ -8661,6 +9203,8 @@ export const EVENT_SCHEMAS = {
   'patch.watch_list.response': PatchWatchListResponseEvent,
   'patch.watch_stop.request': PatchWatchStopRequestEvent,
   'patch.watch_stop.response': PatchWatchStopResponseEvent,
+  'patch.watch_checkin.request': PatchWatchCheckInRequestEvent,
+  'patch.watch_checkin.response': PatchWatchCheckInResponseEvent,
   'server.queue_mode': ServerQueueModeEvent,
   'patch.log_sync.request': PatchLogSyncRequestEvent,
   'patch.log_sync.batch': PatchLogSyncBatchEvent,
@@ -8732,6 +9276,10 @@ export const EVENT_SCHEMAS = {
   'patch.artifact.publish_response': PatchArtifactPublishResponseEvent,
   'patch.pad.request': PatchPadRequestEvent,
   'patch.pad.response': PatchPadResponseEvent,
+  'patch.accounts.request': PatchAccountsRequestEvent,
+  'patch.accounts.response': PatchAccountsResponseEvent,
+  'patch.api.request': PatchApiRequestEvent,
+  'patch.api.response': PatchApiResponseEvent,
   'secrets.list': SecretsListEvent,
   'secrets.updated': SecretsUpdatedEvent,
   'patch.secrets.set_request': PatchSecretsSetRequestEvent,

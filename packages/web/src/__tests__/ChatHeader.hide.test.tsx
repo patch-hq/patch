@@ -63,6 +63,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     rateLimitResumingAt: null,
     resumeKind: null,
     snoozedUntil: null,
+    effort: null,
     ...overrides,
   };
 }

@@ -27,7 +27,12 @@
 
 import type { Logger } from 'pino';
 import { voiceKeyMissingMessage, type VoiceBackend } from '@patch/wire/audio';
-import { pcm16ToWav, type TranscribeOptions, type WhisperBackend } from './whisper.js';
+import {
+  pcm16ToWav,
+  type ClipOptions,
+  type TranscribeOptions,
+  type WhisperBackend,
+} from './whisper.js';
 import { readKey, type KeySource } from './keySource.js';
 
 export const DEFAULT_OPENAI_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
@@ -79,17 +84,22 @@ export class OpenAITranscribeBackend implements WhisperBackend {
     this.opts = opts;
   }
 
-  async transcribe(pcm: Int16Array, _opts?: TranscribeOptions): Promise<string> {
-    return this.transcribeClip(pcm16ToWav(pcm, 16000), 'wav');
+  async transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string> {
+    return this.transcribeClip(
+      pcm16ToWav(pcm, 16000),
+      'wav',
+      opts?.prompt ? { prompt: opts.prompt } : undefined,
+    );
   }
 
-  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
+  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     const form = new FormData();
     const bytes = new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength);
     form.append('file', new Blob([bytes], { type: mimeFor(format) }), `clip.${format}`);
     form.append('model', this.opts.model ?? DEFAULT_OPENAI_TRANSCRIBE_MODEL);
     form.append('language', 'en');
     form.append('response_format', 'json');
+    if (opts?.prompt) form.append('prompt', opts.prompt);
     const doFetch = this.opts.fetchImpl ?? fetch;
     const apiKey = readKey(this.opts.apiKey);
     if (apiKey === undefined) {
@@ -133,11 +143,15 @@ export class GeminiTranscribeBackend implements WhisperBackend {
     this.opts = opts;
   }
 
-  async transcribe(pcm: Int16Array, _opts?: TranscribeOptions): Promise<string> {
-    return this.transcribeClip(pcm16ToWav(pcm, 16000), 'wav');
+  async transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string> {
+    return this.transcribeClip(
+      pcm16ToWav(pcm, 16000),
+      'wav',
+      opts?.prompt ? { prompt: opts.prompt } : undefined,
+    );
   }
 
-  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
+  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     const model = this.opts.model ?? DEFAULT_GEMINI_TRANSCRIBE_MODEL;
     const url = `${GEMINI_API_BASE}/models/${model.replace(/^models\//, '')}:generateContent`;
     const doFetch = this.opts.fetchImpl ?? fetch;
@@ -155,7 +169,11 @@ export class GeminiTranscribeBackend implements WhisperBackend {
             {
               role: 'user',
               parts: [
-                { text: GEMINI_TRANSCRIBE_PROMPT },
+                {
+                  text: opts?.prompt
+                    ? `${GEMINI_TRANSCRIBE_PROMPT} Spell these as given if they are spoken. ${opts.prompt}`
+                    : GEMINI_TRANSCRIBE_PROMPT,
+                },
                 { inline_data: { mime_type: mimeFor(format), data: audio.toString('base64') } },
               ],
             },

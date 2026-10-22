@@ -12,6 +12,7 @@ import type {
   ChatContextUsage,
   ChatErrorCode,
   ChatStatus,
+  EffortLevel,
   StatusKind,
   TodoItem,
   TurnOrigin,
@@ -284,6 +285,16 @@ export interface ChatState {
    */
   model: string | undefined;
   /**
+   * Claude's thinking-effort override (spec/04 § Effort), Claude backend only.
+   * Chosen any time after spawn and changeable like `model`; read afresh as
+   * each turn starts. Persisted to the chat's meta and rehydrated below for
+   * the same reason `model` is — a restart must not silently drop a choice
+   * made about this chat. `undefined` means no override — runs at the
+   * model's own default — whether because none was ever set or because
+   * `chat.effort_request` cleared it with `effort: null`.
+   */
+  effort: EffortLevel | undefined;
+  /**
    * This chat's permission-mode override, outranking the host default (spec/02
    * § Permission mode). Persisted to the chat's meta and rehydrated below,
    * because the spec requires an override to outlive the host that received
@@ -426,6 +437,7 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     claudeSessionId: meta.claudeSessionId,
     claudeSessionAccountId: meta.claudeSessionAccountId,
     model: meta.model ?? undefined,
+    effort: meta.effort ?? undefined,
     permissionMode: meta.permissionMode ?? undefined,
     ...(meta.preferredAccountId !== undefined
       ? { preferredAccountId: meta.preferredAccountId }

@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
 import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
+import * as Clipboard from 'expo-clipboard';
 import { ChatErrorBoundary } from '../../src/components/ChatErrorBoundary';
 import { useMarkChatNotificationsRead } from '../../src/stores/notificationsStore';
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -42,7 +43,7 @@ import {
   Clock,
   CloudOff,
 } from 'lucide-react-native';
-import { ArrowUp, Check, ChevronDown, ChevronRight, Copy } from 'lucide-react-native';
+import { ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hand } from 'lucide-react-native';
 import {
   SPECIAL_THREAD_IDS,
   folderName,
@@ -50,6 +51,8 @@ import {
   isReservedSpecialThread,
   taskNotificationSummary,
   labelForRun,
+  parseAskHuman,
+  splitActionText,
   type AttachmentRef,
 } from '@patch/wire';
 import { apiUrl, getRoute } from '../../src/config';
@@ -74,6 +77,7 @@ import {
   queueChipLabel,
   queueChipTitle,
   queueRelease,
+  creditPause,
   type QueueRelease,
 } from '../../src/lib/queueLabel';
 import {
@@ -93,6 +97,7 @@ import {
   ManagerSegments,
   type ManagerTab,
 } from '../../src/components/ManagerChats';
+import { BrowserLiveCard } from '../../src/components/browser/BrowserLiveCard';
 import { ChatBars } from '../../src/components/ChatBars';
 import { ChatFindBar } from '../../src/components/ChatFindBar';
 import { findMessageSeqs, stepIndex } from '../../src/lib/chatFind';
@@ -1332,6 +1337,7 @@ function ChatDetailBody(): React.ReactElement {
           </View>
         ) : (
           <>
+            <BrowserLiveCard chatId={chatId} />
             <DelegateStrip chatId={chatId} />
             <Composer key={chatId} chatId={chatId} folder={row?.folder} autoFocus />
           </>
@@ -1422,6 +1428,13 @@ function ToolCallItem({
   // through to the ordinary row. Stable per entry, like the branches above.
   const todoItems = entry.tool === 'TodoWrite' ? todoCardItems(entry.toolArgs) : null;
   if (todoItems) return <TodoCard items={todoItems} />;
+  // A `patch_ask_human` is the agent blocked on the user: the task is the card,
+  // with links that open and a code that copies (spec/15 § Chat detail).
+  const askHuman =
+    entry.tool && toolLabel(entry.tool) === 'patch_ask_human'
+      ? parseAskHuman(entry.toolArgs)
+      : null;
+  if (askHuman) return <AskHumanCard task={askHuman.task} why={askHuman.why} />;
   const colors = useTheme();
   const [expanded, setExpanded] = React.useState(false);
   const diff = diffFromToolCall(entry.tool, entry.toolArgs);
@@ -1691,6 +1704,76 @@ const TODO_STATUS_LABEL: Record<TodoCardItem['status'], string> = {
 };
 
 // A marker per step: dashed ring pending, solid ring in progress, filled tick done.
+function ActionText({ text }: { text: string }): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <Text style={{ ...typography.body, color: colors.ink }} selectable>
+      {splitActionText(text).map((seg, i) => {
+        if (seg.kind === 'link') {
+          return (
+            <Text
+              key={i}
+              testID="ask-human-link"
+              accessibilityRole="link"
+              style={{ color: colors.leaf, textDecorationLine: 'underline' }}
+              onPress={() => void Linking.openURL(seg.href)}
+            >
+              {seg.text}
+            </Text>
+          );
+        }
+        if (seg.kind === 'code') {
+          return (
+            <Text
+              key={i}
+              testID="ask-human-code"
+              accessibilityRole="button"
+              accessibilityLabel={`Copy code ${seg.text}`}
+              style={{ ...typography.code, color: colors.leaf }}
+              onPress={() => void Clipboard.setStringAsync(seg.text)}
+            >
+              {seg.text}
+            </Text>
+          );
+        }
+        return seg.text;
+      })}
+    </Text>
+  );
+}
+
+function AskHumanCard({
+  task,
+  why,
+}: {
+  task: string;
+  why: string | undefined;
+}): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <View
+      testID="ask-human-card"
+      style={{
+        backgroundColor: colors.paperRaised,
+        borderColor: colors.lineSoft,
+        borderWidth: 1,
+        borderRadius: radii.lg,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm,
+        marginBottom: space.sm,
+        flexDirection: 'row',
+        gap: space.sm,
+      }}
+    >
+      <Hand size={14} color={colors.leaf} style={{ marginTop: 4 }} />
+      <View style={{ flex: 1, gap: space.xs }}>
+        <ActionText text={task} />
+        {why ? <ActionText text={why} /> : null}
+      </View>
+    </View>
+  );
+}
+
 function TodoCard({ items }: { items: TodoCardItem[] }): React.ReactElement {
   const colors = useTheme();
   return (
@@ -2314,6 +2397,33 @@ function AgentReturnItem({ agentReturn }: { agentReturn: AgentReturn }): React.R
 
 // Memoised for the same reason as ToolGroupItem: entries are immutable, so a
 // row only needs to re-render when its own entry object is replaced.
+/** spec/04 § Handoff budget — the divider row; a link row opens the chat it names. */
+function HandoffRow({ entry }: { entry: ChatEventEntry }): React.ReactElement {
+  const router = useRouter();
+  const colors = useTheme();
+  const linked = entry.kind === 'handoff_link' ? entry.linkedChatId : undefined;
+  return (
+    <View
+      testID={linked ? 'handoff-link' : 'handoff-divider'}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.sm,
+        marginBottom: space.sm,
+      }}
+    >
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.lineSoft }} />
+      <Text
+        onPress={linked ? () => router.push(`/chats/${linked}` as Href) : undefined}
+        style={{ color: colors.ink3, fontSize: textMin, flexShrink: 1, textAlign: 'center' }}
+      >
+        {entry.content}
+      </Text>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.lineSoft }} />
+    </View>
+  );
+}
+
 const TimelineItem = React.memo(function TimelineItem({
   entry,
   chatId,
@@ -2341,6 +2451,12 @@ const TimelineItem = React.memo(function TimelineItem({
   const hostOnline = usePresenceStore((s) => s.daemon === 'online');
   // Sources the `/` skill menu in an open queued-message editor.
   const chatFolder = useChatStore((s) => s.chats[chatId]?.folder);
+  // spec/04 ## Message queueing — a queued entry on a chat out of credit says so.
+  const pauseAt = useChatStore((s) => {
+    const p = entry.queued ? creditPause(s.chats[chatId]) : null;
+    return p === null ? undefined : (p.resetsAt ?? 0);
+  });
+  const pause = pauseAt === undefined ? null : { resetsAt: pauseAt || null };
   // spec/15 ## Chat detail, spec/02 § Background task completions — a
   // completion that arrived still wrapped in its raw block (replay, or a host
   // on a pre-lifting host) is not a turn anyone typed and none of its
@@ -2542,10 +2658,10 @@ const TimelineItem = React.memo(function TimelineItem({
           >
             <Text
               testID="queued-badge"
-              accessibilityLabel={`${queueChipLabel(queuePos, hostOnline, release)}. ${queueChipTitle(queuePos, hostOnline, release)}`}
+              accessibilityLabel={`${queueChipLabel(queuePos, hostOnline, release, pause)}. ${queueChipTitle(queuePos, hostOnline, release, pause)}`}
               style={{ color: colors.ink3, fontSize: textMin }}
             >
-              {queueChipLabel(queuePos, hostOnline, release)}
+              {queueChipLabel(queuePos, hostOnline, release, pause)}
             </Text>
             {entry.localId ? (
               <Pressable
@@ -2650,7 +2766,7 @@ const TimelineItem = React.memo(function TimelineItem({
               )}
             </View>
             <Text testID="delivery-pending" style={{ color: colors.ink3, fontSize: textMin }}>
-              {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
+              {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
             </Text>
           </View>
         ) : null}
@@ -2684,6 +2800,12 @@ const TimelineItem = React.memo(function TimelineItem({
         ) : null}
       </View>
     );
+  }
+  if (entry.kind === 'handoff' || entry.kind === 'handoff_link') {
+    // spec/04 § Handoff budget — the provider-switch divider (the host's own
+    // one-line record) and the row saying the chat was continued in a linked
+    // fresh chat, which opens it.
+    return <HandoffRow entry={entry} />;
   }
   if (entry.kind === 'permission_mode') {
     // spec/15 § Chat detail — where the permission mode changed: a rule across
@@ -2739,6 +2861,30 @@ const TimelineItem = React.memo(function TimelineItem({
           >
             {entry.errorCode}
           </Text>
+        ) : null}
+        {entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
+          <View
+            style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginTop: space.sm }}
+          >
+            {(
+              [
+                ['retry', 'Retry'],
+                ['switch_back', 'Switch back'],
+                ['linked_chat', 'Continue in a linked fresh chat'],
+              ] as const
+            ).map(([action, label]) => (
+              <Pressable
+                key={action}
+                accessibilityRole="button"
+                testID={`handoff-${action.replace('_', '-')}`}
+                onPress={() =>
+                  getWs().send({ type: 'chat.handoff_recover_request', chatId, action })
+                }
+              >
+                <Text style={{ color: colors.red, textDecorationLine: 'underline' }}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
         ) : null}
       </View>
     );

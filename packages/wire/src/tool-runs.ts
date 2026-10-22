@@ -5,6 +5,8 @@
 // host cut differently from a surface would name calls that surface never
 // grouped, and its summary would have nowhere to go.
 
+import { parseAskHuman } from './action-text.js';
+
 /**
  * Can this tool call fold into a run? A file edit keeps its own row for its
  * inline diff, a `Monitor` for the watcher it armed, and a `view_file` because
@@ -16,6 +18,14 @@ export function isGroupableToolCall(tool: string | undefined, args: unknown): bo
   if (tool === 'view_file' || tool === 'mcp__patch__view_file') return false;
   // A notification is a message to the user: it stays in the transcript.
   if (tool === 'patch_notify' || tool === 'mcp__patch__patch_notify') return false;
+  // An action request is drawn as a card the user acts on; folded into a run
+  // its links and codes would sit behind a click.
+  if (
+    (tool === 'patch_ask_human' || tool === 'mcp__patch__patch_ask_human') &&
+    parseAskHuman(args) !== null
+  ) {
+    return false;
+  }
   // The agent's plan is a checklist card in the transcript, not a command.
   if (tool === 'TodoWrite') return false;
   return !isEditToolCall(tool, args);

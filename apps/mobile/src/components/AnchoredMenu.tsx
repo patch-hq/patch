@@ -11,11 +11,13 @@ import React from 'react';
 import { BackHandler, Modal, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check } from 'lucide-react-native';
-import { fixed, fonts, radii, space, useTheme } from '../lib/theme';
+import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 export interface AnchoredMenuItem {
   id: string;
   label: string;
+  /** One line under the label saying what the action does. */
+  detail?: string;
   destructive?: boolean;
   /** Shown greyed and un-pressable — offered for context, not for choosing. */
   disabled?: boolean;
@@ -79,6 +81,7 @@ export function AnchoredMenu({
           : { bottom: insets.bottom + space.xxxl + space.md }),
         right: space.md,
         minWidth: 180,
+        maxWidth: 300,
         backgroundColor: colors.paperRaised,
         borderRadius: radii.md,
         borderWidth: 1,
@@ -117,16 +120,22 @@ export function AnchoredMenu({
             selected: item.selected === true,
           }}
         >
-          <Text
-            style={{
-              color: item.disabled ? colors.inkFaint : item.destructive ? colors.red : colors.ink,
-              fontSize: 15,
-              fontFamily: fonts.bodyMedium,
-              flex: 1,
-            }}
-          >
-            {item.label}
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text
+              style={{
+                color: item.disabled ? colors.inkFaint : item.destructive ? colors.red : colors.ink,
+                fontSize: 15,
+                fontFamily: fonts.bodyMedium,
+              }}
+            >
+              {item.label}
+            </Text>
+            {item.detail ? (
+              <Text style={{ color: colors.ink3, fontSize: textMin, fontFamily: fonts.body }}>
+                {item.detail}
+              </Text>
+            ) : null}
+          </View>
           {item.selected ? <Check size={16} color={colors.leaf} /> : null}
         </Pressable>
       ))}

@@ -1,7 +1,7 @@
 // Settings → Hosts (spec/02 § Host identity, spec/11 § Host installation).
 //
 // Every machine registered to the account, with its presence, and — for the
-// one selected — its name, whether it is home, what it runs, and removing it.
+// one selected — its name, what it runs, and removing it.
 //
 // State comes from the live host reports. A machine that has not reported yet
 // is shown as awaiting its first report rather than being given a fabricated
@@ -33,10 +33,10 @@ import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
 function installCommandProblem(err: unknown): string {
   const code = err instanceof Error ? err.message : String(err);
   if (code === 'nothing_published') {
-    return 'No host build has been published yet, so there is no install command to give.';
+    return 'No machine build has been published yet, so there is no install command to give.';
   }
   if (code === 'no_build_for_os') {
-    return 'No host build has been published for that operating system yet.';
+    return 'No machine build has been published for that operating system yet.';
   }
   if (code === 'no_public_url') {
     return 'This server has no public address configured, so it cannot say where a new machine should download from.';
@@ -61,7 +61,7 @@ export function HostsPage(): JSX.Element {
 
   return (
     <SettingsPage
-      title="Hosts"
+      title="Machines"
       testid="settings-hosts"
       actions={
         <button
@@ -79,7 +79,7 @@ export function HostsPage(): JSX.Element {
       <ThisMac />
       <Group testid="hosts-list">
         {rows.length === 0 ? (
-          <Note testid="hosts-empty">No hosts yet</Note>
+          <Note testid="hosts-empty">No machines yet</Note>
         ) : (
           rows.map((h) => (
             <HostListRow
@@ -127,11 +127,6 @@ function HostListRow({
               {host.hostId}
             </span>
           )}
-          {report?.isHomeHost ? (
-            <span className="set-chip g" data-testid={`host-${host.hostId}-home`}>
-              home
-            </span>
-          ) : null}
         </>
       }
       sub={
@@ -276,22 +271,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 title={shortcutTitle('Save', '↵')}
               />
             </Row>
-            <Row title="Home">
-              {report.isHomeHost ? (
-                <span className="set-val">This is home</span>
-              ) : (
-                <button
-                  type="button"
-                  className="set-btn"
-                  data-testid={`host-${host.hostId}-set-home`}
-                  onClick={() => sendToHost(host, { type: 'host.set_home', hostId: host.hostId })}
-                >
-                  Make home
-                </button>
-              )}
-            </Row>
             <Row
-              title="Host"
+              title="Machine"
               sub={
                 <>
                   <span data-testid={`host-${host.hostId}-platform`}>
@@ -347,8 +328,6 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
           ))}
         </div>
       ) : null}
-
-      <ClaudeSettingsDrift host={host} />
 
       {report && report.components.length > 0 ? (
         <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-components`}>
@@ -406,7 +385,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       {report ? <BrowserRouteThrough host={host} /> : null}
 
       <div className="set-card set-card-gap">
-        <Row title="Remove this host">
+        <Row title="Remove this machine">
           <button
             type="button"
             className="set-btn danger"
@@ -446,63 +425,6 @@ function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | nul
       testid={`host-${host.hostId}-settings-version`}
       sub={<span data-testid={`host-${host.hostId}-settings-state`}>{text}</span>}
     />
-  );
-}
-
-/**
- * This machine's Claude Code settings.json changed on the machine itself
- * (spec/02 § Claude Code settings). Nothing overwrites it until the change is
- * taken into the shared settings — for every host, or for this OS — or thrown away.
- */
-function ClaudeSettingsDrift({ host }: { host: HostPresence }): JSX.Element | null {
-  const drift = host.claudeSettings?.drift;
-  if (drift === undefined) return null;
-  const os =
-    host.host?.platform === 'darwin' ? 'darwin' : host.host?.platform === 'linux' ? 'linux' : null;
-  const id = `host-${host.hostId}-claude-drift`;
-  return (
-    <div className="set-card set-card-gap" data-testid={id}>
-      <Row title="Claude Code settings.json changed on this machine" />
-      <pre className="claude-settings-json" data-testid={`${id}-text`}>
-        {drift}
-      </pre>
-      <div className="set-actions">
-        <button
-          type="button"
-          className="set-btn"
-          data-testid={`${id}-keep-shared`}
-          onClick={() =>
-            void writeShared('keep settings.json', () =>
-              api.adoptClaudeSettings(host.hostId, 'shared'),
-            )
-          }
-        >
-          Keep for every host
-        </button>
-        {os ? (
-          <button
-            type="button"
-            className="set-btn"
-            data-testid={`${id}-keep-os`}
-            onClick={() =>
-              void writeShared('keep settings.json', () => api.adoptClaudeSettings(host.hostId, os))
-            }
-          >
-            Keep for {os === 'darwin' ? 'macOS' : 'Linux'}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="set-btn ghost"
-          data-testid={`${id}-discard`}
-          onClick={() =>
-            sendToHost(host, { type: 'host.claude_settings_discard', hostId: host.hostId })
-          }
-        >
-          Discard
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -603,7 +525,7 @@ function ThisMac(): JSX.Element | null {
       <div className="set-row">
         <div className="set-row-head">
           <div className="set-row-text">
-            <span className="set-row-title">Host</span>
+            <span className="set-row-title">Machine</span>
             <span className="set-sub">Not installed</span>
           </div>
           <button
@@ -668,11 +590,11 @@ function AddHost({ onClose }: { onClose: () => void }): JSX.Element {
     manifest.isError || (manifest.data !== undefined && options.length === 0);
 
   return (
-    <Group label="Add a host" testid="add-host-panel">
+    <Group label="Add a machine" testid="add-host-panel">
       {manifest.isPending ? <Note>…</Note> : null}
       {nothingPublished ? (
         <Note testid="add-host-error">
-          No host build has been published yet. Publish one with <code>pnpm build:host</code>.
+          No machine build has been published yet. Publish one with <code>pnpm build:host</code>.
         </Note>
       ) : null}
       {!nothingPublished && options.length > 0 ? (

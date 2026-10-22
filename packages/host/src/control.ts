@@ -16,7 +16,7 @@
 import { expandHome } from './expandHome.js';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, resolve, join, sep } from 'node:path';
+import { basename, extname, resolve, join, sep } from 'node:path';
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -25,6 +25,7 @@ import Fastify, {
 } from 'fastify';
 import { z } from 'zod';
 import { imageSize } from './imageSize.js';
+import { MeetingAgentNotesEdit } from '@patch/wire';
 import type {
   HostAccountEvent,
   ClaudeMemoryEntry,
@@ -60,7 +61,15 @@ import {
   type PublishArtifact,
   type ViewFileKind,
 } from './artifacts.js';
+import { buildPreviewHtml, previewable } from './viewFilePreview.js';
 import { PadInputError, bundleDir, type PadRequest } from './pads.js';
+import {
+  AccountRefError,
+  AccountsRpcError,
+  resolveAccountRef,
+  type AccountsRpc,
+  type ServerApiRpc,
+} from './accountsClient.js';
 import {
   BrowserNotInstalledError,
   RefNotFoundError,
@@ -69,6 +78,9 @@ import {
   TabNotFoundError,
   type BrowserProfile,
   TabInHandoffError,
+  AppBrowserUnavailableError,
+  UserDrivingError,
+  UserHandedBackError,
 } from './browser.js';
 import { RateLimiter } from './rate-limit.js';
 import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cascade.js';
@@ -165,7 +177,24 @@ export interface BuildOptions {
     folder: string;
     model?: string;
     prompt?: string;
+    preferredAccountId?: string;
   }) => Promise<{ chatId?: string }>;
+  /**
+   * The shared accounts, over the server link: list, and change order or
+   * strategy. Backs `patch_list_accounts` and the CLI's `accounts` commands on
+   * this machine. Unset, those endpoints 503.
+   */
+  accountsRpc?: AccountsRpc;
+  /**
+   * One REST call to the server over the link, for the machine's own CLI
+   * (`/server-api`). Unset, that endpoint 503s.
+   */
+  serverApi?: ServerApiRpc;
+  /**
+   * The accounts this machine holds for the backend a model runs on (Claude
+   * when no model is named), so `account` on a spawn can be a label.
+   */
+  heldAccounts?: (model: string | undefined) => Array<{ id: string; label: string }>;
   /**
    * The account-wide chat list, each entry naming the machine it lives on
    * (spec/03 § Cross-chat tools). Only the server sees every machine's chats,
@@ -252,6 +281,8 @@ export interface BuildOptions {
    * server link. Production wires `PadClient.request`; unset, the endpoint 503s.
    */
   padRequest?: PadRequest;
+  /** Backs `patch_meeting_notes`: the chat agent changing its meeting's notes. Returns the chip label. Unset, the endpoint 503s. */
+  meetingAgentEdit?: (chatId: string, edit: MeetingAgentNotesEdit) => string;
   /** Test hook for the rate limiter. */
   rateLimiter?: RateLimiter;
   /** Structured logger for tool-call accounting. */
@@ -287,7 +318,7 @@ export interface BuildOptions {
    * those routes 503 rather than pretending the control does not exist.
    *
    * The four host controls the SERVER owns (mint a registration code, rename,
-   * set-home, revoke) are deliberately absent: they are HTTP even when the CLI
+   * revoke) are deliberately absent: they are HTTP even when the CLI
    * runs on the host itself.
    */
   host?: {
@@ -312,11 +343,11 @@ export interface BuildOptions {
       install: (componentId: string) => void;
       remove: (componentId: string) => void;
     };
-    /** This host's Claude Code memory entries and any settings.json drift (spec/02 § Claude Code settings). */
+    /** This host's Claude Code settings.json and memory entries (spec/02 § Claude Code settings). */
     claudeSettings: {
-      snapshot: () => { drift?: string; memories: ClaudeMemoryEntry[] };
-      /** Rewrite a drifted settings.json from the shared settings. */
-      discard: () => void;
+      snapshot: () => { settingsJson: string; memories: ClaudeMemoryEntry[] };
+      /** Replace settings.json. Throws InvalidSettingsJsonError, named. */
+      set: (text: string) => void;
       /** Throws InvalidMemoryRefError / MemoryNotFoundError, named. */
       deleteMemory: (project: string, file: string) => void;
     };
@@ -479,6 +510,8 @@ const WatchStartBody = z
     chatId: z.string().min(1),
     command: z.string().min(1),
     description: z.string().min(1),
+    timeoutSec: z.number().int().positive(),
+    checkInSec: z.number().int().positive().optional(),
     cwd: z.string().min(1).optional(),
   })
   .strict();
@@ -504,6 +537,7 @@ const BrowserHandoffBody = z
     reason: z.string().min(1),
     callbackPort: z.number().int().min(1).max(65535).optional(),
     timeoutSeconds: z.number().int().min(10).max(3600).optional(),
+    share: z.boolean().optional(),
   })
   .strict();
 
@@ -740,13 +774,17 @@ const BrowserViewportBody = z
 
 /** The one error shape every `/internal/browser/*` route maps the same way. */
 function sendBrowserError(reply: FastifyReply, err: unknown): FastifyReply {
-  if (err instanceof BrowserNotInstalledError) {
+  if (err instanceof BrowserNotInstalledError || err instanceof AppBrowserUnavailableError) {
     return reply.code(503).send({ error: err.code, message: err.message });
   }
   if (err instanceof TabNotFoundError || err instanceof RefNotFoundError) {
     return reply.code(404).send({ error: err.code, message: err.message });
   }
-  if (err instanceof TabInHandoffError) {
+  if (
+    err instanceof TabInHandoffError ||
+    err instanceof UserDrivingError ||
+    err instanceof UserHandedBackError
+  ) {
     return reply.code(409).send({ error: err.code, message: err.message });
   }
   if (err instanceof BrowserStoppedError) {
@@ -801,6 +839,8 @@ const SpawnBody = z
     name: z.string().min(1).optional(),
     prompt: z.string().min(1).optional(),
     callerChatId: z.string().min(1).optional(),
+    /** The stored account the chat starts on: its id or its label. Refused if not held. */
+    account: z.string().min(1).optional(),
     /** SDK model override (CLI `--model` pass-through; spec/13). */
     model: z.string().min(1).optional(),
     /** SDK permission mode (CLI `--dangerously-skip-permissions`; spec/13). */
@@ -811,6 +851,19 @@ const SpawnBody = z
   .strict();
 
 const StopParams = z.object({ id: z.string().min(1) }).strict();
+
+const ServerApiBody = z
+  .object({
+    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+    path: z.string().min(1),
+    body: z.unknown().optional(),
+  })
+  .strict();
+const AccountsBackendParams = z.object({ backendId: z.enum(['claude-code', 'codex']) }).strict();
+const AccountsOrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).strict();
+const AccountsStrategyBody = z
+  .object({ strategy: z.enum(['priority', 'round-robin', 'soonest-reset', 'least-used']) })
+  .strict();
 
 const ListChatsQuery = z
   .object({
@@ -1300,8 +1353,20 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'bad_request', detail: parsed.error.flatten() });
     }
+    let preferredAccountId: string | undefined;
+    if (parsed.data.account !== undefined) {
+      try {
+        preferredAccountId = resolveSpawnAccount(parsed.data.account, parsed.data.model);
+      } catch (err) {
+        return reply.code(400).send({
+          error: 'account_not_found',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const spawnReq: SpawnChatOptions = {
       folder: parsed.data.folder,
+      ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.prompt !== undefined ? { prompt: parsed.data.prompt } : {}),
       ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
@@ -1364,6 +1429,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   // the machine itself drives them without a round trip through the server.
 
   /** Shared gate: authed, and the host controls actually wired. */
+  /** An `account` as typed (id or label) → the stored account id on this machine. */
+  const resolveSpawnAccount = (account: string, model: string | undefined): string => {
+    if (!opts.heldAccounts) {
+      throw new AccountRefError('this machine has no account store, so it cannot pick an account');
+    }
+    return resolveAccountRef(account, opts.heldAccounts(model));
+  };
+
   const hostGate = (
     req: FastifyRequest,
     reply: FastifyReply,
@@ -1443,12 +1516,22 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return host.claudeSettings.snapshot();
   });
 
-  // POST /claude-settings/discard — rewrite a drifted settings.json from the
-  // shared settings (spec/02 § Claude Code settings).
-  app.post('/claude-settings/discard', async (req, reply) => {
+  // POST /claude-settings — replace this host's settings.json (spec/02 §
+  // Claude Code settings). Text that is not a JSON object is refused.
+  app.post('/claude-settings', async (req, reply) => {
     const host = hostGate(req, reply);
     if (!host) return;
-    host.claudeSettings.discard();
+    const parsed = z.object({ text: z.string() }).strict().safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'bad_request', detail: parsed.error.flatten() });
+    }
+    try {
+      host.claudeSettings.set(parsed.data.text);
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: 'claude_settings_invalid', message: (err as Error).message });
+    }
     return { ok: true, ...host.claudeSettings.snapshot() };
   });
 
@@ -1471,6 +1554,96 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         .send({ error: 'claude_settings_invalid', message: (err as Error).message });
     }
     return { ok: true, ...host.claudeSettings.snapshot() };
+  });
+
+  // ---- shared accounts (over the server link) ----------------------------
+  // `/accounts*` is the machine's own CLI (local key); `/internal/accounts` is
+  // the MCP child (`patch_list_accounts`). All go to the server, which owns the
+  // order and strategy, so none needs a separate login.
+  const accountsCall = async (
+    reply: FastifyReply,
+    req: Parameters<AccountsRpc>[0],
+  ): Promise<unknown> => {
+    if (!opts.accountsRpc) {
+      return reply
+        .code(503)
+        .send({ error: 'accounts_unavailable', message: 'accounts are not wired on this host' });
+    }
+    try {
+      return await opts.accountsRpc(req);
+    } catch (err) {
+      const code = err instanceof AccountsRpcError ? err.code : 'internal';
+      const status = code === 'link_offline' ? 503 : code === 'timeout' ? 504 : 400;
+      return reply.code(status).send({
+        error: code,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  // The CLI's way to the server from this machine: relayed over the link, so
+  // it needs no credential of its own. The server decides what is relayable.
+  app.post('/server-api', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    if (!opts.serverApi) {
+      return reply.code(503).send({
+        error: 'server_api_unavailable',
+        message: 'the server link is not wired on this host',
+      });
+    }
+    const parsed = ServerApiBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    try {
+      const ans = await opts.serverApi(parsed.data);
+      return reply.code(ans.status).send(ans.body ?? '');
+    } catch (err) {
+      const code = err instanceof AccountsRpcError ? err.code : 'internal';
+      return reply
+        .code(code === 'link_offline' ? 503 : code === 'timeout' ? 504 : 500)
+        .send({ error: code, message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+  app.get('/accounts', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    return accountsCall(reply, { op: 'list' });
+  });
+  app.get('/internal/accounts', async (_req, reply) => accountsCall(reply, { op: 'list' }));
+  app.put('/accounts/:backendId/order', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    const params = AccountsBackendParams.safeParse(req.params);
+    const body = AccountsOrderBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: (!params.success ? params.error : body.error!).message,
+      });
+    }
+    return accountsCall(reply, {
+      op: 'order',
+      backendId: params.data.backendId,
+      accountIds: body.data.accountIds,
+    });
+  });
+  app.put('/accounts/:backendId/strategy', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    const params = AccountsBackendParams.safeParse(req.params);
+    const body = AccountsStrategyBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: (!params.success ? params.error : body.error!).message,
+      });
+    }
+    return accountsCall(reply, {
+      op: 'strategy',
+      backendId: params.data.backendId,
+      strategy: body.data.strategy,
+    });
   });
 
   // GET /backends — each backend's version and this host's view of the shared accounts.
@@ -2144,7 +2317,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { chatId, command, description, cwd } = parsed.data;
+    const { chatId, command, description, timeoutSec, checkInSec, cwd } = parsed.data;
     if (!limiter.check(`watch:${chatId}`)) {
       toolLog({
         tool: 'patch_watch',
@@ -2159,6 +2332,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       const rec = opts.daemon!.startWatch(chatId, {
         command,
         description,
+        timeoutSec,
+        ...(checkInSec !== undefined ? { checkInSec } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
       });
       toolLog({
@@ -2293,8 +2468,18 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { timeoutSeconds, ...rest } = parsed.data;
+    const { timeoutSeconds, share, ...rest } = parsed.data;
     try {
+      if (share === true) {
+        if (rest.callbackPort !== undefined || timeoutSeconds !== undefined) {
+          return reply.code(400).send({
+            error: 'invalid_input',
+            message: 'share cannot be combined with callbackPort or timeoutSeconds',
+          });
+        }
+        const shared = await opts.daemon!.browserShare(rest);
+        return { ok: true, ...shared };
+      }
       const result = await opts.daemon!.browserHandoff({
         ...rest,
         ...(timeoutSeconds !== undefined ? { timeoutMs: timeoutSeconds * 1000 } : {}),
@@ -2604,7 +2789,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { folder, host, name, prompt, callerChatId, model, permissionMode } = parsed.data;
+    const { folder, host, name, prompt, callerChatId, model, permissionMode, account } =
+      parsed.data;
     const limiterKey = callerChatId ?? 'anonymous';
     if (!limiter.check(`spawn:${limiterKey}`)) {
       toolLog({
@@ -2617,6 +2803,24 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return sendRateLimited(reply, `spawn:${limiterKey}`);
     }
     const selfHostId = opts.daemon!.hostId;
+    let preferredAccountId: string | undefined;
+    if (account !== undefined) {
+      try {
+        preferredAccountId = resolveSpawnAccount(account, model);
+      } catch (err) {
+        toolLog({
+          tool: 'patch_spawn',
+          callerChatId,
+          durationMs: Date.now() - start,
+          ok: false,
+          err: 'account_not_found',
+        });
+        return reply.code(400).send({
+          error: 'account_not_found',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     // spec/03 § Cross-chat tools — a call whose target is on the calling chat's
     // own machine is short-circuited in-process; one naming another machine
     // goes over the wire, relayed by the server to that machine's host.
@@ -2660,6 +2864,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           folder,
           ...(model !== undefined ? { model } : {}),
           ...(prompt !== undefined ? { prompt } : {}),
+          ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
         });
         toolLog({
           tool: 'patch_spawn',
@@ -2698,6 +2903,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ...(prompt !== undefined ? { prompt } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
+        ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
       };
       const chatId = await opts.daemon!.spawnChat(spawnReq);
       if (opts.emitWire && callerChatId) {
@@ -3203,6 +3409,49 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return result;
   });
 
+  // patch_meeting_notes — the agent adds to or edits the notes of the meeting
+  // running in its own chat. A refusal (no meeting, unknown point, a figure with
+  // no source) goes back to the agent as the error.
+  app.post('/internal/meeting-notes', async (req, reply) => {
+    if (require503(reply)) return;
+    const body = req.body as { callerChatId?: unknown; edit?: unknown };
+    const parsed = MeetingAgentNotesEdit.safeParse(body?.edit);
+    if (typeof body?.callerChatId !== 'string' || !parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: parsed.success ? 'callerChatId is required' : parsed.error.message,
+      } satisfies ErrorEnvelope);
+    }
+    if (!opts.meetingAgentEdit) {
+      return reply.code(503).send({
+        error: 'meetings_unavailable',
+        message: 'meeting mode is not wired on this host',
+      } satisfies ErrorEnvelope);
+    }
+    try {
+      const label = opts.meetingAgentEdit(body.callerChatId, parsed.data);
+      toolLog({
+        tool: 'patch_meeting_notes',
+        callerChatId: body.callerChatId,
+        durationMs: 0,
+        ok: true,
+      });
+      return { ok: true, changed: label };
+    } catch (err) {
+      toolLog({
+        tool: 'patch_meeting_notes',
+        callerChatId: body.callerChatId,
+        durationMs: 0,
+        ok: false,
+        err: 'meeting_edit_failed',
+      });
+      return reply.code(409).send({
+        error: 'meeting_edit_failed',
+        message: (err as Error).message,
+      } satisfies ErrorEnvelope);
+    }
+  });
+
   // view_file — put a file on the USER's screen (spec/14 § Tool calls).
   //
   // The distinction from Read is who the bytes are for: Read feeds Claude,
@@ -3234,6 +3483,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
 
     let relPath: string;
+    let absPath: string;
     let kind: ViewFileKind;
     let size: { width: number; height: number } | undefined;
     let html: string | undefined;
@@ -3242,6 +3492,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     try {
       const resolved = resolveViewFilePath(state.folder, filePath);
       relPath = resolved.relPath;
+      absPath = resolved.absPath;
       kind = resolved.kind;
       const stat = statSync(resolved.absPath);
       if (!stat.isFile()) throw new ArtifactInputError(`not a file: ${filePath}`);
@@ -3347,6 +3598,30 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         .send({ error: 'view_file_publish_failed', message } satisfies ErrorEnvelope);
     }
 
+    // A downloadable file also gets an inline preview page, published under its
+    // own id. A previewable file whose page cannot be built still succeeds as a
+    // download card, but the ack says why there is no preview.
+    let previewUrl: string | undefined;
+    let previewError: string | undefined;
+    if (kind === 'file') {
+      const ext = extname(relPath).toLowerCase();
+      if (previewable(ext)) {
+        try {
+          const previewHtml = await buildPreviewHtml(absPath, ext, name);
+          const published = await opts.publishArtifact({
+            chatId: callerChatId,
+            artifactId: artifactIdFor(callerChatId, `view_file_preview\u0000${relPath}`),
+            title: name,
+            path: relPath,
+            html: previewHtml,
+          });
+          previewUrl = published.url;
+        } catch (err) {
+          previewError = err instanceof Error ? err.message : String(err);
+        }
+      }
+    }
+
     toolLog({ tool: 'view_file', callerChatId, durationMs: Date.now() - start, ok: true });
     return {
       ok: true,
@@ -3355,6 +3630,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       url,
       name,
       path: relPath,
+      // Where the file sits on this host: the desktop app opens it from here.
+      absPath,
+      ...(previewUrl !== undefined ? { previewUrl } : {}),
+      ...(previewError !== undefined ? { previewError } : {}),
       ...(size ?? {}),
       ...(fileBytes !== undefined ? { size: fileBytes } : {}),
     };

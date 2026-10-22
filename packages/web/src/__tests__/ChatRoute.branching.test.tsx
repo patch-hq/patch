@@ -146,8 +146,10 @@ describe('editing a user turn forks a track', () => {
         }),
       ),
     );
-    // The old track's transcript is dropped — the host's replay of the new
-    // track is the authority, so no stale turns linger from the track we left.
+    // Nothing is dropped until the host acknowledges the fork...
+    expect(useChatStore.getState().timelines['c-fork']).toHaveLength(2);
+    // ...then the old track's transcript goes, so no stale turns linger.
+    act(() => useChatStore.getState().applyEvent(TWO_TRACKS));
     expect(useChatStore.getState().timelines['c-fork']).toEqual([]);
     expect(screen.queryByTestId('composer-edit-banner')).toBeNull();
   });
@@ -180,6 +182,92 @@ describe('editing a user turn forks a track', () => {
         }),
       ),
     );
+  });
+
+  it("the new track's turns arriving in the same batch as the acknowledgement are kept", async () => {
+    const ws = WS();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', ws);
+
+    fireEvent.click(screen.getByTestId('msg-edit'));
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'ask again' } });
+    fireEvent.click(screen.getByTestId('send-btn'));
+    await waitFor(() =>
+      expect(ws!.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'chat.fork_request' })),
+    );
+
+    // The socket coalesces events into one commit: the new track's echo and
+    // reply land together with the `chat.branches` that acknowledges it.
+    act(() =>
+      useChatStore
+        .getState()
+        .applyEvents([
+          TWO_TRACKS,
+          { type: 'chat.message', chatId: 'c-fork', role: 'user', content: 'ask again', seq: 6 },
+          {
+            type: 'chat.message',
+            chatId: 'c-fork',
+            role: 'assistant',
+            content: 'new answer',
+            seq: 7,
+          },
+        ]),
+    );
+    const contents = (useChatStore.getState().timelines['c-fork'] ?? []).map((e) => e.content);
+    expect(contents).not.toContain('answer one');
+    expect(contents).toContain('ask again');
+    expect(contents).toContain('new answer');
+  });
+
+  it('an attachments-only edit sends an empty message and keeps the turns until acknowledged', async () => {
+    const ws = WS();
+    vi.stubGlobal(
+      'URL',
+      Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }),
+    );
+    vi.mocked(api.uploadAttachment).mockResolvedValue({
+      ok: true,
+      ref: { id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image', url: '/x/a1' },
+    });
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', ws);
+
+    fireEvent.click(screen.getByTestId('msg-edit'));
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '' } });
+    fireEvent.change(screen.getByTestId('composer-file-input'), {
+      target: { files: [new File(['x'], 'pic.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(screen.getByTestId('send-btn'));
+
+    await waitFor(() =>
+      expect(ws!.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'chat.fork_request', seq: 4, message: '' }),
+      ),
+    );
+    expect(useChatStore.getState().timelines['c-fork']).toHaveLength(2);
+  });
+
+  it('an edit with no text and no attachment cannot be sent and drops nothing', async () => {
+    const ws = WS();
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork', ws);
+
+    fireEvent.click(screen.getByTestId('msg-edit'));
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '' } });
+    expect(screen.getByTestId('send-btn')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('send-btn'));
+    expect(ws!.send).not.toHaveBeenCalled();
+    expect(useChatStore.getState().timelines['c-fork']).toHaveLength(2);
+    expect(screen.queryByTestId('composer-edit-banner')).not.toBeNull();
   });
 
   it('cancelling sends nothing, restores the unsent draft and clears the grey-out', () => {

@@ -195,3 +195,27 @@ describe('picking the dictation transcriber', () => {
     expect(picked.ok && picked.whisper).toBe(withGemini.gemini);
   });
 });
+
+describe('transcription prompt', () => {
+  test('openai sends it as the prompt field; gemini adds it to the instruction', async () => {
+    const o = vi.fn(async () => jsonResponse({ text: 'x' }));
+    await new OpenAITranscribeBackend({ logger, apiKey: 'o', fetchImpl: o }).transcribeClip(
+      Buffer.from('a'),
+      'wav',
+      { prompt: 'Terms: WECA.' },
+    );
+    const [, oi] = o.mock.calls[0] as unknown as [string, RequestInit];
+    expect((oi.body as FormData).get('prompt')).toBe('Terms: WECA.');
+
+    const g = vi.fn(async () =>
+      jsonResponse({ candidates: [{ content: { parts: [{ text: 'x' }] } }] }),
+    );
+    await new GeminiTranscribeBackend({ logger, apiKey: 'g', fetchImpl: g }).transcribeClip(
+      Buffer.from('a'),
+      'wav',
+      { prompt: 'Terms: WECA.' },
+    );
+    const [, gi] = g.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(gi.body as string).contents[0].parts[0].text).toContain('Terms: WECA.');
+  });
+});

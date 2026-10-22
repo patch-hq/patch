@@ -234,7 +234,7 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
     setDraft(next);
   }
 
-  function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>): void {
+  function onPointerUp(): void {
     const done = draftRef.current;
     if (!drawingRef.current || !done) return;
     drawingRef.current = false;

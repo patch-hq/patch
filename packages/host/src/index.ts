@@ -1,5 +1,7 @@
+import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
+import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
 import { CodexHistory } from './codexHistory.js';
 import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
@@ -14,8 +16,16 @@ import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { acquireHomeLock, type HomeLock } from './homeLock.js';
 import { SHUTDOWN_DEADLINE_MS, shutdownThenExit } from './shutdownDeadline.js';
-import { linkLegacySocket } from './legacySocket.js';
-import { mkdirSync, existsSync, unlinkSync, statSync, chmodSync, realpathSync } from 'node:fs';
+import { linkLegacySocket, isNamedPipe } from './legacySocket.js';
+import {
+  mkdirSync,
+  existsSync,
+  unlinkSync,
+  statSync,
+  chmodSync,
+  realpathSync,
+  readFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -55,6 +65,11 @@ import {
   type SharedSettings,
   type SharedSettingsPatch,
   DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_MODEL,
+  DEFAULT_MEETING_RESEARCH_SECONDS,
+  DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
   QUESTION_EXPIRY_SECONDS_DEFAULT,
@@ -96,12 +111,21 @@ import {
   type LoadClaudeOAuthOptions,
 } from '@patch/auth';
 import type { HostAccountEvent, ChatReplayBatchEvent } from '@patch/wire';
-import { REPLAY_BATCH_BYTES } from '@patch/wire';
+import {
+  REPLAY_BATCH_BYTES,
+  DEFAULT_WATCH_CHECK_IN_MINUTES,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
+} from '@patch/wire';
 import { createMockSdkBackend, createRealSdkBackend, type SdkBackend } from './sdkBackend.js';
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
-import { MeetingManager } from './meeting.js';
-import { makeMeetingAnalyser } from './meetingGen.js';
+import { MeetingManager, type MeetingPrompts } from './meeting.js';
+import {
+  makeMeetingAnalyser,
+  makeMeetingCorrector,
+  makeMeetingResearcher,
+  makeMeetingWriteup,
+} from './meetingGen.js';
 import { makeSweepDecider } from './managerSweepGen.js';
 import { makeGoalEvaluator } from './goalEval.js';
 import { makeToolRunSummarizer } from './toolRunGen.js';
@@ -158,12 +182,18 @@ import { rotateLog } from './logRotate.js';
 import { handleHookCheck } from './hookCheck.js';
 import { FolderRegistry } from './folders.js';
 import { ModelCatalog } from './modelCatalog.js';
+import { ModelLimits } from './handoffRun.js';
 import { handleBackgroundTaskStatsRequest } from './backgroundTaskStats.js';
-import { handleWatchListRequest, handleWatchStopRequest } from './watchRequests.js';
+import {
+  handleWatchCheckInRequest,
+  handleWatchListRequest,
+  handleWatchStopRequest,
+} from './watchRequests.js';
 import { HostStateStore } from './hostState.js';
 import { BrowserTunnelClient, BrowserTunnelRelay } from './browser-tunnel.js';
 import { AudioRelayBridge } from './audio-relay-bridge.js';
 import { webBotAuthFromServer } from './webBotAuth.js';
+import { appBrowserLink } from './appBrowser.js';
 import {
   browserToolsEnabledOf,
   enabledMcpServers,
@@ -180,15 +210,17 @@ import { handleBlobRequest } from './blobFetch.js';
 import { ToolLogStore } from './toolLog.js';
 import { ChatTokenReader, UsageHistoryStore } from './usageHistory.js';
 import { ProviderKeyError, ProviderKeyStore, providerKeysPath } from './providerKeys.js';
-import { ClaudeSettingsFile, claudeSettingsFor, settingsOs } from './sharedSettings.js';
 import { createSecretsStore, InvalidSecretKeyError, type SecretsStore } from './secrets.js';
 import {
   claudeHomeFromProjectsRoot,
   deleteClaudeMemory,
   setClaudeMemory,
   InvalidMemoryRefError,
+  InvalidSettingsJsonError,
   listClaudeMemories,
   MemoryNotFoundError,
+  readClaudeSettingsJson,
+  writeClaudeSettingsJson,
 } from './claudeSettings.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startAudioServer, type AudioServerHandle } from './audio/server.js';
@@ -200,6 +232,7 @@ import {
   createWhisper,
   validateWhisperCredentials,
   UnsupportedClipFormatError,
+  LocalWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
@@ -351,26 +384,24 @@ async function startHost(
 ): Promise<void> {
   // only discovered the clash at the real bind further down had already written
   // into the live host's chats and stolen its socket.
-  await assertHealthzPortFree(config.healthzHost, config.healthzPort);
+  if (config.healthzPort !== null) {
+    await assertHealthzPortFree(config.healthzHost, config.healthzPort);
+  }
   // The per-home lock was acquired by main before any state was read.
   mkdirSync(config.patchHome, { recursive: true });
   // spec/02 § Claude Code settings: settings.json sits one level above the
   // transcript-history root the host already resolves; reusing that root
   // means PATCH_CLAUDE_PROJECTS_ROOT sandboxes this too (see claudeSettings.ts).
   const claudeHome = claudeHomeFromProjectsRoot(config.claudeProjectsRoot);
-  // Written from the shared settings, except when changed on this machine
-  // (spec/02 § Claude Code settings): that is reported as drift instead.
-  const claudeSettingsFile = new ClaudeSettingsFile(claudeHome, config.patchHome);
+  // settings.json is this machine's own file (spec/02 § Claude Code settings):
+  // read as it is each time it is reported, written only by a surface's edit.
   const claudeSettingsSnapshot = (): {
-    drift?: string;
+    settingsJson: string;
     memories: ReturnType<typeof listClaudeMemories>;
-  } => {
-    const drift = claudeSettingsFile.drift();
-    return {
-      ...(drift !== undefined ? { drift } : {}),
-      memories: listClaudeMemories(config.claudeProjectsRoot),
-    };
-  };
+  } => ({
+    settingsJson: readClaudeSettingsJson(claudeHome),
+    memories: listClaudeMemories(config.claudeProjectsRoot),
+  });
 
   // 0. Deployment credential gate (group H1, spec/11-deployment.md § Env): the
   // whisper backend's credential is validated EAGERLY, before OAuth, before the
@@ -457,14 +488,19 @@ async function startHost(
     res.writeHead(404);
     res.end();
   });
-  await new Promise<void>((resolve_, reject) => {
-    tcp.once('error', reject);
-    tcp.listen(config.healthzPort, config.healthzHost, () => resolve_());
-  });
-  logger.info(
-    { host: config.healthzHost, port: config.healthzPort },
-    'patch-daemon healthz listening on TCP',
-  );
+  const healthzPort = config.healthzPort;
+  if (healthzPort !== null) {
+    await new Promise<void>((resolve_, reject) => {
+      tcp.once('error', reject);
+      tcp.listen(healthzPort, config.healthzHost, () => resolve_());
+    });
+    logger.info(
+      { host: config.healthzHost, port: healthzPort },
+      'patch-daemon healthz listening on TCP',
+    );
+  } else {
+    logger.info('patch-daemon healthz TCP listener off (local socket only)');
+  }
 
   // 1. Resolve OAuth — log loudly on miss, but don't fail the host process:
   //    /healthz still has to come up so compose/healthcheck reports a green
@@ -644,8 +680,8 @@ async function startHost(
   const persistedHostState = hostStateStore.get();
   /** This machine's user-editable label (`host.rename`). */
   let hostName = persistedHostState.hostName ?? config.hostName;
-  /** Is this the account's home machine (`host.set_home`)? */
-  let isHomeHost = persistedHostState.isHomeHost ?? config.isHomeHost;
+  /** Does the server have this machine running the Manager (`host.set_manager`)? */
+  let runsManager = persistedHostState.runsManager ?? false;
   /** Currently selected Kokoro TTS voice (`host.settings` → `kokoroVoice`). */
   let kokoroVoice: string | undefined = persistedHostState.kokoroVoice;
   /**
@@ -685,7 +721,24 @@ async function startHost(
    */
   let managerContextWindow: number = persistedHostState.managerContextWindow ?? 200;
   // Settings → Goals (spec/04 § Goals): how the goal judge is asked, and when a goal gives up on a refusing agent.
+  let meetingPrompts: MeetingPrompts = {
+    now: DEFAULT_MEETING_NOW_PROMPT,
+    notes: DEFAULT_MEETING_NOTES_PROMPT,
+    actions: DEFAULT_MEETING_ACTIONS_PROMPT,
+  };
+  let meetingModels = {
+    analysis: DEFAULT_MEETING_MODEL,
+    cleanup: DEFAULT_MEETING_MODEL,
+    research: DEFAULT_MEETING_MODEL,
+  };
+  let meetingResearchSeconds = DEFAULT_MEETING_RESEARCH_SECONDS;
+  let meetingTranscriptionModel = '';
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
+  // Settings → Prompts: the check-in a running background task sends its agent.
+  let watchCheckInPrompt: string =
+    persistedHostState.watchCheckInPrompt ?? DEFAULT_WATCH_CHECK_IN_PROMPT;
+  let watchCheckInMinutes: number =
+    persistedHostState.watchCheckInMinutes ?? DEFAULT_WATCH_CHECK_IN_MINUTES;
   let goalModel: string = persistedHostState.goalModel ?? DEFAULT_GOAL_MODEL;
   let goalRefusalLimit: number = persistedHostState.goalRefusalLimit ?? DEFAULT_GOAL_REFUSAL_LIMIT;
   /**
@@ -707,6 +760,9 @@ async function startHost(
    * not.
    */
   let autoResumeRateLimit = persistedHostState.autoResumeRateLimit ?? true;
+  // Whether the scheduled check installs a published build itself. A manual
+  // `host.update` and an unreadable server greeting always apply.
+  let autoUpdateHosts = persistedHostState.autoUpdateHosts ?? true;
 
   /**
    * Whether an unanswered question on this host expires, and the window it is
@@ -956,6 +1012,12 @@ async function startHost(
     };
   };
 
+  /** The accounts this machine holds for the backend `model` runs on, in the shared order. */
+  const heldAccountsFor = (model: string | undefined): Array<{ id: string; label: string }> =>
+    isCodexModel(model)
+      ? (codexAccounts.report().accounts ?? []).map((a) => ({ id: a.id, label: a.label }))
+      : (readPatchStore(oauthOpts)?.accounts ?? []).map((a) => ({ id: a.id, label: a.label }));
+
   /**
    * This host's `host.host` self-description, rebuilt from live state each
    * time so a surface never renders a stale backend or component list. Emitted
@@ -986,7 +1048,7 @@ async function startHost(
       permissionModeDefault: daemon.permissionModeDefault(),
       permissionOverrides: daemon.permissionOverrideCount(),
       ...(defaultModel !== undefined ? { defaultModel } : {}),
-      isHomeHost,
+      runsManager,
       // This host can take its queued messages from the server (spec/04).
       serverQueue: true,
       audioRelayHost: config.audio.relayHost,
@@ -1578,6 +1640,35 @@ async function startHost(
       hostStateStore.update({ goalEvalPrompt, goalModel, goalRefusalLimit });
       logger.info({ goalModel, goalRefusalLimit }, 'goal settings changed');
     }
+    meetingPrompts = {
+      now: shared.meetingNowPrompt,
+      notes: shared.meetingNotesPrompt,
+      actions: shared.meetingActionsPrompt,
+    };
+    meetingModels = {
+      analysis: shared.meetingAnalysisModel,
+      cleanup: shared.meetingCleanupModel,
+      research: shared.meetingResearchModel,
+    };
+    meetingResearchSeconds = shared.meetingResearchSeconds;
+    if (shared.meetingTranscriptionModel !== meetingTranscriptionModel) {
+      meetingTranscriptionModel = shared.meetingTranscriptionModel;
+      whisper?.useModel?.(meetingTranscriptionModel);
+      logger.info({ meetingTranscriptionModel }, 'meeting transcription model changed');
+    }
+    if (
+      shared.watchCheckInPrompt !== watchCheckInPrompt ||
+      shared.watchCheckInMinutes !== watchCheckInMinutes
+    ) {
+      watchCheckInPrompt = shared.watchCheckInPrompt;
+      watchCheckInMinutes = shared.watchCheckInMinutes;
+      daemon.setWatchCheckIn({
+        intervalMs: watchCheckInMinutes * 60_000,
+        prompt: watchCheckInPrompt,
+      });
+      hostStateStore.update({ watchCheckInPrompt, watchCheckInMinutes });
+      logger.info({ watchCheckInMinutes }, 'watch check-in settings changed');
+    }
     if (shared.chatNameInterval !== chatNameInterval) {
       chatNameInterval = shared.chatNameInterval;
       daemon.setChatNameInterval(chatNameInterval);
@@ -1597,6 +1688,10 @@ async function startHost(
       autoResumeRateLimit = shared.autoResumeRateLimit;
       daemon.setAutoResumeRateLimit(autoResumeRateLimit);
       hostStateStore.update({ autoResumeRateLimit });
+    }
+    if (shared.autoUpdateHosts !== autoUpdateHosts) {
+      autoUpdateHosts = shared.autoUpdateHosts;
+      hostStateStore.update({ autoUpdateHosts });
     }
     if (
       shared.questionExpiry !== questionExpiry ||
@@ -1682,14 +1777,6 @@ async function startHost(
         throw err;
       }
     });
-    await part('Claude Code settings.json', () => {
-      claudeSettingsFile.apply(claudeSettingsFor(snapshot.settings.claudeSettings, settingsOs()));
-      link.send({
-        type: 'claude_settings.updated',
-        hostId: selfHostId,
-        ...claudeSettingsSnapshot(),
-      });
-    });
     link.send(buildAccountReport());
     publishHost();
     logger.info({ version: snapshot.version, errors }, 'shared settings: snapshot applied');
@@ -1729,7 +1816,6 @@ async function startHost(
             harnessToolsPrompt: harnessToolsPrompt ?? null,
             harnessSkills: harnessSkills ?? null,
             harnessMemoryEnabled,
-            claudeSettings: { shared: claudeSettingsFile.text(), darwin: '', linux: '' },
           };
           const store = readPatchStore(oauthOpts);
           return {
@@ -1803,12 +1889,6 @@ async function startHost(
           if (!value) throw new Error(`${hostName} has no ${parsed.data} key in its environment`);
           return { ...base, ok: true, result: { kind: 'provider-key', id: parsed.data, value } };
         }
-        case 'claude-settings':
-          return {
-            ...base,
-            ok: true,
-            result: { kind: 'claude-settings', text: claudeSettingsFile.text() },
-          };
         case 'codex-signin':
           throw new Error('a ChatGPT sign-in is started with host.backend_add_account');
       }
@@ -2038,6 +2118,14 @@ async function startHost(
         queuePull.handleResponse(event);
         return;
       }
+      if (event.type === 'patch.api.response') {
+        serverApiClient.handleResponse(event);
+        return;
+      }
+      if (event.type === 'patch.accounts.response') {
+        accountsClient.handleResponse(event);
+        return;
+      }
       if (event.type === 'patch.pad.response') {
         padClient.handleResponse(event);
         return;
@@ -2085,6 +2173,23 @@ async function startHost(
             hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
             listWatch: (chatId) => daemon.listWatch(chatId),
             stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
+            setWatchCheckIn: (chatId, taskId, sec) =>
+              daemon.setWatchTaskCheckIn(chatId, taskId, sec),
+          },
+          sender,
+          logger,
+        );
+        return;
+      }
+      if (event.type === 'patch.watch_checkin.request') {
+        handleWatchCheckInRequest(
+          event,
+          {
+            hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
+            listWatch: (chatId) => daemon.listWatch(chatId),
+            stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
+            setWatchCheckIn: (chatId, taskId, sec) =>
+              daemon.setWatchTaskCheckIn(chatId, taskId, sec),
           },
           sender,
           logger,
@@ -2098,6 +2203,8 @@ async function startHost(
             hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
             listWatch: (chatId) => daemon.listWatch(chatId),
             stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
+            setWatchCheckIn: (chatId, taskId, sec) =>
+              daemon.setWatchTaskCheckIn(chatId, taskId, sec),
           },
           sender,
           logger,
@@ -2175,10 +2282,23 @@ async function startHost(
         sender(await answerAdopt(event));
         return;
       }
-      if (event.type === 'host.claude_settings_discard') {
+      if (event.type === 'host.claude_settings_set') {
         if (!isForThisHost(event.hostId, event.type)) return;
-        claudeSettingsFile.discard();
-        logger.info('Claude Code settings.json: the change made on this machine was discarded');
+        try {
+          writeClaudeSettingsJson(claudeHome, event.text);
+        } catch (err) {
+          if (!(err instanceof InvalidSettingsJsonError)) throw err;
+          const message = `host.claude_settings_set: ${selfHostId} — ${err.message}`;
+          logger.warn({ frameType: event.type }, message);
+          sender({
+            type: 'chat.error',
+            chatId: 'pending-spawn',
+            error: { code: 'claude_settings_invalid', message },
+            seq: OUT_OF_BAND_SEQ,
+          });
+          return;
+        }
+        logger.info('Claude Code settings.json edited');
         sender({
           type: 'claude_settings.updated',
           hostId: selfHostId,
@@ -2391,14 +2511,14 @@ async function startHost(
         logger.info({ epoch: event.epoch }, 'manager: released');
         return;
       }
-      if (event.type === 'host.set_home') {
-        // Broadcast to every machine: the named one becomes home, the rest lose
-        // it, so exactly one machine reports the flag.
+      if (event.type === 'host.set_manager') {
+        // Sent to a machine as it attaches and whenever the server moves the
+        // Manager: the named machine runs it, the rest do not.
         const nowHome = event.hostId === selfHostId;
-        if (nowHome !== isHomeHost) {
-          isHomeHost = nowHome;
-          hostStateStore.update({ isHomeHost: nowHome });
-          logger.info({ isHomeHost }, 'home-machine flag changed');
+        if (nowHome !== runsManager) {
+          runsManager = nowHome;
+          hostStateStore.update({ runsManager: nowHome });
+          logger.info({ runsManager }, 'manager-machine flag changed');
           if (nowHome) {
             createSpecialThreads();
             for (const state of daemon.list()) {
@@ -2614,11 +2734,35 @@ async function startHost(
         // believing it spawned a chat that does not exist (spec/03 § Cross-chat
         // tools — the call resolves inside the turn, success or failure).
         const spawnRequestId = event.requestId;
+        // A preference this machine does not hold is refused, never ignored: a
+        // chat that quietly ran on another account is the failure this stops.
+        if (
+          event.preferredAccountId !== undefined &&
+          !heldAccountsFor(event.model).some((a) => a.id === event.preferredAccountId)
+        ) {
+          const message = `account ${event.preferredAccountId} is not one of ${selfHostId}'s accounts for this backend`;
+          logger.error({ sourceChatId: event.sourceChatId }, `cross-host patch.spawn: ${message}`);
+          if (spawnRequestId !== undefined) {
+            sender({
+              type: 'patch.spawn.response',
+              requestId: spawnRequestId,
+              sourceChatId: event.sourceChatId,
+              hostId: selfHostId,
+              folder: event.folder,
+              ok: false,
+              error: { code: 'account_not_found', message },
+            });
+          }
+          return;
+        }
         void daemon
           .spawnChat({
             folder: event.folder,
             ...(event.model !== undefined ? { model: event.model } : {}),
             ...(event.prompt !== '' ? { prompt: event.prompt } : {}),
+            ...(event.preferredAccountId !== undefined
+              ? { preferredAccountId: event.preferredAccountId }
+              : {}),
           })
           .then((chatId) => {
             logger.info(
@@ -3001,6 +3145,28 @@ async function startHost(
         );
         return;
       }
+      if (event.type === 'chat.handoff_recover_request') {
+        // spec/04 § Handoff budget — Retry / Switch back / Continue in a linked
+        // fresh chat, offered by a failed provider switch. A refusal is said,
+        // never swallowed.
+        const { chatId, action } = event;
+        void daemon.recoverHandoff(chatId, action).then(
+          () => logger.info({ chatId, action }, 'handoff recovery run'),
+          (err: unknown) => {
+            logger.warn(
+              { chatId, action, err: (err as Error).message },
+              'handoff recovery refused',
+            );
+            sender({
+              type: 'chat.error',
+              chatId,
+              error: { code: 'sdk_error', message: (err as Error).message },
+              seq: OUT_OF_BAND_SEQ,
+            });
+          },
+        );
+        return;
+      }
       if (event.type === 'chat.account_request') {
         // spec/10 § Backend credentials — preferred account, from the chat's
         // next turn. Only an account this host holds for the chat's own
@@ -3029,6 +3195,35 @@ async function startHost(
         }
         daemon.setChatPreferredAccount(chatId, preferredAccountId);
         logger.info({ chatId, preferredAccountId }, 'chat preferred account set');
+        return;
+      }
+      if (event.type === 'chat.effort_request') {
+        // spec/04 § Effort — run this chat at another thinking-effort level
+        // from its NEXT turn, or clear the override with `effort: null`.
+        const { chatId, effort } = event;
+        void daemon.setChatEffort(chatId, effort).then(
+          () => {
+            // The acknowledgement is the `chat.state` setChatEffort emits,
+            // which carries the new effort — that is also what makes every
+            // OTHER surface holding this chat converge on it.
+            logger.info({ chatId, effort }, 'chat effort changed');
+          },
+          (err: unknown) => {
+            // NO FALLBACK: a refused change leaves the chat's effort exactly
+            // as it was.
+            const code = (err as { code?: string }).code ?? 'chat_not_found';
+            logger.warn(
+              { chatId, effort, err: (err as Error).message },
+              'chat effort change refused',
+            );
+            sender({
+              type: 'chat.error',
+              chatId,
+              error: { code: code as ChatErrorCode, message: (err as Error).message },
+              seq: OUT_OF_BAND_SEQ,
+            });
+          },
+        );
         return;
       }
       void handleServerEvent(event, daemon, sender, logger, {
@@ -3605,7 +3800,8 @@ async function startHost(
   // nothing, and would make every test that boots a host hit the network.
   if (config.sdkBackend === 'real') accountUsage.start();
 
-  const modelCatalog = new ModelCatalog({ runOnAccountWithCredit });
+  const modelLimits = new ModelLimits();
+  const modelCatalog = new ModelCatalog({ runOnAccountWithCredit, limits: modelLimits });
   // spec/08 § Recurrence — the job editor's natural-language schedule input.
   // Cheap one-shot Haiku, same gate as the title/status/digest generators.
   const translateRecurrenceRule = makeRecurrenceTranslator({
@@ -3708,10 +3904,17 @@ async function startHost(
      * at all cannot tell, and answers `false`: there is no account for anything
      * to be out of credit ON, so nothing should behave as though there were.
      */
-    hostOutOfCredit: () => {
+    hostOutOfCredit: (chatId) => {
       const store = readPatchStore(oauthOpts);
       if (!store) return false;
-      const { accounts, route } = claudeRoute(store);
+      // A chat locked to an account has nowhere else to go: for it the host is
+      // out of credit when ITS account is.
+      const { accounts, route } = claudeRoute(
+        store,
+        chatId === undefined
+          ? undefined
+          : daemon.list().find((c) => c.chatId === chatId)?.preferredAccountId,
+      );
       return accountRotation.usableAccount(accounts, route) === undefined;
     },
     // The strategy and how many held keys are out, so a blocked chat says
@@ -3810,6 +4013,7 @@ async function startHost(
     // asks the outgoing special-thread session to write for itself before
     // it's retired.
     generateDigest: makeDigestGenerator({ sdkBackend, runOnAccountWithCredit, logger }),
+    modelLimits,
     // spec/06 § Sweep — the sweep's one decision call, plus the cross-host
     // relays it uses to read a non-local candidate's recent messages and to
     // nudge/wake one (same relays `patch_history`/`patch_send_to` use).
@@ -3852,6 +4056,7 @@ async function startHost(
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
     sleepGuard: createSleepGuard({ logger }),
+    sleepWatch: createSleepWatch({ logger }),
     onTurnCommitted: (chatId) => {
       if (!(SPECIAL_THREAD_IDS as readonly string[]).includes(chatId)) return;
       const threadId = chatId as SpecialThreadId;
@@ -3876,6 +4081,12 @@ async function startHost(
       alwaysAllowed: () => hostStateStore.get().computerUseAlwaysAllowed === true,
       setAlwaysAllowed: () => hostStateStore.update({ computerUseAlwaysAllowed: true }),
     },
+    // spec/02 § Browser — In the Patch app: when the app is installed on this
+    // machine, the agent's browser lives in it.
+    appBrowser: appBrowserLink({
+      home: homedir(),
+      logger: logger.child({ component: 'app-browser' }),
+    }),
     // spec/02 § Browser — Route through.
     browserRouting: {
       target: () => browserRouteThrough,
@@ -3890,6 +4101,7 @@ async function startHost(
     // the store fresh each call (not cached) so an account added/removed
     // between spawns is reflected immediately.
   });
+  daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
   // Meeting mode (meeting.ts). Local Whisper only: a meeting is hours of audio,
   // so a paid STT backend is never an option here, configured or not.
   meetings = new MeetingManager({
@@ -3899,10 +4111,65 @@ async function startHost(
         throw new Error('host audio stack not ready — whisper unavailable');
       return dictationTranscribers.local.transcribeClip(wav, 'wav');
     },
-    analyse: makeMeetingAnalyser({ sdkBackend, runOnAccountWithCredit, cwd: hostCwd }),
+    // Voice separation needs the local sidecar and its speaker model; without
+    // DIARISE_MODEL_PATH the sidecar refuses rather than merging voices.
+    ...(process.env['DIARISE_MODEL_PATH']
+      ? {
+          transcribeVoices: async (session: string, wav: Buffer) => {
+            if (!(whisper instanceof LocalWhisperBackend))
+              throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
+            return whisper.transcribeVoices(session, wav);
+          },
+        }
+      : {}),
+    ...(process.env['VOICEPRINT_PATH']
+      ? { hasVoiceprint: () => existsSync(process.env['VOICEPRINT_PATH'] as string) }
+      : {}),
+    analyse: makeMeetingAnalyser({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.analysis,
+    }),
+    correct: makeMeetingCorrector({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.cleanup,
+    }),
+    writeup: makeMeetingWriteup({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.analysis,
+    }),
+    research: makeMeetingResearcher({
+      sdkBackend,
+      runOnAccountWithCredit,
+      cwd: hostCwd,
+      model: () => meetingModels.research,
+    }),
+    researchSeconds: () => meetingResearchSeconds,
+    // Optional user glossary: <patchHome>/meetings/glossary.txt, one term per line.
+    glossary: () => {
+      const f = join(config.patchHome, 'meetings', 'glossary.txt');
+      if (!existsSync(f)) return [];
+      return readFileSync(f, 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !l.startsWith('#'));
+    },
+    prompts: () => meetingPrompts,
     emit,
-    runAction: async (chatId, message) => {
-      await daemon.sendInput({ chatId, message, localId: randomUUID(), fromUser: true });
+    startChat: async (parentChatId, message) => {
+      const parent = daemon.chatState.get(parentChatId);
+      if (!parent) throw new Error(`meeting chat ${parentChatId} is not on this host`);
+      return daemon.spawnChat({
+        folder: parent.folder,
+        prompt: message,
+        ...(parent.model !== undefined ? { model: parent.model } : {}),
+        permissionMode: parent.permissionMode,
+      });
     },
     logger: logger.child({ component: 'meeting' }),
   });
@@ -3951,7 +4218,7 @@ async function startHost(
     },
     onChange: (registry) => link.send({ type: 'folders.updated', hostId: selfHostId, ...registry }),
   });
-  // The Manager and Speakers are the account's and live on the home machine
+  // The Manager and Speakers are the account's and live on the machine the server has running them
   // (spec/06 § Where special threads run), so only that machine creates them.
   function createSpecialThreads(): void {
     ensureSpecialThreads({
@@ -3963,7 +4230,7 @@ async function startHost(
       permissionModeDefault: daemon.permissionModeDefault(),
     });
   }
-  if (isHomeHost) createSpecialThreads();
+  if (runsManager) createSpecialThreads();
   // A Manager handoff that was waiting when this host last stopped.
   const waitingHandoff = hostStateStore.get().managerHandoff;
   if (waitingHandoff !== undefined && daemon.chatState.has('thread_manager')) {
@@ -4011,6 +4278,9 @@ async function startHost(
   });
   // patch_pad_* (spec/14 § Pads): the same round trip, for design spaces.
   const padClient = new PadClient({ emit, isLinkOnline: () => linkOnline });
+  // The shared accounts, asked of the server over the same link.
+  const accountsClient = new AccountsClient({ emit, isLinkOnline: () => linkOnline });
+  const serverApiClient = new ServerApiClient({ emit, isLinkOnline: () => linkOnline });
   // spec/04 § Message queueing — the server-run queue's tool-boundary pull.
   const queuePull = new QueuePullClient({ emit, isLinkOnline: () => linkOnline });
   pullQueuedFromServer = (chatId) => queuePull.pull(chatId);
@@ -4090,7 +4360,7 @@ async function startHost(
     // already knows how to do this safely: nothing happens with no update
     // published, and a busy machine defers until idle rather than killing a
     // running turn.
-    if (check.available || check.awaitingArtifact) {
+    if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
       const result = await applyUpdateOnce();
       if (!result.applied && !result.deferred) {
         logger.warn({ reason: result.message }, 'self-update: scheduled apply refused');
@@ -4172,6 +4442,7 @@ async function startHost(
   const armCreditRetryFromDisk = (): void => {
     const now = Date.now();
     let soonest: number | undefined;
+    let failedAt = now;
     for (const state of daemon.chatState.list()) {
       // Off META, and with no filter on the lifecycle status. This read used to
       // be `state.status === 'errored'` and then `state.lastError`, and neither
@@ -4185,7 +4456,10 @@ async function startHost(
       if (!last || !isAccountExhaustedError(last.message)) continue;
       const at = parseLimitResetsAt(last.message, last.at);
       if (at === undefined || at <= now) continue;
-      if (soonest === undefined || at < soonest) soonest = at;
+      if (soonest === undefined || at < soonest) {
+        soonest = at;
+        failedAt = last.at;
+      }
     }
     if (soonest === undefined) return;
     // WHICH key that chat spent is not on disk and is not worth inventing: a
@@ -4195,7 +4469,20 @@ async function startHost(
     // be seen as spent for the others to be tried at all.
     const first = readPatchStore(oauthOpts)?.accounts[0]?.id;
     if (first === undefined) return;
-    accountRotation.markExhausted(first, 'restored from a failed chat after restart', soonest);
+    //
+    // It is a GUESS, so it is stamped with the failure's own time, not the
+    // boot's: a usage probe a refresh cycle after that failure is then believed
+    // and clears it. Stamped "now" it would hold the priority-first key out for
+    // the whole reset while the key that really ran out was another one — every
+    // key sidelined, the turn stopped, nothing to switch to.
+    accountRotation.markExhausted(
+      first,
+      'restored from a failed chat after restart',
+      soonest,
+      failedAt,
+    );
+    // And ask now, so the guess is checked at boot rather than 10 minutes on.
+    void accountUsage?.refreshAll(true);
     logger.info({ at: soonest }, 'credit retry: re-armed after restart from a failed chat on disk');
     creditResume.arm();
   };
@@ -4236,8 +4523,8 @@ async function startHost(
       },
       claudeSettings: {
         snapshot: claudeSettingsSnapshot,
-        discard: () => {
-          claudeSettingsFile.discard();
+        set: (text) => {
+          writeClaudeSettingsJson(claudeHome, text);
           emit({
             type: 'claude_settings.updated',
             hostId: selfHostId,
@@ -4364,6 +4651,10 @@ async function startHost(
     emitWire: emit,
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,
+    accountsRpc: accountsClient.request,
+    serverApi: serverApiClient.request,
+    heldAccounts: heldAccountsFor,
+    meetingAgentEdit: (chatId, edit) => meetings!.agentEdit(chatId, edit),
     // Live link diagnostics + spec/12 link-drop control on the control UDS.
     serverLink: {
       diagnostics: () => link.diagnostics(),
@@ -4401,10 +4692,12 @@ async function startHost(
     },
   });
   const socketDir = dirname(config.socketPath);
-  if (!existsSync(socketDir)) {
+  if (!isNamedPipe(config.socketPath) && !existsSync(socketDir)) {
     mkdirSync(socketDir, { recursive: true });
   }
-  if (existsSync(config.socketPath)) {
+  // A Windows named pipe is not a file: nothing to unlink or chmod.
+  const socketIsFile = !isNamedPipe(config.socketPath);
+  if (socketIsFile && existsSync(config.socketPath)) {
     const stat = statSync(config.socketPath);
     if (!stat.isSocket()) {
       throw new Error(
@@ -4415,7 +4708,7 @@ async function startHost(
   }
   await app.listen({ path: config.socketPath });
   // Lock down the UDS — Fastify's listen({path}) doesn't expose mode.
-  chmodSync(config.socketPath, 0o600);
+  if (socketIsFile) chmodSync(config.socketPath, 0o600);
   logger.info({ socket: config.socketPath }, 'patch-daemon control listening on UDS');
   linkLegacySocket(config.socketPath);
 
@@ -4442,6 +4735,8 @@ async function startHost(
         }
       : {}),
   });
+  // Shared settings may have landed before the backend existed.
+  if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
     logger: logger.child({ component: 'hosted-stt' }),
     local: whisper,
@@ -6215,8 +6510,15 @@ export async function handleServerEvent(
       }
       case 'meeting.control_request': {
         const m = requireMeetings(accounts);
-        if (event.action === 'start') m.start(event.chatId);
-        else if (event.action === 'pause') m.pause(event.chatId);
+        if (event.action === 'start') m.start(event.chatId, event.settings);
+        else if (event.action === 'tune') {
+          if (!event.settings) throw new Error('meeting tune needs settings');
+          m.tune(event.chatId, event.settings);
+        } else if (event.action === 'name_voice') {
+          if (event.voice === undefined || event.name === undefined)
+            throw new Error('meeting name_voice needs voice and name');
+          m.nameVoice(event.chatId, event.voice, event.name);
+        } else if (event.action === 'pause') m.pause(event.chatId);
         else if (event.action === 'resume') m.resume(event.chatId);
         else await m.end(event.chatId);
         return;
@@ -6226,11 +6528,48 @@ export async function handleServerEvent(
           event.chatId,
           event.source,
           Buffer.from(event.audioBase64, 'base64'),
+          event.speakerName,
         );
         return;
       }
       case 'meeting.action_request': {
-        await requireMeetings(accounts).decide(event.chatId, event.actionId, event.decision);
+        const m = requireMeetings(accounts);
+        const given = [event.decision, event.owner, event.agentRuns].filter(
+          (x) => x !== undefined,
+        ).length;
+        if (given !== 1)
+          throw new Error('meeting.action_request needs exactly one of decision, owner, agentRuns');
+        if (event.agentRuns !== undefined) {
+          if (event.actionId !== undefined)
+            throw new Error('meeting.action_request agentRuns takes no actionId');
+          await m.setAgentRunsActions(event.chatId, event.agentRuns);
+          return;
+        }
+        if (event.actionId === undefined)
+          throw new Error('meeting.action_request needs an actionId');
+        if (event.owner !== undefined) m.setActionOwner(event.chatId, event.actionId, event.owner);
+        else if (event.decision !== undefined)
+          await m.decide(event.chatId, event.actionId, event.decision);
+        return;
+      }
+      case 'meeting.notes_request': {
+        requireMeetings(accounts).editNotes(event.chatId, event.edit);
+        return;
+      }
+      case 'meeting.research_request': {
+        requireMeetings(accounts).setResearch(event.chatId, event.on);
+        return;
+      }
+      case 'meeting.writeup_request': {
+        const m = requireMeetings(accounts);
+        if ((event.writeup === undefined) === (event.regenerate === undefined))
+          throw new Error('meeting.writeup_request needs exactly one of writeup, regenerate');
+        if (event.writeup !== undefined) m.setWriteup(event.chatId, event.writeup);
+        else await m.regenerateWriteup(event.chatId);
+        return;
+      }
+      case 'meeting.my_notes_request': {
+        requireMeetings(accounts).setMyNotes(event.chatId, event.text);
         return;
       }
       case 'chat.pin_request': {
@@ -6325,7 +6664,19 @@ export async function handleServerEvent(
         return;
       }
       case 'patch.browser_view.watch': {
-        daemon.browserViewWatch(event.chatId, event.tabId, event.watch);
+        daemon.browserViewWatch(event.chatId, event.tabId, event.watch, {
+          ...(event.viewerId !== undefined ? { viewerId: event.viewerId } : {}),
+          ...(event.viewport !== undefined ? { viewport: event.viewport } : {}),
+        });
+        return;
+      }
+      case 'patch.browser_view.input': {
+        // The user's own input: handed straight to the page, never logged.
+        void daemon.browserViewInput(event.chatId, event.tabId, event.input);
+        return;
+      }
+      case 'patch.browser_view.drive': {
+        daemon.browserViewDrive(event.chatId, event.tabId, event.driver);
         return;
       }
       case 'patch.browser_view.stop': {

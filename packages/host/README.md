@@ -80,7 +80,7 @@ host, or `patch hosts add`). The installer only ever redeems it; it mints
 nothing. It states what the host will be able to do on the machine before it
 registers anything, installs under the invoking user's own `~/.patch`, writes
 the `patch-cli` skill into `~/.claude/skills/patch-cli/`, registers the service
-(launchd on macOS, a systemd user unit on Linux, restart-on-failure +
+(launchd on macOS, a systemd user unit on Linux, always-restart +
 start-at-boot, no working directory), then pairs and starts.
 
 Exit codes: `64` bad usage, `65` wrong platform / incomplete artifact, `69`
@@ -301,8 +301,8 @@ implement the client side without re-deriving the construction.
 | `PATCH_DAEMON_LOCAL_KEY`    | yes                         | Bearer for the UDS HTTP `/chats*` endpoints.                                                                                 |
 | `PATCH_DAEMON_SOCKET`       | no (`~/.patch/daemon.sock`) | UDS path.                                                                                                                    |
 | `PATCH_HOME`                | no (`~/.patch`)             | Override daemon-local state root (test hook).                                                                                |
-| `PATCH_DAEMON_HEALTHZ_PORT` | no (`3001`)                 | TCP /healthz port.                                                                                                           |
-| `PATCH_DAEMON_HEALTHZ_HOST` | no (`0.0.0.0`)              | TCP /healthz host.                                                                                                           |
+| `PATCH_DAEMON_HEALTHZ_PORT` | no (off)                    | TCP /healthz port; unset opens no TCP port (socket only). Docker sets it.                                                    |
+| `PATCH_DAEMON_HEALTHZ_HOST` | no (`127.0.0.1`)            | TCP /healthz host.                                                                                                           |
 | `PATCH_DAEMON_WS_PORT`      | no (`3002`)                 | TCP server-daemon WS port.                                                                                                   |
 | `PATCH_DAEMON_WS_HOST`      | no (`0.0.0.0`)              | TCP server-daemon WS host.                                                                                                   |
 | `SDK_BACKEND`               | **yes** (no default)        | `mock` (unit tests / normal build rounds) or `real` (dev + integration round). No silent default — boot fails loud if unset. |

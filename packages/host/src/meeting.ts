@@ -12,21 +12,39 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { nameFixes } from './meetingVocab.js';
 import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
+  meetingSpeakerLabel,
   formatMeetingClock,
+  DEFAULT_MEETING_SETTINGS,
+  MeetingSettings,
+  applyMeetingNotesOp,
+  type MeetingNotesOp,
   type MeetingAction,
+  type MeetingAgentNotesEdit,
+  MeetingActionKind,
+  MeetingCardKind,
+  MeetingCardSource,
+  MeetingVerdict,
+  meetingCardProblem,
+  DEFAULT_MEETING_RESEARCH_SECONDS,
   type MeetingNow,
   MeetingState,
+  MeetingWriteup,
   type MeetingSummary,
   type MeetingTopic,
   type WireEvent,
 } from '@patch/wire';
 
-export const MEETING_ANALYSE_INTERVAL_MS = 30_000;
+export const MEETING_ANALYSE_INTERVAL_MS = DEFAULT_MEETING_SETTINGS.analyseSeconds * 1000;
+/** Longest provisional "Now" text kept on the state. */
+const MAX_LIVE_CHARS = 300;
 /** Transcript kept on the state; the oldest lines roll off past this. */
 const MAX_TRANSCRIPT_LINES = 4000;
+/** Most name corrections kept for the write-up's tooltips. */
+const NAME_FIX_LIMIT = 200;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
@@ -43,8 +61,20 @@ export const MeetingAnalysis = z
       }),
     ),
     actions: z.array(
-      z.object({ title: z.string(), why: z.string(), atSeconds: z.number().optional() }),
+      z
+        .object({
+          kind: MeetingActionKind,
+          owner: z.string().min(1).optional(),
+          title: z.string(),
+          why: z.string(),
+          atSeconds: z.number().optional(),
+        })
+        .refine((a) => a.kind !== 'other' || a.owner !== undefined, {
+          message: 'an action for someone else needs an owner',
+        }),
     ),
+    /** Names for `Them N` voices, where the transcript makes who they are clear. */
+    voices: z.array(z.object({ voice: z.number().int().min(1), name: z.string() })).optional(),
     summary: z
       .object({ headline: z.string(), bullets: z.array(z.string()) })
       .nullable()
@@ -52,6 +82,39 @@ export const MeetingAnalysis = z
   })
   .strict();
 export type MeetingAnalysis = z.infer<typeof MeetingAnalysis>;
+
+/** What the research pass returns; each card is checked by `meetingCardProblem` before it is shown. */
+export const MeetingResearchResult = z
+  .object({
+    cards: z.array(
+      z
+        .object({
+          kind: MeetingCardKind,
+          title: z.string().min(1),
+          atSeconds: z.number().optional(),
+          bullets: z.array(z.string().min(1)),
+          verdict: MeetingVerdict.optional(),
+          source: MeetingCardSource.optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type MeetingResearchResult = z.infer<typeof MeetingResearchResult>;
+
+export interface ResearchInput {
+  chatId: string;
+  lines: { clock: string; speaker: string; text: string }[];
+  /** Titles of cards already in the feed, so they are not researched again. */
+  existing: string[];
+  context: { now: string | null };
+}
+
+export interface MeetingPrompts {
+  now: string;
+  notes: string;
+  actions: string;
+}
 
 export interface AnalyseInput {
   chatId: string;
@@ -61,16 +124,79 @@ export interface AnalyseInput {
   /** The meeting has ended: also return `summary`. */
   final: boolean;
   elapsedMs: number;
+  /** Tom's own notes so far: they often name who is on the call. */
+  myNotes: string;
+  /** The account's three editable instruction blocks, read fresh each pass. */
+  prompts: MeetingPrompts;
+}
+
+export interface WriteupInput {
+  chatId: string;
+  /** Meeting date, e.g. "20 Oct". */
+  date: string;
+  durationMinutes: number;
+  /** The whole cleaned transcript. */
+  lines: { clock: string; speaker: string; text: string }[];
+  /** Tom's own notes, verbatim; the write-up keeps his words and marks them `mine`. */
+  myNotes: string;
+  /** The points the live pass built, for emphasis only; the transcript is the source. */
+  points: string[];
+  prompts: MeetingPrompts;
+}
+
+export interface CorrectInput {
+  chatId: string;
+  /** Terms the user wants spelt a particular way; each entry may list mishearings after a colon. */
+  glossary: string[];
+  /** What the notes already say, so names can be judged against the meeting's subject. */
+  context: { now: string | null; topics: string[] };
+  /** Lines already cleaned, immediately before `lines`, for continuity only. */
+  before: string[];
+  lines: { speaker: string; text: string }[];
 }
 
 export interface MeetingDeps {
   dir: string;
   /** Local Whisper only. */
   transcribe: (wav: Buffer) => Promise<string>;
+  /**
+   * Local diarisation: transcribes a `them` clip and says which distinct voice
+   * spoke each stretch. `session` is stable for the whole meeting so voice
+   * numbers stay the same across clips. Omitted: `them` stays one speaker.
+   */
+  transcribeVoices?: (session: string, wav: Buffer) => Promise<{ text: string; voice: number }[]>;
+  /**
+   * True once the owner has a voice print. Then every clip (mic included) is
+   * diarised and voice 0 is the owner: those lines are 'you' whichever channel
+   * they came in on, so in-room speech with no app still reads as the owner.
+   */
+  hasVoiceprint?: () => boolean;
   analyse: (input: AnalyseInput) => Promise<MeetingAnalysis>;
+  /**
+   * Cheap pass over new transcript lines that repairs mis-heard names and places
+   * before the notes are built. Returns one corrected text per input line.
+   * Omitted: transcripts go to analysis as transcribed.
+   */
+  correct?: (input: CorrectInput) => Promise<string[]>;
+  /**
+   * The final write-up, written when the meeting ends and on Regenerate.
+   * Omitted: no write-up is made and the Summary tab says so.
+   */
+  writeup?: (input: WriteupInput) => Promise<MeetingWriteup>;
+  /** Live research: one model plus web search over new transcript. Omitted: no research. */
+  research?: (input: ResearchInput) => Promise<MeetingResearchResult>;
+  /** Least seconds between research passes, read fresh so a Settings change applies mid-meeting. */
+  researchSeconds?: () => number;
+  /** The glossary, read fresh each pass so edits apply mid-meeting. */
+  glossary?: () => string[];
+  /** The meeting prompts, read fresh each pass so edits apply mid-meeting. */
+  prompts: () => MeetingPrompts;
   emit: (event: WireEvent) => void;
-  /** Run an action card through the chat's normal tools and permissions. */
-  runAction: (chatId: string, message: string) => Promise<void>;
+  /**
+   * Start a new chat linked to the meeting's chat, seeded with `message`, and
+   * return its id. It runs through the chat's normal tools and permissions.
+   */
+  startChat: (parentChatId: string, message: string) => Promise<string>;
   logger: Logger;
   now?: () => number;
   newId?: () => string;
@@ -86,9 +212,37 @@ interface Runtime {
   analysedUpTo: number;
   /** Index into `state.transcript` already given to the chat's model. */
   deliveredUpTo: number;
-  /** Serialises transcription and analysis so lines land in order. */
+  /** Index into `state.transcript` already through the correction pass. */
+  correctedUpTo: number;
+  /** Index into `state.transcript` already given to research. */
+  researchedUpTo: number;
+  /** Wall-clock ms the last research pass started; not persisted (a restart may research at once). */
+  lastResearchAt: number;
+  /** The pass in flight, so only one runs and tests can wait for it. */
+  researching: Promise<void> | undefined;
+  /** Serialises analysis and write-ups. */
   chain: Promise<void>;
+  /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
+  txChain: Promise<void>;
 }
+
+/** Consecutive segments from one voice read as one line. */
+function mergeVoiceRuns(
+  segs: { text: string; voice: number }[],
+): { text: string; voice: number }[] {
+  const out: { text: string; voice: number }[] = [];
+  for (const g of segs) {
+    const text = g.text.trim();
+    if (text === '') continue;
+    const last = out[out.length - 1];
+    if (last && last.voice === g.voice) last.text += ` ${text}`;
+    else out.push({ text, voice: g.voice });
+  }
+  return out;
+}
+
+/** The model complaining about its input instead of writing notes. */
+const META_TEXT = /\bno (new )?transcript\b|nothing (new )?to (process|summari[sz]e)/i;
 
 export class MeetingError extends Error {
   override readonly name = 'MeetingError';
@@ -119,7 +273,7 @@ export class MeetingManager {
 
   // ---- controls ----
 
-  start(chatId: string): void {
+  start(chatId: string, settings?: MeetingSettings): void {
     const existing = this.load(chatId);
     if (existing && existing.state.status !== 'ended') {
       throw new MeetingError(`chat ${chatId} already has a ${existing.state.status} meeting`);
@@ -132,19 +286,40 @@ export class MeetingManager {
         elapsedBaseMs: 0,
         resumedAt: t,
         now: null,
+        live: null,
+        settings: settings ? MeetingSettings.parse(settings) : { ...DEFAULT_MEETING_SETTINGS },
         summary: null,
         topics: [],
         actions: [],
+        cards: [],
+        researchOn: true,
+        agentEdits: [],
         transcript: [],
         error: null,
       },
       timer: undefined,
       analysedUpTo: 0,
       deliveredUpTo: 0,
+      correctedUpTo: 0,
+      researchedUpTo: 0,
+      lastResearchAt: 0,
+      researching: undefined,
       chain: Promise.resolve(),
+      txChain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
+    this.commit(chatId, rt);
+  }
+
+  /** Change how often the notes update; takes effect on the running timer now. */
+  tune(chatId: string, settings: MeetingSettings): void {
+    const rt = this.load(chatId);
+    if (!rt || rt.state.status === 'ended') {
+      throw new MeetingError(`chat ${chatId} has no running meeting to tune`);
+    }
+    rt.state.settings = MeetingSettings.parse(settings);
+    if (rt.state.status === 'live') this.armTimer(chatId, rt);
     this.commit(chatId, rt);
   }
 
@@ -157,8 +332,14 @@ export class MeetingManager {
     this.commit(chatId, rt);
   }
 
+  /** Resumes a paused meeting, or reopens one that has ended (its write-up stays until it ends again). */
   resume(chatId: string): void {
-    const rt = this.requireStatus(chatId, 'paused');
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (rt.state.status === 'live') {
+      throw new MeetingError(`chat ${chatId}'s meeting is live, not paused or ended`);
+    }
+    delete rt.state.endedAt;
     rt.state.status = 'live';
     rt.state.resumedAt = this.now();
     this.armTimer(chatId, rt);
@@ -178,13 +359,73 @@ export class MeetingManager {
     rt.state.endedAt = t;
     this.disarmTimer(rt);
     this.commit(chatId, rt);
-    await this.enqueue(rt, () => this.analyse(chatId, rt, true));
+    await rt.txChain;
+    await this.enqueue(rt, async () => {
+      await this.analyse(chatId, rt, true);
+      await this.writeUp(chatId, rt);
+    });
+  }
+
+  /** Writes the final write-up again from the transcript and My notes as they are now. */
+  async regenerateWriteup(chatId: string): Promise<void> {
+    const rt = this.requireStatus(chatId, 'ended');
+    await this.enqueue(rt, () => this.writeUp(chatId, rt));
+  }
+
+  /** Stores the user's edited write-up. Their wording is theirs: it is marked `mine`. */
+  setWriteup(chatId: string, writeup: MeetingWriteup): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    rt.state.writeup = MeetingWriteup.parse(writeup);
+    this.commit(chatId, rt);
+  }
+
+  private async writeUp(chatId: string, rt: Runtime): Promise<void> {
+    if (!this.deps.writeup) {
+      rt.state.writeupError = 'no write-up generator is configured on this host';
+      this.commit(chatId, rt);
+      return;
+    }
+    const s = rt.state;
+    try {
+      const w = await this.deps.writeup({
+        chatId,
+        date: new Date(s.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+        durationMinutes: Math.max(1, Math.round(s.elapsedBaseMs / 60_000)),
+        lines: s.transcript.map((l) => ({
+          clock: formatMeetingClock(l.at),
+          speaker: meetingSpeakerLabel(l, s.voices),
+          text: l.text,
+        })),
+        myNotes: s.myNotes ?? '',
+        points: s.topics.map((t) => t.title),
+        prompts: this.deps.prompts(),
+      });
+      const parsed = MeetingWriteup.parse(w);
+      if (
+        META_TEXT.test(
+          `${parsed.title} ${parsed.sections.flatMap((x) => x.items.map((i) => i.text)).join(' ')}`,
+        )
+      )
+        throw new MeetingError(`write-up returned model commentary: ${parsed.title}`);
+      s.writeup = parsed;
+      s.writeupError = null;
+    } catch (err) {
+      s.writeupError = `write-up failed: ${(err as Error).message}`;
+      this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: write-up failed');
+    }
+    this.commit(chatId, rt);
   }
 
   // ---- audio ----
 
   /** Resolves once the clip is transcribed and on the state. */
-  ingestAudio(chatId: string, source: 'mic' | 'system', wav: Buffer): Promise<void> {
+  ingestAudio(
+    chatId: string,
+    source: 'mic' | 'system',
+    wav: Buffer,
+    speakerName?: string,
+  ): Promise<void> {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
     // A surface flushes its last clip before sending End; later audio is a bug.
@@ -192,10 +433,18 @@ export class MeetingManager {
       throw new MeetingError(`chat ${chatId}'s meeting has ended`);
     }
     const at = meetingElapsedMs(rt.state, this.now());
-    return this.enqueue(rt, async () => {
-      let text: string;
+    const next = rt.txChain.then(async () => {
+      const speaker = source === 'mic' ? 'you' : 'them';
+      const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
+      let pieces: { text: string; voice?: number }[];
       try {
-        text = (await this.deps.transcribe(wav)).trim();
+        if (this.deps.transcribeVoices && (speaker === 'them' || printed)) {
+          pieces = mergeVoiceRuns(
+            await this.deps.transcribeVoices(`${chatId}:${rt.state.startedAt}`, wav),
+          );
+        } else {
+          pieces = [{ text: (await this.deps.transcribe(wav)).trim() }];
+        }
       } catch (err) {
         rt.state.error = `transcription failed: ${(err as Error).message}`;
         this.deps.logger.error(
@@ -205,49 +454,337 @@ export class MeetingManager {
         this.commit(chatId, rt);
         return;
       }
-      if (text === '') return;
-      rt.state.transcript.push({ at, speaker: source === 'mic' ? 'you' : 'them', text });
+      let added = false;
+      for (const { text, voice } of pieces) {
+        if (text === '') continue;
+        // Voice 0 is the owner's print; any other voice is someone else, even on the mic.
+        const lineSpeaker =
+          printed && voice !== undefined ? (voice === 0 ? 'you' : 'them') : speaker;
+        rt.state.transcript.push({
+          at,
+          speaker: lineSpeaker,
+          ...(voice !== undefined && voice !== 0 ? { voice } : {}),
+          ...(lineSpeaker === 'them' && speakerName ? { name: speakerName } : {}),
+          text,
+        });
+        added = true;
+      }
+      if (!added) return;
       if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
         const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
         rt.state.transcript.splice(0, drop);
         rt.analysedUpTo = Math.max(0, rt.analysedUpTo - drop);
         rt.deliveredUpTo = Math.max(0, rt.deliveredUpTo - drop);
+        rt.correctedUpTo = Math.max(0, rt.correctedUpTo - drop);
+        rt.researchedUpTo = Math.max(0, rt.researchedUpTo - drop);
       }
       rt.state.error = null;
       this.commit(chatId, rt);
     });
+    rt.txChain = next.catch(() => undefined);
+    return next;
+  }
+
+  /** Show `name` for a `them` voice (e.g. the user recognised Them 2 as Priya). */
+  nameVoice(chatId: string, voice: number, name: string): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (!rt.state.transcript.some((l) => l.voice === voice)) {
+      throw new MeetingError(`chat ${chatId}'s meeting has no voice ${voice}`);
+    }
+    rt.state.voices = { ...rt.state.voices, [String(voice)]: name };
+    this.commit(chatId, rt);
+  }
+
+  // ---- points ----
+
+  /** A user edit to a point or bullet, or a new point. Marks the point fixed so analysis leaves it. */
+  editNotes(chatId: string, edit: MeetingNotesOp): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    try {
+      applyMeetingNotesOp(rt.state.topics, edit);
+    } catch (err) {
+      throw new MeetingError(`cannot edit points in chat ${chatId}: ${(err as Error).message}`);
+    }
+    this.commit(chatId, rt);
+  }
+
+  /** Stores the user's My notes text with the meeting; it is theirs, so analysis never touches it. */
+  setMyNotes(chatId: string, text: string): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if ((rt.state.myNotes ?? '') === text) return;
+    rt.state.myNotes = text;
+    this.commit(chatId, rt);
+  }
+
+  // ---- research ----
+
+  /** The "Research as we go" checkbox. Turning it on starts from now, not from the start of the call. */
+  setResearch(chatId: string, on: boolean): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if ((rt.state.researchOn ?? false) === on) return;
+    rt.state.researchOn = on;
+    if (on) rt.researchedUpTo = rt.state.transcript.length;
+    this.commit(chatId, rt);
+  }
+
+  /** Resolves when the research pass in flight, if any, has landed. Exposed for tests. */
+  async settleResearch(chatId: string): Promise<void> {
+    await this.load(chatId)?.researching;
+  }
+
+  /**
+   * After an analysis pass: research the lines nobody has researched yet, at most
+   * once per `researchSeconds`, and never two at once. Throttled lines wait for
+   * the next pass rather than being dropped.
+   */
+  private maybeResearch(chatId: string, rt: Runtime): void {
+    const research = this.deps.research;
+    if (!research || rt.state.researchOn !== true || rt.state.status !== 'live') return;
+    if (rt.researching) return;
+    const fresh = rt.state.transcript.slice(rt.researchedUpTo);
+    if (fresh.length === 0) return;
+    const t = this.now();
+    const gapMs = (this.deps.researchSeconds?.() ?? DEFAULT_MEETING_RESEARCH_SECONDS) * 1000;
+    if (rt.lastResearchAt !== 0 && t - rt.lastResearchAt < gapMs) return;
+    rt.lastResearchAt = t;
+    const upTo = rt.state.transcript.length;
+    const cards = rt.state.cards ?? [];
+    const run = research({
+      chatId,
+      lines: fresh.map((l) => ({
+        clock: formatMeetingClock(l.at),
+        speaker: meetingSpeakerLabel(l),
+        text: l.text,
+      })),
+      existing: cards.map((c) => c.title),
+      context: { now: rt.state.now?.headline ?? null },
+    })
+      .then((res) => {
+        const rejected = this.addCards(chatId, rt, res);
+        rt.researchedUpTo = Math.max(rt.researchedUpTo, upTo);
+        rt.state.researchError = rejected.length
+          ? `research card not shown: ${rejected.join('; ')}`
+          : null;
+      })
+      .catch((err: unknown) => {
+        rt.state.researchError = `research failed: ${(err as Error).message}`;
+        this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: research failed');
+      })
+      .then(() => {
+        rt.researching = undefined;
+        this.commit(chatId, rt);
+      });
+    rt.researching = run;
+  }
+
+  /** Dedupes by term and keeps the cards that follow the sourcing rules; returns why each other was refused. */
+  private addCards(chatId: string, rt: Runtime, res: MeetingResearchResult): string[] {
+    const s = rt.state;
+    const cards = (s.cards ??= []);
+    const key = (x: string): string =>
+      x
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const rejected: string[] = [];
+    for (const c of res.cards) {
+      const k = key(c.title);
+      if (k === '' || cards.some((x) => x.key === k)) continue;
+      const problem = meetingCardProblem(c);
+      if (problem) {
+        rejected.push(`"${c.title}": ${problem}`);
+        continue;
+      }
+      cards.push({
+        id: this.newId(),
+        kind: c.kind,
+        key: k,
+        title: c.title,
+        at: c.atSeconds !== undefined ? c.atSeconds * 1000 : meetingElapsedMs(s, this.now()),
+        bullets: c.bullets,
+        ...(c.verdict !== undefined ? { verdict: c.verdict } : {}),
+        ...(c.source !== undefined ? { source: c.source } : {}),
+      });
+    }
+    if (rejected.length)
+      this.deps.logger.error({ chatId, rejected }, 'meeting: research cards rejected');
+    return rejected;
+  }
+
+  // ---- agent edits ----
+
+  /**
+   * The chat agent changing the notes. The point it touches becomes fixed, so a
+   * later analysis pass leaves it alone. Returns the chip label for its reply.
+   */
+  agentEdit(chatId: string, edit: MeetingAgentNotesEdit): string {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    const s = rt.state;
+    const find = (id: string): MeetingTopic => {
+      const t = s.topics.find((x) => x.id === id);
+      if (!t) throw new MeetingError(`no point ${id} in chat ${chatId}`);
+      return t;
+    };
+    let label: string;
+    switch (edit.op) {
+      case 'add_point':
+        s.topics.push({
+          id: this.newId(),
+          at: meetingElapsedMs(s, this.now()),
+          title: edit.title,
+          points: edit.bullets ?? [],
+          decided: edit.decided ?? false,
+          fixed: true,
+        });
+        label = 'Added to points';
+        break;
+      case 'edit_point': {
+        const t = find(edit.topicId);
+        if (edit.title === undefined && edit.bullets === undefined)
+          throw new MeetingError('edit_point needs a title or bullets');
+        if (edit.title !== undefined) t.title = edit.title;
+        if (edit.bullets !== undefined) t.points = edit.bullets;
+        t.fixed = true;
+        label = 'Edited a point';
+        break;
+      }
+      case 'add_research': {
+        const t = find(edit.topicId);
+        const problem = meetingCardProblem({
+          kind: 'explained',
+          title: t.title,
+          bullets: edit.bullets,
+          source: edit.source,
+        });
+        if (problem) throw new MeetingError(`research not added: ${problem}`);
+        const tail = edit.source ? ` (${edit.source.name}: ${edit.source.url})` : '';
+        const added = edit.bullets.map((b, i) => (i === edit.bullets.length - 1 ? b + tail : b));
+        t.points = [...t.points, ...added];
+        t.fixed = true;
+        label = 'Added research to points';
+        break;
+      }
+      case 'set_summary':
+        s.summary = { headline: edit.headline, bullets: edit.bullets };
+        label = 'Edited the summary';
+        break;
+    }
+    (s.agentEdits ??= []).push({ id: this.newId(), at: this.now(), label });
+    this.commit(chatId, rt);
+    return label;
   }
 
   // ---- actions ----
 
-  async decide(chatId: string, actionId: string, decision: 'do' | 'dismiss'): Promise<void> {
+  /**
+   * `do` runs an agent action in a linked chat and `chat` starts one on an
+   * action of Tom's; both leave the row pointing at that chat. Someone else's
+   * action never starts a chat. `dismiss` drops any row.
+   */
+  async decide(
+    chatId: string,
+    actionId: string,
+    decision: 'do' | 'chat' | 'dismiss',
+  ): Promise<void> {
     const rt = this.load(chatId);
     const action = rt?.state.actions.find((a) => a.id === actionId);
     if (!rt || !action) throw new MeetingError(`no action ${actionId} in chat ${chatId}`);
-    if (action.status !== 'pending') {
+    if (action.status === 'dismissed' || action.status === 'done') {
       throw new MeetingError(`action ${actionId} is already ${action.status}`);
     }
-    const key = `${chatId}:${actionId}`;
-    if (this.deciding.has(key)) {
-      throw new MeetingError(`action ${actionId} is already being decided`);
-    }
-    if (decision === 'do') {
-      // Dispatch first: if the chat refuses the turn the card must stay pending.
-      this.deciding.add(key);
-      try {
-        await this.deps.runAction(
-          chatId,
-          `Do this action from the meeting: ${action.title}\nWhy it came up: ${action.why}`,
-        );
-      } finally {
-        this.deciding.delete(key);
-      }
-      action.status = 'done';
-    } else {
+    if (decision === 'dismiss') {
       action.status = 'dismissed';
+      action.resolvedAt = this.now();
+      this.commit(chatId, rt);
+      return;
     }
+    const wanted = decision === 'do' ? 'agent' : 'mine';
+    if (action.kind !== wanted) {
+      throw new MeetingError(
+        `action ${actionId} is ${action.kind}'s, so it cannot be "${decision}"`,
+      );
+    }
+    await this.startActionChat(chatId, rt, action);
+  }
+
+  /** Reassigns someone else's action to a speaker or `Everyone`. */
+  setActionOwner(chatId: string, actionId: string, owner: string): void {
+    const rt = this.load(chatId);
+    const action = rt?.state.actions.find((a) => a.id === actionId);
+    if (!rt || !action) throw new MeetingError(`no action ${actionId} in chat ${chatId}`);
+    if (action.kind !== 'other') throw new MeetingError(`action ${actionId} has no owner to set`);
+    if (action.owner === owner) return;
+    action.owner = owner;
+    this.commit(chatId, rt);
+  }
+
+  /** The tray's checkbox. Turning it on starts every agent action already waiting. */
+  async setAgentRunsActions(chatId: string, on: boolean): Promise<void> {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    rt.state.agentRunsActions = on;
+    this.commit(chatId, rt);
+    if (on) await this.startWaitingAgentActions(chatId, rt);
+  }
+
+  private async startWaitingAgentActions(chatId: string, rt: Runtime): Promise<void> {
+    for (const a of rt.state.actions) {
+      if (a.kind !== 'agent' || a.status !== 'pending') continue;
+      try {
+        await this.startActionChat(chatId, rt, a);
+      } catch (err) {
+        this.deps.logger.error(
+          { chatId, actionId: a.id, err: (err as Error).message },
+          'meeting: agent action did not start',
+        );
+        rt.state.error = `could not start "${a.title}": ${(err as Error).message}`;
+        this.commit(chatId, rt);
+      }
+    }
+  }
+
+  private async startActionChat(chatId: string, rt: Runtime, action: MeetingAction): Promise<void> {
+    const key = `${chatId}:${action.id}`;
+    if (this.deciding.has(key)) {
+      throw new MeetingError(`action ${action.id} is already being started`);
+    }
+    if (action.status !== 'pending') {
+      throw new MeetingError(`action ${action.id} is already ${action.status}`);
+    }
+    this.deciding.add(key);
+    try {
+      // Start first: if the chat cannot be made the row must stay pending.
+      action.chatId = await this.deps.startChat(chatId, this.seedFor(rt.state, action));
+    } finally {
+      this.deciding.delete(key);
+    }
+    action.status = 'running';
     action.resolvedAt = this.now();
     this.commit(chatId, rt);
+  }
+
+  /** The first message of an action's chat: the action and enough of the meeting to act on it. */
+  private seedFor(s: MeetingState, a: MeetingAction): string {
+    const lines = [
+      a.kind === 'agent'
+        ? `Do this action from a meeting: ${a.title}`
+        : `Help me with this action from a meeting: ${a.title}`,
+      `Why it came up: ${a.why}`,
+      '',
+      'Meeting context:',
+    ];
+    const headline = s.summary?.headline ?? s.now?.headline;
+    if (headline) lines.push(`Gist: ${headline}`);
+    for (const t of s.topics)
+      lines.push(`- ${formatMeetingClock(t.at)} ${t.title}: ${t.points.join('; ')}`);
+    if (s.myNotes?.trim()) lines.push('My notes:', s.myNotes.trim());
+    return lines.join('\n');
   }
 
   // ---- chat context ----
@@ -266,7 +803,7 @@ export class MeetingManager {
     const s = rt.state;
     const lines: string[] = [
       '<system-reminder>',
-      `A meeting is ${s.status} in this chat (running ${formatMeetingClock(meetingElapsedMs(s, this.now()))}). Answer questions about it from what follows; look things up and use your tools when asked. Do not take actions on other people\'s behalf unless the user asks.`,
+      `A meeting is ${s.status} in this chat (running ${formatMeetingClock(meetingElapsedMs(s, this.now()))}). Answer questions about it from what follows; look things up and use your tools when asked. Do not take actions on other people\'s behalf unless the user asks. When the user asks you to add to or change the notes (a point, research on a point, the summary), do it with the patch_meeting_notes tool and say what you changed; never state a figure without a source.`,
     ];
     if (s.summary)
       lines.push(`Summary: ${s.summary.headline}`, ...s.summary.bullets.map((b) => `- ${b}`));
@@ -277,17 +814,23 @@ export class MeetingManager {
         'Discussed:',
         ...s.topics.map(
           (t) =>
-            `- ${formatMeetingClock(t.at)} ${t.title}${t.decided ? ' (decided)' : ''}: ${t.points.join('; ')}`,
+            `- [${t.id}] ${formatMeetingClock(t.at)} ${t.title}${t.decided ? ' (decided)' : ''}: ${t.points.join('; ')}`,
         ),
       );
-    const pending = s.actions.filter((a) => a.status === 'pending');
+    if (s.cards?.length)
+      lines.push(
+        "Research cards already on the user's panel:",
+        ...s.cards.map(
+          (c) =>
+            `- ${c.kind} "${c.title}"${c.verdict ? ` (${c.verdict})` : ''}: ${c.bullets.join('; ')}${c.source ? ` [${c.source.name} ${c.source.url}]` : ''}`,
+        ),
+      );
+    const pending = s.actions.filter((a) => a.status === 'pending' && a.kind === 'mine');
     if (pending.length)
       lines.push("Pending actions on the user's panel:", ...pending.map((a) => `- ${a.title}`));
     if (fresh.length) {
       let tx = fresh
-        .map(
-          (l) => `[${formatMeetingClock(l.at)} ${l.speaker === 'you' ? 'You' : 'Them'}] ${l.text}`,
-        )
+        .map((l) => `[${formatMeetingClock(l.at)} ${meetingSpeakerLabel(l, s.voices)}] ${l.text}`)
         .join('\n');
       if (tx.length > MAX_PROMPT_TRANSCRIPT_CHARS)
         tx = `…${tx.slice(-MAX_PROMPT_TRANSCRIPT_CHARS)}`;
@@ -309,28 +852,66 @@ export class MeetingManager {
     const rt = this.load(chatId);
     if (!rt || rt.state.status !== 'live') return;
     await this.enqueue(rt, () => this.analyse(chatId, rt, false));
+    // Also when there was nothing new to analyse: lines held back by the throttle are still waiting.
+    this.maybeResearch(chatId, rt);
+  }
+
+  /** Repairs mis-heard names in the lines not yet analysed. A failure throws: the pass is retried. */
+  private async correctLines(chatId: string, rt: Runtime): Promise<void> {
+    if (!this.deps.correct) return;
+    const from = Math.max(rt.analysedUpTo, rt.correctedUpTo);
+    const upTo = rt.state.transcript.length;
+    const lines = rt.state.transcript.slice(from, upTo);
+    if (lines.length === 0) return;
+    const out = await this.deps.correct({
+      chatId,
+      glossary: this.deps.glossary?.() ?? [],
+      context: {
+        now: rt.state.now?.headline ?? null,
+        topics: rt.state.topics.map((t) => t.title),
+      },
+      before: rt.state.transcript.slice(Math.max(0, from - 5), from).map((l) => l.text),
+      lines: lines.map((l) => ({ speaker: meetingSpeakerLabel(l, rt.state.voices), text: l.text })),
+    });
+    if (out.length !== lines.length)
+      throw new MeetingError(`correction returned ${out.length} lines for ${lines.length}`);
+    lines.forEach((l, i) => {
+      const fixed = out[i] as string;
+      const found = nameFixes(l.text, fixed);
+      if (found.length > 0) {
+        const have = rt.state.nameFixes ?? [];
+        for (const f of found)
+          if (!have.some((x) => x.from === f.from && x.to === f.to)) have.push(f);
+        rt.state.nameFixes = have.slice(-NAME_FIX_LIMIT);
+      }
+      l.text = fixed;
+    });
+    rt.correctedUpTo = upTo;
   }
 
   private async analyse(chatId: string, rt: Runtime, final: boolean): Promise<void> {
-    const newLines = rt.state.transcript.slice(rt.analysedUpTo);
     if (
-      newLines.length === 0 &&
+      rt.state.transcript.length - rt.analysedUpTo === 0 &&
       !(final && rt.state.summary === null && rt.state.transcript.length > 0)
     ) {
       return;
     }
     const upTo = rt.state.transcript.length;
     try {
+      await this.correctLines(chatId, rt);
+      const newLines = rt.state.transcript.slice(rt.analysedUpTo, upTo);
       const raw = await this.deps.analyse({
         chatId,
         previous: { now: rt.state.now, topics: rt.state.topics, actions: rt.state.actions },
         newLines: newLines.map((l) => ({
           clock: formatMeetingClock(l.at),
-          speaker: l.speaker === 'you' ? 'You' : 'Them',
+          speaker: meetingSpeakerLabel(l, rt.state.voices),
           text: l.text,
         })),
         final,
         elapsedMs: meetingElapsedMs(rt.state, this.now()),
+        myNotes: rt.state.myNotes ?? '',
+        prompts: this.deps.prompts(),
       });
       const a = MeetingAnalysis.parse(raw);
       this.merge(rt, a, final);
@@ -341,14 +922,19 @@ export class MeetingManager {
       this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: analysis failed');
     }
     this.commit(chatId, rt);
+    if (rt.state.agentRunsActions) await this.startWaitingAgentActions(chatId, rt);
   }
 
   private merge(rt: Runtime, a: MeetingAnalysis, final: boolean): void {
     const s = rt.state;
+    if (!final && META_TEXT.test(`${a.now.headline} ${a.now.bullets.join(' ')}`))
+      throw new MeetingError(`analysis returned model commentary: ${a.now.headline}`);
     s.now = final ? s.now : a.now;
     for (const t of a.topics) {
       const existing = t.id ? s.topics.find((x) => x.id === t.id) : undefined;
       const at = t.atSeconds !== undefined ? t.atSeconds * 1000 : meetingElapsedMs(s, this.now());
+      // Tom's own words are fixed input: a later pass never rewrites them.
+      if (existing?.fixed) continue;
       if (existing) {
         existing.title = t.title;
         existing.points = t.points;
@@ -363,11 +949,19 @@ export class MeetingManager {
         });
       }
     }
+    for (const v of a.voices ?? []) {
+      const name = v.name.trim();
+      if (name === '' || s.voices?.[String(v.voice)] !== undefined) continue;
+      if (!s.transcript.some((l) => l.voice === v.voice)) continue;
+      s.voices = { ...s.voices, [String(v.voice)]: name };
+    }
     const norm = (x: string): string => x.toLowerCase().replace(/\s+/g, ' ').trim();
     for (const act of a.actions) {
       if (s.actions.some((x) => norm(x.title) === norm(act.title))) continue;
       s.actions.push({
         id: this.newId(),
+        kind: act.kind,
+        ...(act.owner !== undefined ? { owner: act.owner } : {}),
         title: act.title,
         why: act.why,
         at: act.atSeconds !== undefined ? act.atSeconds * 1000 : meetingElapsedMs(s, this.now()),
@@ -376,6 +970,15 @@ export class MeetingManager {
     }
     if (final) {
       if (!a.summary) throw new MeetingError('final analysis returned no summary');
+      if (META_TEXT.test(`${a.summary.headline} ${a.summary.bullets.join(' ')}`)) {
+        // Nothing new to add since the last pass is a normal ending: the
+        // summary is what the meeting already found, not an error.
+        s.summary = {
+          headline: s.now?.headline ?? s.topics[0]?.title ?? 'Meeting ended',
+          bullets: s.topics.map((t) => t.title),
+        };
+        return;
+      }
       s.summary = a.summary as MeetingSummary;
     }
   }
@@ -402,7 +1005,14 @@ export class MeetingManager {
       void this.tick(chatId).catch((err: unknown) =>
         this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: tick crashed'),
       );
-    }, this.deps.intervalMs ?? MEETING_ANALYSE_INTERVAL_MS);
+    }, this.intervalMs(rt));
+  }
+
+  /** A test-injected interval wins; otherwise the meeting's own setting. */
+  private intervalMs(rt: Runtime): number {
+    if (this.deps.intervalMs !== undefined) return this.deps.intervalMs;
+    const secs = rt.state.settings?.analyseSeconds;
+    return secs !== undefined ? secs * 1000 : MEETING_ANALYSE_INTERVAL_MS;
   }
 
   private disarmTimer(rt: Runtime): void {
@@ -430,6 +1040,7 @@ export class MeetingManager {
       state: unknown;
       analysedUpTo: number;
       deliveredUpTo: number;
+      researchedUpTo?: number;
     };
     const state = MeetingState.parse(parsed.state);
     const rt: Runtime = {
@@ -437,7 +1048,12 @@ export class MeetingManager {
       timer: undefined,
       analysedUpTo: parsed.analysedUpTo,
       deliveredUpTo: parsed.deliveredUpTo,
+      correctedUpTo: parsed.analysedUpTo,
+      researchedUpTo: parsed.researchedUpTo ?? parsed.analysedUpTo,
+      lastResearchAt: 0,
+      researching: undefined,
       chain: Promise.resolve(),
+      txChain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
     // A host restart finds the meeting `live` with no audio coming: park it as
@@ -451,6 +1067,10 @@ export class MeetingManager {
   }
 
   private commit(chatId: string, rt: Runtime): void {
+    // The provisional Now: whatever has been said that the notes do not cover yet.
+    const unanalysed = rt.state.transcript.slice(rt.analysedUpTo);
+    const text = unanalysed.map((l) => l.text).join(' ');
+    rt.state.live = rt.state.status === 'ended' || text === '' ? null : text.slice(-MAX_LIVE_CHARS);
     const f = this.file(chatId);
     const tmp = `${f}.tmp`;
     writeFileSync(
@@ -459,6 +1079,7 @@ export class MeetingManager {
         state: rt.state,
         analysedUpTo: rt.analysedUpTo,
         deliveredUpTo: rt.deliveredUpTo,
+        researchedUpTo: rt.researchedUpTo,
       }),
     );
     renameSync(tmp, f);

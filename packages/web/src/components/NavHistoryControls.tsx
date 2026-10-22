@@ -14,13 +14,20 @@ import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { shortcutTitle } from '../lib/shortcuts.js';
+import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
+import { matchesAction } from '../lib/keymap.js';
+import { useUiStore } from '../stores/uiStore.js';
 
 const ICON = 16;
 
 // The stack is module-level, not per-instance: every route renders its own
 // NavHistoryControls, so an instance-owned stack was thrown away on each route
 // change and Back from Settings had nowhere to go.
+// Anywhere ⌘←/⌘→ already mean something to the OS or the widget: text fields,
+// rich-text editors and the terminal.
+const TEXT_EDITING_SELECTOR =
+  'input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .xterm';
+
 const navHistory: { stack: string[]; index: number } = { stack: [], index: -1 };
 
 /** Forget all visited locations (tests). */
@@ -33,6 +40,8 @@ export function NavHistoryControls(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const key = location.pathname + location.search;
+  const backGlyphs = useActionGlyphs('historyBack');
+  const forwardGlyphs = useActionGlyphs('historyForward');
 
   // The stack and cursor live in `navHistory` (module-level, mutated in place);
   // a version counter forces the re-render that recomputes the disabled states.
@@ -97,12 +106,13 @@ export function NavHistoryControls(): JSX.Element {
   // them would make it impossible to jump within a line of composer text.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const overrides = useUiStore.getState().shortcutOverrides;
+      const back = matchesAction(e, 'historyBack', overrides);
+      if (!back && !matchesAction(e, 'historyForward', overrides)) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.(TEXT_EDITING_SELECTOR)) return;
       e.preventDefault();
-      if (e.key === 'ArrowLeft') goBack();
+      if (back) goBack();
       else goForward();
     }
     window.addEventListener('keydown', onKeyDown);
@@ -116,7 +126,7 @@ export function NavHistoryControls(): JSX.Element {
         className="nav-history-btn"
         data-testid="nav-back"
         aria-label="Back"
-        title={shortcutTitle('Back', '⌘←')}
+        title={shortcutTitle('Back', backGlyphs)}
         disabled={!canBack}
         onClick={goBack}
       >
@@ -127,7 +137,7 @@ export function NavHistoryControls(): JSX.Element {
         className="nav-history-btn"
         data-testid="nav-forward"
         aria-label="Forward"
-        title={shortcutTitle('Forward', '⌘→')}
+        title={shortcutTitle('Forward', forwardGlyphs)}
         disabled={!canForward}
         onClick={goForward}
       >

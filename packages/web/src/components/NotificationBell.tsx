@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import { useNotificationsStore } from '../stores/notificationsStore.js';
 import { relativeTime } from '../lib/relativeTime.js';
@@ -90,13 +90,41 @@ export function NotificationBell(): JSX.Element {
                         onClick={() => {
                           void markRead({ ids: [n.id] });
                           setOpen(false);
-                          navigate(`/chats/${n.chatId}`);
+                          if (n.jobId !== undefined) {
+                            navigate(`/jobs/${n.jobId}?run=${n.runTs ?? ''}`);
+                          } else {
+                            navigate(`/chats/${n.chatId}`);
+                          }
                         }}
                       >
                         <span className="notif-dot" aria-hidden />
                         <span className="notif-msg">{n.message}</span>
                         <span className="notif-time">{relativeTime(n.sentAt)}</span>
                       </button>
+                      {n.jobId !== undefined ? (
+                        <span className="notif-links">
+                          <Link
+                            to={`/jobs/${n.jobId}?run=${n.runTs ?? ''}`}
+                            data-testid={`notif-run-${n.id}`}
+                            onClick={() => {
+                              void markRead({ ids: [n.id] });
+                              setOpen(false);
+                            }}
+                          >
+                            Run
+                          </Link>
+                          <Link
+                            to={`/jobs/${n.jobId}`}
+                            data-testid={`notif-job-${n.id}`}
+                            onClick={() => {
+                              void markRead({ ids: [n.id] });
+                              setOpen(false);
+                            }}
+                          >
+                            Job
+                          </Link>
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

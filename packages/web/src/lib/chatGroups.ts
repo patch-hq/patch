@@ -8,12 +8,29 @@ import { deriveBadge } from '../stores/chatStore.js';
 import type { ChatRow, FolderRosterEntry } from '../stores/types.js';
 import { isHidden, isSnoozed } from '../stores/types.js';
 
+/**
+ * One project in the sidebar. Paths are scoped to their host (spec/04 § Spawn:
+ * the same string on two hosts is two directories), so the group is the
+ * (host, folder) pair, never the path alone. `key` is that pair as one string,
+ * for React keys and the collapsed-state list.
+ */
+export interface FolderGroup {
+  key: string;
+  hostId: string;
+  folder: string;
+  rows: ChatRow[];
+}
+
+export function folderGroupKey(hostId: string, folder: string): string {
+  return `${hostId}\u0000${folder}`;
+}
+
 export interface Grouped {
   manager: ChatRow | null;
   speakers: ChatRow | null;
   pinned: ChatRow[];
   /** Each project's active rows. Snoozed chats appear only under the Snoozed tab. */
-  folders: Array<{ folder: string; rows: ChatRow[] }>;
+  folders: FolderGroup[];
   archived: ChatRow[];
   /** Soft-deleted chats (spec/04 § Lifecycle → E5). */
   deleted: ChatRow[];
@@ -50,7 +67,7 @@ export interface Grouped {
    * "all archived" half of that promise survive a reload — the store's rows
    * come from `GET /api/chats`, which excludes archived chats.
    */
-  recentFolders: string[];
+  recentFolders: Array<{ key: string; hostId: string; folder: string }>;
 }
 
 const MANAGER_THREAD_ID = 'thread_manager';
@@ -72,11 +89,12 @@ function isSpecialThread(chatId: string): boolean {
  * chats (nothing to do) and soft-deleted chats (cold storage; archiving them
  * would drag them back out of Deleted).
  */
-export function chatsInProject(all: ChatRow[], folder: string): ChatRow[] {
+export function chatsInProject(all: ChatRow[], folder: string, hostId: string): ChatRow[] {
   return all
     .filter(
       (c) =>
         c.folder === folder &&
+        c.hostId === hostId &&
         !isSpecialThread(c.chatId) &&
         c.status !== 'archived' &&
         c.status !== 'deleted',
@@ -132,9 +150,7 @@ function cmpChats(sort: ChatSort): (a: ChatRow, b: ChatRow) => number {
 }
 
 /** Comparator for two projects: by the newest row (or, for name, the folder's basename). */
-function cmpFolders(
-  sort: ChatSort,
-): (a: { folder: string; rows: ChatRow[] }, b: { folder: string; rows: ChatRow[] }) => number {
+function cmpFolders(sort: ChatSort): (a: FolderGroup, b: FolderGroup) => number {
   const newest = (rows: ChatRow[], key: 'lastUserActivity' | 'lastUpdated'): number =>
     Math.max(...rows.map((r) => r[key]), 0);
   const base = (f: string): string => f.split('/').filter(Boolean).pop() ?? f;
@@ -143,17 +159,20 @@ function cmpFolders(
       case 'last-action':
         return (
           newest(b.rows, 'lastUserActivity') - newest(a.rows, 'lastUserActivity') ||
-          a.folder.localeCompare(b.folder)
+          a.folder.localeCompare(b.folder) ||
+          a.hostId.localeCompare(b.hostId)
         );
       case 'last-update':
         return (
           newest(b.rows, 'lastUpdated') - newest(a.rows, 'lastUpdated') ||
-          a.folder.localeCompare(b.folder)
+          a.folder.localeCompare(b.folder) ||
+          a.hostId.localeCompare(b.hostId)
         );
       case 'name':
         return (
           base(a.folder).localeCompare(base(b.folder), undefined, { sensitivity: 'base' }) ||
-          a.folder.localeCompare(b.folder)
+          a.folder.localeCompare(b.folder) ||
+          a.hostId.localeCompare(b.hostId)
         );
     }
   };
@@ -175,7 +194,7 @@ export function groupChats(
   // spec/04 § Snooze: "snoozed" is derived from the clock, so a snooze that
   // lapses simply stops matching — no event needed to bring the chat back.
   const now = Date.now();
-  const byFolder = new Map<string, ChatRow[]>();
+  const byFolder = new Map<string, FolderGroup>();
   const snoozedFolders = new Set<string>();
   // Folder → most-recent lastUpdated across its non-deleted chats, for the
   // Recent folders list. Special threads never contribute (E2).
@@ -189,12 +208,13 @@ export function groupChats(
   // raises a folder's recency from a live row, and `deleted` rows still retire
   // a folder outright (handled after the loop).
   const folderRecency = new Map<string, number>();
-  for (const entry of folderRoster) {
-    folderRecency.set(
-      entry.folder,
-      Math.max(folderRecency.get(entry.folder) ?? 0, entry.lastUpdated),
-    );
-  }
+  const recentRefs = new Map<string, { key: string; hostId: string; folder: string }>();
+  const noteRecent = (hostId: string, folder: string, lastUpdated: number): void => {
+    const key = folderGroupKey(hostId, folder);
+    recentRefs.set(key, { key, hostId, folder });
+    folderRecency.set(key, Math.max(folderRecency.get(key) ?? 0, lastUpdated));
+  };
+  for (const entry of folderRoster) noteRecent(entry.hostId, entry.folder, entry.lastUpdated);
   // Folders retired since the roster was fetched. A soft-delete is the one
   // thing that DOES drop a folder, so a stale roster row must not resurrect it.
   const deletedFolders = new Set<string>();
@@ -213,7 +233,7 @@ export function groupChats(
     }
     if (c.status === 'deleted') {
       deleted.push(c);
-      if (c.folder) deletedFolders.add(c.folder);
+      if (c.folder) deletedFolders.add(folderGroupKey(c.hostId, c.folder));
       continue;
     }
     // Automations (spec/14 § Sidebar): non-exclusive — deliberately no
@@ -224,8 +244,8 @@ export function groupChats(
     }
     // A non-deleted chat's folder is a "recent folder" (active or archived).
     if (c.folder) {
-      liveFolders.add(c.folder);
-      folderRecency.set(c.folder, Math.max(folderRecency.get(c.folder) ?? 0, c.lastUpdated));
+      liveFolders.add(folderGroupKey(c.hostId, c.folder));
+      noteRecent(c.hostId, c.folder, c.lastUpdated);
     }
     if (c.status === 'archived') {
       archived.push(c);
@@ -237,16 +257,17 @@ export function groupChats(
     }
     if (isSnoozed(c, now)) {
       snoozed.push(c);
-      if (c.folder) snoozedFolders.add(c.folder);
+      if (c.folder) snoozedFolders.add(folderGroupKey(c.hostId, c.folder));
       continue;
     }
     if (c.pinned) {
       pinned.push(c);
       continue;
     }
-    const list = byFolder.get(c.folder) ?? [];
-    list.push(c);
-    byFolder.set(c.folder, list);
+    const key = folderGroupKey(c.hostId, c.folder);
+    const group = byFolder.get(key);
+    if (group) group.rows.push(c);
+    else byFolder.set(key, { key, hostId: c.hostId, folder: c.folder, rows: [c] });
   }
   // Every sort ends in a deterministic tiebreaker (chatId for chats, folder
   // path for folders). Without it, rows that tie on the primary key fall back
@@ -262,11 +283,10 @@ export function groupChats(
   const folderCmp = cmpFolders(
     ordering.groupSort === 'same-as-chats' ? ordering.chatSort : ordering.groupSort,
   );
-  const folders = Array.from(byFolder.keys())
-    .map((folder) => {
-      const rows = byFolder.get(folder) ?? [];
-      rows.sort(cmpChats(ordering.chatSort));
-      return { folder, rows };
+  const folders = Array.from(byFolder.values())
+    .map((group) => {
+      group.rows.sort(cmpChats(ordering.chatSort));
+      return group;
     })
     .sort(folderCmp);
   archived.sort((a, b) => b.lastUpdated - a.lastUpdated || cmpId(a, b));
@@ -283,7 +303,17 @@ export function groupChats(
   // the list rejoining the back of it on update, rather than cutting to the
   // front, is what makes the list stop reshuffling out from under you.
   automations.sort((a, b) => a.lastUpdated - b.lastUpdated || cmpId(a, b));
-  hidden.sort((a, b) => a.lastUpdated - b.lastUpdated || cmpId(a, b));
+  // Hidden: chats still working lead (FIFO, as above); settled ones follow,
+  // most recent first, so a stale finished run (12 days old) sinks to the
+  // bottom instead of heading the list.
+  const hiddenLive = (c: ChatRow): boolean =>
+    c.activity === 'running' || c.activity === 'awaiting-permission';
+  hidden.sort((a, b) => {
+    const la = hiddenLive(a);
+    const lb = hiddenLive(b);
+    if (la !== lb) return la ? -1 : 1;
+    return (la ? a.lastUpdated - b.lastUpdated : b.lastUpdated - a.lastUpdated) || cmpId(a, b);
+  });
   // Recent folders: most-recently-active first, but ONLY folders that aren't
   // already shown above as an open Folders section or a pinned chat — otherwise
   // the same folder is listed twice. Recent folders then reads as "other
@@ -296,12 +326,12 @@ export function groupChats(
     if (!liveFolders.has(folder)) folderRecency.delete(folder);
   }
   // A project whose only chats are snoozed is not listed anywhere but Snoozed.
-  const shownFolders = new Set<string>([...byFolder.keys(), ...snoozedFolders]);
-  for (const p of pinned) if (p.folder) shownFolders.add(p.folder);
+  const shownFolders = new Set<string>([...Array.from(byFolder.keys()), ...snoozedFolders]);
+  for (const p of pinned) if (p.folder) shownFolders.add(folderGroupKey(p.hostId, p.folder));
   const recentFolders = Array.from(folderRecency.entries())
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([folder]) => folder)
-    .filter((folder) => !shownFolders.has(folder));
+    .map(([key]) => recentRefs.get(key)!)
+    .filter((ref) => !shownFolders.has(ref.key));
   return {
     manager,
     speakers,
@@ -379,6 +409,10 @@ export const CHAT_STATE_FILTERS: readonly ChatStateFilter[] = [
 export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boolean {
   if (filter === 'all') return true;
   const badge = deriveBadge(row);
+  // A chat the host has said nothing about yet (no events, no state frame) has
+  // just been spawned and is waiting on its first turn: pending, so Working —
+  // never Ready, which its idle `read` badge would otherwise put it in.
+  const pending = row.lastSeq === 0 && row.lastUpdated === 0;
   switch (filter) {
     case 'failed':
       return badge === 'errored';
@@ -390,7 +424,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       // working and being shown only mid-turn chats would hide exactly the
       // work that is easiest to forget about, since nothing about it is on
       // screen.
-      return badge === 'working' || badge === 'background' || badge === 'monitoring';
+      return pending || badge === 'working' || badge === 'background' || badge === 'monitoring';
     case 'waiting':
       // Anything paused ON THE USER: a permission prompt, or an agent that
       // stopped on a question.
@@ -398,7 +432,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         badge === 'permission' || (row.statusKind === 'question' && row.statusDeclared === true)
       );
     case 'done':
-      return badge === 'done' || badge === 'read';
+      return !pending && (badge === 'done' || badge === 'read');
   }
 }
 

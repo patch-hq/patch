@@ -75,6 +75,17 @@ describe('message copy button', () => {
     expect(screen.getAllByTestId('msg-copy-trigger')).toHaveLength(2);
   });
 
+  it('sits in the hover strip beside the message time, not in a gutter', () => {
+    seedChat([
+      { seq: 2, kind: 'message', role: 'assistant', content: 'answer', at: 0, messageAt: 1 },
+    ]);
+    renderChat();
+    const strip = screen.getByTestId('msg-meta');
+    expect(strip).toContainElement(screen.getByTestId('msg-copy-trigger'));
+    expect(strip).toContainElement(screen.getByTestId('msg-side-thread-trigger'));
+    expect(strip).toContainElement(screen.getByTestId('msg-time'));
+  });
+
   it('copies the markdown source and shows a tick', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });

@@ -3,9 +3,8 @@ import { hostSecrets, tokenExpiry, refreshOpenAI, refreshClaude } from './provid
 // Shared settings (spec/01 § Settings).
 //
 // The server is the source of truth for every setting that is not tied to one
-// machine — backend accounts, provider keys, agent behaviour, voice, Claude
-// Code's settings.json — and every host runs from the copy in the last
-// `settings.snapshot` it was sent. A host never changes a shared setting
+// machine — backend accounts, provider keys, agent behaviour, voice — and every host runs from the copy in the
+// last `settings.snapshot` it was sent. A host never changes a shared setting
 // itself: a change starts here, is committed here, and is then pushed.
 //
 // Four files under the data dir:
@@ -67,7 +66,6 @@ const HOST_HELD_KEYS = [
   'harnessToolsPrompt',
   'harnessSkills',
   'harnessMemoryEnabled',
-  'claudeSettings',
 ] as const satisfies readonly (keyof SharedSettings)[];
 
 /** A refusal a REST caller should see verbatim, with its HTTP status. */
@@ -123,24 +121,6 @@ function writeAtomic(path: string, text: string, mode?: number): void {
   const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
   writeFileSync(tmp, text, mode !== undefined ? { encoding: 'utf8', mode } : 'utf8');
   renameSync(tmp, path);
-}
-
-/** A JSON object's text, or `''`. Anything else is refused naming the field. */
-function assertJsonObjectText(field: string, text: string): void {
-  if (text.trim() === '') return;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    throw new SettingsError(
-      400,
-      'invalid_input',
-      `${field} is not valid JSON: ${(err as Error).message}`,
-    );
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new SettingsError(400, 'invalid_input', `${field} must be a JSON object`);
-  }
 }
 
 export interface ValidateOpenAIKey {
@@ -327,7 +307,11 @@ export class SharedSettingsService {
     // A file written before a setting existed lacks that key; it gains the
     // default rather than failing the whole read. A key that is present but
     // wrong is a corrupt file, and that stops the server.
-    const raw = JSON.parse(readFileSync(this.settingsPath, 'utf8')) as unknown;
+    const raw = JSON.parse(readFileSync(this.settingsPath, 'utf8')) as Record<string, unknown>;
+    // `claudeSettings` was a shared setting once; settings.json is now each
+    // host's own file (spec/02 § Claude Code settings), so the retired key is
+    // dropped on read and gone from the file at the next write.
+    delete raw['claudeSettings'];
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
       throw new Error(`${this.settingsPath} is not valid settings: ${parsed.error.message}`);
@@ -712,11 +696,6 @@ export class SharedSettingsService {
       case 'provider-key':
         this.setProviderKey(result.id, result.value);
         return;
-      case 'claude-settings': {
-        const which = id === 'darwin' || id === 'linux' ? id : 'shared';
-        this.update({ claudeSettings: { ...this.settings.claudeSettings, [which]: result.text } });
-        return;
-      }
       default:
         throw new Error(`unexpected adopt result ${(result as { kind: string }).kind}`);
     }
@@ -728,11 +707,6 @@ export class SharedSettingsService {
   update(patch: z.input<typeof SharedSettingsPatch>): SharedSettings {
     const parsed = SharedSettingsPatch.safeParse(patch);
     if (!parsed.success) throw new SettingsError(400, 'invalid_input', parsed.error.message);
-    if (parsed.data.claudeSettings) {
-      for (const k of ['shared', 'darwin', 'linux'] as const) {
-        assertJsonObjectText(`claudeSettings.${k}`, parsed.data.claudeSettings[k]);
-      }
-    }
     for (const [id, mode] of Object.entries(parsed.data.providerPermissionDefaults ?? {})) {
       const modes = (HARNESS_PERMISSION_MODES as Record<string, readonly string[]>)[id];
       if (!modes) throw new SettingsError(400, 'invalid_input', `unknown provider: ${id}`);

@@ -43,7 +43,6 @@ import {
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DeleteIcon } from './icons.js';
-import { JobMenuItem } from './JobBar.js';
 import { NavHistoryControls } from './NavHistoryControls.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { folderLabel } from '../lib/folderLabel.js';
@@ -52,7 +51,7 @@ import { openChatInNewWindow } from '../lib/newWindow.js';
 import { SnoozeMenu } from './SnoozeMenu.js';
 import { MoveChatModal } from './MoveChatModal.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
-import { shortcutTitle } from '../lib/shortcuts.js';
+import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { failed } from '../lib/errorCopy.js';
 import { isPlainEnter } from '../lib/submitChord.js';
 
@@ -93,6 +92,7 @@ function WorkersIndicator({ chatId }: { chatId: string }): JSX.Element | null {
 }
 
 export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
+  const archiveGlyphs = useActionGlyphs('archiveCurrent');
   const setDeleted = useChatStore((s) => s.setDeleted);
   const setArchived = useChatStore((s) => s.setArchived);
   const setHidden = useChatStore((s) => s.setHidden);
@@ -424,7 +424,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 data-testid="action-archive"
                 aria-label={archived ? 'Unarchive chat' : 'Archive chat'}
                 aria-pressed={archived}
-                title={shortcutTitle(archived ? 'Unarchive' : 'Archive', '⌘⌥A')}
+                title={shortcutTitle(archived ? 'Unarchive' : 'Archive', archiveGlyphs)}
                 onClick={toggleArchive}
               >
                 {archived ? (
@@ -655,9 +655,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 >
                   Terminal
                 </button>
-                {row.jobId ? (
-                  <JobMenuItem jobId={row.jobId} onDone={() => setHamburgerOpen(false)} />
-                ) : null}
                 <button
                   type="button"
                   className="head-menu-item"

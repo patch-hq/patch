@@ -126,6 +126,31 @@ describe('createWhisper', () => {
     expect(call.init.body).toBeInstanceOf(FormData);
   });
 
+  test('groq backend sends the model chosen in Settings, and the default when cleared', async () => {
+    const models: unknown[] = [];
+    const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
+      models.push((init?.body as FormData).get('model'));
+      return new Response(JSON.stringify({ text: 'x' }), { status: 200 });
+    }) as typeof fetch;
+    const w = new GroqWhisperBackend({
+      backend: 'groq',
+      logger,
+      groqApiKey: 'gsk_test',
+      fetchImpl: fakeFetch,
+    });
+    w.useModel('whisper-large-v3');
+    await w.transcribe(new Int16Array(160));
+    w.useModel('');
+    await w.transcribe(new Int16Array(160));
+    expect(models).toEqual(['whisper-large-v3', 'whisper-large-v3-turbo']);
+  });
+
+  test('local backend refuses a Settings model it cannot load, loudly', async () => {
+    const w = createWhisper({ backend: 'local', logger, localModelPath: '/tmp' });
+    w.useModel?.('/no/such/whisper-model');
+    await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/does not exist/);
+  });
+
   test('local backend lazy-fails when neither sidecar URL nor model path is set', async () => {
     const w = createWhisper({ backend: 'local', logger });
     // With no URL the host would spawn the sidecar — but that needs a model
@@ -355,6 +380,72 @@ describe('LocalWhisperBackend (external localSidecarUrl — operator-owned proce
     }
   });
 
+  test('transcribeVoices() sends the diarise session with the WAV samples and returns voiced segments', async () => {
+    let sent: Record<string, unknown> = {};
+    let binaryLength = -1;
+    const server = await startWsServer((sock) => {
+      sock.on('message', (raw: Buffer, isBinary: boolean) => {
+        if (isBinary) {
+          binaryLength = raw.byteLength;
+          return;
+        }
+        sent = parseJson(raw);
+        sock.send(
+          JSON.stringify({
+            requestId: sent.requestId,
+            text: 'a b',
+            segments: [
+              { start: 0, end: 1, text: 'a', voice: 1 },
+              { start: 1, end: 2, text: 'b', voice: 2 },
+            ],
+          }),
+        );
+      });
+    });
+    const w = new LocalWhisperBackend({
+      backend: 'local',
+      logger,
+      localSidecarUrl: `ws://127.0.0.1:${server.port}`,
+    });
+    try {
+      const wav = pcm16ToWav(new Int16Array([1, 2, 3, 4]), 16000);
+      const out = await w.transcribeVoices('chat:1', wav);
+      expect(out).toEqual([
+        { text: 'a', voice: 1 },
+        { text: 'b', voice: 2 },
+      ]);
+      expect(sent.diarise).toBe('chat:1');
+      expect(sent.samples).toBe(4);
+      expect(binaryLength).toBe(8);
+    } finally {
+      await w.close();
+      await server.close();
+    }
+  });
+
+  test('transcribeVoices() surfaces a sidecar error and a missing .segments', async () => {
+    const server = await startWsServer((sock) => {
+      sock.on('message', (raw: Buffer, isBinary: boolean) => {
+        if (isBinary) return;
+        const msg = parseJson(raw);
+        sock.send(JSON.stringify({ requestId: msg.requestId, text: 'x' }));
+      });
+    });
+    const w = new LocalWhisperBackend({
+      backend: 'local',
+      logger,
+      localSidecarUrl: `ws://127.0.0.1:${server.port}`,
+    });
+    try {
+      const wav = pcm16ToWav(new Int16Array([1, 2]), 16000);
+      await expect(w.transcribeVoices('s', wav)).rejects.toThrow(/missing \.segments/);
+      await expect(w.transcribeVoices('s', Buffer.from('nope'))).rejects.toThrow(/not a WAV/);
+    } finally {
+      await w.close();
+      await server.close();
+    }
+  });
+
   test('transcribe() rejects when the sidecar response is missing .text', async () => {
     const server = await startWsServer((sock) => {
       sock.on('message', (raw: Buffer, isBinary: boolean) => {
@@ -572,5 +663,60 @@ describe('pcm16ToWav', () => {
     expect(wav.readUInt32LE(24)).toBe(16000); // sample rate
     expect(wav.readUInt16LE(22)).toBe(1); // channels
     expect(wav.readUInt16LE(34)).toBe(16); // bps
+  });
+});
+
+describe('transcription prompt (meeting vocabulary)', () => {
+  test('groq sends the prompt with a clip and with streamed audio, and none when absent', async () => {
+    const forms: FormData[] = [];
+    const fakeFetch = (async (_u: string, init: RequestInit) => {
+      forms.push(init.body as FormData);
+      return new Response(JSON.stringify({ text: 'ok' }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const w = new GroqWhisperBackend({
+      backend: 'groq',
+      logger,
+      groqApiKey: 'gsk_test',
+      fetchImpl: fakeFetch,
+    });
+    await w.transcribeClip(Buffer.from('c'), 'wav', { prompt: 'Terms: WECA.' });
+    await w.transcribe(new Int16Array([1, 2]), { prompt: 'Terms: CRSTS.' });
+    await w.transcribeClip(Buffer.from('c'), 'wav');
+    expect(forms.map((f) => f.get('prompt'))).toEqual(['Terms: WECA.', 'Terms: CRSTS.', null]);
+  });
+
+  test('local backend unwraps a wav clip and sends the prompt in the request envelope', async () => {
+    const seen: Record<string, unknown>[] = [];
+    let binary = 0;
+    const server = await startWsServer((sock) => {
+      sock.on('message', (raw: Buffer, isBinary: boolean) => {
+        if (isBinary) {
+          binary = raw.byteLength;
+          return;
+        }
+        const msg = parseJson(raw);
+        seen.push(msg);
+        sock.send(JSON.stringify({ requestId: msg.requestId, text: 'ok' }));
+      });
+    });
+    const w = createWhisper({
+      backend: 'local',
+      logger,
+      localSidecarUrl: `ws://127.0.0.1:${server.port}`,
+    });
+    try {
+      const wav = pcm16ToWav(new Int16Array([5, 6, 7]), 16000);
+      expect(await w.transcribeClip(wav, 'wav', { prompt: 'Participants: Priya Shah.' })).toBe(
+        'ok',
+      );
+      expect(seen[0]?.samples).toBe(3);
+      expect(seen[0]?.prompt).toBe('Participants: Priya Shah.');
+      expect(binary).toBe(6);
+      await w.transcribeClip(wav, 'wav');
+      expect(seen[1]).not.toHaveProperty('prompt');
+    } finally {
+      await w.close();
+      await server.close();
+    }
   });
 });

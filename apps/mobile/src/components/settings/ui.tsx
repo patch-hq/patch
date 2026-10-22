@@ -436,10 +436,13 @@ export function Chips<T extends string>({
   testIDPrefix,
   labelPrefix,
   labelOf = (o) => o,
+  hintOf,
   disabled = false,
 }: {
   /** What a chip reads as; the value itself when omitted. */
   labelOf?: (value: T) => string;
+  /** What a chip does, said as its accessibility hint and under the row for the chosen one. */
+  hintOf?: (value: T) => string;
   options: readonly T[];
   selected: T;
   onSelect: (value: T) => void;
@@ -458,6 +461,7 @@ export function Chips<T extends string>({
             testID={`${testIDPrefix}-${o}`}
             accessibilityRole="button"
             accessibilityLabel={`${labelPrefix} ${labelOf(o)}`}
+            accessibilityHint={hintOf?.(o)}
             accessibilityState={{ selected: on, disabled }}
             disabled={disabled}
             onPress={() => onSelect(o)}
@@ -483,6 +487,14 @@ export function Chips<T extends string>({
           </Pressable>
         );
       })}
+      {hintOf ? (
+        <Text
+          testID={`${testIDPrefix}-hint`}
+          style={{ ...typography.meta, color: colors.ink3, width: '100%' }}
+        >
+          {hintOf(selected)}
+        </Text>
+      ) : null}
     </View>
   );
 }

@@ -57,7 +57,7 @@ describe('server-run queue through the hub', () => {
       updateAvailable: false,
       permissionModeDefault: 'auto',
       permissionOverrides: 0,
-      isHomeHost: true,
+      runsManager: true,
       ...(hostTakesQueue ? { serverQueue: true } : {}),
       backends: [],
       components: [],

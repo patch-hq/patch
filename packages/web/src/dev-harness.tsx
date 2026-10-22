@@ -51,7 +51,7 @@ import { usePreferencesStore } from './stores/preferencesStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
 import { useBrowserHandoffStore } from './stores/browserHandoffStore.js';
-import type { MeetingState } from '@patch/wire';
+import { applyMeetingNotesOp, type MeetingState } from '@patch/wire';
 import { useDraftStore } from './stores/draftStore.js';
 import { useComposerDraftStore } from './stores/composerDraftStore.js';
 import type { ChatEventEntry } from './stores/chatStore.js';
@@ -236,6 +236,22 @@ useChatStore.getState().hydrate([
   // A chat whose permission mode was changed part-way through (spec/02 §
   // Permission mode) — drives the mode-change line e2e. On its own fixture so
   // the transcript-spacing and markdown specs' chats keep their exact shape.
+  // A chat whose provider switch went through the budgeted handoff and then
+  // failed once (spec/04 § Handoff budget) — drives the divider, the three
+  // recovery actions and the linked-chat row e2e.
+  {
+    chatId: 'chat_handoff',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'long switch',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle' as const,
+    status: 'active' as const,
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 5,
+  },
   {
     chatId: 'chat_perm_mode',
     hostId: 'd1',
@@ -1006,6 +1022,20 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A chat whose last turn failed with the provider's context_length_exceeded.
+  {
+    chatId: 'chat_context_overflow',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'context-overflow-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'errored',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A chat blocked on a usage limit with NO resume armed — auto-resume off
   // (spec/12). The host publishes the structured block and no
   // `rateLimitResumingAt`, and reports the failure in patch's own words; the
@@ -1724,9 +1754,37 @@ const questionStyleEntries: ChatEventEntry[] = [
     at: 5,
   },
 ];
+// A budgeted provider switch (spec/04 § Handoff budget): the divider the host
+// words, the error after a second overflow, and the row left by a linked chat.
+const handoffEntries: ChatEventEntry[] = [
+  { seq: 1, kind: 'message', role: 'user', content: 'carry on with the refactor', at: 1 },
+  {
+    seq: 2,
+    kind: 'handoff',
+    content:
+      'Handed off to openai/gpt-6-astra \u2014 carried 120 of 4,100 entries; older history readable on demand \u00b7 ~38,000 of 190,000 tokens',
+    at: 2,
+  },
+  {
+    seq: 3,
+    kind: 'error',
+    errorCode: 'handoff_overflow',
+    content:
+      'The target model rejected the handoff as too large, even after re-planning it smaller.',
+    at: 3,
+  },
+  {
+    seq: 4,
+    kind: 'handoff_link',
+    content: 'Continued in a linked fresh chat',
+    linkedChatId: 'chat_md',
+    at: 4,
+  },
+];
 useChatStore.setState((s) => ({
   timelines: {
     ...s.timelines,
+    chat_handoff: handoffEntries,
     chat_bus: [...markdownReply, ...monitorEntries],
     chat_md: [...markdownReply, compactionEntry],
     chat_table: wideTableReply,
@@ -1811,6 +1869,7 @@ useChatStore.setState((s) => ({
         at: 1,
       },
     ],
+    chat_context_overflow: [{ seq: 0, kind: 'message', role: 'user', content: 'carry on', at: 0 }],
     chat_limit_blocked: [
       { seq: 0, kind: 'message', role: 'user', content: 'ship the thing', at: 0 },
     ],
@@ -2418,9 +2477,48 @@ Object.assign(window, { __startVoiceNote: startVoiceNote, __cancelVoiceNote: can
 // throughout), which is why nothing captured outbound sends before.
 const wsSent: WireEvent[] = [];
 (window as unknown as { __wsSent: WireEvent[] }).__wsSent = wsSent;
+// The harness has no host, so a points edit is applied here with the same
+// reducer the host runs, and answered the way the host does (`meeting.state`).
+const harnessSend = (event: WireEvent): void => {
+  wsSent.push(event);
+  if (event.type === 'meeting.action_request') {
+    // The host's side of the tray: reassign, dismiss, start a chat, flip the checkbox.
+    const cur = useMeetingStore.getState().byChat[event.chatId];
+    if (!cur) return;
+    const next = structuredClone(cur);
+    if (event.agentRuns !== undefined) next.agentRunsActions = event.agentRuns;
+    const a = next.actions.find((x) => x.id === event.actionId);
+    if (a && event.owner !== undefined) a.owner = event.owner;
+    if (a && event.decision === 'dismiss') a.status = 'dismissed';
+    if (a && (event.decision === 'do' || event.decision === 'chat')) {
+      a.status = 'running';
+      a.chatId = 'chat_child';
+    }
+    useMeetingStore.getState().apply(event.chatId, next);
+    return;
+  }
+  if (event.type === 'meeting.writeup_request') {
+    const cur = useMeetingStore.getState().byChat[event.chatId];
+    if (cur && event.writeup)
+      useMeetingStore.getState().apply(event.chatId, { ...cur, writeup: event.writeup });
+    return;
+  }
+  if (event.type === 'meeting.research_request') {
+    const cur = useMeetingStore.getState().byChat[event.chatId];
+    if (cur) useMeetingStore.getState().apply(event.chatId, { ...cur, researchOn: event.on });
+    return;
+  }
+  if (event.type !== 'meeting.notes_request' && event.type !== 'meeting.my_notes_request') return;
+  const cur = useMeetingStore.getState().byChat[event.chatId];
+  if (!cur) return;
+  const next = structuredClone(cur);
+  if (event.type === 'meeting.my_notes_request') next.myNotes = event.text;
+  else applyMeetingNotesOp(next.topics, event.edit);
+  useMeetingStore.getState().apply(event.chatId, next);
+};
 setActiveWs({
-  send: (event: WireEvent) => wsSent.push(event),
-  safeSend: (event: WireEvent) => wsSent.push(event),
+  send: harnessSend,
+  safeSend: harnessSend,
 } as unknown as PatchWs);
 // The model catalogue (spec/14 § Model selector). Seeded, not fetched: the
 // harness has no backend, and the chat header's model crumb is a live control —
@@ -2493,6 +2591,9 @@ if (new URLSearchParams(window.location.search).get('sideThreads') === '1') {
       side(2, 'Alternatives'),
     ],
   } as never);
+  // The panel is docked to its chat's tab and closes when that tab is not the
+  // focused one, so the chat has to be the focused tab here too.
+  useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'chat_forked' });
   useSideThreadsStore.getState().openThread('chat_forked', 'chat_forked-b2');
 }
 // The failure `chat_limit_blocked` died on, as the host reports it: patch's
@@ -2506,6 +2607,19 @@ useChatStore.getState().applyEvent({
     code: 'sdk_error',
     message:
       'Usage limit reached on Default \u2014 the weekly window. It resets at 2026-09-15T04:00:00Z.',
+  },
+  seq: 1,
+  causeSeq: 0,
+});
+// The 400 an over-long conversation draws from the provider, attached to the
+// turn that failed.
+useChatStore.getState().applyEvent({
+  type: 'chat.error',
+  chatId: 'chat_context_overflow',
+  error: {
+    code: 'sdk_error',
+    message:
+      'HTTP 400 context_length_exceeded: Your input exceeds the context window of this model. Please adjust your input and try again.',
   },
   seq: 1,
   causeSeq: 0,
@@ -2654,7 +2768,7 @@ usePresenceStore.getState().setHosts([
       permissionModeDefault: 'auto',
       permissionOverrides: 0,
       defaultModel: 'claude-opus-5',
-      isHomeHost: true,
+      runsManager: true,
       audioRelayHost: '127.0.0.1:3003',
       backends: [],
       components: [],
@@ -2711,7 +2825,7 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
       hostId: 'd2',
       online: true,
       lastSeenAt: Date.now(),
-      host: home?.host ? { ...home.host, hostId: 'd2', hostName: 'mac', isHomeHost: false } : null,
+      host: home?.host ? { ...home.host, hostId: 'd2', hostName: 'mac', runsManager: false } : null,
       accounts: [
         {
           hostId: 'd2',
@@ -2729,6 +2843,27 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
 // demonstrates the read-only mirror; `?chat=thread_manager` shows the full
 // composer.
 const params = new URLSearchParams(window.location.search);
+
+// The sidebar polls job alerts (spec/08 § Logs). The harness has no server, so
+// unanswered that poll failed and the sidebar drew "Job alerts failed to load"
+// in every spec — which pushed the layout specs' measurements out. The harness
+// answers "none" itself; a spec that serves its own alerts through page.route
+// opts out with `?jobAlerts=live`, so its requests reach the network.
+if (params.get('jobAlerts') !== 'live') {
+  const fetchBeforeAlerts = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (new URL(url, window.location.href).pathname === '/api/job-alerts') {
+      return Promise.resolve(
+        new Response(JSON.stringify({ alerts: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
+    return fetchBeforeAlerts(input, init);
+  }) as typeof window.fetch;
+}
 const chatId = params.get('chat') ?? 'thread_speakers';
 
 // A fixture's own tab-opening call has to run AFTER `ChatPaneRoute`'s mount
@@ -3166,6 +3301,7 @@ if (voiceParam === 'call' || voiceParam === 'hands-free') {
 // `?meeting=live|paused|ended` seeds the chat with a meeting (meeting mode), and
 // `window.__meetingStore` lets a spec play the host's `meeting.state` replies.
 (window as unknown as { __meetingStore?: typeof useMeetingStore }).__meetingStore = useMeetingStore;
+(window as unknown as { __chatStore?: typeof useChatStore }).__chatStore = useChatStore;
 const meetingParam = params.get('meeting');
 if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'ended') {
   const t0 = Date.now();
@@ -3193,26 +3329,54 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
             bullets: ['3 decisions · 5 actions'],
           }
         : null,
+    ...(meetingParam === 'ended'
+      ? {
+          nameFixes: [{ from: 'Weka', to: 'WECA' }],
+          writeup: {
+            title: 'Bus fund planning call',
+            sections: [
+              {
+                heading: 'Where we landed',
+                items: [
+                  { text: 'Go in positive and aligned with what WECA wants', mine: true },
+                  { text: 'Main lever is the capital pipeline, set in the next year' },
+                ],
+              },
+              {
+                heading: 'Open questions',
+                items: [{ text: 'How the forum sits alongside the bus users group' }],
+              },
+            ],
+          },
+        }
+      : {}),
     topics: [
       {
         id: 't1',
         at: 22 * 60_000 + 5000,
-        title: 'Points ledger split',
+        title: 'Decision: Dev: split the points ledger into its own service',
         points: ['Own service'],
         decided: true,
       },
       {
         id: 't2',
         at: 31 * 60_000 + 40_000,
-        title: "Sam's failing tests",
+        title: 'Sam: the failing tests are down to an empty sandbox credit balance',
         points: ['Sandbox out of credit'],
         decided: false,
       },
-      { id: 't3', at: 30_000, title: 'Release 4.2', points: ['Ships Monday'], decided: true },
+      {
+        id: 't3',
+        at: 30_000,
+        title: 'Decision: Priya: release 4.2 ships on Monday',
+        points: ['Ships Monday'],
+        decided: true,
+      },
     ],
     actions: [
       {
         id: 'a1',
+        kind: 'mine',
         title: "Top up Sam's sandbox credit by £50",
         why: 'Sam: tests keep failing',
         at: 31 * 60_000 + 40_000,
@@ -3220,25 +3384,73 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
       },
       {
         id: 'a2',
-        title: 'Create ticket: move points ledger',
-        why: 'Agreed by Dev and Priya',
+        kind: 'other',
+        owner: 'Priya',
+        title: 'Send the Q3 retention deck',
+        why: 'Priya offered to share it',
         at: 22 * 60_000 + 5000,
         status: 'pending',
       },
       {
         id: 'a3',
-        title: 'Sent Priya the Q3 retention deck',
-        why: '',
+        kind: 'agent',
+        title: 'Find dates for the vendor review',
+        why: 'Dev: we need a slot before the 20th',
         at: 9 * 60_000,
-        status: 'done',
-        resolvedAt: t0,
+        status: 'pending',
+      },
+    ],
+    agentRunsActions: false,
+    researchOn: true,
+    myNotes: '01:40 ask Marco about the sandbox budget\n22:30 check the flag plan with Priya',
+    ...(meetingParam === 'live'
+      ? { live: "If we do it in November we're migrating in the busiest week of the year." }
+      : {}),
+    cards: [
+      {
+        id: 'k3',
+        kind: 'answer',
+        key: 'how does the booking service work',
+        title: '"How does the booking service work?"',
+        at: 17 * 60_000 + 33_000,
+        bullets: ['Seats are held for 10 minutes while you pay'],
+        source: { name: 'Booking help page', url: 'https://example.org/help' },
+      },
+      {
+        id: 'k2',
+        kind: 'fact',
+        key: 'the ferry carries about fifty cars',
+        title: '"The ferry carries about fifty cars"',
+        at: 23 * 60_000 + 41_000,
+        verdict: 'off',
+        bullets: ['The operator lists a deck capacity of 40 cars'],
+        source: { name: 'Operator fleet page', url: 'https://example.org/fleet' },
+      },
+      {
+        id: 'k1',
+        kind: 'explained',
+        key: 'harbour levy',
+        title: 'Harbour levy',
+        at: 24 * 60_000 + 46_000,
+        bullets: [
+          'A charge each ship pays to use the port',
+          'Set by the harbour authority each year',
+        ],
       },
     ],
     transcript: [
+      { at: 20_000, speaker: 'them', name: 'Priya', text: 'Morning all.' },
+      { at: 25_000, speaker: 'them', name: 'Dev', text: 'Morning.' },
       {
         at: 33 * 60_000 + 58_000,
         speaker: 'them',
         text: "If we do it in November we're migrating in the busiest week of the year.",
+      },
+      {
+        at: 33 * 60_000 + 59_000,
+        speaker: 'them',
+        voice: 2,
+        text: 'And the freeze starts the week after.',
       },
       {
         at: 34 * 60_000 + 3000,
@@ -3249,6 +3461,17 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
     error: null,
   };
   useMeetingStore.getState().apply(chatId, seeded);
+  // Reply timestamps, so a spec can place a notes change inside one reply (the chip under it).
+  useChatStore.setState((st) => ({
+    timelines: {
+      ...st.timelines,
+      [chatId]: (st.timelines[chatId] ?? []).map((e) =>
+        e.kind === 'message' && e.messageAt === undefined
+          ? { ...e, messageAt: 1760000000000 + e.seq * 1000 }
+          : e,
+      ),
+    },
+  }));
 }
 
 // `?route=/settings` drives an arbitrary initial route (else a chat).

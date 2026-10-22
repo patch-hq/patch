@@ -44,7 +44,7 @@ describe('sanitizeTitle', () => {
     expect(sanitizeTitle('"Foo" bar')).toBe('"Foo" bar');
   });
   it('truncates without leaving a lone surrogate before the ellipsis', () => {
-    const out = sanitizeTitle('a'.repeat(46) + '😀😀')!;
+    const out = sanitizeTitle('a'.repeat(118) + '😀😀')!;
     expect(out.endsWith('…')).toBe(true);
     expect(/[\ud800-\udbff]…$/.test(out)).toBe(false);
   });

@@ -23,7 +23,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { fitTooltipText } from '../lib/tooltipText.js';
-import { computeTooltipPosition, type TooltipPosition } from '../lib/tooltipPosition.js';
+import {
+  computeTooltipPosition,
+  pickLineRect,
+  type TooltipPosition,
+} from '../lib/tooltipPosition.js';
 
 /** Hover shows after a short pause, like a native tooltip but far faster. */
 const HOVER_DELAY_MS = 350;
@@ -47,6 +51,9 @@ export function TooltipHost(): JSX.Element | null {
   const sourceRef = useRef<HTMLElement | null>(null);
   const stashRef = useRef<Map<HTMLElement, string>>(new Map());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Where the pointer last was, to tell which line of a wrapped inline element
+  // (an underlined name inside a sentence) is being hovered.
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const stash = stashRef.current;
@@ -108,6 +115,7 @@ export function TooltipHost(): JSX.Element | null {
     }
 
     function onMouseOver(e: MouseEvent): void {
+      pointerRef.current = { x: e.clientX, y: e.clientY };
       arm(e.target, HOVER_DELAY_MS);
     }
     function onMouseOut(e: MouseEvent): void {
@@ -115,6 +123,7 @@ export function TooltipHost(): JSX.Element | null {
       if (source && !leavingSource(source, e.relatedTarget)) hide(source);
     }
     function onFocusIn(e: FocusEvent): void {
+      pointerRef.current = null;
       arm(e.target, FOCUS_DELAY_MS);
     }
     function onFocusOut(e: FocusEvent): void {
@@ -149,6 +158,30 @@ export function TooltipHost(): JSX.Element | null {
     };
   }, []);
 
+  // A shown control whose `title` is rewritten while its bubble is up (the
+  // monitoring badge's countdown ticks every second) would get its native
+  // tooltip back next to ours — two tooltips at once. Take the new text, blank
+  // the attribute again, and keep the one bubble current.
+  useEffect(() => {
+    if (!shown) return;
+    const el = shown.el;
+    const stash = stashRef.current;
+    const observer = new MutationObserver(() => {
+      // restore() puts the title back on hide and clears the stash entry; that
+      // write must not be mistaken for a rewrite of a still-shown control.
+      if (!stash.has(el)) return;
+      const next = el.getAttribute('title');
+      if (next === null) return;
+      el.removeAttribute('title');
+      stash.set(el, next);
+      setShown((cur) =>
+        cur !== null && cur.el === el && cur.text !== next ? { ...cur, text: next } : cur,
+      );
+    });
+    observer.observe(el, { attributes: true, attributeFilter: ['title'] });
+    return () => observer.disconnect();
+  }, [shown?.el]);
+
   // Two-phase: paint invisibly first so the bubble can be measured, then
   // place it — avoids guessing its width up front to centre it under a
   // control that ellipsises to very different widths.
@@ -163,7 +196,14 @@ export function TooltipHost(): JSX.Element | null {
       setShown(null);
       return;
     }
-    const trigger = shown.el.getBoundingClientRect();
+    // A wrapped inline element's bounding box spans every line it sits on, so
+    // anchoring to it drops the bubble over unrelated text; anchor to the one
+    // line fragment under the pointer instead.
+    const trigger = pickLineRect(
+      [...shown.el.getClientRects()],
+      shown.el.getBoundingClientRect(),
+      pointerRef.current,
+    );
     const size = bubble.getBoundingClientRect();
     setPos(
       computeTooltipPosition(trigger, size, {

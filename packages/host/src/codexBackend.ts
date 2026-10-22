@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
-import { TurnFailedError, trackLiveRun } from './sdkBackend.js';
+import {
+  HandoffOverflowError,
+  TurnFailedError,
+  reportedContextLimit,
+  trackLiveRun,
+} from './sdkBackend.js';
 import { isAccountExhaustedError } from './accountFailover.js';
 import { persistedUserContent } from './history.js';
 import { CodexAccounts } from './codexAccounts.js';
@@ -216,11 +221,28 @@ export class CodexBackend implements SdkBackend {
       // harness); `codexAppendItems` hands over only the delta into a thread
       // that was just RESUMED above, riding its own existing prompt cache.
       const appendEvents = opts.codexReseed?.events ?? opts.codexAppendItems?.events;
-      const seedTrim = appendEvents
-        ? await injectWithTrim(appendEvents, (items) =>
-            client.request('thread/inject_items', { threadId, items }),
-          )
-        : 0;
+      let seedTrim = 0;
+      if (appendEvents && opts.handoffStrict) {
+        // A budgeted handoff is never trimmed to fit: an over-window rejection
+        // is surfaced typed so the host re-plans once (spec/04 § Handoff budget).
+        const items = toResponsesItems(appendEvents);
+        if (items.length > 0) {
+          try {
+            await client.request('thread/inject_items', { threadId, items });
+          } catch (error) {
+            if (isContextOverflowError(error))
+              throw new HandoffOverflowError(
+                (error as Error).message,
+                reportedContextLimit((error as Error).message),
+              );
+            throw error;
+          }
+        }
+      } else if (appendEvents) {
+        seedTrim = await injectWithTrim(appendEvents, (items) =>
+          client.request('thread/inject_items', { threadId, items }),
+        );
+      }
       yield { type: 'system', sessionId, ...(seedTrim > 0 ? { seedTrim } : {}) };
       const queue: CodexNotification[] = [];
       let wake: (() => void) | undefined;
@@ -242,6 +264,8 @@ export class CodexBackend implements SdkBackend {
       });
       let turnId: string | undefined;
       let toolsStarted = false;
+      // Any assistant output at all: past this, a failure is surfaced, never re-planned.
+      let outputBegan = false;
       let interruption: Promise<void> | undefined;
       const interrupt = (): void => {
         if (turnId && !interruption)
@@ -444,6 +468,20 @@ export class CodexBackend implements SdkBackend {
             envelope = codexItem(message.params.item, message.method === 'item/completed');
           }
           if (envelope?.type === 'tool_use') toolsStarted = true;
+          if (envelope) outputBegan = true;
+          if (message.method === 'thread/tokenUsage/updated') {
+            const usage = message.params.tokenUsage as RpcObject | undefined;
+            const window = usage?.modelContextWindow;
+            const input = (usage?.last as RpcObject | undefined)?.inputTokens;
+            yield {
+              type: 'system',
+              tokenUsage: {
+                ...(typeof window === 'number' ? { contextWindow: window } : {}),
+                ...(typeof input === 'number' ? { inputTokens: input } : {}),
+              },
+            };
+            continue;
+          }
           if (envelope) {
             this.history.append(sessionId, turnId!, opts.chatId ?? threadId, envelope);
             yield envelope;
@@ -494,6 +532,18 @@ export class CodexBackend implements SdkBackend {
           this.accounts.markExhausted(accountId);
           void this.accounts.refresh();
         }
+        // A budgeted handoff the target refused as over its window, before any
+        // output: nothing ran, so the host may re-plan it once.
+        if (
+          opts.handoffStrict &&
+          !outputBegan &&
+          !(error instanceof HandoffOverflowError) &&
+          isContextOverflowError(error)
+        )
+          throw new HandoffOverflowError(
+            (error as Error).message,
+            reportedContextLimit((error as Error).message),
+          );
         throw error;
       } finally {
         unsubscribe();

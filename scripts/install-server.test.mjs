@@ -48,10 +48,19 @@ test('--print-caddyfile names the domain it was given and proxies to the server'
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /email me@example\.com/);
   assert.match(r.stdout, /^patch\.example\.com \{$/m);
-  assert.match(r.stdout, /reverse_proxy 127\.0\.0\.1:3000/);
+  assert.match(r.stdout, /reverse_proxy 127\.0\.0\.1:3970/);
   assert.match(r.stdout, /@device path \/device\/\*/);
   assert.match(r.stdout, /reverse_proxy @device 127\.0\.0\.1:3003/);
   assert.doesNotMatch(r.stdout, /@audio|\/audio\/\*/);
+});
+
+test('--socket makes Caddy proxy to the Unix socket, with a default path', () => {
+  const a = run(['--domain', 'patch.example.com', '--socket', '--print-caddyfile']);
+  assert.equal(a.status, 0, a.stderr);
+  assert.match(a.stdout, /reverse_proxy unix\/\/run\/patch\/server\.sock/);
+  assert.doesNotMatch(a.stdout, /127\.0\.0\.1:3970/);
+  const b = run(['--domain', 'patch.example.com', '--socket=/run/x/y.sock', '--print-caddyfile']);
+  assert.match(b.stdout, /reverse_proxy unix\/\/run\/x\/y\.sock/);
 });
 
 test('with no domain it uses <ip>.sslip.io, a name that already resolves to the box', () => {
@@ -105,7 +114,7 @@ test('--user-mode --no-service lays the release out and says how to start it', (
   assert.equal(r.status, 0, r.stderr);
   assert.ok(existsSync(join(home, 'current/patch-server')));
   const env = readFileSync(join(home, 'server.env'), 'utf8');
-  assert.match(env, /^PATCH_PUBLIC_URL=http:\/\/.*:3000$/m);
+  assert.match(env, /^PATCH_PUBLIC_URL=http:\/\/.*:3970$/m);
   assert.match(env, /^HOST=0\.0\.0\.0$/m);
   assert.match(r.stdout, /Start it with/);
 });

@@ -114,7 +114,7 @@ export function runSlashCommand(text: string, d: SlashDeps): SlashResult {
     if (model === null) {
       d.pushError('usage: /model <name>');
     } else if (d.hostId === null) {
-      d.pushError('model failed: this chat has no host to read models from');
+      d.pushError('model failed: this chat has no machine to read models from');
     } else {
       void d.api
         .models(d.hostId)

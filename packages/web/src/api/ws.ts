@@ -855,7 +855,9 @@ export class PatchWs {
       return;
     }
     if (event.type === 'claude_settings.list' || event.type === 'claude_settings.updated') {
-      usePresenceStore.getState().setClaudeSettings(event.hostId, event.drift, event.memories);
+      usePresenceStore
+        .getState()
+        .setClaudeSettings(event.hostId, event.settingsJson, event.memories);
       return;
     }
     // Agent browser live view and hand-off: live-only, never a timeline entry.
@@ -869,6 +871,25 @@ export class PatchWs {
     }
     if (event.type === 'patch.browser_handoff.state') {
       useBrowserHandoffStore.getState().applyState(event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.form') {
+      useBrowserHandoffStore.getState().applyForm(event);
+      return;
+    }
+    if (event.type === 'patch.browser_view.clipboard') {
+      // The answer to this window's own Copy: only the window the user is in writes the clipboard.
+      if (event.text !== '' && document.hasFocus()) {
+        navigator.clipboard.writeText(event.text).catch((err: unknown) => {
+          useUiStore
+            .getState()
+            .pushError(
+              'Couldn’t copy from the browser',
+              undefined,
+              err instanceof Error ? err.message : String(err),
+            );
+        });
+      }
       return;
     }
     if (event.type === 'meeting.state') {

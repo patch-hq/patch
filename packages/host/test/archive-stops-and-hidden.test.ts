@@ -115,7 +115,7 @@ describe('archiving stops everything the chat has in motion', () => {
   it('stops every running watch without delivering a completion into the chat', async () => {
     const { daemon, prompts, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    daemon.startWatch(chatId, { command: 'sleep 30', description: 'slow thing' });
+    daemon.startWatch(chatId, { command: 'sleep 30', description: 'slow thing', timeoutSec: 600 });
     expect(daemon.listWatch(chatId).filter((w) => w.status === 'running')).toHaveLength(1);
 
     await daemon.setArchived(chatId, true);
@@ -253,7 +253,11 @@ describe('Hidden', () => {
   it('stays hidden while it owns a running watch, and stays hidden once nothing is left', async () => {
     const { daemon, folder } = setup();
     const chatId = await daemon.spawnChat({ folder, hidden: true });
-    const w = daemon.startWatch(chatId, { command: 'sleep 30', description: 'slow' });
+    const w = daemon.startWatch(chatId, {
+      command: 'sleep 30',
+      description: 'slow',
+      timeoutSec: 600,
+    });
 
     await daemon.sendInput({ chatId, message: 'carry on', localId: 'L1', origin: 'machine' });
     await tick();

@@ -46,7 +46,12 @@ export const DYNAMIC_CATEGORY = 'patch_dynamic';
 export interface PlannedAction {
   identifier: string;
   buttonTitle: string;
-  /** Android: whether tapping this action unlocks/opens the app first. */
+  /**
+   * Android: whether tapping this action unlocks/opens the app first. A button
+   * whose tap must reach the chat needs this true: with it false and the app's
+   * JS not running (killed, or reclaimed in the background) expo-notifications
+   * parks the response in memory with no listener, and the tap does nothing.
+   */
   opensAppToForeground: boolean;
   textInput?: { submitButtonTitle: string; placeholder: string };
 }
@@ -71,7 +76,7 @@ export function planActions(actions: NotifyActionsPayload | undefined): PlannedA
         (text, i): PlannedAction => ({
           identifier: quickReplyAction(i),
           buttonTitle: text,
-          opensAppToForeground: false,
+          opensAppToForeground: true,
         }),
       ),
       REPLY,
@@ -90,7 +95,7 @@ export function planActions(actions: NotifyActionsPayload | undefined): PlannedA
       (label, i): PlannedAction => ({
         identifier: optionAction(i),
         buttonTitle: label,
-        opensAppToForeground: false,
+        opensAppToForeground: true,
       }),
     );
   }

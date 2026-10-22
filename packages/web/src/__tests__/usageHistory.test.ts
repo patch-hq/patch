@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildBurndown, periodWindow } from '../lib/usageHistory.js';
+import { buildBurndown, burndownPath, periodWindow, splitAtResets } from '../lib/usageHistory.js';
 
 describe('periodWindow', () => {
   const now = Date.UTC(2026, 9, 14, 12);
@@ -31,5 +31,68 @@ describe('buildBurndown', () => {
       ['A', [90, 60]],
       ['B', [25]],
     ]);
+  });
+});
+
+describe('splitAtResets', () => {
+  it('starts a new run wherever what is left jumps back up', () => {
+    const runs = splitAtResets([
+      { ts: 1, remaining: 60 },
+      { ts: 2, remaining: 50 },
+      { ts: 3, remaining: 100 },
+      { ts: 4, remaining: 90 },
+      { ts: 5, remaining: 91 }, // a wobble, not a reset
+    ]);
+    expect(runs.map((r) => r.map((p) => p.remaining))).toEqual([
+      [60, 50],
+      [100, 90, 91],
+    ]);
+  });
+});
+
+describe('burndownPath', () => {
+  const x = (ts: number) => ts;
+  const y = (pct: number) => 100 - pct;
+  it('is one smooth curve within a cycle', () => {
+    const d = burndownPath(
+      [
+        { ts: 0, remaining: 100 },
+        { ts: 10, remaining: 80 },
+        { ts: 20, remaining: 50 },
+      ],
+      x,
+      y,
+    );
+    expect(d.startsWith('M0,0')).toBe(true);
+    expect(d.match(/ C/g)).toHaveLength(2);
+    expect(d).not.toContain(' L');
+  });
+  it('steps straight up at a reset rather than curving through it', () => {
+    const d = burndownPath(
+      [
+        { ts: 0, remaining: 60 },
+        { ts: 10, remaining: 50 },
+        { ts: 10, remaining: 100 },
+        { ts: 20, remaining: 90 },
+      ],
+      x,
+      y,
+    );
+    // The reset is a vertical line to the new run's first point, at full.
+    expect(d).toContain(' L10,0');
+  });
+  it('never overshoots a reading', () => {
+    // Monotone: a curve between 100 and 90 stays at or below 100.
+    const d = burndownPath(
+      [
+        { ts: 0, remaining: 100 },
+        { ts: 10, remaining: 100 },
+        { ts: 20, remaining: 60 },
+      ],
+      x,
+      y,
+    );
+    const ys = [...d.matchAll(/[\d.]+,(-?[\d.]+)/g)].map((m) => Number(m[1]));
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
   });
 });

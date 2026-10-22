@@ -7,7 +7,7 @@
 // ink-on-paper assistant bubble and the white-on-green user bubble.
 
 import React from 'react';
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   AstRenderer,
   MarkdownIt,
@@ -36,8 +36,27 @@ import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 function trimTrailingNewline(content: string): string {
   return content.endsWith('\n') ? content.slice(0, -1) : content;
 }
+const tableScroll = { marginBottom: space.sm };
+const tableScrollContent = { flexGrow: 1 };
+// Narrowest a column may get before the table scrolls instead.
+const TABLE_CELL_MIN_WIDTH = 104;
 function leafRules(selectable: boolean): RenderRules {
   return {
+    // A wide table scrolls sideways rather than squashing its columns into the
+    // screen's width (spec/15 § Chat detail — Wide tables). `flexGrow` on both
+    // the scroller's content and the table lets a narrow one still fill the row.
+    table: (node, children, _parent, styles) => (
+      <ScrollView
+        key={node.key}
+        horizontal
+        showsHorizontalScrollIndicator
+        nestedScrollEnabled
+        contentContainerStyle={tableScrollContent}
+        style={tableScroll}
+      >
+        <View style={styles._VIEW_SAFE_table}>{children}</View>
+      </ScrollView>
+    ),
     // Every other BODY row takes the stripe fill (spec/14 § Theming → Tables);
     // `node.index` is the row's position among its siblings, and the header
     // row is already set apart by its own fill.
@@ -306,7 +325,14 @@ export function ChatMarkdown({
       paddingHorizontal: space.md,
       marginLeft: 0,
     },
-    table: { borderWidth: 1, borderColor: colors.tableLine, borderRadius: radii.sm / 2 },
+    table: {
+      borderWidth: 1,
+      borderColor: colors.tableLine,
+      borderRadius: radii.sm / 2,
+      flexGrow: 1,
+    },
+    th: { flex: 1, padding: 5, minWidth: TABLE_CELL_MIN_WIDTH },
+    td: { flex: 1, padding: 5, minWidth: TABLE_CELL_MIN_WIDTH },
     thead: { backgroundColor: colors.tableHead },
     tr: { borderBottomWidth: 1, borderColor: colors.tableLine, flexDirection: 'row' as const },
     tr_stripe: { backgroundColor: colors.tableStripe },

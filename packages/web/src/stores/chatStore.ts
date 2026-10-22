@@ -12,6 +12,7 @@ import type {
   AttachmentRef,
   ChatBranch,
   ChatDelegateUpdateEvent,
+  EffortLevel,
   FinishedGoal,
   GoalProgress,
   MessageCompaction,
@@ -208,6 +209,7 @@ interface ChatState {
         | 'snoozedUntil'
         | 'jobId'
         | 'model'
+        | 'effort'
         | 'rateLimitResumingAt'
         | 'resumeKind'
         | 'lastUserActivity'
@@ -235,6 +237,8 @@ interface ChatState {
         // Optional, same reason as jobId: a caller that predates the model
         // top-bar label omits it, which PRESERVES whatever is already known.
         model?: string | null;
+        // Same reason as model: omitting it preserves the known effort.
+        effort?: EffortLevel | null;
         rateLimitResumingAt?: number | null;
         resumeKind?: 'rate_limit' | 'overloaded' | null;
         // Optional: an older server predates the field. Store-side merge falls
@@ -284,6 +288,7 @@ interface ChatState {
         | 'snoozedUntil'
         | 'jobId'
         | 'model'
+        | 'effort'
         | 'rateLimitResumingAt'
         | 'resumeKind'
         | 'lastUserActivity'
@@ -313,6 +318,8 @@ interface ChatState {
         // See `hydrate` above: optional so pre-model-label callers don't have
         // to know about it, and omitting it preserves the known value.
         model?: string | null;
+        // Same reason: omitting it preserves the known effort.
+        effort?: EffortLevel | null;
         rateLimitResumingAt?: number | null;
         resumeKind?: 'rate_limit' | 'overloaded' | null;
         // Optional: an older server predates the field. Store-side merge falls
@@ -570,7 +577,11 @@ export interface ChatEventEntry {
     | 'artifact'
     | 'error'
     | 'compaction'
-    | 'permission_mode';
+    | 'permission_mode'
+    | 'handoff'
+    | 'handoff_link';
+  /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
+  linkedChatId?: string;
   role?: 'user' | 'assistant' | 'system';
   content?: string;
   /**
@@ -940,6 +951,10 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     // then, and also correct forever if the spawning host has no model
     // catalogue support to report one.
     model: null,
+    // Unknown until `chat.state` first names it (spec/04 § Effort) — `null`
+    // until then, and also correct forever for a chat with no override or one
+    // on the Codex backend.
+    effort: null,
     // `null` until a rate-limit auto-resume is scheduled; cleared when it fires
     // or is cancelled (host's `rateLimitResumingAt` field in `chat.state`).
     rateLimitResumingAt: null,
@@ -1074,6 +1089,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // model is set once at spawn and never changes (spec/04 § Spawn) — same
       // fallback rule as jobId.
       const model = r.model !== undefined ? r.model : (existing?.model ?? null);
+      // See `hydrate`/`mergeChats` above: same rule for the effort override.
+      const effort = r.effort !== undefined ? r.effort : (existing?.effort ?? null);
       // rateLimitResumingAt can clear (timer fired) — `null` is meaningful.
       const rateLimitResumingAt =
         r.rateLimitResumingAt !== undefined
@@ -1131,6 +1148,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1158,6 +1176,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1208,6 +1227,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const jobId = r.jobId !== undefined ? r.jobId : (existing?.jobId ?? null);
       // See `hydrate` above.
       const model = r.model !== undefined ? r.model : (existing?.model ?? null);
+      // See `hydrate` above.
+      const effort = r.effort !== undefined ? r.effort : (existing?.effort ?? null);
       const rateLimitResumingAt =
         r.rateLimitResumingAt !== undefined
           ? r.rateLimitResumingAt
@@ -1250,6 +1271,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1277,6 +1299,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hidden,
           jobId,
           model,
+          effort,
           rateLimitResumingAt,
           resumeKind,
           limitBlock,
@@ -1614,6 +1637,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chats[event.chatId] = {
             ...row,
             activity: nextActivity,
+            optimisticSend: false,
             // The turn is over, so no tool call is in flight. The counter is
             // client-side and only a tool_result decrements it; a result that
             // never arrived would otherwise pin the row on `working` for good.
@@ -1691,10 +1715,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Resume kind (rate_limit vs overloaded) — cleared alongside
             // rateLimitResumingAt. Absent on payloads from older hosts.
             resumeKind: event.resumeKind !== undefined ? event.resumeKind : row.resumeKind,
+            waitingForWakeSince:
+              event.waitingForWakeSince !== undefined
+                ? event.waitingForWakeSince
+                : (row.waitingForWakeSince ?? null),
             // The figures behind the pause — which account, which pool, how
             // full, when it clears. Same absent/null rule as the two above.
             limitBlock:
               event.limitBlock !== undefined ? event.limitBlock : (row.limitBlock ?? null),
+            // Why the chat failed, for the failed badge's tooltip. Only meaningful
+            // while errored, so it never outlives the failure.
+            lastError:
+              event.activity !== 'errored'
+                ? null
+                : event.lastError !== undefined
+                  ? event.lastError
+                  : (row.lastError ?? null),
             // spec/04 § Model — a chat's model can change mid-chat, and this is
             // how the change reaches every surface holding the chat, including
             // the ones that did not ask for it. It is also the acknowledgement of
@@ -1714,6 +1750,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.preferredAccountId !== undefined
                 ? event.preferredAccountId
                 : row.preferredAccountId,
+            // spec/04 § Effort — same absent/null rule as `model` above: absent
+            // is "unchanged", and `null` is a real value (no override, or the
+            // chat is on the Codex backend) carried through as-is.
+            effort: event.effort !== undefined ? event.effort : row.effort,
             // spec/02 § Background task completions — how much of this chat's
             // work is still in flight now the turn has ended. `0` is meaningful
             // (the last task finished), so only an ABSENT field keeps the known
@@ -1884,6 +1924,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.permissionModeChangeAutomatic
                 ? { permissionModeChangeAutomatic: true }
                 : {}),
+              at: Date.now(),
+            });
+            break;
+          }
+          // spec/04 § Handoff budget — the provider-switch divider and the row
+          // saying the chat was continued in a linked fresh chat. Furniture, like
+          // a mode change: (seq, kind) is the identity, the host's one-line
+          // record is the text.
+          if (
+            event.role === 'system' &&
+            (event.sessionChange?.handoff !== undefined || event.handoffLink !== undefined)
+          ) {
+            chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+            const kind = event.handoffLink ? 'handoff_link' : 'handoff';
+            const list = timelines[event.chatId];
+            if (list?.some((e) => e.kind === kind && e.seq === event.seq)) break;
+            pushTimeline(event.chatId, {
+              seq: event.seq,
+              kind,
+              content: event.content,
+              ...(event.handoffLink ? { linkedChatId: event.handoffLink.chatId } : {}),
               at: Date.now(),
             });
             break;
@@ -2822,7 +2883,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.chats,
         // Seed the durable first-user-message preview ONCE — a later optimistic
         // send must not overwrite it, or the sidebar label flips around.
-        [chatId]: { ...row, preview: row.preview ?? headCodePoints(content, 140) },
+        [chatId]: {
+          ...row,
+          preview: row.preview ?? headCodePoints(content, 140),
+          // Working at once, not after the host's first activity frame. Only a settled
+          // chat: a running or blocked one already says the right thing.
+          ...(!opts?.dedupeAgainstPersisted &&
+          local.length === 0 &&
+          (row.activity === 'idle' || row.activity === 'errored')
+            ? { optimisticSend: true }
+            : {}),
+        },
       },
     });
   },
@@ -2933,6 +3004,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   failDelivery(chatId, localId) {
+    const row = get().chats[chatId];
+    if (row?.optimisticSend) {
+      set({ chats: { ...get().chats, [chatId]: { ...row, optimisticSend: false } } });
+    }
     updateDeliveryEntry(get, set, chatId, localId, {
       deliveryPending: false,
       deliveryFailed: true,

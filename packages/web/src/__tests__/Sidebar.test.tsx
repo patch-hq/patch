@@ -6,6 +6,7 @@ import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { reportHost } from './presenceHelpers.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api, ApiError } from '../api/rest.js';
@@ -65,6 +66,7 @@ function rowFixture(overrides: Partial<ChatRow> = {}): RowFixture {
     lastUserActivity: Date.now(),
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
     ...overrides,
@@ -181,7 +183,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).toContain('offline');
-    expect(dot.getAttribute('title')).toBe('Reconnecting…');
+    expect(dot.getAttribute('title')).toContain('Server: reconnecting');
   });
 
   // Patch Updates: "Dot should show status" — the WS link to the server can be
@@ -192,7 +194,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).toContain('offline');
-    expect(dot.getAttribute('title')).toBe('Agent offline');
+    expect(dot.getAttribute('title')).toContain('Server: reachable');
   });
 
   it('the connection dot shows connected styling + "Connected" tooltip when the WS is connected and the host is online', () => {
@@ -200,7 +202,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).not.toContain('offline');
-    expect(dot.getAttribute('title')).toBe('Connected');
+    expect(dot.getAttribute('title')).toContain('This surface (web): connected');
   });
 
   it('the connection dot tooltip lists every host with its state', () => {
@@ -230,7 +232,9 @@ describe('Sidebar', () => {
     });
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
-    expect(dot.getAttribute('title')).toBe('Connected\nd-box: offline\nd-mac: online');
+    expect(dot.getAttribute('title')).toBe(
+      'This surface (web): connected\nServer: reachable\nHost d-box: offline\nHost d-mac: online',
+    );
   });
 
   it('shows the empty manager slot when none exists', () => {
@@ -1209,7 +1213,7 @@ describe('Sidebar', () => {
     const btn = screen.getByTestId('folder-new-chat-/home/tom/projects/portfolio');
     expect(btn).toHaveAttribute('aria-label', 'New chat in project portfolio');
     fireEvent.click(btn);
-    expect(seen.at(-1)).toBe('/chats/new?folder=%2Fhome%2Ftom%2Fprojects%2Fportfolio');
+    expect(seen.at(-1)).toBe('/chats/new?folder=%2Fhome%2Ftom%2Fprojects%2Fportfolio&host=d1');
   });
 
   it('archive-project is a no-op when the custom modal is dismissed', async () => {
@@ -2027,7 +2031,39 @@ describe('Sidebar', () => {
     // Forget the archived-only folder → it leaves the list.
     fireEvent.click(screen.getByTestId('recent-folder-forget-/home/tom/proj-archived'));
     expect(screen.queryByTestId('recent-folder-/home/tom/proj-archived')).not.toBeInTheDocument();
-    expect(useUiStore.getState().forgottenFolders).toContain('/home/tom/proj-archived');
+    expect(useUiStore.getState().forgottenFolders).toContain('d1\u0000/home/tom/proj-archived');
+  });
+
+  it('the same path on two hosts is two recents: each named by host, linking and forgetting on its own host', () => {
+    reportHost('d1', { hostName: 'mac' });
+    reportHost('d2', { hostName: 'netcup' });
+    useChatStore
+      .getState()
+      .hydrate([
+        rowFixture({ chatId: 'a1', folder: '/srv/app', hostId: 'd1', status: 'archived' }),
+        rowFixture({ chatId: 'a2', folder: '/srv/app', hostId: 'd2', status: 'archived' }),
+      ]);
+    function Where(): JSX.Element {
+      const l = useLocation();
+      return <div data-testid="where">{l.pathname + l.search}</div>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Sidebar />
+        <Where />
+      </MemoryRouter>,
+    );
+    const names = Array.from(
+      screen.getByTestId('recent-folders').querySelectorAll('.recent-folder-name'),
+    ).map((n) => n.textContent);
+    expect(names.sort()).toEqual(['app (mac)', 'app (netcup)']);
+    fireEvent.click(screen.getAllByTestId('recent-folder-start-/srv/app')[1]!);
+    expect(screen.getByTestId('where').textContent).toMatch(
+      /^\/chats\/new\?folder=%2Fsrv%2Fapp&host=d[12]$/,
+    );
+    fireEvent.click(screen.getAllByTestId('recent-folder-forget-/srv/app')[0]!);
+    expect(screen.getAllByTestId('recent-folder-/srv/app')).toHaveLength(1);
+    expect(useUiStore.getState().forgottenFolders).toHaveLength(1);
   });
 
   it('the recents section is headed "Recent projects" — never the word "folders" (spec/14 §4b)', () => {

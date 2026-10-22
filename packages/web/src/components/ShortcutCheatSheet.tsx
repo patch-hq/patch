@@ -5,6 +5,7 @@ import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { SHORTCUT_TABLE, shortcutLabel, shortcutScopeLabel } from '../lib/shortcuts.js';
 import { chordGlyphs } from '../lib/dictateChord.js';
+import { actionGlyphs } from '../lib/keymap.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { CloseIcon } from './icons.js';
 
@@ -12,6 +13,7 @@ export function ShortcutCheatSheet(): JSX.Element | null {
   const open = useUiStore((s) => s.cheatSheetOpen);
   const setOpen = useUiStore((s) => s.setCheatSheetOpen);
   const dictateChord = useUiStore((s) => s.dictateChord);
+  const overrides = useUiStore((s) => s.shortcutOverrides);
 
   useEffect(() => {
     if (!open) return;
@@ -55,7 +57,9 @@ export function ShortcutCheatSheet(): JSX.Element | null {
                 {/* The table is written in macOS glyphs; the sheet draws it for
                     the keyboard reading it (spec/14 § Discoverability). */}
                 <td className="kbd">
-                  {shortcutLabel(row.dictate ? chordGlyphs(dictateChord) : row.keys)}
+                  {row.ids
+                    ? row.ids.map((id) => shortcutLabel(actionGlyphs(id, overrides))).join(' / ')
+                    : shortcutLabel(row.dictate ? chordGlyphs(dictateChord) : row.keys)}
                 </td>
                 <td>{row.action}</td>
                 <td className="scope">{shortcutScopeLabel(row.scope)}</td>

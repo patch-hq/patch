@@ -17,9 +17,17 @@
 // chats and restarts. 'logged-out' is a throwaway in-memory context — no
 // userDataDir, nothing written to disk, so it leaves no cookies behind.
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type {
   Browser,
@@ -51,6 +59,19 @@ export class BrowserNotInstalledError extends Error {
   }
 }
 
+/**
+ * spec/02 § Browser — In the Patch app. The app is installed here, so the
+ * agent's browser lives in it, and it could not be reached. NO FALLBACK: never
+ * a quiet switch to a separate Chromium.
+ */
+export class AppBrowserUnavailableError extends Error {
+  readonly code = 'app_browser_unavailable' as const;
+  constructor(detail: string) {
+    super(`the agent's browser is in the Patch app on this machine, and ${detail}`);
+    this.name = 'AppBrowserUnavailableError';
+  }
+}
+
 export class TabNotFoundError extends Error {
   readonly code = 'tab_not_found' as const;
   constructor(tabId: string) {
@@ -66,6 +87,35 @@ export class TabInHandoffError extends Error {
       `tab ${tabId} is in the user's hands (a hand-off is open); wait for patch_browser_handoff to return before acting on it`,
     );
     this.name = 'TabInHandoffError';
+  }
+}
+
+/**
+ * The user pressed Take over (or simply started using the tab) and has not
+ * handed it back in time. NO FALLBACK: the agent is told, never left waiting
+ * without end or let loose on a page the user is working.
+ */
+export class UserDrivingError extends Error {
+  readonly code = 'user_driving' as const;
+  constructor(tabId: string) {
+    super(
+      `the user has taken tab ${tabId} over and has not handed it back yet; carry on with something else or ask them, and use the tab once they hand it back`,
+    );
+    this.name = 'UserDrivingError';
+  }
+}
+
+/**
+ * A call that waited while the user drove the tab: it is not carried out on
+ * a page the user may have changed underneath it.
+ */
+export class UserHandedBackError extends Error {
+  readonly code = 'user_was_driving' as const;
+  constructor(tabId: string, url: string) {
+    super(
+      `the user used tab ${tabId} and has handed it back, now at ${url}; read the page again before acting, it may have changed`,
+    );
+    this.name = 'UserHandedBackError';
   }
 }
 
@@ -252,6 +302,12 @@ export interface TabInfo {
   routedVia?: string;
 }
 
+/** What survives a host restart of an open logged-in tab. */
+interface PersistedTab {
+  url: string;
+  ownerChatId?: string | undefined;
+}
+
 interface Tab {
   tabId: string;
   page: Page;
@@ -282,6 +338,31 @@ interface Tab {
   fileChooser?: FileChooser;
   /** Held open for the tab's life: device emulation lives and dies with its CDP session. */
   cdp?: CDPSession;
+  /** When the agent opened it (ms epoch): the live view's timer. */
+  openedAt: number;
+  /** In the Patch app: the tab's DevTools target there, so a large view can show it as itself. */
+  appTarget?: string;
+  /** Who is using it: the agent, or the user after Take over. */
+  driver: 'agent' | 'user';
+  /** Agent calls waiting for the user to hand the tab back. */
+  driverWaiters: ((outcome: 'handed_back' | 'closed') => void)[];
+  /** Where the agent last pointed, in viewport CSS pixels. */
+  cursor?: { x: number; y: number; at: number };
+  /** The agent emulated a named device: a viewer's size never overrides it. */
+  agentDevice?: boolean;
+  /** The agent set its own size while a view was open: views stop resizing the tab until all close. */
+  viewerYielded?: boolean;
+  /**
+   * A large live view's size, which the tab takes while the view is open (the
+   * agent then sees the same size), and its pixel ratio, laid on top through
+   * `cdp` only. `saved` is the agent's size to put back.
+   */
+  viewer?: {
+    width: number;
+    height: number;
+    scale: number;
+    saved: { width: number; height: number };
+  };
   frameNumbers: WeakMap<Frame, number>;
   nextFrameNumber: number;
 }
@@ -323,6 +404,20 @@ export interface BrowserManagerOptions {
   webBotAuth?: WebBotAuthConfig;
   /** Called when a chat's browser activity changes (an action starts or ends, a tab opens or closes). */
   onActivity?: (chatId: string) => void;
+  /**
+   * spec/02 § Browser — In the Patch app: the Patch app on this machine hosts
+   * the browser. Both profiles are its: the signed-in one is the app's own, a
+   * throwaway one is an in-memory context there. No Chromium or Xvfb of this
+   * host's own is started.
+   */
+  appBrowser?: AppBrowserLink;
+}
+
+/** Where the Patch app's browser is, starting the app when it is not running. */
+export interface AppBrowserLink {
+  /** Whether the app has ever run on this machine (its endpoint file exists). */
+  present(): boolean;
+  endpoint(): Promise<string>;
 }
 
 /** What a chat's surfaces show: is the agent driving a browser for it, and on which tabs. */
@@ -331,7 +426,18 @@ export interface ChatBrowserStatus {
   active: boolean;
   action?: string;
   since?: number;
-  tabs: Array<{ tabId: string; url: string; title: string; handedOff: boolean }>;
+  tabs: Array<{
+    tabId: string;
+    url: string;
+    title: string;
+    handedOff: boolean;
+    driver: 'agent' | 'user';
+    cursor?: { x: number; y: number; at: number };
+    appTarget?: string;
+    openedAt: number;
+  }>;
+  /** When the oldest of these tabs was opened. */
+  openedAt?: number;
   lastStoppedAt?: number;
 }
 
@@ -356,11 +462,125 @@ export type HandoffUserInput =
   | { kind: 'text'; text: string }
   | { kind: 'key'; key: string };
 
+/** The live view's input (the wire's `BrowserViewInput`), as this module takes it. */
+export type ViewUserInput =
+  | {
+      kind: 'pointer';
+      action: 'move' | 'down' | 'up' | 'click' | 'double_click' | 'right_click';
+      x: number;
+      y: number;
+      button?: 'left' | 'right' | 'middle';
+      clickCount?: number;
+      modifiers?: ('Alt' | 'Control' | 'Meta' | 'Shift')[];
+    }
+  | { kind: 'scroll'; x: number; y: number; dx: number; dy: number }
+  | { kind: 'text'; text: string }
+  | { kind: 'key'; key: string; action?: 'press' | 'down' | 'up' }
+  | { kind: 'nav'; action: 'back' | 'forward' | 'reload' | 'goto'; url?: string }
+  | { kind: 'copy' }
+  | { kind: 'fill'; formId: string; values: { field: string; value: string }[]; submit: boolean };
+
+/** A sign-in form on the page, as a surface's own card shows it. Labels, never values. */
+export interface DetectedForm {
+  formId: string;
+  site: string;
+  fields: { field: string; label: string; kind: 'text' | 'email' | 'password' | 'code' }[];
+}
+
+/** One picture of a tab for the live view. */
+export interface ScreencastFrame {
+  data: string;
+  /** Viewport, CSS pixels: the coordinate space of the user's input. */
+  width: number;
+  height: number;
+  url: string;
+  title: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+export interface Screencast {
+  stop(): Promise<void>;
+  /** Send a picture now, as after the view's size changed on a page that is not moving. */
+  refresh(): Promise<void>;
+}
+
+/**
+ * What the user typed into the address bar, as an address: a URL as it is, a
+ * bare domain over https, anything else a web search. `javascript:` is a
+ * search, as it is in Chrome's own address bar.
+ */
+export function addressToUrl(text: string): string {
+  const t = text.trim();
+  if (/^(https?|file|about|data|chrome):/i.test(t)) return t;
+  if (/^localhost(:\d+)?(\/.*)?$/i.test(t) || /^127\.0\.0\.1(:\d+)?(\/.*)?$/.test(t)) {
+    return `http://${t}`;
+  }
+  if (!/\s/.test(t) && /^[^\s/:]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(t)) return `https://${t}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
+}
+
+/**
+ * Finds a sign-in form's visible fields, tags each with `data-patch-field` so
+ * a fill can reach it, and returns their labels. Nothing about values.
+ */
+const DETECT_FORM_SCRIPT = `(() => {
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && !el.disabled && !el.readOnly;
+  };
+  const kindOf = (el) => {
+    const t = (el.type || 'text').toLowerCase();
+    const ac = (el.autocomplete || '').toLowerCase();
+    const hint = [el.name, el.id, el.placeholder, el.getAttribute('aria-label')].join(' ').toLowerCase();
+    if (t === 'password') return 'password';
+    if (!['text', 'email', 'tel', 'number', ''].includes(t)) return null;
+    if (ac.includes('one-time-code') || /\\b(otp|2fa|totp|passcode|verification|code)\\b/.test(hint)) return 'code';
+    if (t === 'email' || ac.includes('email') || /e-?mail/.test(hint)) return 'email';
+    if (ac.includes('username') || /user(name)?|login|account/.test(hint)) return 'text';
+    return null;
+  };
+  for (const el of document.querySelectorAll('[data-patch-field]')) el.removeAttribute('data-patch-field');
+  const found = [...document.querySelectorAll('input')].filter(visible).map((el) => ({ el, kind: kindOf(el) })).filter((f) => f.kind);
+  const secret = found.find((f) => f.kind === 'password' || f.kind === 'code');
+  const wordy = /sign.?in|log.?in|log on/i.test((document.title + ' ' + (document.body ? document.body.innerText : '')).slice(0, 6000));
+  if (!secret && !(found.length > 0 && wordy)) return [];
+  const anchor = secret || found[0];
+  const form = anchor.el.form;
+  const pick = found.filter((f) => !form || f.el.form === form).slice(0, 4);
+  const named = { password: 'Password', email: 'Email', code: 'Code', text: 'Username' };
+  return pick.map((f, i) => {
+    const el = f.el;
+    let label = el.getAttribute('aria-label') || (el.labels && el.labels[0] ? el.labels[0].innerText : '') || el.placeholder || '';
+    label = label.replace(/\\s+/g, ' ').trim().slice(0, 40) || named[f.kind];
+    el.setAttribute('data-patch-field', 'p' + i);
+    return { field: 'p' + i, label, kind: f.kind };
+  });
+})()`;
+
+/** The selected text, from a text field's selection or the page's. A password field gives nothing. */
+const SELECTION_SCRIPT = `(() => {
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && typeof a.selectionStart === 'number') {
+    if (a.type === 'password') return '';
+    return a.value.slice(a.selectionStart, a.selectionEnd);
+  }
+  return String(getSelection() || '');
+})()`;
+
 function randomDelay(minMs: number, maxMs: number): number {
   return minMs + Math.floor(Math.random() * (maxMs - minMs));
 }
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
+
+/** How long an agent call waits for the user to hand a taken-over tab back. */
+export const USER_DRIVE_WAIT_MS = 10 * 60_000;
+
+/** The sizes a viewer may lay a tab out at; outside them the view is letterboxed. */
+const VIEWER_MIN = { width: 320, height: 240 };
+const VIEWER_MAX = { width: 3840, height: 2400 };
 
 /** Run in the page with the element and the text: selects the first occurrence of the text inside it. */
 const SELECT_TEXT_BODY = `
@@ -409,6 +629,11 @@ export class BrowserManager {
   private xvfb: ChildProcess | null = null;
   private display: string | undefined;
   private playwrightMod: typeof import('playwright') | null = null;
+  /** The Patch app's browser, while connected (`appBrowser`). */
+  private appConnection: Browser | null = null;
+  private appConnecting: Promise<Browser> | null = null;
+  /** A throwaway context's route in the app: a context's own proxy, not a launch option. */
+  private appThrowawayProxy: { server: string } | undefined;
 
   /** Tabs the user has taken over: the agent's tools refuse them until the hand-off ends. */
   private readonly handoffTabs = new Set<string>();
@@ -432,6 +657,7 @@ export class BrowserManager {
   constructor(private readonly opts: BrowserManagerOptions) {}
 
   private notify(chatId: string | undefined): void {
+    this.persistTabs();
     if (chatId === undefined) return;
     try {
       this.opts.onActivity?.(chatId);
@@ -469,6 +695,10 @@ export class BrowserManager {
           url: redactUrl(t.page.isClosed() ? t.lastUrl : t.page.url() || t.lastUrl),
           title: '',
           handedOff,
+          driver: t.driver,
+          ...(t.cursor ? { cursor: { ...t.cursor } } : {}),
+          ...(t.appTarget ? { appTarget: t.appTarget } : {}),
+          openedAt: t.openedAt,
         };
       });
     const lastStopped = this.chatLastStopped.get(chatId);
@@ -477,6 +707,7 @@ export class BrowserManager {
       active: runs.length > 0,
       ...(current ? { action: current.action } : {}),
       ...(runs.length > 0 ? { since: Math.min(...runs.map((r) => r.startedAt)) } : {}),
+      ...(tabs.length > 0 ? { openedAt: Math.min(...tabs.map((t) => t.openedAt)) } : {}),
       tabs,
       ...(lastStopped !== undefined ? { lastStoppedAt: lastStopped } : {}),
     };
@@ -517,6 +748,7 @@ export class BrowserManager {
     const tabs = [...this.tabsById.values()];
     this.tabsById.clear();
     this.handoffTabs.clear();
+    this.persistTabs();
     for (const tab of tabs) {
       await tab.page.close().catch((err: unknown) => {
         this.opts.logger.warn({ err }, 'browser: error closing tab on stop');
@@ -533,37 +765,37 @@ export class BrowserManager {
   }
 
   async click(tabId: string, ref: string): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving('Clicking', () => this.clickImpl(tabId, ref), { tabId });
   }
 
   async type(tabId: string, ref: string, text: string, opts?: { submit?: boolean }): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving('Typing', () => this.typeImpl(tabId, ref, text, opts), { tabId });
   }
 
   async fillForm(tabId: string, fields: { ref: string; value: string }[]): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving('Filling in a form', () => this.fillFormImpl(tabId, fields), { tabId });
   }
 
   async select(tabId: string, ref: string, value: string): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving('Choosing an option', () => this.selectImpl(tabId, ref, value), { tabId });
   }
 
   async upload(tabId: string, filePaths: string[], ref?: string): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving('Choosing a file', () => this.uploadImpl(tabId, filePaths, ref), { tabId });
   }
 
   async pointer(tabId: string, req: PointerRequest): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving('Moving the mouse', () => this.pointerImpl(tabId, req), { tabId });
   }
 
   async pressKeys(tabId: string, keys: string[]): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving('Pressing keys', () => this.pressKeysImpl(tabId, keys), { tabId });
   }
 
@@ -643,6 +875,7 @@ export class BrowserManager {
    * the same clear way, never half-launches.
    */
   private async checkChromiumInstalled(): Promise<void> {
+    if (this.usingApp()) return;
     const { chromium } = await this.playwright();
     const execPath = chromium.executablePath();
     if (!existsSync(execPath)) {
@@ -752,6 +985,75 @@ export class BrowserManager {
     return run;
   }
 
+  /**
+   * Whether the agent's browser is the Patch app's. Decided at the first
+   * launch, not when the host starts: the app installed or updated after the
+   * host came up still counts. Fixed from then for this host's life, since
+   * tabs cannot move between the two.
+   */
+  private appDecided: boolean | undefined;
+  private usingApp(): boolean {
+    if (this.appDecided === undefined) {
+      if (!this.opts.appBrowser) return false;
+      this.appDecided = this.opts.appBrowser.present();
+      if (this.appDecided)
+        this.opts.logger.info('browser: the agent browser lives in the Patch app');
+    }
+    return this.appDecided;
+  }
+
+  /** The Patch app's browser, connected once and shared by both profiles. */
+  private connectApp(): Promise<Browser> {
+    if (this.appConnection?.isConnected()) return Promise.resolve(this.appConnection);
+    if (this.appConnecting) return this.appConnecting;
+    const link = this.opts.appBrowser!;
+    this.appConnecting = (async () => {
+      let endpoint: string;
+      try {
+        endpoint = await link.endpoint();
+      } catch (err) {
+        throw new AppBrowserUnavailableError(err instanceof Error ? err.message : String(err));
+      }
+      const { chromium } = await this.playwright();
+      const browser = await chromium.connectOverCDP(endpoint).catch((err: unknown) => {
+        throw new AppBrowserUnavailableError(
+          `connecting to it failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+      browser.on('disconnected', () => {
+        if (this.appConnection !== browser) return;
+        this.appConnection = null;
+        this.loggedInContext = null;
+        this.loggedInContextProxyKey = null;
+        this.ephemeralBrowser = null;
+        this.ephemeralBrowserProxyKey = null;
+        this.markContextDead('logged-in', undefined, browser);
+        this.markContextDead('logged-out', undefined, browser);
+      });
+      this.appConnection = browser;
+      return browser;
+    })().finally(() => {
+      this.appConnecting = null;
+    });
+    return this.appConnecting;
+  }
+
+  /** In the app, the tab's DevTools target id, for the large view to show it as itself. */
+  private async learnAppTarget(tab: Tab, page: Page): Promise<void> {
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const { targetInfo } = (await cdp.send('Target.getTargetInfo')) as {
+        targetInfo: { targetId: string };
+      };
+      if (tab.page === page) {
+        tab.appTarget = targetInfo.targetId;
+        this.notify(tab.ownerChatId);
+      }
+    } finally {
+      await cdp.detach().catch(() => undefined);
+    }
+  }
+
   private getLoggedInContext(routeThrough?: RouteThrough): Promise<BrowserContext> {
     return this.serialised('logged-in', () => this.launchLoggedInContext(routeThrough));
   }
@@ -764,6 +1066,30 @@ export class BrowserManager {
       this.loggedInContext = null;
     }
     if (this.loggedInContext) return this.loggedInContext;
+    if (this.usingApp()) {
+      const browser = await this.connectApp();
+      const context = browser.contexts()[0];
+      if (!context) throw new AppBrowserUnavailableError('it offered no signed-in profile');
+      // The app is not launched with a proxy: its profile is re-pointed instead.
+      const session = await browser.newBrowserCDPSession();
+      await session.send(
+        'Patch.setProxy' as never,
+        (launchOpt ? { proxyServer: launchOpt.server } : {}) as never,
+      );
+      await session.detach();
+      await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
+      await this.installSigning(context);
+      context.on('close', () => {
+        if (this.loggedInContext === context) {
+          this.loggedInContext = null;
+          this.loggedInContextProxyKey = null;
+        }
+        this.markContextDead('logged-in', context);
+      });
+      this.loggedInContext = context;
+      this.loggedInContextProxyKey = key;
+      return context;
+    }
     await this.checkChromiumInstalled();
     const { chromium } = await this.playwright();
     const userDataDir = join(this.opts.root, 'profile');
@@ -795,6 +1121,18 @@ export class BrowserManager {
 
   private async launchEphemeralBrowser(routeThrough?: RouteThrough): Promise<Browser> {
     const { key, launchOpt } = await this.proxyFor(routeThrough);
+    if (this.usingApp()) {
+      // One app browser for both profiles: a new route closes the throwaway
+      // tabs, never the browser (that would take the signed-in tabs with it).
+      if (this.ephemeralBrowser && this.ephemeralBrowserProxyKey !== key) {
+        await this.closeTabsFor('logged-out');
+      }
+      const browser = await this.connectApp();
+      this.appThrowawayProxy = launchOpt;
+      this.ephemeralBrowser = browser;
+      this.ephemeralBrowserProxyKey = key;
+      return browser;
+    }
     if (this.ephemeralBrowser && this.ephemeralBrowserProxyKey !== key) {
       await this.closeTabsFor('logged-out');
       await this.ephemeralBrowser.close();
@@ -822,7 +1160,99 @@ export class BrowserManager {
     return browser;
   }
 
-  private requireTab(tabId: string): Tab {
+  // ---- Tab ids outlive a host restart ----------------------------------------
+
+  private disposing = false;
+  private readonly restoring = new Map<string, Promise<Tab>>();
+
+  private get tabRegistryPath(): string {
+    return join(this.opts.root, 'tabs.json');
+  }
+
+  /**
+   * Writes the open logged-in tabs (id, owner, last address) so a restarted host
+   * can reopen them under the same ids. Throwaway 'logged-out' tabs are not
+   * kept: they hold no session worth resuming. Skipped while disposing, because
+   * dispose closes tabs one by one and would otherwise wipe the list.
+   */
+  private persistTabs(): void {
+    if (this.disposing) return;
+    const entries: Record<string, PersistedTab> = {};
+    for (const [tabId, tab] of this.tabsById) {
+      if (tab.profile !== 'logged-in') continue;
+      entries[tabId] = {
+        url: tab.lastUrl,
+        ...(tab.ownerChatId ? { ownerChatId: tab.ownerChatId } : {}),
+      };
+    }
+    try {
+      mkdirSync(this.opts.root, { recursive: true });
+      const tmp = `${this.tabRegistryPath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(entries), { mode: 0o600 });
+      renameSync(tmp, this.tabRegistryPath);
+    } catch (err) {
+      this.opts.logger.warn({ err }, 'browser: could not save the tab list');
+    }
+  }
+
+  private readPersistedTab(tabId: string): PersistedTab | undefined {
+    let raw: string;
+    try {
+      raw = readFileSync(this.tabRegistryPath, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      this.opts.logger.warn({ err }, 'browser: could not read the tab list');
+      return undefined;
+    }
+    try {
+      const entry = (JSON.parse(raw) as Record<string, PersistedTab>)[tabId];
+      return entry && typeof entry.url === 'string' ? entry : undefined;
+    } catch (err) {
+      this.opts.logger.warn({ err }, 'browser: the tab list is corrupt, ignoring it');
+      return undefined;
+    }
+  }
+
+  /** A tab id this process has not seen but a previous run saved: reopened where it was. */
+  private restoreTab(tabId: string, saved: PersistedTab): Promise<Tab> {
+    let pending = this.restoring.get(tabId);
+    if (!pending) {
+      pending = (async () => {
+        this.opts.logger.warn({ tabId }, 'browser: reopening tab saved before a host restart');
+        const context = await this.getLoggedInContext();
+        const page = await context.newPage();
+        const tab = this.newTab({
+          tabId,
+          page,
+          profile: 'logged-in',
+          ownerChatId: saved.ownerChatId,
+        });
+        this.attachPage(tab, page);
+        try {
+          if (saved.url && saved.url !== 'about:blank') {
+            await page.goto(saved.url, { waitUntil: 'domcontentloaded' });
+          }
+        } catch (err) {
+          await page.close().catch(() => undefined);
+          throw new Error(
+            `tab ${tabId} was lost in a host restart and could not be reopened at ${redactUrl(saved.url)}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        tab.lastUrl = saved.url;
+        tab.notices.push(
+          `this tab was lost when the host restarted and has been reopened at ${redactUrl(saved.url)}; anything not saved in the page (typed text, scroll, open menus) is gone, and refs from before must be re-read`,
+        );
+        this.tabsById.set(tabId, tab);
+        this.activeTabId = tabId;
+        this.notify(tab.ownerChatId);
+        return tab;
+      })().finally(() => this.restoring.delete(tabId));
+      this.restoring.set(tabId, pending);
+    }
+    return pending;
+  }
+
+  requireTab(tabId: string): Tab {
     const tab = this.tabsById.get(tabId);
     if (!tab) throw new TabNotFoundError(tabId);
     return tab;
@@ -839,6 +1269,10 @@ export class BrowserManager {
    * simply gone: `TabNotFoundError`, never resurrected.
    */
   private async tabFor(tabId: string): Promise<Tab> {
+    if (!this.tabsById.has(tabId)) {
+      const saved = this.readPersistedTab(tabId);
+      if (saved) await this.restoreTab(tabId, saved);
+    }
     const tab = this.requireTab(tabId);
     if (tab.recovering) await tab.recovering;
     if (tab.crashed || (tab.page.isClosed() && tab.contextDead)) {
@@ -892,6 +1326,8 @@ export class BrowserManager {
     }
     tab.page = page;
     tab.cdp = undefined;
+    // A fresh page carries none of the old one's emulation: a viewer re-applies its size.
+    tab.viewer = undefined;
     tab.crashed = false;
     tab.contextDead = false;
     tab.fileChooser = undefined;
@@ -922,7 +1358,9 @@ export class BrowserManager {
   }
 
   private async newThrowawayContext(browser: Browser): Promise<BrowserContext> {
-    const context = await browser.newContext();
+    const context = await browser.newContext(
+      this.usingApp() && this.appThrowawayProxy ? { proxy: this.appThrowawayProxy } : {},
+    );
     await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
     await this.installSigning(context);
     return context;
@@ -960,6 +1398,9 @@ export class BrowserManager {
       dialogs: [],
       frameNumbers: new WeakMap(),
       nextFrameNumber: 0,
+      openedAt: Date.now(),
+      driver: 'agent',
+      driverWaiters: [],
     };
   }
 
@@ -1063,9 +1504,18 @@ export class BrowserManager {
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
-      if (url && url !== 'about:blank') tab.lastUrl = url;
+      if (url && url !== 'about:blank') {
+        tab.lastUrl = url;
+        if (this.tabsById.get(tab.tabId) === tab) this.persistTabs();
+      }
       tab.fileChooser = undefined;
     });
+    if (this.usingApp()) {
+      tab.appTarget = undefined;
+      this.learnAppTarget(tab, page).catch((err: unknown) => {
+        this.opts.logger.warn({ err, tabId: tab.tabId }, 'browser: could not learn the app tab id');
+      });
+    }
   }
 
   /** A target=_blank link or window.open: a tab of its own, owned by the same chat. */
@@ -1117,7 +1567,7 @@ export class BrowserManager {
 
   /** `patch_browser_downloads`: what the tab (or every tab) downloaded, as files on THIS host. */
   async downloadsOf(tabId: string | undefined, waitMs = 0): Promise<DownloadEntry[]> {
-    if (tabId) this.assertNotHandedOff(tabId);
+    if (tabId) await this.agentTurn(tabId);
     const deadline = Date.now() + waitMs;
     const pick = (): DownloadEntry[] =>
       this.downloads.filter((d) => (tabId ? d.tabId === tabId : true));
@@ -1222,7 +1672,7 @@ export class BrowserManager {
       maxChars?: number;
     } = {},
   ): Promise<ReadResult> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     const mode = opts.mode ?? 'snapshot';
     const maxChars = opts.maxChars ?? 50_000;
@@ -1317,7 +1767,7 @@ export class BrowserManager {
     action: 'goto' | 'back' | 'forward' | 'reload',
     url?: string,
   ): Promise<{ title: string; url: string; status?: number }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving(
       'Navigating',
       async () => {
@@ -1354,7 +1804,7 @@ export class BrowserManager {
 
   /** `patch_browser_switch_tab`: bring a tab to the front, the way a person clicks its tab. */
   async switchTo(tabId: string): Promise<{ tabId: string; title: string; url: string }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     await tab.page.bringToFront();
     this.activeTabId = tabId;
@@ -1381,7 +1831,7 @@ export class BrowserManager {
       timeoutMs?: number;
     },
   ): Promise<{ title: string; url: string; waitedMs: number }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const given = [c.text, c.textGone, c.selector, c.ref, c.url, c.networkIdle, c.ms];
     if (given.every((g) => g === undefined || g === false)) {
       throw new Error('wait needs one of text, textGone, selector, ref, url, networkIdle or ms');
@@ -1464,7 +1914,7 @@ export class BrowserManager {
       | { action: 'clipboard_read' }
       | { action: 'clipboard_write'; text: string },
   ): Promise<{ text?: string }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     return this.driving(
       'Interacting',
       async () => {
@@ -1556,7 +2006,7 @@ export class BrowserManager {
     tabId: string,
     req: { accept?: boolean; promptText?: string },
   ): { armed: boolean; dialogs: DialogEntry[] } {
-    this.assertNotHandedOff(tabId);
+    this.assertAgentTurnNow(tabId);
     const tab = this.requireTab(tabId);
     if (req.accept !== undefined) {
       tab.armedDialog = {
@@ -1571,7 +2021,7 @@ export class BrowserManager {
 
   /** Cookies and localStorage of the tab's browser context (the whole profile, not just this tab). */
   async stateGet(tabId: string, domain?: string): Promise<StorageState> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     const state = (await tab.page.context().storageState()) as unknown as StorageState;
     if (!domain) return state;
@@ -1601,7 +2051,7 @@ export class BrowserManager {
       localStorage?: Record<string, string>;
     },
   ): Promise<{ cookies: number; origins: number; localStorageKeys: number }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     const context = tab.page.context();
     let keys = 0;
@@ -1681,7 +2131,7 @@ export class BrowserManager {
     tabId: string,
     what: { cookies?: boolean; localStorage?: boolean },
   ): Promise<void> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     if (what.cookies) await tab.page.context().clearCookies();
     if (what.localStorage) await tab.page.evaluate('localStorage.clear()');
@@ -1695,7 +2145,7 @@ export class BrowserManager {
     expression: string,
     opts: { frameUrl?: string; maxChars?: number } = {},
   ): Promise<{ value: unknown; truncated?: boolean }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     let target: Page | Frame = tab.page;
     if (opts.frameUrl) {
@@ -1718,7 +2168,7 @@ export class BrowserManager {
     tabId: string,
     opts: { level?: string; limit?: number; clear?: boolean } = {},
   ): ConsoleEntry[] {
-    this.assertNotHandedOff(tabId);
+    this.assertAgentTurnNow(tabId);
     const tab = this.requireTab(tabId);
     let list = tab.consoleLog.filter((e) => !opts.level || e.type === opts.level);
     list = list.slice(-(opts.limit ?? 100));
@@ -1730,7 +2180,7 @@ export class BrowserManager {
     tabId: string,
     opts: { urlContains?: string; limit?: number; clear?: boolean } = {},
   ): NetworkEntry[] {
-    this.assertNotHandedOff(tabId);
+    this.assertAgentTurnNow(tabId);
     const tab = this.requireTab(tabId);
     let list = tab.network.filter((e) => !opts.urlContains || e.url.includes(opts.urlContains));
     list = list.slice(-(opts.limit ?? 100));
@@ -1748,7 +2198,7 @@ export class BrowserManager {
     id: number,
     maxChars = 100_000,
   ): Promise<{ id: number; mimeType: string; text?: string; bytes: number; truncated?: boolean }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = this.requireTab(tabId);
     const res = tab.responses.get(id);
     if (!res)
@@ -1780,11 +2230,18 @@ export class BrowserManager {
     tabId: string,
     req: { width?: number; height?: number; device?: string; reset?: boolean },
   ): Promise<{ width: number; height: number; userAgent: string; devicePixelRatio: number }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     const page = tab.page;
     if (!tab.cdp) tab.cdp = await page.context().newCDPSession(page);
     const cdp = tab.cdp;
+    // The agent's own size wins over a live view's: the view letterboxes from now on.
+    if (tab.viewer) {
+      tab.viewer = undefined;
+      tab.viewerYielded = true;
+      await cdp.send('Emulation.clearDeviceMetricsOverride');
+    }
+    tab.agentDevice = Boolean(req.device) && !req.reset;
     {
       if (req.reset) {
         await cdp.send('Emulation.clearDeviceMetricsOverride');
@@ -1832,15 +2289,18 @@ export class BrowserManager {
     tabId: string,
     opts: { ref?: string; fullPage?: boolean } = {},
   ): Promise<{ data: string; mimeType: string }> {
-    this.assertNotHandedOff(tabId);
+    await this.agentTurn(tabId);
     const tab = await this.tabFor(tabId);
     let buf: Buffer;
     if (opts.ref) {
       const el = await this.requireLocator(tab, opts.ref);
-      buf = await el.screenshot({ type: 'png' });
+      buf = await el.screenshot({ type: 'png', scale: 'css' });
     } else {
       buf = await tab.page.screenshot({
         type: 'png',
+        // CSS pixels: a live view laying the page out at its own pixel ratio
+        // must never change the coordinates the agent reads off a screenshot.
+        scale: 'css',
         ...(opts.fullPage ? { fullPage: true } : {}),
       });
     }
@@ -1862,6 +2322,7 @@ export class BrowserManager {
   async clickImpl(tabId: string, ref: string): Promise<void> {
     const tab = await this.tabFor(tabId);
     const locator = await this.requireLocator(tab, ref);
+    await this.pointAtLocator(tab, locator);
     await tab.page.waitForTimeout(randomDelay(50, 150));
     await locator.click({ delay: randomDelay(30, 90) });
   }
@@ -1876,6 +2337,7 @@ export class BrowserManager {
   ): Promise<void> {
     const tab = await this.tabFor(tabId);
     const locator = await this.requireLocator(tab, ref);
+    await this.pointAtLocator(tab, locator);
     await tab.page.waitForTimeout(randomDelay(50, 150));
     await locator.click();
     await locator.pressSequentially(text, { delay: randomDelay(40, 120) });
@@ -1888,6 +2350,7 @@ export class BrowserManager {
     const tab = await this.tabFor(tabId);
     for (const field of fields) {
       const locator = await this.requireLocator(tab, field.ref);
+      await this.pointAtLocator(tab, locator);
       const tag = await locator.evaluate((el) => (el as { tagName: string }).tagName.toLowerCase());
       if (tag === 'select') {
         await locator.selectOption(field.value);
@@ -1911,6 +2374,7 @@ export class BrowserManager {
   async selectImpl(tabId: string, ref: string, value: string): Promise<void> {
     const tab = await this.tabFor(tabId);
     const locator = await this.requireLocator(tab, ref);
+    await this.pointAtLocator(tab, locator);
     await locator.selectOption(value);
   }
 
@@ -1973,6 +2437,7 @@ export class BrowserManager {
       );
     }
     const mouse = tab.page.mouse;
+    this.markCursor(tab, x, y);
     await mouse.move(x, y, { steps: 8 });
     await tab.page.waitForTimeout(randomDelay(50, 150));
     switch (req.action) {
@@ -1997,6 +2462,7 @@ export class BrowserManager {
         }
         await mouse.down();
         await mouse.move(toX, toY, { steps: 15 });
+        this.markCursor(tab, toX, toY);
         await mouse.up();
         return;
       }
@@ -2042,8 +2508,88 @@ export class BrowserManager {
     return this.handoffTabs.has(tabId);
   }
 
-  private assertNotHandedOff(tabId: string): void {
+  /**
+   * Every agent call on a tab passes through here. A tab in a hand-off is
+   * refused at once; a tab the user has taken over makes the call wait until
+   * they hand it back, then fail telling the agent to look again (the page is
+   * the user's work now, not what the agent last read), or fail after
+   * {@link USER_DRIVE_WAIT_MS} if they never do.
+   */
+  private async agentTurn(tabId: string): Promise<void> {
     if (this.handoffTabs.has(tabId)) throw new TabInHandoffError(tabId);
+    const tab = this.tabsById.get(tabId);
+    if (!tab || tab.driver !== 'user') return;
+    await new Promise<void>((resolve, reject) => {
+      const settle = (outcome: 'handed_back' | 'closed' | 'timeout'): void => {
+        clearTimeout(timer);
+        const i = tab.driverWaiters.indexOf(waiter);
+        if (i >= 0) tab.driverWaiters.splice(i, 1);
+        if (outcome === 'handed_back') {
+          reject(new UserHandedBackError(tabId, redactUrl(tab.page.url() || tab.lastUrl)));
+        } else if (outcome === 'closed') reject(new TabNotFoundError(tabId));
+        else reject(new UserDrivingError(tabId));
+        void resolve;
+      };
+      const waiter = (outcome: 'handed_back' | 'closed'): void => settle(outcome);
+      const timer = setTimeout(() => settle('timeout'), USER_DRIVE_WAIT_MS);
+      timer.unref();
+      tab.driverWaiters.push(waiter);
+    });
+  }
+
+  /** The synchronous form, for reads that answer at once: refuse rather than wait. */
+  private assertAgentTurnNow(tabId: string): void {
+    if (this.handoffTabs.has(tabId)) throw new TabInHandoffError(tabId);
+    if (this.tabsById.get(tabId)?.driver === 'user') throw new UserDrivingError(tabId);
+  }
+
+  /** The large view's size the tab is laid out at, if one is. */
+  viewerOf(tabId: string): { width: number; height: number; scale: number } | undefined {
+    const v = this.tabsById.get(tabId)?.viewer;
+    return v ? { width: v.width, height: v.height, scale: v.scale } : undefined;
+  }
+
+  /** Who is using the tab now. */
+  driverOf(tabId: string): 'agent' | 'user' {
+    return this.requireTab(tabId).driver;
+  }
+
+  /** The chat that opened the tab, if it is still open. */
+  ownerOf(tabId: string): string | undefined {
+    return this.tabsById.get(tabId)?.ownerChatId;
+  }
+
+  /**
+   * Take over (`user`) or Hand back (`agent`). Handing back releases the agent
+   * calls that waited, each failing with {@link UserHandedBackError}; with
+   * none waiting, the agent hears it on its next read instead.
+   */
+  setDriver(tabId: string, driver: 'agent' | 'user'): void {
+    const tab = this.requireTab(tabId);
+    if (tab.driver === driver) return;
+    tab.driver = driver;
+    if (driver === 'agent') {
+      const waiters = tab.driverWaiters.splice(0);
+      if (waiters.length === 0) {
+        tab.notices.push(
+          `the user used this tab and handed it back at ${redactUrl(tab.page.url() || tab.lastUrl)}; it may have changed since you last read it`,
+        );
+      }
+      for (const w of waiters) w('handed_back');
+    }
+    this.notify(tab.ownerChatId);
+  }
+
+  /** Where the agent is pointing, for the live view's cursor. */
+  private markCursor(tab: Tab, x: number, y: number): void {
+    tab.cursor = { x: Math.round(x), y: Math.round(y), at: Date.now() };
+    this.notify(tab.ownerChatId);
+  }
+
+  /** The centre of an element the agent is about to act on, as its cursor. */
+  private async pointAtLocator(tab: Tab, locator: Locator): Promise<void> {
+    const box = await locator.boundingBox().catch(() => null);
+    if (box) this.markCursor(tab, box.x + box.width / 2, box.y + box.height / 2);
   }
 
   /** The tab this chat opened most recently and that is still open. */
@@ -2061,43 +2607,98 @@ export class BrowserManager {
 
   /**
    * The tab's live picture for the user's view: Chrome's screencast pushes a
-   * JPEG each time the page paints, so the view moves as the page does. A
+   * JPEG each time the page paints, so the view moves as the page does, and a
+   * still picture is sent at once so a page that is not moving still shows. A
    * frame is acknowledged (and so the next one released) no sooner than
    * `minFrameMs` after the last, which caps the rate a busy page sends.
-   * `onEnd` fires once if the page closes. Never reaches the model.
+   * While a large view lays the tab out at a higher pixel ratio, Chrome's
+   * screencast still draws at the window's own ratio, so it serves only as
+   * the signal that the page painted: each paint is answered with a screenshot
+   * from the session that set the ratio, which is drawn at it. `onEnd` fires
+   * once if the page closes. Never reaches the model.
    */
   async screencast(
     tabId: string,
-    onFrame: (f: {
-      data: string;
-      width: number;
-      height: number;
-      url: string;
-      title: string;
-    }) => void,
+    onFrame: (f: ScreencastFrame) => void,
     onEnd: () => void,
     opts: { quality?: number; minFrameMs?: number } = {},
-  ): Promise<() => Promise<void>> {
+  ): Promise<Screencast> {
     const tab = await this.tabFor(tabId);
     const page = tab.page;
     const cdp = await page.context().newCDPSession(page);
     const minFrameMs = opts.minFrameMs ?? 50;
+    const quality = opts.quality ?? 85;
     let title = await page.title().catch(() => '');
+    const history = { canGoBack: false, canGoForward: false };
     let stopped = false;
     let lastFrameAt = 0;
+    let capturing = false;
+    let dirty = false;
     const refreshTitle = (): void => {
       void page
         .title()
         .then((t) => (title = t))
         .catch(() => undefined);
     };
+    const refreshHistory = async (): Promise<void> => {
+      const h = (await cdp.send('Page.getNavigationHistory').catch(() => null)) as {
+        currentIndex: number;
+        entries: unknown[];
+      } | null;
+      if (!h) return;
+      history.canGoBack = h.currentIndex > 0;
+      history.canGoForward = h.currentIndex < h.entries.length - 1;
+    };
+    const onNavigated = (frame: Frame): void => {
+      refreshTitle();
+      if (frame === page.mainFrame()) void refreshHistory();
+    };
     const ended = (): void => {
       if (stopped) return;
       stopped = true;
       onEnd();
     };
+    const emit = (data: string, width: number, height: number): void => {
+      onFrame({
+        data,
+        width: Math.max(1, Math.round(width)),
+        height: Math.max(1, Math.round(height)),
+        url: redactUrl(page.url()),
+        title,
+        ...history,
+      });
+    };
+    /** One sharp picture per paint at a large view's ratio; paints that land meanwhile share the next. */
+    const sharp = async (): Promise<void> => {
+      if (capturing) {
+        dirty = true;
+        return;
+      }
+      capturing = true;
+      // Chrome refuses a capture for a moment after the size changes; a page
+      // that is not moving will not paint again to ask, so try again here.
+      let misses = 0;
+      try {
+        do {
+          dirty = false;
+          const v = tab.viewer;
+          const session = tab.cdp;
+          if (!v || !session || stopped || tab.page !== page) break;
+          const shot = (await session
+            .send('Page.captureScreenshot', { format: 'jpeg', quality })
+            .catch(() => null)) as { data: string } | null;
+          if (shot && !stopped) emit(shot.data, v.width, v.height);
+          else if (!shot && ++misses < 30) dirty = true;
+          await new Promise((r) => setTimeout(r, shot ? minFrameMs : 100));
+        } while (dirty && !stopped);
+      } finally {
+        capturing = false;
+      }
+    };
+    const sharpWanted = (): boolean =>
+      tab.page === page && tab.cdp !== undefined && (tab.viewer?.scale ?? 1) > 1;
     page.on('load', refreshTitle);
-    page.on('framenavigated', refreshTitle);
+    page.on('framenavigated', onNavigated);
     page.on('close', ended);
     cdp.on(
       'Page.screencastFrame',
@@ -2107,13 +2708,8 @@ export class BrowserManager {
         metadata: { deviceWidth: number; deviceHeight: number };
       }) => {
         if (stopped) return;
-        onFrame({
-          data: f.data,
-          width: Math.max(1, Math.round(f.metadata.deviceWidth)),
-          height: Math.max(1, Math.round(f.metadata.deviceHeight)),
-          url: redactUrl(page.url()),
-          title,
-        });
+        if (sharpWanted()) void sharp();
+        else emit(f.data, f.metadata.deviceWidth, f.metadata.deviceHeight);
         const wait = Math.max(0, lastFrameAt + minFrameMs - Date.now());
         lastFrameAt = Date.now() + wait;
         setTimeout(() => {
@@ -2124,19 +2720,233 @@ export class BrowserManager {
         }, wait).unref();
       },
     );
-    await cdp.send('Page.startScreencast', {
-      format: 'jpeg',
-      quality: opts.quality ?? 80,
-      everyNthFrame: 1,
-    });
-    return async () => {
-      stopped = true;
-      page.off('load', refreshTitle);
-      page.off('framenavigated', refreshTitle);
-      page.off('close', ended);
-      await cdp.send('Page.stopScreencast').catch(() => undefined);
-      await cdp.detach().catch(() => undefined);
+    /** Chrome sends a frame only when the page paints: a still page would show nothing. */
+    const still = async (): Promise<void> => {
+      if (sharpWanted()) return sharp();
+      // Chrome refuses a capture for a moment after the page changes size, and a
+      // page that is not moving will not paint again to ask: try for a while.
+      for (let attempt = 0; attempt < 30 && !stopped; attempt++) {
+        const m = (await cdp.send('Page.getLayoutMetrics').catch(() => null)) as {
+          cssVisualViewport?: { clientWidth: number; clientHeight: number };
+        } | null;
+        const shot = (await cdp
+          .send('Page.captureScreenshot', { format: 'jpeg', quality })
+          .catch(() => null)) as { data: string } | null;
+        if (shot && m?.cssVisualViewport) {
+          if (!stopped) {
+            emit(shot.data, m.cssVisualViewport.clientWidth, m.cssVisualViewport.clientHeight);
+          }
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
     };
+    const start = async (): Promise<void> => {
+      await cdp.send('Page.startScreencast', { format: 'jpeg', quality, everyNthFrame: 1 });
+      await still();
+    };
+    await refreshHistory();
+    await start();
+    return {
+      refresh: async () => {
+        if (!stopped) await still();
+      },
+      stop: async () => {
+        stopped = true;
+        page.off('load', refreshTitle);
+        page.off('framenavigated', onNavigated);
+        page.off('close', ended);
+        await cdp.send('Page.stopScreencast').catch(() => undefined);
+        await cdp.detach().catch(() => undefined);
+      },
+    };
+  }
+
+  /**
+   * A large live view's size laid over the agent's: the page is laid out at
+   * the view's CSS size and drawn at its pixel ratio, so the picture is as
+   * sharp as the screen it lands on and the page takes the shape of that
+   * screen (a phone gets the site's narrow layout). `null` puts the agent's
+   * own size back. A device the agent emulated, or a size the agent set since,
+   * is never overridden.
+   */
+  setViewerViewport(
+    tabId: string,
+    vp: { width: number; height: number; scale: number } | null,
+  ): Promise<void> {
+    // One at a time per tab: a renewal landing while a restore is half done
+    // would read the view's size back as the agent's and never give it back.
+    const prev = this.viewerChains.get(tabId) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(() => this.applyViewerViewport(tabId, vp));
+    this.viewerChains.set(tabId, next);
+    void next.finally(() => {
+      if (this.viewerChains.get(tabId) === next) this.viewerChains.delete(tabId);
+    });
+    return next;
+  }
+
+  private readonly viewerChains = new Map<string, Promise<void>>();
+
+  private async applyViewerViewport(
+    tabId: string,
+    vp: { width: number; height: number; scale: number } | null,
+  ): Promise<void> {
+    const tab = this.tabsById.get(tabId);
+    if (!tab) return;
+    if (tab.page.isClosed()) return;
+    if (vp === null) {
+      tab.viewerYielded = false;
+      if (!tab.viewer) return;
+      const { saved } = tab.viewer;
+      tab.viewer = undefined;
+      if (tab.cdp) await tab.cdp.send('Emulation.clearDeviceMetricsOverride');
+      await tab.page.setViewportSize(saved);
+      return;
+    }
+    if (tab.agentDevice || tab.viewerYielded) return;
+    const clamp = (n: number, lo: number, hi: number): number =>
+      Math.min(hi, Math.max(lo, Math.round(n)));
+    const width = clamp(vp.width, VIEWER_MIN.width, VIEWER_MAX.width);
+    const height = clamp(vp.height, VIEWER_MIN.height, VIEWER_MAX.height);
+    const scale = Math.min(3, Math.max(1, vp.scale));
+    const v = tab.viewer;
+    if (v && v.width === width && v.height === height && v.scale === scale) return;
+    if (!tab.cdp) tab.cdp = await tab.page.context().newCDPSession(tab.page);
+    const saved = v ? v.saved : await this.viewport(tabId);
+    // The tab takes the view's size, so the agent's screenshots and the view
+    // agree; the ratio rides only on this session, so a screenshot the agent
+    // takes stays in CSS pixels while the view's captures here are sharp.
+    await tab.page.setViewportSize({ width, height });
+    await tab.cdp.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: scale,
+      mobile: false,
+    });
+    tab.viewer = { width, height, scale, saved };
+  }
+
+  /**
+   * The user's input from the live view, at any time (`patch.browser_view.input`):
+   * presses and releases with their button and modifiers, so a drag selects or
+   * drags; held keys; the toolbar's navigation; copying the selection out
+   * (returns it); and the sign-in card's values. Not an agent action: no
+   * Computer-use gate, no `running` entry, no human timing. Text and values are
+   * never logged, and a field the user typed into reads as `[redacted]` to the agent.
+   */
+  async viewInput(tabId: string, input: ViewUserInput): Promise<string | undefined> {
+    const tab = this.requireTab(tabId);
+    const page = tab.page;
+    const markTyped = (): Promise<unknown> =>
+      page.evaluate(
+        `document.activeElement && document.activeElement.setAttribute('data-patch-user-typed', '')`,
+      );
+    switch (input.kind) {
+      case 'pointer': {
+        const held = (input.modifiers ?? []).map((m) => this.hostModifier(m));
+        for (const m of held) await page.keyboard.down(m);
+        try {
+          const { x, y } = input;
+          const button = input.button ?? 'left';
+          const clickCount = input.clickCount ?? 1;
+          await page.mouse.move(x, y);
+          if (input.action === 'down') await page.mouse.down({ button, clickCount });
+          else if (input.action === 'up') await page.mouse.up({ button, clickCount });
+          else if (input.action === 'click') await page.mouse.click(x, y, { button, clickCount });
+          else if (input.action === 'double_click') await page.mouse.dblclick(x, y, { button });
+          else if (input.action === 'right_click') {
+            await page.mouse.click(x, y, { button: 'right' });
+          }
+        } finally {
+          for (const m of held.reverse()) await page.keyboard.up(m);
+        }
+        return undefined;
+      }
+      case 'scroll':
+        await page.mouse.move(input.x, input.y);
+        await page.mouse.wheel(input.dx, input.dy);
+        return undefined;
+      case 'text':
+        await page.keyboard.insertText(input.text);
+        await markTyped();
+        return undefined;
+      case 'key': {
+        const key = this.hostChord(input.key);
+        if (input.action === 'down') await page.keyboard.down(key);
+        else if (input.action === 'up') await page.keyboard.up(key);
+        else await page.keyboard.press(key);
+        return undefined;
+      }
+      case 'nav':
+        // `commit`: the toolbar answers as the page starts to change, not when it finishes.
+        if (input.action === 'back') await page.goBack({ waitUntil: 'commit' });
+        else if (input.action === 'forward') await page.goForward({ waitUntil: 'commit' });
+        else if (input.action === 'reload') await page.reload({ waitUntil: 'commit' });
+        else {
+          if (!input.url) throw new Error('goto needs an address');
+          await page.goto(addressToUrl(input.url), { waitUntil: 'commit' });
+        }
+        return undefined;
+      case 'copy':
+        return String(await page.evaluate(SELECTION_SCRIPT));
+      case 'fill': {
+        const current = await this.detectForm(tabId);
+        if (!current || current.formId !== input.formId) {
+          throw new Error('the sign-in form changed before it could be filled; fill it again');
+        }
+        let last: Locator | undefined;
+        for (const { field, value } of input.values) {
+          const el = page.locator(`[data-patch-field="${field}"]`).first();
+          await el.fill(value);
+          await el.evaluate((node) =>
+            (node as { setAttribute(n: string, v: string): void }).setAttribute(
+              'data-patch-user-typed',
+              '',
+            ),
+          );
+          last = el;
+        }
+        if (input.submit && last) await last.press('Enter');
+        return undefined;
+      }
+    }
+  }
+
+  /**
+   * The visible sign-in form on the tab, if it has one: its fields' labels and
+   * kinds, tagged so `viewInput` `fill` can reach them. `formId` changes when
+   * the form does (a password step after an email step).
+   */
+  async detectForm(tabId: string): Promise<DetectedForm | null> {
+    const tab = this.requireTab(tabId);
+    if (tab.page.isClosed()) return null;
+    const fields = (await tab.page
+      .evaluate(DETECT_FORM_SCRIPT)
+      .catch(() => [])) as DetectedForm['fields'];
+    if (fields.length === 0) return null;
+    let site = '';
+    let path = '';
+    try {
+      const u = new URL(tab.page.url());
+      site = u.hostname.replace(/^www\./, '');
+      path = u.pathname;
+    } catch {
+      /* about:blank and the like have no site */
+    }
+    const formId = createHash('sha256')
+      .update(JSON.stringify([site, path, fields]))
+      .digest('hex')
+      .slice(0, 16);
+    return { formId, site, fields };
+  }
+
+  /** Cmd on the user's Mac is Ctrl to a browser on any other system. */
+  private hostModifier(m: 'Alt' | 'Control' | 'Meta' | 'Shift'): string {
+    return m === 'Meta' && process.platform !== 'darwin' ? 'Control' : m;
+  }
+
+  private hostChord(key: string): string {
+    return process.platform === 'darwin' ? key : key.replace(/(^|\+)Meta(?=\+)/g, '$1Control');
   }
 
   /**
@@ -2247,6 +3057,7 @@ export class BrowserManager {
     this.tabsById.delete(tabId);
     this.handoffTabs.delete(tabId);
     if (this.activeTabId === tabId) this.activeTabId = undefined;
+    for (const w of tab.driverWaiters.splice(0)) w('closed');
     try {
       if (!tab.page.isClosed()) await tab.page.close();
       if (tab.ephemeralContext) await tab.ephemeralContext.close();
@@ -2281,6 +3092,12 @@ export class BrowserManager {
    */
   async clearLoggedInProfile(): Promise<void> {
     await this.closeTabsFor('logged-in');
+    if (this.usingApp()) {
+      // The profile is the app's: clear what it holds rather than a directory here.
+      const context = await this.getLoggedInContext();
+      await context.clearCookies();
+      return;
+    }
     if (this.loggedInContext) {
       await this.loggedInContext.close();
       this.loggedInContext = null;
@@ -2290,10 +3107,19 @@ export class BrowserManager {
 
   /** Close every tab/context/browser and stop this manager's own Xvfb. */
   async dispose(): Promise<void> {
+    this.disposing = true;
     for (const tabId of [...this.tabsById.keys()]) {
       await this.close(tabId).catch((err: unknown) => {
         this.opts.logger.warn({ tabId, err }, 'browser: error closing tab on dispose');
       });
+    }
+    if (this.appConnection) {
+      // Closes what this host opened in the app; the app itself keeps running.
+      const app = this.appConnection;
+      this.appConnection = null;
+      this.loggedInContext = null;
+      this.ephemeralBrowser = null;
+      await app.close().catch(() => undefined);
     }
     if (this.loggedInContext) {
       await this.loggedInContext.close().catch(() => undefined);

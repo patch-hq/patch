@@ -77,6 +77,10 @@ const RULES: readonly Rule[] = [
     test: /exited with code 137\b|terminated by signal SIGKILL|out of memory|\bENOMEM\b|\bOOM\b/i,
   },
   // --- transient: the condition can clear on its own ---
+  // Claude Code's own run died ("[session_crash] error_name=AbortError
+  // api_error_status=none"). Before `server_error`, whose `api_error` test
+  // would otherwise match the `api_error_status` field and misname it.
+  { reason: 'session_crash', kind: 'transient', test: /\[session_crash\]/i },
   { reason: 'overloaded', kind: 'transient', test: /overloaded_error|api error: 529/i },
   {
     reason: 'rate_limited',

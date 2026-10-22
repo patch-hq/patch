@@ -19,7 +19,7 @@
 // into the design's document to edit it, which an opaque origin forbids. Pads
 // are authored by the user's own agents, the same trust the standalone Pad had.
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
@@ -119,6 +119,8 @@ export interface PadView {
   /** Why the Pad's screens could not be read (a bad pad.json), when they could not. */
   screensError: string | null;
   frameUrl: string;
+  /** Read-only sharing; null while private. `url` is a path on this server. */
+  share: { mode: 'link' | 'public'; url: string } | null;
   thumbUrl: string | null;
   thumbError: string | null;
 }
@@ -209,6 +211,12 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
       })),
       screensError,
       frameUrl: `${base(pad.id)}/`,
+      share: pad.share
+        ? {
+            mode: pad.share.mode,
+            url: `/api/shared/${pad.share.mode === 'public' ? pad.id : pad.share.token}/`,
+          }
+        : null,
       thumbUrl: screens[0] ? thumbUrlFor(pad.id, screens[0].id) : null,
       thumbError: pad.thumbError ?? null,
     };
@@ -540,23 +548,35 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
     }
   });
 
-  app.patch<{ Params: { id: string }; Body: { name?: string; device?: Device } }>(
-    '/api/pads/:id',
-    async (req, reply) => {
-      if (!(await authed(req, reply))) return;
-      try {
-        const pad = store.mustGet(req.params.id);
-        if (typeof req.body?.name === 'string' && req.body.name.trim())
-          pad.name = req.body.name.trim();
-        if (req.body?.device === 'desktop' || req.body?.device === 'phone')
-          pad.device = req.body.device;
-        store.save(pad);
-        return view(pad);
-      } catch (err) {
-        return fail(reply, err);
+  app.patch<{
+    Params: { id: string };
+    Body: { name?: string; device?: Device; share?: string; rotate?: boolean };
+  }>('/api/pads/:id', async (req, reply) => {
+    if (!(await authed(req, reply))) return;
+    try {
+      const pad = store.mustGet(req.params.id);
+      if (typeof req.body?.name === 'string' && req.body.name.trim())
+        pad.name = req.body.name.trim();
+      if (req.body?.device === 'desktop' || req.body?.device === 'phone')
+        pad.device = req.body.device;
+      const mode = req.body?.share;
+      if (mode !== undefined) {
+        if (mode === 'private') delete pad.share;
+        else if (mode === 'link' || mode === 'public') {
+          // A fresh token on first link share, or when asked to revoke the old link.
+          const token =
+            pad.share?.token && req.body?.rotate !== true
+              ? pad.share.token
+              : randomBytes(16).toString('hex');
+          pad.share = { mode, token };
+        } else throw new PadError(400, 'share must be private, link or public');
       }
-    },
-  );
+      store.save(pad);
+      return view(pad);
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
 
   app.delete<{ Params: { id: string } }>('/api/pads/:id', async (req, reply) => {
     if (!(await authed(req, reply))) return;
@@ -625,6 +645,46 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
     withPad((req, reply, pad) => {
       if (!/^[a-z0-9-]+\.png$/i.test(req.params.name)) throw new PadError(404, 'no such thumbnail');
       return sendFile(reply, join(store.dir(pad.id), 'thumbs'), req.params.name);
+    }),
+  );
+
+  // ------------------------------------- 2b. shared, read-only (no bearer) --
+  // Open to anyone holding the key: a link share's token, or a public Pad's id.
+  // Nothing here writes, and nothing exposes changes, notes or batches. The
+  // design's own files carry `sandbox` so they run in an opaque origin, apart
+  // from Patch's (which holds credentials in the browser).
+
+  const withShared =
+    (handler: (req: any, reply: FastifyReply, pad: PadRecord) => unknown) =>
+    async (req: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
+      const { key } = req.params as { key: string };
+      try {
+        const pad = store.findShared(key);
+        if (!pad) throw new PadError(404, 'not shared');
+        return await handler(req, reply, pad);
+      } catch (err) {
+        return fail(reply, err);
+      }
+    };
+  const SHARED = '/api/shared/:key';
+  app.get(SHARED, async (req, reply) => reply.redirect(`${req.url.split('?')[0]}/`, 301));
+  app.get(
+    `${SHARED}/`,
+    withShared((_req, reply) => sendFile(reply, PUBLIC, 'shared.html')),
+  );
+  app.get(
+    `${SHARED}/api`,
+    withShared((_req, _reply, pad) => ({
+      name: pad.name,
+      device: pad.device,
+      screens: screensOf(pad.id),
+    })),
+  );
+  app.get(
+    `${SHARED}/f/*`,
+    withShared((req, reply, pad) => {
+      reply.header('content-security-policy', 'sandbox allow-scripts');
+      return sendFile(reply, store.filesDir(pad.id), req.params['*']);
     }),
   );
 

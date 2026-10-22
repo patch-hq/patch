@@ -102,6 +102,40 @@ describe('GET /api/usage-report', () => {
     }
   });
 
+  it('answers a named period from its cache after the first read, and says when it was read', async () => {
+    const { built, get, answerAll, readRequests } = await setup();
+    try {
+      const first = get('period=day');
+      await answerAll({
+        'host-a': {
+          samples: [{ ts: Date.now() - 1000, accountId: 'a', label: 'A', week: 0.5 }],
+          chats: [],
+        },
+      });
+      const body = (await first).json();
+      expect(body.samples).toHaveLength(1);
+      expect(body.until - body.since).toBe(24 * 60 * 60 * 1000);
+      expect(typeof body.at).toBe('number');
+      const asked = readRequests().length;
+      // Within the TTL: the same answer, and nothing asked of any machine.
+      const second = await get('period=day');
+      expect(second.statusCode).toBe(200);
+      expect(second.json().at).toBe(body.at);
+      expect(readRequests().length).toBe(asked);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('refuses a period it does not keep', async () => {
+    const { built, get } = await setup();
+    try {
+      expect((await get('period=year')).statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('rejects non-numeric bounds', async () => {
     const { built, get } = await setup();
     try {

@@ -5,6 +5,7 @@ import {
   harnessModesInclude,
 } from './harnesses.js';
 import type { SleepGuard } from './sleepGuard.js';
+import type { SleepWatch } from './sleepWatch.js';
 import { expandHome } from './expandHome.js';
 import { escapesFolder } from './pathEscape.js';
 import { invalidateGitDirtyCache } from './git-dirty.js';
@@ -81,6 +82,7 @@ import type {
   PermissionDecisionBy,
   TurnOutcome,
   McpServerConfig,
+  EffortLevel,
 } from '@patch/wire';
 
 import {
@@ -110,7 +112,14 @@ import {
 } from './history.js';
 import { randomUUID } from 'node:crypto';
 import { WakeScheduler, parseDelayMs, type WakeRecord } from './wake.js';
-import { WatchScheduler, type WatchRecord } from './watch.js';
+import {
+  DEFAULT_CHECK_IN_MS,
+  DEFAULT_CHECK_IN_PROMPT,
+  WatchScheduler,
+  readProgress,
+  type WatchProgress,
+  type WatchRecord,
+} from './watch.js';
 import type { WebBotAuthConfig } from './webBotAuth.js';
 import {
   BrowserManager,
@@ -123,6 +132,7 @@ import {
   type ReadResult,
   type StorageState,
   type TabInfo,
+  type AppBrowserLink,
 } from './browser.js';
 import {
   persistPendingDecision,
@@ -142,7 +152,17 @@ import {
   selectNextTodo,
   TODO_PREFIX,
 } from './todos.js';
+import { execFileSync } from 'node:child_process';
 import { assistantContextTokens, resultContextWindow } from './contextUsage.js';
+import { handoffKey, planHandoff, replanAfterOverflow, type HandoffPlan } from './handoffPlan.js';
+import {
+  budgetFor,
+  dividerCopy,
+  estimateIsOff,
+  instructionHash,
+  trackForPlan,
+  type ModelLimits,
+} from './handoffRun.js';
 import { renderGoalTranscript } from './goalEval.js';
 import {
   isReservedSpecialThread,
@@ -167,6 +187,7 @@ import {
 } from './accountFailover.js';
 import {
   assistantErrorText,
+  HandoffOverflowError,
   isModelOutput,
   setLiveRunPermissionMode,
   TurnFailedError,
@@ -180,6 +201,7 @@ import {
   statedLimitOf,
 } from './limitFailure.js';
 import { classifyFailure, backoffMs as overloadBackoffMs } from './errorClass.js';
+import { describeTurnFailure } from './failureCopy.js';
 import { CLAUDE_BACKEND_ID } from './host.js';
 import {
   applyFindReplace,
@@ -198,10 +220,11 @@ import { importDocx, exportMarkdownToDocx, exportMarkdownToPdf } from './docConv
 import type {
   AccountStrategy,
   BrowserHandoffInput,
+  BrowserViewInput,
   ChatInputEvent,
   DocExportFormat,
 } from '@patch/wire';
-import { BrowserHandoff, type HandoffResult } from './browserHandoff.js';
+import { BrowserHandoff, type HandoffResult, type ShareResult } from './browserHandoff.js';
 import { voicePrefixForSource } from './specialThreads.js';
 
 /**
@@ -409,7 +432,7 @@ export interface HostOptions {
    * Absent (tests, hosts with no account store) means "cannot tell", which is
    * reported as `false`: the ladder behaves exactly as it did before.
    */
-  hostOutOfCredit?: () => boolean;
+  hostOutOfCredit?: (chatId?: string) => boolean;
   /**
    * The routing strategy in force and how far through the held accounts the
    * exhaustion has got, for the chat to say beside the limit ("Round robin —
@@ -469,6 +492,8 @@ export interface HostOptions {
   onTurnCommitted?: (chatId: string) => void;
   /** Held from the start of a chat's pump until it settles, so the host machine cannot sleep mid-turn. */
   sleepGuard?: SleepGuard;
+  /** Tells a turn that died because the machine slept from one that failed on its own. */
+  sleepWatch?: SleepWatch;
   /**
    * Optional AI title summariser (spec/04 § Name). When set, the host fires
    * it ONCE per chat as soon as the chat's first user message is accepted —
@@ -575,6 +600,12 @@ export interface HostOptions {
     folder: string;
     model?: string | null;
   }) => Promise<string | null>;
+  /**
+   * What the catalogue and the harnesses have reported about each model's
+   * context window and output cap (spec/04 § Handoff budget). Absent, every
+   * target is planned against the assumed window and says so on the divider.
+   */
+  modelLimits?: ModelLimits;
   /**
    * The Manager sweep's one decision call (spec/06 § Sweep;
    * `managerSweepGen.ts`). OPTIONAL — `runManagerSweep` refuses rather than
@@ -705,6 +736,8 @@ export interface HostOptions {
   browser?: BrowserManager;
   /** Deployment signing stays on the paired server; the host receives only this RPC facade. */
   webBotAuth?: WebBotAuthConfig;
+  /** spec/02 § Browser — In the Patch app: the app on this machine hosts the agent's browser. */
+  appBrowser?: AppBrowserLink;
   /**
    * spec/02 § Browser — Route through: resolves THIS host's current routing
    * target (if any) into what `BrowserManager.open` needs — whether that
@@ -853,6 +886,9 @@ export interface SpawnChatOptions {
  * Its length IS the retry ceiling.
  */
 const SDK_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000];
+
+/** How often a turn held for a sleeping machine asks whether it has woken. */
+const WAKE_POLL_MS = 15_000;
 
 /** Re-sends for a session the SDK aborted unasked: one resumed, one on a fresh session. */
 const SESSION_ABORT_RESTARTS = 2;
@@ -1243,6 +1279,7 @@ import {
   attachmentsDirFor,
 } from './chatMove.js';
 import { createClaudeSessionStore } from './claudeSessionStore.js';
+import { isCodexModel } from './codexAccounts.js';
 import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
@@ -1652,6 +1689,20 @@ export class UnknownModelError extends Error {
 }
 
 /**
+ * A `chat.effort_request` landed on a chat whose current model is not on the
+ * Claude backend (spec/04 § Effort). NO FALLBACK: Codex has no equivalent
+ * option, so there is nothing to round the request to — the chat's effort is
+ * left exactly as it was.
+ */
+export class EffortNotSupportedError extends Error {
+  readonly code = 'effort_not_supported' as const;
+  constructor(chatId: string, model: string | undefined) {
+    super(`chat ${chatId} is on model ${model ?? '(none)'}, which has no Claude effort levels`);
+    this.name = 'EffortNotSupportedError';
+  }
+}
+
+/**
  * Why a file-browser create / rename / delete was refused (spec/03 § Files —
  * `patch.file_op.response`). Every one of these reaches the user as itself;
  * none of them is recoverable by guessing at what was meant.
@@ -1954,6 +2005,67 @@ interface ToolRunState {
   closed?: boolean;
 }
 
+/** The numbers a handoff divider shows (the wire `sessionChange.handoff`, plus the model it names). */
+interface HandoffDivider {
+  model: string;
+  carriedEntries: number;
+  totalEntries: number;
+  omittedFromSeq?: number;
+  omittedToSeq?: number;
+  estimatedTokens: number;
+  availableTokens: number;
+  windowKnown: boolean;
+  summary: boolean;
+  summaryNote?: string;
+  replanned: boolean;
+}
+
+interface ActiveHandoff {
+  key: string;
+  prompt: string;
+  instructionHash: string;
+  track: readonly TrackEntry[];
+  targetModel: string | null;
+  planState: { permissionMode?: string; branch?: string; narrative: string | null };
+  summaryNote: string | undefined;
+  windowKnown: boolean;
+  estimatedTokens: number;
+  availableTokens: number;
+  replanned: boolean;
+  /** First input-token count the target reported for this handoff's turn. */
+  reportedInputTokens: number | null;
+}
+
+/** How long the source model gets to write an optional narrative before the handoff goes without. */
+const HANDOFF_NARRATIVE_TIMEOUT_MS = 30_000;
+
+/** The folder's git branch, when it is a git checkout; absent otherwise (not every chat folder is one). */
+function gitBranchOf(folder: string): { branch?: string } {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: folder,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    }).trim();
+    return out ? { branch: out } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A handoff track as plain text, for the first message of a linked fresh chat. */
+function renderSeedTrack(track: readonly TrackEntry[]): string {
+  const lines: string[] = [];
+  for (const { event } of track) {
+    if (event.type === 'chat.message' && event.role !== 'system')
+      lines.push(`${event.role === 'user' ? 'User' : 'Assistant'}: ${event.content}`);
+    else if (event.type === 'chat.tool_call')
+      lines.push(`[tool ${event.tool}] ${JSON.stringify(event.args).slice(0, 300)}`);
+  }
+  return lines.join('\n\n');
+}
+
 export class Daemon {
   readonly chatState: ChatStateMap;
   private readonly opts: Required<
@@ -2202,8 +2314,18 @@ export class Daemon {
        * records to fit its context window (spec/04 § History — Codex has no
        * auto-compaction for an injected thread, unlike Claude Code). */
       trimmedRecords?: number;
+      /** The budgeted handoff behind this switch (spec/04 § Handoff budget), for its divider. */
+      handoff?: HandoffDivider;
     }
   >();
+  /**
+   * The budgeted handoff in flight for each chat (spec/04 § Handoff budget):
+   * what was planned, so an overflow can re-plan once and the first reply can
+   * be verified against it. Cleared when the turn settles.
+   */
+  private readonly activeHandoffs = new Map<string, ActiveHandoff>();
+  /** A retry that must reuse the user message already logged at this seq (see `recoverHandoff`). */
+  private readonly reuseLoggedUserMessage = new Map<string, number>();
   /**
    * Set by `setChatModel(chatId, model, { compact: true })` (spec/04 § History
    * — "switch and compact", the cheap path for huge chats): the NEXT turn's
@@ -2314,6 +2436,10 @@ export class Daemon {
       // a loop tick due while the chat's pump is occupied is absorbed rather
       // than queued (see wake.ts `fire`/`onTurnEnd`).
       isBusy: (chatId) => this.pumping.has(chatId),
+      isLimited: (chatId) =>
+        this.limitBlocks.has(chatId) ||
+        this.rateLimitPendingTurns.has(chatId) ||
+        this.rateLimitTimers.has(chatId),
       now: () => this.opts.now(),
       logger: this.opts.logger,
     });
@@ -2326,6 +2452,7 @@ export class Daemon {
       allChatIds: () => this.opts.metaStore.list().map((m) => m.chatId),
       now: () => this.opts.now(),
       logger: this.opts.logger,
+      checkIn: () => this.watchCheckIn,
     });
     // spec/02 § Browser: the agent browser, one real Chromium this host owns.
     // Rooted beside the meta store, same trick ChatLog's blobsDir above uses
@@ -2336,6 +2463,7 @@ export class Daemon {
         root: join(dirname(dirname(dirname(options.metaStore.pathFor('_')))), 'browser'),
         logger: options.logger.child({ component: 'browser' }),
         ...(options.webBotAuth ? { webBotAuth: options.webBotAuth } : {}),
+        ...(options.appBrowser ? { appBrowser: options.appBrowser } : {}),
         onActivity: (chatId) => this.emitBrowserStatus(chatId),
       });
     this.browserHandoff_ = new BrowserHandoff({
@@ -2867,6 +2995,10 @@ export class Daemon {
   private readonly sessionAbortCount = new Map<string, number>();
   /** Armed generic-error retries, so shutdown can cancel them. */
   private readonly sdkRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Chats whose turn is held until the machine is fully awake, and since when. */
+  private readonly waitingForWakeSince = new Map<string, number>();
+  /** Keeps each sleep re-send's localId unique, however fast they come. */
+  private sleepRetrySeq = 0;
   /**
    * Turns parked waiting for a retry — a rate-limit reset or a backoff step.
    * Held here as well as in the timer's closure so `persistPendingTurns` can
@@ -3465,7 +3597,13 @@ export class Daemon {
    */
   startWatch(
     chatId: string,
-    opts: { command: string; description: string; cwd?: string },
+    opts: {
+      command: string;
+      description: string;
+      timeoutSec: number;
+      checkInSec?: number;
+      cwd?: string;
+    },
   ): WatchRecord {
     const state = this.chatState.get(chatId);
     const meta = this.opts.metaStore.read(chatId);
@@ -3479,6 +3617,8 @@ export class Daemon {
       command: opts.command,
       description: opts.description,
       cwd,
+      timeoutSec: opts.timeoutSec,
+      ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
     });
     this.opts.logger.info({ chatId, taskId: rec.taskId }, 'watch: started');
     // spec/02 § Background task completions — a launch starts work the turn
@@ -3490,14 +3630,33 @@ export class Daemon {
     return rec;
   }
 
+  /** The periodic background-task check-in: how often, and the prompt the owning agent is sent. */
+  private watchCheckIn = { intervalMs: DEFAULT_CHECK_IN_MS, prompt: DEFAULT_CHECK_IN_PROMPT };
+
+  setWatchCheckIn(cfg: { intervalMs: number; prompt: string }): void {
+    if (!(cfg.intervalMs > 0) || cfg.prompt.trim() === '') {
+      throw new Error('setWatchCheckIn: intervalMs must be positive and prompt non-empty');
+    }
+    this.watchCheckIn = cfg;
+  }
+
   /** Every watch this chat has running or recently ended (patch_watch_list). */
-  listWatch(chatId: string): WatchRecord[] {
-    return this.watch.list(chatId);
+  listWatch(chatId: string): (WatchRecord & WatchProgress & { nextCheckInAt?: number })[] {
+    return this.watch.list(chatId).map((rec) => ({
+      ...rec,
+      ...readProgress(rec.outputFile),
+      ...(rec.status === 'running' ? { nextCheckInAt: this.watch.nextCheckInAt(rec) } : {}),
+    }));
   }
 
   /** A task's combined stdout+stderr (patch_watch_output). */
   watchOutput(chatId: string, taskId: string, tail?: number): string {
     return this.watch.output(chatId, taskId, tail);
+  }
+
+  /** Change how often a running task's owning agent is checked in with (the bar's control). */
+  setWatchTaskCheckIn(chatId: string, taskId: string, checkInSec: number): boolean {
+    return this.watch.setCheckIn(chatId, taskId, checkInSec);
   }
 
   /** Kill a running task's whole process group (patch_watch_stop). */
@@ -3555,7 +3714,15 @@ export class Daemon {
       chatId,
       active: st.active,
       ...(st.action ? { action: st.action } : {}),
-      tabs: st.tabs.map(({ tabId, url, handedOff }) => ({ tabId, url, handedOff })),
+      tabs: st.tabs.map(({ tabId, url, handedOff, driver, cursor, appTarget }) => ({
+        tabId,
+        url,
+        handedOff,
+        ...(driver === 'user' ? { driver } : {}),
+        ...(cursor ? { cursor } : {}),
+        ...(appTarget ? { appTarget } : {}),
+      })),
+      ...(st.openedAt !== undefined ? { since: st.openedAt } : {}),
     });
   }
 
@@ -3759,9 +3926,33 @@ export class Daemon {
     return this.browserHandoff_.request(args);
   }
 
+  /** `patch_browser_handoff` with `share`: the user reviews the tab; the agent is not blocked. */
+  browserShare(args: { chatId: string; tabId: string; reason: string }): Promise<ShareResult> {
+    return this.browserHandoff_.share(args);
+  }
+
   /** `patch.browser_view.watch` from a surface. */
-  browserViewWatch(chatId: string, tabId: string | undefined, watch: boolean): void {
-    this.browserHandoff_.watch(chatId, tabId, watch);
+  browserViewWatch(
+    chatId: string,
+    tabId: string | undefined,
+    watch: boolean,
+    view: { viewerId?: string; viewport?: { width: number; height: number; scale: number } } = {},
+  ): void {
+    this.browserHandoff_.watch(chatId, tabId, watch, view);
+  }
+
+  /** `patch.browser_view.input` from a surface: the user's own input, never logged. */
+  browserViewInput(chatId: string, tabId: string, input: BrowserViewInput): Promise<void> {
+    return this.browserHandoff_.viewInput(chatId, tabId, input);
+  }
+
+  /** `patch.browser_view.drive` from a surface: Take over / Hand back. */
+  browserViewDrive(chatId: string, tabId: string, driver: 'agent' | 'user'): void {
+    try {
+      this.browserHandoff_.drive(chatId, tabId, driver);
+    } catch (err) {
+      this.opts.logger.warn({ chatId, tabId, err }, 'browser view: drive failed');
+    }
   }
 
   /** `patch.browser_handoff.input` from a surface. */
@@ -3967,6 +4158,9 @@ export class Daemon {
       lastUpdated: now,
       claudeSessionId: undefined,
       model,
+      // A brand-new chat has no effort override of its own (spec/04 §
+      // Effort) — it runs at the model's own default until one is set.
+      effort: undefined,
       permissionMode,
       ...(req.preferredAccountId !== undefined
         ? { preferredAccountId: req.preferredAccountId }
@@ -4778,7 +4972,7 @@ export class Daemon {
     this.threadHandoffs.set(chatId, handoff);
   }
 
-  /** The Manager is back on its home host: whatever handoff was waiting is moot. */
+  /** The Manager has moved off this host: whatever handoff was waiting is moot. */
   dropThreadHandoff(chatId: string): void {
     this.threadHandoffs.delete(chatId);
   }
@@ -5000,6 +5194,10 @@ export class Daemon {
     }
   }
 
+  private managerDisabled(): boolean {
+    return this.chatState.get(SPECIAL_THREAD_IDS.manager)?.disabled === true;
+  }
+
   /** Quiet one-line note on the Manager thread's own log (spec/06 § Sweep —
    * "Sweep traffic never enters it, only the one-line flags"): a `system`
    * `chat.message`, same arrangement a rotation boundary uses — never a turn,
@@ -5046,6 +5244,15 @@ export class Daemon {
         error: 'manager-sweep: no decider configured',
       };
     }
+    // spec/06 § Disabled — a disabled Manager sends nothing. The server stops
+    // raising sweeps, but a run already on its way here still arrives.
+    const idle = (tokensUsed: number): ManagerSweepResultEvent => ({
+      type: 'manager.sweep_result',
+      runId: req.runId,
+      actions: req.candidates.map((c) => ({ chatId: c.chatId, action: 'leave' as const })),
+      tokensUsed,
+    });
+    if (this.managerDisabled()) return idle(0);
     const digest = await this.buildSweepDigest(req.candidates, req.messagesPerChat);
     const result = await this.opts.decideSweep({
       digest,
@@ -5061,6 +5268,8 @@ export class Daemon {
         error: 'manager-sweep: decision call failed or returned an unparseable reply',
       };
     }
+    // Disabled while the decision call was running.
+    if (this.managerDisabled()) return idle(result.tokensUsed);
     const byChatId = new Map(req.candidates.map((c) => [c.chatId, c]));
     const actions: { chatId: string; action: 'nudge' | 'wake' | 'flag' | 'leave' }[] = [];
     const seen = new Set<string>();
@@ -5493,8 +5702,60 @@ export class Daemon {
     const activeBranchId = meta.activeBranchId ?? this.branchIdFor(chatId);
     const targetBranchId = branchId ?? activeBranchId;
     const records = readTrackRecords(this.chatLog, chatId, meta, targetBranchId, fromSeq);
+    // A question that ran out unanswered, or that the user ANSWERED, is replayed
+    // as a request plus its resolution, so a reload draws the card the live
+    // surface showed (greyed out, or with the picks marked) instead of dropping
+    // it and leaving two bare tool rows. Cancelled ones are not: their tool
+    // rows already tell that story.
+    const settledQuestions = new Map<
+      string,
+      { approve: boolean; answers?: Record<string, string> }
+    >();
     for (const record of records) {
-      if (record.rec.k === 'event') {
+      if (record.rec.k !== 'permission.decision') continue;
+      if (record.rec.by === 'expiry') {
+        settledQuestions.set(record.rec.requestId, { approve: false });
+      } else if (record.rec.decision === 'approve_with_edits') {
+        const answers = record.rec.editedInput?.['answers'];
+        if (answers !== null && typeof answers === 'object') {
+          settledQuestions.set(record.rec.requestId, {
+            approve: true,
+            answers: answers as Record<string, string>,
+          });
+        }
+      }
+    }
+    for (const record of records) {
+      if (
+        record.rec.k === 'permission.request' &&
+        record.rec.tool === ASK_USER_QUESTION &&
+        settledQuestions.has(record.rec.requestId) &&
+        !this.pendingPermissionEvents.has(`${chatId}:${record.rec.requestId}`)
+      ) {
+        emitToSurface({
+          type: 'chat.permission_request',
+          chatId,
+          requestId: record.rec.requestId,
+          request: {
+            tool: record.rec.tool,
+            args: record.rec.args,
+            ...(record.rec.description !== undefined
+              ? { description: record.rec.description }
+              : {}),
+          },
+          seq: record.seq,
+          ...(targetBranchId === activeBranchId ? {} : { branchId: targetBranchId }),
+        });
+        const settled = settledQuestions.get(record.rec.requestId)!;
+        emitToSurface({
+          type: 'chat.permission_response',
+          chatId,
+          requestId: record.rec.requestId,
+          approve: settled.approve,
+          decision: settled.approve ? 'approve_with_edits' : 'deny',
+          ...(settled.answers !== undefined ? { answers: settled.answers } : {}),
+        });
+      } else if (record.rec.k === 'event') {
         const ev = record.rec.event;
         // Send the blob REFERENCE, never the body. Tool output is 85-99% of a
         // long chat's bytes — one measured chat shipped 23 MB to draw 150 KB
@@ -6523,32 +6784,77 @@ export class Daemon {
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       this.sdkRetryTimers.delete(chatId);
-      this.unparkTurn(chatId);
-      // A turn that arrived while we were waiting has already revived the
-      // chat, and a stop or delete means nobody wants this one any more.
-      const cur = this.chatState.get(chatId);
-      if (!cur || cur.activity !== 'errored') return;
-      // A FRESH localId per attempt, never the original turn's: (chatId,
-      // localId) is the idempotency key, so re-sending under the failed turn's
-      // id is silently deduped and the retry never happens. That made the
-      // second and third rungs of the ladder unreachable.
-      void this.sendInput({
-        chatId,
-        message: prompt,
-        localId: `sdk-retry-${chatId}-${attempt}-${this.opts.now()}`,
-        // spec/09 § Whose turn it was — a retry is the same turn, so it settles
-        // as whatever it was. A user turn that had to go round the error ladder
-        // still notifies once; a wake tick that did still says nothing.
-        ...(cur.turnOrigin ? { origin: cur.turnOrigin } : {}),
-        // The fresh localId above is what makes the host RUN this rung at
-        // all; this is what stops every surface drawing it as a second message.
-        ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
-      }).catch((err: unknown) => {
-        this.opts.logger.error({ chatId, err }, 'sdk error: retry could not be sent');
-      });
+      this.resendRetriedTurn(chatId, prompt, `sdk-retry-${chatId}-${attempt}`, retryOfSeq);
     }, delayMs);
     timer.unref?.();
     this.sdkRetryTimers.set(chatId, timer);
+  }
+
+  /**
+   * Hold a turn until the machine is in a full wake. Surfaces see
+   * `waitingForWakeSince` for as long as it is held. Returns once the machine
+   * is awake, or the turn is stopped.
+   */
+  private async holdUntilFullyAwake(
+    chatId: string,
+    watch: SleepWatch,
+    signal: AbortSignal,
+  ): Promise<void> {
+    this.waitingForWakeSince.set(chatId, this.opts.now());
+    this.emitState(chatId);
+    this.opts.logger.info(
+      { chatId },
+      'machine is in a dark wake — holding the turn until it is fully awake',
+    );
+    try {
+      while (!signal.aborted) {
+        await new Promise<void>((resolve) => {
+          const done = (): void => {
+            clearTimeout(t);
+            signal.removeEventListener('abort', done);
+            resolve();
+          };
+          const t = setTimeout(done, WAKE_POLL_MS);
+          signal.addEventListener('abort', done);
+        });
+        if (!signal.aborted && watch.isFullyAwake()) break;
+      }
+    } finally {
+      this.waitingForWakeSince.delete(chatId);
+      this.emitState(chatId);
+      this.opts.logger.info({ chatId, stopped: signal.aborted }, 'wake hold over');
+    }
+  }
+
+  private resendRetriedTurn(
+    chatId: string,
+    prompt: string,
+    localIdPrefix: string,
+    retryOfSeq: number | undefined,
+  ): void {
+    this.unparkTurn(chatId);
+    // A turn that arrived while we were waiting has already revived the
+    // chat, and a stop or delete means nobody wants this one any more.
+    const cur = this.chatState.get(chatId);
+    if (!cur || cur.activity !== 'errored') return;
+    // A FRESH localId per attempt, never the original turn's: (chatId,
+    // localId) is the idempotency key, so re-sending under the failed turn's
+    // id is silently deduped and the retry never happens. That made the
+    // second and third rungs of the ladder unreachable.
+    void this.sendInput({
+      chatId,
+      message: prompt,
+      localId: `${localIdPrefix}-${this.opts.now()}`,
+      // spec/09 § Whose turn it was — a retry is the same turn, so it settles
+      // as whatever it was. A user turn that had to go round the error ladder
+      // still notifies once; a wake tick that did still says nothing.
+      ...(cur.turnOrigin ? { origin: cur.turnOrigin } : {}),
+      // The fresh localId above is what makes the host RUN this rung at
+      // all; this is what stops every surface drawing it as a second message.
+      ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
+    }).catch((err: unknown) => {
+      this.opts.logger.error({ chatId, err }, 'sdk error: retry could not be sent');
+    });
   }
 
   /**
@@ -6808,6 +7114,19 @@ export class Daemon {
   }): Promise<void> {
     const state = this.chatState.get(req.chatId);
     if (!state) throw new ChatNotFoundError(req.chatId);
+    if (req.message.trim().length === 0 && (req.attachments ?? []).length === 0) {
+      this.emit({
+        type: 'chat.error',
+        chatId: req.chatId,
+        error: {
+          code: 'fork_empty_message',
+          message: 'an edited turn needs text or an attachment',
+        },
+        seq: OUT_OF_BAND_SEQ,
+      });
+      this.opts.logger.warn({ chatId: req.chatId, seq: req.seq }, 'fork refused: empty turn');
+      return;
+    }
     const graph = this.ensureBranches(req.chatId);
 
     const sessionId = state.claudeSessionId;
@@ -7483,6 +7802,7 @@ export class Daemon {
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
       ...(state.model !== undefined ? { model: state.model } : {}),
+      ...(state.effort !== undefined ? { effort: state.effort } : {}),
       permissionMode: this.chatPermissionMode(chatId),
       disabledTools: state.disabledTools,
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
@@ -7961,7 +8281,10 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
     if (isReservedSpecialThread(chatId)) {
-      throw new ChatMoveError('unsupported', 'a special thread stays on the home host');
+      throw new ChatMoveError(
+        'unsupported',
+        'a special thread stays on the host that runs the Manager',
+      );
     }
     if (
       this.pumping.has(chatId) ||
@@ -8036,7 +8359,10 @@ export class Daemon {
       throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
     }
     if (isReservedSpecialThread(chatId)) {
-      throw new ChatMoveError('unsupported', 'a special thread stays on the home host');
+      throw new ChatMoveError(
+        'unsupported',
+        'a special thread stays on the host that runs the Manager',
+      );
     }
     this.movingOut.add(chatId);
     await this.stopAllWork(chatId);
@@ -8337,6 +8663,14 @@ export class Daemon {
     const abortController = new AbortController();
     this.aborters.set(chatId, abortController);
 
+    // A turn never starts while the machine is in a dark wake: it would die when
+    // the machine drops back to sleep. Before the credential is read, so a long
+    // wait never runs on a stale token; a stop during the wait lands on the
+    // aborted check below.
+    if (this.opts.sleepWatch?.isFullyAwake() === false) {
+      await this.holdUntilFullyAwake(chatId, this.opts.sleepWatch, abortController.signal);
+    }
+
     // OAuth gate (spec/10-auth.md): re-read the credential BEFORE the SDK query,
     // self-refreshing an expiring token (see makeResolveOAuth). Missing/expired
     // and unrefreshable → emit `host.unauthenticated`, refuse the query. NO
@@ -8544,6 +8878,7 @@ export class Daemon {
     // spec/04 § History — the turn opens in the chat's own history log before
     // anything it produces is written there.
     const turnId = randomUUID();
+    const turnStartedAt = this.opts.now();
     let turnOutcome: TurnOutcome = 'failed';
     let turnError: { code: ChatErrorCode; message: string } | undefined;
     this.branchIds.delete(chatId);
@@ -8591,7 +8926,14 @@ export class Daemon {
     // gone from the client's copy of this entry. The seq survives that
     // reconciliation (spec/12), so it is the only identity that still works.
     let userMessageSeq: number | undefined;
-    if (userContent !== null) {
+    // spec/04 § Handoff budget — a retried provider switch delivers the message
+    // already in the log; it does not append a second copy of it.
+    const reusesLoggedMessage =
+      retryOfSeq !== undefined && this.reuseLoggedUserMessage.get(chatId) === retryOfSeq;
+    if (reusesLoggedMessage) {
+      this.reuseLoggedUserMessage.delete(chatId);
+      userMessageSeq = retryOfSeq;
+    } else if (userContent !== null) {
       const raw: ChatMessageEvent = {
         type: 'chat.message',
         chatId,
@@ -8731,6 +9073,7 @@ export class Daemon {
     // run on (or whose prior session is genuinely gone).
     let reconstructTrack: readonly TrackEntry[] | undefined;
     let resumeExistingNativeSessionId: string | undefined;
+    let handoffDivider: HandoffDivider | undefined;
     if (isProviderSwitch || isNativeRebuild) {
       const compactRequest = this.pendingCompactSwitch.get(chatId);
       this.pendingCompactSwitch.delete(chatId);
@@ -8785,6 +9128,30 @@ export class Daemon {
         resumeExistingNativeSessionId = switchedClaudeAccount
           ? undefined
           : plan.resumeExistingSessionId;
+        // spec/04 § Handoff budget — a track built from scratch on another
+        // provider is sized to the target's window first; a resume of the
+        // target's own earlier session only carries the delta.
+        if (isProviderSwitch && plan.resumeExistingSessionId === undefined) {
+          const handoff = await this.planProviderHandoff({
+            chatId,
+            state,
+            fullTrack: plan.track,
+            branchId: plan.activeBranchId,
+            prompt,
+            ...(userMessageSeq !== undefined ? { userMessageSeq } : {}),
+          });
+          if (!handoff.ok) {
+            this.aborters.delete(chatId);
+            const error = this.failHandoff(chatId, 'handoff_too_large', handoff.message, {
+              ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}),
+              revertModel: true,
+            });
+            this.closeTurnInHistory(chatId, 'failed', error);
+            return false;
+          }
+          chosen = { ...plan, track: handoff.track };
+          handoffDivider = handoff.divider;
+        }
       }
       reconstructTrack = chosen.track;
       // A rebuild after a restart is not a switch: no divider to announce.
@@ -8800,6 +9167,7 @@ export class Daemon {
           seededMessages: reconstructTrack.filter(
             (t) => t.event.type === 'chat.message' && t.event.role !== 'system',
           ).length,
+          ...(handoffDivider ? { handoff: handoffDivider } : {}),
         });
       }
       // Stash the OUTGOING harness's own session + how much of the track it
@@ -8894,11 +9262,13 @@ export class Daemon {
       // session only up to the shared prefix and land the turn in a fresh
       // session, leaving the parent transcript intact.
       ...(fork ? { fork } : {}),
+      ...(handoffDivider ? { handoffStrict: true } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
       ...(state.model !== undefined ? { model: state.model } : {}),
+      ...(state.effort !== undefined ? { effort: state.effort } : {}),
       permissionMode,
       // spec/02 § Native subagent dispatch — talking to the user is the
       // PARENT's job, so a subagent never gets the tools that do it, on top
@@ -9000,13 +9370,36 @@ export class Daemon {
 
     const run = (async (): Promise<boolean> => {
       try {
-        for await (const env of untilAborted(
-          withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
-          abortController.signal,
-          (env) => env.type === 'tool_result',
-        )) {
-          this.handleEnvelope(chatId, env, userMessageSeq);
+        for (;;) {
+          try {
+            for await (const env of untilAborted(
+              withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
+              abortController.signal,
+              (env) => env.type === 'tool_result',
+            )) {
+              this.handleEnvelope(chatId, env, userMessageSeq);
+            }
+            break;
+          } catch (err) {
+            // spec/04 § Handoff budget — the target refused the handoff as over
+            // its window before producing anything (so no tool ran): re-plan
+            // ONCE, tighter. Never the same request again; a second overflow
+            // is the error below.
+            const tighter =
+              err instanceof HandoffOverflowError
+                ? this.replanHandoff(chatId, state, err, userMessageSeq)
+                : undefined;
+            if (!tighter) throw err;
+            if (targetHarness === 'codex') sdkOpts.codexReseed = { events: tighter };
+            else if (sdkOpts.claudeSessionStore) {
+              sdkOpts.claudeSessionStore.reseed = {
+                events: tighter,
+                model: state.model ?? null,
+              };
+            }
+          }
         }
+        this.verifyHandoff(chatId, sdkOpts.prompt);
         turnOutcome = 'completed';
         // A turn that completes cleanly RECOVERS an errored chat: drop the
         // errored status and the persisted error detail so it no longer counts
@@ -9155,8 +9548,45 @@ export class Daemon {
           this.emitState(chatId);
           return false;
         }
+        if (err instanceof HandoffOverflowError) {
+          turnError = this.failHandoff(
+            chatId,
+            'handoff_overflow',
+            'The target model rejected the handoff as too large, even after re-planning it smaller. The history is untouched; retry, switch back, or continue in a linked fresh chat.',
+            { ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}) },
+          );
+          this.opts.logger.warn({ chatId, err: err.message }, 'handoff overflowed twice');
+          return false;
+        }
         const errMsg = (err as Error).message ?? String(err);
         turnError = { code: 'sdk_error', message: errMsg };
+        // A turn that died because the machine slept under it did not fail:
+        // it is owed again once the machine is properly awake, and none of the
+        // retry budgets below are spent on it.
+        this.opts.sleepWatch?.check();
+        const sleptThrough =
+          /went to sleep/i.test(errMsg) || this.opts.sleepWatch?.sleptSince(turnStartedAt) === true;
+        if (sleptThrough) {
+          // Not reported as an error: nothing is wrong with the turn. It goes
+          // round again at once, the wake gate at the top of the next attempt
+          // holds it (visibly) until the machine is fully awake, and the
+          // re-send folds onto the turn's own bubble.
+          this.opts.logger.warn(
+            { chatId, errMsg },
+            'turn died while the machine slept — re-sending it, held until the machine is fully awake',
+          );
+          turnOutcome = 'interrupted';
+          turnError = undefined;
+          const cur = this.chatState.get(chatId);
+          void this.sendInput({
+            chatId,
+            message: prompt,
+            localId: `sleep-retry-${chatId}-${++this.sleepRetrySeq}-${this.opts.now()}`,
+            ...(cur?.turnOrigin ? { origin: cur.turnOrigin } : {}),
+            ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
+          });
+          return false;
+        }
         // What the provider said about the limit, structured — carried through
         // the error boundary rather than re-read out of the sentence. Undefined
         // for a failure that stated no limit (a crash, an abort).
@@ -9188,7 +9618,7 @@ export class Daemon {
         // of this error, so it is true for a turn that died of something else
         // entirely while every key was spent, and settled BEFORE the failover
         // walk below can mark another account and change the answer.
-        let hostOutOfCredit = this.opts.hostOutOfCredit?.() === true;
+        let hostOutOfCredit = this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           isAccountExhausted(limit, errMsg) &&
@@ -9611,11 +10041,17 @@ export class Daemon {
                 ...(block?.accountLabel !== undefined ? { accountLabel: block.accountLabel } : {}),
                 ...(block?.resetsAt !== undefined ? { resetsAt: block.resetsAt } : {}),
               });
+        // `errMsg` stays the provider's words for every predicate above; what
+        // the bubble and the job's run row show is said in plain terms — a
+        // slept-through turn is owed, not failed, and a session crash is
+        // named by its error rather than its field dump.
         const reportedMsg =
           limitWords ??
           (hostOutOfCredit
             ? `Usage limit reached — every account on this host is out of credit. The turn also failed with: ${errMsg}`
-            : errMsg);
+            : describeTurnFailure(errMsg, {
+                sleptThrough: sleptThrough && !isSessionInvalid && !blockedOnCredit,
+              }));
         turnError = { code, message: reportedMsg };
         const seq = this.bumpSeq(chatId);
         const errorEvent: ChatErrorEvent = {
@@ -10521,6 +10957,17 @@ export class Daemon {
   }
 
   private handleEnvelopeInner(chatId: string, env: SdkEnvelope, userMessageSeq?: number): void {
+    // spec/04 § Handoff budget — what the target reports about itself: its real
+    // window (learned for the next switch) and the input tokens of the first
+    // request after a handoff (checked against the estimate by `verifyHandoff`).
+    const limitsModel = this.chatState.get(chatId)?.model;
+    if (env.tokenUsage?.contextWindow !== undefined && limitsModel)
+      this.opts.modelLimits?.note(limitsModel, { contextWindow: env.tokenUsage.contextWindow });
+    const active = this.activeHandoffs.get(chatId);
+    if (active && active.reportedInputTokens === null) {
+      const reported = env.tokenUsage?.inputTokens ?? assistantContextTokens(env.raw)?.tokens;
+      if (reported !== undefined) active.reportedInputTokens = reported;
+    }
     if (env.sessionId) {
       const cur = this.chatState.get(chatId);
       if (cur && cur.claudeSessionId !== env.sessionId) {
@@ -10591,6 +11038,13 @@ export class Daemon {
             : {}),
           updatedAt: this.opts.now(),
         }));
+        if (providerSwitch?.handoff) {
+          // The target accepted the handoff (its session exists, the track is in it).
+          this.opts.metaStore.update(chatId, (m) => ({
+            ...m,
+            ...(m.handoff ? { handoff: { ...m.handoff, state: 'sent' as const } } : {}),
+          }));
+        }
         if (providerSwitch) {
           // A quiet divider, not a notice — the fact rides on the field, not
           // on eye-catching text (spec/04 § History, unlike a permission-mode
@@ -10599,7 +11053,21 @@ export class Daemon {
             type: 'chat.message',
             chatId,
             role: 'system',
-            content: '',
+            content: providerSwitch.handoff
+              ? dividerCopy({
+                  model: providerSwitch.handoff.model,
+                  carried: providerSwitch.handoff.carriedEntries,
+                  total: providerSwitch.handoff.totalEntries,
+                  estimatedTokens: providerSwitch.handoff.estimatedTokens,
+                  availableTokens: providerSwitch.handoff.availableTokens,
+                  windowKnown: providerSwitch.handoff.windowKnown,
+                  summary: providerSwitch.handoff.summary,
+                  ...(providerSwitch.handoff.summaryNote !== undefined
+                    ? { summaryNote: providerSwitch.handoff.summaryNote }
+                    : {}),
+                  replanned: providerSwitch.handoff.replanned,
+                })
+              : '',
             seq: this.bumpSeq(chatId),
             createdAt: this.opts.now(),
             sessionChange: {
@@ -10608,6 +11076,27 @@ export class Daemon {
               seededMessages: providerSwitch.seededMessages,
               ...(providerSwitch.trimmedRecords
                 ? { trimmedRecords: providerSwitch.trimmedRecords }
+                : {}),
+              ...(providerSwitch.handoff
+                ? {
+                    handoff: {
+                      carriedEntries: providerSwitch.handoff.carriedEntries,
+                      totalEntries: providerSwitch.handoff.totalEntries,
+                      ...(providerSwitch.handoff.omittedFromSeq !== undefined
+                        ? {
+                            omittedFromSeq: providerSwitch.handoff.omittedFromSeq,
+                            omittedToSeq: providerSwitch.handoff.omittedToSeq!,
+                          }
+                        : {}),
+                      estimatedTokens: providerSwitch.handoff.estimatedTokens,
+                      availableTokens: providerSwitch.handoff.availableTokens,
+                      summary: providerSwitch.handoff.summary,
+                      ...(providerSwitch.handoff.summaryNote !== undefined
+                        ? { summaryNote: providerSwitch.handoff.summaryNote }
+                        : {}),
+                      ...(providerSwitch.handoff.replanned ? { replanned: true as const } : {}),
+                    },
+                  }
                 : {}),
             },
           });
@@ -13038,6 +13527,370 @@ export class Daemon {
     );
   }
 
+  /**
+   * spec/04 § Handoff budget — size a cross-provider handoff to the TARGET's
+   * window before anything is sent. Whole track if it fits; otherwise the
+   * ledger plus the widest recent window that does, plus a model-written
+   * narrative only if the source can produce one right now. `ok: false` is a
+   * refusal: nothing has been sent and the caller must say so.
+   */
+  private async planProviderHandoff(o: {
+    chatId: string;
+    state: ChatState;
+    fullTrack: readonly TrackEntry[];
+    branchId: string;
+    prompt: string;
+    userMessageSeq?: number;
+  }): Promise<
+    { ok: true; track: TrackEntry[]; divider: HandoffDivider } | { ok: false; message: string }
+  > {
+    const { chatId, state, fullTrack, prompt } = o;
+    const targetModel = state.model ?? null;
+    const { budget, windowKnown } = budgetFor(
+      this.opts.modelLimits?.get(targetModel),
+      this.harnessConfig,
+    );
+    const planState = {
+      permissionMode: this.chatPermissionMode(chatId),
+      ...gitBranchOf(state.folder),
+      narrative: null as string | null,
+    };
+    let plan = planHandoff(chatId, fullTrack, budget, {
+      latestInstruction: prompt,
+      ...planState,
+    });
+    let summaryNote: string | undefined = 'only the recent turns were needed';
+    if (plan.ok && plan.omittedEntries > 0) {
+      const narrative = await this.handoffNarrative(chatId, state);
+      summaryNote = narrative.note;
+      if (narrative.text !== null) {
+        planState.narrative = narrative.text;
+        plan = planHandoff(chatId, fullTrack, budget, { latestInstruction: prompt, ...planState });
+      }
+    }
+    if (!plan.ok) return { ok: false, message: plan.message };
+    const key = handoffKey(
+      chatId,
+      o.branchId,
+      fullTrack[0]?.record.seq ?? -1,
+      targetModel ?? 'default',
+    );
+    this.activeHandoffs.set(chatId, {
+      key,
+      prompt,
+      instructionHash: instructionHash(prompt),
+      track: fullTrack,
+      targetModel,
+      planState,
+      summaryNote: planState.narrative === null ? summaryNote : undefined,
+      windowKnown,
+      estimatedTokens: plan.estimatedTokens,
+      availableTokens: plan.availableTokens,
+      replanned: false,
+      reportedInputTokens: null,
+    });
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      handoff: {
+        key,
+        state: 'planned',
+        targetModel,
+        prompt,
+        estimatedTokens: plan.ok ? plan.estimatedTokens : 0,
+        availableTokens: plan.availableTokens,
+        instructionHash: instructionHash(prompt),
+        ...(o.userMessageSeq !== undefined ? { userMessageSeq: o.userMessageSeq } : {}),
+      },
+    }));
+    return {
+      ok: true,
+      track: trackForPlan(chatId, plan, planState, this.opts.now()),
+      divider: this.dividerFor(chatId, plan, fullTrack.length),
+    };
+  }
+
+  private dividerFor(
+    chatId: string,
+    plan: Extract<HandoffPlan, { ok: true }>,
+    totalEntries: number,
+  ): HandoffDivider {
+    const active = this.activeHandoffs.get(chatId)!;
+    return {
+      model: active.targetModel ?? 'default',
+      carriedEntries: plan.carried.length,
+      totalEntries,
+      ...(plan.omittedEntries > 0
+        ? { omittedFromSeq: plan.ledger.fromSeq, omittedToSeq: plan.carriedFromSeq - 1 }
+        : {}),
+      estimatedTokens: plan.estimatedTokens,
+      availableTokens: plan.availableTokens,
+      windowKnown: active.windowKnown,
+      summary: active.planState.narrative !== null,
+      ...(active.summaryNote !== undefined ? { summaryNote: active.summaryNote } : {}),
+      replanned: active.replanned,
+    };
+  }
+
+  /** The optional model-written summary: only when the source answers within the timeout. */
+  private async handoffNarrative(
+    chatId: string,
+    state: ChatState,
+  ): Promise<{ text: string | null; note: string | undefined }> {
+    if (!this.opts.generateDigest || !state.claudeSessionId)
+      return { text: null, note: 'no summariser is configured' };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const text = await Promise.race([
+        this.opts.generateDigest({
+          chatId,
+          resumeSessionId: state.claudeSessionId,
+          folder: state.folder,
+          model: state.model ?? null,
+        }),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), HANDOFF_NARRATIVE_TIMEOUT_MS);
+        }),
+      ]);
+      return text === null
+        ? { text: null, note: 'the previous model could not write one in time' }
+        : { text, note: undefined };
+    } catch (err) {
+      this.opts.logger.warn(
+        { chatId, err: (err as Error).message },
+        'handoff narrative unavailable — continuing from the deterministic ledger',
+      );
+      return { text: null, note: `the previous model was unavailable: ${(err as Error).message}` };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * One tighter plan after the target said the handoff was over its window.
+   * `undefined` means there is nothing smaller to try (already re-planned
+   * once, or the plan would fall below a useful size): the caller ends in an
+   * error rather than resending.
+   */
+  private replanHandoff(
+    chatId: string,
+    state: ChatState,
+    err: HandoffOverflowError,
+    userMessageSeq: number | undefined,
+  ): TrackEntry[] | undefined {
+    const active = this.activeHandoffs.get(chatId);
+    if (!active || active.replanned) return undefined;
+    if (err.reportedLimit !== undefined && active.targetModel)
+      this.opts.modelLimits?.note(active.targetModel, { contextWindow: err.reportedLimit });
+    const tighter = replanAfterOverflow(
+      { estimatedTokens: active.estimatedTokens, availableTokens: active.availableTokens },
+      err.reportedLimit,
+    );
+    if (!tighter) return undefined;
+    const { budget } = budgetFor(
+      this.opts.modelLimits?.get(active.targetModel),
+      this.harnessConfig,
+    );
+    const plan = planHandoff(chatId, active.track, budget, {
+      latestInstruction: active.prompt,
+      ...active.planState,
+      maxTokensOverride: tighter.maxTokensOverride,
+    });
+    if (!plan.ok) return undefined;
+    active.replanned = true;
+    active.estimatedTokens = plan.estimatedTokens;
+    active.availableTokens = plan.availableTokens;
+    const track = trackForPlan(chatId, plan, active.planState, this.opts.now());
+    const running = this.runningProviderSwitch.get(chatId);
+    if (running) {
+      running.handoff = this.dividerFor(chatId, plan, active.track.length);
+      running.seededMessages = track.filter(
+        (t) => t.event.type === 'chat.message' && t.event.role !== 'system',
+      ).length;
+      delete running.trimmedRecords;
+    }
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      ...(m.handoff
+        ? {
+            handoff: {
+              ...m.handoff,
+              state: 'planned' as const,
+              replanned: true,
+              estimatedTokens: plan.estimatedTokens,
+              availableTokens: plan.availableTokens,
+            },
+          }
+        : {}),
+    }));
+    // The re-run starts on a fresh thread: the chat is not on the half-made one.
+    void state;
+    this.opts.logger.warn(
+      { chatId, userMessageSeq: userMessageSeq ?? null, estimatedTokens: plan.estimatedTokens },
+      'handoff overflowed — re-planned tighter, once',
+    );
+    return track;
+  }
+
+  /**
+   * A handoff that cannot go ahead, said plainly with the recoveries a surface
+   * offers (retry, switch back, linked fresh chat). `revertModel` returns a
+   * refused (never-sent) switch to the model it left.
+   */
+  private failHandoff(
+    chatId: string,
+    code: 'handoff_too_large' | 'handoff_overflow',
+    message: string,
+    o: { causeSeq?: number; revertModel?: boolean },
+  ): { code: ChatErrorCode; message: string } {
+    const error = { code, message };
+    this.emit({
+      type: 'chat.error',
+      chatId,
+      error,
+      seq: this.bumpSeq(chatId),
+      ...(o.causeSeq !== undefined ? { causeSeq: o.causeSeq } : {}),
+    });
+    const s = this.chatState.get(chatId);
+    if (o.revertModel && s) {
+      const from = this.opts.metaStore.read(chatId)?.switchedFrom;
+      if (from?.model) {
+        s.model = from.model;
+        this.opts.metaStore.update(chatId, (m) => {
+          const { switchedFrom: _drop, ...rest } = m;
+          void _drop;
+          return { ...rest, model: from.model! };
+        });
+      }
+    }
+    this.activeHandoffs.delete(chatId);
+    this.runningProviderSwitch.delete(chatId);
+    this.chatState.setLastError(chatId, { ...error, at: this.opts.now() });
+    this.chatState.setActivity(chatId, 'idle');
+    this.emitState(chatId);
+    return error;
+  }
+
+  /** The target answered: write `handoff.verified` and close the handoff's state. */
+  private verifyHandoff(chatId: string, deliveredPrompt: string): void {
+    const active = this.activeHandoffs.get(chatId);
+    if (!active) return;
+    this.activeHandoffs.delete(chatId);
+    const delivered = instructionHash(deliveredPrompt);
+    this.logRecord(chatId, {
+      k: 'handoff.verified',
+      key: active.key,
+      replyReceived: true,
+      estimatedTokens: active.estimatedTokens,
+      reportedInputTokens: active.reportedInputTokens,
+      flagged: estimateIsOff(active.estimatedTokens, active.reportedInputTokens),
+      instructionHash: delivered,
+    });
+    if (delivered !== active.instructionHash)
+      this.opts.logger.error(
+        { chatId, planned: active.instructionHash, delivered },
+        'handoff instruction was altered before delivery',
+      );
+    this.opts.metaStore.update(chatId, (m) => {
+      const { switchedFrom: _drop, ...rest } = m;
+      void _drop;
+      return {
+        ...rest,
+        ...(m.handoff ? { handoff: { ...m.handoff, state: 'confirmed' as const } } : {}),
+      };
+    });
+  }
+
+  /**
+   * The recoveries a failed provider switch offers (spec/04 § Handoff budget).
+   * Refused loudly when there is nothing to recover.
+   */
+  async recoverHandoff(
+    chatId: string,
+    action: 'retry' | 'switch_back' | 'linked_chat',
+  ): Promise<void> {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
+    const meta = this.opts.metaStore.read(chatId);
+    const handoff = meta?.handoff;
+    if (!handoff || handoff.state === 'confirmed')
+      throw new Error('This chat has no failed provider switch to recover from');
+    if (action === 'switch_back') {
+      const from = meta?.switchedFrom;
+      const current = this.chatState.get(chatId)?.model ?? null;
+      if (!from?.model) throw new Error('The model this chat was switched from is not recorded');
+      if (current !== from.model) await this.setChatModel(chatId, from.model);
+      this.opts.metaStore.update(chatId, (m) => {
+        const { handoff: _h, switchedFrom: _s, ...rest } = m;
+        void _h;
+        void _s;
+        return rest;
+      });
+      return;
+    }
+    if (action === 'retry') {
+      if (handoff.targetModel && state.model !== handoff.targetModel)
+        await this.setChatModel(chatId, handoff.targetModel);
+      if (handoff.userMessageSeq !== undefined)
+        this.reuseLoggedUserMessage.set(chatId, handoff.userMessageSeq);
+      await this.sendInput({
+        chatId,
+        message: handoff.prompt,
+        localId: `handoff-retry-${chatId}-${this.opts.now()}`,
+        ...(handoff.userMessageSeq !== undefined ? { retryOfSeq: handoff.userMessageSeq } : {}),
+      });
+      return;
+    }
+    const model = handoff.targetModel ?? state.model ?? null;
+    const fullTrack = meta
+      ? readTrack(
+          this.chatLog,
+          chatId,
+          meta,
+          meta.activeBranchId ?? this.branchIdFor(chatId),
+          -1,
+        ).filter(
+          (t) => handoff.userMessageSeq === undefined || t.record.seq < handoff.userMessageSeq,
+        )
+      : [];
+    const { budget } = budgetFor(this.opts.modelLimits?.get(model), this.harnessConfig);
+    const overflowed = state.lastError?.code === 'handoff_overflow';
+    const retighten = overflowed
+      ? replanAfterOverflow({
+          estimatedTokens: handoff.estimatedTokens,
+          availableTokens: handoff.availableTokens,
+        })
+      : null;
+    const plan = planHandoff(chatId, fullTrack, budget, {
+      latestInstruction: handoff.prompt,
+      permissionMode: this.chatPermissionMode(chatId),
+      ...gitBranchOf(state.folder),
+      narrative: null,
+      ...(retighten ? { maxTokensOverride: retighten.maxTokensOverride } : {}),
+    });
+    if (!plan.ok) throw new Error(plan.message);
+    const seed = trackForPlan(
+      chatId,
+      plan,
+      { permissionMode: this.chatPermissionMode(chatId), narrative: null },
+      this.opts.now(),
+    );
+    const newChatId = await this.spawnChat({
+      folder: state.folder,
+      ...(model ? { model } : {}),
+      prompt: [renderSeedTrack(seed), '[The task]', handoff.prompt].join('\n\n'),
+    });
+    this.opts.metaStore.update(newChatId, (m) => ({ ...m, continuedFrom: { chatId } }));
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: 'Continued in a linked fresh chat',
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+      handoffLink: { chatId: newChatId },
+    });
+  }
+
   private async planHarnessReconstruction(
     chatId: string,
     targetHarness: HarnessId,
@@ -14021,8 +14874,21 @@ export class Daemon {
       // intent must not silently fire on a later, differently-requested turn.
       this.pendingCompactSwitch.delete(chatId);
     }
+    // spec/04 § Handoff budget — remember the model a provider switch leaves,
+    // so a failed switch can go back. Kept from the FIRST crossing (A→B→C is
+    // still "from A"); dropped when the chat is back on its session's provider.
+    const sessionHarness = harnessOfSessionId(s.claudeSessionId);
+    const crossing = sessionHarness !== undefined && sessionHarness !== harnessOfModel(model);
+    const leaving = s.model ?? null;
     s.model = model;
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, model }));
+    this.opts.metaStore.update(chatId, (m) => {
+      const { switchedFrom: kept, ...rest } = m;
+      return {
+        ...rest,
+        model,
+        ...(crossing ? { switchedFrom: kept ?? { model: leaving } } : {}),
+      };
+    });
     // Approval mode follows the provider: a mode the new model cannot run moves
     // to its static closest (wire `closestPermissionModeForModel`), recorded as
     // an automatic change so the transcript says it was not the user's pick.
@@ -14035,8 +14901,8 @@ export class Daemon {
   }
 
   /**
-   * Start this chat's turns on another shared account from its next turn, or
-   * (`null`) hand the choice back to the account strategy (spec/10 § Backend
+   * Lock this chat to another shared account from its next turn, or (`null`)
+   * hand the choice back to the account strategy (spec/10 § Backend
    * credentials — preferred account). Written through to meta so it outlives
    * this host. Whether the host holds the account is the caller's check.
    */
@@ -14049,6 +14915,27 @@ export class Daemon {
       const { preferredAccountId: _drop, ...rest } = m;
       return accountId === null ? rest : { ...rest, preferredAccountId: accountId };
     });
+    this.emitState(chatId);
+    // A chat waiting out its old account's limit has a new account to try.
+    if (this.creditParked(chatId)) this.resumeRateLimitedNow(chatId);
+  }
+
+  /**
+   * Set this chat's Claude thinking-effort override from its NEXT turn
+   * (spec/04 § Effort), or clear it with `effort: null`. Unlike `setChatModel`
+   * there IS a clear reading — `null` is a real, requestable value meaning "no
+   * override, let the model decide" — so it is not required to carry a level.
+   *
+   * Refused when the chat's current model is not on the Claude backend
+   * (`EffortNotSupportedError`): Codex has no equivalent option, and the chat
+   * must not be left thinking it switched when it did not.
+   */
+  async setChatEffort(chatId: string, effort: EffortLevel | null): Promise<void> {
+    const s = this.chatState.get(chatId);
+    if (!s) throw new ChatNotFoundError(chatId);
+    if (isCodexModel(s.model)) throw new EffortNotSupportedError(chatId, s.model);
+    s.effort = effort ?? undefined;
+    this.opts.metaStore.update(chatId, (m) => ({ ...m, effort: effort ?? undefined }));
     this.emitState(chatId);
   }
 
@@ -14226,6 +15113,7 @@ export class Daemon {
       lastError: s.lastError,
       rateLimitResumingAt,
       ...(resumeKind !== undefined ? { resumeKind } : {}),
+      waitingForWakeSince: this.waitingForWakeSince.get(chatId) ?? null,
       // Not gated on a resume time: a limit nobody parked is still a limit, and
       // the block is the whole structured account of it (spec/12).
       limitBlock: this.limitBlocks.get(chatId) ?? null,
@@ -14247,6 +15135,11 @@ export class Daemon {
       // the chat has no model of its own; the surface must not read that as a
       // model, only as "unchanged, and don't guess".
       ...(s.model !== undefined ? { model: s.model } : {}),
+      // spec/04 § Effort — the Claude thinking-effort level the chat's NEXT
+      // turn will run at, carried on every emit for the same reason `model`
+      // is. Omitted for a chat on the Codex backend — effort does not apply
+      // there, and the field must not be read as "overridable but unset".
+      ...(isCodexModel(s.model) ? {} : { effort: s.effort ?? null }),
     };
     return ev;
   }

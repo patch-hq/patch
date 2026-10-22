@@ -1,5 +1,5 @@
 // A human name for this browser, shown on the device that is asked to approve
-// its sign-in ("Chrome on Mac wants to sign in").
+// its sign-in ("Approve a Patch sign-in from Chrome on a Mac?").
 
 export function deviceLabel(ua: string = navigator.userAgent): string {
   const browser = /Edg\//.test(ua)

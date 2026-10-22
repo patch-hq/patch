@@ -1,21 +1,26 @@
-// Settings → Keys: the account's provider keys (shared by every host), and
-// its secrets.
+// Settings → Providers: the account's provider keys (shared by every host), its
+// secrets, and Claude Code's own settings.json on one host — a plain file edited
+// where it lives (spec/02 § Claude Code settings).
 
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { providerKeyInfo, type ProviderKeyId } from '@patch/wire';
+import { isSubmitChord } from '../../lib/submitChord.js';
+import { shortcutLabel } from '../../lib/shortcuts.js';
+import { sendToHost } from './hostWrite.js';
 import { api, type SharedState } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { hostLabel } from './hostScope.js';
 import { problemText, writeShared } from './sharedWrite.js';
-import { Group, Note, Row, SettingsPage } from './ui.js';
+import { Group, Note, Row, SettingsPage, useHostGate } from './ui.js';
 
-export function KeysPage(): JSX.Element {
+export function ProvidersPage(): JSX.Element {
+  const { host, gate } = useHostGate();
   return (
-    <SettingsPage title="Keys" testid="settings-keys">
+    <SettingsPage title="Providers" testid="settings-providers" hostSwitch>
       <section className="set-group">
         <div className="set-group-head">
           <h2 className="set-label">Provider keys</h2>
@@ -23,7 +28,102 @@ export function KeysPage(): JSX.Element {
         <ProviderKeys />
       </section>
       <Secrets />
+      {gate ?? (host ? <ClaudeSettingsEditor host={host} /> : null)}
     </SettingsPage>
+  );
+}
+
+/**
+ * That host's Claude Code `settings.json`, as the machine holds it. Save sends
+ * the text to the host, which writes the file or refuses text that is not a
+ * JSON object; the editor closes when the host's report shows the file changed,
+ * and stays open with the text while it has not.
+ */
+function ClaudeSettingsEditor({ host }: { host: HostPresence }): JSX.Element {
+  const report = host.claudeSettings;
+  const [draft, setDraft] = useState<string | null>(null);
+  const [sentOver, setSentOver] = useState<string | null>(null);
+  const id = `host-${host.hostId}-claude-settings`;
+  const value = report?.settingsJson;
+
+  if (sentOver !== null && value !== sentOver) {
+    setSentOver(null);
+    setDraft(null);
+  }
+
+  function save(): void {
+    if (draft === null || value === undefined) return;
+    if (sendToHost(host, { type: 'host.claude_settings_set', hostId: host.hostId, text: draft })) {
+      setSentOver(value);
+    }
+  }
+
+  return (
+    <Group label="Claude Code settings.json" testid={id}>
+      <div className={`set-row${draft === null ? '' : ' stack'}`} data-testid={`${id}-row`}>
+        <div className="set-row-head">
+          <div className="set-row-text">
+            <span className="set-row-title">{hostLabel(host)}</span>
+            <span className="set-sub">
+              {report === null ? 'Not reported yet' : value?.trim() === '' ? 'None' : 'Set'}
+            </span>
+          </div>
+          {draft === null ? (
+            <button
+              type="button"
+              className="set-btn"
+              data-testid={`${id}-edit`}
+              disabled={value === undefined}
+              onClick={() => setDraft(value ?? '')}
+            >
+              Edit
+            </button>
+          ) : null}
+        </div>
+        {draft !== null ? (
+          <>
+            <textarea
+              className="claude-settings-json"
+              aria-label="Claude Code settings.json"
+              data-testid={`${id}-json`}
+              rows={14}
+              placeholder="{}"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (!isSubmitChord(e)) return;
+                e.preventDefault();
+                save();
+              }}
+            />
+            <div className="set-actions">
+              <button
+                type="button"
+                className="set-btn ghost"
+                data-testid={`${id}-cancel`}
+                onClick={() => {
+                  setSentOver(null);
+                  setDraft(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="set-btn primary"
+                data-testid={`${id}-save`}
+                disabled={draft === value || sentOver !== null}
+                title={shortcutLabel('⌘↵')}
+                onClick={save}
+              >
+                Save
+              </button>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </Group>
   );
 }
 
@@ -77,7 +177,7 @@ function ProviderKeys(): JSX.Element {
     const { label } = providerKeyInfo(id);
     const ok = await useUiStore.getState().confirm({
       title: `Revoke ${label} key`,
-      message: `Delete the ${label} key from every host? A host with one in its own environment goes back to that.`,
+      message: `Delete the ${label} key from every machine? A machine with one in its own environment goes back to that.`,
       confirmLabel: 'Revoke',
       danger: true,
     });

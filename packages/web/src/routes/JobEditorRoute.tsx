@@ -7,7 +7,7 @@ import { DateTimeField } from '../components/DateTimeField.js';
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import type { Job, JobAction, JobCreateBody, JobTrigger, WebhookScheme } from '@patch/wire/jobs';
 import { scriptVerdictLine } from '@patch/wire/jobs';
@@ -365,7 +365,7 @@ export function resolveSkillLink(input: {
   // chrome-cdp lives only in `~/.claude/skills` on the host with Chrome) asked
   // about from a folder/host that genuinely doesn't have it — conflating the
   // two made a real "not on this host" read as "this host can't tell me".
-  if (input.paths === undefined) return { reason: 'host does not report skill files' };
+  if (input.paths === undefined) return { reason: 'machine does not report skill files' };
   const file = input.paths[input.skill];
   if (file === undefined) return { reason: 'skill not found on this host' };
   const chat = input.chats.find((c) => c.hostId === input.hostId && c.folder === input.folder);
@@ -1080,7 +1080,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     if (!phrase) return;
     const hostId = form.spawnHostId || defaultHostId(hosts);
     if (!hostId) {
-      setRecurrenceNlError('No host is available to run the translation on yet.');
+      setRecurrenceNlError('No machine is available to run the translation on yet.');
       return;
     }
     setRecurrenceNlTranslating(true);
@@ -1177,7 +1177,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // that would dispatch nowhere. Refuse at save time, where there is someone
     // to tell (spec/08 § Action).
     if (usesSpawnFields && !form.spawnHostId.trim()) {
-      pushError('Choose which host the chat runs on.');
+      pushError('Choose which machine the chat runs on.');
       return;
     }
     // A gate with no host or folder would dispatch nowhere, and the server's own
@@ -1185,7 +1185,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // than as a 400 about a field name (spec/08 § Gate).
     if (form.gateOn && form.gateCommand.trim().length > 0) {
       if (!form.gateHostId.trim()) {
-        pushError('Choose which host the gate command runs on.');
+        pushError('Choose which machine the gate command runs on.');
         return;
       }
       if (!form.gateFolder.trim()) {
@@ -1245,9 +1245,9 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // may be empty, still loading, or the host offline, and an edit to an
   // unrelated field must never silently unpin a saved model.
   /**
-   * The account the job's chat starts on (spec/08 § Action, spec/10 § Backend
-   * credentials — preferred account). A preference, not a pin: a spent account
-   * is walked past. Fixed when the chat is created, like the model.
+   * The account the job's chat is locked to (spec/08 § Action, spec/10 § Backend
+   * credentials — preferred account): a spent account is waited on, not walked
+   * past. Fixed when the chat is created, like the model.
    */
   function accountField(): JSX.Element | null {
     const codex = form.spawnModel.startsWith('openai/');
@@ -1318,7 +1318,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           ))}
         </select>
         {modelHostId === null ? (
-          <p className="field-hint">Pick a folder first. Models are per host.</p>
+          <p className="field-hint">Pick a folder first. Models are per machine.</p>
         ) : modelCatalog.status === 'error' ? (
           <p className="field-hint" data-testid="job-spawn-model-error">
             Couldn’t load this host’s models: {modelCatalog.error ?? 'unknown error'}
@@ -2171,8 +2171,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     {form.spawnHostId === '' && form.spawnFolder === '' && !folderCustom ? (
                       <option value="" disabled>
                         {folderGroups.length === 0
-                          ? 'No hosts connected'
-                          : 'Select a host and folder…'}
+                          ? 'No machines connected'
+                          : 'Select a machine and folder…'}
                       </option>
                     ) : null}
                     {folderGroups.map((g) => (
@@ -2191,7 +2191,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <p className="field-hint" data-testid="job-spawn-host">
                     {form.spawnHostId
                       ? `Runs on ${folderGroups.find((g) => g.hostId === form.spawnHostId)?.label ?? form.spawnHostId}`
-                      : 'No host chosen. Pick a folder under the machine it lives on.'}
+                      : 'No machine chosen. Pick a folder under the machine it lives on.'}
                   </p>
                   {folderIsAdHoc ? (
                     <input
@@ -2670,6 +2670,13 @@ function dateInstant(inputValue: string, loadedIso: string | null): string | nul
  */
 function RunRow({ run, jobId }: { run: JobRun; jobId: string }): JSX.Element {
   const [open, setOpen] = useState(false);
+  // A notification links here with `?run=<ts>`: scroll that fire into view and mark it.
+  const [params] = useSearchParams();
+  const linked = params.get('run') === String(run.ts);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (linked) rowRef.current?.scrollIntoView({ block: 'center' });
+  }, [linked]);
   const output = run.action?.output ?? '';
   const verdict = scriptVerdictLine(output);
   // Only a script fire has an exit code, and only a non-zero one is worth the
@@ -2680,7 +2687,7 @@ function RunRow({ run, jobId }: { run: JobRun; jobId: string }): JSX.Element {
   // Worth expanding only when there is more than the headline already on screen.
   const hasMore = output.length > 0 && output.trim() !== verdict;
   return (
-    <li className="run-row">
+    <li className={linked ? 'run-row run-row-linked' : 'run-row'} ref={rowRef} data-linked={linked}>
       <div className="run-row-head">
         <span>{new Date(run.ts).toLocaleString()}</span>
         <span className={`status status-${run.status}`}>{run.status}</span>

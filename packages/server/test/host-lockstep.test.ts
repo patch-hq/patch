@@ -116,12 +116,16 @@ describe('host hello brings a stale host in step', () => {
     );
   }
 
-  async function connectHost(clientVersion: string): Promise<{
+  async function connectHost(
+    clientVersion: string,
+    settings?: Record<string, unknown>,
+  ): Promise<{
     frames: string[];
     recheck: () => void;
     close: () => Promise<void>;
   }> {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(90));
+    if (settings) writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
@@ -160,6 +164,19 @@ describe('host hello brings a stale host in step', () => {
     const c = await connectHost('0.0.1');
     try {
       expect(c.frames).toEqual(['host.update:daemon-1']);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it('sends nothing to a behind host when auto-update is off', async () => {
+    publish(VERSION);
+    const c = await connectHost('0.0.1', { autoUpdateHosts: false });
+    try {
+      expect(c.frames).toEqual([]);
+      c.recheck();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(c.frames).toEqual([]);
     } finally {
       await c.close();
     }

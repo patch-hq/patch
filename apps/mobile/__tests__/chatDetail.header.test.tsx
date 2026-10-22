@@ -120,7 +120,7 @@ describe('chat-detail header', () => {
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
-      isHomeHost: false,
+      runsManager: false,
       backends: [],
       components: [],
     });

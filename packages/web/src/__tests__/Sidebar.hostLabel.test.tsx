@@ -23,6 +23,7 @@ function seedChat(chatId: string, name: string, hostId = 'd1'): void {
     pendingWake: null,
     todos: [],
     snoozedUntil: null,
+    effort: null,
     chatId,
     hostId,
     permissionMode: 'bypassPermissions' as const,

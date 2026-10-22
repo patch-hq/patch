@@ -3,6 +3,11 @@
 //   patch-audio tap        system audio → stdout, raw 16 kHz mono signed 16-bit PCM;
 //                          prints `ready` on stderr once audio is flowing
 //   patch-audio mic-watch  one JSON line per change: which processes have a mic open
+//   patch-audio speakers   one JSON line per change: the text labels in a calling app's
+//                          windows ({"labels": [...]}), read through macOS Accessibility,
+//                          for the shell to pick participants and the active speaker from
+//   patch-audio probe      creates a process tap and removes it again: exit 0 when System
+//                          Audio Recording is allowed. The first run asks the user.
 //
 // `tap` is a Core Audio process tap: audio only, no screen capture, so macOS shows
 // no picker and no screen-sharing indicator. It follows the default output device
@@ -12,6 +17,8 @@
 
 import AVFoundation
 import AudioToolbox
+import ApplicationServices
+import AppKit
 import CoreAudio
 import Foundation
 
@@ -201,10 +208,89 @@ func runMicWatch() -> Never {
     }
 }
 
+// MARK: - speakers
+
+/// Calling apps whose windows are read. A browser covers Google Meet and the web Teams.
+let speakerApps = [
+    "us.zoom.xos", "com.microsoft.teams", "com.google.Chrome", "com.microsoft.edgemac",
+    "com.brave.Browser", "company.thebrowser.Browser", "org.mozilla.firefox", "com.apple.Safari",
+]
+
+func axString(_ element: AXUIElement, _ attribute: String) -> String? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+    return value as? String
+}
+
+func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success else { return [] }
+    return value as? [AXUIElement] ?? []
+}
+
+/// Breadth-first, bounded: a browser's tree can be enormous.
+func collectLabels(_ root: AXUIElement, into labels: inout Set<String>) {
+    var queue = [root]
+    var visited = 0
+    while !queue.isEmpty && visited < 4000 {
+        let element = queue.removeFirst()
+        visited += 1
+        for attribute in [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute] {
+            if let text = axString(element, attribute as String), !text.isEmpty, text.count <= 160 { labels.insert(text) }
+        }
+        queue.append(contentsOf: axChildren(element))
+    }
+}
+
+func speakerLabels() -> [String] {
+    var labels: Set<String> = []
+    for app in NSWorkspace.shared.runningApplications {
+        guard let id = app.bundleIdentifier, speakerApps.contains(where: { id.hasPrefix($0) }) else { continue }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        // Chromium builds its web accessibility tree only when asked.
+        AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        for window in axChildren(element) { collectLabels(window, into: &labels) }
+    }
+    return labels.sorted()
+}
+
+func runSpeakers() -> Never {
+    if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
+        fail("Accessibility is not allowed for Patch. Allow it in System Settings > Privacy & Security > Accessibility to name speakers")
+    }
+    var last: [String]?
+    while true {
+        let now = speakerLabels()
+        if now != last {
+            let data = try! JSONSerialization.data(withJSONObject: ["labels": now], options: [.sortedKeys])
+            FileHandle.standardOutput.write(data + Data("\n".utf8))
+            last = now
+        }
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+}
+
+// MARK: - probe
+
+/** macOS has no way to ask whether System Audio Recording is allowed without trying. */
+func runProbe() -> Never {
+    let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+    description.uuid = UUID()
+    description.name = "Patch probe"
+    description.isPrivate = true
+    var tapID = AudioObjectID(kAudioObjectUnknown)
+    check(AudioHardwareCreateProcessTap(description, &tapID), "create audio tap (is System Audio Recording allowed for Patch?)")
+    AudioHardwareDestroyProcessTap(tapID)
+    exit(0)
+}
+
 // MARK: - main
 
 switch CommandLine.arguments.dropFirst().first {
 case "tap": runTap()
 case "mic-watch": runMicWatch()
-default: fail("usage: patch-audio tap | mic-watch")
+case "speakers": runSpeakers()
+case "probe": runProbe()
+default: fail("usage: patch-audio tap | mic-watch | speakers | probe")
 }

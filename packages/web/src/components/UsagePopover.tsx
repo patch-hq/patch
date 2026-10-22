@@ -28,8 +28,14 @@ const BACKEND_LABEL: Record<string, string> = { [CLAUDE_BACKEND_ID]: 'Claude', c
 
 export interface AccountUsageRow {
   key: string;
+  /** The provider the account belongs to (`claude`, `codex`). */
+  providerId: 'claude' | 'codex';
+  /** The shared account's id. */
+  accountId: string;
   /** The account's own label, without the backend prefix. */
   label: string;
+  /** The backend's name in words — `Claude`, `OpenAI`. */
+  backend: string;
   title: string;
   usage: HostAccount['usage'];
 }
@@ -42,10 +48,10 @@ export function accountRows(
   if (shared === null) return [];
   const rows: AccountUsageRow[] = [];
   const backends = [
-    { id: CLAUDE_BACKEND_ID, accounts: shared.secrets.claude },
-    { id: 'codex', accounts: shared.secrets.codex },
+    { id: CLAUDE_BACKEND_ID, providerId: 'claude', accounts: shared.secrets.claude },
+    { id: 'codex', providerId: 'codex', accounts: shared.secrets.codex },
   ] as const;
-  for (const { id: backendId, accounts } of backends) {
+  for (const { id: backendId, providerId, accounts } of backends) {
     const backend = BACKEND_LABEL[backendId] ?? backendId;
     for (const account of accounts) {
       if (!account.connected || ('kind' in account && account.kind === 'apiKey')) continue;
@@ -61,7 +67,10 @@ export function accountRows(
       }
       rows.push({
         key: `${backendId}:${account.id}`,
+        providerId,
+        accountId: account.id,
         label: account.label,
+        backend,
         title: `${backend} · ${account.label}`,
         usage,
       });

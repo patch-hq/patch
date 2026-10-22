@@ -73,10 +73,7 @@ test.describe('the limit bubble', () => {
     });
 
     const bubble = page.getByTestId('rate-limit-bar');
-    await expect(page.getByTestId('rate-limit-headline')).toContainText(
-      /reached your session limit/i,
-    );
-    await expect(page.getByTestId('rate-limit-account')).toHaveText('Default');
+    await expect(page.getByTestId('rate-limit-headline')).toHaveText('Session limit · Default');
     // The headline that started this. It must not come back.
     await expect(bubble).not.toContainText(/extra usage limit/i);
   });
@@ -99,45 +96,52 @@ test.describe('the limit bubble', () => {
     expect(inStream.last).toBe(true);
   });
 
-  test('counts down, in words, without anything else changing', async ({ page }) => {
+  test('counts down in the corner without anything else changing', async ({ page }) => {
     await page.goto(HARNESS);
-    // 125s reads as "3 minutes"; ten seconds later it must read "2 minutes".
-    // Nothing else touches the store in between, so only the component's own
-    // clock can move it.
+    // 125s reads as "2 min"; thirty seconds later it must read "1 min". Nothing
+    // else touches the store in between, so only the component's own clock can
+    // move it.
     await park(page, { scope: 'session' }, 125_000);
 
     const countdown = page.getByTestId('rate-limit-countdown');
-    await expect(countdown).toContainText('3 minutes');
-    await expect(countdown).toContainText('2 minutes', { timeout: 20_000 });
-    // A unit symbol is not something a person says.
-    await expect(countdown).not.toContainText(/\d+\s?h\b/);
+    await expect(countdown).toContainText('Resets in 2 min');
+    await expect(countdown).toContainText('Resets in 1 min', { timeout: 40_000 });
   });
 
-  test('is a bounded raised card with its buttons on one divided row', async ({ page }) => {
+  test('is full width, text is at least 14px, and the controls are always the same', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 900, height: 700 });
     await page.goto(HARNESS);
-    await park(page, {
-      scope: 'session',
-      overageBlocked: true,
-      overageReason: 'org_level_disabled_until',
-    });
+    await park(page, { scope: 'session' });
     const card = page.locator('[data-testid="rate-limit-bar"] .content');
     await expect(card).toBeVisible();
+    const stream = (await page.getByTestId('chat-stream').boundingBox())!;
     const box = (await card.boundingBox())!;
-    expect(box.width).toBeLessThanOrEqual(461);
-    const style = await card.evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return { radius: parseFloat(cs.borderTopLeftRadius), shadow: cs.boxShadow };
-    });
-    expect(style.radius).toBeGreaterThanOrEqual(16);
-    expect(style.shadow).not.toBe('none');
-    const rows = await page.evaluate(() => {
-      const tops = ['rate-limit-retry', 'rate-limit-extra-usage'].map(
-        (id) => document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect().top,
-      );
-      return Math.max(...tops) - Math.min(...tops);
-    });
-    expect(rows).toBeLessThan(12);
+    expect(box.width).toBeGreaterThan(stream.width * 0.8);
+    const small = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="rate-limit-bar"] *')]
+        .filter(
+          (el) =>
+            el.childNodes.length &&
+            [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent!.trim()),
+        )
+        .map((el) => parseFloat(getComputedStyle(el).fontSize))
+        .filter((px) => px < 14),
+    );
+    expect(small).toEqual([]);
+    for (const id of [
+      'rate-limit-send',
+      'rate-limit-change-account',
+      'rate-limit-change-provider',
+      'rate-limit-extra-usage',
+      'rate-limit-auto-resume',
+    ]) {
+      await expect(page.getByTestId(id)).toBeVisible();
+    }
+    // Before the reset Send waits, and says when.
+    await expect(page.getByTestId('rate-limit-send')).toHaveAttribute('title', /^Available at /);
+    await expect(page.getByTestId('rate-limit-change-model')).toHaveCount(0);
     await page.screenshot({ path: process.env['LIMIT_SHOT'] ?? 'test-results/limit-card.png' });
   });
 
@@ -190,36 +194,26 @@ test.describe('the limit bubble', () => {
     await expect(page.getByTestId('turn-failed')).toHaveCount(1);
   });
 
-  test('offers the way to turn extra usage on only when that is what left no overflow', async ({
-    page,
-  }) => {
+  test('Extra usage links out while off and is greyed, not hidden, once on', async ({ page }) => {
     await page.goto(HARNESS);
     await park(page, { scope: 'week' });
-    await expect(page.getByTestId('rate-limit-bar')).toBeVisible();
-    await expect(page.getByTestId('rate-limit-extra-usage')).toHaveCount(0);
+    const extra = page.getByTestId('rate-limit-extra-usage');
+    await expect(extra).toBeVisible();
+    await expect(extra).toHaveAttribute('aria-disabled', 'true');
+    await expect(extra).toHaveAttribute('title', 'Extra usage is already on');
 
     await park(page, {
       scope: 'session',
       overageBlocked: true,
       overageReason: 'org_level_disabled_until',
     });
-    const link = page.getByTestId('rate-limit-extra-usage');
-    // A link, not a switch: patch cannot flip an Anthropic account setting, and
-    // a control that pretends to is worse than none. The explanation that used
-    // to be a paragraph of chrome lives on it.
-    await expect(link).toHaveAttribute('href', /claude\.ai/);
-    await expect(link).toHaveAttribute('title', /Extra usage: disabled\./);
-    await expect(link).toHaveAttribute('title', /Opens your Claude usage settings/);
-    // Not "this organisation": a personal subscription has no organisation
-    // that did anything, and the sentence read as an accusation.
-    await expect(link).not.toHaveAttribute('title', /organisation/i);
+    // A link, not a switch: patch cannot flip an Anthropic account setting.
+    await expect(extra).toHaveAttribute('href', /claude\.ai/);
   });
 
-  test('carries the auto-resume choice, ticked, and the manual retry', async ({ page }) => {
+  test('carries the auto-resume choice, ticked', async ({ page }) => {
     await page.goto(HARNESS);
     await park(page, { scope: 'session' });
-
     await expect(page.getByTestId('rate-limit-auto-resume')).toBeChecked();
-    await expect(page.getByTestId('rate-limit-retry')).toBeVisible();
   });
 });

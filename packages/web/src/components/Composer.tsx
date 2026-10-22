@@ -29,7 +29,7 @@
 // Composer — skill autocomplete).
 
 import { LONG_PASTE_CHARS, pastedTextName } from '../lib/pastedText';
-import type { JSX, Ref } from 'react';
+import type { JSX, ReactNode, Ref } from 'react';
 import {
   forwardRef,
   useEffect,
@@ -56,8 +56,11 @@ import {
   Clock,
   Zap,
 } from 'lucide-react';
-import { endMeeting, startMeeting } from '../lib/meetingControl.js';
+import { endMeeting } from '../lib/meetingControl.js';
+import { beginMeeting, maybeIntroduceMeetings } from '../lib/meetingSetup.js';
+import { MeetingSetupPopover } from './MeetingSetup.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
+import { EffortControl } from './EffortControl.js';
 import { CloseIcon } from './icons.js';
 import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
 import { ImageAnnotator } from './ImageAnnotator.js';
@@ -254,6 +257,9 @@ function makePending(file: File): PendingAttachment {
 
 export interface ComposerProps {
   chatId: string;
+  /** Owner key for unsent attachments, when `chatId` is shared by several
+   *  composers (every new-chat draft is "new"). Defaults to `chatId`. */
+  attachmentKey?: string;
   /**
    * The host this chat runs on. Credentials and presence are per host (spec/10
    * § Surface in Settings, spec/04 § Spawn), so whether sending is possible is
@@ -332,6 +338,12 @@ export interface ComposerProps {
    * for it to exist on its host and open it before a call can bind to it.
    */
   onStartCall?(): void;
+  /**
+   * When provided, the Meeting button hands over to this instead of starting a
+   * meeting in the composer's own chat. Used by NewChatRoute, which must create
+   * the chat and open it before a meeting can bind to it.
+   */
+  onStartMeeting?(): void;
   /** Test seam (transcribe mode): inject the mic recorder factory. */
   recorderFactory?(deps?: VoiceRecorderDeps): Promise<VoiceRecording>;
   /** Test seam (transcribe mode): inject the clip→transcript upload call. */
@@ -386,6 +398,10 @@ export interface ComposerProps {
   checking?: boolean;
   /** The hook name(s) a `checking` state is waiting on, for the button's label. */
   checkingHookNames?: string[];
+  /** Replaces "Type a message" (a meeting's Note mode writes a note, not a message). */
+  placeholder?: string;
+  /** Drawn at the start of the input row, before the text (the meeting's Note / Ask switch). */
+  leading?: ReactNode;
   /**
    * Edit mode (spec/04 § Branching): this composer edits the text
    * of a message already in the transcript instead of composing a new one. It
@@ -455,6 +471,7 @@ function focusIsClaimed(): boolean {
 export const Composer = forwardRef(function Composer(
   {
     chatId,
+    attachmentKey = chatId,
     hostId,
     folder,
     onSend,
@@ -464,6 +481,7 @@ export const Composer = forwardRef(function Composer(
     onAddToTodo,
     onStartVoiceNote,
     onStartCall,
+    onStartMeeting,
     recorderFactory,
     transcribeClip,
     previewFactory,
@@ -477,6 +495,8 @@ export const Composer = forwardRef(function Composer(
     onStop,
     checking = false,
     checkingHookNames,
+    placeholder: placeholderText = 'Type a message',
+    leading,
     edit,
     editingTurn,
   }: ComposerProps,
@@ -656,39 +676,18 @@ export const Composer = forwardRef(function Composer(
       });
   }
 
-  // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
-  // unreliable in the desktop shell, so size it here: reset to `auto` (allows
-  // shrinking), then to scrollHeight (clamped at the cap). Crucially, keep
-  // overflow HIDDEN while the content fits under the cap — the field simply
-  // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
-  // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
-  // can't push the chat off-screen.
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    // `scrollHeight` is the content+padding box; with `box-sizing: border-box`
-    // the style height also includes the border, so add the border delta —
-    // otherwise the box lands 1–2px short of the content and clips it (which is
-    // exactly what makes a spurious scrollbar flicker in). offsetHeight -
-    // clientHeight is that border total (overflow is hidden here, so no
-    // scrollbar contributes to it).
-    const border = el.offsetHeight - el.clientHeight;
-    const contentHeight = el.scrollHeight + border;
-    const cap = maxInputHeight();
-    el.style.height = `${Math.min(contentHeight, cap)}px`;
-    el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
-  }, [value]);
   const pushError = useUiStore((s) => s.pushError);
   const dictateChord = useUiStore((s) => s.dictateChord);
   // Attachments the user has added but not yet sent (spec/14 § Composer). They
   // upload on send; a failed upload surfaces an error and keeps the attachment
   // (NO FALLBACK — never silently dropped).
-  const attachments = useComposerAttachmentStore((s) => s.byChat[chatId] ?? NO_ATTACHMENTS);
+  const attachments = useComposerAttachmentStore((s) => s.byChat[attachmentKey] ?? NO_ATTACHMENTS);
   const setAttachments = (
     fn: PendingAttachment[] | ((cur: PendingAttachment[]) => PendingAttachment[]),
   ): void =>
-    useComposerAttachmentStore.getState().update(chatId, typeof fn === 'function' ? fn : () => fn);
+    useComposerAttachmentStore
+      .getState()
+      .update(attachmentKey, typeof fn === 'function' ? fn : () => fn);
   // A new-chat send with attachments waiting on the chat to be created
   // (`resolveChatId`). Attachment uploads never hold the composer: the message
   // is in the stream, counting them, the moment Send is pressed.
@@ -1030,6 +1029,16 @@ export const Composer = forwardRef(function Composer(
   const noteActive = useVoiceStore((s) => s.note !== null);
   const onCall = useVoiceStore((s) => s.call !== null && s.call.chatId === chatId);
   const inMeeting = useMeetingStore((s) => isMeetingOpen(s.byChat[chatId]));
+  // Once ever: introduce what a meeting needs on this Mac, on the Meeting button.
+  const hasMeetingButton = !edit && (chatId !== 'new' || onStartMeeting !== undefined);
+  useEffect(() => {
+    if (!hasMeetingButton) return;
+    maybeIntroduceMeetings(chatId).catch((err: unknown) =>
+      useUiStore
+        .getState()
+        .pushError(`Could not check meeting permissions: ${(err as Error).message}`),
+    );
+  }, [chatId, hasMeetingButton]);
   // A note that failed or was cancelled hands back the text it lifted out of a
   // composer when it started (voiceStore § composerRestore). Take it back into
   // the input so the user can retry or send it by hand — NO FALLBACK: a note
@@ -1064,6 +1073,38 @@ export const Composer = forwardRef(function Composer(
   const recordingRef = useRef<VoiceRecording | null>(null);
   const previewRef = useRef<DictationPreview | null>(null);
   const showLivePreview = micState === 'recording' && livePartial.length > 0;
+
+  // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
+  // unreliable in the desktop shell, so size it here: reset to `auto` (allows
+  // shrinking), then to scrollHeight (clamped at the cap). Crucially, keep
+  // overflow HIDDEN while the content fits under the cap — the field simply
+  // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
+  // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
+  // can't push the chat off-screen.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    // `scrollHeight` is the content+padding box; with `box-sizing: border-box`
+    // the style height also includes the border, so add the border delta —
+    // otherwise the box lands 1–2px short of the content and clips it (which is
+    // exactly what makes a spurious scrollbar flicker in). offsetHeight -
+    // clientHeight is that border total (overflow is hidden here, so no
+    // scrollbar contributes to it).
+    const border = el.offsetHeight - el.clientHeight;
+    // While dictating, the interim transcript is painted by the mirror, not
+    // held by the textarea, so its text never reaches `el.scrollHeight`: size
+    // to whichever is taller. The mirror is absolutely filling the wrapper
+    // (now at the textarea's `auto` height), so its scrollHeight is its content.
+    const mirror = el.parentElement?.querySelector<HTMLElement>(
+      '.composer-live-preview, .composer-chip-mirror',
+    );
+    const contentHeight = Math.max(el.scrollHeight, mirror?.scrollHeight ?? 0) + border;
+    const cap = maxInputHeight();
+    el.style.height = `${Math.min(contentHeight, cap)}px`;
+    el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
+    syncMirrors(el);
+  }, [value, livePartial, showLivePreview]);
   // Seconds spent waiting on the transcript, so a slow upload visibly counts
   // up instead of looking identical to recording.
   const [transcribeSecs, setTranscribeSecs] = useState(0);
@@ -1507,6 +1548,9 @@ export const Composer = forwardRef(function Composer(
     // Focus on the autoFocus→ready transition (not on every keystroke — value
     // is intentionally not a dependency).
     if (!autoFocus || offline) return;
+    // Touch devices: focusing raises the soft keyboard over the transcript.
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+      return;
     // At most once per mount. `offline` has to stay a dependency (the composer
     // routinely mounts before the socket connects), but a LATER reconnect must
     // not yank the cursor back out of wherever the user has since moved it.
@@ -1977,7 +2021,8 @@ export const Composer = forwardRef(function Composer(
       <div className="composer-row">
         {/* The input and its live-dictation mirror share one positioned box so
             the greyed preview sits exactly over the real text. */}
-        <div className="composer-input-wrap">
+        <div className={leading ? 'composer-input-wrap has-leading' : 'composer-input-wrap'}>
+          {leading ? <div className="composer-leading">{leading}</div> : null}
           {/* Live-dictation preview (spec/07 § Dictation into the composer):
               what is already in the input, in normal ink, plus the host's
               interim transcript GREYED behind a text-transparent textarea, so
@@ -2013,7 +2058,7 @@ export const Composer = forwardRef(function Composer(
              button's own `Send (↵)` tooltip and the ⌘? cheat-sheet carry that.
              `Reconnecting…` is the one permitted swap — state, not teaching. */
             placeholder={
-              suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : 'Type a message'
+              suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : placeholderText
             }
             onChange={(e) => {
               setValue(joinQuotes(quotes, e.target.value));
@@ -2275,19 +2320,28 @@ export const Composer = forwardRef(function Composer(
               </button>
               {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
-              {chatId === 'new' ? null : (
-                <button
-                  type="button"
-                  className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
-                  data-testid="meeting-btn"
-                  aria-pressed={inMeeting}
-                  aria-label={inMeeting ? 'end meeting' : 'meeting'}
-                  title={inMeeting ? 'End meeting' : 'Meeting'}
-                  onClick={() => (inMeeting ? endMeeting(chatId) : void startMeeting(chatId))}
-                  disabled={voiceDisabled && !inMeeting}
-                >
-                  <AudioLines size={ICON_SIZE} aria-hidden />
-                </button>
+              {chatId === 'new' && !onStartMeeting ? null : (
+                <span className="mm-setup-anchor">
+                  <button
+                    type="button"
+                    className={`call-btn meeting-btn${inMeeting ? ' mm-live' : ''}`}
+                    data-testid="meeting-btn"
+                    aria-pressed={inMeeting}
+                    aria-label={inMeeting ? 'end meeting' : 'meeting'}
+                    title={inMeeting ? 'End meeting' : 'Meeting'}
+                    onClick={() =>
+                      onStartMeeting
+                        ? onStartMeeting()
+                        : inMeeting
+                          ? endMeeting(chatId)
+                          : void beginMeeting(chatId)
+                    }
+                    disabled={voiceDisabled && !inMeeting}
+                  >
+                    <AudioLines size={ICON_SIZE} aria-hidden />
+                  </button>
+                  <MeetingSetupPopover chatId={chatId} />
+                </span>
               )}
               {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
               chat's next turn will use, last in the utility group so it reads
@@ -2340,6 +2394,7 @@ export const Composer = forwardRef(function Composer(
                 </div>
               )}
               <ChatModelControl chatId={chatId} />
+              <EffortControl chatId={chatId} />
               {/* spec/14 § Composer — context ring, immediately left of stop/send. */}
               <ContextRing chatId={chatId} />
             </>

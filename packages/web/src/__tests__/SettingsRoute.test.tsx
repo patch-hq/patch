@@ -2,7 +2,7 @@
 // beside a nav grouped Agents / Setup / System. This file covers the shell —
 // the nav, the addresses, the host switcher, what was removed — and the
 // Account, Devices, Voice, Agent and Manager pages. Usage (accounts), MCP,
-// Memories, Hosts, Keys and Updates each have a file of their own.
+// Memories, Hosts, Providers and Updates each have a file of their own.
 //
 // Backed by /api/auth/me, /api/settings and the live per-host reports.
 
@@ -37,20 +37,23 @@ import { PERMISSION_MODES } from '../components/Composer.js';
 /** Each page's own testid, so a test can say which page is showing. */
 const PAGE_TESTID: Record<string, string> = {
   usage: 'settings-usage',
+  chats: 'settings-chats',
   agent: 'settings-agent',
   mcp: 'settings-mcp',
   memories: 'settings-memories',
   manager: 'settings-manager-page',
   goals: 'settings-goals-page',
+  prompts: 'settings-prompts-page',
   voice: 'settings-voice',
   hooks: 'settings-hooks-page',
   computer: 'settings-computer-use',
   activity: 'settings-activity',
   hosts: 'settings-hosts',
   identity: 'settings-identity',
-  keys: 'settings-keys',
+  providers: 'settings-providers',
   notifications: 'settings-notifications',
   devices: 'settings-devices',
+  shortcuts: 'settings-shortcuts',
   updates: 'settings-version',
   account: 'settings-account',
 };
@@ -81,20 +84,23 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       .filter((b) => b.getAttribute('data-testid')?.startsWith('settings-nav-'));
     expect(buttons.map((a) => a.textContent)).toEqual([
       'Usage',
+      'Chats',
       'Agent',
       'MCP',
       'Memories',
       'Manager',
       'Goals',
+      'Prompts',
       'Voice',
       'Hooks',
       'Computer use',
       'Activity',
-      'Hosts',
+      'Machines',
       'Agent identity',
-      'Keys',
+      'Providers',
       'Notifications',
       'Devices',
+      'Shortcuts',
       'Updates',
       'Account',
     ]);
@@ -245,10 +251,10 @@ describe('Settings host switcher (per-host pages)', () => {
     expect(screen.queryByTestId('settings-host-switch')).toBeNull();
   });
 
-  it('is drawn with two, defaulting to the home host', async () => {
+  it('is drawn with two, defaulting to the only online host', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d1', { hostName: 'mac', isHomeHost: false });
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    reportHost('d1', { hostName: 'mac', runsManager: false });
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
     usePresenceStore.getState().setHostOnline('d2', true);
     renderSettings('/settings/memories');
     const sw = await screen.findByTestId('settings-host-switch');
@@ -264,8 +270,8 @@ describe('Settings host switcher (per-host pages)', () => {
 
   it('switching hosts changes which machine the page shows, and the choice is shared', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d1', { hostName: 'mac', isHomeHost: false });
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    reportHost('d1', { hostName: 'mac', runsManager: false });
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
     renderSettings('/settings/memories');
     fireEvent.click(await screen.findByTestId('settings-host-d1'));
     await waitFor(() =>
@@ -280,16 +286,18 @@ describe('Settings host switcher (per-host pages)', () => {
 
   it('is not drawn on a page of shared settings', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d1', { hostName: 'mac', isHomeHost: false });
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    reportHost('d1', { hostName: 'mac', runsManager: false });
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
     renderSettings('/settings/agent');
     await waitFor(() => expect(screen.getByTestId('permission-default')).toBeInTheDocument());
     expect(screen.queryByTestId('settings-host-switch')).toBeNull();
   });
 
-  it('forgets a chosen host that has gone, falling back to home', async () => {
+  it('forgets a chosen host that has gone, falling back to the only online one', async () => {
     vi.stubGlobal('fetch', makeFetch());
-    reportHost('d2', { hostName: 'hetzner', isHomeHost: true });
+    usePresenceStore.getState().setHostOnline('d1', false);
+    reportHost('d2', { hostName: 'hetzner', runsManager: true });
+    usePresenceStore.getState().setHostOnline('d2', true);
     useSettingsHostStore.setState({ selected: 'gone' });
     renderSettings('/settings/memories');
     await waitFor(() =>
@@ -302,7 +310,7 @@ describe('Settings host switcher (per-host pages)', () => {
     clearHosts();
     renderSettings('/settings/memories');
     await waitFor(() =>
-      expect(screen.getByTestId('settings-no-hosts')).toHaveTextContent('No hosts yet'),
+      expect(screen.getByTestId('settings-no-hosts')).toHaveTextContent('No machines yet'),
     );
   });
 
@@ -700,10 +708,10 @@ describe('Settings → Voice', () => {
       reportHost('d1', { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } });
       reportHost('d2', {
         hostName: 'mac',
-        isHomeHost: false,
+        runsManager: false,
         voiceKeys: { gemini: true, openai: false },
       });
-      reportHost('d3', { hostName: 'old-daemon', isHomeHost: false });
+      reportHost('d3', { hostName: 'old-daemon', runsManager: false });
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('voice-dictation-keys')).toBeInTheDocument());
       expect(screen.getByTestId('voice-dictation-keys')).toHaveTextContent(
@@ -716,7 +724,7 @@ describe('Settings → Voice', () => {
       expect(screen.queryByTestId('voice-call-keys')).toBeNull();
     });
 
-    // spec/02 § Provider keys: a key set from Settings → Keys takes effect with
+    // spec/02 § Provider keys: a key set from Settings → Providers takes effect with
     // no restart, and the host's next report is what clears the line.
     it('clears the line live when the host reports the key has been set', async () => {
       usePreferencesStore.setState({
@@ -917,7 +925,9 @@ describe('Settings → Voice', () => {
       renderSettings('/settings/voice');
       const select = (await screen.findByTestId('kokoro-voice')) as HTMLSelectElement;
       expect(select.value).toBe('');
-      expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Each host’s Kokoro default');
+      expect(screen.getByTestId('voice-speaking')).toHaveTextContent(
+        'Each machine’s Kokoro default',
+      );
     });
 
     it('writes a new chat-name interval on blur and on Enter, and refuses a negative one', async () => {
@@ -1003,7 +1013,7 @@ describe('Settings → Voice', () => {
 
 describe('Settings → Agent', () => {
   describe('Model for new chats (account-wide)', () => {
-    it('offers the home host’s catalogue and writes the pick to the account', async () => {
+    it('offers the default host’s catalogue and writes the pick to the account', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal(
         'fetch',
@@ -1029,14 +1039,12 @@ describe('Settings → Agent', () => {
       await waitFor(() => expect(server.writes).toEqual([{ defaultModel: 'claude-sonnet-5' }]));
     });
 
-    it('says there is no home machine to read the list from, keeping the saved value', async () => {
+    it('says there is no machine to read the list from, keeping the saved value', async () => {
       vi.stubGlobal('fetch', makeFetch());
       clearHosts();
       renderSettings('/settings/agent');
       await waitFor(() =>
-        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent(
-          'Designate a home machine',
-        ),
+        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent('No single machine'),
       );
       expect((screen.getByTestId('default-model') as HTMLSelectElement).value).toBe(
         usePreferencesStore.getState().preferences.defaultModel,
@@ -1154,47 +1162,6 @@ describe('Settings → Agent', () => {
         expect(server.writes).toContainEqual({ harnessSystemPrompt: 'Be kind.' }),
       );
       await waitFor(() => expect(screen.queryByTestId(SYSTEM)).toBeNull());
-    });
-
-    it('edits the shared settings.json and each OS override, refusing text the server refuses', async () => {
-      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
-      vi.stubGlobal(
-        'fetch',
-        makeFetch({}, (url, init) => {
-          if (url.includes('/api/settings') && init?.method === 'PATCH') {
-            const body = JSON.parse(String(init.body)) as { claudeSettings?: { shared: string } };
-            if (body.claudeSettings?.shared === '[1]') {
-              return json(
-                { error: 'invalid_input', message: 'claudeSettings.shared must be a JSON object' },
-                400,
-              );
-            }
-          }
-          return server.handler(url, init);
-        }),
-      );
-      loadShared();
-      renderSettings('/settings/agent');
-      fireEvent.click(await screen.findByTestId('claude-settings-shared-edit'));
-      fireEvent.change(screen.getByTestId('claude-settings-shared-json'), {
-        target: { value: '[1]' },
-      });
-      fireEvent.click(screen.getByTestId('claude-settings-shared-save'));
-      await waitFor(() =>
-        expect(errors().some((e) => e.includes('must be a JSON object'))).toBe(true),
-      );
-      expect(screen.getByTestId('claude-settings-shared-json')).toBeInTheDocument();
-      fireEvent.click(screen.getByTestId('claude-settings-shared-cancel'));
-      fireEvent.click(screen.getByTestId('claude-settings-darwin-edit'));
-      fireEvent.change(screen.getByTestId('claude-settings-darwin-json'), {
-        target: { value: '{"hooks":{}}' },
-      });
-      fireEvent.click(screen.getByTestId('claude-settings-darwin-save'));
-      await waitFor(() =>
-        expect(server.writes).toContainEqual({
-          claudeSettings: { shared: '', darwin: '{"hooks":{}}', linux: '' },
-        }),
-      );
     });
   });
 

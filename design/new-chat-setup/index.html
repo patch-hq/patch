@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>New chat — setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,400..600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-app: #f2f0ea;
+    --bg-panel: #faf8f3;
+    --bg-elevated: #ffffff;
+    --bg-soft: #f4f2eb;
+    --ink: #1b1813;
+    --ink-2: #423b32;
+    --ink-3: #645c50;
+    --ink-faint: #8a8175;
+    --line: #ddd6c6;
+    --line-soft: #e8e2d4;
+    --accent: #46802f;
+    --accent-soft: #cfddc1;
+    --accent-strong: #356026;
+    --accent-tint: #e7f0dd;
+    --waiting: #c46a12;
+    --on-accent: #ffffff;
+    --text-min: 14px;
+    --radius-pill: 999px;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg-elevated);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  main {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 40px 24px;
+  }
+
+  /* Empty-chat art, as in the app */
+  .empty-chat { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .empty-chat-art { width: 176px; height: auto; margin-bottom: 14px; }
+  .empty-chat-bubble { fill: var(--accent-tint); stroke: var(--accent); }
+  .empty-chat-dot, .empty-chat-leaf { fill: var(--accent); }
+  .empty-chat-stem { stroke: var(--accent); }
+  .empty-chat-title {
+    margin: 0;
+    font-family: 'Fraunces', Georgia, serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 22px;
+  }
+
+  /* The setup: one labelled row per decision, in a fixed order. */
+  .setup {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 20px;
+    row-gap: 14px;
+    align-items: center;
+    max-width: 1140px;
+    width: 100%;
+  }
+  .setup-label {
+    font-size: var(--text-min);
+    color: var(--ink-3);
+    text-align: right;
+    letter-spacing: 0.01em;
+  }
+  .setup-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  /* Chip */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    padding: 6px 14px;
+    background: var(--bg-elevated);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: var(--text-min);
+    line-height: 1.3;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--accent); background: var(--accent-tint); color: var(--ink); }
+  .chip.selected { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .chip.selected:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+  .chip.off { opacity: 0.5; cursor: default; }
+  .chip.off:hover { border-color: var(--line); background: var(--bg-elevated); color: var(--ink-2); }
+  .chip .sub { color: var(--ink-faint); }
+  .chip.selected .sub { color: rgba(255,255,255,0.75); }
+  .chip.auto { align-self: center; }
+  .chip .caret { font-size: 11px; color: var(--ink-faint); margin-left: 2px; }
+  .chip.selected .caret { color: rgba(255,255,255,0.75); }
+
+  /* Usage: one read-only card per account, separate from the selections. */
+  .usage {
+    width: 100%;
+    max-width: 1140px;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 20px;
+    display: grid;
+    gap: 12px;
+  }
+  .usage-title { margin: 0; font-size: var(--text-min); font-weight: 500; color: var(--ink-3); letter-spacing: 0.01em; }
+  .usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .account {
+    display: grid;
+    row-gap: 6px;
+    border: 1px solid var(--line-soft);
+    border-radius: 14px;
+    padding: 10px 14px 12px;
+    background: var(--bg-panel);
+    color: var(--ink-2);
+    font-size: var(--text-min);
+    line-height: 1.25;
+    text-align: left;
+  }
+  .account-name { display: flex; align-items: baseline; gap: 8px; color: var(--ink); font-weight: 500; }
+  .account-name .sub { color: var(--ink-faint); font-weight: 400; }
+  .account-meters { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; row-gap: 6px; align-items: center; }
+  .meter-label { color: var(--ink-3); font-size: 13px; white-space: nowrap; }
+  .meter-bar { position: relative; height: 8px; border-radius: 4px; background: var(--line-soft); overflow: hidden; min-width: 72px; }
+  .meter-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 4px; }
+  .meter-fill.hot { background: var(--waiting); }
+  .meter-fig { color: var(--ink-3); font-size: 13px; white-space: nowrap; }
+
+  @media (max-width: 640px) {
+    .setup { grid-template-columns: 1fr; row-gap: 8px; }
+    .setup-label { text-align: left; }
+    .setup-label + .setup-row { margin-bottom: 8px; }
+    .usage-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="empty-chat">
+    <svg class="empty-chat-art" viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M60 40 H180 A26 26 0 0 1 206 66 V110 A26 26 0 0 1 180 136 H104 L74 162 L74 136 H60 A26 26 0 0 1 34 110 V66 A26 26 0 0 1 60 40 Z" class="empty-chat-bubble" stroke-width="3" stroke-linejoin="round"/>
+      <circle cx="94" cy="88" r="8" class="empty-chat-dot"/>
+      <circle cx="120" cy="88" r="8" class="empty-chat-dot"/>
+      <circle cx="146" cy="88" r="8" class="empty-chat-dot"/>
+      <path d="M158 18 c1 -9 7 -15 15 -16 c-2 9 -8 15 -15 16 z" class="empty-chat-leaf"/>
+      <path d="M150 40 c1 -9 4 -16 8 -22" class="empty-chat-stem" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </svg>
+    <h2 class="empty-chat-title">New chat</h2>
+  </div>
+
+  <div class="setup" id="setup">
+    <div class="setup-label">Machine</div>
+    <div class="setup-row" id="row-machine">
+      <button class="chip">Mac</button>
+      <button class="chip selected">Netcup</button>
+    </div>
+
+    <div class="setup-label">Account</div>
+    <div class="setup-row" id="row-account">
+      <button class="chip selected">Auto</button>
+      <button class="chip">Default <span class="sub">Claude</span></button>
+      <button class="chip">work <span class="sub">Claude</span></button>
+      <button class="chip">tom.chambers@gmail.com <span class="sub">ChatGPT</span></button>
+    </div>
+
+    <div class="setup-label">Project</div>
+    <div class="setup-row" id="row-project">
+      <button class="chip selected">portfolio</button>
+      <button class="chip">Unite</button>
+      <button class="chip">claude-dev</button>
+      <button class="chip">patch</button>
+      <button class="chip">Other… <span class="caret">▾</span></button>
+    </div>
+
+    <div class="setup-label">Model</div>
+    <div class="setup-row" id="row-model">
+      <button class="chip selected">Claude Fable 5.1 <span class="sub">default</span></button>
+      <button class="chip">Claude Opus 5.5</button>
+      <button class="chip">Claude Sonnet 5.5</button>
+      <button class="chip">Claude Haiku 5.5</button>
+      <button class="chip">More… <span class="caret">▾</span></button>
+    </div>
+  </div>
+  <section class="usage" id="usage" aria-label="Usage">
+    <h3 class="usage-title">Usage</h3>
+    <div class="usage-grid">
+      <div class="account" id="usage-default">
+        <div class="account-name">Default <span class="sub">Claude</span></div>
+        <div class="account-meters">
+          <span class="meter-label">5-hour</span>
+          <span class="meter-bar"><span class="meter-fill" style="width:79%"></span></span>
+          <span class="meter-fig">79% used · resets 14:00</span>
+          <span class="meter-label">Week</span>
+          <span class="meter-bar"><span class="meter-fill" style="width:55%"></span></span>
+          <span class="meter-fig">55% used · resets Mon</span>
+        </div>
+      </div>
+      <div class="account" id="usage-work">
+        <div class="account-name">work <span class="sub">Claude</span></div>
+        <div class="account-meters">
+          <span class="meter-label">5-hour</span>
+          <span class="meter-bar"><span class="meter-fill hot" style="width:91%"></span></span>
+          <span class="meter-fig">91% used · resets 12:00</span>
+          <span class="meter-label">Week</span>
+          <span class="meter-bar"><span class="meter-fill" style="width:35%"></span></span>
+          <span class="meter-fig">35% used · resets Sun</span>
+        </div>
+      </div>
+      <div class="account" id="usage-openai">
+        <div class="account-name">tom.chambers@gmail.com <span class="sub">ChatGPT</span></div>
+        <div class="account-meters">
+          <span class="meter-label">5-hour</span>
+          <span class="meter-bar"><span class="meter-fill" style="width:22%"></span></span>
+          <span class="meter-fig">22% used · resets 15:40</span>
+          <span class="meter-label">Week</span>
+          <span class="meter-bar"><span class="meter-fill" style="width:69%"></span></span>
+          <span class="meter-fig">69% used · resets Fri</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

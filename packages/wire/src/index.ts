@@ -182,7 +182,9 @@ export * from './tool-runs.js';
 export * from './chat-move.js';
 export * from './sweep-prompt.js';
 export * from './link-summary-prompt.js';
+export * from './meeting-prompts.js';
 export * from './goal-prompt.js';
+export * from './watch-check-in-prompt.js';
 export { WireDecodeError } from './errors.js';
 
 /**
@@ -378,3 +380,5 @@ export * from './pairing.js';
 export * from './ambiguous-titles.js';
 export * from './snooze-format.js';
 export * from './client-crash.js';
+export * from './action-text.js';
+export * from './signin-question.js';

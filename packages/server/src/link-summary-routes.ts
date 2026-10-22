@@ -2,9 +2,9 @@
 //
 // POST /api/link-summary {url} — fetches the linked page server-side (same
 // SSRF-checked fetch as the link preview), then round-trips one
-// `patch.link_summary.request` to the account's home machine, which holds the
+// `patch.link_summary.request` to the machine running the Manager, which holds the
 // Claude credential and runs the account's `linkSummaryPrompt` over the page
-// text. NO FALLBACK: an unfetchable page is a 4xx/502, an offline home machine
+// text. NO FALLBACK: an unfetchable page is a 4xx/502, an offline Manager machine
 // is a 503, a timeout is a 504, and a failed model call is a 502 carrying its
 // reason — never an empty summary.
 
@@ -15,12 +15,7 @@ import type { SharedSettings, WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import { requireAuth } from './folder-routes.js';
-import {
-  extractReadableText,
-  fetchChecked,
-  isBlockedHost,
-  RedirectRefused,
-} from './link-preview-routes.js';
+import { extractReadableText, isBlockedHost } from './link-preview-routes.js';
 
 export interface LinkSummaryRoutesDeps {
   logger: Logger;
@@ -36,14 +31,66 @@ export const LINK_SUMMARY_MAX_CHARS = 24_000;
 /** Fetch + a model call. */
 export const LINK_SUMMARY_TIMEOUT_MS = 60_000;
 
+const MAX_REDIRECTS = 5;
+
+/** A redirect the summary refuses to follow; `status` is what the route answers. */
+class RedirectRefused extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * fetch() with redirects walked BY HAND, so every hop goes through the same
+ * host check — `redirect: 'follow'` would let a public page 302 the server
+ * into 127.0.0.1 or the cloud metadata address.
+ */
+async function fetchChecked(
+  start: URL,
+  init: { signal: AbortSignal; headers: Record<string, string> },
+  logger: Logger,
+): Promise<Response> {
+  let target = start;
+  for (let hop = 0; ; hop++) {
+    const res = await fetch(target.toString(), { ...init, redirect: 'manual' });
+    if (res.status < 300 || res.status > 399) return res;
+    const location = res.headers.get('location');
+    if (location === null) return res;
+    if (hop >= MAX_REDIRECTS) {
+      throw new RedirectRefused(502, 'fetch_failed', `more than ${MAX_REDIRECTS} redirects`);
+    }
+    let next: URL;
+    try {
+      next = new URL(location, target);
+    } catch {
+      throw new RedirectRefused(502, 'fetch_failed', 'upstream sent an unreadable Location');
+    }
+    if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+      throw new RedirectRefused(400, 'invalid_url', 'only http/https URLs are supported');
+    }
+    if (isBlockedHost(next.hostname)) {
+      logger.warn(
+        { from: target.toString(), to: next.toString() },
+        'link-summary: refused a redirect into a blocked host',
+      );
+      throw new RedirectRefused(400, 'blocked_host', 'this host cannot be summarised');
+    }
+    target = next;
+  }
+}
+
 const Body = z.object({ url: z.string().min(1) }).strict();
 
-type SummaryResponse = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
+type LinkSummaryResponse = Extract<WireEvent, { type: 'patch.link_summary.response' }>;
 
 export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummaryRoutesDeps): void {
   const pending = new Map<
     string,
-    { resolve: (ev: SummaryResponse) => void; timeout: NodeJS.Timeout; hostId: string }
+    { resolve: (ev: LinkSummaryResponse) => void; timeout: NodeJS.Timeout; hostId: string }
   >();
   deps.hostLink.onEvent((event: WireEvent, from) => {
     if (event.type !== 'patch.link_summary.response') return;
@@ -90,7 +137,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
         .code(400)
         .send({ error: 'blocked_host', message: 'this host cannot be summarised' });
     }
-    const hostId = deps.registry.homeHostId();
+    const hostId = deps.registry.managerHostId();
     if (hostId === null || !deps.hostLink.isOnline(hostId)) {
       return reply.code(503).send({
         error: 'host_offline',
@@ -142,7 +189,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
     }
 
     const requestId = deps.idGenerator();
-    const result = await new Promise<SummaryResponse | 'timeout'>((resolve) => {
+    const result = await new Promise<LinkSummaryResponse | 'timeout'>((resolve) => {
       const timeout = setTimeout(() => {
         pending.delete(requestId);
         resolve('timeout');

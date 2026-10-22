@@ -118,6 +118,14 @@ describe('JobAlerts', () => {
     ]);
   });
 
+  it('onRun reports a new alert once, not on every repeat failure', () => {
+    const a = make();
+    expect(a.onRun(run('gate-error', { error: 'x', ts: 1 }))).toBe(true);
+    expect(a.onRun(run('gate-error', { error: 'x', ts: 2 }))).toBe(false);
+    expect(a.onRun(run('ok', { ts: 3 }))).toBe(false);
+    expect(a.onRun(run('gate-error', { error: 'x', ts: 4 }))).toBe(true);
+  });
+
   it('dismiss removes the alert, once', () => {
     const a = make();
     a.onRun(run('dispatch-error', { error: 'x' }));

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { generateUserKeypair, mintSurfaceCredential, mintDaemonKey } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
+import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
@@ -937,6 +938,38 @@ describe('WS hub relay', () => {
     }
   });
 
+  it('closes surfaces with CLOSE_SERVER_RESTARTING when the server shuts down (spec/14)', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(18));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    registry.upsertSurface({ surfaceId: 'srf-rs', surfaceKind: 'web', label: 'b', issuedAt: 1 });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'srf-rs',
+      surfaceKind: 'web',
+      label: 'browser',
+    });
+    const h = await startServer({ registry });
+    const WebSocketCtor = (await import('ws')).default;
+    const ws = new WebSocketCtor(h.url);
+    await new Promise<void>((resolve, reject) => {
+      ws.on('open', () => resolve());
+      ws.on('error', reject);
+    });
+    const closed = new Promise<number>((resolve) => ws.on('close', (c: number) => resolve(c)));
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        clientType: 'surface-web',
+        clientVersion: '1.0.0',
+        auth: jwt,
+      }),
+    );
+    await new Promise<void>((resolve) => ws.once('message', () => resolve()));
+    await h.close();
+    expect(await closed).toBe(CLOSE_SERVER_RESTARTING);
+  });
+
   it('auth.ok carries the served web-bundle hash for live updates (spec/14)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(17));
     const registry = Registry.load(dir);
@@ -1282,7 +1315,7 @@ describe('WS hub host gate', () => {
       const errorPromise = surface.waitFor('chat.error', undefined, 2000);
       surface.sendInput({ chatId: 'c1', message: 'hi', localId: 'L1' });
 
-      // Not misrouted to the connected-but-wrong home host while the wait
+      // Not misrouted to the connected-but-wrong Manager host while the wait
       // is still running.
       await new Promise((r) => setTimeout(r, 80));
       expect(host1Got).toHaveLength(0);
