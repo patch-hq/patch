@@ -230,6 +230,20 @@
     var nav = $('screens');
     nav.hidden = false;
     $('screenBar').hidden = false;
+    // The poll lands here every 1.5s. Rebuilding the buttons under a press
+    // makes mousedown and mouseup hit different elements, so the click is lost.
+    var sig3 = JSON.stringify([state.screens.map(function (x) { return [x.id, x.name, pendingOn(x), seen && seen.indexOf(x.id) < 0]; }), screen && screen.id]);
+    if (sig3 !== screensSig) {
+      screensSig = sig3;
+      buildScreenList(nav, seen);
+    }
+    var i = state.screens.indexOf(screen);
+    $('screenName').textContent = screen ? screen.name : 'Not one of the screens';
+    $('prevScreen').disabled = i <= 0;
+    $('nextScreen').disabled = i < 0 || i >= state.screens.length - 1;
+  }
+  var screensSig = null;
+  function buildScreenList(nav, seen) {
     nav.textContent = '';
     el('h2', '', nav).textContent = 'Screens';
     state.screens.forEach(function (s) {
@@ -239,15 +253,15 @@
       var n = pendingOn(s);
       if (n) el('b', '', b).textContent = n;
       else if (seen && seen.indexOf(s.id) < 0) el('i', 'new-dot', b).title = 'New screen';
-      b.addEventListener('click', function () { setScreen(s); });
+      b.addEventListener('click', function () {
+        // The list outlives refreshes, which replace the screen objects: resolve by id.
+        var cur = state.screens.filter(function (x) { return x.id === s.id; })[0];
+        if (cur) setScreen(cur);
+      });
     });
     var add = el('button', 'add-screen', nav);
     add.id = 'addScreen'; add.textContent = '+'; add.setAttribute('aria-label', 'Add screen');
     add.addEventListener('click', addScreen);
-    var i = state.screens.indexOf(screen);
-    $('screenName').textContent = screen ? screen.name : 'Not one of the screens';
-    $('prevScreen').disabled = i <= 0;
-    $('nextScreen').disabled = i < 0 || i >= state.screens.length - 1;
   }
   function addScreen() {
     closeScreenSheet();

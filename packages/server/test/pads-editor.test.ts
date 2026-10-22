@@ -370,4 +370,31 @@ describe('pad editor in a browser', () => {
     expect(kept).toBe(1);
     await ctx.close();
   }, 90_000);
+  it('the screen list is not rebuilt by the background poll, so a click is never lost to a rebuild', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    await page.frameLocator('#frame').locator('#p').waitFor();
+    await page.evaluate(() => {
+      (document.querySelector('#screens button[data-screen]') as unknown as { mark: number }).mark =
+        1;
+    });
+    await page.waitForTimeout(5000);
+    const kept = await page.evaluate(
+      () =>
+        (document.querySelector('#screens button[data-screen]') as unknown as { mark?: number })
+          .mark,
+    );
+    expect(kept).toBe(1);
+    // A press held across a poll still completes as a click on the same button.
+    const other = page.locator('#screens button:not(.add-screen)').nth(1);
+    const box = (await other.boundingBox())!;
+    await page.mouse.move(box.x + 10, box.y + 10);
+    await page.mouse.down();
+    await page.waitForTimeout(1800);
+    await page.mouse.up();
+    await expect.poll(() => page.locator('#screens button.on').textContent()).toContain('Other');
+    await ctx.close();
+  }, 90_000);
 });
