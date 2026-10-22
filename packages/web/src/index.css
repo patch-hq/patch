@@ -2804,7 +2804,7 @@ button.nav-row {
   padding: 0 24px;
 }
 /* New-chat setup (spec/14 §8): one labelled row per decision — Machine,
-   Account, Project, Model — as a two-column grid, labels in a quiet right-
+   Project, Model, Account — as a two-column grid, labels in a quiet right-
    aligned column so the rows scan as a form rather than a cloud of pills. The
    usage block sits beneath, apart from the selections. */
 .new-chat-setup {

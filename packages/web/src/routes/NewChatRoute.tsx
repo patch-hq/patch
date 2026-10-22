@@ -968,7 +968,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   const setupRow = (
     <div className="new-chat-setup" data-testid="new-chat-setup">
       {/* One labelled row per decision, in the order they are taken: machine,
-          account, project, model (spec/14 §8). A row with nothing to decide —
+          project, model, account (spec/14 §8). A row with nothing to decide —
           one machine, one account — is absent rather than drawn with one chip. */}
       <div className="new-chat-setup-grid" data-testid="new-chat-setup-grid">
         {/* Where the chat runs. An offline machine is listed so its absence is
@@ -987,45 +987,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 onSelect={chooseMachine}
                 testId="new-chat-host"
               />
-            </div>
-          </>
-        ) : null}
-        {/* The account this chat is LOCKED to (spec/10 § Backend
-            credentials — preferred account): a spent account is waited on, not
-            walked past. Auto leaves the choice to the account strategy. Only the chosen model's backend's accounts are offered,
-            and only once there is more than one to choose between. */}
-        {preferableAccounts.length > 1 ? (
-          <>
-            <span className="new-chat-setup-label">Account</span>
-            <div
-              className="new-chat-setup-row"
-              role="radiogroup"
-              aria-label="Account"
-              data-testid="new-chat-account"
-            >
-              <button
-                type="button"
-                role="radio"
-                className={`folder-quick ${preferredAccountId === null ? 'selected' : ''}`}
-                data-testid="new-chat-account-auto"
-                aria-checked={preferredAccountId === null}
-                onClick={() => setPreferredAccountId(null)}
-              >
-                Auto
-              </button>
-              {preferableAccounts.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  role="radio"
-                  className={`folder-quick ${preferredAccountId === a.id ? 'selected' : ''}`}
-                  data-testid={`new-chat-account-${a.id}`}
-                  aria-checked={preferredAccountId === a.id}
-                  onClick={() => setPreferredAccountId(a.id)}
-                >
-                  {a.label}
-                </button>
-              ))}
             </div>
           </>
         ) : null}
@@ -1319,6 +1280,45 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             {...(modelIsQuick ? { triggerLabel: 'More…' } : {})}
           />
         </div>
+        {/* The account this chat is LOCKED to (spec/10 § Backend
+            credentials — preferred account): a spent account is waited on, not
+            walked past. Auto leaves the choice to the account strategy. Only the chosen model's backend's accounts are offered,
+            and only once there is more than one to choose between. */}
+        {preferableAccounts.length > 1 ? (
+          <>
+            <span className="new-chat-setup-label">Account</span>
+            <div
+              className="new-chat-setup-row"
+              role="radiogroup"
+              aria-label="Account"
+              data-testid="new-chat-account"
+            >
+              <button
+                type="button"
+                role="radio"
+                className={`folder-quick ${preferredAccountId === null ? 'selected' : ''}`}
+                data-testid="new-chat-account-auto"
+                aria-checked={preferredAccountId === null}
+                onClick={() => setPreferredAccountId(null)}
+              >
+                Auto
+              </button>
+              {preferableAccounts.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="radio"
+                  className={`folder-quick ${preferredAccountId === a.id ? 'selected' : ''}`}
+                  data-testid={`new-chat-account-${a.id}`}
+                  aria-checked={preferredAccountId === a.id}
+                  onClick={() => setPreferredAccountId(a.id)}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
       </div>
       {/* Usage, apart from the selections (Tom: "keep usage separate from the
           selections"): what each account has left, read-only, so the account

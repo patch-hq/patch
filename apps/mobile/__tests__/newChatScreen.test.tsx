@@ -393,25 +393,50 @@ describe('NewChat — setup quick picks', () => {
     ]);
   });
 
-  // Todoist 6hfFww7fH7JQFWj4 ("the options, model and workspace ... should
-  // be at the bottom of the window, instead of at the top"): the picks used
-  // to sit in a ScrollView directly under the header. They now dock right
-  // above the composer, behind an empty flex:1 spacer that takes the space a
-  // real chat's transcript would occupy — so document order (which this
-  // flex-column screen renders straight down the page) must read spacer,
-  // then the Folder pick, then the composer, never the other way round.
-  it('the picks dock above the composer, behind a spacer, not under the header', async () => {
+  // Todoist 6hq3Wmwm3fRQqcwc: the setup is centred in the space above the
+  // composer with the `New chat` title directly above it (not in a header at
+  // the top), and Account sits below Model. Document order of this flex-column
+  // screen: top spacer, title, Project, Model, Account, Permissions, composer.
+  it('centres title + picks between two spacers, Account below Model', async () => {
     useChatStore.setState({ chats: { a: chat({ chatId: 'a', folder: '/p/one' }) } });
+    useSettingsStore.setState({
+      data: {
+        preferences: {},
+        shared: {
+          version: 1,
+          secrets: {
+            claude: [
+              { id: 'a1', label: 'one', connected: true },
+              { id: 'a2', label: 'two', connected: true },
+            ],
+            codex: [],
+            providerKeys: [],
+          },
+        },
+      },
+    } as never);
     const r = await renderReady();
     const everyHostNode = findAllHost(r.root, () => true);
     const indexOf = (testID: string): number =>
       everyHostNode.findIndex((i) => i.props['testID'] === testID);
-    const spacerIdx = indexOf('new-chat-top-spacer');
-    const folderPickIdx = indexOf('new-chat-folder-pill');
-    const composerIdx = indexOf('composer-actions-row');
-    expect(spacerIdx).toBeGreaterThanOrEqual(0);
-    expect(folderPickIdx).toBeGreaterThan(spacerIdx);
-    expect(composerIdx).toBeGreaterThan(folderPickIdx);
+    const top = indexOf('new-chat-top-spacer');
+    const title = indexOf('new-chat-title');
+    const folder = indexOf('new-chat-folder-pill');
+    const model = everyHostNode.findIndex((i) =>
+      String(i.props['testID'] ?? '').startsWith('new-chat-model-quick-'),
+    );
+    const account = indexOf('new-chat-account-strategy');
+    const mode = indexOf('new-chat-permission-mode');
+    const bottom = indexOf('new-chat-bottom-spacer');
+    const composer = indexOf('composer-actions-row');
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(title).toBeGreaterThan(top);
+    expect(folder).toBeGreaterThan(title);
+    expect(model).toBeGreaterThan(folder);
+    expect(account).toBeGreaterThan(model);
+    expect(mode).toBeGreaterThan(account);
+    expect(bottom).toBeGreaterThan(mode);
+    expect(composer).toBeGreaterThan(bottom);
   });
 });
 

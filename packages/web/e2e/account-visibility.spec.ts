@@ -48,6 +48,11 @@ test('a new chat names the account it starts on, and sends it with the spawn', a
   });
   const row = page.getByTestId('new-chat-account');
   await expect(row).toBeVisible();
+  // Account is taken after the model: its row sits below the Model row.
+  const rowY = (await row.boundingBox())!.y;
+  const modelY = (await page.locator('.new-chat-setup-label', { hasText: 'Model' }).boundingBox())!
+    .y;
+  expect(rowY).toBeGreaterThan(modelY);
   // Chips, like every other row of the setup — not a native select.
   await expect(row.locator('select')).toHaveCount(0);
   await expect(row.getByRole('radio')).toHaveText(['Auto', 'work', 'personal']);

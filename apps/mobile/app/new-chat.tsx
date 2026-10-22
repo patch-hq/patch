@@ -337,48 +337,35 @@ export default function NewChat(): React.ReactElement {
         <Pressable onPress={goBack} style={{ padding: space.sm }} accessibilityLabel="Cancel">
           <ChevronLeft size={22} color={colors.ink} />
         </Pressable>
-        <Text numberOfLines={1} style={{ ...typography.title, color: colors.ink, flex: 1 }}>
-          New chat
-        </Text>
       </View>
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Empty transcript area — a new chat has no messages yet, so this
-            just holds the space the real chat's message list will occupy,
-            pushing the quick picks and composer down to the bottom of the
-            window instead of stacking them under the header. */}
+        {/* A new chat has no messages yet, so the title and the picks are
+            centred between two equal spacers in the space above the composer. */}
         <View testID="new-chat-top-spacer" style={{ flex: 1 }} />
 
+        <Text
+          testID="new-chat-title"
+          numberOfLines={1}
+          style={{
+            ...typography.title,
+            color: colors.ink,
+            textAlign: 'center',
+            paddingHorizontal: space.md,
+            paddingBottom: space.sm,
+          }}
+        >
+          New chat
+        </Text>
+
         <ScrollView
-          style={{ flexShrink: 1 }}
+          style={{ flexGrow: 0, flexShrink: 1 }}
           contentContainerStyle={{ paddingBottom: space.sm }}
           keyboardShouldPersistTaps="handled"
         >
-          {/* The account the chat's turns START on (spec/10 § Backend
-              credentials — preferred account). A lock: a spent account is waited on. */}
-          {preferable.length > 1 ? (
-            <PickRow label="Account">
-              <Chip
-                testID="new-chat-account-strategy"
-                label="By strategy"
-                selected={preferredAccountId === null}
-                onPress={() => setPreferredAccountId(null)}
-              />
-              {preferable.map((a) => (
-                <Chip
-                  key={a.id}
-                  testID={`new-chat-account-${a.id}`}
-                  label={a.label}
-                  selected={preferredAccountId === a.id}
-                  onPress={() => setPreferredAccountId(a.id)}
-                />
-              ))}
-            </PickRow>
-          ) : null}
-
           <PickRow label="Project">
             <Chip
               testID="new-chat-folder-pill"
@@ -415,6 +402,28 @@ export default function NewChat(): React.ReactElement {
             />
           </PickRow>
 
+          {/* The account the chat's turns START on (spec/10 § Backend
+              credentials — preferred account). A lock: a spent account is waited on. */}
+          {preferable.length > 1 ? (
+            <PickRow label="Account">
+              <Chip
+                testID="new-chat-account-strategy"
+                label="By strategy"
+                selected={preferredAccountId === null}
+                onPress={() => setPreferredAccountId(null)}
+              />
+              {preferable.map((a) => (
+                <Chip
+                  key={a.id}
+                  testID={`new-chat-account-${a.id}`}
+                  label={a.label}
+                  selected={preferredAccountId === a.id}
+                  onPress={() => setPreferredAccountId(a.id)}
+                />
+              ))}
+            </PickRow>
+          ) : null}
+
           <PickRow label="Permissions">
             <Chip
               testID="new-chat-permission-mode"
@@ -436,6 +445,8 @@ export default function NewChat(): React.ReactElement {
               flow): what each account has left, read-only. */}
           <AccountUsageStrip />
         </ScrollView>
+
+        <View testID="new-chat-bottom-spacer" style={{ flex: 1 }} />
 
         <Composer
           chatId={draftId}
