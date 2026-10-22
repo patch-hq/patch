@@ -99,11 +99,8 @@ test('a live chat with two accounts gets an account dropdown styled like the app
   const select = page.getByTestId('chat-account');
   await expect(select).toHaveJSProperty('tagName', 'SELECT');
   await expect(select.locator('option')).toHaveText(['Automatic: work', 'work', 'personal']);
-  // The tooltip would sit over the open list, so it is off while focused.
-  await expect(select).toHaveAttribute('title', /work account/);
-  await select.focus();
+  // A tooltip would sit over the open list, so the select carries none.
   await expect(select).not.toHaveAttribute('title', /.*/);
-  await select.blur();
   // Drawn as the approval-mode select beside it, not as a bordered chip.
   const mode = page.getByTestId('permission-mode');
   for (const prop of ['appearance', 'font-size', 'border-top-width', 'height', 'color']) {
