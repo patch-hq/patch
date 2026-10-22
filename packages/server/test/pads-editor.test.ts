@@ -276,6 +276,36 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   }, 30_000);
 
+  it('View mode: a note over the design does not block clicks on what is underneath', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    await page.keyboard.press('n');
+    const bbox = (await design.locator('#b').boundingBox())!;
+    await page.mouse.click(bbox.x + 5, bbox.y + 5);
+    await page.keyboard.type('Over the button');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).map((c) => c.kind)).toEqual(['note']);
+    await page.locator('[data-mode=view]').click();
+    await design
+      .locator('#b')
+      .evaluate((b) => b.addEventListener('click', () => b.setAttribute('data-hit', '1')));
+    const covered = await page.evaluate(() => {
+      const n = document.querySelector('.note')!.getBoundingClientRect();
+      return { x: n.x + 4, y: n.y + 4 };
+    });
+    // The note sits over the button: pointer events at that spot must fall through to the design.
+    const top = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.className ?? '',
+      covered,
+    );
+    expect(top).not.toContain('note');
+    await ctx.close();
+  }, 30_000);
+
   it('desktop and phone: shape tools draw a rectangle, ellipse, line and arrow as shape strokes', async () => {
     const frameUrl = await newPad();
     for (const opts of [{ viewport: { width: 1280, height: 800 } }, { ...pw.devices['Pixel 7'] }]) {
