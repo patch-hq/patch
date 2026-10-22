@@ -12,6 +12,7 @@ import {
   formatReadAt,
   formatUtilization,
   OVERAGE_DISABLED_REASON,
+  OVERAGE_ORG_DISABLED_REASON,
   SCOPE_LABEL,
   SCOPE_ORDER,
   type AccountUsage,
@@ -117,6 +118,35 @@ export function TokenEntry({
   );
 }
 
+/** A name field revealed by Rename, sending on its own button. */
+export function RenameEntry({
+  testID,
+  current,
+  onSubmit,
+}: {
+  testID: string;
+  current: string;
+  onSubmit: (label: string) => void;
+}): React.ReactElement {
+  const [label, setLabel] = React.useState(current);
+  return (
+    <View style={{ marginTop: space.sm, gap: space.sm }}>
+      <Field
+        testID={`${testID}-input`}
+        accessibilityLabel="Account name"
+        value={label}
+        onChangeText={setLabel}
+        placeholder={current}
+      />
+      <SettingsButton
+        testID={`${testID}-submit`}
+        label="Rename"
+        onPress={() => onSubmit(label.trim())}
+      />
+    </View>
+  );
+}
+
 /** The rank circle: accent-filled on the account the host is using now. */
 export function Rank({ n, active }: { n: number; active: boolean }): React.ReactElement {
   const colors = useTheme();
@@ -213,7 +243,7 @@ export function UsageLine({
   scope: UsageScope;
   win: RateLimitWindow | undefined;
   testID: string;
-  /** Where this window's add-on is turned on; the label links there. */
+  /** Where this window's add-on is turned on. */
   manageUrl?: string;
 }): React.ReactElement | null {
   const colors = useTheme();
@@ -224,33 +254,20 @@ export function UsageLine({
   const warn = state === 'warn';
   const fill = blocked ? colors.red : warn ? colors.amber : off ? colors.ink3 : colors.leaf;
   const pct = Math.min(100, Math.round((win.utilization ?? 0) * 100));
+  // Extra usage is one line: where to turn it on when it was never taken out,
+  // or that organisation policy prevents it, in place of a reset time.
+  const neverTakenOut = scope === 'overage' && win.disabledReason === OVERAGE_DISABLED_REASON;
+  const orgDisabled = scope === 'overage' && win.disabledReason === OVERAGE_ORG_DISABLED_REASON;
   const reason =
-    win.disabledReason !== undefined && win.disabledReason !== OVERAGE_DISABLED_REASON
+    win.disabledReason !== undefined && !neverTakenOut && !orgDisabled
       ? describeDisabledReason(win.disabledReason)
       : null;
   return (
     <View testID={testID} style={{ marginTop: space.xs }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        {manageUrl ? (
-          <Pressable
-            testID={`${testID}-manage`}
-            accessibilityRole="link"
-            accessibilityLabel={`Manage ${SCOPE_LABEL[scope]}`}
-            onPress={() => void Linking.openURL(manageUrl)}
-            style={{ width: 96 }}
-          >
-            <Text
-              numberOfLines={1}
-              style={{ ...typography.meta, color: colors.leaf, textDecorationLine: 'underline' }}
-            >
-              {SCOPE_LABEL[scope]}
-            </Text>
-          </Pressable>
-        ) : (
-          <Text numberOfLines={1} style={{ ...typography.meta, color: colors.ink3, width: 96 }}>
-            {SCOPE_LABEL[scope]}
-          </Text>
-        )}
+        <Text numberOfLines={1} style={{ ...typography.meta, color: colors.ink3, width: 96 }}>
+          {SCOPE_LABEL[scope]}
+        </Text>
         <View
           style={{
             flex: 1,
@@ -273,6 +290,18 @@ export function UsageLine({
           {off ? 'off' : formatUtilization(win)}
           {blocked ? ' · blocked' : ''}
         </Text>
+        {neverTakenOut && manageUrl ? (
+          <Pressable
+            testID={`${testID}-manage`}
+            accessibilityRole="link"
+            accessibilityLabel="Turn on Extra usage"
+            onPress={() => void Linking.openURL(manageUrl)}
+          >
+            <Text style={{ ...typography.meta, color: colors.leaf }}>Turn on ↗</Text>
+          </Pressable>
+        ) : orgDisabled ? (
+          <Text style={{ ...typography.meta, color: colors.ink3 }}>disabled by organisation</Text>
+        ) : null}
       </View>
       {reason ? <Muted>{reason}</Muted> : null}
     </View>

@@ -206,6 +206,71 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     expect(query(r, 'account-claude-code-a-refresh')).toBeNull();
   });
 
+  it('explains each account action in one line, and offers Rename', async () => {
+    const r = await render();
+    await actAsync(() => get(r, 'account-claude-code-a-menu').props.onPress());
+    expect(textOf(get(r, 'account-claude-code-a-rename'))).toContain('Rename');
+    expect(textOf(get(r, 'account-claude-code-a-connect'))).toContain('Sign in again');
+    expect(textOf(get(r, 'account-claude-code-a-connect'))).toContain('Replace the stored login');
+    expect(textOf(get(r, 'account-claude-code-a-disconnect'))).toContain('Keep the row, forget');
+    expect(textOf(get(r, 'account-claude-code-a-remove'))).toContain('Remove');
+    expect(textOf(get(r, 'account-claude-code-a-remove'))).toContain(
+      'Forget this account everywhere',
+    );
+  });
+
+  it('renames an account from an inline field', async () => {
+    vi.mocked(api.updateAccount).mockResolvedValue(
+      shared([{ ...WORK, label: 'office' }, PERSONAL]),
+    );
+    const r = await render();
+    await pressMenuItem(r.root, 'account-claude-code-a-menu', 'account-claude-code-a-rename');
+    await actAsync(() =>
+      get(r, 'account-claude-code-a-rename-input').props.onChangeText(' office '),
+    );
+    await actAsync(async () => {
+      get(r, 'account-claude-code-a-rename-submit').props.onPress();
+      await flush();
+    });
+    expect(api.updateAccount).toHaveBeenCalledWith('claude-code', 'a', { label: 'office' });
+  });
+
+  it('reads Extra usage on one line: Turn on link when never taken out, organisation when policy blocks it', async () => {
+    reportHost('h1', { hostName: 'hetzner' });
+    const report = (disabledReason: string) =>
+      usePresenceStore.getState().setHostAccount({
+        type: 'host.account',
+        hostId: 'h1',
+        backendId: 'claude-code',
+        connected: true,
+        accountEmail: null,
+        accounts: [
+          {
+            id: 'a',
+            label: 'work',
+            connected: true,
+            accountEmail: null,
+            usage: { at: 1_000, overage: { status: 'rejected', disabledReason } },
+          },
+        ],
+      });
+    report('org_level_disabled_until');
+    const r = await render();
+    const line = get(r, 'account-claude-code-a-usage-overage');
+    expect(textOf(line)).toContain('Extra usage');
+    expect(textOf(line)).toContain('Turn on ↗');
+    expect(textOf(line)).not.toMatch(/overspent|not enabled/);
+    expect(get(r, 'account-claude-code-a-usage-overage-manage').props.accessibilityRole).toBe(
+      'link',
+    );
+    act(() => r.unmount());
+    report('org_level_disabled');
+    const r2 = await render();
+    const line2 = textOf(get(r2, 'account-claude-code-a-usage-overage'));
+    expect(line2).toContain('disabled by organisation');
+    expect(line2).not.toContain('Turn on');
+  });
+
   it('describes each account-picking strategy', async () => {
     const r = await render();
     expect(textOf(get(r, 'strategy-claude-code-hint'))).toBe(STRATEGY_HINT.priority);

@@ -18,7 +18,15 @@ import { usePresenceStore } from '../../stores/presenceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { AnchoredMenuItem } from '../AnchoredMenu';
 import { SettingsSection } from '../SettingsSection';
-import { moveAccount, moveItems, Rank, RowMenu, TokenEntry, UsageBars } from './accountRows';
+import {
+  moveAccount,
+  moveItems,
+  Rank,
+  RenameEntry,
+  RowMenu,
+  TokenEntry,
+  UsageBars,
+} from './accountRows';
 import { NoticeRow } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
 import { UsageHistorySection } from './UsageHistorySection';
@@ -180,6 +188,7 @@ function AccountRow({
   const backendId = provider.id;
   const reading = useReading(backendId, row.id);
   const [connecting, setConnecting] = React.useState(false);
+  const [renaming, setRenaming] = React.useState(false);
   const id = `${backendId}-${row.id}`;
   const organizationId = 'organizationId' in row ? row.organizationId : undefined;
   // Two rows on one Claude organisation are one pool of credit under two labels.
@@ -199,11 +208,20 @@ function AccountRow({
 
   const items: AnchoredMenuItem[] = [
     ...moveItems(`account-${id}`, rank - 1, rows.length, moving),
+    {
+      id: 'rename',
+      label: 'Rename',
+      detail: 'Change the name shown in the list',
+      testID: `account-${id}-rename`,
+    },
     ...(provider.pasteToken
       ? [
           {
             id: 'connect',
             label: row.connected ? 'Sign in again' : 'Sign in',
+            detail: row.connected
+              ? 'Replace the stored login with a fresh token'
+              : 'Paste a token to start using this account',
             testID: `account-${id}-connect`,
           },
         ]
@@ -213,17 +231,25 @@ function AccountRow({
           {
             id: 'disconnect',
             label: 'Sign out',
+            detail: 'Keep the row, forget the login: nothing uses it until it is signed in again',
             testID: `account-${id}-disconnect`,
             destructive: true,
           },
         ]
       : []),
-    { id: 'remove', label: 'Remove account', testID: `account-${id}-remove`, destructive: true },
+    {
+      id: 'remove',
+      label: 'Remove',
+      detail: 'Forget this account everywhere',
+      testID: `account-${id}-remove`,
+      destructive: true,
+    },
   ];
 
   const onSelect = (action: string): void => {
     if (action === 'up') onMove(-1);
     else if (action === 'down') onMove(1);
+    else if (action === 'rename') setRenaming(true);
     else if (action === 'connect') setConnecting(true);
     else if (action === 'disconnect') {
       Alert.alert(
@@ -243,7 +269,7 @@ function AccountRow({
       Alert.alert(`Remove ${row.label}?`, 'The account and its login are forgotten.', [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Remove account',
+          text: 'Remove',
           style: 'destructive',
           onPress: () => void writeShared('Remove', () => api.removeAccount(backendId, row.id)),
         },
@@ -279,6 +305,20 @@ function AccountRow({
         scopes={provider.windows}
         extraUsageUrl={provider.extraUsageUrl}
       />
+      {renaming ? (
+        <RenameEntry
+          testID={`account-${id}-rename`}
+          current={row.label}
+          onSubmit={(label) => {
+            if (label === '') return;
+            void writeShared('Rename', () => api.updateAccount(backendId, row.id, { label })).then(
+              (ok) => {
+                if (ok) setRenaming(false);
+              },
+            );
+          }}
+        />
+      ) : null}
       {connecting ? (
         <TokenEntry
           testID={`account-${id}-token`}
