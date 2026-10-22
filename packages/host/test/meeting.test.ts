@@ -270,10 +270,26 @@ describe('MeetingManager', () => {
       newLines: [{ clock: '00:05', speaker: 'Them', text: "Hi, I'm Priya" }],
       final: false,
       elapsedMs: 5000,
+      myNotes: '',
       prompts: PROMPTS,
     });
     expect(p).toContain('by name');
     expect(p).toContain('never "the user"');
+  });
+
+  it("passes Tom's My notes to the analysis so a voice can be named from them", async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    m.setMyNotes('c1', 'With Priya and Dev');
+    transcribeVoices.mockResolvedValueOnce([{ text: 'Morning all', voice: 1 }]);
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    await m.tick('c1');
+    const input = analyse.mock.calls[0]![0];
+    expect(input.myNotes).toBe('With Priya and Dev');
+    const p = buildMeetingPrompt(input);
+    expect(p).toContain('With Priya and Dev');
+    expect(p).toContain("Tom's own notes");
   });
 
   it('live Now shows what is said before analysis, then clears once the notes cover it', async () => {
@@ -925,6 +941,7 @@ describe('meetingGen', () => {
       newLines: [],
       final: true,
       elapsedMs: 5000,
+      myNotes: '',
       prompts: PROMPTS,
     });
     expect(p).toContain('already in the notes above');
@@ -937,6 +954,7 @@ describe('meetingGen', () => {
       newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
       final: false,
       elapsedMs: 5000,
+      myNotes: '',
       prompts: PROMPTS,
     };
     expect(buildMeetingPrompt(base)).toContain('"summary":null');
@@ -955,6 +973,7 @@ describe('meetingGen', () => {
       newLines: [{ clock: '20:00', speaker: 'Them', text: 'x' }],
       final: false,
       elapsedMs: 1_200_000,
+      myNotes: '',
       prompts: PROMPTS,
     });
     expect(p).toMatch(/main thrust/);
@@ -971,6 +990,7 @@ describe('editable meeting prompts', () => {
     newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
     final: false,
     elapsedMs: 5000,
+    myNotes: '',
     prompts: { now: 'NOW-RULES', notes: 'NOTES-RULES', actions: 'ACTION-RULES' },
   };
 
@@ -1020,6 +1040,7 @@ describe('meeting action restraint', () => {
       newLines: [{ clock: '00:05', speaker: 'Them', text: 'x' }],
       final: false,
       elapsedMs: 5000,
+      myNotes: '',
       prompts: PROMPTS,
     });
     expect(p).toMatch(/"kind"/);
@@ -1036,6 +1057,7 @@ describe('makeMeetingAnalyser', () => {
     newLines: [{ clock: '00:05', speaker: 'Them', text: 'ship monday' }],
     final: false,
     elapsedMs: 5000,
+    myNotes: '',
     prompts: PROMPTS,
   };
 

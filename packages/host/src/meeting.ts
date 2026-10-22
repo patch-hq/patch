@@ -124,6 +124,8 @@ export interface AnalyseInput {
   /** The meeting has ended: also return `summary`. */
   final: boolean;
   elapsedMs: number;
+  /** Tom's own notes so far: they often name who is on the call. */
+  myNotes: string;
   /** The account's three editable instruction blocks, read fresh each pass. */
   prompts: MeetingPrompts;
 }
@@ -908,6 +910,7 @@ export class MeetingManager {
         })),
         final,
         elapsedMs: meetingElapsedMs(rt.state, this.now()),
+        myNotes: rt.state.myNotes ?? '',
         prompts: this.deps.prompts(),
       });
       const a = MeetingAnalysis.parse(raw);
