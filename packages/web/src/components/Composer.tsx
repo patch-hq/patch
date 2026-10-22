@@ -72,6 +72,7 @@ import {
   providerBuiltinCommands,
   providerDescriptor,
   providerForModel,
+  SPECIAL_THREAD_IDS,
 } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
@@ -1065,7 +1066,11 @@ export const Composer = forwardRef(function Composer(
   const onCall = useVoiceStore((s) => s.call !== null && s.call.chatId === chatId);
   const inMeeting = useMeetingStore((s) => isMeetingOpen(s.byChat[chatId]));
   // Once ever: introduce what a meeting needs on this Mac, on the Meeting button.
-  const hasMeetingButton = !edit && (chatId !== 'new' || onStartMeeting !== undefined);
+  // The Manager coordinates other chats; it takes no meeting notes.
+  const hasMeetingButton =
+    !edit &&
+    chatId !== SPECIAL_THREAD_IDS.manager &&
+    (chatId !== 'new' || onStartMeeting !== undefined);
   useEffect(() => {
     if (!hasMeetingButton) return;
     maybeIntroduceMeetings(chatId).catch((err: unknown) =>
@@ -2382,7 +2387,7 @@ export const Composer = forwardRef(function Composer(
             disabled={claudeDisconnected}
             {...(claudeDisconnected
               ? {
-                  title: `${accountModel?.startsWith('openai/') ? 'OpenAI' : 'Claude'} isn’t connected. Connect in Settings.`,
+                  title: `${accountModel?.startsWith('openai/') ? 'Codex' : 'Claude'} isn’t connected. Connect in Settings.`,
                 }
               : {})}
             rows={1}
@@ -2490,7 +2495,7 @@ export const Composer = forwardRef(function Composer(
               </button>
               {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
-              {chatId === 'new' && !onStartMeeting ? null : (
+              {!hasMeetingButton ? null : (
                 <span className="mm-setup-anchor">
                   <button
                     type="button"

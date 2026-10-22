@@ -800,7 +800,11 @@ describe('chat-detail swipe to change chat', () => {
   function surface(r: ReturnType<typeof renderRN>): ReturnType<typeof findHost> {
     return findHost(r.root, byTestId('chat-swipe-surface'));
   }
-  const g = (dx: number, dy = 0): { dx: number; dy: number } => ({ dx, dy });
+  const g = (dx: number, dy = 0, vx = 0): { dx: number; dy: number; vx: number } => ({
+    dx,
+    dy,
+    vx,
+  });
 
   it('swiping right opens the previous chat, left the next', () => {
     seedThree();
@@ -821,12 +825,43 @@ describe('chat-detail swipe to change chat', () => {
     expect(routerMock.replace).not.toHaveBeenCalled();
   });
 
+  it('a medium drag or a quick short flick changes chat; a slow short one does not', () => {
+    seedThree();
+    __setLocalSearchParams({ chatId: 'c2' });
+    const s = surface(renderRN(<ChatDetailScreen />));
+    s.props['onPanResponderRelease']({}, g(-60));
+    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c3');
+    routerMock.replace.mockClear();
+    s.props['onPanResponderRelease']({}, g(30, 0, 0.8));
+    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c1');
+    routerMock.replace.mockClear();
+    s.props['onPanResponderRelease']({}, g(30, 0, 0.1));
+    expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+
+  it('ignores a release that ended mostly vertical', () => {
+    seedThree();
+    __setLocalSearchParams({ chatId: 'c2' });
+    const s = surface(renderRN(<ChatDetailScreen />));
+    s.props['onPanResponderRelease']({}, g(70, 90));
+    expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+
+  it('claims in the capture phase so the message list cannot take the drag first', () => {
+    seedThree();
+    __setLocalSearchParams({ chatId: 'c2' });
+    const s = surface(renderRN(<ChatDetailScreen />));
+    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(30, 15))).toBe(true);
+    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(15, 40))).toBe(false);
+    expect(s.props['onPanResponderTerminationRequest']({})).toBe(false);
+  });
+
   it('only claims a clearly horizontal drag', () => {
     seedThree();
     __setLocalSearchParams({ chatId: 'c2' });
     const s = surface(renderRN(<ChatDetailScreen />));
-    expect(s.props['onMoveShouldSetPanResponder']({}, g(40, 5))).toBe(true);
-    expect(s.props['onMoveShouldSetPanResponder']({}, g(40, 40))).toBe(false);
-    expect(s.props['onMoveShouldSetPanResponder']({}, g(5, 0))).toBe(false);
+    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(40, 5))).toBe(true);
+    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(40, 40))).toBe(false);
+    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(5, 0))).toBe(false);
   });
 });

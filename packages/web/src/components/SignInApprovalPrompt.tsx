@@ -15,22 +15,32 @@ export function SignInApprovalPrompt(): JSX.Element | null {
   const [now, setNow] = useState(() => Date.now());
   const [shown, setShown] = useState<{ label: string; code: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // What was asked while this surface was away: the live event is gone, the list is not.
+  // Re-checks every 30s so a failed check clears itself once the server is back.
   useEffect(() => {
     if (surfaceId === null) return;
     let cancelled = false;
-    api
-      .signInPending()
-      .then((r) => {
-        if (!cancelled) for (const req of r.requests) useSignInStore.getState().add(req);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(`Could not check for sign-in requests: ${(e as Error).message}`);
-      });
+    const check = (): void => {
+      api
+        .signInPending()
+        .then((r) => {
+          if (cancelled) return;
+          setCheckFailed(null);
+          for (const req of r.requests) useSignInStore.getState().add(req);
+        })
+        .catch((e: unknown) => {
+          if (!cancelled)
+            setCheckFailed(`Could not check for sign-in requests: ${(e as Error).message}`);
+        });
+    };
+    check();
+    const t = setInterval(check, 30_000);
     return () => {
       cancelled = true;
+      clearInterval(t);
     };
   }, [surfaceId]);
 
@@ -81,7 +91,7 @@ export function SignInApprovalPrompt(): JSX.Element | null {
       </div>
     );
   }
-  if (current === undefined && error === null) return null;
+  if (current === undefined && (error ?? checkFailed) === null) return null;
   return (
     <div
       className="signin-prompt"
@@ -113,10 +123,24 @@ export function SignInApprovalPrompt(): JSX.Element | null {
           </div>
         </>
       ) : null}
-      {error !== null ? (
-        <p className="signin-error" data-testid="signin-error" role="alert">
-          {error}
-        </p>
+      {(error ?? checkFailed) !== null ? (
+        <>
+          <p className="signin-error" data-testid="signin-error" role="alert">
+            {error ?? checkFailed}
+          </p>
+          <div className="signin-buttons">
+            <button
+              type="button"
+              data-testid="signin-error-dismiss"
+              onClick={() => {
+                setError(null);
+                setCheckFailed(null);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </>
       ) : null}
     </div>
   );

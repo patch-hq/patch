@@ -70,4 +70,28 @@ describe('SignInApprovalPrompt', () => {
     fireEvent.click(await screen.findByTestId('signin-allow'));
     expect((await screen.findByTestId('signin-error')).textContent).toMatch(/no such pending/);
   });
+
+  it('a failed pending check can be dismissed, and clears itself on a later good check', async () => {
+    const pending = vi.spyOn(api, 'signInPending').mockRejectedValue(new Error('offline'));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<SignInApprovalPrompt />);
+      expect((await screen.findByTestId('signin-error')).textContent).toMatch(/offline/);
+      fireEvent.click(screen.getByTestId('signin-error-dismiss'));
+      expect(screen.queryByTestId('signin-error')).toBeNull();
+
+      pending.mockRejectedValueOnce(new Error('offline'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(await screen.findByTestId('signin-error')).toBeTruthy();
+      pending.mockResolvedValue({ requests: [] });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      await waitFor(() => expect(screen.queryByTestId('signin-error')).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -83,7 +83,7 @@ describe('Settings → Usage → accounts', () => {
     expect(screen.getByTestId('accounts-empty-claude-code')).toHaveTextContent(
       'No Claude accounts yet',
     );
-    expect(screen.getByTestId('accounts-empty-codex')).toHaveTextContent('No ChatGPT accounts yet');
+    expect(screen.getByTestId('accounts-empty-codex')).toHaveTextContent('No Codex accounts yet');
   });
 
   it('shows the freshest usage reading any host has taken, and names no host', () => {

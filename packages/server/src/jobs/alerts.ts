@@ -40,8 +40,8 @@ const REFUSED = /refused the action: ([a-z_]+)(?:: |$)/;
 
 const BY_CODE: Record<string, { reason: string; fix: string; fixPath?: string }> = {
   chatgpt_login_required: {
-    reason: 'ChatGPT is not signed in on the host that runs this job.',
-    fix: 'Sign in to ChatGPT in Settings → Hosts.',
+    reason: 'Codex is not signed in on the host that runs this job.',
+    fix: 'Sign in to Codex in Settings → Hosts.',
     fixPath: '/settings/hosts',
   },
   claude_oauth_missing: {

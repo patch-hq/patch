@@ -6,7 +6,7 @@
 // change is not offered: a session or weekly limit covers every model on the
 // account, so it cannot escape one.
 
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { harnessForModel } from '@patch/wire';
 import type { ChatRow } from '../stores/types.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -15,10 +15,10 @@ import { useUiStore } from '../stores/uiStore.js';
 import { getActiveWs } from '../api/ws.js';
 import { patchShared } from '../routes/settings/sharedWrite.js';
 import { getModelCatalog, loadModels } from '../lib/models.js';
-import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { EXTRA_USAGE_URL, LIMIT_NAME, formatReset, formatResetDetail } from '../lib/usage.js';
 import { formatSpanShort, limitControls, type LimitControl } from '../lib/limitControls.js';
 import { accountRows } from './UsagePopover.js';
+import { LimitMenu } from './LimitMenu.js';
 import { ProviderSwitchModal } from './ProviderSwitchModal.js';
 
 const EXTRA_USAGE_URLS: Record<string, string> = {
@@ -59,16 +59,7 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
     return () => window.clearInterval(id);
   }, [resetsAt]);
 
-  const [open, setOpen] = useState<'account' | 'provider' | null>(null);
   const [switchTarget, setSwitchTarget] = useState<string | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  // The catalogue is how "Change provider" finds a model to move to; it is
-  // fetched when that menu opens, not for every card.
-  useEffect(() => {
-    if (open === 'provider' && row.hostId !== '') void loadModels(row.hostId);
-  }, [open, row.hostId]);
-  useDismissOnClickOff(open !== null, [wrapRef], () => setOpen(null));
-
   const pastReset = resetsAt !== null && resetsAt <= now;
   const isOverload = row.resumeKind === 'overloaded';
   const providerId = harnessForModel(row.model);
@@ -93,7 +84,6 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
   // Moving the chat is the way past the limit, so it re-sends the turn: Send
   // itself is waiting for a reset the new account or provider does not have.
   const chooseAccount = (accountId: string): void => {
-    setOpen(null);
     const ws = getActiveWs();
     ws?.send({ type: 'chat.account_request', chatId: row.chatId, preferredAccountId: accountId });
     send();
@@ -107,8 +97,12 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
     getActiveWs()?.send({ type: 'chat.model_request', chatId: row.chatId, model: model.id });
     send();
   };
+  // The catalogue is how "Change provider" finds a model to move to; it is
+  // fetched when that menu opens, not for every card.
+  const loadCatalogue = (): void => {
+    if (row.hostId !== '') void loadModels(row.hostId);
+  };
   const chooseProvider = (target: string): void => {
-    setOpen(null);
     if (suppressSwitchWarning) moveToProvider(target);
     else setSwitchTarget(target);
   };
@@ -117,45 +111,6 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
     controls.main === key ? 'limit-btn limit-btn-main' : 'limit-btn';
   const disabledProps = (c: LimitControl): { 'aria-disabled'?: true; title?: string } =>
     c.enabled ? {} : { 'aria-disabled': true, title: c.reason };
-
-  const menu = (
-    kind: 'account' | 'provider',
-    label: string,
-    c: LimitControl & { options: { id: string; label: string }[] },
-    choose: (id: string) => void,
-  ): JSX.Element => (
-    <div className="limit-menu-wrap">
-      <button
-        type="button"
-        className={btn(kind)}
-        data-testid={`rate-limit-change-${kind}`}
-        data-enabled={c.enabled ? 'true' : 'false'}
-        aria-haspopup="menu"
-        aria-expanded={open === kind}
-        {...disabledProps(c)}
-        onClick={() => {
-          if (c.enabled) setOpen(open === kind ? null : kind);
-        }}
-      >
-        {label} <span aria-hidden>▾</span>
-      </button>
-      {open === kind ? (
-        <div className="limit-menu" role="menu" data-testid={`rate-limit-${kind}-menu`}>
-          {c.options.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              role="menuitem"
-              data-testid={`rate-limit-${kind}-option`}
-              onClick={() => choose(o.id)}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
 
   const extraUrl = EXTRA_USAGE_URLS[providerId] ?? EXTRA_USAGE_URL;
   return (
@@ -183,7 +138,7 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
           </p>
         ) : null}
 
-        <div className="limit-actions" ref={wrapRef}>
+        <div className="limit-actions">
           <button
             type="button"
             className={btn('send')}
@@ -196,8 +151,21 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
           >
             Send
           </button>
-          {menu('account', 'Change account', controls.account, chooseAccount)}
-          {menu('provider', 'Change provider', controls.provider, chooseProvider)}
+          <LimitMenu
+            kind="account"
+            label="Change account"
+            control={controls.account}
+            main={controls.main === 'account'}
+            choose={chooseAccount}
+          />
+          <LimitMenu
+            kind="provider"
+            label="Change provider"
+            control={controls.provider}
+            main={controls.main === 'provider'}
+            onOpen={loadCatalogue}
+            choose={chooseProvider}
+          />
           {controls.extraUsage.enabled ? (
             <a
               className="limit-btn"

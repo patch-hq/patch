@@ -24,7 +24,7 @@ import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { UsageBars } from '../routes/settings/accountList.js';
 import { formatReadAt, summariseContext } from '../lib/usage.js';
 
-const BACKEND_LABEL: Record<string, string> = { [CLAUDE_BACKEND_ID]: 'Claude', codex: 'OpenAI' };
+const BACKEND_LABEL: Record<string, string> = { [CLAUDE_BACKEND_ID]: 'Claude', codex: 'Codex' };
 
 export interface AccountUsageRow {
   key: string;
@@ -34,7 +34,7 @@ export interface AccountUsageRow {
   accountId: string;
   /** The account's own label, without the backend prefix. */
   label: string;
-  /** The backend's name in words — `Claude`, `OpenAI`. */
+  /** The backend's name in words — `Claude`, `Codex`. */
   backend: string;
   title: string;
   usage: HostAccount['usage'];

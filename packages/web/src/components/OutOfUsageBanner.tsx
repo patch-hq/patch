@@ -25,8 +25,12 @@ import { Link } from 'react-router-dom';
 import { CLAUDE_BACKEND_ID, harnessForModel } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
-import { useModelCatalog, loadModels } from '../lib/models.js';
+import { getModelCatalog, loadModels } from '../lib/models.js';
 import { getActiveWs } from '../api/ws.js';
+import { useUiStore } from '../stores/uiStore.js';
+import { limitControls } from '../lib/limitControls.js';
+import { accountRows } from './UsagePopover.js';
+import { LimitMenu } from './LimitMenu.js';
 import { ProviderSwitchModal } from './ProviderSwitchModal.js';
 import {
   formatDurationWords,
@@ -55,6 +59,7 @@ export function OutOfUsageBanner({
   // The countdown has to count. Ten seconds is under the minute it renders, so
   // the figure is never visibly stale, and it costs one render.
   const [now, setNow] = useState(() => Date.now());
+  const pushError = useUiStore((s) => s.pushError);
   const outage = hostOutage(
     (account?.accounts ?? []).filter(
       (a) =>
@@ -62,29 +67,31 @@ export function OutOfUsageBanner({
         (a.kind ?? 'chatgpt') === (model.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
     ),
   );
-  // The other provider on this host: is there credit to move to?
-  const onCodex = model?.startsWith('openai/') ?? false;
-  const otherAccount = usePresenceStore((s) =>
-    hostId ? (s.hosts[hostId]?.accounts[onCodex ? CLAUDE_BACKEND_ID : 'codex'] ?? null) : null,
-  );
-  const otherUsable =
-    otherAccount !== null &&
-    otherAccount.connected &&
-    (otherAccount.accounts ?? []).some((a) => a.connected) &&
-    hostOutage(otherAccount.accounts ?? []) === null;
-  const catalog = useModelCatalog();
-  const target =
-    model !== undefined && otherUsable
-      ? catalog.models.find((m) => harnessForModel(m.id) !== harnessForModel(model))
-      : undefined;
-  const wantsCatalogue = outage !== null && otherUsable && chatId !== undefined;
+  // Every other connected provider with usage left: the same options the
+  // limit card's "Change provider" menu lists.
+  const shared = usePreferencesStore((s) => s.shared);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const providerControl = limitControls({
+    now,
+    resetsAt: null,
+    currentAccountId: undefined,
+    currentProviderId: model === undefined ? '' : harnessForModel(model),
+    rows: accountRows(hosts, shared),
+    overageBlocked: false,
+  }).provider;
+  const wantsCatalogue = outage !== null && providerControl.enabled && chatId !== undefined;
   useEffect(() => {
     if (wantsCatalogue && hostId) void loadModels(hostId);
   }, [wantsCatalogue, hostId]);
   const suppressWarning = usePreferencesStore((s) => s.preferences.suppressProviderSwitchWarning);
-  const [confirming, setConfirming] = useState(false);
-  const sendSwitch = (): void => {
-    if (chatId === undefined || target === undefined) return;
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const sendSwitch = (providerId: string): void => {
+    if (chatId === undefined) return;
+    const target = getModelCatalog().models.find((m) => harnessForModel(m.id) === providerId);
+    if (!target) {
+      pushError(`No ${providerId} model is available on this machine to switch to`);
+      return;
+    }
     getActiveWs()?.send({ type: 'chat.model_request', chatId, model: target.id, retry: true });
   };
   const soonestAt = outage?.soonest?.resetsAt;
@@ -117,30 +124,32 @@ export function OutOfUsageBanner({
           // NO FALLBACK on the time: an invented reset is worse than none,
           // because the whole value of this banner is knowing when to come back.
           <span data-testid="out-of-usage-reset">
-            {model?.startsWith('openai/') ? 'OpenAI' : 'Anthropic'} gave no reset time.
+            {model?.startsWith('openai/') ? 'Codex' : 'Anthropic'} gave no reset time.
           </span>
         )}{' '}
         <Link to="/settings/usage">Usage</Link>
       </span>
-      {chatId !== undefined && target !== undefined && (
-        <button
-          type="button"
-          className="out-of-usage-switch"
-          data-testid="out-of-usage-switch"
-          onClick={() => (suppressWarning ? sendSwitch() : setConfirming(true))}
-        >
-          Switch to {onCodex ? 'Claude' : 'ChatGPT'}
-        </button>
+      {chatId !== undefined && (
+        <span className="out-of-usage-switch">
+          <LimitMenu
+            kind="provider"
+            label="Change provider"
+            control={providerControl}
+            className="out-of-usage-switch-btn"
+            choose={(id) => (suppressWarning ? sendSwitch(id) : setConfirming(id))}
+          />
+        </span>
       )}
-      {confirming && (
+      {confirming !== null && (
         <ProviderSwitchModal
-          onCancel={() => setConfirming(false)}
+          onCancel={() => setConfirming(null)}
           onSwitch={(dontShowAgain) => {
-            setConfirming(false);
+            const target = confirming;
+            setConfirming(null);
             if (dontShowAgain) {
               void usePreferencesStore.getState().update({ suppressProviderSwitchWarning: true });
             }
-            sendSwitch();
+            sendSwitch(target);
           }}
         />
       )}

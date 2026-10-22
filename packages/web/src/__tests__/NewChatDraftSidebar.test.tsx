@@ -11,13 +11,14 @@
 // sidebar rather than the store alone.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NewChatRoute } from '../routes/NewChatRoute.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useDraftStore } from '../stores/draftStore.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { setModelCatalog, resetModelCatalog } from '../lib/models.js';
@@ -67,6 +68,19 @@ describe('new-chat drafts in the sidebar', () => {
   });
   afterEach(() => {
     cleanup();
+  });
+
+  it('lists a draft that has only an attachment, titled by the file', () => {
+    renderNewChat();
+    const id = draftIds()[0]!;
+    act(() => {
+      useComposerAttachmentStore.setState({
+        byKey: { [id]: [{ key: 'k', name: 'plan.pdf', kind: 'file', status: 'uploaded' }] },
+      });
+    });
+    const row = screen.getByTestId(`draft-row-${id}`);
+    expect(row).toHaveTextContent('plan.pdf');
+    act(() => useComposerAttachmentStore.getState()._reset());
   });
 
   it('lists a draft once it has text', () => {

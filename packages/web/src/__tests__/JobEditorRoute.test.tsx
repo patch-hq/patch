@@ -3135,6 +3135,22 @@ describe('JobEditorRoute (single-page form)', () => {
     expect(body.trigger).toEqual({ type: 'webhook', scheme: 'todoist', secret: 's3cret' });
   });
 
+  it('message action: pinned chats are offered first, most recently pinned on top', () => {
+    useChatStore.setState({
+      chats: {
+        a: makeChatRow('a', '/p/a', 'Plain'),
+        b: { ...makeChatRow('b', '/p/b', 'PinnedOld'), pinned: true, pinnedAt: 100 },
+        c: { ...makeChatRow('c', '/p/c', 'PinnedNew'), pinned: true, pinnedAt: 200 },
+      },
+    });
+    renderNew();
+    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'message' } });
+    const sel = screen.getByTestId('job-message-chat') as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.value)).toEqual(['', 'c', 'b', 'a']);
+    const groups = [...sel.querySelectorAll('optgroup')].map((g) => g.label);
+    expect(groups).toEqual(['Pinned', 'Other chats']);
+  });
+
   it('message action: lists chats, seeds folder-scoped skills, and posts a message action', async () => {
     useChatStore.setState({
       chats: {

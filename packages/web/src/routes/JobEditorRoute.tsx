@@ -819,6 +819,17 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   const chats = useChatStore((s) => s.chats);
   const chatList = Object.values(chats);
   const setActiveChat = useChatStore((s) => s.setActiveChat);
+  // Recipient picker order: pinned chats first, most recently pinned on top
+  // (spec/14 § Jobs view).
+  const pinnedChats = chatList
+    .filter((c) => c.pinned)
+    .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+  const otherChats = chatList.filter((c) => !c.pinned);
+  const recipientOption = (c: (typeof chatList)[number]) => (
+    <option key={c.chatId} value={c.chatId}>
+      {(c.name ?? c.chatId) + ' · ' + c.folder}
+    </option>
+  );
   const hosts = usePresenceStore((s) => s.hosts);
   const sharedAccounts = usePreferencesStore((s) => s.shared?.secrets);
   // Folder picker source: EVERY host's own published registry, grouped by host
@@ -2333,11 +2344,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     required
                   >
                     <option value="">— pick a chat —</option>
-                    {chatList.map((c) => (
-                      <option key={c.chatId} value={c.chatId}>
-                        {(c.name ?? c.chatId) + ' · ' + c.folder}
-                      </option>
-                    ))}
+                    <optgroup label="Pinned">{pinnedChats.map(recipientOption)}</optgroup>
+                    <optgroup label="Other chats">{otherChats.map(recipientOption)}</optgroup>
                   </select>
                 </label>
                 <p className="field-hint" data-testid="action-payload-hint">

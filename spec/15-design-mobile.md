@@ -128,7 +128,7 @@ Tap-and-hold on the Voice bottom tab opens a global voice-note overlay targeting
 
 ## Chat detail
 
-Full-screen stream. A horizontal swipe (at least 80px, clearly more sideways than vertical) opens the neighbouring chat in the Chats tab's order — Manager, Pinned, then folders A–Z with chats by recent user activity: swiping right opens the previous chat, left the next. Nothing happens past either end, or for a chat outside that order (Channels, Hidden, Snoozed, Archived). Top bar carries:
+Full-screen stream. A horizontal swipe (a drag of at least 48px, or a quick flick of at least 24px; clearly more sideways than vertical, and claimed ahead of the message list so a slightly diagonal drag still counts) opens the neighbouring chat in the Chats tab's order — Manager, Pinned, then folders A–Z with chats by recent user activity: swiping right opens the previous chat, left the next. Nothing happens past either end, or for a chat outside that order (Channels, Hidden, Snoozed, Archived). Top bar carries:
 
 - Back arrow (left).
 - Folder name and host name (body face, ink-3, small) above the chat name (upright Fraunces), as `folder · host` like web's crumb, each segment drawn only when known — the folder as its basename, the host as its machine name, all on one line, on the same rule as the folder pickers (§ New chat flow) and web's crumb (`14-design-web.md` §8). The top bar shares its width with the pills and buttons to its right, so a full path wrapped here reduces the name beside it to a letter. Special threads (Manager / Speakers) show no folder crumb: their fixed label is the title, and the crumb above it would only repeat the same word.

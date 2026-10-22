@@ -13,8 +13,8 @@ const alert = (over: Partial<JobAlertView> = {}): JobAlertView => ({
   jobName: 'Cadence monitor agents',
   status: 'dispatch-error',
   ts: 1,
-  reason: 'ChatGPT is not signed in on the host that runs this job.',
-  fix: 'Sign in to ChatGPT in Settings → Hosts.',
+  reason: 'Codex is not signed in on the host that runs this job.',
+  fix: 'Sign in to Codex in Settings → Hosts.',
   detail: 'x',
   fixPath: '/settings/hosts',
   ...over,
@@ -36,7 +36,7 @@ describe('JobAlerts', () => {
     mount();
     expect(await screen.findByTestId('job-alert-name')).toHaveTextContent('Cadence monitor agents');
     expect(screen.getByTestId('job-alert-reason')).toHaveTextContent('not signed in');
-    expect(screen.getByRole('link', { name: /Sign in to ChatGPT in Settings/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Sign in to Codex in Settings/ })).toHaveAttribute(
       'href',
       '/settings/hosts',
     );

@@ -65,7 +65,7 @@ describe('ClaudeDisconnectedBanner', () => {
   it('checks the right provider for an OpenAI model, and the right kind', () => {
     setSharedAccounts({ claude: [{ connected: true }], codex: [{ connected: false }] });
     renderBanner('openai/gpt-5');
-    expect(screen.getByTestId('claude-disconnected-banner').textContent).toMatch(/OpenAI/);
+    expect(screen.getByTestId('claude-disconnected-banner').textContent).toMatch(/Codex/);
     cleanup();
     setSharedAccounts({ codex: [{ connected: true, kind: 'apiKey' }] });
     renderBanner('openai/gpt-5');

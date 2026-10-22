@@ -4141,10 +4141,12 @@ button.nav-row {
 /* Wide panel: the strip moves out of the 16px tail into the right-hand gutter,
    stacked and top-aligned with the turn, so the message keeps its padding and
    time / host / model get room to read. It starts just past the measure edge. Narrower
-   panels have no gutter to lend and keep the strip in the tail. */
+   panels have no gutter to lend and keep the strip in the tail. A turn holding a
+   table keeps it in the tail too: a wide table borrows those same gutters, and
+   the strip hung on top of its last column on hover (Todoist: "patch big table
+   overlaps hover state"). */
 @container (min-width: 1100px) {
-  .msg-meta,
-  .msg-user .msg-meta {
+  .msg:not(:has(.md-table-wrap)) .msg-meta {
     top: 2px;
     bottom: auto;
     inset-inline-start: auto;
@@ -10184,6 +10186,12 @@ main.empty-state p {
 .out-of-usage-banner .out-of-usage-switch {
   margin-left: auto;
   flex: none;
+}
+.out-of-usage-banner .out-of-usage-switch-btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.out-of-usage-banner .out-of-usage-switch-btn {
   background: transparent;
   color: inherit;
   border: 1px solid currentColor;
@@ -16051,9 +16059,9 @@ select.permission-mode.is-pending {
 
 .signin-prompt {
   position: fixed;
-  top: 24px;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -16374,6 +16382,7 @@ select.permission-mode.is-pending {
   padding: 4px 10px;
   color: var(--ink-3);
   font-size: var(--text-min);
+}
 /* spec/04 § Branching — a settled user turn is edited in the MAIN composer.
    Everything after the edited turn in the stream is greyed: it belongs to the
    track being left, and saving replaces it. */
