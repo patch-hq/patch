@@ -235,7 +235,11 @@ export default function ChatDetailScreen(): React.ReactElement {
   );
 }
 
-const SWIPE_MIN_DX = 80;
+// A drag of SWIPE_MIN_DX commits on its own; a quicker flick commits from
+// SWIPE_FLICK_DX (a thumb on a phone rarely travels 80px).
+const SWIPE_MIN_DX = 48;
+const SWIPE_FLICK_DX = 24;
+const SWIPE_FLICK_VX = 0.5;
 
 function ChatDetailBody(): React.ReactElement {
   const colors = useTheme();
@@ -253,16 +257,21 @@ function ChatDetailBody(): React.ReactElement {
   useLeaveWhenArchivedElsewhere(chatId, router, '/(tabs)/chats');
   useMarkChatNotificationsRead(chatId);
   // Swipe sideways to step to the neighbouring chat in the Chats tab's order.
-  // A claimed gesture must be clearly horizontal and long, so vertical
-  // scrolling and horizontal scrollers inside messages (code, tables) win.
+  // Claimed in the capture phase: the message list is a scroll view that would
+  // otherwise take any slightly diagonal drag before this surface is asked.
+  // The claim still has to be clearly horizontal, so vertical scrolling wins.
   // Read the store at release rather than subscribing: the list moving under a
   // finger must not re-render this screen.
   const swipe = React.useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) =>
-        Math.abs(g.dx) > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onMoveShouldSetPanResponderCapture: (_e, g) =>
+        Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      onPanResponderTerminationRequest: () => false,
       onPanResponderRelease: (_e, g) => {
-        if (Math.abs(g.dx) < SWIPE_MIN_DX) return;
+        const adx = Math.abs(g.dx);
+        if (adx <= Math.abs(g.dy)) return;
+        const flick = adx >= SWIPE_FLICK_DX && Math.abs(g.vx) >= SWIPE_FLICK_VX;
+        if (adx < SWIPE_MIN_DX && !flick) return;
         const { prev, next } = swipeNeighbours(useChatStore.getState().chats, chatIdRef.current);
         // Finger moving right drags the previous chat in from the left.
         const target = g.dx > 0 ? prev : next;
