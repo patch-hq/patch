@@ -110,6 +110,19 @@ describe('toClaudeSessionEntries', () => {
     }
   });
 
+  it('Claude built-ins such as ToolSearch rebuild as real tool_use blocks, not "[Tool(...)]" text the model copies', () => {
+    for (const tool of ['ToolSearch', 'Skill', 'AskUserQuestion', 'EnterPlanMode']) {
+      const entries = toClaudeSessionEntries(
+        track([toolCall(tool, { query: 'q' }, 'c7'), toolResult(tool, 'x', 'c7')]),
+        { sessionId: 's', folder: '/w', model: null },
+      );
+      expect((entries[0]!['message'] as { content: { type: string }[] }).content[0]).toMatchObject({
+        type: 'tool_use',
+        name: tool,
+      });
+    }
+  });
+
   it('closes a dangling trailing tool_use with a synthetic interrupted result', () => {
     const entries = toClaudeSessionEntries(
       track([toolCall('Bash', { command: 'sleep 100' }, 'c1')]),

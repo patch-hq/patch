@@ -65,6 +65,10 @@ const CLAUDE_NATIVE_TOOLS = new Set([
   'NotebookEdit',
   'SlashCommand',
   'ExitPlanMode',
+  'EnterPlanMode',
+  'ToolSearch',
+  'Skill',
+  'AskUserQuestion',
 ]);
 
 /** An `mcp__` tool is reconstructed as a real tool_use/tool_result pair too:
