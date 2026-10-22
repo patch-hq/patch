@@ -20,6 +20,7 @@ import {
   type ChatInputEvent,
   type HealthzResponse,
   type WireEvent,
+  CLOSE_SERVER_RESTARTING,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
@@ -330,6 +331,19 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // concurrency-limited so a burst cannot pin the event loop. `zlib` contexts
   // are the memory risk here, hence the modest window and the client-side
   // no-context-takeover: this box has 4 GB and runs everything else too.
+  // The plugin's own pre-close closes every socket with no code, which a
+  // surface cannot tell from a dropped link. This hook is added first so it
+  // runs first: sockets already closing ignore the plugin's later close().
+  app.addHook('preClose', function (done) {
+    const server = (
+      this as unknown as {
+        websocketServer?: { clients: Set<{ close(c: number, r: string): void }> };
+      }
+    ).websocketServer;
+    for (const client of server?.clients ?? [])
+      client.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+    done();
+  });
   await app.register(websocketPlugin, {
     options: {
       perMessageDeflate: {

@@ -13,7 +13,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type WebSocket from 'ws';
-import { CLOSE_AUTH_FAILED, CLOSE_MALFORMED_FRAME as CLOSE_BAD_FRAME } from '@patch/wire';
+import {
+  CLOSE_AUTH_FAILED,
+  CLOSE_MALFORMED_FRAME as CLOSE_BAD_FRAME,
+  CLOSE_SERVER_RESTARTING,
+} from '@patch/wire';
 import {
   decode,
   encode,
@@ -586,7 +590,7 @@ export class WsHub {
     this.newChatDraftsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close();
+        conn.socket.close(CLOSE_SERVER_RESTARTING, 'server restarting');
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)

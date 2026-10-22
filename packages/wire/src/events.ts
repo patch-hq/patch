@@ -55,6 +55,12 @@ import {
  */
 export const CLOSE_MALFORMED_FRAME = 4400;
 export const CLOSE_AUTH_FAILED = 4401;
+/**
+ * The server is shutting down to restart (a deploy or self-update). Unlike
+ * CLOSE_AUTH_FAILED this IS retryable: surfaces keep dialling, but tell the
+ * person the server is updating rather than showing a bare "Reconnecting…".
+ */
+export const CLOSE_SERVER_RESTARTING = 4503;
 
 // ---------------------------------------------------------------------------
 // Shared atoms

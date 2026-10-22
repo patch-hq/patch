@@ -68,6 +68,7 @@ A surface already shows its own dropped link (the banner, after the 3s grace). W
 
 - The host reports how long its link has been down (`offlineSince` in `/internal/diag/link`: since the loss, or since start if it never connected; `null` while online).
 - The desktop app, on a Mac that runs a host, reads that from the host's control socket every 15s from its main process. Past one minute it sets the tray tooltip to "server unreachable" and raises one native notification, and clears both when the link returns. A host it cannot read is logged, never treated as healthy.
+- When the server is shutting down to restart (a deploy or self-update) it closes every surface socket with code 4503 (`CLOSE_SERVER_RESTARTING`). Unlike 4401 this is retryable; the surface keeps dialling, but its banner reads "Server is updating — back in a moment" instead of "Reconnecting…" until a later close that is not a restart, or a reconnect, replaces it. A server killed without a clean shutdown still shows "Reconnecting…".
 - The phone's banner, after a minute of foreground outage, changes from "Reconnecting…" to "Server unreachable. Retrying", and reverts on reconnect.
 
 ### Hosts fail independently
