@@ -126,9 +126,8 @@ describe('MoveChatModal', () => {
       });
     });
 
-    it('says what stays behind and leaves the folder for the user to choose', () => {
+    it('leaves the folder for the user to choose', () => {
       render(<MoveChatModal row={row} onClose={() => undefined} />);
-      expect(screen.getByTestId('move-chat-takeover-note').textContent).toContain('Mac is offline');
       expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe('');
       expect((screen.getByTestId('move-chat-confirm') as HTMLButtonElement).disabled).toBe(true);
     });
@@ -154,7 +153,7 @@ describe('MoveChatModal', () => {
       expect(api.moveChat).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
     });
 
-    it('a machine that is online shows neither the note nor a suggestion button', () => {
+    it('a machine that is online shows no suggestion button', () => {
       usePresenceStore.setState({
         hosts: {
           mac: host('mac', 'Mac', true, ['/Users/tom/wpp/Unite']),
@@ -162,54 +161,7 @@ describe('MoveChatModal', () => {
         },
       });
       render(<MoveChatModal row={row} onClose={() => undefined} />);
-      expect(screen.queryByTestId('move-chat-takeover-note')).toBeNull();
       expect(screen.queryByTestId('move-chat-suggest')).toBeNull();
-    });
-  });
-
-  describe("choosing the server copy while the chat's machine is online", () => {
-    it('is offered, switches to the takeover notice with an empty folder, and sends the choice', async () => {
-      vi.mocked(api.moveChat).mockResolvedValue({
-        ok: true,
-        chatId: 'c1',
-        hostId: 'box',
-        folder: '/home/tom/Unite',
-      });
-      const onClose = vi.fn();
-      render(<MoveChatModal row={row} onClose={onClose} />);
-      expect(screen.queryByTestId('move-chat-takeover-note')).toBeNull();
-      fireEvent.click(screen.getByTestId('move-chat-from-copy'));
-      expect(screen.getByTestId('move-chat-takeover-note').textContent).toContain(
-        'continues from the server',
-      );
-      expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe('');
-      fireEvent.click(screen.getByTestId('move-chat-suggest'));
-      fireEvent.click(screen.getByTestId('move-chat-confirm'));
-      await waitFor(() => expect(onClose).toHaveBeenCalled());
-      expect(api.moveChat).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite', {
-        fromServerCopy: true,
-      });
-    });
-
-    it('switching back restores the same-named folder and the ordinary move', () => {
-      render(<MoveChatModal row={row} onClose={() => undefined} />);
-      fireEvent.click(screen.getByTestId('move-chat-from-copy'));
-      fireEvent.click(screen.getByTestId('move-chat-from-copy'));
-      expect(screen.queryByTestId('move-chat-takeover-note')).toBeNull();
-      expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe(
-        '/home/tom/Unite',
-      );
-    });
-
-    it('is not offered when the machine is already offline, since that is the only way', () => {
-      usePresenceStore.setState({
-        hosts: {
-          mac: host('mac', 'Mac', false, ['/Users/tom/wpp/Unite']),
-          box: host('box', 'Hetzner', true, ['/home/tom/Unite']),
-        },
-      });
-      render(<MoveChatModal row={row} onClose={() => undefined} />);
-      expect(screen.queryByTestId('move-chat-from-copy')).toBeNull();
     });
   });
 });

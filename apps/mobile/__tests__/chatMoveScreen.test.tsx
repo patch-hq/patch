@@ -148,17 +148,12 @@ describe('Chat Move screen', () => {
       }
     };
 
-    it('an offline host: note shown, folder empty, suggestion applied only when tapped', async () => {
+    it('an offline host: folder empty, suggestion applied only when tapped', async () => {
       usePresenceStore.getState().setHostOnline('mac', false);
       moveSpy.mockResolvedValue(OK);
       const r = renderRN(<ChatMove />);
-      const note = findHost(r.root, byTestId('move-takeover-note'));
-      expect(hasText(note, 'Mac is offline. The chat continues from the server')).toBe(true);
-      expect(
-        hasText(note, 'watched processes stay on that machine. Timers and attachments move'),
-      ).toBe(true);
+      expect(hasAny(r, 'move-takeover-note')).toBe(false);
       expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('');
-      expect(hasAny(r, 'move-from-copy')).toBe(false);
       expect(hasText(findHost(r.root, byTestId('move-confirm')), 'Continue')).toBe(true);
       expect(findHost(r.root, byTestId('move-confirm')).props.disabled).toBe(true);
       expect(
@@ -166,46 +161,6 @@ describe('Chat Move screen', () => {
       ).toBe(true);
       press(r.root, 'move-suggest');
       expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
-      press(r.root, 'move-confirm');
-      await flush();
-      expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
-    });
-
-    it('choosing it on an online host sends fromServerCopy', async () => {
-      moveSpy.mockResolvedValue(OK);
-      const r = renderRN(<ChatMove />);
-      expect(hasAny(r, 'move-takeover-note')).toBe(false);
-      expect(
-        hasText(
-          findHost(r.root, byTestId('move-from-copy')),
-          "Continue from the server's copy instead",
-        ),
-      ).toBe(true);
-      press(r.root, 'move-from-copy');
-      const note = findHost(r.root, byTestId('move-takeover-note'));
-      expect(hasText(note, 'is offline')).toBe(false);
-      expect(hasText(note, "The chat continues from the server's copy.")).toBe(true);
-      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('');
-      expect(hasText(findHost(r.root, byTestId('move-from-copy')), 'Move as it is instead')).toBe(
-        true,
-      );
-      press(r.root, 'move-suggest');
-      press(r.root, 'move-confirm');
-      await flush();
-      expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite', {
-        fromServerCopy: true,
-      });
-    });
-
-    it('switching back restores the ordinary move', async () => {
-      moveSpy.mockResolvedValue(OK);
-      const r = renderRN(<ChatMove />);
-      press(r.root, 'move-from-copy');
-      press(r.root, 'move-from-copy');
-      expect(hasAny(r, 'move-takeover-note')).toBe(false);
-      expect(hasAny(r, 'move-suggest')).toBe(false);
-      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
-      expect(hasText(findHost(r.root, byTestId('move-confirm')), 'Move')).toBe(true);
       press(r.root, 'move-confirm');
       await flush();
       expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');

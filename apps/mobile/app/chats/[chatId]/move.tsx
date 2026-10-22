@@ -4,9 +4,8 @@
 // machine's own folders are listed, the one with the same name as the chat's
 // current folder chosen first, and any path can be typed. The chat stays where
 // it is until the server says it has arrived; a refusal stays on this page
-// with the reason. When the chat's own machine is offline, or the user chooses
-// it, the move continues from the server's copy: a note says what stays behind,
-// the folder starts empty and the same-named folder is only suggested.
+// with the reason. When the chat's own machine is offline the folder starts
+// empty and the same-named folder is only suggested.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
@@ -51,8 +50,7 @@ export default function ChatMoveScreen(): React.ReactElement {
   }, [byHost, hostId]);
   const current = row ? hosts[row.hostId] : undefined;
   const offline = current !== undefined && !current.online;
-  const [fromCopy, setFromCopy] = useState(false);
-  const takeover = offline || fromCopy;
+  const takeover = offline;
   const [folder, setFolder] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -73,12 +71,6 @@ export default function ChatMoveScreen(): React.ReactElement {
     setError(null);
   }, [hostId, folders, row?.folder, takeover]);
   const suggestion = takeover && row ? defaultMoveFolder(row.folder, folders) : undefined;
-  // Switching between the ordinary move and the server's copy starts the field afresh.
-  const takeoverRef = useRef(takeover);
-  if (takeoverRef.current !== takeover) {
-    takeoverRef.current = takeover;
-    chosenRef.current = false;
-  }
   const chooseFolder = (f: string): void => {
     chosenRef.current = true;
     setFolder(f);
@@ -91,11 +83,7 @@ export default function ChatMoveScreen(): React.ReactElement {
     setMoving(true);
     setError(null);
     try {
-      if (fromCopy && !offline) {
-        await api.moveChat(chatId, hostId, folder.trim(), { fromServerCopy: true });
-      } else {
-        await api.moveChat(chatId, hostId, folder.trim());
-      }
+      await api.moveChat(chatId, hostId, folder.trim());
       goBack();
     } catch (e) {
       const body = e instanceof ApiError ? (e.body as { message?: unknown } | null) : null;
@@ -175,27 +163,6 @@ export default function ChatMoveScreen(): React.ReactElement {
             );
           })}
         </View>
-        {takeover ? (
-          <Text testID="move-takeover-note" style={{ ...typography.secondary, color: colors.ink2 }}>
-            {offline && current ? `${hostName(current)} is offline. ` : ''}The chat continues from
-            the server's copy. Uncommitted project files and watched processes stay on that machine.
-            Timers and attachments move with the chat.
-          </Text>
-        ) : null}
-        {offline ? null : (
-          <Pressable
-            testID="move-from-copy"
-            accessibilityRole="button"
-            accessibilityState={{ selected: fromCopy, disabled: moving }}
-            disabled={moving}
-            onPress={() => setFromCopy((v) => !v)}
-            style={{ alignSelf: 'flex-start', paddingVertical: space.sm }}
-          >
-            <Text style={{ ...typography.label, color: colors.leaf }}>
-              {fromCopy ? 'Move as it is instead' : "Continue from the server's copy instead"}
-            </Text>
-          </Pressable>
-        )}
         {targets.length === 0 ? (
           <Text testID="move-no-hosts" style={{ ...typography.body, color: colors.ink2 }}>
             No other machine

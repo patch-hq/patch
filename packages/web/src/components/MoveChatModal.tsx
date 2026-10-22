@@ -4,9 +4,8 @@
 // name as the chat's current folder chosen first, else the first it offers —
 // or type a path. The chat
 // stays where it is until the server says it has arrived; a refusal keeps the
-// dialog open with the reason. When the chat's own machine is offline the move
-// is a takeover from the server's copy: the dialog says what stays behind and
-// the same-named folder is only suggested, never filled in.
+// dialog open with the reason. When the chat's own machine is offline the
+// same-named folder is only suggested, never filled in.
 
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { defaultMoveFolder } from '@patch/wire';
@@ -43,10 +42,7 @@ export function MoveChatModal({
   }, [hosts, hostId]);
   const current = hosts[row.hostId];
   const offline = current !== undefined && !current.online;
-  // The user can also leave an online machine behind: a move it would refuse
-  // (mid-turn, a timer armed) goes through from the server's copy.
-  const [fromCopy, setFromCopy] = useState(false);
-  const takeover = offline || fromCopy;
+  const takeover = offline;
   const [folder, setFolder] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -86,11 +82,7 @@ export function MoveChatModal({
     setMoving(true);
     setError(null);
     try {
-      if (fromCopy && !offline) {
-        await api.moveChat(row.chatId, hostId, folder.trim(), { fromServerCopy: true });
-      } else {
-        await api.moveChat(row.chatId, hostId, folder.trim());
-      }
+      await api.moveChat(row.chatId, hostId, folder.trim());
       onClose();
     } catch (e) {
       const body = e instanceof ApiError ? (e.body as { message?: unknown } | null) : null;
@@ -131,25 +123,6 @@ export function MoveChatModal({
             </button>
           ))}
         </div>
-        {takeover ? (
-          <p className="modal-message" data-testid="move-chat-takeover-note">
-            {offline ? `${hostName(current)} is offline. ` : ''}The chat continues from the server's
-            copy. Uncommitted project files and watched processes stay on that machine. Timers and
-            attachments move with the chat.
-          </p>
-        ) : null}
-        {offline ? null : (
-          <button
-            type="button"
-            className="modal-btn"
-            data-testid="move-chat-from-copy"
-            aria-pressed={fromCopy}
-            disabled={moving}
-            onClick={() => setFromCopy((v) => !v)}
-          >
-            {fromCopy ? 'Move as it is instead' : "Continue from the server's copy instead"}
-          </button>
-        )}
         {targets.length === 0 ? (
           <p className="modal-message" data-testid="move-chat-no-hosts">
             No other machine
