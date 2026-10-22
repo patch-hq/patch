@@ -11,11 +11,9 @@ import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { setActiveWs } from '../api/ws.js';
-import { api } from '../api/rest.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { DEFAULT_SHARED_SETTINGS, type WireEvent } from '@patch/wire';
 import { fireEvent } from '@testing-library/react';
-import { setModelCatalog, resetModelCatalog } from '../lib/models.js';
 
 vi.mock('../api/rest.js', () => ({
   api: {
