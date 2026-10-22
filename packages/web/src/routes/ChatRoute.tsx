@@ -1913,6 +1913,20 @@ export function ChatRoute({
         i++;
         continue;
       }
+      // Queued turns that all hit the same failure (a session limit) each
+      // raise their own error; the same failure straight after itself is
+      // drawn once.
+      if (entry.kind === 'error' && i > from) {
+        const prev = timeline[i - 1];
+        if (
+          prev?.kind === 'error' &&
+          prev.content === entry.content &&
+          prev.errorCode === entry.errorCode
+        ) {
+          i++;
+          continue;
+        }
+      }
       // Already drawn inside the file's own row above.
       if (usedByViewFile.has(i)) {
         i++;
