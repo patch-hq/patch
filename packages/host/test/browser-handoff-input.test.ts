@@ -16,7 +16,11 @@ it('runs inputs in order, one at a time, and drops moves a newer move replaced',
     endHandoff: () => undefined,
     isHandedOff: () => true,
     redactedUrl: () => 'https://example.com/',
-    screencast: async () => async () => undefined,
+    screencast: async () => ({ stop: async () => undefined, refresh: async () => undefined }),
+    viewerOf: () => undefined,
+    ownerOf: () => 'c1',
+    driverOf: () => 'agent',
+    setViewerViewport: async () => undefined,
     userInput: async (_tab: string, input: BrowserHandoffInput) => {
       running++;
       if (running > 1) overlapped = true;
@@ -49,5 +53,60 @@ it('runs inputs in order, one at a time, and drops moves a newer move replaced',
 
   handoff.control('c1', 'done', handoffId);
   expect((await run).outcome).toBe('done');
+  handoff.dispose();
+});
+
+it('takes the tab over on a press or a key, not on a move or a scroll, and drives in order', async () => {
+  const done: string[] = [];
+  let driver: 'agent' | 'user' = 'agent';
+  const fake = {
+    isHandedOff: () => false,
+    ownerOf: (tab: string) => (tab === 't1' ? 'c1' : undefined),
+    driverOf: () => driver,
+    setDriver: (_tab: string, d: 'agent' | 'user') => {
+      driver = d;
+      done.push(`driver:${d}`);
+    },
+    viewInput: async (_tab: string, input: { kind: string; action?: string }) => {
+      await new Promise((r) => setTimeout(r, 2));
+      done.push(`${input.kind}${input.action ? `:${input.action}` : ''}`);
+      return input.kind === 'copy' ? 'selected words' : undefined;
+    },
+  } as unknown as BrowserManager;
+  const events: WireEvent[] = [];
+  const handoff = new BrowserHandoff({
+    browser: fake,
+    emit: (e) => events.push(e),
+    logger: pino({ level: 'silent' }),
+  });
+  await handoff.viewInput('c1', 't1', { kind: 'pointer', action: 'move', x: 1, y: 1 });
+  await handoff.viewInput('c1', 't1', { kind: 'scroll', x: 1, y: 1, dx: 0, dy: 40 });
+  expect(driver).toBe('agent');
+  void handoff.viewInput('c1', 't1', { kind: 'pointer', action: 'down', x: 5, y: 5 });
+  void handoff.viewInput('c1', 't1', { kind: 'pointer', action: 'move', x: 9, y: 5 });
+  await handoff.viewInput('c1', 't1', { kind: 'pointer', action: 'up', x: 9, y: 5 });
+  await handoff.viewInput('c1', 't1', { kind: 'copy' });
+  expect(done).toEqual([
+    'pointer:move',
+    'scroll',
+    'driver:user',
+    'pointer:down',
+    'pointer:move',
+    'pointer:up',
+    'copy',
+  ]);
+  expect(events).toContainEqual({
+    type: 'patch.browser_view.clipboard',
+    chatId: 'c1',
+    tabId: 't1',
+    text: 'selected words',
+  });
+
+  // Another chat's tab is not this chat's to touch.
+  await handoff.viewInput('c2', 't1', { kind: 'text', text: 'x' });
+  expect(done).not.toContain('text');
+
+  handoff.drive('c1', 't1', 'agent');
+  expect(driver).toBe('agent');
   handoff.dispose();
 });

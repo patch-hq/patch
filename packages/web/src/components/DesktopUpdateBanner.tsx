@@ -42,7 +42,7 @@ const URGENCY_OVERDUE_MS = 3 * 24 * 60 * 60 * 1000;
  * shell, a dropped IPC message or a stalled installer reports nothing at all,
  * and without this the button stayed on "Updating…" and disabled for good.
  */
-const INSTALL_GRACE_MS = 60_000;
+const INSTALL_GRACE_MS = 5 * 60_000;
 
 export type UpdateUrgency = 'none' | 'ready' | 'due' | 'overdue';
 

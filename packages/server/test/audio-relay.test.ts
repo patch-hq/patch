@@ -138,7 +138,7 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
-      isHomeHost: false,
+      runsManager: false,
       audioRelayHost: `127.0.0.1:${fakeUpstreamPort}`,
       backends: [],
       components: [],
@@ -337,7 +337,7 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
       updateAvailable: false,
       permissionModeDefault: 'default',
       permissionOverrides: 0,
-      isHomeHost: false,
+      runsManager: false,
       backends: [],
       components: [],
     } as unknown as WireEvent);

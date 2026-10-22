@@ -31,9 +31,8 @@ test.describe('composer model', () => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     const model = page.getByTestId('chat-model');
     await expect(model).toBeVisible();
-    // Read as the catalogue's label; the raw id is the tooltip.
+    // Read as the catalogue's label. No tooltip: pills carry none (spec/14).
     await expect(model).toContainText('Sonnet 4.6');
-    await expect(model).toHaveAttribute('title', 'claude-sonnet-4-6');
     await expect(page.getByTestId('chat-head').getByTestId('chat-model')).toHaveCount(0);
     await expect(page.locator('.composer-actions').getByTestId('chat-model')).toHaveCount(1);
 

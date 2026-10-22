@@ -44,11 +44,10 @@ describe('ToolsList', () => {
   it('renders exactly one switch per catalogued tool, no duplicates', () => {
     const r = renderRN(<ToolsList chatId="c1" />);
     const switches = findAllHost(r.root, (i) => i.type === 'Switch');
-    // 11 native + 42 patch tools in the catalog at time of writing (grew from
-    // 39 to 42 adding patch_delegate/patch_delegate_list/patch_delegate_stop)
-    // — assert the exact count is stable rather than "some", so a catalog
-    // edit that quietly drops a tool from the sheet is caught here.
-    expect(switches.length).toBe(64);
+    // Exact count, not "some", so a catalog edit that quietly drops a tool
+    // from the sheet is caught here. Dropped from 64 to 55 when the job and
+    // device tools moved to the CLI.
+    expect(switches.length).toBe(55);
   });
 });
 

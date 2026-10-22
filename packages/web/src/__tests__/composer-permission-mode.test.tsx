@@ -54,6 +54,7 @@ function seedChat(chatId: string, permissionMode: PermissionMode): void {
     lastSeq: -1,
     jobId: null,
     model: null,
+    effort: null,
     rateLimitResumingAt: null,
     resumeKind: null,
   };

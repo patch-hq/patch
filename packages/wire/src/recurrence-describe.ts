@@ -134,7 +134,7 @@ export interface RecurrenceFields {
   days: string[];
   /** `BYSETPOS` — set only for the MONTHLY/YEARLY nth-weekday shape. */
   setPos: number | null;
-  /** `BYMONTH` (1-12), or null when unrestricted. Always set for YEARLY. */
+  /** `BYMONTH` (1-12), or null when unrestricted. Exactly one month for YEARLY. */
   months: number[] | null;
   hour: number;
   minute: number;
@@ -215,8 +215,11 @@ export function parseRecurrenceFields(rrule: string): RecurrenceFields | null {
 
   if (freq === 'YEARLY') {
     // YEARLY with no BYMONTH ("the 3rd Sunday of the year") has no clean
-    // short phrase — refuse rather than guess.
-    if (months === null || months.length === 0) return null;
+    // short phrase — refuse rather than guess. And YEARLY with SEVERAL months
+    // is not "the 1st Monday of each of them": BYSETPOS picks from the whole
+    // year's set, so the rule fires once a year (May's first Monday, never
+    // June's). Only MONTHLY;BYMONTH=… fires per month, so this is refused too.
+    if (months === null || months.length !== 1) return null;
   }
   return { freq, days, setPos, months, hour, minute };
 }

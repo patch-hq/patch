@@ -32,7 +32,9 @@ describe('SignInApprovalPrompt', () => {
     act(() =>
       useSignInStore.getState().add({ id: 'r1', label: 'Chrome on Mac', expiresAt: soon() }),
     );
-    expect((await screen.findByTestId('signin-prompt')).textContent).toMatch(/Chrome on Mac/);
+    expect((await screen.findByTestId('signin-prompt')).textContent).toContain(
+      'Approve a Patch sign-in from Chrome on a Mac?',
+    );
     fireEvent.click(screen.getByTestId('signin-allow'));
     expect((await screen.findByTestId('signin-code-value')).textContent).toBe('482913');
     expect(approve).toHaveBeenCalledWith('r1');
@@ -56,7 +58,9 @@ describe('SignInApprovalPrompt', () => {
       requests: [{ id: 'r3', label: 'Safari on iOS', expiresAt: soon() }],
     });
     render(<SignInApprovalPrompt />);
-    expect((await screen.findByTestId('signin-prompt')).textContent).toMatch(/Safari on iOS/);
+    expect((await screen.findByTestId('signin-prompt')).textContent).toContain(
+      'Safari on an iOS device',
+    );
   });
 
   it('shows a failed answer instead of swallowing it', async () => {

@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
-import { defaultHostName, loadConfig } from '../src/config.js';
+import { defaultHostName, defaultSocketPath, loadConfig } from '../src/config.js';
 
 const base: NodeJS.ProcessEnv = {
   PATCH_SERVER_WS_URL: 'ws://server:3000/ws',
@@ -98,6 +98,21 @@ describe('loadConfig', () => {
       env: { ...base, WHISPER_BACKEND: 'local', WHISPER_MODEL_PATH: '/models/whisper/medium.en' },
     });
     expect(cfg.audio.whisperModelPath).toBe('/models/whisper/medium.en');
+  });
+
+  it('opens no TCP port unless PATCH_DAEMON_HEALTHZ_PORT is set', () => {
+    expect(loadConfig({ env: { ...base } }).healthzPort).toBeNull();
+    const on = loadConfig({ env: { ...base, PATCH_DAEMON_HEALTHZ_PORT: '3001' } });
+    expect(on.healthzPort).toBe(3001);
+    expect(on.healthzHost).toBe('127.0.0.1');
+  });
+
+  it('puts the control socket in the home on Unix and a per-home named pipe on Windows', () => {
+    expect(defaultSocketPath('/h/.patch', 'linux')).toBe('/h/.patch/host.sock');
+    const a = defaultSocketPath('C:\\Users\\a\\.patch', 'win32');
+    expect(a).toMatch(/^\\\\\.\\pipe\\patch-host-[0-9a-f]{12}$/);
+    expect(a).toBe('\\\\.\\pipe\\patch-host-add03206a464'); // pinned: the CLI computes the same name
+    expect(defaultSocketPath('C:\\Users\\b\\.patch', 'win32')).not.toBe(a);
   });
 
   it('throws on a non-numeric/out-of-range int override (NO FALLBACK)', () => {

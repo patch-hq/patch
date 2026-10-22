@@ -6,7 +6,7 @@
 // The switcher appears only once more than one host has reported. The choice
 // is shared by every page, so picking the Mac on Usage still shows the Mac on
 // Agent; until one is picked (or when the picked one is removed) the page shows
-// the home host, else the first that has reported.
+// the first online host that has reported, else the first that has reported.
 
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -39,7 +39,7 @@ export function sortedHosts(hosts: Record<string, HostPresence>): HostPresence[]
 
 /**
  * The host a page shows: the one picked, if it is still registered; else the
- * home host; else the first that has reported; else the first registered.
+ * first online host that has reported; else the first that has reported; else the first registered.
  * Null only with no hosts at all.
  */
 export function resolveSettingsHost(
@@ -49,7 +49,7 @@ export function resolveSettingsHost(
   if (chosen !== null && hosts[chosen]) return hosts[chosen] as HostPresence;
   const all = sortedHosts(hosts);
   return (
-    all.find((h) => h.host?.isHomeHost === true) ??
+    all.find((h) => h.online && h.host !== null) ??
     all.find((h) => h.host !== null) ??
     all[0] ??
     null
@@ -125,7 +125,7 @@ export function HostSwitcher(): React.ReactElement | null {
  * at all, or one that has not reported — else null. Never invented values.
  */
 export function unreportedText(host: HostPresence | null): string | null {
-  if (host === null) return 'No hosts yet';
+  if (host === null) return 'No machines yet';
   if (host.host === null) return `${host.hostId} hasn’t reported yet`;
   return null;
 }

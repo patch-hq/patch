@@ -10,11 +10,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { WatchScheduler } from '../src/watch.js';
+import { WatchScheduler, readProgress } from '../src/watch.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -63,7 +63,13 @@ describe('WatchScheduler.start — spawn failure', () => {
     const deps = makeDeps({ spawnFn: (() => child) as never });
     const s = mkScheduler(deps);
     expect(() =>
-      s.start({ chatId: 'c1', command: 'true', description: 'd', cwd: '/nonexistent-dir' }),
+      s.start({
+        chatId: 'c1',
+        command: 'true',
+        description: 'd',
+        timeoutSec: 600,
+        cwd: '/nonexistent-dir',
+      }),
     ).toThrow(/failed to spawn/);
     expect(child.listenerCount('error')).toBeGreaterThan(0);
     expect(() => child.emit('error', new Error('spawn /bin/sh ENOENT'))).not.toThrow();
@@ -80,6 +86,7 @@ describe('WatchScheduler.start', () => {
         chatId: 'c1',
         command: 'sleep 5',
         description: 'a slow sleep',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       expect(rec.status).toBe('running');
@@ -99,6 +106,7 @@ describe('WatchScheduler.start', () => {
         chatId: 'c1',
         command: 'echo hello-watch; echo to-stderr 1>&2',
         description: 'echo test',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       await flushUntil(() => scheduler.list('c1')[0]?.status !== 'running');
@@ -118,6 +126,7 @@ describe('WatchScheduler.start', () => {
         chatId: 'c1',
         command: 'printf "l1\\nl2\\nl3\\n"',
         description: 'three lines',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       await flushUntil(() => scheduler.list('c1')[0]?.status !== 'running');
@@ -138,6 +147,7 @@ describe('WatchScheduler resident poll — completion delivered from OUTSIDE the
         chatId: 'c-complete',
         command: 'sleep 0.05',
         description: 'quick sleep',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       // The poll is resident on the scheduler, not inside the watched command's
@@ -163,6 +173,7 @@ describe('WatchScheduler resident poll — completion delivered from OUTSIDE the
         chatId: 'c-fail',
         command: 'exit 3',
         description: 'a failing command',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       await flushUntil(() => deps.delivered.length > 0);
@@ -185,6 +196,7 @@ describe('WatchScheduler — survives a host restart', () => {
         chatId: 'c-restart',
         command: 'sleep 5',
         description: 'outlives the host',
+        timeoutSec: 600,
         cwd: depsA.home,
       });
     } finally {
@@ -229,6 +241,7 @@ describe('WatchScheduler.stop', () => {
         chatId: 'c-stop',
         command: 'sleep 5',
         description: 'to be killed',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       const stopped = scheduler.stop('c-stop', rec.taskId);
@@ -251,6 +264,7 @@ describe('WatchScheduler.stop', () => {
         chatId: 'c-stop2',
         command: 'exit 0',
         description: 'short-lived',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       scheduler.stop('c-stop2', rec.taskId);
@@ -276,7 +290,13 @@ describe('WatchScheduler.list / count', () => {
     const deps = makeDeps();
     const scheduler = mkScheduler(deps);
     try {
-      scheduler.start({ chatId: 'c-a', command: 'sleep 5', description: 'a', cwd: deps.home });
+      scheduler.start({
+        chatId: 'c-a',
+        command: 'sleep 5',
+        description: 'a',
+        timeoutSec: 600,
+        cwd: deps.home,
+      });
       expect(scheduler.list('c-a')).toHaveLength(1);
       expect(scheduler.list('c-b')).toEqual([]);
     } finally {
@@ -288,11 +308,18 @@ describe('WatchScheduler.list / count', () => {
     const deps = makeDeps();
     const scheduler = mkScheduler(deps);
     try {
-      scheduler.start({ chatId: 'c-count', command: 'sleep 5', description: 'a', cwd: deps.home });
+      scheduler.start({
+        chatId: 'c-count',
+        command: 'sleep 5',
+        description: 'a',
+        timeoutSec: 600,
+        cwd: deps.home,
+      });
       const rec2 = scheduler.start({
         chatId: 'c-count',
         command: 'sleep 0.05',
         description: 'b',
+        timeoutSec: 600,
         cwd: deps.home,
       });
       expect(scheduler.count('c-count')).toBe(2);
@@ -300,6 +327,105 @@ describe('WatchScheduler.list / count', () => {
         () => scheduler.list('c-count').find((r) => r.taskId === rec2.taskId)?.status !== 'running',
       );
       expect(scheduler.count('c-count')).toBe(1);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+});
+
+describe('WatchScheduler — timeout, progress and stall nudge', () => {
+  it('kills a task that outlives its timeoutSec and tells the chat it timed out', async () => {
+    let t = 1_000_000;
+    const deps = makeDeps({ now: () => t });
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-to',
+        command: 'sleep 30',
+        description: 'runaway',
+        timeoutSec: 60,
+        cwd: deps.home,
+      });
+      t += 61_000;
+      await flushUntil(() => deps.delivered.length > 0);
+      const after = scheduler.list('c-to')[0]!;
+      expect(after.status).toBe('failed');
+      expect(after.timedOut).toBe(true);
+      expect(deps.delivered[0]!.message).toMatch(/timed out after 1m and was killed/);
+      expect(() => process.kill(rec.pid, 0)).toThrow();
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
+  it('readProgress returns the last non-empty line and its write time', () => {
+    const deps = makeDeps();
+    const f = join(deps.home, 'out.txt');
+    writeFileSync(f, 'one\nstep 2 of 9\n\n');
+    const p = readProgress(f);
+    expect(p.lastLine).toBe('step 2 of 9');
+    expect(p.lastOutputAt).toBeGreaterThan(0);
+    expect(readProgress(join(deps.home, 'missing'))).toEqual({});
+  });
+
+  it('checks in with the agent every interval while running, filling the prompt template', async () => {
+    let t = 1_000_000;
+    const deps = makeDeps({
+      now: () => t,
+      checkIn: () => ({
+        intervalMs: 3_600_000,
+        prompt: '"{description}" up {running}, last: {lastOutput} ({taskId})',
+      }),
+    });
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-ci',
+        command: 'echo step 4; sleep 30',
+        description: 'deploy',
+        timeoutSec: 86_400,
+        cwd: deps.home,
+      });
+      await flushUntil(() => readProgress(rec.outputFile).lastLine === 'step 4');
+      t += 3_599_000;
+      await new Promise((r) => setTimeout(r, 100));
+      expect(deps.delivered).toHaveLength(0);
+      t += 2_000;
+      await flushUntil(() => deps.delivered.length === 1);
+      expect(deps.delivered[0]!.message).toBe(
+        `[watch] "deploy" up 1h00m, last: step 4 (${rec.taskId})`,
+      );
+      t += 3_600_000;
+      await flushUntil(() => deps.delivered.length === 2);
+      scheduler.stop('c-ci', rec.taskId);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
+  it('honours a per-watch check-in interval and restarts the clock when it is changed', async () => {
+    let t = 1_000_000;
+    const deps = makeDeps({ now: () => t });
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-pw',
+        command: 'sleep 30',
+        description: 'long wait',
+        timeoutSec: 86_400,
+        checkInSec: 5 * 3600,
+        cwd: deps.home,
+      });
+      expect(scheduler.nextCheckInAt(rec)).toBe(t + 5 * 3600 * 1000);
+      t += 3_700_000; // past the 1h default, well before 5h
+      await new Promise((r) => setTimeout(r, 100));
+      expect(deps.delivered).toHaveLength(0);
+      expect(scheduler.setCheckIn('c-pw', rec.taskId, 600)).toBe(true);
+      expect(scheduler.nextCheckInAt(scheduler.list('c-pw')[0]!)).toBe(t + 600_000);
+      t += 601_000;
+      await flushUntil(() => deps.delivered.length === 1);
+      scheduler.stop('c-pw', rec.taskId);
+      expect(scheduler.setCheckIn('c-pw', rec.taskId, 600)).toBe(false);
     } finally {
       scheduler.dispose();
     }

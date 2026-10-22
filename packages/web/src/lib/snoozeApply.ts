@@ -9,6 +9,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import { failed } from './errorCopy.js';
 import { navigateAfterArchive } from './archiveNav.js';
+import { isSnoozeUntilComplete } from '@patch/wire';
 import { formatWakeAt } from './snoozePresets.js';
 import type { ChatRow } from '../stores/types.js';
 
@@ -53,7 +54,7 @@ export function applySnooze(opts: {
   }
 
   ui.pushSnoozeToast(
-    `${name} snoozed until ${formatWakeAt(until)}`,
+    `${name} snoozed until ${isSnoozeUntilComplete(until) ? 'complete' : formatWakeAt(until)}`,
     runningToastLine(running, isProject),
     () => {
       for (const c of targets) {

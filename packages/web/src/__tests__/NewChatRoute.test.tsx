@@ -51,6 +51,12 @@ import { __setAudioOpenerForTests, __setRecorderFactoryForTests } from '../lib/v
 import type { VoiceRecording } from '../lib/voiceRecorder.js';
 import type { PatchWs } from '../api/ws.js';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
+import { startMeeting } from '../lib/meetingControl.js';
+
+vi.mock('../lib/meetingControl.js', async (orig) => ({
+  ...(await orig<typeof import('../lib/meetingControl.js')>()),
+  startMeeting: vi.fn(async () => undefined),
+}));
 
 function makeRow(
   chatId: string,
@@ -64,6 +70,7 @@ function makeRow(
     pendingWake: null,
     todos: [],
     snoozedUntil: null,
+    effort: null,
     chatId,
     hostId,
     permissionMode: 'bypassPermissions' as const,
@@ -93,6 +100,27 @@ function makeRow(
     rateLimitResumingAt: null,
     resumeKind: null,
   };
+}
+
+// What the Project row says is chosen: the pressed chip when one carries it,
+// else the pill — which reads the folder only when no chip does (spec/14 §8)
+// and `Other…` otherwise.
+function chosenFolderLabel(): string | null | undefined {
+  const pressed = screen
+    .getByTestId('new-chat-setup')
+    .querySelector('.folder-quick[aria-pressed="true"]');
+  if (pressed) return pressed.textContent;
+  return screen.getByTestId('new-chat-folder-pill').querySelector('.folder-pill-label')
+    ?.textContent;
+}
+
+// The same for the Model row.
+function chosenModelLabel(): string | null | undefined {
+  const pressed = screen
+    .getByTestId('new-chat-setup')
+    .querySelector('.model-quick[aria-pressed="true"] .quick-label');
+  if (pressed) return pressed.textContent;
+  return screen.getByTestId('new-chat-model').querySelector('.model-pill-label')?.textContent;
 }
 
 describe('/chats/new', () => {
@@ -288,12 +316,11 @@ describe('/chats/new', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    // H2: the pill shows the folder's BASENAME, full path on hover (title).
-    const label = screen
-      .getByTestId('new-chat-folder-pill')
-      .querySelector('.folder-pill-label') as HTMLElement;
-    expect(label.textContent).toBe('myproj');
-    expect(label).toHaveAttribute('title', '/home/tom/myproj');
+    // Not among the chips, so the pill reads it — and carries no tooltip.
+    expect(chosenFolderLabel()).toBe('myproj');
+    expect(
+      screen.getByTestId('new-chat-folder-pill').querySelector('.folder-pill-label'),
+    ).not.toHaveAttribute('title');
     fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
     expect((screen.getByTestId('new-chat-folder') as HTMLInputElement).value).toBe(
       '/home/tom/myproj',
@@ -554,6 +581,38 @@ describe('/chats/new', () => {
     useVoiceStore.getState().endCall();
   });
 
+  it('a meeting STARTS the chat: creates it, navigates into it, starts the meeting on the new chatId', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ chatId: 'c-meet', folder: '~/x', status: 'pending' }), {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+    usePresenceStore.getState().setConnection('connected');
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/chats/new']}>
+          <Routes>
+            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
+            <Route path="/chats/:chatId" element={<div data-testid="navigated" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
+    fireEvent.change(screen.getByTestId('new-chat-folder'), { target: { value: '~/x' } });
+    fireEvent.click(screen.getByTestId('meeting-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
+    await waitFor(() => expect(startMeeting).toHaveBeenCalledWith('c-meet'));
+    expect(useChatStore.getState().chats['c-meet']?.folder).toBe('~/x');
+  });
+
   // ---- Folder picker: simplified dropdown (spec/14 § Sidebar §8) ----
   // Recent rows are one-tap SELECT shortcuts; Browse rows DRILL into subfolders
   // and a distinct "Use this folder" action selects the current directory.
@@ -641,12 +700,7 @@ describe('/chats/new', () => {
     // One tap SELECTS and closes the picker (a recent row is a destination).
     fireEvent.click(opt);
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
-    // H2: pill shows the basename; full path on hover.
-    const label = screen
-      .getByTestId('new-chat-folder-pill')
-      .querySelector('.folder-pill-label') as HTMLElement;
-    expect(label.textContent).toBe('portfolio');
-    expect(label).toHaveAttribute('title', '/home/tom/projects/portfolio');
+    expect(chosenFolderLabel()).toBe('portfolio');
   });
 
   it('clicking the ALREADY-selected recent row keeps it selected and closes the picker', async () => {
@@ -655,14 +709,14 @@ describe('/chats/new', () => {
     const pill = screen.getByTestId('new-chat-folder-pill');
     fireEvent.click(pill);
     fireEvent.click(await screen.findByTestId('folder-option-/home/tom/projects/portfolio'));
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('portfolio');
+    expect(chosenFolderLabel()).toBe('portfolio');
 
     fireEvent.click(pill);
     const again = await screen.findByTestId('folder-option-/home/tom/projects/portfolio');
     expect(again).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(again);
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('portfolio');
+    expect(chosenFolderLabel()).toBe('portfolio');
   });
 
   it('clicking the MRU-preselected recent row keeps the folder', async () => {
@@ -676,7 +730,7 @@ describe('/chats/new', () => {
     const opt = await screen.findByTestId('folder-option-/home/tom/projects/portfolio');
     expect(opt).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(opt);
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('portfolio');
+    expect(chosenFolderLabel()).toBe('portfolio');
   });
 
   it('recent-folder rows add a disambiguating parent path ONLY when two basenames collide', async () => {
@@ -749,29 +803,35 @@ describe('/chats/new', () => {
   // The three most recently used projects sit in the setup row itself, so the
   // commonest choice costs ONE click instead of open-pop-up-then-choose.
 
-  it('offers the three most recently used projects as toggles in the setup row, newest first', async () => {
+  it('offers the head of the picker list as chips, in its fixed order, with no tooltip', async () => {
     useChatStore.setState({
       chats: {
         c1: makeRow('c1', '/home/tom/projects/alpha', 100),
         c2: makeRow('c2', '/home/tom/projects/bravo', 300),
         c3: makeRow('c3', '/home/tom/projects/charlie', 200),
         c4: makeRow('c4', '/home/tom/projects/delta', 50),
+        c5: makeRow('c5', '/home/tom/projects/echo', 400),
       },
     });
-    stubPickerFetch({ folders: [] });
+    stubPickerFetch({ folders: ['/home/tom/projects/zulu'] });
     renderPicker();
 
     const setup = screen.getByTestId('new-chat-setup');
+    // The picker's own order — configured roots first, then recents by name —
+    // never chat recency: `echo` is the newest chat and is left to the pop-up.
     const quicks = await waitFor(() => {
       const found = setup.querySelectorAll('[data-testid^="folder-quick-"]');
-      expect(found).toHaveLength(3);
+      expect(Array.from(found).map((b) => b.textContent)).toEqual([
+        'zulu',
+        'alpha',
+        'bravo',
+        'charlie',
+      ]);
       return found;
     });
-    // Newest first, capped at three — `delta` (oldest) is left to the pop-up.
-    expect(Array.from(quicks).map((b) => b.textContent)).toEqual(['bravo', 'charlie', 'alpha']);
-    expect(screen.queryByTestId('folder-quick-/home/tom/projects/delta')).toBeNull();
-    // Full path on the tooltip, as on the pop-up rows.
-    expect(quicks[0]).toHaveAttribute('title', '/home/tom/projects/bravo');
+    expect(screen.queryByTestId('folder-quick-/home/tom/projects/echo')).toBeNull();
+    // Nothing hides behind a chip.
+    for (const q of Array.from(quicks)) expect(q).not.toHaveAttribute('title');
     // They live in the setup row, NOT inside the pop-up — that is the point.
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
   });
@@ -787,52 +847,68 @@ describe('/chats/new', () => {
     expect(quick).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(quick);
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('alpha');
+    expect(chosenFolderLabel()).toBe('alpha');
     expect(screen.getByTestId('folder-quick-/home/tom/projects/alpha')).toHaveAttribute(
       'aria-pressed',
       'true',
     );
+    // The chip carries the choice, so the pill is only the way to the rest.
+    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('Other…');
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
   });
 
-  // ---- Quick model toggles (spec/14 §8 § New-chat setup row) ----
-  // The model gets the same treatment the projects already have: the three
-  // most recently used, on their own line, one click each. Recency comes from
-  // the model each existing chat resolved to at spawn — the only per-chat
-  // record of it — and the line is topped up from the live catalogue.
+  // ---- Quick model chips (spec/14 §8 § New-chat setup row) ----
+  // The account default first, marked, then the head of the live catalogue in
+  // its own order. Fixed: the row used to follow the models recent chats ran
+  // on, and reshuffled with them.
 
   function quickModelLabels(): string[] {
     const row = screen.getByTestId('new-chat-quick-models');
-    return Array.from(row.querySelectorAll('[data-testid^="model-quick-"]')).map(
+    return Array.from(row.querySelectorAll('[data-testid^="model-quick-"] .quick-label')).map(
       (b) => b.textContent ?? '',
     );
   }
 
-  it('offers the three most recently used models as toggles on their own line, newest first', async () => {
+  it('offers the account default first, marked as such, then the head of the catalogue', async () => {
     resetModelCatalog();
     setModelCatalog({
       status: 'ready',
-      models: [...MODEL_OPTIONS, { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' }],
+      models: [
+        { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+        ...MODEL_OPTIONS,
+        { id: 'claude-ancient-1', label: 'Ancient 1' },
+      ],
     });
+    // Chat history on other models counts for nothing here.
     useChatStore.setState({
       chats: {
-        c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1', 'claude-sonnet-5'),
-        c2: makeRow('c2', '/home/tom/projects/bravo', 200, 'd1', 'claude-haiku-4-5'),
-        c3: makeRow('c3', '/home/tom/projects/charlie', 100, 'd1', ACCOUNT_DEFAULT_MODEL),
-        // Oldest — pushed off the end of the three.
-        c4: makeRow('c4', '/home/tom/projects/delta', 50, 'd1', 'claude-sonnet-4-6'),
-        // No model recorded — contributes nothing.
-        c5: makeRow('c5', '/home/tom/projects/echo', 400),
+        c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1', 'claude-haiku-4-5'),
+        c2: makeRow('c2', '/home/tom/projects/bravo', 200, 'd1', 'claude-ancient-1'),
       },
     });
     stubPickerFetch({ folders: [] });
     renderPicker();
 
     await waitFor(() => {
-      expect(quickModelLabels()).toEqual(['Claude Sonnet 5', 'Claude Haiku 4.5', 'Claude Opus 5']);
+      expect(quickModelLabels()).toEqual([
+        'Claude Opus 5',
+        'Sonnet 4.6',
+        'Claude Sonnet 5',
+        'Claude Haiku 4.5',
+      ]);
     });
-    expect(screen.queryByTestId('model-quick-claude-sonnet-4-6')).toBeNull();
-    // Their own line, separate from the project toggles.
+    expect(screen.queryByTestId('model-quick-claude-ancient-1')).toBeNull();
+    expect(
+      screen.getByTestId(`model-quick-${ACCOUNT_DEFAULT_MODEL}`).querySelector('.quick-sub')
+        ?.textContent,
+    ).toBe('default');
+    expect(screen.getByTestId('model-quick-claude-sonnet-4-6').querySelector('.quick-sub')).toBe(
+      null,
+    );
+    for (const b of screen.getByTestId('new-chat-quick-models').querySelectorAll('button')) {
+      expect(b).not.toHaveAttribute('title');
+    }
+    // Their own row, separate from the project chips.
     const setup = screen.getByTestId('new-chat-setup');
     const models = screen.getByTestId('new-chat-quick-models');
     expect(setup).toContainElement(models);
@@ -841,66 +917,20 @@ describe('/chats/new', () => {
     expect(screen.queryByTestId('model-popup')).not.toBeInTheDocument();
   });
 
-  it('excludes job-spawned chats from the quick-model recency, so an unattended job cannot bury a hand-picked model', async () => {
-    resetModelCatalog();
-    setModelCatalog({
-      status: 'ready',
-      models: [...MODEL_OPTIONS, { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' }],
-    });
-    useChatStore.setState({
-      chats: {
-        // User-initiated, older.
-        c1: makeRow('c1', '/home/tom/projects/alpha', 100, 'd1', 'claude-haiku-4-5'),
-        // Job-spawned, newer — must not outrank the hand-picked chat above.
-        c2: makeRow('c2', '/home/tom/projects/bravo', 300, 'd1', 'claude-sonnet-4-6', 'job-1'),
-      },
-    });
+  it('offers the catalogue head alone when the account default is not in the catalogue', async () => {
+    reportHost('d1', { defaultModel: 'claude-retired-1' });
     stubPickerFetch({ folders: [] });
     renderPicker();
 
+    // NO second source: a model the pop-up disowns is offered nowhere.
     await waitFor(() => {
-      expect(quickModelLabels()).toEqual(['Claude Haiku 4.5', 'Claude Opus 5', 'Claude Sonnet 5']);
-    });
-    expect(screen.queryByTestId('model-quick-claude-sonnet-4-6')).toBeNull();
-  });
-
-  it('tops the quick models up from the catalogue when fewer than three have been used', async () => {
-    useChatStore.setState({
-      chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100, 'd1', 'claude-haiku-4-5') },
-    });
-    stubPickerFetch({ folders: [] });
-    renderPicker();
-
-    // The used one leads; the rest come off the head of the catalogue, in its
-    // order, without repeating it.
-    await waitFor(() => {
-      expect(quickModelLabels()).toEqual(['Claude Haiku 4.5', 'Claude Opus 5', 'Claude Sonnet 5']);
-    });
-  });
-
-  it('never offers a model the catalogue does not list', async () => {
-    useChatStore.setState({
-      chats: {
-        // Retired since that chat spawned: the pop-up disowns it, so the
-        // shortcut row must too rather than becoming a second source.
-        c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1', 'claude-retired-1'),
-        c2: makeRow('c2', '/home/tom/projects/bravo', 200, 'd1', 'claude-sonnet-5'),
-      },
-    });
-    stubPickerFetch({ folders: [] });
-    renderPicker();
-
-    await waitFor(() => {
-      expect(quickModelLabels()).toEqual(['Claude Sonnet 5', 'Claude Opus 5', 'Claude Haiku 4.5']);
+      expect(quickModelLabels()).toEqual(['Claude Opus 5', 'Claude Sonnet 5', 'Claude Haiku 4.5']);
     });
     expect(screen.queryByTestId('model-quick-claude-retired-1')).toBeNull();
   });
 
-  it('shows no quick-model line while the catalogue is unavailable', async () => {
+  it('shows no quick-model row while the catalogue is unavailable', async () => {
     resetModelCatalog();
-    useChatStore.setState({
-      chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100, 'd1', 'claude-sonnet-5') },
-    });
     stubPickerFetch({ folders: [], models: 'error' });
     renderPicker();
 
@@ -914,16 +944,16 @@ describe('/chats/new', () => {
   });
 
   it('one click on a quick model chooses it, exactly as the pop-up row does', async () => {
-    useChatStore.setState({
-      chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100, 'd1', 'claude-sonnet-5') },
-    });
     stubPickerFetch({ folders: [] });
     renderPicker();
 
     const pill = screen.getByTestId('new-chat-model');
-    // Nothing chosen yet, so the pill (and the pressed toggle) read the host's
-    // own last-used model — exactly what an omitted `model` resolves to.
-    expect(pill.querySelector('.model-pill-label')?.textContent).toBe('Claude Opus 5');
+    // Nothing chosen yet, so the pressed chip is the account default — exactly
+    // what an omitted `model` resolves to — and the pill is only the way to the
+    // rest of the catalogue.
+    expect(chosenModelLabel()).toBe('Claude Opus 5');
+    expect(pill.querySelector('.model-pill-label')?.textContent).toBe('More…');
+    expect(pill).not.toHaveAttribute('title');
     const sonnet = await screen.findByTestId('model-quick-claude-sonnet-5');
     expect(screen.getByTestId(`model-quick-${ACCOUNT_DEFAULT_MODEL}`)).toHaveAttribute(
       'aria-pressed',
@@ -931,7 +961,7 @@ describe('/chats/new', () => {
     );
 
     fireEvent.click(sonnet);
-    expect(pill.querySelector('.model-pill-label')?.textContent).toBe('Claude Sonnet 5');
+    expect(chosenModelLabel()).toBe('Claude Sonnet 5');
     expect(screen.getByTestId('model-quick-claude-sonnet-5')).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -943,58 +973,67 @@ describe('/chats/new', () => {
     // A chat always spawns on some model, so there is no deselect: clicking the
     // chosen one again leaves it chosen (spec/14 § Model selector).
     fireEvent.click(screen.getByTestId('model-quick-claude-sonnet-5'));
-    expect(pill.querySelector('.model-pill-label')?.textContent).toBe('Claude Sonnet 5');
+    expect(chosenModelLabel()).toBe('Claude Sonnet 5');
     // Selecting from the row never opens the pop-up.
     expect(screen.queryByTestId('model-popup')).not.toBeInTheDocument();
   });
 
-  it('Left/Right arrow keys on the quick-model row select the adjacent model', async () => {
-    useChatStore.setState({
-      chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100, 'd1', 'claude-haiku-4-5') },
+  it('the pill reads the chosen model, filled, when no chip carries it', async () => {
+    resetModelCatalog();
+    setModelCatalog({
+      status: 'ready',
+      models: [
+        ...MODEL_OPTIONS,
+        { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+        { id: 'claude-old-2', label: 'Old 2' },
+      ],
     });
     stubPickerFetch({ folders: [] });
     renderPicker();
 
-    // ['claude-haiku-4-5', 'claude-opus-5', 'claude-sonnet-5']
-    const haiku = await screen.findByTestId('model-quick-claude-haiku-4-5');
-    const opus = screen.getByTestId(`model-quick-${ACCOUNT_DEFAULT_MODEL}`);
+    const pill = screen.getByTestId('new-chat-model');
+    fireEvent.click(pill);
+    fireEvent.click(await screen.findByTestId('model-option-claude-old-2'));
+    expect(pill.querySelector('.model-pill-label')?.textContent).toBe('Old 2');
+    expect(pill.classList.contains('is-active')).toBe(true);
+    expect(
+      screen.getByTestId('new-chat-setup').querySelector('.model-quick[aria-pressed="true"]'),
+    ).toBeNull();
+  });
+
+  it('Left/Right arrow keys on the quick-model row select the adjacent model', async () => {
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    // [opus (the default), sonnet, haiku] — the catalogue's order.
+    const opus = await screen.findByTestId(`model-quick-${ACCOUNT_DEFAULT_MODEL}`);
     const sonnet = screen.getByTestId('model-quick-claude-sonnet-5');
-    // The host's last-used model reads as pressed before anything is chosen.
+    const haiku = screen.getByTestId('model-quick-claude-haiku-4-5');
     expect(opus).toHaveAttribute('aria-pressed', 'true');
 
     opus.focus();
     fireEvent.keyDown(opus, { key: 'ArrowRight' });
-    expect(screen.getByTestId('model-quick-claude-sonnet-5')).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(sonnet).toHaveAttribute('aria-pressed', 'true');
     expect(document.activeElement).toBe(sonnet);
 
-    // Wraps past the last button back to the first.
     fireEvent.keyDown(sonnet, { key: 'ArrowRight' });
-    expect(screen.getByTestId('model-quick-claude-haiku-4-5')).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(haiku).toHaveAttribute('aria-pressed', 'true');
     expect(document.activeElement).toBe(haiku);
 
+    // Wraps past the last chip back to the first.
+    fireEvent.keyDown(haiku, { key: 'ArrowRight' });
+    expect(opus).toHaveAttribute('aria-pressed', 'true');
+
     // ArrowLeft wraps the other way.
-    fireEvent.keyDown(haiku, { key: 'ArrowLeft' });
-    expect(screen.getByTestId('model-quick-claude-sonnet-5')).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    fireEvent.keyDown(opus, { key: 'ArrowLeft' });
+    expect(haiku).toHaveAttribute('aria-pressed', 'true');
   });
 
-  // ---- Order stability across a send (Todoist: "the order of the last used
-  // workflow/model should not change when you send the message. that screen
-  // should stay as is") ----
-  // `foldersByRecency`/`modelsByRecency` are LIVE off `projectChats`, so once
-  // the chat this send is creating (or any other store update — the host's
-  // `chat.spawned` confirmation, a late WS frame) lands with a fresh
-  // `lastUpdated`, the live derivation reorders. Reproduce that landing WHILE
-  // the panel is still mounted (the POST /api/chats response deliberately
-  // never resolves during the assertion) and prove the on-screen order holds.
+  // ---- Order stability (Tom: "things jump around depending on what's
+  // happening in the background") ----
+  // The rows are drawn from the picker's list and the catalogue, in their own
+  // order, so nothing an agent or a job does to a chat in the background can
+  // reorder them — not while idle, and not mid-send either.
 
   function quickFolderLabels(): string[] {
     const setup = screen.getByTestId('new-chat-setup');
@@ -1003,72 +1042,7 @@ describe('/chats/new', () => {
     );
   }
 
-  it('does not reorder the quick folder toggles while a send is in flight', async () => {
-    useChatStore.setState({
-      chats: {
-        c1: makeRow('c1', '/home/tom/projects/alpha', 100),
-        c2: makeRow('c2', '/home/tom/projects/bravo', 300),
-        c3: makeRow('c3', '/home/tom/projects/charlie', 200),
-      },
-    });
-    let resolveCreate: ((r: Response) => void) | undefined;
-    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
-      const u = String(url);
-      if (u === '/api/chats' && init?.method === 'POST') {
-        return new Promise<Response>((resolve) => {
-          resolveCreate = resolve;
-        });
-      }
-      return new Response(JSON.stringify({ projectFolders: [] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={['/chats/new']}>
-          <Routes>
-            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
-            <Route path="/chats/:chatId" element={<div data-testid="navigated" />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => expect(quickFolderLabels()).toEqual(['bravo', 'charlie', 'alpha']));
-
-    const composer = screen.getByTestId('composer-input');
-    fireEvent.change(composer, { target: { value: 'hi' } });
-    fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
-
-    // The POST is still pending (never resolved), so this is exactly the
-    // window between pressing send and navigating away. Simulate a late
-    // store update landing in it — an existing chat (alpha) picking up a
-    // fresh `lastUpdated`, the same shape of change a `chat.spawned`
-    // confirmation makes. Pre-fix this flips the live order to
-    // ['alpha', 'bravo', 'charlie'].
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    act(() => {
-      useChatStore.setState((s) => ({
-        chats: { ...s.chats, c1: { ...s.chats.c1!, lastUpdated: 999999 } },
-      }));
-    });
-    expect(quickFolderLabels()).toEqual(['bravo', 'charlie', 'alpha']);
-
-    // Let the send actually complete — the freeze must not break the flow it
-    // is guarding, only stop the row from reshuffling during it.
-    resolveCreate?.(
-      new Response(JSON.stringify({ chatId: 'c-inflight', folder: '~/x', status: 'pending' }), {
-        status: 202,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-    await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
-  });
-
-  it('does not reorder the quick model toggles while a send is in flight', async () => {
+  it('keeps the project and model chips in place while chats change underneath', async () => {
     useChatStore.setState({
       chats: {
         c1: makeRow('c1', '/home/tom/projects/alpha', 100, 'd1', 'claude-sonnet-5'),
@@ -1076,100 +1050,31 @@ describe('/chats/new', () => {
         c3: makeRow('c3', '/home/tom/projects/charlie', 200, 'd1', ACCOUNT_DEFAULT_MODEL),
       },
     });
-    let resolveCreate: ((r: Response) => void) | undefined;
-    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
-      const u = String(url);
-      if (u === '/api/chats' && init?.method === 'POST') {
-        return new Promise<Response>((resolve) => {
-          resolveCreate = resolve;
-        });
-      }
-      return new Response(JSON.stringify({ projectFolders: [] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={['/chats/new']}>
-          <Routes>
-            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
-            <Route path="/chats/:chatId" element={<div data-testid="navigated" />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+    await waitFor(() => expect(quickFolderLabels()).toEqual(['alpha', 'bravo', 'charlie']));
+    const models = quickModelLabels();
+    expect(models).toEqual(['Claude Opus 5', 'Claude Sonnet 5', 'Claude Haiku 4.5']);
 
-    await waitFor(() =>
-      expect(quickModelLabels()).toEqual(['Claude Haiku 4.5', 'Claude Opus 5', 'Claude Sonnet 5']),
-    );
-
-    const composer = screen.getByTestId('composer-input');
-    fireEvent.change(composer, { target: { value: 'hi' } });
-    fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    // Simulate the model this chat used (sonnet) picking up a fresh
-    // `lastUpdated` mid-send — pre-fix this flips the live order to lead
-    // with sonnet.
+    // An agent finishes a turn in alpha; a job lands a new chat on haiku.
     act(() => {
       useChatStore.setState((s) => ({
-        chats: { ...s.chats, c1: { ...s.chats.c1!, lastUpdated: 999999 } },
+        chats: {
+          ...s.chats,
+          c1: { ...s.chats.c1!, lastUpdated: 999999 },
+          j1: makeRow(
+            'j1',
+            '/home/tom/projects/charlie',
+            999998,
+            'd1',
+            'claude-haiku-4-5',
+            'job-1',
+          ),
+        },
       }));
     });
-    expect(quickModelLabels()).toEqual(['Claude Haiku 4.5', 'Claude Opus 5', 'Claude Sonnet 5']);
-
-    resolveCreate?.(
-      new Response(JSON.stringify({ chatId: 'c-inflight-2', folder: '~/x', status: 'pending' }), {
-        status: 202,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-    await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
-  });
-
-  it('resumes live recency tracking after a failed send leaves the screen showing', async () => {
-    useChatStore.setState({
-      chats: {
-        c1: makeRow('c1', '/home/tom/projects/alpha', 100),
-        c2: makeRow('c2', '/home/tom/projects/bravo', 300),
-      },
-    });
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ error: 'folder_not_found' }), {
-          status: 400,
-          headers: { 'content-type': 'application/json' },
-        }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={['/chats/new']}>
-          <Routes>
-            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    await waitFor(() => expect(quickFolderLabels()).toEqual(['bravo', 'alpha']));
-
-    const composer = screen.getByTestId('composer-input');
-    fireEvent.change(composer, { target: { value: 'hi' } });
-    fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
-
-    // The create call fails, so the screen stays put (no navigation) and the
-    // freeze must release — a later, real recency change is allowed to show.
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    act(() => {
-      useChatStore.setState((s) => ({
-        chats: { ...s.chats, c1: { ...s.chats.c1!, lastUpdated: 999999 } },
-      }));
-    });
-    await waitFor(() => expect(quickFolderLabels()).toEqual(['alpha', 'bravo']));
+    expect(quickFolderLabels()).toEqual(['alpha', 'bravo', 'charlie']);
+    expect(quickModelLabels()).toEqual(models);
   });
 
   // ---- Recent-folder selection rule (spec/04 § Folders) ----
@@ -1243,11 +1148,7 @@ describe('/chats/new', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    const label = screen
-      .getByTestId('new-chat-folder-pill')
-      .querySelector('.folder-pill-label') as HTMLElement;
-    expect(label.textContent).toBe('bravo');
-    expect(label).toHaveAttribute('title', '/home/tom/projects/bravo');
+    expect(chosenFolderLabel()).toBe('bravo');
   });
 
   // The chatId rule and the path rule are independent (spec/04 § Folders lists
@@ -1301,7 +1202,6 @@ describe('/chats/new', () => {
     const alpha = await screen.findByTestId('folder-quick-/home/tom/projects/alpha');
     const bravo = screen.getByTestId('folder-quick-/home/tom/projects/bravo');
     const charlie = screen.getByTestId('folder-quick-/home/tom/projects/charlie');
-    const pill = screen.getByTestId('new-chat-folder-pill');
     // MRU seeded `bravo` (most recent) as the start point.
     expect(bravo).toHaveAttribute('aria-pressed', 'true');
 
@@ -1309,7 +1209,7 @@ describe('/chats/new', () => {
     fireEvent.keyDown(bravo, { key: 'ArrowRight' });
     expect(charlie).toHaveAttribute('aria-pressed', 'true');
     expect(bravo).toHaveAttribute('aria-pressed', 'false');
-    expect(pill.querySelector('.folder-pill-label')?.textContent).toBe('charlie');
+    expect(chosenFolderLabel()).toBe('charlie');
     // Focus follows the selection, so a second press keeps working without
     // needing to re-tab into the row.
     expect(document.activeElement).toBe(charlie);
@@ -1349,18 +1249,16 @@ describe('/chats/new', () => {
     renderPicker();
 
     // Starts on the most recent chat's machine, offering only its project.
-    expect(await screen.findByTestId('new-chat-host')).toHaveAttribute('title', 'd1');
+    expect(await screen.findByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd1');
     expect(screen.getByTestId('folder-quick-/home/tom/projects/alpha')).toBeInTheDocument();
     expect(screen.queryByTestId('folder-quick-/srv/bravo')).not.toBeInTheDocument();
 
     chooseHost('d2');
-    expect(screen.getByTestId('new-chat-host')).toHaveAttribute('title', 'd2');
+    expect(screen.getByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd2');
     // d1's folder is not a directory on d2, so it is not carried across;
     // the first folder in d2's list is selected instead.
     expect(screen.queryByTestId('folder-quick-/home/tom/projects/alpha')).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId('new-chat-folder-pill').querySelector('.folder-pill-label')?.textContent,
-    ).toBe('bravo');
+    expect(chosenFolderLabel()).toBe('bravo');
 
     const composer = screen.getByTestId('composer-input');
     fireEvent.change(composer, { target: { value: 'go' } });
@@ -1415,15 +1313,16 @@ describe('/chats/new', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    const pillLabel = (): string | null | undefined =>
-      screen.getByTestId('new-chat-folder-pill').querySelector('.folder-pill-label')?.textContent;
+    const pillLabel = (): string | null | undefined => chosenFolderLabel();
 
-    expect(await screen.findByTestId('new-chat-host')).toHaveAttribute('title', 'd1');
+    expect(await screen.findByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd1');
     expect(pillLabel()).toBe('alpha');
 
     fireEvent.click(screen.getByTestId('other-recent-folder'));
 
-    await waitFor(() => expect(screen.getByTestId('new-chat-host')).toHaveAttribute('title', 'd2'));
+    await waitFor(() =>
+      expect(screen.getByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd2'),
+    );
     expect(pillLabel()).toBe('bravo');
   });
 
@@ -1498,7 +1397,7 @@ describe('/chats/new', () => {
     });
   });
 
-  it('tops the toggles up from the picker list when fewer than three projects have been used', async () => {
+  it('leads with the configured project roots, in their own order, then the recent folders', async () => {
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100) } });
     stubPickerFetch({ folders: ['/home/tom/projects/zeta', '/home/tom/projects/yankee'] });
     renderPicker();
@@ -1507,7 +1406,7 @@ describe('/chats/new', () => {
       const found = screen
         .getByTestId('new-chat-setup')
         .querySelectorAll('[data-testid^="folder-quick-"]');
-      expect(Array.from(found).map((b) => b.textContent)).toEqual(['alpha', 'zeta', 'yankee']);
+      expect(Array.from(found).map((b) => b.textContent)).toEqual(['zeta', 'yankee', 'alpha']);
     });
   });
 
@@ -1537,7 +1436,9 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
   });
 
-  it('shows a usage indicator for each connected account, with its 5-hour and weekly figures', async () => {
+  // ---- Usage (spec/14 §8): apart from the selections, visual, in words ----
+
+  it('shows a usage card per connected account, apart from the selections, with 5-hour and weekly meters', async () => {
     setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
     reportAccounts('d1', [
       {
@@ -1545,7 +1446,7 @@ describe('/chats/new', () => {
         label: 'Claude 0',
         connected: true,
         usage: {
-          session: { status: 'allowed', utilization: 0.42 },
+          session: { status: 'allowed', utilization: 0.42, resetsAt: Date.now() + 3_600_000 },
           week: { status: 'allowed', utilization: 0.1 },
         },
       },
@@ -1554,12 +1455,150 @@ describe('/chats/new', () => {
     stubPickerFetch({ folders: [] });
     renderPicker();
 
-    const first = await screen.findByTestId('new-chat-usage-claude-code:c0');
+    const usage = await screen.findByTestId('new-chat-usage');
+    // Beneath the selections, never inside the rows (Tom: "keep usage separate
+    // from the selections").
+    expect(screen.getByTestId('new-chat-setup')).toContainElement(usage);
+    expect(screen.getByTestId('new-chat-setup-grid')).not.toContainElement(usage);
+    const first = screen.getByTestId('new-chat-usage-claude-code:c0');
     expect(first.textContent).toContain('Claude 0');
-    expect(first.textContent).toContain('42%');
-    expect(first.textContent).toContain('10%');
+    // The figure says which way the bar reads — no `5h`/`wk`, no bare percent.
+    expect(screen.getByTestId('new-chat-usage-claude-code:c0-session').textContent).toMatch(
+      /^42% used · resets /,
+    );
+    expect(screen.getByTestId('new-chat-usage-claude-code:c0-week').textContent).toBe('10% used');
+    expect(first.textContent).not.toMatch(/\b5h\b|\bwk\b/);
+    expect(first.querySelectorAll('.new-chat-usage-bar i')[0]).toHaveStyle({ width: '42%' });
     // An account nothing has read yet says so rather than drawing empty bars.
-    expect(screen.getByTestId('new-chat-usage-claude-code:c1').textContent).toContain('not read');
+    expect(screen.getByTestId('new-chat-usage-claude-code:c1').textContent).toContain(
+      'not read yet',
+    );
+    // Nothing in the block is a control, and nothing hides in a tooltip.
+    expect(usage.querySelector('button, select, [title]')).toBeNull();
+  });
+
+  it('says when a window was not reported rather than drawing an empty bar', async () => {
+    setSharedAccounts({ claude: [{ connected: true }] });
+    reportAccounts('d1', [
+      {
+        id: 'c0',
+        label: 'Claude 0',
+        connected: true,
+        usage: { week: { status: 'allowed', utilization: 0.55 } },
+      },
+    ]);
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    expect((await screen.findByTestId('new-chat-usage-claude-code:c0-session')).textContent).toBe(
+      'not reported',
+    );
+    expect(screen.getByTestId('new-chat-usage-claude-code:c0-week').textContent).toBe('55% used');
+  });
+
+  it('shows four accounts at a time and pages through the rest', async () => {
+    setSharedAccounts({
+      claude: [
+        { connected: true },
+        { connected: true },
+        { connected: true },
+        { connected: true },
+        { connected: true },
+        { connected: true },
+      ],
+    });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    await screen.findByTestId('new-chat-usage');
+    const cards = (): HTMLElement[] => screen.getAllByTestId(/^new-chat-usage-claude-code:c\d$/);
+    expect(cards().map((c) => c.getAttribute('data-testid'))).toEqual([
+      'new-chat-usage-claude-code:c0',
+      'new-chat-usage-claude-code:c1',
+      'new-chat-usage-claude-code:c2',
+      'new-chat-usage-claude-code:c3',
+    ]);
+    expect(screen.getByTestId('new-chat-usage-page').textContent).toBe('1–4 of 6');
+    expect(screen.getByTestId('new-chat-usage-prev')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('new-chat-usage-next'));
+    expect(screen.getByTestId('new-chat-usage-page').textContent).toBe('5–6 of 6');
+    expect(cards()).toHaveLength(2);
+    expect(screen.getByTestId('new-chat-usage-next')).toBeDisabled();
+  });
+
+  it('shows no pager with four accounts or fewer', async () => {
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+    await screen.findByTestId('new-chat-usage');
+    expect(screen.queryByTestId('new-chat-usage-pager')).toBeNull();
+  });
+
+  // ---- Account row (spec/14 § Account selector): chips, not a select ----
+
+  it('offers the account as chips — Auto, then each connected account — and sends the choice with the spawn', async () => {
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
+    const fetchMock = vi.fn(async (path: string, _init?: RequestInit) => {
+      const json = (body: unknown): Response =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (path.startsWith('/api/chats')) return json({ chatId: 'c-acct', folder: '~/x' });
+      if (path.startsWith('/api/settings')) return json({ projectFolders: ['/home/tom/x'] });
+      if (path.startsWith('/api/models')) return json({ models: getModelCatalog().models });
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    renderPicker();
+
+    const group = await screen.findByTestId('new-chat-account');
+    expect(group).toHaveAttribute('role', 'radiogroup');
+    expect(screen.getByTestId('new-chat-setup').querySelector('select')).toBeNull();
+    expect(screen.getByTestId('new-chat-account-auto')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('new-chat-account-c1')).toHaveTextContent('Claude 1');
+    fireEvent.click(screen.getByTestId('new-chat-account-c1'));
+    expect(screen.getByTestId('new-chat-account-c1')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('new-chat-account-auto')).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(await screen.findByTestId('folder-quick-/home/tom/x'));
+    const composer = screen.getByTestId('composer-input');
+    fireEvent.change(composer, { target: { value: 'hi' } });
+    fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => String(c[0]).startsWith('/api/chats'));
+      expect(call).toBeTruthy();
+      const body = JSON.parse((call![1] as RequestInit).body as string);
+      expect(body).toMatchObject({ preferredAccountId: 'c1' });
+    });
+  });
+
+  it('shows no account row with a single account', async () => {
+    setSharedAccounts({ claude: [{ connected: true }] });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+    await screen.findByTestId('new-chat-folder-pill');
+    expect(screen.queryByTestId('new-chat-account')).toBeNull();
+  });
+
+  // ---- The rows (spec/14 §8): one labelled row per decision, in order ----
+
+  it('lays the setup out as labelled rows — Machine, Account, Project, Model — in that order', async () => {
+    usePresenceStore.getState().setHostOnline('d2', true);
+    reportHost('d2', { hostName: 'mac' });
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    await screen.findByTestId('new-chat-account');
+    const labels = Array.from(
+      screen.getByTestId('new-chat-setup-grid').querySelectorAll('.new-chat-setup-label'),
+    ).map((l) => l.textContent);
+    expect(labels).toEqual(['Machine', 'Account', 'Project', 'Model']);
+    // The machine control is labelled by the row, and says Machine, never host.
+    expect(screen.getByTestId('new-chat-host')).toHaveAttribute('aria-label', 'Machine');
+    expect(screen.getByTestId('new-chat-host')).not.toHaveAttribute('title');
+    expect(screen.getByTestId('host-option-d2')).not.toHaveAttribute('title');
   });
 
   it('draws no quick toggles when there are no projects to offer', async () => {
@@ -1649,12 +1688,7 @@ describe('/chats/new', () => {
     fireEvent.click(use);
     // Now it SELECTS the browsed dir and closes.
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
-    // H2: pill shows basename; full path on hover.
-    const label = screen
-      .getByTestId('new-chat-folder-pill')
-      .querySelector('.folder-pill-label') as HTMLElement;
-    expect(label.textContent).toBe('portfolio');
-    expect(label).toHaveAttribute('title', '/home/tom/projects/portfolio');
+    expect(chosenFolderLabel()).toBe('portfolio');
   });
 
   it('attaches to a NEW chat: creates the chat FIRST, uploads to the real id (not "new"), then sends', async () => {
@@ -2007,12 +2041,7 @@ describe('/chats/new', () => {
       </QueryClientProvider>,
     );
     // The MRU folder ('/newest') seeds the folder pill via the sync effect.
-    // H2: the pill shows the basename ('newest'), full path on hover.
-    const label = screen
-      .getByTestId('new-chat-folder-pill')
-      .querySelector('.folder-pill-label') as HTMLElement;
-    expect(label.textContent).toBe('newest');
-    expect(label).toHaveAttribute('title', '/newest');
+    expect(chosenFolderLabel()).toBe('newest');
   });
 
   // Paths are scoped to their host (spec/04 § Spawn), and the picker's folder
@@ -2074,12 +2103,7 @@ describe('/chats/new', () => {
         chats: { late: makeRow('late', '/late-hydrated', 500) },
       });
     });
-    // H2: basename in the pill, full path on hover.
-    const label = screen
-      .getByTestId('new-chat-folder-pill')
-      .querySelector('.folder-pill-label') as HTMLElement;
-    expect(label.textContent).toBe('late-hydrated');
-    expect(label).toHaveAttribute('title', '/late-hydrated');
+    expect(chosenFolderLabel()).toBe('late-hydrated');
   });
 
   it('a double-fire send while a chat creation is already in flight is a no-op the second time', async () => {
@@ -2540,12 +2564,7 @@ describe('/chats/new', () => {
     fireEvent.change(input, { target: { value: '/tmp/typed' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
-    // H2: pill shows the basename of the typed path; full path on hover.
-    const label = screen
-      .getByTestId('new-chat-folder-pill')
-      .querySelector('.folder-pill-label') as HTMLElement;
-    expect(label.textContent).toBe('typed');
-    expect(label).toHaveAttribute('title', '/tmp/typed');
+    expect(chosenFolderLabel()).toBe('typed');
   });
 
   // ---- The folder picker NEVER browses the surface's own machine ----
@@ -2577,9 +2596,7 @@ describe('/chats/new', () => {
     fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
     fireEvent.click(await screen.findByTestId('folder-browser-entry-portfolio'));
     fireEvent.click(await screen.findByTestId('folder-browser-use'));
-    expect(
-      screen.getByTestId('new-chat-folder-pill').querySelector('.folder-pill-label')?.textContent,
-    ).toBe('portfolio');
+    expect(chosenFolderLabel()).toBe('portfolio');
   });
 });
 
@@ -2758,7 +2775,7 @@ describe('/chats/new model picker treatment', () => {
     renderNewChat();
     const model = screen.getByTestId('new-chat-model');
     const current = MODEL_OPTIONS.find((m: ModelOption) => m.id === ACCOUNT_DEFAULT_MODEL)!;
-    expect(model.querySelector('.model-pill-label')?.textContent).toBe(current.label);
+    expect(chosenModelLabel()).toBe(current.label);
     expect(screen.queryByTestId('model-popup')).not.toBeInTheDocument();
     expect(model).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(model);
@@ -2774,9 +2791,7 @@ describe('/chats/new model picker treatment', () => {
     fireEvent.click(screen.getByTestId('new-chat-model'));
     fireEvent.click(screen.getByTestId(`model-option-${target.id}`));
     expect(screen.queryByTestId('model-popup')).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId('new-chat-model').querySelector('.model-pill-label')?.textContent,
-    ).toBe(target.label);
+    expect(chosenModelLabel()).toBe(target.label);
   });
 
   // The picker used to append the host's code to its own copy
@@ -2881,9 +2896,7 @@ describe('/chats/new — opens on the last new chat', () => {
       </QueryClientProvider>,
     );
   }
-  const pillLabel = (): string | null =>
-    (screen.getByTestId('new-chat-folder-pill').querySelector('.folder-pill-label') as HTMLElement)
-      .textContent;
+  const pillLabel = (): string | null | undefined => chosenFolderLabel();
 
   it('uses the recorded folder over a newer chat, and ignores chats changing afterwards', () => {
     saveLastNewChat({ hostId: 'd1', folder: '/home/tom/projects/mine', model: null });
@@ -2901,6 +2914,25 @@ describe('/chats/new — opens on the last new chat', () => {
       });
     });
     expect(pillLabel()).toBe('mine');
+  });
+
+  it('opens on the account default model, not the model of the last new chat', () => {
+    saveLastNewChat({
+      hostId: 'd1',
+      folder: '/home/tom/projects/mine',
+      model: 'claude-haiku-4-5',
+    });
+    renderNewChat();
+    // The default exists to be the default (Settings → Agent → Model for new
+    // chats); the last chat's pick is not carried forward.
+    expect(screen.getByTestId(`model-quick-${ACCOUNT_DEFAULT_MODEL}`)).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByTestId('model-quick-claude-haiku-4-5')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 
   it('records the folder and model when a new chat is created, and nothing before', async () => {

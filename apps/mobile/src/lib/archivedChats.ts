@@ -41,8 +41,66 @@ function useLazySection(
   }, [wanted, generation]);
 }
 
-export function useArchivedChats(wanted: boolean): void {
-  useLazySection(wanted, () => api.listArchivedChats(), 'archived');
+export const ARCHIVED_PAGE_SIZE = 30;
+
+// Archived is unbounded, so it is paged like the web sidebar (spec/14 § Sidebar
+// item 6): one page when the section opens, the next when the list is scrolled
+// near its end (`loadMore`). `all` — a search is running — pulls every
+// remaining page, because a local match further down would otherwise not show.
+// A roster bump resets to the first page, as the rows were dropped.
+export function useArchivedChats(wanted: boolean, all = false): { loadMore: () => void } {
+  const generation = useChatStore((s) => s.rosterGeneration);
+  // undefined = first page not requested; null = nothing left; number = next offset.
+  const nextRef = React.useRef<number | null | undefined>(undefined);
+  const loadingRef = React.useRef(false);
+  const liveRef = React.useRef(false);
+  const allRef = React.useRef(all);
+  allRef.current = all;
+
+  const load = React.useCallback((offset: number) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    api
+      .listArchivedChats({ limit: ARCHIVED_PAGE_SIZE, offset })
+      .then((r) => {
+        loadingRef.current = false;
+        if (!liveRef.current) return;
+        useChatStore.getState().mergeRows(r.chats.map(toChatListRow));
+        nextRef.current = r.nextOffset;
+        if (allRef.current && r.nextOffset !== null) load(r.nextOffset);
+      })
+      .catch((e: Error) => {
+        loadingRef.current = false;
+        if (!liveRef.current) return;
+        useUiStore.getState().pushError(`failed to load archived chats: ${e.message}`);
+      });
+  }, []);
+
+  React.useEffect(() => {
+    if (!wanted) return;
+    liveRef.current = true;
+    nextRef.current = undefined;
+    loadingRef.current = false;
+    load(0);
+    return () => {
+      liveRef.current = false;
+    };
+  }, [wanted, generation, load]);
+
+  React.useEffect(() => {
+    if (!wanted || !all) return;
+    const next = nextRef.current;
+    if (next === null || next === undefined) return;
+    load(next);
+  }, [wanted, all, load]);
+
+  const loadMore = React.useCallback(() => {
+    const next = nextRef.current;
+    if (next === null || next === undefined) return;
+    load(next);
+  }, [load]);
+
+  return { loadMore };
 }
 
 export function useHiddenChats(wanted: boolean): void {

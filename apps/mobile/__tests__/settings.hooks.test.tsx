@@ -87,7 +87,7 @@ beforeEach(() => {
   __clearLastAlert();
   useUiStore.setState({ errors: [] });
   resetHosts();
-  reportHost('home', { hostName: 'laptop', isHomeHost: true });
+  reportHost('home', { hostName: 'laptop', runsManager: true });
   vi.mocked(api.listHooks)
     .mockReset()
     .mockResolvedValue({ hooks: [scriptHook, promptHook] });

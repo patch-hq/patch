@@ -30,18 +30,21 @@ import { DEFAULT_SETTINGS_PAGE, SETTINGS_PAGES, type SettingsPageId } from './se
 import { SettingsBackContext } from './settings/ui.js';
 import { useBehind } from './settings/UpdatesPage.js';
 import { UsagePage } from './settings/UsagePage.js';
+import { ChatsPage } from './settings/ChatsPage.js';
 import { AgentPage } from './settings/AgentPage.js';
 import { McpPage } from './settings/McpPage.js';
 import { MemoriesPage } from './settings/MemoriesPage.js';
 import { ManagerPage } from './settings/ManagerPage.js';
 import { GoalsPage } from './settings/GoalsPage.js';
+import { PromptsPage } from './settings/PromptsPage.js';
 import { VoicePage } from './settings/VoicePage.js';
+import { ShortcutsPage } from './settings/ShortcutsPage.js';
 import { HooksPage } from './settings/HooksPage.js';
 import { ComputerUsePage } from './settings/ComputerUsePage.js';
 import { HostsPage } from './settings/HostsPage.js';
 import { AgentIdentityPage } from './settings/AgentIdentityPage.js';
 import { ActivityPage } from './settings/ActivityPage.js';
-import { KeysPage } from './settings/KeysPage.js';
+import { ProvidersPage } from './settings/ProvidersPage.js';
 import { DevicesPage } from './settings/DevicesPage.js';
 import { NotificationsPage } from './settings/NotificationsPage.js';
 import { UpdatesPage } from './settings/UpdatesPage.js';
@@ -49,18 +52,21 @@ import { AccountPage } from './settings/AccountPage.js';
 
 const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   usage: UsagePage,
+  chats: ChatsPage,
   agent: AgentPage,
   mcp: McpPage,
   memories: MemoriesPage,
   manager: ManagerPage,
   goals: GoalsPage,
+  prompts: PromptsPage,
   voice: VoicePage,
+  shortcuts: ShortcutsPage,
   hooks: HooksPage,
   computer: ComputerUsePage,
   activity: ActivityPage,
   hosts: HostsPage,
   identity: AgentIdentityPage,
-  keys: KeysPage,
+  providers: ProvidersPage,
   notifications: NotificationsPage,
   devices: DevicesPage,
   updates: UpdatesPage,

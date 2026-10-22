@@ -3,7 +3,7 @@
 // on launch or when this surface returns to the foreground — never while the
 // user is mid-use, so a screen does not move under a hand.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { positionFromPath, pathFromPosition } from '../lib/viewPosition.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -18,18 +18,28 @@ const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 
 export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   const location = useLocation();
+  // Captures and detached tabs have an explicitly requested screen. They
+  // must neither adopt the account's last page nor publish their own position.
+  const [isolated] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('tabWindow') === '1' || params.has('capture');
+  });
   const navigate = useNavigate();
   const remote = useViewPositionStore((s) => s.remote);
   const scroll = useViewPositionStore((s) => s.scroll);
   // Account-wide "Sync position between surfaces". Until the preferences have
   // loaded the answer is unknown, so nothing is reported or adopted.
-  const enabled = usePreferencesStore((s) => s.loaded && s.preferences.syncPosition);
+  const enabled = usePreferencesStore((s) => s.loaded && s.preferences.syncPosition) && !isolated;
   // The user has touched this surface since it launched / came to the front.
   const activeRef = useRef(false);
   // Still waiting for the launch snapshot.
   const launchRef = useRef(true);
+  // Bumped on the first touch after launch / foreground so the page the user is
+  // already on is reported without them having to navigate or scroll first.
+  const [activations, setActivations] = useState(0);
 
-  const adopt = (): void => {
+  const adopt = (allowOwn = false): void => {
+    if (isolated) return;
     const st = useViewPositionStore.getState();
     const own = usePresenceStore.getState().surfaceId;
     const r = st.remote;
@@ -38,7 +48,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
       !usePreferencesStore.getState().loaded
     )
       return;
-    if (!r || r.surfaceId === own || r.updatedAt <= st.handledAt) return;
+    if (!r || (r.surfaceId === own && !allowOwn) || r.updatedAt <= st.handledAt) return;
     st.markHandled(r.updatedAt);
     navigate(pathFromPosition(r));
   };
@@ -46,12 +56,13 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   useEffect(() => {
     if (enabled && remote && launchRef.current && !activeRef.current) {
       launchRef.current = false;
-      adopt();
+      adopt(true);
     }
   }, [remote, enabled]);
 
   useEffect(() => {
     const onInput = (): void => {
+      if (!activeRef.current) setActivations((n) => n + 1);
       activeRef.current = true;
       launchRef.current = false;
     };
@@ -85,7 +96,7 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
       if (pos) ws.send({ type: 'view_position.set', ...pos });
     }, VIEW_POSITION_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [ws, enabled, location.pathname, scroll]);
+  }, [ws, enabled, location.pathname, scroll, activations]);
 
   return null;
 }

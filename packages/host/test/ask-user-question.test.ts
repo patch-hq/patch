@@ -108,6 +108,35 @@ describe('AskUserQuestion: the question reaches the surface', () => {
   });
 });
 
+describe('AskUserQuestion: an answered question survives a replay', () => {
+  it('replays the card as a request followed by a response carrying the picked answers', async () => {
+    const { daemon, events, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
+    await tick();
+    const req = permissionRequest(events);
+    daemon.submitPermissionResponse({
+      requestId: req.requestId,
+      decision: 'approve_with_edits',
+      editedNewString: JSON.stringify({ [QUESTION]: 'Luxon' }),
+    });
+    await tick();
+
+    const replayed: WireEvent[] = [];
+    daemon.replayChat(chatId, -1, (e) => replayed.push(e));
+
+    const reqIdx = replayed.findIndex(
+      (e) => e.type === 'chat.permission_request' && e.requestId === req.requestId,
+    );
+    const res = replayed.find(
+      (e) => e.type === 'chat.permission_response' && e.requestId === req.requestId,
+    ) as { approve: boolean; answers?: Record<string, string> } | undefined;
+    expect(reqIdx, 'the answered question was dropped from replay').toBeGreaterThanOrEqual(0);
+    expect(res?.approve).toBe(true);
+    expect(res?.answers).toEqual({ [QUESTION]: 'Luxon' });
+    expect(replayed.findIndex((e) => e === res)).toBeGreaterThan(reqIdx);
+  });
+});
+
 describe('AskUserQuestion: answers reach updatedInput via the non-edit branch', () => {
   it('a single-select answer lands on the tool input as answers[question]', async () => {
     const { daemon, events, folder } = setup();

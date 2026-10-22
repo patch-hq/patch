@@ -576,7 +576,7 @@ export function Composer({
       useUiStore
         .getState()
         .pushError(
-          `the host did not switch the model — this chat is still on ${chatModel ?? 'its previous model'}`,
+          `the machine did not switch the model — this chat is still on ${chatModel ?? 'its previous model'}`,
         );
     }, MODEL_CONFIRM_TIMEOUT_MS);
     return () => clearTimeout(t);
@@ -1592,6 +1592,7 @@ export function Composer({
               // the field is still holding.
               minHeight: COMPOSER_MIN_HEIGHT,
               maxHeight: COMPOSER_MAX_HEIGHT,
+              overflow: 'hidden',
             }}
           >
             <Text

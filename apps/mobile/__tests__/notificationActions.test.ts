@@ -28,8 +28,8 @@ describe('planActions', () => {
   it('a message with quickReplies puts them ahead of Reply', () => {
     const plan = planActions({ kind: 'message', quickReplies: ['Yes', 'Snooze 10 min'] });
     expect(plan.map((a) => a.identifier)).toEqual(['quickreply-0', 'quickreply-1', 'reply']);
-    expect(plan[0]).toMatchObject({ buttonTitle: 'Yes', opensAppToForeground: false });
-    expect(plan[1]).toMatchObject({ buttonTitle: 'Snooze 10 min', opensAppToForeground: false });
+    expect(plan[0]).toMatchObject({ buttonTitle: 'Yes', opensAppToForeground: true });
+    expect(plan[1]).toMatchObject({ buttonTitle: 'Snooze 10 min', opensAppToForeground: true });
   });
 
   it('a permission carries Approve (opens app) and Deny (does not)', () => {
@@ -47,8 +47,8 @@ describe('planActions', () => {
       options: ['OAuth', 'JWT'],
     });
     expect(plan).toEqual([
-      { identifier: 'option-0', buttonTitle: 'OAuth', opensAppToForeground: false },
-      { identifier: 'option-1', buttonTitle: 'JWT', opensAppToForeground: false },
+      { identifier: 'option-0', buttonTitle: 'OAuth', opensAppToForeground: true },
+      { identifier: 'option-1', buttonTitle: 'JWT', opensAppToForeground: true },
     ]);
   });
 

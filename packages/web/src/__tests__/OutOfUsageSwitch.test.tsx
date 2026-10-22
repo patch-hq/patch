@@ -87,7 +87,9 @@ describe('OutOfUsageBanner — offering the other provider', () => {
     fireEvent.click(btn);
     expect(sent).toEqual([]); // the cross-provider warning comes first
     fireEvent.click(screen.getByRole('button', { name: /^switch$/i }));
-    expect(sent).toEqual([{ type: 'chat.model_request', chatId: 'c1', model: 'openai/gpt-5' }]);
+    expect(sent).toEqual([
+      { type: 'chat.model_request', chatId: 'c1', model: 'openai/gpt-5', retry: true },
+    ]);
   });
 
   it('switches at once when the warning is turned off', () => {
@@ -111,7 +113,9 @@ describe('OutOfUsageBanner — offering the other provider', () => {
     expect(screen.getByTestId('out-of-usage-switch').textContent).toBe('Switch to Claude');
     fireEvent.click(screen.getByTestId('out-of-usage-switch'));
     fireEvent.click(screen.getByRole('button', { name: /^switch$/i }));
-    expect(sent).toEqual([{ type: 'chat.model_request', chatId: 'c1', model: 'claude-opus-5' }]);
+    expect(sent).toEqual([
+      { type: 'chat.model_request', chatId: 'c1', model: 'claude-opus-5', retry: true },
+    ]);
   });
 
   it('offers nothing when the other provider is spent too', () => {

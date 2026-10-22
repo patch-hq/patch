@@ -13,7 +13,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type WebSocket from 'ws';
-import { CLOSE_AUTH_FAILED, CLOSE_MALFORMED_FRAME as CLOSE_BAD_FRAME } from '@patch/wire';
+import {
+  CLOSE_AUTH_FAILED,
+  CLOSE_MALFORMED_FRAME as CLOSE_BAD_FRAME,
+  CLOSE_SERVER_RESTARTING,
+} from '@patch/wire';
 import {
   decode,
   encode,
@@ -30,6 +34,7 @@ import {
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey, CredentialExpiredError } from '@patch/auth';
 import type { Registry } from './registry.js';
+import type { ActivityLog } from './activity-log.js';
 import type { PresenceTracker, ClientBuildInfo } from './presence.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
@@ -129,6 +134,8 @@ const DETAIL_LEVEL_EVENT_TYPES = new Set<WireEvent['type']>([
   'patch.browser_view.frame',
   'patch.browser_view.status',
   'patch.browser_handoff.state',
+  'patch.browser_view.clipboard',
+  'patch.browser_view.form',
   // Meeting mode: the whole panel (transcript included) re-sent on every clip.
   // Only a surface watching the chat draws it.
   'meeting.state',
@@ -140,13 +147,6 @@ export interface WsHubDeps {
   sharedSettings?: () => WireEvent;
   registry: Registry;
   presence: PresenceTracker;
-  /**
-   * Told when what a computer's presence rests on may have changed (an input
-   * report, a surface going offline) and when a surface opens a chat, so the
-   * handover to the phone (spec/09 § Handing over to the phone) reacts in
-   * seconds rather than at its next tick.
-   */
-  presenceHandover?: { check(): Promise<unknown>; opened(chatId: string): void };
   hostLink: HostLink;
   /**
    * Server-side mirror of chat activity. On host-link loss the hub queries it
@@ -154,6 +154,14 @@ export interface WsHubDeps {
    * turn-completion event will never arrive from the now-gone host).
    */
   chatRegistry: ChatRegistry;
+  /**
+   * Chat dwell-session log (`activity-log.ts`) — `patch_activity`'s sessions
+   * (spec/06 § Cross-chat toolset). Recorded here, at the single point every
+   * surface's focus/visibility frames pass through regardless of which host a
+   * chat is on. Optional so the many unit tests that construct a bare hub
+   * needn't supply one; production (`app.ts`) always does.
+   */
+  activity?: ActivityLog;
   /**
    * How long a host must stay offline before its in-flight chats are forced to
    * `errored`. A link that drops and returns inside this window (a network
@@ -187,8 +195,8 @@ export interface WsHubDeps {
   /** Told what the server committed, so each host can be told how far its chats reach. */
   commitAcks?: CommitAcks;
   /**
-   * Which host runs the Manager when the home host is away, and the stretch of
-   * the Manager's transcript the home host's own log is missing.
+   * Which host runs the Manager when the Manager host is away, and the stretch of
+   * the Manager's transcript the Manager host's own log is missing.
    */
   managerFailover?: ManagerFailover;
   /** Server-owned new-chat drafts (spec/14 § New chat drafts). */
@@ -224,6 +232,8 @@ export interface WsHubDeps {
    */
   serverVersion?: string;
   publishedHost?: () => { version: string; targets: string[] } | null;
+  /** Whether a behind host is told to update on connect (shared `autoUpdateHosts`). Absent: yes. */
+  autoUpdateHosts?: () => boolean;
 }
 
 export class WsHub {
@@ -342,18 +352,18 @@ export class WsHub {
   }
 
   /**
-   * The account's HOME machine (spec/06). Exactly one machine holds it: the
+   * The Manager machine (spec/06). Exactly one machine holds it: the
    * registry's explicit choice, else the first registered machine.
    */
-  private homeHostId(): string | null {
-    return this.deps.registry.homeHostId() ?? this.registeredHostIds()[0] ?? null;
+  private managerHostId(): string | null {
+    return this.deps.registry.managerHostId() ?? this.registeredHostIds()[0] ?? null;
   }
 
   /**
    * Apply the SERVER-owned fields to a machine's self-description before it
    * reaches a surface: the user-editable name (`host.rename` is surface →
-   * server) and the home flag (`host.set_home`). The registry is the authority
-   * for both, so exactly one machine can claim home and a rename survives the
+   * server) and whether it runs the Manager. The registry is the authority
+   * for both, so exactly one machine can claim the Manager and a rename survives the
    * machine restarting.
    */
   private withServerOwnedHostFields(event: HostInfoEvent): HostInfoEvent {
@@ -361,7 +371,7 @@ export class WsHub {
     return {
       ...event,
       ...(name !== undefined ? { hostName: name } : {}),
-      isHomeHost: this.homeHostId() === event.hostId,
+      runsManager: this.managerHostId() === event.hostId,
     };
   }
 
@@ -602,7 +612,7 @@ export class WsHub {
     this.newChatDraftsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close();
+        conn.socket.close(CLOSE_SERVER_RESTARTING, 'server restarting');
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)
@@ -836,7 +846,6 @@ export class WsHub {
         // as it once did, unroute the window that is still open).
         if (lastForSurface) {
           this.deps.presence.offline(conn.accountId, conn.surfaceId);
-          this.checkHandover();
         }
       } else {
         log.info({}, 'ws close (pre-auth)');
@@ -845,12 +854,6 @@ export class WsHub {
 
     socket.on('error', (err: Error) => {
       log.warn({ err: err.message }, 'ws error');
-    });
-  }
-
-  private checkHandover(): void {
-    this.deps.presenceHandover?.check().catch((err: Error) => {
-      this.deps.logger.error({ err: err.message }, 'handover to phone failed');
     });
   }
 
@@ -1177,6 +1180,7 @@ export class WsHub {
       case 'incomparable':
         return;
       case 'update':
+        if (this.deps.autoUpdateHosts && !this.deps.autoUpdateHosts()) return;
         log.warn(ctx, 'host is behind the server; telling it to update');
         socket.send(encode({ type: 'host.update', hostId }));
         return;
@@ -1214,7 +1218,7 @@ export class WsHub {
 
   /**
    * Re-publish a machine's self-description to every surface after the SERVER
-   * changed something it owns (its name, the home flag). Without this the
+   * changed something it owns (its name, whether it runs the Manager). Without this the
    * change would only appear the next time the machine happened to speak.
    */
   private republishHost(hostId: string): void {
@@ -1312,19 +1316,21 @@ export class WsHub {
           scope: event.scope,
           ...(event.away ? { away: event.away } : {}),
         });
-        this.checkHandover();
         return;
       }
       case 'surface.foregrounded':
       case 'surface.backgrounded': {
-        // Not persisted (we reuse heartbeat semantics so a surface that
-        // explicitly foregrounds doesn't fall stale).
+        // Not persisted for PRESENCE (we reuse heartbeat semantics so a surface
+        // that explicitly foregrounds doesn't fall stale) — but it IS the
+        // visibility half of `patch_activity`'s dwell-time reconstruction
+        // (activity-log.ts), which presence's current-state-only model can't answer.
         this.deps.presence.heartbeat(conn.accountId, conn.surfaceId);
+        this.deps.activity?.recordVisibility(conn.surfaceId, event.type === 'surface.foregrounded');
         return;
       }
       case 'chat.focus_change': {
         this.deps.presence.setFocus(conn.accountId, conn.surfaceId, event.chatId);
-        if (event.chatId !== null) this.deps.presenceHandover?.opened(event.chatId);
+        this.deps.activity?.recordFocus(conn.surfaceId, event.chatId);
         if (event.chatId === null) {
           // Unsubscribe from everything.
           conn.watchedChats.clear();
@@ -1373,6 +1379,12 @@ export class WsHub {
         }
         // chat.input is a focus signal too — surface clearly cares about this chat.
         conn.watchedChats.add(event.chatId);
+        // A message sent is a draft done (spec/14 § Composer): drop the chat's
+        // server draft whichever surface sent it, so a surface that did not
+        // clear its own copy (killed mid-send, a different surface) cannot
+        // resurrect already-sent text on the next snapshot. Only for a fresh
+        // input: a redelivery must not wipe what the user has typed since.
+        if (fresh) this.deps.composerDrafts?.clear(event.chatId);
         // Group 12 (HIGH-1): strip `source` on the surface ingress path.
         // Only the voice-device hook may attach `source`
         // (per ChatInputSource JSDoc). A surface that sets it would otherwise
@@ -1432,7 +1444,7 @@ export class WsHub {
       }
       // ---- host-scoped controls the SERVER owns (spec/03 § Host events) ----
       // The registry entry — not the machine — holds the user-editable name and
-      // which machine is home, so these two are answered here and the result is
+      // which machine runs the Manager, so these two are answered here and the result is
       // pushed to every surface. The machine is told as well, so its own CLI
       // and self-description agree with the registry.
       case 'host.rename': {
@@ -1448,25 +1460,6 @@ export class WsHub {
         );
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, event);
         this.republishHost(event.hostId);
-        return;
-      }
-      case 'host.set_home': {
-        try {
-          this.deps.registry.setHomeHostId(event.hostId);
-        } catch (err) {
-          this.sendControlError(conn, 'invalid_frame', (err as Error).message);
-          return;
-        }
-        slog.info({ hostId: event.hostId }, 'home machine changed');
-        // EVERY machine's flag moves: the new home gains it and the previous
-        // one loses it, so exactly one machine reports it.
-        for (const hostId of this.registeredHostIds()) {
-          this.deps.hostLink.sendTo(hostId, conn.surfaceId, {
-            type: 'host.set_home',
-            hostId: event.hostId,
-          });
-          this.republishHost(hostId);
-        }
         return;
       }
       // ---- host-scoped controls the MACHINE owns ----
@@ -1491,7 +1484,7 @@ export class WsHub {
       // a UI sender and a host handler; three of those four are no use.
       case 'host.backend_add_account':
       case 'host.backend_usage_refresh':
-      case 'host.claude_settings_discard':
+      case 'host.claude_settings_set':
       case 'host.claude_memory_delete':
       case 'host.claude_memory_set': {
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, event);
@@ -1517,7 +1510,13 @@ export class WsHub {
       case 'patch.browser_view.stop':
       case 'patch.browser_handoff.input':
       case 'patch.browser_handoff.control':
+      case 'patch.browser_view.input':
+      case 'patch.browser_view.drive':
       case 'meeting.action_request':
+      case 'meeting.notes_request':
+      case 'meeting.my_notes_request':
+      case 'meeting.writeup_request':
+      case 'meeting.research_request':
       case 'chat.archive_request':
       case 'chat.snooze_request':
       case 'chat.snooze_back_clear_request':
@@ -1528,6 +1527,7 @@ export class WsHub {
       // switch is relayed untouched and answered by the `chat.state` that host
       // emits. The server holds no model of its own to keep in step.
       case 'chat.model_request':
+      case 'chat.handoff_recover_request':
       case 'chat.account_request':
       case 'patch.peek.request':
       case 'patch.send_to':
@@ -1631,7 +1631,9 @@ export class WsHub {
 
   /**
    * A replay for a chat whose host is offline cannot be answered by the host,
-   * so answer it from the transcript the server holds. The request is still
+   * so answer it from the transcript the server holds. The same goes for a chat
+   * the registry does not know yet: right after a server restart surfaces
+   * reconnect before any host has re-announced its chats. The request is still
    * sent on: the host answers it when it is back, and a surface drops the
    * events it already has.
    */
@@ -1642,8 +1644,8 @@ export class WsHub {
     const store = this.deps.chatLogStore;
     if (!store) return;
     const hostId = this.deps.chatRegistry.get(request.chatId)?.hostId;
-    const hostOffline = hostId !== undefined && !this.deps.hostLink.isOnline(hostId);
-    // The home host's own log does not hold what the Manager said while another
+    const hostOffline = hostId === undefined || !this.deps.hostLink.isOnline(hostId);
+    // The Manager host's own log does not hold what the Manager said while another
     // host stood in for it, so that stretch is added from the server's copy.
     const events = hostOffline
       ? store.read(request.chatId, request.fromSeq)
@@ -1720,7 +1722,14 @@ export class WsHub {
       // Pad file bundles and answers: consumed by the pads bridge (spec/14 § Pads).
       event.type === 'patch.pad.request' ||
       event.type === 'patch.pad.response' ||
+      // Shared-accounts asks and answers: consumed by the accounts bridge.
+      event.type === 'patch.accounts.request' ||
+      event.type === 'patch.accounts.response' ||
+      event.type === 'patch.api.request' ||
+      event.type === 'patch.api.response' ||
       event.type === 'patch.host_files.response' ||
+      // The summary is answered over REST to the one caller that asked.
+      event.type === 'patch.link_summary.response' ||
       event.type === 'patch.chat_move.response' ||
       event.type === 'patch.chat_search.response' ||
       // A host's question to the server-run queue is answered by the server alone.
@@ -1754,11 +1763,11 @@ export class WsHub {
     if (event.type === 'host.host') {
       this.lastHostReport.set(event.hostId, event);
       this.hostLastSeenAt.set(event.hostId, Date.now());
-      // The name and the home flag are SERVER-owned (spec/03: `host.rename` and
-      // `host.set_home` are surface → server). Overwrite what the machine
+      // The name and the Manager flag are SERVER-owned (spec/03: `host.rename` is
+      // surface → server, `host.set_manager` server → host). Overwrite what the machine
       // reported before any surface sees it, so a rename is not undone by the
       // machine's next self-description and two machines can never both claim
-      // home.
+      // the Manager.
       event = this.withServerOwnedHostFields(event);
     }
     if (event.type === 'folders.list' || event.type === 'folders.updated') {
@@ -1779,7 +1788,7 @@ export class WsHub {
       this.lastClaudeSettings.set(event.hostId, {
         type: 'claude_settings.list',
         hostId: event.hostId,
-        ...(event.drift !== undefined ? { drift: event.drift } : {}),
+        settingsJson: event.settingsJson,
         memories: event.memories,
       });
     }
@@ -1990,9 +1999,9 @@ export class WsHub {
   }
 
   /**
-   * Re-publish every machine's self-description after the home machine moved
-   * without anyone choosing it (the home machine was removed), so exactly one
-   * machine reads as home on every surface.
+   * Re-publish every machine's self-description after the Manager machine moved
+   * without anyone choosing it (the Manager machine was removed), so exactly one
+   * machine reads as running the Manager on every surface.
    */
   republishAllHosts(): void {
     for (const hostId of this.registeredHostIds()) this.republishHost(hostId);

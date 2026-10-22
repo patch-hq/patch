@@ -7,13 +7,15 @@
 // terminals and pages join as later stages extend `TabDescriptor`
 // (`stores/layoutStore.ts`) and the `TabContent` switch below.
 
-import { Fragment, useCallback, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { DragEvent as ReactDragEvent, JSX, MouseEvent as ReactMouseEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/rest.js';
 import {
   ExternalLink,
   Files,
+  Globe,
   FolderTree,
   PanelRightOpen,
   Settings as SettingsIcon,
@@ -35,10 +37,10 @@ import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { StatusBadge } from './StatusBadge.js';
-import { deriveBadge } from '../stores/chatStore.js';
+import { useChatBadge } from './ChatStatusBadge.js';
 import { openTabInNewWindow } from '../lib/newWindow.js';
 import { CloseIcon } from './icons.js';
-import { shortcutTitle } from '../lib/shortcuts.js';
+import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { SideThreadsPanel } from './SideThreadsPanel.js';
 import { FileEditorTab } from './FileEditorTab.js';
@@ -48,6 +50,7 @@ import { JobsRoute } from '../routes/JobsRoute.js';
 import { JobEditorRoute } from '../routes/JobEditorRoute.js';
 import { SettingsRoute } from '../routes/SettingsRoute.js';
 import { TerminalPanel } from './TerminalPanel.js';
+import { BrowserView } from './BrowserView.js';
 import { PadsPage } from './PadsPage.js';
 import { PadPane } from './PadPane.js';
 import { NewPadPage } from './NewPadPage.js';
@@ -64,7 +67,7 @@ interface DragPayload {
   tabId: string;
 }
 
-function readDragPayload(e: ReactDragEvent): DragPayload | null {
+function readDragPayload(e: { dataTransfer: DataTransfer | null }): DragPayload | null {
   const raw = e.dataTransfer?.getData(TAB_DRAG_TYPE);
   if (!raw) return null;
   try {
@@ -114,6 +117,8 @@ function tabTitle(
       return chatTitle(d.chatId, chatName);
     case 'terminal':
       return `Terminal — ${chatTitle(d.chatId, chatName)}`;
+    case 'browser':
+      return `Browser — ${chatTitle(d.chatId, chatName)}`;
     case 'file':
       return d.path.includes('/') ? d.path.slice(d.path.lastIndexOf('/') + 1) : d.path;
     case 'page':
@@ -148,6 +153,8 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
       return null;
     case 'terminal':
       return <TerminalSquare size={13} aria-hidden />;
+    case 'browser':
+      return <Globe size={13} aria-hidden />;
     case 'file':
       return <Files size={13} aria-hidden />;
     case 'page':
@@ -168,10 +175,73 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
   }
 }
 
+// Tab content is mounted ONCE per tab, in `PaneArea`, into a detached host
+// element that belongs to the tab. The pane it is shown in only adopts that
+// element into its content slot. Moving a tab to another pane or splitting it
+// out therefore moves a DOM node instead of unmounting and remounting the
+// content, so a chat, terminal or editor keeps its state.
+const tabHostEls = new Map<string, HTMLElement>();
+
+function tabHostEl(tabId: string): HTMLElement {
+  let el = tabHostEls.get(tabId);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'tab-host';
+    el.style.display = 'contents';
+    tabHostEls.set(tabId, el);
+  }
+  return el;
+}
+
+function activeLeafTabs(node: PaneNode, out: { pane: LeafPane; tab: Tab }[] = []) {
+  if (node.type === 'leaf') {
+    const tab = node.tabs.find((t) => t.id === node.activeTabId);
+    if (tab) out.push({ pane: node, tab });
+  } else {
+    for (const c of node.children) activeLeafTabs(c.pane, out);
+  }
+  return out;
+}
+
+function HostedTab({
+  tab,
+  focused,
+  ws,
+}: {
+  tab: Tab;
+  focused: boolean;
+  ws: PatchWs | null;
+}): JSX.Element {
+  const el = tabHostEl(tab.id);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // Deferred so StrictMode's simulated unmount/remount, which runs in the
+      // same task, doesn't tear down the host the portal is still rendering into.
+      queueMicrotask(() => {
+        if (mounted.current) return;
+        el.remove();
+        if (tabHostEls.get(tab.id) === el) tabHostEls.delete(tab.id);
+      });
+    };
+  }, [el, tab.id]);
+  return createPortal(<TabContent tab={tab} focused={focused} ws={ws} />, el);
+}
+
 export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
   const root = useLayoutStore((s) => s.root);
+  const activePaneId = useLayoutStore((s) => s.activePaneId);
   const totalPanes = countPanes(root);
-  return <PaneNodeView node={root} ws={ws} totalPanes={totalPanes} />;
+  return (
+    <>
+      <PaneNodeView node={root} ws={ws} totalPanes={totalPanes} />
+      {activeLeafTabs(root).map(({ pane, tab }) => (
+        <HostedTab key={tab.id} tab={tab} focused={pane.id === activePaneId} ws={ws} />
+      ))}
+    </>
+  );
 }
 
 function PaneNodeView({
@@ -184,7 +254,7 @@ function PaneNodeView({
   totalPanes: number;
 }): JSX.Element {
   const resizeSplit = useLayoutStore((s) => s.resizeSplit);
-  if (node.type === 'leaf') return <Pane pane={node} ws={ws} totalPanes={totalPanes} />;
+  if (node.type === 'leaf') return <Pane pane={node} totalPanes={totalPanes} />;
   return (
     <div
       className={`pane-split pane-split-${node.direction}`}
@@ -214,15 +284,7 @@ function PaneNodeView({
 // imported twice under two names in the same file.
 import { PaneDivider as PaneDividerHandle } from './PaneDivider.js';
 
-function Pane({
-  pane,
-  ws,
-  totalPanes,
-}: {
-  pane: LeafPane;
-  ws: PatchWs | null;
-  totalPanes: number;
-}): JSX.Element {
+function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX.Element {
   const activePaneId = useLayoutStore((s) => s.activePaneId);
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const moveTab = useLayoutStore((s) => s.moveTab);
@@ -240,10 +302,14 @@ function Pane({
   // only to drive the visible highlight — `.pane-dropzone` below.
   const dropEdgeRef = useRef<SplitEdge | 'center' | null>(null);
 
-  const onContentDragOver = useCallback((e: ReactDragEvent<HTMLDivElement>): void => {
+  // NATIVE listeners, not React's: the tab's content is portalled in
+  // (`HostedTab`), so a drop on it bubbles through the DOM to this pane but
+  // through React to `PaneArea`, and a React `onDrop` here never heard it.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const onContentDragOver = useCallback((e: DragEvent): void => {
     if (!e.dataTransfer?.types.includes(TAB_DRAG_TYPE)) return;
     e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     const EDGE = 0.25;
@@ -256,14 +322,14 @@ function Pane({
     setDropEdge(zone);
   }, []);
 
-  const onContentDragLeave = useCallback((e: ReactDragEvent<HTMLDivElement>): void => {
-    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+  const onContentDragLeave = useCallback((e: DragEvent): void => {
+    if ((e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) return;
     dropEdgeRef.current = null;
     setDropEdge(null);
   }, []);
 
   const onContentDrop = useCallback(
-    (e: ReactDragEvent<HTMLDivElement>): void => {
+    (e: DragEvent): void => {
       const payload = readDragPayload(e);
       const edge = dropEdgeRef.current;
       dropEdgeRef.current = null;
@@ -278,6 +344,18 @@ function Pane({
     },
     [moveTab, splitWithTab, pane.id, pane.tabs.length],
   );
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.addEventListener('dragover', onContentDragOver);
+    el.addEventListener('dragleave', onContentDragLeave);
+    el.addEventListener('drop', onContentDrop);
+    return () => {
+      el.removeEventListener('dragover', onContentDragOver);
+      el.removeEventListener('dragleave', onContentDragLeave);
+      el.removeEventListener('drop', onContentDrop);
+    };
+  }, [onContentDragOver, onContentDragLeave, onContentDrop]);
 
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
   // A single pane holding a single tab is the common case — today's plain
@@ -295,18 +373,12 @@ function Pane({
       }}
     >
       {showTabBar ? <TabBar pane={pane} focused={focused} /> : null}
-      <div
-        className="pane-content"
-        data-testid={`pane-content-${pane.id}`}
-        onDragOver={onContentDragOver}
-        onDragLeave={onContentDragLeave}
-        onDrop={onContentDrop}
-      >
+      <div ref={contentRef} className="pane-content" data-testid={`pane-content-${pane.id}`}>
         {dropEdge ? (
           <div className={`pane-dropzone pane-dropzone-${dropEdge}`} data-testid="pane-dropzone" />
         ) : null}
         {activeTab ? (
-          <TabContent key={activeTab.id} tab={activeTab} focused={focused} ws={ws} />
+          <TabSlot tabId={activeTab.id} />
         ) : (
           <div className="pane-empty" data-testid="pane-empty">
             No tabs open
@@ -315,6 +387,28 @@ function Pane({
       </div>
     </div>
   );
+}
+
+/** Adopts the tab's persistent host element (see `HostedTab`) into this pane. */
+function TabSlot({ tabId }: { tabId: string }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const slot = ref.current;
+    const host = tabHostEl(tabId);
+    // Moving an element out of the document drops focus inside it: never re-append
+    // one that is already here, and give the cursor back when it really moves panes.
+    if (!slot || host.parentElement === slot) return;
+    const focused = document.activeElement;
+    slot.appendChild(host);
+    if (
+      focused instanceof HTMLElement &&
+      focused !== document.activeElement &&
+      host.contains(focused)
+    ) {
+      focused.focus({ preventScroll: true });
+    }
+  }, [tabId]);
+  return <div ref={ref} className="tab-slot" style={{ display: 'contents' }} />;
 }
 
 function TabContent({
@@ -350,6 +444,8 @@ function TabContent({
       return (
         <FileEditorTab chatId={d.chatId} path={d.path} tabId={tab.id} focused={focused} ws={ws} />
       );
+    case 'browser':
+      return <BrowserView chatId={d.chatId} layout="pane" />;
     case 'page':
       switch (d.page) {
         case 'jobs':
@@ -376,6 +472,8 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
   const setActiveTab = useLayoutStore((s) => s.setActiveTab);
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const closeTab = useLayoutStore((s) => s.closeTab);
+  const closePane = useLayoutStore((s) => s.closePane);
+  const multiplePanes = useLayoutStore((s) => s.root.type === 'split');
   const reorderTab = useLayoutStore((s) => s.reorderTab);
   const moveTab = useLayoutStore((s) => s.moveTab);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -467,6 +565,17 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
           else moveTab(payload.paneId, payload.tabId, pane.id, pane.tabs.length);
         }}
       />
+      {multiplePanes && (
+        <button
+          type="button"
+          className="pane-tab-close pane-close"
+          aria-label="Close pane"
+          data-testid={`pane-close-${pane.id}`}
+          onClick={() => closePane(pane.id)}
+        >
+          ×
+        </button>
+      )}
       <ContextMenu
         anchor={menu.anchor}
         items={menuTab ? tabContextItems(menuTab, pane) : []}
@@ -499,6 +608,7 @@ interface PaneTabProps {
  *  and status badge stay live — they are read where they render, never from a
  *  one-off `getState()` that would freeze them at the last unrelated render. */
 function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
+  const closeTabGlyphs = useActionGlyphs('closeTab');
   const chatId = tabChatId(tab.descriptor);
   const row = useChatStore((s) => (chatId ? s.chats[chatId] : undefined));
   const isJob = tab.descriptor.kind === 'page' && tab.descriptor.page === 'job';
@@ -507,7 +617,8 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
     queryFn: () => api.listJobs() as Promise<{ jobs: { id: string; name: string }[] }>,
     enabled: isJob,
   });
-  const badge = tab.descriptor.kind === 'chat' && row ? deriveBadge(row) : null;
+  const chatBadge = useChatBadge(row);
+  const badge = tab.descriptor.kind === 'chat' ? chatBadge : null;
   const padId =
     tab.descriptor.kind === 'page' && tab.descriptor.page === 'pad' ? tab.descriptor.padId : null;
   const { data: pad } = useQuery({
@@ -549,7 +660,11 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
       onDragEnd={on.onDragEnd}
     >
       {badge ? (
-        <StatusBadge badge={badge} pendingWake={row?.pendingWake ?? null} />
+        <StatusBadge
+          badge={badge}
+          pendingWake={row?.pendingWake ?? null}
+          failureReason={row?.lastError?.message ?? null}
+        />
       ) : (
         tabIcon(tab.descriptor)
       )}
@@ -567,7 +682,7 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
         className="pane-tab-close"
         data-testid={`tab-close-${tab.id}`}
         aria-label="Close tab"
-        title={shortcutTitle('Close tab', '⌘W')}
+        title={shortcutTitle('Close tab', closeTabGlyphs)}
         onClick={(e) => {
           e.stopPropagation();
           on.onClose();

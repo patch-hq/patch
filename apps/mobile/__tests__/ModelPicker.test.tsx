@@ -177,15 +177,17 @@ describe('ModelPicker — choosing', () => {
   });
 });
 
-describe('ModelPicker — recent models only', () => {
-  it('lists only the first five of the catalogue', async () => {
-    const models = Array.from({ length: 8 }, (_, i) => ({ id: `m${i}`, label: `Model ${i}` }));
+describe('ModelPicker — the complete list', () => {
+  it('lists every model the host offers, ChatGPT included, not just the newest few', async () => {
+    const models = [
+      ...Array.from({ length: 7 }, (_, i) => ({ id: `claude-${i}`, label: `Claude ${i}` })),
+      { id: 'openai/gpt-5-codex', label: 'GPT-5 Codex' },
+    ];
     modelsSpy.mockResolvedValue({ models });
-    const r = await renderPicker({ selected: 'm0' });
+    const r = await renderPicker({ selected: 'claude-0' });
     actSync(() => findHost(r.root, byTestId('new-chat-model-pill')).props.onPress());
-    for (let i = 0; i < 5; i++) {
-      expect(queryHost(r.root, byTestId(`new-chat-model-option-m${i}`))).toBeTruthy();
+    for (const m of models) {
+      expect(queryHost(r.root, byTestId(`new-chat-model-option-${m.id}`))).toBeTruthy();
     }
-    expect(queryHost(r.root, byTestId('new-chat-model-option-m5'))).toBeFalsy();
   });
 });

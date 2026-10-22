@@ -14,6 +14,7 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { relativeTime } from '../lib/relativeTime.js';
 import { openPadBesideChat } from '../lib/openPad.js';
+import { OpenableButton } from './OpenableLink.js';
 import { NavHistoryControls } from './NavHistoryControls.js';
 
 export function PadBadge({ pad }: { pad: PadView }): JSX.Element | null {
@@ -128,12 +129,12 @@ export function PadsPage(): JSX.Element {
             </h2>
             <div className="pads-grid">
               {pads.map((p) => (
-                <button
+                <OpenableButton
                   key={p.id}
-                  type="button"
+                  opens={{ kind: 'page', page: 'pad', padId: p.id }}
                   className={`pads-tile${p.device === 'phone' ? ' is-phone' : ''}`}
                   data-testid={`pad-tile-${p.id}`}
-                  onClick={() => openPadBesideChat(p.id, p.chatId)}
+                  onOpen={() => openPadBesideChat(p.id, p.chatId)}
                 >
                   <PadThumb pad={p} />
                   <span className="pads-tile-body">
@@ -148,7 +149,7 @@ export function PadsPage(): JSX.Element {
                       <span className="pads-when">{relativeTime(p.updatedAt)}</span>
                     </span>
                   </span>
-                </button>
+                </OpenableButton>
               ))}
             </div>
           </section>

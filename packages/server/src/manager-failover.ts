@@ -1,15 +1,16 @@
-// Manager failover (spec/06 § Manager failover).
+// Manager placement (spec/06 § Manager failover).
 //
-// The Manager lives on the home host. When that host has been offline for a
-// while and another host is up, the server asks the other host to run the
-// Manager for the time being, giving it the recent conversation from the
-// server's own copy so the Manager can pick up where it left off. When the home
-// host returns, the Manager goes back, and is told what was said meanwhile.
+// The server decides which host runs the Manager; no host is special. When that
+// host has been offline for a while and another host is up, the server moves
+// the Manager there for good, giving the new host the recent conversation from
+// the server's own copy so the Manager can pick up where it left off. The host
+// that was running it is told to let go whenever it next attaches; it is not
+// handed the Manager back on return.
 //
-// The Manager's messages keep one sequence across hosts: the stand-in numbers
-// its messages from where the server's copy ends, and the home host does the
-// same on its return. The stretch the home host's own log is missing is
-// answered from the server's copy (`gapEvents`).
+// The Manager's messages keep one sequence across hosts: the new host numbers
+// its messages from where the server's copy ends. Each host's own log misses
+// the stretches other hosts ran, so those are answered from the server's copy
+// (`gapEvents`).
 
 import { parsePersisted } from './persisted-json.js';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -18,14 +19,16 @@ import type { Logger } from 'pino';
 import { headCodePoints, tailCodePoints, SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
 import type { ChatLogStore } from './chat-log-store.js';
 
-/** How long the home host must be offline before another host takes over. */
+/** How long the Manager's host must be offline before another host takes over. */
 export const FAILOVER_GRACE_MS = 120_000;
 
 const MESSAGE_CHARS = 2_000;
 const HANDOFF_CHARS = 24_000;
 const SERVER_SURFACE = '_server';
 
-interface Gap {
+/** A stretch of the Manager's transcript that `host` ran (`to` null while it still does). */
+interface Run {
+  host: string;
   from: number;
   to: number | null;
 }
@@ -36,15 +39,18 @@ interface HostOrder {
 }
 
 interface State {
-  acting: string | null;
   epoch: number;
-  gaps: Gap[];
+  runs: Run[];
   orders: Record<string, HostOrder>;
 }
 
 export interface ManagerFailoverDeps {
-  /** The account's home host, as the registry names it. */
-  homeHostId: () => string | null;
+  /** The host the registry has running the Manager. */
+  managerHostId: () => string | null;
+  /** Make `hostId` the host running the Manager. */
+  setManagerHostId: (hostId: string) => void;
+  /** Tell every host and surface the Manager has moved. */
+  onMoved: (hostId: string) => void;
   registeredHostIds: () => string[];
   isOnline: (hostId: string) => boolean;
   onHostStatus: (handler: (hostId: string, status: 'online' | 'offline') => void) => () => void;
@@ -58,7 +64,7 @@ export interface ManagerFailoverDeps {
 }
 
 export class ManagerFailover {
-  private state: State = { acting: null, epoch: 0, gaps: [], orders: {} };
+  private state: State = { epoch: 0, runs: [], orders: {} };
   private readonly path: string | null;
   private readonly graceMs: number;
   private timer: NodeJS.Timeout | null = null;
@@ -73,8 +79,8 @@ export class ManagerFailover {
   /** Begin watching host presence. */
   start(): void {
     this.unsubscribe = this.deps.onHostStatus((hostId, status) => this.onStatus(hostId, status));
-    // A server restart while the home host was already down.
-    if (this.homeOffline() && this.state.acting === null) this.armTimer();
+    // A server restart while the Manager's host was already down.
+    if (this.managerOffline()) this.armTimer();
   }
 
   stop(): void {
@@ -83,64 +89,50 @@ export class ManagerFailover {
     this.clearTimer();
   }
 
-  /** The host currently standing in for the home host, or null. */
-  acting(): string | null {
-    return this.state.acting;
-  }
-
   /** The host that owns the Manager and Speakers right now. */
   specialThreadHost(): string | null {
-    return this.state.acting ?? this.deps.homeHostId();
+    return this.deps.managerHostId();
   }
 
   /**
-   * The Manager's events from the stretches the home host's own log is missing,
-   * after `fromSeq`. Empty when no takeover has happened.
+   * The Manager's events after `fromSeq` that the current Manager host's own
+   * log is missing: the stretches other hosts ran. Empty before any move.
    */
   gapEvents(fromSeq: number): WireEvent[] {
-    if (this.state.gaps.length === 0) return [];
+    if (this.state.runs.length === 0) return [];
+    const current = this.deps.managerHostId();
     return this.deps.log.read(SPECIAL_THREAD_IDS.manager, fromSeq).filter((e) => {
       const seq = (e as { seq: number }).seq;
-      return this.state.gaps.some((g) => seq >= g.from && (g.to === null || seq <= g.to));
+      return this.state.runs.some(
+        (r) => r.host !== current && seq >= r.from && (r.to === null || seq <= r.to),
+      );
     });
   }
 
   private onStatus(hostId: string, status: 'online' | 'offline'): void {
-    const home = this.deps.homeHostId();
+    const manager = this.deps.managerHostId();
     if (status === 'online') {
       // A host that missed an order while it was away is told again; it acts on
-      // each takeover once.
+      // each order once.
       const order = this.state.orders[hostId];
       if (order) this.deps.sendTo(hostId, SERVER_SURFACE, order.event);
-      if (hostId === home) {
-        this.clearTimer();
-        if (this.state.acting !== null) this.handBack(this.state.acting, hostId);
-      } else if (this.homeOffline() && this.state.acting === null) {
-        this.armTimer();
-      }
+      if (hostId === manager) this.clearTimer();
+      else if (this.managerOffline()) this.armTimer();
       return;
     }
-    if (hostId === home) {
-      if (this.state.acting === null) this.armTimer();
-    } else if (hostId === this.state.acting) {
-      // The stand-in went away: another may take over, or the home host returns.
-      this.state.acting = null;
-      this.closeGap();
-      this.save();
-      if (this.homeOffline()) this.activate();
-    }
+    if (hostId === manager) this.armTimer();
   }
 
-  private homeOffline(): boolean {
-    const home = this.deps.homeHostId();
-    return home !== null && !this.deps.isOnline(home);
+  private managerOffline(): boolean {
+    const manager = this.deps.managerHostId();
+    return manager !== null && !this.deps.isOnline(manager);
   }
 
   private armTimer(): void {
     if (this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      if (this.homeOffline() && this.state.acting === null) this.activate();
+      if (this.managerOffline()) this.activate();
     }, this.graceMs);
     this.timer.unref();
   }
@@ -157,74 +149,51 @@ export class ManagerFailover {
   }
 
   private activate(): void {
-    const home = this.deps.homeHostId();
+    const previous = this.deps.managerHostId();
     const candidate = this.deps
       .registeredHostIds()
-      .find((id) => id !== home && this.deps.isOnline(id));
-    if (candidate === undefined) {
-      this.deps.logger.warn({}, 'manager-failover: home host offline and no other host is up');
+      .find((id) => id !== previous && this.deps.isOnline(id));
+    if (previous === null || candidate === undefined) {
+      this.deps.logger.warn(
+        {},
+        'manager-failover: the Manager host is offline and no other host is up',
+      );
       return;
     }
-    const nextSeq = this.maxSeq() + 1;
+    const last = this.maxSeq();
+    const nextSeq = last + 1;
+    // The first move: the original host ran everything so far.
+    if (this.state.runs.length === 0) {
+      this.state.runs.push({ host: previous, from: 0, to: last });
+    } else {
+      const open = this.state.runs.at(-1);
+      if (open && open.to === null) open.to = last;
+    }
+    this.state.runs.push({ host: candidate, from: nextSeq, to: null });
     this.state.epoch += 1;
-    this.state.acting = candidate;
-    this.state.gaps.push({ from: nextSeq, to: null });
-    const event: WireEvent = {
+    const adopt: WireEvent = {
       type: 'host.manager_adopt',
       hostId: candidate,
       epoch: this.state.epoch,
-      handoff: this.handoffText(-1, 'the home machine is offline'),
+      handoff: this.handoffText(-1, 'the machine that was running you is offline'),
       nextSeq,
     };
-    this.state.orders[candidate] = { kind: 'adopt', event };
+    this.state.orders[candidate] = { kind: 'adopt', event: adopt };
+    this.state.orders[previous] = {
+      kind: 'release',
+      event: { type: 'host.manager_release', hostId: previous, epoch: this.state.epoch },
+    };
+    this.deps.setManagerHostId(candidate);
     this.save();
     this.deps.logger.info(
-      { hostId: candidate, epoch: this.state.epoch },
-      'manager-failover: stand-in chosen',
+      { hostId: candidate, previous, epoch: this.state.epoch },
+      'manager-failover: Manager moved',
     );
-    this.deps.sendTo(candidate, SERVER_SURFACE, event);
-  }
-
-  private handBack(standIn: string, home: string): void {
-    const gapFrom = this.state.gaps.at(-1)?.from ?? 0;
-    this.state.acting = null;
-    this.closeGap();
-    this.state.epoch += 1;
-    this.state.orders[standIn] = {
-      kind: 'release',
-      event: { type: 'host.manager_release', hostId: standIn, epoch: this.state.epoch },
-    };
-    const gap = this.state.gaps.at(-1);
-    const nextSeq = this.maxSeq() + 1;
-    // The home host is told what it missed only when something was said.
-    if (gap && gap.to !== null && gap.to >= gap.from) {
-      this.state.orders[home] = {
-        kind: 'adopt',
-        event: {
-          type: 'host.manager_adopt',
-          hostId: home,
-          epoch: this.state.epoch,
-          handoff: this.handoffText(
-            gapFrom - 1,
-            'it was run on another machine while you were away',
-          ),
-          nextSeq,
-        },
-      };
-    } else {
-      delete this.state.orders[home];
+    this.deps.sendTo(candidate, SERVER_SURFACE, adopt);
+    if (this.deps.isOnline(previous)) {
+      this.deps.sendTo(previous, SERVER_SURFACE, this.state.orders[previous]!.event);
     }
-    this.save();
-    this.deps.logger.info({ standIn, home }, 'manager-failover: handed back to the home host');
-    this.deps.sendTo(standIn, SERVER_SURFACE, this.state.orders[standIn]!.event);
-    const toHome = this.state.orders[home];
-    if (toHome) this.deps.sendTo(home, SERVER_SURFACE, toHome.event);
-  }
-
-  /** The stretch being recorded ends at the last event the server holds. */
-  private closeGap(): void {
-    const gap = this.state.gaps.at(-1);
-    if (gap && gap.to === null) gap.to = this.maxSeq();
+    this.deps.onMoved(candidate);
   }
 
   private handoffText(afterSeq: number, why: string): string {

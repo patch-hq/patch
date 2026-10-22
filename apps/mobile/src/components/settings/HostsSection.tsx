@@ -4,7 +4,7 @@
 // Hosts — Add a host (the server's install command and a single-use pairing
 // code), then one row per machine: a presence dot, its name, platform and when
 // it was last seen, Update when it is behind. Tapping a row opens that host
-// (app/hosts/[hostId]/index.tsx → HostDetail): its name, Make home, the
+// (app/hosts/[hostId]/index.tsx → HostDetail): its name, the
 // state of its agent backends with Sign in, its optional components, its Files
 // and Terminal, and Remove this host.
 //
@@ -27,20 +27,11 @@ import { usePresenceStore, type HostPresence } from '../../stores/presenceStore'
 import { useUiStore } from '../../stores/uiStore';
 import { SettingsSection } from '../SettingsSection';
 import { agoLabel, sendToHost } from './hostSend';
-import { NoticeRow, hostName, sortedHosts } from './HostSwitcher';
+import { NoticeRow, hostName, sortedHosts, unreportedText, useSettingsHost } from './HostSwitcher';
+import { ClaudeSettingsRow } from './ClaudeSettingsSection';
 import { SecretsSection } from './SecretsSection';
 import { SettingsPage } from './SettingsPage';
-import {
-  ButtonRow,
-  Chevron,
-  Dot,
-  ErrorLine,
-  Field,
-  Muted,
-  Row,
-  RowValue,
-  SettingsButton,
-} from './ui';
+import { ButtonRow, Chevron, Dot, ErrorLine, Field, Muted, Row, SettingsButton } from './ui';
 
 /** How a host's `platform` reads: macOS, Linux, Windows, else as reported. */
 export function platformLabel(platform: string): string {
@@ -54,11 +45,10 @@ export function platformLabel(platform: string): string {
 export function hostSubtitle(h: HostPresence, now: number = Date.now()): string {
   if (!h.host) return 'awaiting first report';
   const where = platformLabel(h.host.platform);
-  const home = h.host.isHomeHost ? 'home · ' : '';
   const power = h.host.power
     ? ` · ${Math.round(h.host.power.percent)}% ${h.host.power.onBattery ? 'on battery' : 'plugged in'}`
     : '';
-  return `${home}${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}${power}`;
+  return `${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}${power}`;
 }
 
 // ── Hosts ────────────────────────────────────────────────────────────────────
@@ -67,11 +57,11 @@ export function HostsPage(): React.ReactElement {
   const [adding, setAdding] = React.useState(false);
   return (
     <SettingsPage
-      title="Hosts"
+      title="Machines"
       testID="settings-page-hosts"
       right={
         adding ? null : (
-          <SettingsButton testID="add-host" label="Add a host" onPress={() => setAdding(true)} />
+          <SettingsButton testID="add-host" label="Add a machine" onPress={() => setAdding(true)} />
         )
       }
     >
@@ -89,7 +79,7 @@ export function HostsSection(): React.ReactElement {
   return (
     <SettingsSection testID="settings-hosts">
       {rows.length === 0 ? (
-        <NoticeRow testID="hosts-empty" text="No hosts yet" />
+        <NoticeRow testID="hosts-empty" text="No machines yet" />
       ) : (
         rows.map((h) => (
           <Row
@@ -127,7 +117,7 @@ export function HostsSection(): React.ReactElement {
 }
 
 /**
- * One host's own page. Its name (renamable), Make home, Update, the state of
+ * One host's own page. Its name (renamable), Update, the state of
  * its agent backends with Sign in on any that needs one, its optional
  * components, Files and Terminal, and Remove this host.
  */
@@ -147,7 +137,7 @@ export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
     return (
       <SettingsPage title={hostId} testID="settings-host-detail">
         <SettingsSection>
-          <NoticeRow testID="host-detail-gone" text="This host is no longer on the account" />
+          <NoticeRow testID="host-detail-gone" text="This machine is no longer on the account" />
         </SettingsSection>
       </SettingsPage>
     );
@@ -167,7 +157,6 @@ export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
         <>
           <HostIdentity host={host} />
           <HostSettingsState host={host} />
-          <ClaudeSettingsDrift host={host} />
           <HostBackends host={host} />
           <HostComponents host={host} />
           <HostTools host={host} />
@@ -200,54 +189,6 @@ function HostSettingsState({ host }: { host: HostPresence }): React.ReactElement
   return (
     <SettingsSection testID={`host-${host.hostId}-settings-version`}>
       <Row title="Settings" subtitle={text} subtitleTestID={`host-${host.hostId}-settings-state`} />
-    </SettingsSection>
-  );
-}
-
-/**
- * This machine's Claude Code settings.json changed on the machine itself
- * (spec/02 § Claude Code settings): shown, and kept for every host, kept for
- * this OS, or discarded. Nothing overwrites it until one is chosen.
- */
-function ClaudeSettingsDrift({ host }: { host: HostPresence }): React.ReactElement | null {
-  const drift = host.claudeSettings?.drift;
-  if (drift === undefined) return null;
-  const hostId = host.hostId;
-  const platform = host.host?.platform;
-  const os = platform === 'darwin' || platform === 'linux' ? platform : null;
-  return (
-    <SettingsSection
-      title="settings.json changed on this machine"
-      testID={`host-${hostId}-claude-drift`}
-    >
-      <Muted testID={`host-${hostId}-claude-drift-text`}>{drift}</Muted>
-      <ButtonRow>
-        <SettingsButton
-          testID={`host-${hostId}-claude-drift-keep-shared`}
-          label="Keep for every host"
-          onPress={() =>
-            void writeShared('Keep settings.json', () => api.adoptClaudeSettings(hostId, 'shared'))
-          }
-        />
-        {os ? (
-          <SettingsButton
-            testID={`host-${hostId}-claude-drift-keep-os`}
-            label={`Keep for ${os === 'darwin' ? 'macOS' : 'Linux'}`}
-            variant="quiet"
-            onPress={() =>
-              void writeShared('Keep settings.json', () => api.adoptClaudeSettings(hostId, os))
-            }
-          />
-        ) : null}
-        <SettingsButton
-          testID={`host-${hostId}-claude-drift-discard`}
-          label="Discard"
-          variant="quiet"
-          onPress={() =>
-            void sendToHost(hostId, { type: 'host.claude_settings_discard', hostId }, 'Discard')
-          }
-        />
-      </ButtonRow>
     </SettingsSection>
   );
 }
@@ -318,23 +259,6 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
               onPress={() => void sendToHost(hostId, { type: 'host.update', hostId }, 'Update')}
             />
           ) : null
-        }
-      />
-      <Row
-        title="Home"
-        right={
-          report.isHomeHost ? (
-            <RowValue testID={`host-${hostId}-home`}>This is home</RowValue>
-          ) : (
-            <SettingsButton
-              testID={`host-${hostId}-set-home`}
-              label="Make home"
-              variant="quiet"
-              onPress={() =>
-                void sendToHost(hostId, { type: 'host.set_home', hostId }, 'Make home')
-              }
-            />
-          )
         }
       />
     </SettingsSection>
@@ -544,7 +468,7 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
   return (
     <SettingsSection>
       <Row
-        title="Remove this host"
+        title="Remove this machine"
         right={
           <SettingsButton
             testID={`host-${host.hostId}-remove`}
@@ -573,10 +497,10 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
 /** The server's refusal, said in words rather than as a code. */
 function installCommandProblem(message: string): string {
   if (message.startsWith('nothing_published')) {
-    return 'No host build has been published yet.';
+    return 'No machine build has been published yet.';
   }
   if (message.startsWith('no_build_for_os')) {
-    return 'No host build has been published for that operating system yet.';
+    return 'No machine build has been published for that operating system yet.';
   }
   if (message.startsWith('no_public_url')) {
     return 'This server has no public address configured.';
@@ -654,10 +578,10 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
     platforms.state === 'error' || (platforms.state === 'ok' && platforms.value.length === 0);
 
   return (
-    <SettingsSection title="Add a host" testID="add-host-panel">
+    <SettingsSection title="Add a machine" testID="add-host-panel">
       {platforms.state === 'loading' ? <NoticeRow text="…" /> : null}
       {nothingPublished ? (
-        <NoticeRow testID="add-host-error" text="No host build has been published yet" />
+        <NoticeRow testID="add-host-error" text="No machine build has been published yet" />
       ) : null}
       {platforms.state === 'ok' && platforms.value.length > 0 ? (
         <>
@@ -730,13 +654,22 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
   );
 }
 
-// ── Keys ─────────────────────────────────────────────────────────────────────
+// ── Providers ────────────────────────────────────────────────────────────────
 
-export function KeysPage(): React.ReactElement {
+export function ProvidersPage(): React.ReactElement {
+  const host = useSettingsHost();
+  const gap = unreportedText(host);
   return (
-    <SettingsPage title="Keys" testID="settings-page-keys">
+    <SettingsPage title="Providers" testID="settings-page-providers" hostSwitcher>
       <ProviderKeys />
       <SecretsSection />
+      {host === null || gap !== null ? (
+        <SettingsSection title="Claude Code settings.json">
+          <NoticeRow text={gap ?? ''} />
+        </SettingsSection>
+      ) : (
+        <ClaudeSettingsRow host={host} />
+      )}
     </SettingsPage>
   );
 }
@@ -829,7 +762,7 @@ export function ProviderKeys(): React.ReactElement {
                       onPress={() =>
                         Alert.alert(
                           `Revoke ${label} key?`,
-                          'It is deleted from every host; a host with one in its own environment goes back to that.',
+                          'It is deleted from every machine; a machine with one in its own environment goes back to that.',
                           [
                             { text: 'Cancel', style: 'cancel' },
                             {

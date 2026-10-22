@@ -206,7 +206,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     permissionModeDefault: 'bypassPermissions',
     permissionOverrides: 1,
     defaultModel: 'claude-opus-5',
-    isHomeHost: true,
+    runsManager: true,
     audioRelayHost: '127.0.0.1:3003',
     backends: [{ id: 'claude-code', label: 'Claude Code', version: '2.1.220', state: 'present' }],
     components: [{ id: 'kokoro', label: 'Kokoro TTS', bytes: 340_000_000, state: 'not-installed' }],
@@ -220,7 +220,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     accountEmail: 'tom@anthropic.com',
   },
   'host.rename': { type: 'host.rename', hostId: 'host-a', hostName: 'hetzner' },
-  'host.set_home': { type: 'host.set_home', hostId: 'host-a' },
+  'host.set_manager': { type: 'host.set_manager', hostId: 'host-a' },
   'host.removed': { type: 'host.removed', hostId: 'host-a' },
   'signin.requested': { type: 'signin.requested', id: 'r1', label: 'Chrome on Mac', expiresAt: 1 },
   'signin.resolved': { type: 'signin.resolved', id: 'r1' },
@@ -333,7 +333,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'signin-1',
     account: { id: 'c2', label: 'me@example.com', kind: 'chatgpt', authJson: '{"tokens":{}}' },
   },
-  'host.claude_settings_discard': { type: 'host.claude_settings_discard', hostId: 'host-a' },
+  'host.claude_settings_set': {
+    type: 'host.claude_settings_set',
+    hostId: 'host-a',
+    text: '{"model":"opus"}',
+  },
   'device.session': { type: 'device.session', deviceId: 'dev-1', name: 'kitchen', active: true },
   'folders.list': {
     type: 'folders.list',
@@ -350,12 +354,13 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'claude_settings.list': {
     type: 'claude_settings.list',
     hostId: 'host-a',
-    drift: '{"model":"opus"}',
+    settingsJson: '{"model":"opus"}',
     memories: [],
   },
   'claude_settings.updated': {
     type: 'claude_settings.updated',
     hostId: 'host-a',
+    settingsJson: '',
     memories: [],
   },
   'new_chat_draft.set': {
@@ -419,12 +424,20 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'meeting.control_request': { type: 'meeting.control_request', chatId: 'c1', action: 'start' },
   'meeting.get_request': { type: 'meeting.get_request', chatId: 'c1' },
   'meeting.audio': { type: 'meeting.audio', chatId: 'c1', source: 'mic', audioBase64: 'AA==' },
+  'meeting.notes_request': {
+    type: 'meeting.notes_request',
+    chatId: 'c',
+    edit: { op: 'remove', topicId: 't' },
+  },
+  'meeting.my_notes_request': { type: 'meeting.my_notes_request', chatId: 'c', text: 'x' },
+  'meeting.writeup_request': { type: 'meeting.writeup_request', chatId: 'c', regenerate: true },
   'meeting.action_request': {
     type: 'meeting.action_request',
     chatId: 'c1',
     actionId: 'a1',
     decision: 'do',
   },
+  'meeting.research_request': { type: 'meeting.research_request', chatId: 'c1', on: true },
   'meeting.state': { type: 'meeting.state', chatId: 'c1', meeting: null },
   'patch.browser_view.frame': {
     type: 'patch.browser_view.frame',
@@ -470,6 +483,35 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     chatId: 'c1',
     handoffId: 'h1',
     action: 'done',
+  },
+  'patch.browser_view.input': {
+    type: 'patch.browser_view.input',
+    chatId: 'c1',
+    tabId: 't1',
+    input: { kind: 'pointer', action: 'down', x: 10, y: 20, button: 'left', clickCount: 1 },
+  },
+  'patch.browser_view.drive': {
+    type: 'patch.browser_view.drive',
+    chatId: 'c1',
+    tabId: 't1',
+    driver: 'user',
+  },
+  'patch.browser_view.clipboard': {
+    type: 'patch.browser_view.clipboard',
+    chatId: 'c1',
+    tabId: 't1',
+    text: 'copied',
+  },
+  'patch.browser_view.form': {
+    type: 'patch.browser_view.form',
+    chatId: 'c1',
+    tabId: 't1',
+    formId: 'f1',
+    site: 'example.com',
+    fields: [
+      { field: 'p0', label: 'Email', kind: 'email' },
+      { field: 'p1', label: 'Password', kind: 'password' },
+    ],
   },
   'chat.archive_request': { type: 'chat.archive_request', chatId: 'c1', archived: true },
   'chat.hide_request': { type: 'chat.hide_request', chatId: 'c1', hidden: true },
@@ -530,10 +572,20 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     chatId: 'c1',
     model: 'claude-opus-4-1',
   },
+  'chat.handoff_recover_request': {
+    type: 'chat.handoff_recover_request',
+    chatId: 'c1',
+    action: 'switch_back',
+  },
   'chat.account_request': {
     type: 'chat.account_request',
     chatId: 'c1',
     preferredAccountId: 'account-1',
+  },
+  'chat.effort_request': {
+    type: 'chat.effort_request',
+    chatId: 'c1',
+    effort: 'high',
   },
   'file.write': { type: 'file.write', chatId: 'c1', path: 'foo.txt', content: 'x' },
   'patch.file_changed': { type: 'patch.file_changed', chatId: 'c1', path: 'foo.txt' },
@@ -615,6 +667,31 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     sourceChatId: 'c1',
     chatCount: 3,
   },
+  'patch.search_chats.request': {
+    type: 'patch.search_chats.request',
+    sourceChatId: 'c1',
+    query: 'deploy',
+    limit: 10,
+  },
+  'patch.search_chats.response': {
+    type: 'patch.search_chats.response',
+    sourceChatId: 'c1',
+    query: 'deploy',
+    results: [
+      {
+        chatId: 'c2',
+        hostId: 'host-a',
+        name: 'Deploys',
+        folder: '/w',
+        status: 'active',
+        lastUpdated: 1,
+        matchedIn: ['name'],
+        excerpts: [{ seq: 3, role: 'user', text: 'deploy it' }],
+      },
+    ],
+    truncated: false,
+    chatsWithoutLog: 0,
+  },
   'patch.activity.request': {
     type: 'patch.activity.request',
     sourceChatId: 'c1',
@@ -635,6 +712,18 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       },
     ],
     messagesTruncated: false,
+    chatSessions: [
+      {
+        chatId: 'c2',
+        chatName: 'bus watch',
+        hostId: 'host-a',
+        folder: '/work/bus',
+        start: 1_000,
+        end: 5_000,
+        durationMs: 4_000,
+      },
+    ],
+    sessionsTruncated: false,
   },
   'patch.activity.read.request': {
     type: 'patch.activity.read.request',
@@ -764,6 +853,19 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'ws1',
     ok: true,
     stopped: true,
+  },
+  'patch.watch_checkin.request': {
+    type: 'patch.watch_checkin.request',
+    requestId: 'wc1',
+    chatId: 'c1',
+    taskId: 't1',
+    checkInSec: 18_000,
+  },
+  'patch.watch_checkin.response': {
+    type: 'patch.watch_checkin.response',
+    requestId: 'wc1',
+    ok: true,
+    updated: true,
   },
   'patch.files.request': {
     type: 'patch.files.request',
@@ -993,6 +1095,21 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     sessionId: 'term-1',
     cols: 48,
     rows: 20,
+  },
+  'patch.link_summary.request': {
+    type: 'patch.link_summary.request',
+    requestId: 'ls1',
+    hostId: 'host-a',
+    prompt: 'Summarise it.',
+    url: 'https://example.com/a',
+    text: 'Page text.',
+  },
+  'patch.link_summary.response': {
+    type: 'patch.link_summary.response',
+    requestId: 'ls1',
+    hostId: 'host-a',
+    ok: true,
+    summary: 'A page.',
   },
   'patch.host_files.request': {
     type: 'patch.host_files.request',
@@ -1364,6 +1481,32 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'r1',
     ok: true,
     result: { id: 'care-screens' },
+  },
+  'patch.accounts.request': {
+    type: 'patch.accounts.request',
+    requestId: 'r1',
+    op: 'order',
+    backendId: 'claude-code',
+    accountIds: ['a1', 'a2'],
+  },
+  'patch.accounts.response': {
+    type: 'patch.accounts.response',
+    requestId: 'r1',
+    ok: true,
+    result: { strategy: 'priority', claude: [], codex: [] },
+  },
+  'patch.api.request': {
+    type: 'patch.api.request',
+    requestId: 'r1',
+    method: 'PUT',
+    path: '/api/accounts/claude-code/order',
+    body: { accountIds: ['a'] },
+  },
+  'patch.api.response': {
+    type: 'patch.api.response',
+    requestId: 'r1',
+    status: 200,
+    body: { version: 1 },
   },
   'secrets.list': {
     type: 'secrets.list',
@@ -2328,5 +2471,31 @@ describe('assertValidPermissionResponse', () => {
         editedNewString: null,
       }),
     ).toThrowError(/requires editedNewString/);
+  });
+});
+
+describe('chat.fork_request carries what an edited turn is sent with', () => {
+  test('an attachments-only edit (empty message) round-trips', () => {
+    const event: WireEvent = {
+      type: 'chat.fork_request',
+      chatId: 'c1',
+      seq: 4,
+      message: '',
+      localId: 'L4',
+      attachments: [{ id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image' }],
+    };
+    expect(decode(encode(event))).toEqual(event);
+  });
+  test('attachments and disabledTools round-trip', () => {
+    const event: WireEvent = {
+      type: 'chat.fork_request',
+      chatId: 'c1',
+      seq: 4,
+      message: 'rephrased',
+      localId: 'L3',
+      attachments: [{ id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image' }],
+      disabledTools: ['WebSearch'],
+    };
+    expect(decode(encode(event))).toEqual(event);
   });
 });

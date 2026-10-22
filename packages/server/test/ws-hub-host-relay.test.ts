@@ -41,7 +41,7 @@ const HOST_FRAMES: { type: string; frame: Record<string, unknown> }[] = [
     type: 'host.backend_add_account',
     frame: { hostId: 'd1', backendId: 'codex', authMethod: 'device', requestId: 'openai-login' },
   },
-  { type: 'host.claude_settings_discard', frame: { hostId: 'd1' } },
+  { type: 'host.claude_settings_set', frame: { hostId: 'd1', text: '{}' } },
   {
     type: 'host.claude_memory_delete',
     frame: { hostId: 'd1', project: 'proj', file: 'entry.md' },

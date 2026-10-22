@@ -109,7 +109,7 @@ describe('connecting → failed after the timeout', () => {
     vi.advanceTimersByTime(1);
     await flush();
     const st = useVoiceStore.getState();
-    expect(st.callError).toBe('Could not connect — no answer from the host after 15s');
+    expect(st.callError).toBe('Could not connect — no answer from the machine after 15s');
     // The bar stays up (activeSession kept) so the error and Retry show.
     expect(st.activeSession).not.toBeNull();
     expect(FakeWebSocket.last().close).toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe('connecting → failed after the timeout', () => {
     expect(stopTtsPlaybackMock).toHaveBeenCalled();
     expect(stopVoiceAudioServiceMock).toHaveBeenCalled();
     expect(useUiStore.getState().errors.map((e) => e.message)).toContain(
-      'voice call: no answer from the host after 15s',
+      'voice call: no answer from the machine after 15s',
     );
   });
 
@@ -301,7 +301,7 @@ describe('a call that timed out while still minting its token', () => {
     await flush();
     vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
     await flush();
-    expect(useVoiceStore.getState().callError).toMatch(/no answer from the host/);
+    expect(useVoiceStore.getState().callError).toMatch(/no answer from the machine/);
 
     resolveToken({ token: 'tok1', sessionId: 'sess-1', audioUrl: '/audio/sess-1', expiresAt: 0 });
     await flush(20);
@@ -309,7 +309,7 @@ describe('a call that timed out while still minting its token', () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
     expect(startVoiceAudioService).not.toHaveBeenCalled();
     // Still failed, with its error showing for Retry.
-    expect(useVoiceStore.getState().callError).toMatch(/no answer from the host/);
+    expect(useVoiceStore.getState().callError).toMatch(/no answer from the machine/);
     expect(useVoiceStore.getState().activeSession).not.toBeNull();
   });
 });

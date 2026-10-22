@@ -14,21 +14,23 @@
 
 import type { Logger } from 'pino';
 import type {
+  PatchWatchCheckInRequestEvent,
   PatchWatchListRequestEvent,
   PatchWatchStopRequestEvent,
   WatchTaskRow,
   WireEvent,
 } from '@patch/wire';
-import type { WatchRecord } from './watch.js';
+import type { WatchProgress, WatchRecord } from './watch.js';
 
 export interface WatchRequestsDeps {
   hasChat(chatId: string): boolean;
-  listWatch(chatId: string): WatchRecord[];
+  listWatch(chatId: string): (WatchRecord & WatchProgress & { nextCheckInAt?: number })[];
+  setWatchCheckIn(chatId: string, taskId: string, checkInSec: number): boolean;
   stopWatch(chatId: string, taskId: string): boolean;
 }
 
 /** `WatchRecord` (daemon-internal: also carries chatId/cwd/pid) → the wire row a surface gets. */
-function toWireRow(rec: WatchRecord): WatchTaskRow {
+function toWireRow(rec: WatchRecord & WatchProgress & { nextCheckInAt?: number }): WatchTaskRow {
   return {
     taskId: rec.taskId,
     description: rec.description,
@@ -36,6 +38,12 @@ function toWireRow(rec: WatchRecord): WatchTaskRow {
     outputFile: rec.outputFile,
     status: rec.status,
     startedAt: rec.startedAt,
+    ...(rec.timeoutSec !== undefined ? { timeoutSec: rec.timeoutSec } : {}),
+    ...(rec.timedOut ? { timedOut: true } : {}),
+    ...(rec.checkInSec !== undefined ? { checkInSec: rec.checkInSec } : {}),
+    ...(rec.nextCheckInAt !== undefined ? { nextCheckInAt: rec.nextCheckInAt } : {}),
+    ...(rec.lastLine !== undefined ? { lastLine: rec.lastLine } : {}),
+    ...(rec.lastOutputAt !== undefined ? { lastOutputAt: rec.lastOutputAt } : {}),
     ...(rec.endedAt !== undefined ? { endedAt: rec.endedAt } : {}),
     ...(rec.exitCode !== undefined ? { exitCode: rec.exitCode } : {}),
     ...(rec.signal !== undefined ? { signal: rec.signal } : {}),
@@ -99,6 +107,38 @@ export function handleWatchStopRequest(
     );
     sender({
       type: 'patch.watch_stop.response',
+      requestId: event.requestId,
+      ok: false,
+      error: { code: 'internal', message: (err as Error).message },
+    });
+  }
+}
+
+export function handleWatchCheckInRequest(
+  event: PatchWatchCheckInRequestEvent,
+  deps: WatchRequestsDeps,
+  sender: (e: WireEvent) => void,
+  logger: Logger,
+): void {
+  if (!deps.hasChat(event.chatId)) {
+    sender({
+      type: 'patch.watch_checkin.response',
+      requestId: event.requestId,
+      ok: false,
+      error: { code: 'chat_not_found', message: `chat not found: ${event.chatId}` },
+    });
+    return;
+  }
+  try {
+    const updated = deps.setWatchCheckIn(event.chatId, event.taskId, event.checkInSec);
+    sender({ type: 'patch.watch_checkin.response', requestId: event.requestId, ok: true, updated });
+  } catch (err) {
+    logger.warn(
+      { err: (err as Error).message, chatId: event.chatId, taskId: event.taskId },
+      'patch.watch_checkin.request: setWatchCheckIn failed',
+    );
+    sender({
+      type: 'patch.watch_checkin.response',
       requestId: event.requestId,
       ok: false,
       error: { code: 'internal', message: (err as Error).message },

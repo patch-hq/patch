@@ -188,6 +188,20 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     );
   });
 
+  it('clips the live transcript to the input box instead of overflowing it', async () => {
+    const { factory, sessions } = makeDictationFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
+    await actAsync(() => {
+      findHost(r.root, byLabel('Dictate into message')).props['onPress']();
+    });
+    await actAsync(() => {
+      sessions[0]!.onPartial('a very long interim transcript '.repeat(40));
+    });
+    const preview = r.root.findAllByProps({ testID: 'dictation-preview' })[0]!;
+    const box = preview.parent!.parent!;
+    expect(box.props['style']).toMatchObject({ overflow: 'hidden', maxHeight: 200 });
+  });
+
   it('shows the live/interim transcript in grey inside the input while recording', async () => {
     const { factory, sessions } = makeDictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);

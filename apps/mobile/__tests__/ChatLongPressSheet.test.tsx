@@ -72,7 +72,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     pinnedAt: null,
     lastUpdated: 0,
     awaitingPermission: false,
-    lastVisitedAt: 0,
+    lastReadSeq: 0,
     preview: null,
     pendingPermissions: [],
     lastSeq: 0,
@@ -480,7 +480,7 @@ describe('pin / archive / delete — refused by the server', () => {
       ],
     });
     s.setActiveChat('c1');
-    const visitedAt = useChatStore.getState().chats['c1']!.lastVisitedAt;
+    const visitedAt = useChatStore.getState().chats['c1']!.lastReadSeq;
     expect(visitedAt).toBeGreaterThan(0);
 
     deleteChatRow(useChatStore.getState().chats['c1']!);
@@ -491,7 +491,7 @@ describe('pin / archive / delete — refused by the server', () => {
     const after = useChatStore.getState();
     expect(after.timelines['c1']?.map((e) => e.content)).toEqual(['hello']);
     expect(after.branchGraphs['c1']?.activeBranchId).toBe('b0');
-    expect(after.chats['c1']?.lastVisitedAt).toBe(visitedAt);
+    expect(after.chats['c1']?.lastReadSeq).toBe(visitedAt);
     expect(failures().some((m) => /delete failed: nope/.test(m))).toBe(true);
   });
 

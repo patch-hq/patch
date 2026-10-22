@@ -134,6 +134,50 @@ describe('NotificationRouter — push channel', () => {
     expect(push.sent).toHaveLength(1);
   });
 
+  it('a notification shown on the desktop is never pushed later when the user goes idle', async () => {
+    const { dir, registry } = makeRegistryDir();
+    const presence = new PresenceTracker();
+    presence.online(ACCOUNT.publicKey, 'srf-1', 'web', 1_700_000_000_000);
+    presence.input(ACCOUNT.publicKey, 'srf-1', 5_000, 1_700_000_000_000);
+    registry.upsertSurface({
+      surfaceId: 'srf-1',
+      surfaceKind: 'web',
+      label: 'web',
+      issuedAt: 1_700_000_000_000,
+    });
+    registry.registerPushToken({
+      surfaceId: 'srf-1',
+      accountId: ACCOUNT.publicKey,
+      token: 'tok-1',
+      registeredAt: 1,
+    });
+    const wsHub = makeFakeWsHub();
+    const push = fakePush();
+    let now = 1_700_000_010_000;
+    const router = new NotificationRouter({
+      logger: silent,
+      registry,
+      presence,
+      wsHub: wsHub as never,
+      dataDir: dir,
+      pushBackend: push.backend,
+      nowMs: () => now,
+    });
+    await router.route({ type: 'notify', chatId: 'c1', message: 'seen' });
+    await router.route({ type: 'notify', chatId: 'c2', message: 'seen too' });
+    expect(wsHub.delivered.filter((d) => d.kind === 'desktop')).toHaveLength(2);
+    now += 30 * 60_000; // the user walks away
+    await new Promise((r) => setTimeout(r, 20));
+    expect(push.sent).toHaveLength(0);
+    await router.route({
+      type: 'notify',
+      chatId: 'c3',
+      message: 'new',
+      deepLink: 'patch://chat/c3',
+    });
+    expect(push.sent).toHaveLength(1);
+  });
+
   it('suppresses non-urgent push while the user is at a computer', async () => {
     const { dir, registry } = makeRegistryDir();
     const presence = new PresenceTracker();

@@ -148,6 +148,61 @@ describe('GET /internal/activity', () => {
     }
   });
 
+  it('forwards includeSessions/sessionsCursor to getActivity and returns the session fields', async () => {
+    const { daemon, jobs } = setup();
+    const calls: unknown[] = [];
+    const app = await buildControl({
+      daemon,
+      jobs,
+      localKey: LOCAL_KEY,
+      getActivity: async (
+        _callerChatId,
+        _since,
+        _until,
+        _messagesCursor,
+        _limit,
+        includeSessions,
+        sessionsCursor,
+      ) => {
+        calls.push({ includeSessions, sessionsCursor });
+        return {
+          ...EMPTY_RESULT,
+          chatSessions: [{ chatId: 'c2', start: 1_000, end: 2_000, durationMs: 1_000 }],
+          sessionsTruncated: true,
+          nextSessionsCursor: 1_001,
+        };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/internal/activity?since=0&until=5000&includeSessions=true&sessionsCursor=700&callerChatId=c1',
+        headers: AUTH,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(calls).toEqual([{ includeSessions: true, sessionsCursor: 700 }]);
+      expect(res.json().chatSessions).toHaveLength(1);
+      expect(res.json().nextSessionsCursor).toBe(1_001);
+
+      const plain = await app.inject({
+        method: 'GET',
+        url: '/internal/activity?since=0&until=5000&callerChatId=c1',
+        headers: AUTH,
+      });
+      expect(plain.statusCode).toBe(200);
+      expect(calls[1]).toEqual({ includeSessions: undefined, sessionsCursor: undefined });
+
+      const bad = await app.inject({
+        method: 'GET',
+        url: '/internal/activity?since=0&until=5000&includeSessions=maybe&callerChatId=c1',
+        headers: AUTH,
+      });
+      expect(bad.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('502s naming the problem when getActivity rejects (e.g. link offline)', async () => {
     const { daemon, jobs } = setup();
     const app = await buildControl({

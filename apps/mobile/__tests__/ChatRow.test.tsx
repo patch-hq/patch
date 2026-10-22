@@ -64,7 +64,7 @@ function makeRow(overrides: Partial<ChatRowT> = {}): ChatRowT {
     pinnedAt: null,
     lastUpdated: 100,
     awaitingPermission: false,
-    lastVisitedAt: 200, // > lastUpdated → 'read' badge by default
+    lastReadSeq: 200, // > lastSeq → 'read' badge by default
     preview: 'Sounds good, see you then',
     pendingPermissions: [],
     lastSeq: 1,
@@ -184,14 +184,14 @@ describe('ChatRowItem — pinned + folder conditionals', () => {
 
 describe('ChatRowItem — badge-derived title colour', () => {
   it('shows the muted ink3 title colour for a read (idle, already-visited) row', () => {
-    const readRow = makeRow({ activity: 'idle', lastUpdated: 1, lastVisitedAt: 2 }); // read
+    const readRow = makeRow({ activity: 'idle', lastUpdated: 1, lastSeq: 1, lastReadSeq: 2 }); // read
     const r = renderRN(<ChatRowItem row={readRow} />);
     const title = findHost(r.root, byTitle);
     expect(title.props.style.color).toBe(lightColors.ink3);
   });
 
   it('shows the full ink title colour for a non-read (unread/done) row', () => {
-    const doneRow = makeRow({ activity: 'idle', lastUpdated: 2, lastVisitedAt: 1 }); // done
+    const doneRow = makeRow({ activity: 'idle', lastUpdated: 2, lastSeq: 2, lastReadSeq: 1 }); // done
     const r = renderRN(<ChatRowItem row={doneRow} />);
     const title = findHost(r.root, byTitle);
     expect(title.props.style.color).toBe(lightColors.ink);

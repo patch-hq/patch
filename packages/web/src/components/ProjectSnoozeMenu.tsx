@@ -6,7 +6,15 @@ import type { JSX } from 'react';
 import { Clock } from 'lucide-react';
 import { useUiStore } from '../stores/uiStore.js';
 
-export function ProjectSnoozeMenu({ folder, name }: { folder: string; name: string }): JSX.Element {
+export function ProjectSnoozeMenu({
+  folder,
+  hostId,
+  name,
+}: {
+  folder: string;
+  hostId: string;
+  name: string;
+}): JSX.Element {
   const openSnoozeSheet = useUiStore((s) => s.openSnoozeSheet);
   return (
     <span className="snooze-wrap">
@@ -16,7 +24,7 @@ export function ProjectSnoozeMenu({ folder, name }: { folder: string; name: stri
         data-testid={`folder-snooze-${folder}`}
         title="Snooze all"
         aria-label={`snooze all in project ${name}`}
-        onClick={() => openSnoozeSheet({ kind: 'project', folder, name })}
+        onClick={() => openSnoozeSheet({ kind: 'project', folder, hostId, name })}
       >
         <Clock size={13} aria-hidden />
       </button>

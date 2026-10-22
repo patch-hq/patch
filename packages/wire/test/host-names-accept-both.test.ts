@@ -22,17 +22,17 @@ describe('host rename: legacy daemon names still decode', () => {
   });
   // A registry.json persisted before the rename. Missing this one mapping
   // took production down: `RegistryFile` is `.strict()`, so the stale key was
-  // rejected AND the required `homeHostId` was absent, and the server
+  // rejected AND the required `managerHostId` was absent, and the server
   // crash-looped on boot.
   it('canonicalizes homeDaemonId, the one legacy name that is not a bare daemonId', () => {
     expect(canonicalizeHostNames({ version: 1, homeDaemonId: null })).toEqual({
       version: 1,
-      homeHostId: null,
+      managerHostId: null,
     });
     // Already migrated: the canonical field wins and the stale one is left be.
-    expect(canonicalizeHostNames({ homeDaemonId: 'h1', homeHostId: 'h2' })).toEqual({
+    expect(canonicalizeHostNames({ homeDaemonId: 'h1', managerHostId: 'h2' })).toEqual({
       homeDaemonId: 'h1',
-      homeHostId: 'h2',
+      managerHostId: 'h2',
     });
   });
   it('still rejects a frame with neither id', () => {

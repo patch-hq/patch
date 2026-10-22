@@ -1,14 +1,17 @@
 // Settings → Usage: how the weekly allowance went down over a period, and
-// which chats spent the tokens. Both are read through every online machine
+// which chats spent the tokens. A named period (Day / Week / Month) is read
+// from the server's cache, so it draws at once and is re-read behind the
+// page; a custom range is read live through every online machine
 // (GET /api/usage-report).
 
 import { useState, type JSX } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/rest.js';
-import { formatTokens } from '../../lib/usage.js';
+import { formatReadAt, formatTokens } from '../../lib/usage.js';
 import {
   USAGE_PERIODS,
   buildBurndown,
+  burndownPath,
   periodWindow,
   pageOf,
   type BurndownSeries,
@@ -19,7 +22,10 @@ import { Group, Note, Pills, Row } from './ui.js';
 const W = 640;
 const H = 200;
 const PAD = { l: 36, r: 8, t: 8, b: 20 };
-const COLOURS = ['#4f8cff', '#e8833a', '#3fb67a', '#b06be0'];
+const COLOURS = ['#46802f', '#c46a12', '#574fa6', '#a64a3a'];
+
+/** How often the page asks again while it is open; the server answers from its cache. */
+const REFETCH_MS = 60_000;
 
 function Burndown({
   series,
@@ -73,13 +79,14 @@ function Burndown({
         </text>
       ))}
       {series.map((s, i) => (
-        <polyline
+        <path
           key={s.key}
           data-testid={`usage-line-${s.key}`}
           fill="none"
           stroke={COLOURS[i % COLOURS.length]}
           strokeWidth={2}
-          points={s.points.map((p) => `${x(p.ts)},${y(p.remaining)}`).join(' ')}
+          strokeLinejoin="round"
+          d={burndownPath(s.points, x, y)}
         />
       ))}
     </svg>
@@ -91,21 +98,27 @@ export function UsageHistory(): JSX.Element {
   const [custom, setCustom] = useState({ from: '', to: '' });
   const [chatPage, setChatPage] = useState(0);
   const [now] = useState(() => Date.now());
-  const win = periodWindow(period, now, custom);
+  const win = period === 'custom' ? periodWindow(period, now, custom) : null;
+  const params =
+    period === 'custom' ? (win ? { since: win.since, until: win.until } : null) : { period };
 
   const { data, error, isLoading } = useQuery({
-    queryKey: ['usage-report', win?.since, win?.until],
-    queryFn: () => api.usageReport(win!),
-    enabled: win !== null,
+    queryKey: ['usage-report', params],
+    queryFn: () => api.usageReport(params!),
+    enabled: params !== null,
+    placeholderData: keepPreviousData,
+    staleTime: REFETCH_MS,
+    refetchInterval: period === 'custom' ? false : REFETCH_MS,
   });
 
   const series = data ? buildBurndown(data.samples) : [];
   const paged = pageOf(data?.chats ?? [], chatPage);
+  const readAt = formatReadAt(data?.at);
 
   return (
     <>
       <Group label="Allowance left" testid="usage-history">
-        <Row title="Period">
+        <Row title="Period" sub={readAt ?? undefined}>
           <Pills
             options={USAGE_PERIODS}
             value={period}
@@ -136,20 +149,20 @@ export function UsageHistory(): JSX.Element {
             />
           </Row>
         ) : null}
-        {win === null ? (
+        {params === null ? (
           <Note testid="usage-pick-range">Pick a start and end date</Note>
-        ) : error ? (
+        ) : error && !data ? (
           <Note testid="usage-error">Could not read usage: {error.message}</Note>
-        ) : isLoading ? (
-          <Note>Loading…</Note>
+        ) : isLoading || !data ? (
+          <Note testid="usage-loading">Reading…</Note>
         ) : series.length === 0 ? (
           <Note testid="usage-history-empty">No readings in this period</Note>
         ) : (
           <>
-            <Burndown series={series} since={win.since} until={win.until} />
-            <div data-testid="usage-legend">
+            <Burndown series={series} since={data.since} until={data.until} />
+            <div className="usage-legend" data-testid="usage-legend">
               {series.map((s, i) => (
-                <span key={s.key} style={{ color: COLOURS[i % COLOURS.length], marginRight: 12 }}>
+                <span key={s.key} style={{ color: COLOURS[i % COLOURS.length] }}>
                   {s.label}
                 </span>
               ))}
@@ -158,7 +171,7 @@ export function UsageHistory(): JSX.Element {
         )}
       </Group>
       <Group label="Chats by tokens" testid="usage-chats">
-        {win === null || isLoading || error ? null : data && data.chats.length > 0 ? (
+        {params === null || !data ? null : data.chats.length > 0 ? (
           <>
             {paged.rows.map((c) => (
               <Row
@@ -173,6 +186,7 @@ export function UsageHistory(): JSX.Element {
               <Row title={`Page ${paged.page + 1} of ${paged.pages}`} testid="usage-chats-pager">
                 <button
                   type="button"
+                  className="set-btn ghost"
                   data-testid="usage-chats-prev"
                   disabled={paged.page === 0}
                   onClick={() => setChatPage(paged.page - 1)}
@@ -181,6 +195,7 @@ export function UsageHistory(): JSX.Element {
                 </button>
                 <button
                   type="button"
+                  className="set-btn ghost"
                   data-testid="usage-chats-next"
                   disabled={paged.page >= paged.pages - 1}
                   onClick={() => setChatPage(paged.page + 1)}

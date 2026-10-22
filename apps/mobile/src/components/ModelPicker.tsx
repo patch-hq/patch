@@ -24,7 +24,7 @@ import React from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, ChevronDown } from 'lucide-react-native';
-import { useModelCatalog, RECENT_MODEL_COUNT } from '../lib/models';
+import { useModelCatalog } from '../lib/models';
 import { compactModelLabel } from '../lib/modelLabel';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
@@ -206,7 +206,7 @@ export function ModelPicker({
               </Text>
             ) : (
               <ScrollView>
-                {catalog.models.slice(0, RECENT_MODEL_COUNT).map((m) => {
+                {catalog.models.map((m) => {
                   const active = m.id === selected;
                   return (
                     <Pressable

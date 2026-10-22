@@ -84,22 +84,30 @@ describe('toClaudeSessionEntries', () => {
     });
   });
 
-  it('an unmapped tool (no Claude native equivalent) becomes plain text, never a tool_use block', () => {
+  it('an MCP tool becomes a real tool_use/tool_result pair, not transcript text', () => {
     const entries = toClaudeSessionEntries(
       track([
-        toolCall('mcp__todoist__add_task', { content: 'buy milk' }, 'c9'),
-        toolResult('mcp__todoist__add_task', { id: '123' }, 'c9'),
+        toolCall('mcp__patch__patch_watch_output', { tail: 6 }, 'c9'),
+        toolResult('mcp__patch__patch_watch_output', { ok: true }, 'c9'),
       ]),
       { sessionId: 's', folder: '/w', model: null },
     );
-    for (const e of entries) {
-      const content = (e['message'] as { content: unknown }).content;
-      expect(Array.isArray(content)).toBe(false);
-      expect(typeof content).toBe('string');
-    }
-    expect((entries[0]!['message'] as { content: string }).content).toContain(
-      'mcp__todoist__add_task',
+    expect((entries[0]!['message'] as { content: unknown }).content).toEqual([
+      { type: 'tool_use', id: 'c9', name: 'mcp__patch__patch_watch_output', input: { tail: 6 } },
+    ]);
+    expect(
+      (entries[1]!['message'] as { content: { type: string; tool_use_id: string }[] }).content[0],
+    ).toMatchObject({ type: 'tool_result', tool_use_id: 'c9' });
+  });
+
+  it('an unknown non-MCP tool still becomes plain text, never a tool_use block', () => {
+    const entries = toClaudeSessionEntries(
+      track([toolCall('SomethingElse', { a: 1 }, 'c8'), toolResult('SomethingElse', 'x', 'c8')]),
+      { sessionId: 's', folder: '/w', model: null },
     );
+    for (const e of entries) {
+      expect(typeof (e['message'] as { content: unknown }).content).toBe('string');
+    }
   });
 
   it('closes a dangling trailing tool_use with a synthetic interrupted result', () => {

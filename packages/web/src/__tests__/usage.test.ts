@@ -15,6 +15,7 @@ import {
   hostOutage,
   listLabels,
   formatDurationWords,
+  formatAgo,
   formatReadAt,
   formatReset,
   formatResetDetail,
@@ -269,6 +270,15 @@ describe('summariseUsage', () => {
     expect(out?.title).toContain('Weekly 28%');
     expect(out?.title).not.toContain('allowed');
     expect(out?.title).not.toContain('UTC ·');
+  });
+});
+
+describe('formatAgo', () => {
+  it('is the reading age alone, for beside a name', () => {
+    expect(formatAgo(AT - 30_000, AT)).toBe('just now');
+    expect(formatAgo(AT - 5 * 60_000, AT)).toBe('5 min ago');
+    expect(formatAgo(AT - 2 * 86_400_000, AT)).toBe('2 d ago');
+    expect(formatAgo(undefined, AT)).toBeNull();
   });
 });
 

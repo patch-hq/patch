@@ -31,7 +31,7 @@ function makeRow(chatId: string, hostId: string, name = 'Fix login'): ChatRowT {
     pinnedAt: null,
     lastUpdated: 100,
     awaitingPermission: false,
-    lastVisitedAt: 200,
+    lastReadSeq: 200,
     preview: 'hello',
     pendingPermissions: [],
     lastSeq: 1,

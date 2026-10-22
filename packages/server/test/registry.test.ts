@@ -184,7 +184,7 @@ describe('Registry', () => {
     );
     const r = Registry.load(dir);
     expect(r.listDaemonKeys().map((k) => k.hostId)).toEqual(['d1']);
-    expect(r.homeHostId()).toBe('d1');
+    expect(r.managerHostId()).toBe('d1');
   });
 
   it('rejects a legacy account (public key only, no private key) with a migration instruction', () => {
@@ -262,15 +262,15 @@ describe('Registry', () => {
     r.bootstrapAccount({ keypair: KP_A });
     r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
     r.setDaemonKey({ hostId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 1 });
-    r.setHomeHostId('daemon-2');
+    r.setManagerHostId('daemon-2');
     r.removeHost('daemon-2');
     expect(r.isRevoked('daemon-2')).toBe(true);
     expect(r.registeredHostIds()).toEqual(['daemon-1']);
-    expect(r.homeHostId()).toBe('daemon-1');
+    expect(r.managerHostId()).toBe('daemon-1');
     // Durable: a reload agrees.
     const reloaded = Registry.load(dir);
     expect(reloaded.registeredHostIds()).toEqual(['daemon-1']);
-    expect(reloaded.snapshot().homeHostId).toBeNull();
+    expect(reloaded.snapshot().managerHostId).toBeNull();
     // Removing it again, or a machine never registered, is refused naming it.
     expect(() => r.removeHost('daemon-2')).toThrow(/daemon-2/);
     expect(() => r.removeHost('nope')).toThrow(/nope/);

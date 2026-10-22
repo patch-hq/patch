@@ -94,7 +94,7 @@ against the registry's user public key + revocation list.
 
 | Name                              | Required            | Purpose                                                                |
 | --------------------------------- | ------------------- | ---------------------------------------------------------------------- |
-| `PORT`                            | default `3000`      | HTTP listen port                                                       |
+| `PORT`                            | default `3970`      | HTTP listen port                                                       |
 | `HOST`                            | default `0.0.0.0`   | HTTP listen host                                                       |
 | `PATCH_DATA_DIR`                  | **required (prod)** | Directory containing `registry.json`. Crashes if env set + dir absent. |
 | `PATCH_INTERNAL_TOKEN`            | **required (prod)** | HMAC secret for voice session tokens (spec/13), ≥16 chars.             |

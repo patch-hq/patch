@@ -114,6 +114,10 @@ test.describe('sidebar row context menu', () => {
     await page.keyboard.press('Enter');
 
     await expect(page.getByTestId(`chat-context-menu-${id}`)).toHaveCount(0);
-    await expect(page.getByTestId(`name-pin-${id}`)).toBeVisible();
+    // The pointer is still on the row, so the tools cover the slot and the pin
+    // BUTTON reads active; stepping off shows the rest-state pin by the time.
+    await expect(page.getByTestId(`pin-btn-${id}`)).toHaveClass(/is-pinned/);
+    await page.mouse.move(900, 500);
+    await expect(page.getByTestId(`row-pin-${id}`)).toBeVisible();
   });
 });

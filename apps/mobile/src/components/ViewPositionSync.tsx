@@ -21,10 +21,15 @@ export const VIEW_POSITION_DEBOUNCE_MS = 800;
 // Module-level so the root layout's touch capture can set it.
 let active = false;
 let launching = true;
+// The report below is scheduled from route/scroll changes; a first touch after
+// launch or foreground changes neither, so it has to wake the report itself.
+const activatedListeners = new Set<() => void>();
 
 export function noteUserInput(): void {
+  const wasActive = active;
   active = true;
   launching = false;
+  if (!wasActive) for (const l of activatedListeners) l();
 }
 
 /**
@@ -63,25 +68,39 @@ export function ViewPositionSync(): null {
     if (useSettingsStore.getState().data === null) void useSettingsStore.getState().load();
   }, []);
 
+  // Bumped when the user first touches the surface, so the chat they are
+  // already on is reported without needing to navigate or scroll first.
+  const [activations, setActivations] = React.useState(0);
+  React.useEffect(() => {
+    const l = (): void => setActivations((n) => n + 1);
+    activatedListeners.add(l);
+    return () => {
+      activatedListeners.delete(l);
+    };
+  }, []);
+
   const enabledRef = React.useRef(enabled);
   enabledRef.current = enabled;
 
-  const adopt = React.useCallback((): void => {
-    const st = useViewPositionStore.getState();
-    const r = st.remote;
-    if (!navReady || !r || !enabledRef.current) return;
-    if (r.surfaceId === usePresenceStore.getState().surfaceId || r.updatedAt <= st.handledAt)
-      return;
-    st.markHandled(r.updatedAt);
-    if (Date.now() - explicitNavAt < EXPLICIT_NAV_HOLD_MS) return;
-    router.navigate(routeFromPosition(r) as Href);
-  }, [navReady, router]);
+  const adopt = React.useCallback(
+    (allowOwn = false): void => {
+      const st = useViewPositionStore.getState();
+      const r = st.remote;
+      if (!navReady || !r || !enabledRef.current) return;
+      const own = r.surfaceId === usePresenceStore.getState().surfaceId;
+      if ((own && !allowOwn) || r.updatedAt <= st.handledAt) return;
+      st.markHandled(r.updatedAt);
+      if (Date.now() - explicitNavAt < EXPLICIT_NAV_HOLD_MS) return;
+      router.navigate(routeFromPosition(r) as Href);
+    },
+    [navReady, router],
+  );
 
   React.useEffect(() => {
     // A launch snapshot that lands before the navigator mounts waits for it.
     if (enabled && remote && navReady && launching && !active) {
       launching = false;
-      adopt();
+      adopt(true);
     }
   }, [remote, navReady, adopt, enabled]);
 
@@ -105,7 +124,7 @@ export function ViewPositionSync(): null {
       if (pos) getWs().send({ type: 'view_position.set', ...pos });
     }, VIEW_POSITION_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [enabled, pathname, id, scroll]);
+  }, [enabled, pathname, id, scroll, activations]);
 
   return null;
 }

@@ -155,6 +155,33 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   });
 
+  it('desktop: the Add text tool puts a new text element in the clicked container and sends it as a change', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#p').waitFor();
+    await page.locator('[data-tool="addtext"]').click();
+    const pbox = (await design.locator('#p').boundingBox())!;
+    await page.mouse.click(pbox.x + 40, pbox.y + 5);
+    await page.keyboard.type('Brand new line');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).map((c) => c.kind)).toEqual(['add']);
+    await expect
+      .poll(() => design.locator('#p [data-pad-add]').textContent())
+      .toBe('Brand new line');
+    // Another device replays it too.
+    const other = await (
+      await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    ).newPage();
+    await other.goto(frameUrl);
+    await expect
+      .poll(() => other.frameLocator('#frame').locator('[data-pad-add]').textContent())
+      .toBe('Brand new line');
+    await ctx.close();
+  });
+
   it('phone: the screen bar has a + that adds a screen', async () => {
     const frameUrl = await newPad();
     const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, hasTouch: true });
@@ -249,6 +276,123 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   }, 30_000);
 
+  it('View mode: a note over the design does not block clicks on what is underneath', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    await page.keyboard.press('n');
+    const bbox = (await design.locator('#b').boundingBox())!;
+    await page.mouse.click(bbox.x + 5, bbox.y + 5);
+    await page.keyboard.type('Over the button');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).map((c) => c.kind)).toEqual(['note']);
+    await page.locator('[data-mode=view]').click();
+    await design
+      .locator('#b')
+      .evaluate((b) => b.addEventListener('click', () => b.setAttribute('data-hit', '1')));
+    const covered = await page.evaluate(() => {
+      const n = document.querySelector('.note')!.getBoundingClientRect();
+      return { x: n.x + 4, y: n.y + 4 };
+    });
+    // The note sits over the button: pointer events at that spot must fall through to the design.
+    const top = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.className ?? '',
+      covered,
+    );
+    expect(top).not.toContain('note');
+    await ctx.close();
+  }, 30_000);
+
+  it('notes stay visible while the frame reloads, and each is positioned by its own anchor', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    const addNote = async (sel: string, text: string) => {
+      await page.keyboard.press('n');
+      const bb = (await design.locator(sel).boundingBox())!;
+      await page.mouse.click(bb.x + 5, bb.y + 5);
+      await page.keyboard.type(text);
+      await page.keyboard.press('Enter');
+    };
+    await addNote('#t', 'first');
+    await addNote('#b', 'second');
+    await expect.poll(async () => (await pending(frameUrl)).length).toBe(2);
+    const pos = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('.note')].map((n) => {
+          const r = n.getBoundingClientRect();
+          return `${n.querySelector('.body')!.textContent}:${Math.round(r.x)},${Math.round(r.y)}:${getComputedStyle(n).display}`;
+        }),
+      );
+    await expect.poll(async () => (await pos()).length).toBe(2);
+    const before = await pos();
+    // Watch every frame for a hidden note while another device forces a reload.
+    await page.evaluate(() => {
+      (window as unknown as { hid: number }).hid = 0;
+      const tick = () => {
+        document.querySelectorAll('.note').forEach((n) => {
+          if (getComputedStyle(n).display === 'none') (window as unknown as { hid: number }).hid++;
+        });
+        const c = document.querySelectorAll('.note').length;
+        if (c < 2) (window as unknown as { hid: number }).hid++;
+        requestAnimationFrame(tick);
+      };
+      tick();
+    });
+    const other = await (
+      await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    ).newPage();
+    await other.goto(frameUrl);
+    await other.frameLocator('#frame').locator('#p').waitFor();
+    const pb = (await other.frameLocator('#frame').locator('#p').boundingBox())!;
+    await other.mouse.click(pb.x + 5, pb.y + 5);
+    await other.keyboard.press('n');
+    await other.mouse.click(pb.x + 5, pb.y + 5);
+    await other.keyboard.type('third');
+    await other.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).length).toBe(3);
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => (window as unknown as { hid: number }).hid)).toBe(0);
+    expect((await pos()).slice(0, 2)).toEqual(before);
+    await ctx.close();
+  }, 30_000);
+
+  it('notes of a screen are not drawn over the previous screen while the new one loads', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    await page.keyboard.press('n');
+    const bb = (await design.locator('#b').boundingBox())!;
+    await page.mouse.click(bb.x + 5, bb.y + 5);
+    await page.keyboard.type('on home');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).length).toBe(1);
+    await page.locator('#screens button:not(.add-screen)').nth(1).click();
+    await expect.poll(() => page.locator('.note').count()).toBe(0);
+    await design.locator('#b').waitFor();
+    // Back to the first screen: in the same task as the click, nothing of it may be drawn yet.
+    const during = await page.evaluate(() => {
+      (document.querySelectorAll('#screens button:not(.add-screen)')[0] as HTMLElement).click();
+      return [...document.querySelectorAll('.note')].filter(
+        (n) =>
+          getComputedStyle(n).display !== 'none' &&
+          getComputedStyle(n.parentElement!).visibility !== 'hidden',
+      ).length;
+    });
+    expect(during).toBe(0);
+    await expect.poll(() => page.locator('.note').count()).toBe(1);
+    await ctx.close();
+  }, 30_000);
+
   it('desktop and phone: shape tools draw a rectangle, ellipse, line and arrow as shape strokes', async () => {
     const frameUrl = await newPad();
     for (const opts of [{ viewport: { width: 1280, height: 800 } }, { ...pw.devices['Pixel 7'] }]) {
@@ -287,4 +431,57 @@ describe('pad editor in a browser', () => {
       await ctx.close();
     }
   }, 60_000);
+  it('the Changes panel is not rebuilt by the background poll when nothing changed', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#p').waitFor();
+    await page.keyboard.press('n');
+    const pbox = (await design.locator('#p').boundingBox())!;
+    await page.mouse.click(pbox.x + 40, pbox.y + 5);
+    await page.keyboard.type('Stay put');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.locator('#pending li:not(.screen-head)').count()).toBe(1);
+    await page.locator('#send').click();
+    await expect.poll(() => page.locator('#history li').count(), { timeout: 30_000 }).toBe(1);
+    await page.evaluate(() => {
+      (document.querySelector('#history li') as unknown as { mark: number }).mark = 1;
+    });
+    // Several 1.5s polls go by with no change from anywhere.
+    await page.waitForTimeout(5000);
+    const kept = await page.evaluate(
+      () => (document.querySelector('#history li') as unknown as { mark?: number }).mark,
+    );
+    expect(kept).toBe(1);
+    await ctx.close();
+  }, 90_000);
+  it('the screen list is not rebuilt by the background poll, so a click is never lost to a rebuild', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    await page.frameLocator('#frame').locator('#p').waitFor();
+    await page.evaluate(() => {
+      (document.querySelector('#screens button[data-screen]') as unknown as { mark: number }).mark =
+        1;
+    });
+    await page.waitForTimeout(5000);
+    const kept = await page.evaluate(
+      () =>
+        (document.querySelector('#screens button[data-screen]') as unknown as { mark?: number })
+          .mark,
+    );
+    expect(kept).toBe(1);
+    // A press held across a poll still completes as a click on the same button.
+    const other = page.locator('#screens button:not(.add-screen)').nth(1);
+    const box = (await other.boundingBox())!;
+    await page.mouse.move(box.x + 10, box.y + 10);
+    await page.mouse.down();
+    await page.waitForTimeout(1800);
+    await page.mouse.up();
+    await expect.poll(() => page.locator('#screens button.on').textContent()).toContain('Other');
+    await ctx.close();
+  }, 90_000);
 });

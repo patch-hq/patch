@@ -66,7 +66,10 @@ describes (`17-cli.md` § Skill).
 
 The host self-updates. It checks the server for a newer build on boot and on a
 schedule, downloads it, and restarts itself under the service manager. A host
-behind the current version shows an update control in Settings → Hosts. A failed
+behind the current version shows an update control in Settings → Updates. The shared setting
+`autoUpdateHosts` (default on) governs this: off, a host neither installs on its own schedule nor is told
+to by the server when it connects, and stays put until Update (one host) or Update all is pressed. A
+host whose server greeting it cannot read still updates. A failed
 update leaves the running version in place and reports the failure to surfaces.
 The restart never lands under a running turn: it would kill the turn and every
 command it is running. An update asked for while any chat on the host is mid-turn
@@ -104,6 +107,7 @@ Claude Code runs through `@anthropic-ai/claude-agent-sdk` against the host's ins
 Codex supports explicit approval, workspace edits, read-only planning and explicitly unrestricted execution. It does not offer Claude's automatic approval classifier. A new OpenAI chat inherits explicit approval when the host default is Claude's automatic mode.
 
 Codex history persists independently of Claude transcripts, including tool results and pending turn identities. On reconnect the host reconciles an outstanding provider turn before submitting another request. An uncertain outcome is reported and never silently retried. Branches fork at provider-supported turn boundaries; unsupported partial-turn branch points are refused.
+Claude also offers a per-chat thinking-effort override (`04-chats-and-folders.md` § Effort); Codex has no equivalent setting.
 
 The host provisions a backend the host lacks rather than reporting it as
 missing. For Claude Code it resolves the `claude` executable and passes it to the
@@ -459,7 +463,11 @@ browser if needed, reopened at the address it was on, with no action from the
 user. The page's in-memory state is lost, so the next `patch_browser_read` carries
 a one-time `notice` saying so. A tab the user closed by hand stays closed
 (`tab_not_found`). Recovery of a routed tab obeys § Route through: with the
-routing host offline it fails rather than reconnecting direct.
+routing host offline it fails rather than reconnecting direct. A host restart
+is the same: the host keeps the list of open logged-in tabs on disk (`tabs.json`
+beside the profile), and the first use of a `tabId` from before the restart
+reopens it at its last address with the same notice. Closing a tab, Stop, and a
+clean shutdown leave nothing to restore; throwaway logged-out tabs are not kept.
 
 **Watching and stopping.** The browser is one host-wide resource shared by every
 chat; a tab is attributed to the chat that opened it. A chat's browsing is visible
@@ -473,6 +481,46 @@ untouched. Settings → Computer use has the host-wide Stop, which does the same
 every chat. The user can also take any tab over at any time through the hand-off
 below.
 
+### In the Patch app
+
+When the Patch app is installed on the host's own machine, the agent's browser
+lives in the app instead of in a Chromium of the host's own. The app is a real
+browser; its tabs are the agent's tabs, and a large view of one in that app's
+window (`14-design-web.md` § Main chat panel — Browser) shows the tab itself
+laid over the view's place — typing, selection, scrolling, the context menu,
+copy and paste are the browser's own — rather than a picture of it.
+
+- **The bridge.** Electron has no browser-wide DevTools endpoint that is not an
+  open, unauthenticated port, so the app serves one: a loopback WebSocket whose
+  path holds a 32-byte random token, written with the app's path and pid to
+  `~/.patch/agent-browser.json` (mode 600). The host connects Playwright to it
+  (`connectOverCDP`) and drives tabs with the same code as anywhere else, so
+  every `patch_browser_*` tool, the live view and hand-off work unchanged.
+  Page sessions are relayed to each tab's own debugger; the browser-level
+  commands Playwright sends — targets, contexts, cookies, permissions,
+  downloads — are answered from Electron's own APIs. A command the bridge does
+  not answer fails naming it.
+- **Profiles.** The signed-in profile is the app's own persistent partition,
+  shared by every chat; a throwaway profile is an in-memory context of its own.
+  Route through re-points the signed-in profile's proxy and gives a throwaway
+  context its own. The user agent carries no app or Electron token.
+- **Tabs.** A tab no view shows lives in a window that is open but never seen
+  (borderless, transparent, off every screen, taking no input), so its page
+  keeps drawing for screenshots and the live view; a large view moves it into
+  its own window at the view's place and back when it closes, and a window
+  that closes or reloads gives its tabs back. A link that opens a new tab, or
+  `window.open`, becomes a tab of its own with its opener kept. Downloads go
+  where the host asks. The host learns each tab's target id and reports it in
+  the status (`appTarget`), which is how the app's own window knows the tab is
+  its to show. The user working a shown tab while the agent is not acting
+  takes it over, as in the live view.
+- **Starting.** The host decides at its first browser launch: the endpoint file exists (the app
+  has run here) means the app's browser. Not running, the host starts it in
+  the background (`open -g -j` on a Mac) and waits up to 30 s. NO FALLBACK:
+  an app that does not come up fails the browser call
+  (`app_browser_unavailable`, 503) rather than reverting to a separate Chromium.
+  The host's disconnecting closes what it opened; the app keeps running.
+
 ### Hand-off
 
 The agent can drive the browser but must not type the user's passwords, pass
@@ -484,10 +532,39 @@ hands one tab to the user, in the chat, and waits.
   `patch.browser_view.frame` (host → surfaces): a JPEG of the tab each time
   its page paints (Chrome's screencast, so a still page sends one frame and a
   moving one up to 20 a second), its viewport size, its address with the query
-  and fragment removed, and its title. Surfaces renew the watch every 5 s; the host stops streaming a
-  tab not asked for in 15 s, so a vanished surface costs nothing. Frames are
+  and fragment removed, its title, and whether it can go back or forward. A
+  picture is sent as soon as the view opens, so a page that is not moving still
+  shows. Surfaces renew the watch every 5 s; the host stops streaming a tab not
+  asked for in 15 s, so a vanished surface costs nothing. Frames are
   detail-level (only surfaces focused on the chat get them) and carry no `seq`:
-  they never enter history. This alone is the read-only view.
+  they never enter history.
+- **Large view.** Each open view names itself (`viewerId`). A view shown large
+  sends its own size and pixel ratio (`viewport`): the tab takes that size, so
+  a phone gets the site's own narrow layout and the agent sees the same size,
+  and pictures are drawn at that ratio — Chrome's screencast draws at the
+  window's own ratio, so each paint is answered with a screenshot from the
+  session that set it. When no large view renews it the agent's own size comes
+  back. A size the agent sets itself (`patch_browser_viewport`) wins: views stop
+  resizing the tab until they all close. The agent's screenshots are always in
+  CSS pixels, so a view never moves its coordinates.
+- **Using the tab.** The user can work any tab of their chat at any time
+  (`patch.browser_view.input`, host `inputVersion` 2): presses and releases
+  with their button, click count and modifiers (so a drag selects text or
+  drags), the wheel, keys held or pressed (Cmd on a Mac is Ctrl to a browser on
+  any other system), text, back, forward, reload and an address, and Copy,
+  which answers with the selection (`patch.browser_view.clipboard`). They play
+  one at a time in order, a burst of moves collapsing to the newest, and are
+  never logged. Working the page — a press, a key, text, navigation — takes the
+  tab over (`driver: 'user'` in the status); moving the pointer and scrolling
+  do not. Take over and Hand back can also be sent outright
+  (`patch.browser_view.drive`). While the user drives, every agent call on that
+  tab waits; on Hand back the call that waited fails with `user_was_driving`
+  ("read the page again before acting") rather than acting on a page the user
+  may have changed, and a call made later carries the same as a one-time
+  notice. One that waits 10 minutes fails with `user_driving`. A tab nobody is
+  watching any more goes back to the agent. The status also carries where the
+  agent last pointed (`cursor`), so a view draws its cursor, and when the
+  chat's oldest open tab was opened (`since`), for the timer.
 - **Hand-off.** `patch_browser_handoff({ tabId, reason, callbackPort?,
 timeoutSeconds? })` blocks the tool call. The host emits
   `patch.browser_handoff.state` `waiting` with the agent's `reason`, and
@@ -502,6 +579,25 @@ timeoutSeconds? })` blocks the tool call. The host emits
   so does `timeoutSeconds` (default 600), the tab closing, or the OAuth relay
   below. The host then emits `state` `ended` with the `outcome` (`done`,
   `cancelled`, `timeout`, `tab_closed`, `callback`).
+- **Sign-in form.** While a hand-off waits, the host looks for a sign-in form
+  on the page (a visible password or one-time-code field, or an email or
+  username field on a sign-in page) and tells surfaces its fields' labels and
+  kinds (`patch.browser_view.form`), never values, again whenever it changes. A
+  phone shows them as its own fields and sends what the user typed as `fill`:
+  the host puts the values into the page's fields, marks them as the user's
+  (so the agent's reads show `[redacted]`) and submits. The user can always use
+  the page instead.
+- **Share for review.** `patch_browser_handoff({ tabId, reason, share: true })`
+  is the non-blocking form, for a page the user should look at rather than act
+  for the agent (a local app on a headless host). It returns at once with
+  `{ ok, shared: true, handoffId, url }`. The host emits the same `state`
+  events with `shared: true` and streams the tab, but the tab is not locked,
+  nothing is redacted, and there is no timeout: the agent keeps using the tab
+  and the user's feedback arrives as ordinary chat messages. The user's input
+  is played into the page as in a hand-off. It ends (`state` `ended`) on
+  `control` `done` or `cancel`, or `tab_closed`. A second share of a tab already
+  shared is refused, and `share` with `callbackPort` or `timeoutSeconds` is
+  invalid input (400).
 - **Out of the model's reach.** Frames, the address with its query, and the
   user's input travel host ↔ surfaces as wire events, never as tool results.
   While a hand-off is open every other `patch_browser_*` tool refuses that tab
@@ -587,13 +683,14 @@ The host runs Claude Code against the user's own configuration (§ Runtime and
 installation), and two parts of it are visible and editable from Settings:
 
 - `settings.json` in the `~/.claude` the agent backend reads — permissions,
-  hooks, model, statusLine, output style, env and the rest. It is a shared
-  setting (`01-server.md` § Settings): one text for every host, plus an optional
-  override per OS (`darwin`, `linux`) whose top-level keys replace the shared
-  ones on hosts of that OS, for values such as hook paths that differ between
-  machines. The host writes the file from each snapshot. Shown and edited as
-  raw JSON; text that is not valid JSON is refused, naming why, rather than
-  stored.
+  hooks, model, statusLine, output style, env and the rest. It is that
+  machine's own file, not a shared setting: it is edited on one chosen host
+  and nothing copies it to another, so hook paths and the like can differ
+  between machines without any override. Settings shows the text as the host
+  holds it and Save sends the whole text to that host (`host.claude_settings_set`),
+  which replaces the file. Text that is not a JSON object is refused, naming
+  why, and the file is left as it was. A change made on the machine itself
+  (Claude Code, an editor) is simply the file; there is no drift to resolve.
 - Memory entries: Claude Code's own persistent-memory files, one per topic,
   under each project's `~/.claude/projects/<project>/memory/` alongside its
   `MEMORY.md` index. These stay on the host that wrote them, since they are
@@ -602,16 +699,8 @@ installation), and two parts of it are visible and editable from Settings:
   Deleting one also drops its line from that project's `MEMORY.md` index where
   present.
 
-Claude Code itself can change `settings.json` on the machine, and so can a
-person editing the file. The host watches it, and a file that no longer
-matches what the snapshot wrote is reported as drift on that host rather than
-overwritten or ignored. Settings offers two actions on it: take it into the
-shared text (or that OS's override), or discard it, which rewrites the file
-from the snapshot. A new snapshot does not overwrite a drifted file either;
-the drift stays reported until one of the two is chosen.
-
-The host publishes memory entries and any drift on connect and after every
-change (`03-wire-protocol.md` § Host events), and the local CLI socket carries
+The host publishes its `settings.json` text and memory entries on connect and
+after every change (`03-wire-protocol.md` § Host events), and the local CLI socket carries
 the same operations (§ Control IPC).
 
 ## Provider keys
@@ -625,9 +714,9 @@ and not Secrets (which are injected into chats, `15-design-mobile.md` §
 Settings tab).
 
 Provider keys are shared settings (`01-server.md` § Settings): set once on
-Settings → Keys and used by every host.
+Settings → Providers and used by every host.
 
-- A key comes from Settings → Keys, or from the host's own environment, read
+- A key comes from Settings → Providers, or from the host's own environment, read
   once at boot. A key set from Settings wins over the environment; revoking it
   lets a host's environment apply again. A key in one host's environment can
   be adopted from Settings as the shared value.
@@ -680,7 +769,7 @@ last-used model.
 
 - Node (pinned runtime, shipped with the host artifact), TypeScript, single process.
 - Drives its agent backend in-process (§ Agent backends), which manages whatever subprocesses the agent needs internally and gives us the agent stream as an async iterator.
-- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-machine test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json`, and its own append-only history log, `events.jsonl` — `04-chats-and-folders.md` § History) + `~/.patch/blobs/` (content-addressed store for large tool results and inline images referenced from that log) + `~/.patch/threads/{manager,speakers}/` on the home host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). The agent's native history under `~/.claude/projects/...` is a resumption cache the harness reads from, not the record.
+- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-machine test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json`, and its own append-only history log, `events.jsonl` — `04-chats-and-folders.md` § History) + `~/.patch/blobs/` (content-addressed store for large tool results and inline images referenced from that log) + `~/.patch/threads/{manager,speakers}/` on the Manager host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). The agent's native history under `~/.claude/projects/...` is a resumption cache the harness reads from, not the record.
 - Connects to server via WebSocket. Reconnects with exponential backoff; buffers outbound events during disconnect. See `12-error-and-offline.md`.
 
 ## CLI
@@ -761,6 +850,8 @@ A task with no such process is reported as unmeasured, not as zero: a background
 
 The host also counts how many of each chat's background tasks are still running, and reports that count on the chat's state (`03-wire-protocol.md` ## Event categories). It tracks them from its own outgoing stream: a `run_in_background` call starts one, a completion notice ends one, and an explicit kill ends one, paired by the same rules a surface uses (`14-design-web.md` § Main chat panel — Background task bar). A surface holding many chats has the transcript of none, so this count is the only way the list can tell a chat that has finished from one that settled idle with work still in flight. It is in memory only: a background task belongs to the agent session that launched it, and a restart leaves nothing of it running. The count is reported on every state emit, zero included, so a surface can tell a host that counts them and reports none running from a host that does not count them at all.
 
+A `patch_watch` task must be given a `timeoutSec`; the host kills the task's whole process group when it is exceeded and delivers a `[watch]` message saying it timed out. Whatever the task prints is its progress: the last non-empty line of its output, and when it was written, are reported with each task so a surface can show it beside the elapsed time (`14-design-web.md` § Main chat panel — Background task bar). A task that prints nothing for an hour is flagged amber on the bar. At each check-in interval a task is still running (default one hour, a daemon setting; the agent may give a different `checkInMinutes` when it starts the task, and the user may change it from the bar, which restarts the clock), the host sends the owning chat a `[watch]` check-in asking whether it is still working as intended; the prompt text is a setting too, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in. Each running task reports when its next check-in is due, and the bar shows it as `next check-in at HH:MM`; clicking it opens a field to change the interval. The setting is currently held by the daemon (`setWatchCheckIn`); the prompts settings page will edit it.
+
 Nothing else on a user message is chat-visible. Tool results and the turn's own prompt echo arrive the same way and are not transcript entries.
 
 ## Output style
@@ -801,7 +892,7 @@ Tools (see `06-threads-manager-speakers.md` § Cross-chat tools): `patch_wake_me
 
 A surface can arm or stop a loop too, not just the agent: `/loop <interval> <message>` typed in the composer sends `chat.loop_request` (`03-wire-protocol.md`), which reaches the identical `scheduleWake`/`cancelWake` calls `patch_loop`/`patch_cancel_wake` reach — a bare `/loop` cancels. This is unlike `/goal`/`/remind`, which are pure user-owned banner state with no agent-tool equivalent; a loop needs to land on the real scheduler, since the agent can arm, see, and stop the very same one.
 
-A pending wake is a scheduled future turn in the user's chat, and is visible as such: the host carries it on `chat.state` as `pendingWake` — `{ message, fireAt, notAfter?, every?, waiting? }`, or `null` when nothing is armed — read straight from `wake.json` on every state emit, so it is correct after a restart and after a catch-up fire. `every` (ms) is present only for a `patch_loop` record; its absence is what tells a surface this is the plain one-shot kind. `waiting` is present (and `true`) only while that loop is absorbing a tick, per the above — `fireAt` is stale then, so surfaces read `waiting` instead of trusting a countdown to a time that isn't real yet. State is re-emitted the moment a wake is scheduled, replaced, cancelled, or fires, and the moment a loop's `waiting` tick is absorbed and the moment it's re-armed on turn-end — a firing `patch_loop` record re-emits too, since its `fireAt` just moved (a firing plain wake clears to `null` instead, as the delivered turn lands). Surfaces render it as a bar above the chat showing the countdown to `fireAt` and the wake message, or "waiting for current turn" in place of the countdown while `waiting` is set (`14-design-web.md` § Main chat panel). A plain one-shot wake is a read-only readout there — the agent owns the timer, and there is no cancel control for it — but a loop's bar carries a stop control, since a loop is exactly as likely to have been armed by the user (`/loop`) as by the agent (`patch_loop`), and either can stop it.
+A pending wake is a scheduled future turn in the user's chat, and is visible as such: the host carries it on `chat.state` as `pendingWake` — `{ message, fireAt, notAfter?, every?, waiting? }`, or `null` when nothing is armed — read straight from `wake.json` on every state emit, so it is correct after a restart and after a catch-up fire. `every` (ms) is present only for a `patch_loop` record; its absence is what tells a surface this is the plain one-shot kind. `waiting` is present (and `true`) only while that loop is absorbing a tick, per the above — `fireAt` is stale then, so surfaces read `waiting` instead of trusting a countdown to a time that isn't real yet. State is re-emitted the moment a wake is scheduled, replaced, cancelled, or fires, and the moment a loop's `waiting` tick is absorbed and the moment it's re-armed on turn-end — a firing `patch_loop` record re-emits too, since its `fireAt` just moved (a firing plain wake clears to `null` instead, as the delivered turn lands). Surfaces render it as a bar above the chat showing the countdown to `fireAt` and the wake message, or "waiting for current turn" in place of the countdown while `waiting` is set (`14-design-web.md` § Main chat panel). Every wake's bar carries a dismiss (×) control and an edit control, since a wake is as likely to be watched by the user as armed by the agent and either can cancel it. Dismiss cancels (`chat.loop_request` with `loop: null`). Edit opens a roomy modal with the message in a large text area plus the interval (loop) or fire time (one-shot); saving re-arms through the same request, replacing the pending wake, and an unchanged fire time is kept exactly.
 
 Self-wake vs job vs `CronCreate`: a job (`08-triggers-and-jobs.md`) is an externally-defined schedule that fires into a usually-new chat (durable, server-side); a self-wake is a chat re-invoking itself, adaptive or fixed-cadence, and self-terminating or explicitly cancelled (durable, host-side, per-chat); `CronCreate` is the agent's in-session timer — unavailable in the host's session model, so Patch provides self-wake in its place.
 
@@ -857,25 +948,25 @@ Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discover
 
 `patch <subcommand>` invoked on the host itself (e.g. while SSH'd in) talks to the running host over a Unix domain socket at `~/.patch/daemon.sock` (HTTP framing over the socket), not via the public WebSocket. The socket path is fixed under `~/.patch`, so the local CLI finds it without a port-discovery file. The socket is created mode `0600` (owner-only).
 
-| Endpoint                         | Verb | Purpose                                                                   |
-| -------------------------------- | ---- | ------------------------------------------------------------------------- |
-| `/list`                          | GET  | Active chats                                                              |
-| `/spawn-chat`                    | POST | Spawn a new chat in a folder                                              |
-| `/stop-chat`                     | POST | SIGTERM a tracked chat                                                    |
-| `/stop`                          | POST | Shut the host down                                                        |
-| `/host`                          | GET  | This host's self-description — the same content as its `host.host` report |
-| `/folders`                       | GET  | This host's folder registry                                               |
-| `/folders/add`                   | POST | Designate a project root                                                  |
-| `/folders/remove`                | POST | Drop a designated project root                                            |
-| `/backends`                      | GET  | Each backend's version and this host's view of its shared accounts        |
-| `/models`                        | GET  | This host's model catalogue across its backends                           |
-| `/components/install`            | POST | Install an optional component                                             |
-| `/components/remove`             | POST | Delete an installed component                                             |
-| `/claude-settings`               | GET  | This host's Claude Code memory entries and any settings.json drift        |
-| `/claude-settings/memory/delete` | POST | Delete one memory entry                                                   |
-| `/claude-settings/discard`       | POST | Rewrite a drifted settings.json from the last snapshot                    |
-| `/update`                        | POST | Apply an available host update                                            |
-| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)  |
+| Endpoint                         | Verb | Purpose                                                                        |
+| -------------------------------- | ---- | ------------------------------------------------------------------------------ |
+| `/list`                          | GET  | Active chats                                                                   |
+| `/spawn-chat`                    | POST | Spawn a new chat in a folder                                                   |
+| `/stop-chat`                     | POST | SIGTERM a tracked chat                                                         |
+| `/stop`                          | POST | Shut the host down                                                             |
+| `/host`                          | GET  | This host's self-description — the same content as its `host.host` report      |
+| `/folders`                       | GET  | This host's folder registry                                                    |
+| `/folders/add`                   | POST | Designate a project root                                                       |
+| `/folders/remove`                | POST | Drop a designated project root                                                 |
+| `/backends`                      | GET  | Each backend's version and this host's view of its shared accounts             |
+| `/models`                        | GET  | This host's model catalogue across its backends                                |
+| `/components/install`            | POST | Install an optional component                                                  |
+| `/components/remove`             | POST | Delete an installed component                                                  |
+| `/claude-settings`               | GET  | This host's Claude Code settings.json text and memory entries                  |
+| `/claude-settings/memory/delete` | POST | Delete one memory entry                                                        |
+| `/claude-settings`               | POST | Replace settings.json with `{text}`; text that is not a JSON object is refused |
+| `/update`                        | POST | Apply an available host update                                                 |
+| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)       |
 
 Below the chat endpoints, the socket carries every host-scoped control of
 `03-wire-protocol.md` § Host events that this host owns, one endpoint per
@@ -884,10 +975,10 @@ frame, because the CLI's default host is the machine it runs on (`17-cli.md`
 through the server. A host-scoped control added to the wire gains its endpoint
 here in the same change. Shared settings are not host-scoped and have no
 endpoint here: the CLI changes them through the server wherever it runs
-(`01-server.md` § Settings). Four host controls are reached over HTTP too, even
+(`01-server.md` § Settings). Three host controls are reached over HTTP too, even
 when the CLI is invoked on that host, because the server owns them rather than
-the host: minting a registration code for a new host, renaming a host, marking
-one the home host, and revoking one. `/pair-device` runs
+the host: minting a registration code for a new host, renaming a host, and
+revoking one. `/pair-device` runs
 the other way round — it exists here and has no wire frame, since the host
 adopts the device itself and the command is local-only (`17-cli.md` § Commands).
 

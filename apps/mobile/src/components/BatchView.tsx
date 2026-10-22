@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useChatStore } from '../stores/chatStore';
 import { useBatchStore } from '../stores/batchStore';
 import type { BatchCheckInChoice } from '../api/rest';
-import { StatusBadge } from './StatusBadge';
+import { ChatStatusBadge } from './ChatStatusBadge';
 import { deriveBadge } from '../stores/types';
 import { EmptyState } from './EmptyState';
 import { EMPTY_STATES } from '../lib/emptyStates';
@@ -125,7 +125,7 @@ export function BatchView(): React.ReactElement {
             gap: space.sm,
           }}
         >
-          {batch.checkedIn && row ? <StatusBadge badge={deriveBadge(row)} /> : null}
+          {batch.checkedIn && row ? <ChatStatusBadge row={row} /> : null}
           <Text style={{ ...typography.body, color: colors.ink, flex: 1 }}>
             {deriveChatTitle({ name: row?.name ?? null, chatId, folder: row?.folder ?? '' })}
           </Text>

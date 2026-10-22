@@ -38,7 +38,7 @@ function row(pendingWake: ChatRow['pendingWake']): ChatRow {
     pinnedAt: null,
     lastUpdated: 0,
     awaitingPermission: false,
-    lastVisitedAt: 0,
+    lastReadSeq: 0,
     preview: null,
     pendingPermissions: [],
     lastSeq: 0,
@@ -66,6 +66,20 @@ describe('WakeBar', () => {
     expect(textOf(queryHost(r.root, byTestId('wake-bar-countdown'))!)).toContain('9m');
     expect(textOf(queryHost(r.root, byTestId('wake-bar-message'))!)).toContain(
       'check whether the bus has left',
+    );
+  });
+
+  it('warns when the chat is out of credit, naming when it comes back', () => {
+    const r = renderRN(
+      <WakeBar
+        row={{
+          ...row({ message: 'check', fireAt: NOW + 9 * 60_000 }),
+          limitBlock: { resetsAt: NOW + 3_600_000 },
+        }}
+      />,
+    );
+    expect(textOf(queryHost(r.root, byTestId('wake-bar-countdown'))!)).toMatch(
+      /Wakes in 9m · out of credit until /,
     );
   });
 

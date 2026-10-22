@@ -8,9 +8,9 @@
 
 import type { JSX } from 'react';
 import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { OpenableLink } from './OpenableLink.js';
 import { CloseIcon } from './icons.js';
-import { StatusBadge } from './StatusBadge.js';
+import { ChatStatusBadge } from './ChatStatusBadge.js';
 import { deriveBadge, useChatStore } from '../stores/chatStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -107,13 +107,15 @@ export function BatchPanel(): JSX.Element {
           className={`batch-row ${activeChatId === chatId ? 'active' : ''}`}
           data-testid={`batch-row-${chatId}`}
         >
-          <Link to={`/chats/${chatId}`} className="batch-row-link">
-            {batch.checkedIn && row ? (
-              <StatusBadge badge={deriveBadge(row)} pendingWake={row.pendingWake} />
-            ) : null}
+          <OpenableLink
+            to={`/chats/${chatId}`}
+            opens={{ kind: 'chat', chatId }}
+            className="batch-row-link"
+          >
+            {batch.checkedIn && row ? <ChatStatusBadge row={row} /> : null}
             <span className="name">{deriveChatTitle(row?.name ?? null)}</span>
             {!batch.checkedIn ? <span className="batch-waiting">waiting</span> : null}
-          </Link>
+          </OpenableLink>
           <button
             type="button"
             className="batch-remove-btn"

@@ -69,7 +69,18 @@ const RULES: readonly Rule[] = [
     kind: 'permanent',
     test: /claude code (executable|native binary) not found|spawn claude ENOENT/i,
   },
+  // The kernel OOM killer SIGKILLs the child (exit 137). Running the same turn
+  // again re-grows the same memory, so it settles errored at once, not laddered.
+  {
+    reason: 'out_of_memory',
+    kind: 'permanent',
+    test: /exited with code 137\b|terminated by signal SIGKILL|out of memory|\bENOMEM\b|\bOOM\b/i,
+  },
   // --- transient: the condition can clear on its own ---
+  // Claude Code's own run died ("[session_crash] error_name=AbortError
+  // api_error_status=none"). Before `server_error`, whose `api_error` test
+  // would otherwise match the `api_error_status` field and misname it.
+  { reason: 'session_crash', kind: 'transient', test: /\[session_crash\]/i },
   { reason: 'overloaded', kind: 'transient', test: /overloaded_error|api error: 529/i },
   {
     reason: 'rate_limited',

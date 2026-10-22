@@ -25,6 +25,7 @@ function manager(): { m: BrowserManager; addTab: (id: string) => FakePage } {
     const locator = {
       count: async () => 1,
       first: () => locator,
+      boundingBox: async () => ({ x: 10, y: 10, width: 20, height: 20 }),
       click: async () => {
         await Promise.race([gate, dead]);
       },

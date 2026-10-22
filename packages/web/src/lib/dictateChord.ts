@@ -20,7 +20,7 @@ export const DEFAULT_DICTATE_CHORD: DictateChord = { alt: false, shift: true, co
 
 const STORAGE_KEY = 'patch.voice.dictateChord';
 
-const MODIFIER_CODES = new Set([
+export const MODIFIER_CODES = new Set([
   'MetaLeft',
   'MetaRight',
   'ControlLeft',
@@ -48,7 +48,7 @@ const CODE_GLYPHS: Record<string, string> = {
   Space: 'Space',
 };
 
-function keyGlyph(code: string): string {
+export function chordKeyGlyph(code: string): string {
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
   if (/^Digit[0-9]$/.test(code)) return code.slice(5);
   return CODE_GLYPHS[code] ?? code;
@@ -56,7 +56,7 @@ function keyGlyph(code: string): string {
 
 /** The chord in the macOS glyphs every shortcut is written in (`⌘⇧D`). */
 export function chordGlyphs(chord: DictateChord): string {
-  return `⌘${chord.alt ? '⌥' : ''}${chord.shift ? '⇧' : ''}${keyGlyph(chord.code)}`;
+  return `⌘${chord.alt ? '⌥' : ''}${chord.shift ? '⇧' : ''}${chordKeyGlyph(chord.code)}`;
 }
 
 /** The chord a keydown spells, or null when it can't be one (no ⌘/Ctrl, or

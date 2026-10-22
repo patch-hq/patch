@@ -22,6 +22,9 @@ import { setActiveWs, type PatchWs } from '../api/ws.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { clearHosts, reportHost } from './presenceHelpers.js';
+import { makeFetch, preferencesServer } from './settingsHarness.js';
+import { loadShared, resetShared } from './sharedHelpers.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 
 const REPORT: VersionReport = {
   checkedAt: '2026-07-28T12:00:00.000Z',
@@ -164,6 +167,7 @@ beforeEach(() => {
   useUiStore.getState().resolveConfirm(false);
   usePresenceStore.getState().setConnection('connected');
   setActiveWs(null);
+  resetShared();
 });
 
 afterEach(() => {
@@ -362,20 +366,24 @@ describe('UpdatesPage', () => {
   });
 
   describe('a host with a newer host waiting', () => {
-    it('is listed under Behind with its version and an Update button', async () => {
+    it('shows its version and status in the one component list, with an Update button', async () => {
       stubFetch(null);
       reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
       usePresenceStore.getState().setHostOnline('host-a', true);
-      reportHost('host-b', { hostName: 'mac', updateAvailable: false });
+      reportHost('host-b', { hostName: 'mac', hostVersion: '0.1.317', updateAvailable: false });
       renderPage();
       await loaded();
-      const behind = screen.getByTestId('version-drift');
-      const row = within(behind).getByTestId('version-behind-host-a');
+      expect(screen.queryByTestId('version-drift')).toBeNull();
+      const rows = screen.getByTestId('version-rows');
+      const row = within(rows).getByTestId('version-host-host-a');
       expect(row).toHaveTextContent('laptop host');
       expect(row).toHaveTextContent('0.1.300');
+      expect(row).toHaveTextContent('behind');
       expect(row).not.toHaveTextContent('offline');
       expect(within(row).getByTestId('host-host-a-update')).toHaveTextContent('Update');
-      expect(within(behind).queryByTestId('version-behind-host-b')).toBeNull();
+      const current = within(rows).getByTestId('version-host-host-b');
+      expect(current).toHaveTextContent('up to date');
+      expect(within(current).queryByTestId('host-host-b-update')).toBeNull();
     });
 
     it('names the published build it would update to, once the channel is read', async () => {
@@ -391,7 +399,7 @@ describe('UpdatesPage', () => {
       renderPage();
       await loaded();
       await waitFor(() =>
-        expect(screen.getByTestId('version-behind-host-a')).toHaveTextContent('0.1.300 → 0.1.310'),
+        expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('0.1.300 → 0.1.310'),
       );
     });
 
@@ -415,7 +423,7 @@ describe('UpdatesPage', () => {
       usePresenceStore.getState().setHostOnline('host-a', false);
       renderPage();
       await loaded();
-      expect(screen.getByTestId('version-behind-host-a')).toHaveTextContent('0.1.300 · offline');
+      expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('offline');
       fireEvent.click(screen.getByTestId('host-host-a-update'));
       await waitFor(() =>
         expect(screen.getByTestId('error-toasts')).toHaveTextContent(
@@ -442,16 +450,66 @@ describe('UpdatesPage', () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
-    it('is listed alongside drift', async () => {
-      stubFetch({ drift: DRIFT });
-      reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
+    it('never prints a host-mismatch error or a Settings → Hosts hint', async () => {
+      stubFetch(null);
+      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
+      reportHost('host-b', { hostName: 'mac', hostVersion: '0.1.317', updateAvailable: false });
       renderPage();
-      await waitFor(() =>
-        expect(screen.getByTestId('version-drift-web-server-mismatch')).toBeInTheDocument(),
+      await loaded();
+      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('different host builds');
+      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('Settings → Hosts');
+    });
+  });
+
+  describe('update mode', () => {
+    function mode(autoUpdateHosts: boolean) {
+      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+      loadShared({ settings: { autoUpdateHosts } });
+      return server;
+    }
+
+    it('is automatic by default, and the toggle writes the shared setting', async () => {
+      const server = mode(true);
+      const inner = stubFetch(null).getMockImplementation()!;
+      vi.stubGlobal(
+        'fetch',
+        makeFetch({}, (url: string, init?: RequestInit) =>
+          url.includes('/api/version') ? inner(url) : server.handler(url, init),
+        ),
       );
-      expect(
-        within(screen.getByTestId('version-drift')).getByTestId('version-behind-host-a'),
-      ).toBeInTheDocument();
+      renderPage();
+      await loaded();
+      const toggle = screen.getByTestId('auto-update-toggle');
+      expect(toggle).toBeChecked();
+      fireEvent.click(toggle);
+      await waitFor(() => expect(server.writes).toContainEqual({ autoUpdateHosts: false }));
+    });
+
+    it('Update all sends host.update to every online host that is behind, only', async () => {
+      mode(false);
+      stubFetch(null);
+      const ws = fakeWs();
+      reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
+      usePresenceStore.getState().setHostOnline('host-a', true);
+      reportHost('host-b', { hostName: 'mac', updateAvailable: true });
+      usePresenceStore.getState().setHostOnline('host-b', true);
+      reportHost('host-c', { hostName: 'box', updateAvailable: false });
+      usePresenceStore.getState().setHostOnline('host-c', true);
+      renderPage();
+      await loaded();
+      expect(screen.getByTestId('auto-update-toggle')).not.toBeChecked();
+      fireEvent.click(screen.getByTestId('update-all'));
+      expect(ws.send).toHaveBeenCalledTimes(2);
+      expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a' });
+      expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-b' });
+    });
+
+    it('has no Update all when nothing is behind', async () => {
+      stubFetch(null);
+      reportHost('host-a', { hostName: 'laptop', updateAvailable: false });
+      renderPage();
+      await loaded();
+      expect(screen.queryByTestId('update-all')).toBeNull();
     });
   });
 
@@ -555,8 +613,8 @@ describe('UpdatesPage', () => {
       await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
       expect(screen.getByTestId('version-shell')).toHaveTextContent('check failed');
       expect(screen.getByTestId('version-shell')).not.toHaveTextContent('up to date');
-      // And the detail is surfaced verbatim as a problem, under Behind.
-      const err = within(screen.getByTestId('version-drift')).getByTestId('version-shell-error');
+      // And the detail is surfaced verbatim, next to the desktop row.
+      const err = within(screen.getByTestId('version-rows')).getByTestId('version-shell-error');
       expect(err).toHaveTextContent('Last update check failed');
       expect(err).toHaveTextContent('ENOTFOUND feed');
     });
@@ -587,7 +645,7 @@ describe('UpdatesPage', () => {
       await waitFor(() => expect(check).toHaveBeenCalled());
     });
 
-    it('explains WHY the shell cannot self-update rather than looking fine', async () => {
+    it('does not hardcode a standing "can’t self-update" card from the signing limit', async () => {
       stubFetch(null);
       installBridge(
         shellState({
@@ -595,10 +653,10 @@ describe('UpdatesPage', () => {
         }),
       );
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell-disabled')).toBeInTheDocument());
-      const row = within(screen.getByTestId('version-drift')).getByTestId('version-shell-disabled');
-      expect(row).toHaveTextContent('Desktop app can’t self-update');
-      expect(row).toHaveTextContent('app-update.yml');
+      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
+      expect(screen.queryByTestId('version-shell-disabled')).toBeNull();
+      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('self-update');
+      expect(screen.queryByTestId('version-drift')).toBeNull();
     });
 
     it('tolerates a bridge with no state-push subscription', async () => {

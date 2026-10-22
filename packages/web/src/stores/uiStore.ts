@@ -17,6 +17,13 @@ import {
 } from '../lib/chatGroups.js';
 import { DEFAULT_JOB_SORT, type JobSort } from '../lib/jobSort.js';
 import { NO_JOB_FILTER, type JobFilter } from '../lib/jobFilter.js';
+import {
+  loadOverrides,
+  saveOverrides,
+  type ActionId,
+  type Chord,
+  type Overrides,
+} from '../lib/keymap.js';
 import { loadDictateChord, saveDictateChord, type DictateChord } from '../lib/dictateChord.js';
 import type { SettingsPageId } from '../routes/settings/pages.js';
 import { useLayoutStore } from './layoutStore.js';
@@ -676,7 +683,7 @@ const TOAST_TTL_MS = 6000;
 /** What the Snooze sheet is open for (spec/14 § Snooze sheet). */
 export type SnoozeSheetTarget =
   | { kind: 'chat'; chatId: string }
-  | { kind: 'project'; folder: string; name: string }
+  | { kind: 'project'; folder: string; hostId: string; name: string }
   | { kind: 'chats'; chatIds: string[] };
 
 interface UiState {
@@ -797,6 +804,10 @@ interface UiState {
   resetToolsPanelWidth(): void;
   /** The dictate shortcut on this machine (lib/dictateChord.ts). */
   dictateChord: DictateChord;
+  /** Per-machine shortcut overrides (lib/keymap.ts); absent = the default. */
+  shortcutOverrides: Overrides;
+  /** Rebind one action; `null` puts it back to its default. */
+  setShortcutChord: (id: ActionId, chord: Chord | null) => void;
   /** F1: width (px) of the file-browser directory tree column (resizable). */
   browseTreeWidth: number;
   /** F1: whether the file-browser directory tree is collapsed to a thin strip. */
@@ -1038,6 +1049,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   threadsPanelWidth: loadWidth(THREADS_PANEL_W_KEY, DEFAULT_THREADS_PANEL_W),
   toolsPanelWidth: loadWidth(TOOLS_PANEL_W_KEY, DEFAULT_TOOLS_PANEL_W),
   dictateChord: loadDictateChord(),
+  shortcutOverrides: loadOverrides(),
+  setShortcutChord(id, chord) {
+    const next = { ...get().shortcutOverrides };
+    if (chord) next[id] = chord;
+    else delete next[id];
+    saveOverrides(next);
+    set({ shortcutOverrides: next });
+  },
   browseTreeWidth: loadWidth(BROWSE_TREE_W_KEY, DEFAULT_BROWSE_TREE_W),
   browseTreeCollapsed: loadBool(BROWSE_TREE_COLLAPSED_KEY),
   backgroundTasksCollapsed: loadBool(BACKGROUND_TASKS_COLLAPSED_KEY),

@@ -1046,6 +1046,30 @@ test('activity --json: REST hits /api/activity with the window', async () => {
   );
 });
 
+test('activity --limit and --messages-cursor go through the shared contract, never forwarded raw', async () => {
+  // They used to be put on the query string as typed, so `--limit abc` reached
+  // the server and came back as an opaque error instead of the one message
+  // every other --limit gives.
+  await withSetup(
+    () => ({ status: 200, body: { messages: [], messagesTruncated: false } }),
+    async (env) => {
+      for (const bad of ['abc', '0', '-5']) {
+        const r = await runCli(['activity', '--since', '1', '--until', '2', '--limit', bad], env);
+        assert.equal(r.code, 1, `limit ${bad}: stdout=${r.stdout} stderr=${r.stderr}`);
+        assert.match(r.stderr + r.stdout, /--limit must be a positive integer/);
+      }
+      for (const bad of ['abc', '-5', '1.5']) {
+        const r = await runCli(
+          ['activity', '--since', '1', '--until', '2', '--messages-cursor', bad],
+          env,
+        );
+        assert.equal(r.code, 1, `cursor ${bad}: stdout=${r.stdout} stderr=${r.stderr}`);
+        assert.match(r.stderr + r.stdout, /--messages-cursor must be a non-negative integer/);
+      }
+    },
+  );
+});
+
 test('activity --json: over the host socket it asks /internal/activity as the calling chat, no credential needed', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'patch-cli-act-'));
   const sock = join(dir, 'host.sock');

@@ -1,113 +1,67 @@
 import { test, expect } from '@playwright/test';
 
 // Real-browser check for spec/14 § Message links: a message link carries a
-// preview toggle icon; clicking it fetches (stubbed here) and renders an
-// inline mini-preview without navigating away. `chat_link_preview` seeds one
+// Summarise button; clicking it fetches a summary (stubbed here) and renders it
+// inline without navigating away. `chat_link_preview` seeds one
 // assistant message with a single link — see dev-harness.tsx.
 const HARNESS = '/app/dev-harness.html?chat=chat_link_preview';
 const MESSAGE_LINK = 'a[href="https://example.com/foraging-guide"]:not([data-testid])';
 
-test.describe('a message link carries an inline preview toggle', () => {
-  test('clicking the toggle icon fetches and shows the preview inline', async ({ page }) => {
-    await page.route('**/api/link-preview**', async (route) => {
+test.describe('a message link carries an inline Summarise button', () => {
+  test('clicking the button fetches and shows the summary inline', async ({ page }) => {
+    let body: unknown;
+    await page.route('**/api/link-summary', async (route) => {
+      body = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           url: 'https://example.com/foraging-guide',
-          title: 'A Guide to Foraging',
-          description: 'What to look for this season.',
+          summary: 'Start with the hedgerows in early autumn.',
         }),
       });
     });
     await page.goto(HARNESS);
 
-    // The message's own link — not the open-in-browser icon beside it, which
-    // carries the same href.
     const link = page.locator(MESSAGE_LINK);
     await expect(link).toBeVisible();
-    const toggle = page.locator('[data-testid="link-preview-toggle"]');
+    const toggle = page.locator('[data-testid="link-summary-toggle"]');
     await expect(toggle).toBeVisible();
-    await expect(page.locator('[data-testid="link-preview-card"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="link-summary-card"]')).toHaveCount(0);
 
     await toggle.click();
 
-    const card = page.locator('[data-testid="link-preview-card"]');
+    const card = page.locator('[data-testid="link-summary-card"]');
     await expect(card).toBeVisible();
-    await expect(card).toContainText('A Guide to Foraging');
-    await expect(card).toContainText('What to look for this season.');
+    await expect(card.getByTestId('link-summary-text')).toHaveText(
+      'Start with the hedgerows in early autumn.',
+    );
+    await expect(card).toContainText('example.com');
+    expect(body).toEqual({ url: 'https://example.com/foraging-guide' });
 
-    // The link itself still points at the real target — the icon is an
-    // addition, not a replacement for normal navigation.
+    // The link itself still points at the real target.
     await expect(link).toHaveAttribute('href', 'https://example.com/foraging-guide');
 
-    // Clicking again collapses it.
     await toggle.click();
     await expect(card).toHaveCount(0);
   });
 
-  test('a failed preview fetch shows an error, not a silent blank card', async ({ page }) => {
-    await page.route('**/api/link-preview**', async (route) => {
+  test('a failed summary shows an error, not a silent blank card', async ({ page }) => {
+    await page.route('**/api/link-summary', async (route) => {
       await route.fulfill({
         status: 502,
         contentType: 'application/json',
-        body: JSON.stringify({ error: 'fetch_failed', message: 'upstream 503' }),
+        body: JSON.stringify({ error: 'summary_failed', message: 'overloaded' }),
       });
     });
     await page.goto(HARNESS);
 
-    await page.locator('[data-testid="link-preview-toggle"]').click();
+    await page.locator('[data-testid="link-summary-toggle"]').click();
 
-    const card = page.locator('[data-testid="link-preview-card"]');
+    const card = page.locator('[data-testid="link-summary-card"]');
     await expect(card).toBeVisible();
     // rest.ts's error path surfaces the response body's `error` code.
-    await expect(card).toContainText('fetch_failed');
-  });
-
-  // Todoist: "patch link preview is broken" — every preview showed no image,
-  // because the server's CSP (packages/server/src/app.ts) allows images only
-  // from 'self', data: and blob:, and the og:image is a third-party URL. The
-  // vite dev server sends no CSP, so the harness document is served here with
-  // the production img-src directive: a plain `<img src="https://…">` is then
-  // blocked exactly as it was in the app, and only the proxied blob: renders.
-  test('the preview image renders under the production img-src policy', async ({ page }) => {
-    await page.route('**/app/dev-harness.html**', async (route) => {
-      const res = await route.fetch();
-      await route.fulfill({
-        response: res,
-        headers: { ...res.headers(), 'content-security-policy': "img-src 'self' data: blob:" },
-      });
-    });
-    const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGN0a9BnYGBgYmBgYGBgAAALvQD5RRAoZwAAAABJRU5ErkJggg==',
-      'base64',
-    );
-    const imageUrls: string[] = [];
-    await page.route('**/api/link-preview/image**', async (route) => {
-      imageUrls.push(new URL(route.request().url()).searchParams.get('url') ?? '');
-      await route.fulfill({ status: 200, contentType: 'image/png', body: png });
-    });
-    await page.route('**/api/link-preview?**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          url: 'https://example.com/foraging-guide',
-          title: 'A Guide to Foraging',
-          image: 'https://cdn.example.com/og/foraging.png',
-        }),
-      });
-    });
-    await page.goto(HARNESS);
-
-    await page.locator('[data-testid="link-preview-toggle"]').click();
-
-    const img = page.locator('[data-testid="link-preview-card"] img.link-preview-image');
-    await expect(img).toBeVisible();
-    // Actually decoded, not a broken-image box.
-    await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBe(2);
-    expect(await img.getAttribute('src')).toMatch(/^blob:/);
-    expect(imageUrls).toEqual(['https://cdn.example.com/og/foraging.png']);
+    await expect(card).toContainText('summary_failed');
   });
 
   // "…also add an external browser button icon to the right so its easy to
@@ -119,7 +73,7 @@ test.describe('a message link carries an inline preview toggle', () => {
     await page.goto(HARNESS);
 
     const link = page.locator(MESSAGE_LINK);
-    const toggle = page.locator('[data-testid="link-preview-toggle"]');
+    const toggle = page.locator('[data-testid="link-summary-toggle"]');
     const external = page.locator('[data-testid="link-preview-external"]');
     await expect(external).toBeVisible();
     await expect(external).toHaveAttribute('href', 'https://example.com/foraging-guide');
@@ -129,7 +83,7 @@ test.describe('a message link carries an inline preview toggle', () => {
     const toggleBox = await toggle.boundingBox();
     const externalBox = await external.boundingBox();
     if (!linkBox || !toggleBox || !externalBox) throw new Error('link controls have no box');
-    // After the link and after the preview toggle, on the link's own line.
+    // After the link and after the summary button, on the link's own line.
     expect(externalBox.x).toBeGreaterThanOrEqual(linkBox.x + linkBox.width - 1);
     expect(externalBox.x).toBeGreaterThanOrEqual(toggleBox.x + toggleBox.width - 1);
     const mid = (b: { y: number; height: number }): number => b.y + b.height / 2;
@@ -146,21 +100,21 @@ test.describe('a message link carries an inline preview toggle', () => {
   // line out of order: the wrap was an inline-block holding the card, so the
   // link lined up with the card's last line and the icons sat on a line above
   // it. The icons must stay on the link's line and the card open below it.
-  test('opening the preview keeps the icons on the link line and the card below', async ({
+  test('opening the summary keeps the icons on the link line and the card below', async ({
     page,
   }) => {
-    await page.route('**/api/link-preview**', async (route) => {
+    await page.route('**/api/link-summary', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ url: 'https://example.com/foraging-guide', title: 'Jira' }),
+        body: JSON.stringify({ url: 'https://example.com/foraging-guide', summary: 'Jira' }),
       });
     });
     await page.goto(HARNESS);
     const link = page.locator(MESSAGE_LINK);
-    const toggle = page.locator('[data-testid="link-preview-toggle"]');
+    const toggle = page.locator('[data-testid="link-summary-toggle"]');
     await toggle.click();
-    const card = page.locator('[data-testid="link-preview-card"]');
+    const card = page.locator('[data-testid="link-summary-card"]');
     await expect(card).toBeVisible();
 
     const linkBox = await link.boundingBox();

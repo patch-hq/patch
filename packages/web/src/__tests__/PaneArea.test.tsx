@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, createEvent, act } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
@@ -45,15 +46,16 @@ function seedChats(ids: string[]): void {
   );
 }
 
-function renderPanes(): void {
+function renderPanes({ strict = false }: { strict?: boolean } = {}): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const tree = (
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <PaneArea ws={null} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 beforeEach(() => {
@@ -61,11 +63,42 @@ beforeEach(() => {
   useChatStore.getState()._reset();
 });
 
+const settingsMounts = vi.hoisted(() => ({ count: 0 }));
+vi.mock('../routes/SettingsRoute.js', async () => {
+  const React = await import('react');
+  return {
+    SettingsRoute: () => {
+      React.useEffect(() => {
+        settingsMounts.count += 1;
+      }, []);
+      return <div data-testid="settings-stub" />;
+    },
+  };
+});
+
 const openTabInNewWindow = vi.hoisted(() => vi.fn());
 vi.mock('../lib/newWindow.js', async (orig) => ({
   ...(await orig<typeof import('../lib/newWindow.js')>()),
   openTabInNewWindow,
 }));
+
+describe('PaneArea — close pane', () => {
+  it('a pane in a split has a close-pane control that removes the whole pane; a lone pane has none', () => {
+    seedChats(['c1', 'c2']);
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' });
+    useLayoutStore
+      .getState()
+      .openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
+    const split = useLayoutStore.getState().root as SplitPane;
+    const rightId = split.children[1]!.pane.id;
+    renderPanes();
+    fireEvent.click(screen.getByTestId(`pane-close-${rightId}`));
+    const root = useLayoutStore.getState().root as LeafPane;
+    expect(root.type).toBe('leaf');
+    expect(root.tabs.map((t) => cid(t.descriptor))).toEqual(['c1']);
+    expect(screen.queryByLabelText('Close pane')).toBeNull();
+  });
+});
 
 describe('PaneArea — single pane, single tab', () => {
   it('draws no tab bar at all (the plain, pre-existing chat view)', () => {
@@ -248,5 +281,53 @@ describe('PaneArea — regressions found using it', () => {
       expect(openTabInNewWindow).not.toHaveBeenCalled();
       expect((useLayoutStore.getState().root as LeafPane).tabs).toHaveLength(2);
     });
+  });
+});
+
+describe('PaneArea — moving a tab keeps it mounted', () => {
+  it('moving a tab to another pane or splitting it out does not remount its content', () => {
+    seedChats(['c1']);
+    settingsMounts.count = 0;
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' }, { placement: 'tab' });
+    useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    const first = useLayoutStore.getState().root as LeafPane;
+    const settingsTab = first.tabs.find((t) => t.descriptor.kind === 'page')!;
+    renderPanes();
+    expect(settingsMounts.count).toBe(1);
+
+    act(() => useLayoutStore.getState().splitWithTab(first.id, settingsTab.id, first.id, 'right'));
+    expect(screen.getByTestId('settings-stub')).toBeInTheDocument();
+    const split = useLayoutStore.getState().root as SplitPane;
+    const rightId = split.children[1]!.pane.id;
+    expect(screen.getByTestId(`pane-content-${rightId}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
+    expect(settingsMounts.count).toBe(1);
+
+    act(() => useLayoutStore.getState().moveTab(rightId, settingsTab.id, first.id, 0));
+    expect(screen.getByTestId(`pane-content-${first.id}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
+    expect(settingsMounts.count).toBe(1);
+  });
+});
+
+describe('PaneArea — StrictMode (the dev app and the e2e harness both run in it)', () => {
+  it("shows the tab's content in its pane after the double mount, and still after a move", () => {
+    seedChats(['c1']);
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' }, { placement: 'tab' });
+    useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    const first = useLayoutStore.getState().root as LeafPane;
+    const settingsTab = first.tabs.find((t) => t.descriptor.kind === 'page')!;
+    renderPanes({ strict: true });
+    expect(screen.getByTestId(`pane-content-${first.id}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
+
+    act(() => useLayoutStore.getState().splitWithTab(first.id, settingsTab.id, first.id, 'right'));
+    const rightId = (useLayoutStore.getState().root as SplitPane).children[1]!.pane.id;
+    expect(screen.getByTestId(`pane-content-${rightId}`)).toContainElement(
+      screen.getByTestId('settings-stub'),
+    );
   });
 });

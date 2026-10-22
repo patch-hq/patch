@@ -52,17 +52,21 @@ export function readClaudeSettingsJson(claudeHome: string): string {
 
 /**
  * Overwrite `<claudeHome>/settings.json` verbatim. Non-empty text must parse
- * as JSON — writing malformed config Claude Code would then fail to start
+ * as a JSON object — writing malformed config Claude Code would then fail to start
  * against is worse than refusing. Atomic write (temp + fsync + rename), the
  * same discipline `HostStateStore` uses for `host.json`.
  */
 export function writeClaudeSettingsJson(claudeHome: string, json: string): void {
   const trimmed = json.trim();
   if (trimmed.length > 0) {
+    let parsed: unknown;
     try {
-      JSON.parse(trimmed);
+      parsed = JSON.parse(trimmed);
     } catch (e) {
       throw new InvalidSettingsJsonError((e as Error).message);
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new InvalidSettingsJsonError('settings.json must be a JSON object');
     }
   }
   mkdirSync(claudeHome, { recursive: true });

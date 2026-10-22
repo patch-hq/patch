@@ -10,6 +10,7 @@
 //   - patch.installUpdate()                   → the user pressed Restart
 //   - patch.onNavigate(cb)                    → main asks the renderer to navigate
 //   - patch.onStartVoiceNote(cb)              → ⌃Space global hotkey hit
+//   - patch.copyImagePng(png)                 → native clipboard image write
 //   - patch.getDesktopEvents()                → test/inspection hook
 //   - patch.localHost.status()/install()    → the host on this Mac
 //   - patch.overlayTitleBar                   → this platform's windows have no
@@ -76,6 +77,25 @@ contextBridge.exposeInMainWorld('patch', {
   // window" and the updater panel die together, silently. `window-chrome.test.ts`
   // is what keeps the two copies in agreement.
   overlayTitleBar: process.platform === 'darwin',
+  // spec/02 § Browser — In the Patch app. The agent's tabs, when the host on
+  // this machine keeps them in this app: a large view shows the tab itself at
+  // its own place in the window instead of a picture of it.
+  agentBrowser: {
+    owns(targetId: string): Promise<boolean> {
+      return ipcRenderer.invoke('patch:agent-browser:owns', targetId) as Promise<boolean>;
+    },
+    show(targetId: string, rect: { x: number; y: number; width: number; height: number }): void {
+      ipcRenderer.send('patch:agent-browser:show', { targetId, rect });
+    },
+    hide(targetId: string): void {
+      ipcRenderer.send('patch:agent-browser:hide', { targetId });
+    },
+    onInput(cb: (e: { targetId: string }) => void): () => void {
+      const handler = (_: unknown, payload: { targetId: string }): void => cb(payload);
+      ipcRenderer.on('patch:agent-browser:input', handler);
+      return () => ipcRenderer.removeListener('patch:agent-browser:input', handler);
+    },
+  },
   notify(payload: NotifyPayload): void {
     ipcRenderer.send('patch:notify', payload);
   },
@@ -113,6 +133,19 @@ contextBridge.exposeInMainWorld('patch', {
   stopSystemAudio(): void {
     ipcRenderer.send('patch:system-audio:stop');
   },
+  /** Where meeting mode's macOS permissions stand; null off macOS. */
+  getMeetingPermissions(): Promise<Record<
+    'microphone' | 'callAudio' | 'accessibility',
+    'granted' | 'missing' | 'unknown'
+  > | null> {
+    return ipcRenderer.invoke('patch:meeting-permissions');
+  },
+  /** Ask macOS for one of them; rejects with the helper's message when call audio is refused. */
+  requestMeetingPermission(
+    kind: 'microphone' | 'callAudio' | 'accessibility',
+  ): Promise<'granted' | 'missing' | 'unknown'> {
+    return ipcRenderer.invoke('patch:meeting-permission:request', kind);
+  },
   onSystemAudio(cb: (pcm: Uint8Array) => void): () => void {
     const handler = (_: unknown, pcm: Uint8Array): void => cb(pcm);
     ipcRenderer.on('patch:system-audio', handler);
@@ -122,6 +155,23 @@ contextBridge.exposeInMainWorld('patch', {
     const handler = (_: unknown, payload: { message: string }): void => cb(payload);
     ipcRenderer.on('patch:system-audio-failed', handler);
     return () => ipcRenderer.removeListener('patch:system-audio-failed', handler);
+  },
+  startMeetingSpeakers(): void {
+    ipcRenderer.send('patch:meeting-speakers:start');
+  },
+  stopMeetingSpeakers(): void {
+    ipcRenderer.send('patch:meeting-speakers:stop');
+  },
+  onMeetingSpeakers(cb: (e: { participants: string[]; speaking: string[] }) => void): () => void {
+    const handler = (_: unknown, payload: { participants: string[]; speaking: string[] }): void =>
+      cb(payload);
+    ipcRenderer.on('patch:meeting-speakers', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-speakers', handler);
+  },
+  onMeetingSpeakersFailed(cb: (e: { message: string }) => void): () => void {
+    const handler = (_: unknown, payload: { message: string }): void => cb(payload);
+    ipcRenderer.on('patch:meeting-speakers-failed', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-speakers-failed', handler);
   },
   onMeetingSignal(cb: (e: { phase: 'started' | 'ended'; app: string }) => void): () => void {
     const handler = (_: unknown, payload: { phase: 'started' | 'ended'; app: string }): void =>
@@ -180,6 +230,12 @@ contextBridge.exposeInMainWorld('patch', {
   // Double-click on the divider: back to the default share.
   resetPanelWidth(): void {
     ipcRenderer.send('patch:panel:reset-width');
+  },
+  async copyImagePng(png: Uint8Array): Promise<void> {
+    await ipcRenderer.invoke('patch:copy-image', png);
+  },
+  async openPath(path: string, mode: 'file' | 'folder'): Promise<void> {
+    await ipcRenderer.invoke('patch:open-path', { path, mode });
   },
   async getDesktopEvents(): Promise<unknown[]> {
     return (await ipcRenderer.invoke('patch:get-events')) as unknown[];

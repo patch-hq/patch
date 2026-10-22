@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Copy as CopyGlyph, Download as DownloadGlyph } from 'lucide-react';
 import { CloseIcon } from './icons.js';
 import { copyImageToClipboard } from '../lib/copyImage.js';
+import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { useUiStore } from '../stores/uiStore.js';
 
 // Full-screen, zoomable image viewer rendered INSIDE the app (spec/14 §
@@ -37,9 +38,15 @@ export function ImageLightbox({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
 
+  const menu = useContextMenu();
+  // Esc and a backdrop click close the menu first, the viewer only when no menu is up.
+  const menuOpen = useRef(false);
+  menuOpen.current = menu.anchor !== null;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
+        if (menuOpen.current) return; // the menu's own Esc handler closes it
         e.stopPropagation();
         onClose();
       }
@@ -47,6 +54,27 @@ export function ImageLightbox({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
+
+  const copy = (): void => {
+    copyImageToClipboard(url).then(
+      () => useUiStore.getState().pushNotice('Image copied'),
+      (err: Error) => useUiStore.getState().pushError('copy failed', undefined, err.message),
+    );
+  };
+  const menuItems: ContextMenuItem[] = [
+    { id: 'copy', label: 'Copy image', icon: <CopyGlyph size={14} aria-hidden />, run: copy },
+    {
+      id: 'download',
+      label: 'Download image',
+      icon: <DownloadGlyph size={14} aria-hidden />,
+      run: () => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadName ?? imageDownloadName(url);
+        a.click();
+      },
+    },
+  ];
 
   function clampScale(s: number): number {
     return Math.min(8, Math.max(1, s));
@@ -63,7 +91,10 @@ export function ImageLightbox({
       role="dialog"
       aria-modal="true"
       aria-label={alt}
-      onClick={onClose}
+      onClick={() => {
+        if (!menuOpen.current) onClose();
+      }}
+      onContextMenu={menu.openAt}
       onWheel={(e) => {
         e.preventDefault();
         setScale((s) => {
@@ -92,10 +123,7 @@ export function ImageLightbox({
         aria-label="Copy image"
         onClick={(e) => {
           e.stopPropagation();
-          copyImageToClipboard(url).then(
-            () => useUiStore.getState().pushNotice('Image copied'),
-            (err: Error) => useUiStore.getState().pushError('copy failed', undefined, err.message),
-          );
+          copy();
         }}
       >
         <CopyGlyph size={20} aria-hidden />
@@ -141,6 +169,13 @@ export function ImageLightbox({
         onPointerUp={() => {
           drag.current = null;
         }}
+      />
+      <ContextMenu
+        anchor={menu.anchor}
+        items={menuItems}
+        onClose={menu.close}
+        label="Image actions"
+        testId="lightbox-menu"
       />
     </div>,
     document.body,

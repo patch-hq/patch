@@ -13,6 +13,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
   STORE_BATCH_MS,
   DISCONNECT_GRACE_MS,
+  SERVER_LOST_MS,
 } from '../src/api/ws';
 import { saveCredential, clearCredential } from '../src/lib/credential';
 import { useSettingsStore } from '../src/stores/settingsStore';
@@ -541,6 +542,17 @@ describe('disconnect grace — banner only for a real foreground outage', () => 
     expect(usePresenceStore.getState().connection).toBe('reconnecting');
   });
 
+  it('a foreground outage of a minute marks the server lost; reconnect clears it', () => {
+    connectAndOpen();
+    FakeWebSocket.last().emitClose(1006, '');
+    vi.advanceTimersByTime(SERVER_LOST_MS - 1);
+    expect(usePresenceStore.getState().serverLost).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(usePresenceStore.getState().serverLost).toBe(true);
+    FakeWebSocket.last().emitOpen();
+    expect(usePresenceStore.getState().serverLost).toBe(false);
+  });
+
   it('a successful reconnect clears the banner', () => {
     connectAndOpen();
     FakeWebSocket.last().emitClose(1006, '');
@@ -875,22 +887,30 @@ describe('message dispatch', () => {
     const sock = open();
     const memory = { project: 'p', file: 'm.md', name: 'n', description: '', memoryType: 'user' };
     sock.emitMessage(
-      JSON.stringify({ type: 'claude_settings.list', hostId: 'd1', memories: [memory] }),
+      JSON.stringify({
+        type: 'claude_settings.list',
+        hostId: 'd1',
+        settingsJson: '',
+        memories: [memory],
+      }),
     );
-    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings).toEqual({ memories: [memory] });
+    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings).toEqual({
+      settingsJson: '',
+      memories: [memory],
+    });
     sock.emitMessage(
       JSON.stringify({
         type: 'claude_settings.updated',
         hostId: 'd1',
-        drift: '{"a":1}',
+        settingsJson: '{"a":1}',
         memories: [],
       }),
     );
-    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.drift).toBe('{"a":1}');
+    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.settingsJson).toBe('{"a":1}');
     usePresenceStore
       .getState()
       .setHosts([{ hostId: 'd1', online: true, lastSeenAt: 1, host: null, accounts: [] }]);
-    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.drift).toBe('{"a":1}');
+    expect(usePresenceStore.getState().hosts['d1']?.claudeSettings?.settingsJson).toBe('{"a":1}');
   });
 
   // spec/03 § Settings — the shared settings arrive in the greeting and after every change.
@@ -921,7 +941,7 @@ describe('message dispatch', () => {
     expect(useSettingsStore.getState().data?.preferences.chatNameInterval).toBe(5);
   });
 
-  // Settings → Hosts → Remove this host: every surface is sent `host.removed`
+  // Settings → Hosts → Remove this machine: every surface is sent `host.removed`
   // and drops the host with every report it had cached for it.
   it('host.removed drops THAT host and its cached reports, and nothing else', () => {
     const sock = open();

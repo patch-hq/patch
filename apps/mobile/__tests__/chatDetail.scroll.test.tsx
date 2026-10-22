@@ -46,6 +46,7 @@ import {
 } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
+import { useViewPositionStore } from '../src/stores/viewPositionStore';
 import { __emitKeyboardEvent, __flatListCalls, __resetFlatListCalls } from './stubs/react-native';
 import { __setLocalSearchParams } from './stubs/expo-router';
 
@@ -892,6 +893,60 @@ describe('remembered scroll position across a re-open', () => {
 // change (Todoist: "switching chat puts you in a different position when you
 // come back" — also true here, since this screen's `onContentSizeChange`
 // restore had the exact same raw-offset shape).
+describe('handover — scroll position reported to the view-position store', () => {
+  it('a fling reports where it came to rest, not where the finger lifted', async () => {
+    seedChatWithMessages('scroll-handover-1', 3); // invertedRows: [3, 2, 1]
+    __setLocalSearchParams({ chatId: 'scroll-handover-1' });
+    const r = render(<ChatDetailScreen />);
+    await flush();
+    const list = flatListNode(r.root);
+    actSync(() => {
+      list.props.onScrollBeginDrag(scrollEvent(100));
+      list.props.onViewableItemsChanged({ viewableItems: [{ index: 1 }] });
+      list.props.onScroll(scrollEvent(100));
+      list.props.onScrollEndDrag(scrollEvent(100));
+      // The fling carries on after the finger is off: the list comes to rest on seq 1.
+      list.props.onViewableItemsChanged({ viewableItems: [{ index: 2 }] });
+      list.props.onMomentumScrollEnd(scrollEvent(600));
+    });
+    expect(useViewPositionStore.getState().scroll).toEqual({ chatId: 'scroll-handover-1', seq: 1 });
+  });
+
+  it('a release with no momentum reports the position too', async () => {
+    seedChatWithMessages('scroll-handover-2', 3);
+    __setLocalSearchParams({ chatId: 'scroll-handover-2' });
+    const r = render(<ChatDetailScreen />);
+    await flush();
+    const list = flatListNode(r.root);
+    actSync(() => {
+      list.props.onScrollBeginDrag(scrollEvent(100));
+      list.props.onScroll(scrollEvent(100));
+      list.props.onViewableItemsChanged({ viewableItems: [{ index: 1 }] });
+      list.props.onScrollEndDrag(scrollEvent(100));
+    });
+    expect(useViewPositionStore.getState().scroll).toEqual({ chatId: 'scroll-handover-2', seq: 2 });
+  });
+
+  it('a fling back to the newest reports the latest (no seq)', async () => {
+    seedChatWithMessages('scroll-handover-3', 3);
+    __setLocalSearchParams({ chatId: 'scroll-handover-3' });
+    const r = render(<ChatDetailScreen />);
+    await flush();
+    const list = flatListNode(r.root);
+    actSync(() => {
+      list.props.onScrollBeginDrag(scrollEvent(500));
+      list.props.onViewableItemsChanged({ viewableItems: [{ index: 2 }] });
+      list.props.onScroll(scrollEvent(500));
+      list.props.onScrollEndDrag(scrollEvent(500));
+      list.props.onMomentumScrollEnd(scrollEvent(0));
+    });
+    expect(useViewPositionStore.getState().scroll).toEqual({
+      chatId: 'scroll-handover-3',
+      seq: null,
+    });
+  });
+});
+
 describe('remembered scroll position — anchored to a message, not a raw offset', () => {
   it('restores to the anchor message’s current index (scrollToIndex) even after new messages have shifted every index, not the stale raw offset', async () => {
     seedChatWithMessages('scroll-anchor-1', 3); // seq 1..3; invertedRows: [3, 2, 1]

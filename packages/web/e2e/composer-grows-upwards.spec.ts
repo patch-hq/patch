@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 // move as the field grows, and the transcript must give up the space.
 
 const HARNESS = '/app/dev-harness.html?chat=chat_bus';
-const CAP = 0.5; // fraction of window height: `.composer-input` max-height (50vh)
+const CAP = 0.3; // fraction of window height: `.composer-input` max-height (30vh)
 
 /** A paste comfortably past the cap. */
 const LONG = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of a long message`).join('\n');

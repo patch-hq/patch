@@ -95,7 +95,6 @@ describe('model catalogue', () => {
 describe('no surface-local model default', () => {
   it('exports no default model id and no surface-local last-used accessors', () => {
     expect(Object.keys(models).sort()).toEqual([
-      'RECENT_MODEL_COUNT',
       'getModelCatalog',
       'loadModels',
       'refreshModelsForHost',

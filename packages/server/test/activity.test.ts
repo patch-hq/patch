@@ -3,8 +3,8 @@
 // `patch.activity.request` both fan out `patch.activity.read.request` frames,
 // merge the answers and join them against the chat mirror.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
@@ -23,6 +23,21 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
+
+/** Seed the server's dwell log (`activity.jsonl`) before it is built: surface s1 sits on c-a, then c-b. */
+function seedDwell(base: number): void {
+  const events = [
+    { kind: 'visibility', ts: base, surfaceId: 's1', visible: true },
+    { kind: 'focus', ts: base, surfaceId: 's1', chatId: 'c-a' },
+    { kind: 'focus', ts: base + 1000, surfaceId: 's1', chatId: 'c-b' },
+    { kind: 'focus', ts: base + 1500, surfaceId: 's1', chatId: 'gone' },
+    { kind: 'visibility', ts: base + 2000, surfaceId: 's1', visible: false },
+  ];
+  writeFileSync(
+    join(dir, 'activity.jsonl'),
+    events.map((e) => JSON.stringify(e)).join('\n') + '\n',
+  );
+}
 
 async function setup() {
   const user = generateUserKeypair(() => new Uint8Array(32).fill(77));
@@ -67,6 +82,7 @@ async function setup() {
       (s): s is { surfaceId: string; hostId?: string; event: PatchActivityReadRequestEvent } =>
         s.event.type === 'patch.activity.read.request',
     );
+  const answeredIds = new Set<string>();
   const answerAll = async (
     byHost: Record<
       string,
@@ -78,10 +94,12 @@ async function setup() {
       }>
     >,
   ) => {
-    for (let i = 0; i < 100 && readRequests().length < ONLINE_HOSTS.length; i++) {
+    const unanswered = () => readRequests().filter((r) => !answeredIds.has(r.event.requestId));
+    for (let i = 0; i < 100 && unanswered().length < ONLINE_HOSTS.length; i++) {
       await new Promise((r) => setTimeout(r, 5));
     }
-    for (const r of readRequests()) {
+    for (const r of unanswered()) {
+      answeredIds.add(r.event.requestId);
       hostLink.injectHostEvent({
         type: 'patch.activity.read.response',
         requestId: r.event.requestId,
@@ -299,6 +317,134 @@ describe('patch.activity.request (a host’s patch_activity)', () => {
   });
 });
 
+describe('chat dwell sessions (opt-in)', () => {
+  it('GET /api/activity?includeSessions=true adds server-recorded sessions, enriched, dropping chats the mirror does not know', async () => {
+    const base = Date.now() - 60_000;
+    seedDwell(base);
+    const { built, get, answerAll } = await setup();
+    try {
+      const pending = get(`since=${base}&until=${base + 5000}&includeSessions=true`);
+      await answerAll({});
+      const res = await pending;
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        messages: [],
+        messagesTruncated: false,
+        chatSessions: [
+          {
+            chatId: 'c-a',
+            chatName: null,
+            hostId: 'host-a',
+            folder: '/work/c-a',
+            start: base,
+            end: base + 1000,
+            durationMs: 1000,
+          },
+          {
+            chatId: 'c-b',
+            chatName: null,
+            hostId: 'host-b',
+            folder: '/work/c-b',
+            start: base + 1000,
+            end: base + 1500,
+            durationMs: 500,
+          },
+        ],
+        sessionsTruncated: false,
+      });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('pages sessions with sessionsCursor (which implies includeSessions) independently of messages', async () => {
+    const base = Date.now() - 60_000;
+    seedDwell(base);
+    const { built, get, answerAll } = await setup();
+    try {
+      const p1 = get(`since=${base}&until=${base + 5000}&includeSessions=true&limit=1`);
+      await answerAll({});
+      const page1 = (await p1).json();
+      expect(page1.chatSessions.map((c: { chatId: string }) => c.chatId)).toEqual(['c-a']);
+      expect(page1.sessionsTruncated).toBe(true);
+      expect(page1.nextSessionsCursor).toBe(base + 1);
+
+      const p2 = get(
+        `since=${base}&until=${base + 5000}&limit=1&sessionsCursor=${page1.nextSessionsCursor}`,
+      );
+      await answerAll({});
+      const page2 = (await p2).json();
+      expect(page2.chatSessions.map((c: { chatId: string }) => c.chatId)).toEqual(['c-b']);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('rejects a non-numeric sessionsCursor', async () => {
+    const { built, get } = await setup();
+    try {
+      expect((await get('since=0&until=10&sessionsCursor=x')).statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('a host that sets includeSessions on patch.activity.request gets chatSessions back; one that does not never does', async () => {
+    const base = Date.now() - 60_000;
+    seedDwell(base);
+    const { built, hostLink, answerAll } = await setup();
+    const reply = async (sourceChatId: string) => {
+      for (
+        let i = 0;
+        i < 100 &&
+        !hostLink.sent.some(
+          (s) =>
+            s.event.type === 'patch.activity.response' &&
+            (s.event as { sourceChatId: string }).sourceChatId === sourceChatId,
+        );
+        i++
+      ) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      return hostLink.sent.find(
+        (s) =>
+          s.event.type === 'patch.activity.response' &&
+          (s.event as { sourceChatId: string }).sourceChatId === sourceChatId,
+      )!.event;
+    };
+    try {
+      hostLink.injectHostEvent({
+        type: 'patch.activity.request',
+        sourceChatId: 'new-host',
+        since: base,
+        until: base + 5000,
+        includeSessions: true,
+      } as WireEvent);
+      await answerAll({});
+      const withSessions = await reply('new-host');
+      expect(withSessions).toMatchObject({
+        sessionsTruncated: false,
+        chatSessions: [{ chatId: 'c-a' }, { chatId: 'c-b' }],
+      });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('asking for sessions with no log fails rather than returning an empty list', async () => {
+    const { createActivityReader } = await import('../src/activity.js');
+    const { ChatRegistry } = await import('../src/chat-registry.js');
+    const reader = createActivityReader({
+      hostLink: new InProcessHostLink(),
+      chatRegistry: new ChatRegistry(),
+    });
+    await expect(reader.query({ since: 0, until: 10, includeSessions: true })).rejects.toThrow(
+      /sessions are not recorded/,
+    );
+    reader.close();
+  });
+});
+
 describe('read retry', () => {
   it('retries a machine that was silent for one attempt, and still fails if it stays silent', async () => {
     const { createActivityReader } = await import('../src/activity.js');
@@ -316,13 +462,22 @@ describe('read retry', () => {
         requestId: (reqs().at(-1)!.event as PatchActivityReadRequestEvent).requestId,
         messages: [],
       } as WireEvent);
-    const ok = reader.query({ since: 0, until: 1000 });
-    await new Promise((r) => setTimeout(r, 40)); // first attempt times out unanswered
-    expect(reqs().length).toBe(2);
-    answerLatest();
-    await expect(ok).resolves.toMatchObject({ messagesTruncated: false });
-    const dead = reader.query({ since: 0, until: 1000 });
-    await expect(dead).rejects.toThrow(/did not answer/);
-    reader.close();
+    // A simulated clock: on a loaded runner, real waits let the retry time out
+    // too before the test answered it, and that rejection had no listener yet.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const ok = reader.query({ since: 0, until: 1000 });
+      await vi.advanceTimersByTimeAsync(20); // first attempt times out unanswered
+      expect(reqs().length).toBe(2);
+      answerLatest();
+      await expect(ok).resolves.toMatchObject({ messagesTruncated: false });
+      const dead = reader.query({ since: 0, until: 1000 });
+      const refused = expect(dead).rejects.toThrow(/did not answer/);
+      await vi.advanceTimersByTimeAsync(40); // both attempts go unanswered
+      await refused;
+    } finally {
+      vi.useRealTimers();
+      reader.close();
+    }
   });
 });

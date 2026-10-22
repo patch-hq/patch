@@ -245,7 +245,7 @@ function HookEditor({
   const { data: folderData } = useQuery({ queryKey: ['folders'], queryFn: () => api.folders() });
   const modelCatalog = useModelCatalog();
   // The model catalogue is per machine: ask the first host the hook is gated
-  // to, else the home host. No host to ask means no list — said, not guessed.
+  // to, else the account default. No host to ask means no list — said, not guessed.
   const modelHostId = draft.hosts[0] ?? defaultHostId(hosts);
   useEffect(() => {
     if (draft.kind !== 'prompt' || modelHostId === null) return;

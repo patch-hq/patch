@@ -17,7 +17,11 @@ export const NOTIFICATION_LOG_CAP = 200;
 const Entry = z
   .object({
     id: z.string().min(1),
-    chatId: z.string().min(1),
+    /** Absent on a job-failure entry, which belongs to a job rather than a chat. */
+    chatId: z.string().min(1).optional(),
+    /** A job-failure entry: the job, and the `ts` of the failed run. */
+    jobId: z.string().min(1).optional(),
+    runTs: z.number().optional(),
     message: z.string(),
     importance: z.enum(['silent', 'normal', 'urgent']),
     deepLink: z.string().optional(),

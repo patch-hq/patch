@@ -4,6 +4,7 @@
 
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
+import { signInQuestion } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { useSignInStore } from '../stores/signInStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -90,9 +91,7 @@ export function SignInApprovalPrompt(): JSX.Element | null {
     >
       {current !== undefined ? (
         <>
-          <p>
-            <strong>{current.label}</strong> wants to sign in to Patch.
-          </p>
+          <p>{signInQuestion(current.label)}</p>
           <div className="signin-buttons">
             <button
               type="button"

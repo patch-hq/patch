@@ -80,6 +80,7 @@ ENV PATCH_WEB_DIST=/app/web/dist
 COPY --from=builder /out/server /app
 COPY --from=builder /out/web/dist /app/web/dist
 
+ENV PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
   CMD wget -qO- http://127.0.0.1:3000/api/healthz || exit 1

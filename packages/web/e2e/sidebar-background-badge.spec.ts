@@ -67,9 +67,12 @@ test.describe('sidebar background-job badge', () => {
     const tick = page.getByTestId('chat-row-chat_md').getByTestId('badge-done');
     const bgBox = (await badge.boundingBox())!;
     const tickBox = (await tick.boundingBox())!;
-    // spec/14: "Every state draws at the same footprint" — a badge that grows
-    // its own box shoves the row title across and stops reading as a marker.
-    expect(Math.abs(bgBox.x - tickBox.x)).toBeLessThanOrEqual(2);
+    // spec/14: "Every state draws at the same footprint" — every state is
+    // centred on the same axis in the badge track (a 10px disc and a 16px
+    // glyph box share a centre, not a left edge); a badge that grows its own
+    // box shoves the row title across and stops reading as a marker.
+    const centre = (b: { x: number; width: number }): number => b.x + b.width / 2;
+    expect(Math.abs(centre(bgBox) - centre(tickBox))).toBeLessThanOrEqual(1);
     // The row reserves an 18px badge track; a badge that outgrows it shoves the
     // name across.
     expect(bgBox.width).toBeLessThanOrEqual(18);

@@ -9,18 +9,17 @@
 // until the server answers.
 
 import type { JSX, ReactNode } from 'react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
 import {
-  EXTRA_USAGE_OFF_TEXT,
-  EXTRA_USAGE_ORG_DISABLED_TEXT,
-  EXTRA_USAGE_URL,
   OVERAGE_DISABLED_REASON,
   OVERAGE_ORG_DISABLED_REASON,
+  SCOPE_ORDER,
   formatReset,
   formatResetDetail,
   formatUntil,
   formatUtilization,
+  type UsageScope,
 } from '../../lib/usage.js';
 
 export interface RankedItem {
@@ -140,7 +139,9 @@ export function RankedList({
 
 /**
  * One account row: handle, rank, body, and a ⋯ that opens the row's actions
- * under it (inline, so the row is never covered and nothing is clipped).
+ * in a small panel beside it. The panel floats over whatever is below rather
+ * than pushing it down, so the list never jumps; it closes on a choice, a
+ * click elsewhere, or Escape.
  */
 export function AccountRow({
   handle,
@@ -162,6 +163,22 @@ export function AccountRow({
   testid: string;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent): void => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', key);
+    };
+  }, [open]);
   return (
     <div className={`set-acct${active ? ' active' : ''}`} data-testid={testid}>
       {handle}
@@ -170,52 +187,58 @@ export function AccountRow({
       </span>
       <div className="set-acct-body">{children}</div>
       {menu.length > 0 ? (
-        <button
-          type="button"
-          className="set-btn ghost set-more"
-          aria-label={`${menuLabel} actions`}
-          aria-expanded={open}
-          data-testid={menuTestid}
-          onClick={() => setOpen((v) => !v)}
-        >
-          ⋯
-        </button>
+        <div className="set-acct-more" ref={wrap}>
+          <button
+            type="button"
+            className="set-btn ghost set-more"
+            aria-label={`${menuLabel} actions`}
+            aria-expanded={open}
+            aria-haspopup="menu"
+            data-testid={menuTestid}
+            onClick={() => setOpen((v) => !v)}
+          >
+            ⋯
+          </button>
+          {open ? (
+            <div className="set-acct-menu" role="menu" data-testid={`${menuTestid}-open`}>
+              {menu.map((it) => (
+                <button
+                  key={it.testid}
+                  type="button"
+                  role="menuitem"
+                  className={`set-acct-menu-item${it.danger ? ' danger' : ''}`}
+                  disabled={it.disabled}
+                  data-testid={it.testid}
+                  onClick={() => {
+                    setOpen(false);
+                    it.onSelect();
+                  }}
+                >
+                  <span className="set-acct-menu-label">{it.label}</span>
+                  {it.detail ? <span className="set-acct-menu-detail">{it.detail}</span> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : (
         <span />
       )}
-      {open ? (
-        <div className="set-acct-actions" role="menu">
-          {menu.map((it) => (
-            <button
-              key={it.testid}
-              type="button"
-              role="menuitem"
-              className={`set-btn${it.danger ? ' danger' : ''}`}
-              disabled={it.disabled}
-              data-testid={it.testid}
-              onClick={() => {
-                setOpen(false);
-                it.onSelect();
-              }}
-            >
-              {it.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
 
 export interface MenuItem {
   label: string;
+  /** One line under the label saying what the action does, where the label alone does not. */
+  detail?: string;
   onSelect: () => void;
   testid: string;
   danger?: boolean;
   disabled?: boolean;
 }
 
-type Scope = 'session' | 'week' | 'overage';
+type Scope = UsageScope;
 const SCOPE_LABELS: Record<Scope, string> = {
   session: '5-hour',
   week: 'Weekly',
@@ -223,38 +246,29 @@ const SCOPE_LABELS: Record<Scope, string> = {
 };
 
 /**
- * Anthropic's reason code in words.
- *
- * `org_level_disabled_until` is the one that matters and the one that read as
- * an accusation: it does NOT mean money has been spent, and it does not mean
- * anyone switched anything off. Extra usage is a paid add-on, so an account
- * that never took it out reports this for ever. The sentence is shared with
- * the chat-transcript block, so patch says it one way. An unrecognised code is
- * shown raw rather than guessed at.
- */
-function describeDisabledReason(reason: string): string {
-  if (reason === OVERAGE_DISABLED_REASON) return EXTRA_USAGE_OFF_TEXT;
-  if (reason === OVERAGE_ORG_DISABLED_REASON) return EXTRA_USAGE_ORG_DISABLED_TEXT;
-  return reason;
-}
-
-/**
  * An account's limit windows as bars: label, fill, percentage, reset.
  *
- * The same `rejected` means two different things. On the session or the week
- * it means work has stopped. On overage it means the extra-usage add-on was
- * never bought — permanently true of a healthy account — so it draws in
- * neutral styling and reads as off, not blocked. A window the host has not
- * reported draws nothing rather than an empty bar.
+ * `windows` is what the provider reports, in order; a window the host has not
+ * reported draws nothing rather than an empty bar. The same `rejected` means
+ * two different things. On the session or the week it means work has stopped.
+ * On overage it means the extra-usage add-on was never bought — permanently
+ * true of a healthy account — so it draws in neutral styling and reads as off,
+ * with where to turn it on in place of a reset time. `org_level_disabled`
+ * means organisation policy prevents it and says so; any other reason is
+ * shown raw rather than guessed at.
  */
 export function UsageBars({
   usage,
+  windows = SCOPE_ORDER,
+  extraUsageUrl,
   testId,
   testIdFor,
 }: {
   usage:
     | { session?: RateLimitWindow; week?: RateLimitWindow; overage?: RateLimitWindow; at?: number }
     | undefined;
+  windows?: readonly Scope[];
+  extraUsageUrl?: string;
   testId: string;
   testIdFor: (scope: Scope) => string;
 }): JSX.Element {
@@ -267,12 +281,9 @@ export function UsageBars({
       </div>
     );
   }
-  const reasons = (['session', 'week', 'overage'] as const)
-    .map((s) => usage[s]?.disabledReason)
-    .filter((r): r is string => r !== undefined);
   return (
     <div className="set-bars" data-testid={testId}>
-      {(['session', 'week', 'overage'] as const).map((scope) => {
+      {windows.map((scope) => {
         const win = usage[scope];
         if (!win) return null;
         const state = rateLimitWindowState(scope, win);
@@ -294,37 +305,66 @@ export function UsageBars({
             <span className="set-bar" aria-hidden="true">
               <i style={{ width: `${Math.round((win.utilization ?? 0) * 100)}%` }} />
             </span>
-            <span className="set-bar-value">
-              {off ? 'off' : formatUtilization(win)}
-              {blocked ? ' · blocked' : ''}
-            </span>
-            <span className="set-bar-reset">
-              {win.resetsAt !== undefined ? `resets ${formatReset(win.resetsAt)}` : ''}
+            <span className="set-bar-value">{off ? 'off' : formatUtilization(win)}</span>
+            <span
+              className="set-bar-reset"
+              title={
+                win.disabledReason !== undefined
+                  ? describeDisabledReason(win.disabledReason)
+                  : undefined
+              }
+            >
+              {win.disabledReason !== undefined ? (
+                <DisabledReason reason={win.disabledReason} extraUsageUrl={extraUsageUrl} />
+              ) : win.resetsAt !== undefined ? (
+                `${blocked ? 'blocked · ' : ''}resets ${formatReset(win.resetsAt)}`
+              ) : blocked ? (
+                'blocked'
+              ) : (
+                ''
+              )}
             </span>
           </div>
         );
       })}
-      {reasons.length > 0 ? (
-        <span className="set-sub set-bars-reason">
-          {[...new Set(reasons)].map((reason, index) => (
-            <span key={reason}>
-              {index > 0 ? ' · ' : null}
-              {reason === OVERAGE_DISABLED_REASON ? (
-                <a
-                  href={EXTRA_USAGE_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  data-testid="account-extra-usage-settings"
-                >
-                  {describeDisabledReason(reason)}
-                </a>
-              ) : (
-                describeDisabledReason(reason)
-              )}
-            </span>
-          ))}
-        </span>
-      ) : null}
     </div>
   );
+}
+
+/**
+ * Anthropic's reason code in words, in the reset column of the window it is
+ * about. `org_level_disabled_until` is the one that matters and the one that
+ * read as an accusation: it does NOT mean money has been spent, and it does
+ * not mean anyone switched anything off — the add-on was never taken out, so
+ * the line says where to turn it on.
+ */
+/** The reason as plain words, for the hover title when the column clips it. */
+function describeDisabledReason(reason: string): string {
+  if (reason === OVERAGE_DISABLED_REASON) return 'Extra usage is off: turn it on at claude.ai';
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return 'Extra usage disabled by organisation';
+  return reason;
+}
+
+function DisabledReason({
+  reason,
+  extraUsageUrl,
+}: {
+  reason: string;
+  extraUsageUrl: string | undefined;
+}): JSX.Element {
+  if (reason === OVERAGE_DISABLED_REASON && extraUsageUrl !== undefined) {
+    return (
+      <a
+        href={extraUsageUrl}
+        target="_blank"
+        rel="noreferrer"
+        data-testid="account-extra-usage-settings"
+      >
+        Turn on ↗
+      </a>
+    );
+  }
+  if (reason === OVERAGE_DISABLED_REASON) return <>disabled</>;
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return <>disabled by organisation</>;
+  return <>{reason}</>;
 }

@@ -3,7 +3,7 @@
 // and each names the event that releases it.
 
 import { describe, it, expect } from 'vitest';
-import { queueChipLabel, queueChipTitle, queueRelease } from '../src/lib/queueLabel';
+import { creditPause, queueChipLabel, queueChipTitle, queueRelease } from '../src/lib/queueLabel';
 
 describe('queueChipLabel', () => {
   it('reads "Queued" at the head of the queue', () => {
@@ -42,9 +42,9 @@ describe('queueChipTitle', () => {
 
 describe('host offline', () => {
   it('says the host is offline rather than that a turn is running', () => {
-    expect(queueChipLabel(1, false)).toBe('Host offline');
-    expect(queueChipLabel(3, false)).toBe('Host offline');
-    expect(queueChipTitle(1, false)).toBe('Waiting for the host to come back online');
+    expect(queueChipLabel(1, false)).toBe('Machine offline');
+    expect(queueChipLabel(3, false)).toBe('Machine offline');
+    expect(queueChipTitle(1, false)).toBe('Waiting for the machine to come back online');
   });
 });
 
@@ -63,7 +63,7 @@ describe('release event', () => {
   });
 
   it('host offline wins over the release event', () => {
-    expect(queueChipLabel(1, false, 'tool')).toBe('Host offline');
+    expect(queueChipLabel(1, false, 'tool')).toBe('Machine offline');
   });
 
   it('holds everything behind a turn that needs its own run', () => {
@@ -71,5 +71,20 @@ describe('release event', () => {
     expect(queueRelease(block, 0)).toBe('tool');
     expect(queueRelease(block, 1)).toBe('turn');
     expect(queueRelease(block, 2)).toBe('turn');
+  });
+});
+
+describe('out of credit', () => {
+  it('says paused, with the resume time when stated', () => {
+    expect(queueChipLabel(2, true, 'tool', { resetsAt: null })).toBe('Paused · out of credit');
+    expect(queueChipLabel(1, true, 'tool', { resetsAt: 1_800_000_000_000 })).toMatch(
+      /^Paused · out of credit · resumes /,
+    );
+    expect(queueChipLabel(1, false, 'tool', { resetsAt: null })).toBe('Machine offline');
+  });
+  it('derives the pause from a row, ignoring a plain overload', () => {
+    expect(creditPause({})).toBeNull();
+    expect(creditPause({ rateLimitResumingAt: 5, resumeKind: 'overloaded' })).toBeNull();
+    expect(creditPause({ limitBlock: {} })).toEqual({ resetsAt: null });
   });
 });

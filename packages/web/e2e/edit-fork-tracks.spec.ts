@@ -51,14 +51,16 @@ test.describe('edit a turn / switch tracks', () => {
     await userTurn.locator('.content').hover();
     await userTurn.getByTestId('msg-edit').click();
 
-    const field = userTurn.getByTestId('msg-edit-input');
+    const field = page.getByTestId('composer-input');
     await expect(field).toBeVisible();
     await expect(field).toHaveValue('the edited turn');
-    // The static bubble is replaced, not duplicated.
-    await expect(userTurn.getByTestId('msg-content')).toHaveCount(0);
+    // The original remains as the fork anchor while the main composer edits it.
+    await expect(userTurn).toHaveClass(/msg-edit-anchor/);
+    await expect(userTurn.getByTestId('msg-content')).toContainText('the edited turn');
 
-    await userTurn.getByTestId('msg-edit-cancel').click();
-    await expect(userTurn.getByTestId('msg-edit-input')).toHaveCount(0);
+    await page.getByTestId('composer-edit-cancel').click();
+    await expect(page.getByTestId('composer-edit-banner')).toHaveCount(0);
+    await expect(field).toHaveValue('');
     await expect(userTurn.getByTestId('msg-content')).toContainText('the edited turn');
   });
 
@@ -91,24 +93,25 @@ test.describe('edit a turn / switch tracks', () => {
 });
 
 test.describe('the message editor is the composer', () => {
-  test('carries dictation, no attachments, and Esc cancels', async ({ page }) => {
+  test('keeps dictation and attachments in the main composer, and Esc cancels', async ({
+    page,
+  }) => {
     await page.goto(FORKED);
     const userTurn = page.locator('.msg-user').nth(1);
     await userTurn.locator('.content').hover();
     await userTurn.getByTestId('msg-edit').click();
 
-    const editor = userTurn.getByTestId('msg-editor');
-    await expect(editor.getByTestId('msg-edit-input')).toBeFocused();
+    const editor = page.getByTestId('composer');
+    await expect(editor.getByTestId('composer-input')).toBeFocused();
     await expect(editor.getByTestId('voice-note-btn')).toBeVisible();
-    await expect(editor.getByTestId('attach-btn')).toHaveCount(0);
-    await expect(editor.getByTestId('send-btn')).toHaveCount(0);
-    // Fills the turn rather than sitting in the composer's reading column.
-    const turnBox = await userTurn.boundingBox();
-    const editorBox = await editor.boundingBox();
-    expect(editorBox!.width).toBeGreaterThan(turnBox!.width * 0.6);
+    await expect(editor.getByTestId('attach-btn')).toBeVisible();
+    await expect(editor.getByTestId('send-btn')).toBeVisible();
+    await expect(page.getByTestId('composer-edit-banner')).toBeVisible();
+    await expect(userTurn.getByTestId('msg-editor')).toHaveCount(0);
 
     await page.keyboard.press('Escape');
-    await expect(userTurn.getByTestId('msg-editor')).toHaveCount(0);
+    await expect(page.getByTestId('composer-edit-banner')).toHaveCount(0);
+    await expect(editor.getByTestId('composer-input')).toHaveValue('');
     await expect(userTurn.getByTestId('msg-content')).toContainText('the edited turn');
   });
 });

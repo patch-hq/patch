@@ -25,6 +25,7 @@
   var sig = '';            // signature of the change list this frame reflects
   var restoring = null;    // scroll positions to put back after a reload
   var notesDirty = true;
+  var frameReady = false;  // the frame has loaded the screen we are on; until then its DOM is not the one the notes belong to
 
   // ---------- small helpers ----------
   function doc() { return frame.contentDocument; }
@@ -119,10 +120,17 @@
     if (!d || !d.body || applying) return;
     applying = true;
     var selDup = sel && sel.getAttribute && sel.getAttribute('data-pad-dup');
-    Array.prototype.forEach.call(d.querySelectorAll('[data-pad-dup]'), function (x) { x.remove(); });
+    Array.prototype.forEach.call(d.querySelectorAll('[data-pad-dup], [data-pad-add]'), function (x) { x.remove(); });
     live().forEach(function (c) {
       if (c.kind === 'note' || c.kind === 'draw') return;
       var n = find(c.target.selector); if (!n) return;
+      if (c.kind === 'add') {
+        var t = d.createElement('div');
+        t.setAttribute('data-pad-add', c.id);
+        t.textContent = c.text;
+        n.appendChild(t);
+        return;
+      }
       if (c.kind === 'duplicate') {
         var copy = n.cloneNode(true);
         copy.removeAttribute('id');
@@ -160,6 +168,7 @@
   }
   function reloadFrame() {
     restoring = saveScroll();
+    frameReady = false;
     sel = null; hoverEl = null;
     if (screen) frame.src = screenUrl(screen);
     else win().location.reload();
@@ -193,6 +202,7 @@
     closeScreenSheet();
     if (s === screen) return;
     screen = s; sel = null; hoverEl = null;
+    frameReady = false; notesLayer.style.visibility = 'hidden';
     try { localStorage.setItem(screenKey(), s.id); } catch (e) { /* ignore */ }
     renderScreens(); draw();
     frame.src = screenUrl(s);
@@ -223,6 +233,20 @@
     var nav = $('screens');
     nav.hidden = false;
     $('screenBar').hidden = false;
+    // The poll lands here every 1.5s. Rebuilding the buttons under a press
+    // makes mousedown and mouseup hit different elements, so the click is lost.
+    var sig3 = JSON.stringify([state.screens.map(function (x) { return [x.id, x.name, pendingOn(x), seen && seen.indexOf(x.id) < 0]; }), screen && screen.id]);
+    if (sig3 !== screensSig) {
+      screensSig = sig3;
+      buildScreenList(nav, seen);
+    }
+    var i = state.screens.indexOf(screen);
+    $('screenName').textContent = screen ? screen.name : 'Not one of the screens';
+    $('prevScreen').disabled = i <= 0;
+    $('nextScreen').disabled = i < 0 || i >= state.screens.length - 1;
+  }
+  var screensSig = null;
+  function buildScreenList(nav, seen) {
     nav.textContent = '';
     el('h2', '', nav).textContent = 'Screens';
     state.screens.forEach(function (s) {
@@ -232,15 +256,15 @@
       var n = pendingOn(s);
       if (n) el('b', '', b).textContent = n;
       else if (seen && seen.indexOf(s.id) < 0) el('i', 'new-dot', b).title = 'New screen';
-      b.addEventListener('click', function () { setScreen(s); });
+      b.addEventListener('click', function () {
+        // The list outlives refreshes, which replace the screen objects: resolve by id.
+        var cur = state.screens.filter(function (x) { return x.id === s.id; })[0];
+        if (cur) setScreen(cur);
+      });
     });
     var add = el('button', 'add-screen', nav);
     add.id = 'addScreen'; add.textContent = '+'; add.setAttribute('aria-label', 'Add screen');
     add.addEventListener('click', addScreen);
-    var i = state.screens.indexOf(screen);
-    $('screenName').textContent = screen ? screen.name : 'Not one of the screens';
-    $('prevScreen').disabled = i <= 0;
-    $('nextScreen').disabled = i < 0 || i >= state.screens.length - 1;
   }
   function addScreen() {
     closeScreenSheet();
@@ -259,6 +283,7 @@
   var observer = null;
   frame.addEventListener('load', function () {
     var d = doc();
+    frameReady = true; notesLayer.style.visibility = '';
     applyPreviews();
     if (restoring) {
       var r = restoring; restoring = null;
@@ -338,6 +363,9 @@
 
   var noteEls = {};
   function drawNotes() {
+    // Mid-load the frame holds the previous document: positional selectors
+    // would miss (notes vanish) or match the wrong screen (notes jump).
+    if (!frameReady) return;
     var notes = live().filter(function (c) { return c.kind === 'note'; });
     var keep = {};
     notes.forEach(function (c) {
@@ -429,7 +457,7 @@
     if (t !== 'interact') editTool = t;
     document.querySelectorAll('[data-tool]').forEach(function (b) { b.classList.toggle('on', b.dataset.tool === t); });
     layer.classList.toggle('interact', t === 'interact');
-    layer.classList.toggle('text-tool', t === 'text');
+    layer.classList.toggle('text-tool', t === 'text' || t === 'addtext');
     layer.classList.toggle('draw-tool', t === 'draw' || SHAPE_TOOLS.indexOf(t) >= 0);
     if (t !== 'select') hoverEl = null;
     draw();
@@ -474,6 +502,7 @@
     if (!screen) { toast('This view isn’t one of the screens. Pick one from the list to edit it.', 3500); return; }
     var pt = local(e);
     if (tool === 'text') { e.preventDefault(); startNote(pt); return; }
+    if (tool === 'addtext') { e.preventDefault(); startAddText(pt); return; }
     if (tool === 'draw') { e.preventDefault(); startStroke(e, pt); return; }
     if (SHAPE_TOOLS.indexOf(tool) >= 0) { e.preventDefault(); startStroke(e, pt, tool); return; }
     var t = hit(pt);
@@ -793,7 +822,8 @@
     else if (k === 'escape') { if (!$('help').hidden) toggleHelp(false); else { sel = null; draw(); } }
     else if (k === 'e') setMode(tool === 'interact' ? 'edit' : 'view');
     else if (k === 'v' && editingOn) setTool('select');
-    else if ((k === 'n' || k === 't') && editingOn) setTool('text');
+    else if (k === 'n' && editingOn) setTool('text');
+    else if (k === 't' && editingOn) setTool('addtext');
     else if (k === 'd' && editingOn) setTool('draw');
     else if (k === 'r' && editingOn) setTool('rectangle');
     else if (k === 'o' && editingOn) setTool('ellipse');
@@ -808,6 +838,29 @@
     else if (k === 'tab') selectRelative(e.shiftKey ? 'prev' : 'next');
     else return;
     e.preventDefault();
+  }
+
+  // ---------- added text ----------
+  // Lands as the last child of the element tapped, so tapping a chat area adds a line to it.
+  function startAddText(pt) {
+    var anchor = hit(pt) || doc().body;
+    var n = el('div', 'note draft', notesLayer);
+    n.style.left = pt.x + 'px'; n.style.top = pt.y + 'px';
+    var ta = el('textarea', 'note-draft', n); ta.placeholder = 'Type new text';
+    var done = false;
+    var finish = function (save) {
+      if (done) return; done = true;
+      var text = ta.value.trim(); n.remove();
+      if (save && text) post({ kind: 'add', target: target(anchor), text: text });
+      setTool('select');
+    };
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') finish(false);
+    });
+    ta.addEventListener('blur', function () { finish(true); });
+    n.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    ta.focus();
   }
 
   // ---------- keyboard actions ----------
@@ -904,7 +957,7 @@
       draw();
     });
   }
-  var KIND = { move: 'Move', resize: 'Size', text: 'Text', delete: 'Delete', note: 'Note', draw: 'Draw', duplicate: 'Copy' };
+  var KIND = { move: 'Move', resize: 'Size', text: 'Text', delete: 'Delete', note: 'Note', draw: 'Draw', duplicate: 'Copy', add: 'Add' };
   function describe(c) {
     var on = c.target.label;
     if (c.kind === 'move') return on + ' moved ' + phrase(c.dx, c.dy);
@@ -912,6 +965,7 @@
     if (c.kind === 'text') return '"' + c.before.trim().slice(0, 40) + '" → "' + c.after.trim().slice(0, 60) + '"';
     if (c.kind === 'delete' || c.kind === 'duplicate') return on;
     if (c.kind === 'draw') return 'on ' + on;
+    if (c.kind === 'add') return '"' + c.text.slice(0, 60) + '" in ' + on;
     return c.text;
   }
   function phrase(dx, dy) {
@@ -920,7 +974,13 @@
     if (dy) p.push(Math.abs(dy) + 'px ' + (dy > 0 ? 'down' : 'up'));
     return p.join(', ') || 'back';
   }
+  // The poll calls renderPanel every 1.5s; rebuilding identical DOM makes the
+  // bar flash and the sent-picture thumbnails reload, so skip an unchanged one.
+  var panelSig = null;
   function renderPanel() {
+    var sig2 = JSON.stringify([state.screens, state.changes, state.batches, sending]);
+    if (sig2 === panelSig) return;
+    panelSig = sig2;
     var pending = state.changes.filter(function (c) { return c.status === 'pending'; });
     var ol = $('pending'); ol.textContent = '';
     var many = state.screens.length > 1, lastScreen;
@@ -1010,4 +1070,42 @@
       if (++misses === 3) toast('Lost the connection to Pad: ' + err.message, 6000);
     });
   }, 1500);
+})();
+
+// Pad's own tooltip in place of the browser's: one bubble, drawn from any
+// element's `title`, which is blanked while it shows so only one ever appears
+// and put back (or kept, if rewritten meanwhile) when the pointer leaves.
+(function () {
+  var tip = null, src = null, text = '', timer = null;
+  function hide() {
+    clearTimeout(timer);
+    if (src && text && !src.getAttribute('title')) src.setAttribute('title', text);
+    if (tip) { tip.remove(); tip = null; }
+    src = null;
+  }
+  document.addEventListener('mouseover', function (e) {
+    var el = e.target.closest && e.target.closest('[title]');
+    if (!el || el === src) return;
+    hide();
+    src = el; text = el.getAttribute('title');
+    timer = setTimeout(function () {
+      if (src !== el || !el.isConnected) return;
+      el.removeAttribute('title');
+      tip = document.createElement('div');
+      tip.className = 'pad-tooltip';
+      tip.setAttribute('role', 'tooltip');
+      tip.textContent = text;
+      document.body.appendChild(tip);
+      var r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+      var left = Math.max(4, Math.min(innerWidth - t.width - 4, r.left + r.width / 2 - t.width / 2));
+      var top = r.bottom + 6 + t.height > innerHeight ? r.top - t.height - 6 : r.bottom + 6;
+      tip.style.left = left + 'px';
+      tip.style.top = Math.max(4, top) + 'px';
+    }, 350);
+  });
+  document.addEventListener('mouseout', function (e) {
+    if (src && !(e.relatedTarget instanceof Node && src.contains(e.relatedTarget))) hide();
+  });
+  document.addEventListener('mousedown', hide);
+  document.addEventListener('scroll', hide, true);
 })();

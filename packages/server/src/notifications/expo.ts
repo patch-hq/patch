@@ -28,6 +28,7 @@ interface ExpoPushMessage {
   data?: Record<string, string>;
   priority?: 'default' | 'high';
   channelId?: string;
+  categoryId?: string;
   sound?: 'default' | null;
 }
 
@@ -79,6 +80,9 @@ export class ExpoPushBackend implements PushBackend {
         title: payload.title,
         body: payload.body,
         ...(payload.data ? { data: payload.data } : {}),
+        // Expo reads the action-button category from the message's own field;
+        // inside `data` it only reaches the app's JS, never the OS's builder.
+        ...(payload.data?.['categoryId'] ? { categoryId: payload.data['categoryId'] } : {}),
         priority: 'high',
         ...channelFields,
       }));

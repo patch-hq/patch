@@ -3,13 +3,14 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
 import { OfflineBanner } from '../components/OfflineBanner.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
 describe('OfflineBanner', () => {
   beforeEach(() => {
-    usePresenceStore.setState({ connection: 'offline', everConnected: true });
+    usePresenceStore.setState({ connection: 'offline', everConnected: true, lastClose: null });
   });
 
   it('renders nothing when connected', () => {
@@ -56,5 +57,24 @@ describe('OfflineBanner', () => {
     fireEvent.click(screen.getByTestId('offline-diagnose'));
     expect(useUiStore.getState().diagnosticsOpen).toBe(true);
     useUiStore.setState({ diagnosticsOpen: false });
+  });
+
+  it('explains a server restart instead of a bare "Reconnecting…"', () => {
+    usePresenceStore.getState().setConnection('reconnecting');
+    usePresenceStore
+      .getState()
+      .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: 'server restarting', at: Date.now() });
+    render(<OfflineBanner />);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent(
+      'Server is updating — back in a moment',
+    );
+  });
+
+  it('goes back to "Reconnecting…" once a later close is not a restart', () => {
+    usePresenceStore.getState().setConnection('reconnecting');
+    usePresenceStore.getState().noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: '', at: 1 });
+    usePresenceStore.getState().noteWsClose({ code: 1006, reason: '', at: 2 });
+    render(<OfflineBanner />);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent('Reconnecting…');
   });
 });

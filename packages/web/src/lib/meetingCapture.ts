@@ -9,18 +9,26 @@
 // ("Thank you.") from silence. NO FALLBACK: a denied mic or missing Web Audio
 // API rejects `startMeetingCapture`.
 //
+// When both are captured the call is also audible in the room, so the mic is
+// cleaned of the system audio (`EchoCanceller`) before it is cut into clips:
+// the mic then carries the local speaker only and each utterance is heard once.
+//
 // The mic is a MediaStream. System audio ("them") is NOT: the desktop shell's
 // native helper taps it and hands over 16 kHz PCM (`PcmFeed`), so no screen is
 // ever shared to hear a call.
 
 import { createPcm16Downsampler, MIC_SAMPLE_RATE } from './pcmDownsample.js';
 import { silentAudioContext } from './silentAudioContext.js';
+import { EchoCanceller } from './echoCanceller.js';
 
-export const CLIP_SECONDS = 15;
+export const CLIP_SECONDS = 6;
 /** A tail shorter than this on stop is not worth a Whisper call. */
 export const MIN_TAIL_SECONDS = 1;
 /** RMS (0..1 of full scale) below which a clip is treated as silence. */
 export const SILENCE_RMS = 0.004;
+
+/** The far end saying nothing for this long means the call is over: the meeting ends itself. */
+export const AUTO_END_SILENCE_SECONDS = 300;
 
 export type MeetingSource = 'mic' | 'system';
 
@@ -72,8 +80,14 @@ export class ClipBuilder {
   private samples = 0;
   constructor(
     private readonly onClip: (wav: Uint8Array) => void,
-    private readonly clipSeconds: number = CLIP_SECONDS,
+    private clipSeconds: number = CLIP_SECONDS,
+    private readonly onQuiet?: (seconds: number) => void,
   ) {}
+
+  setClipSeconds(seconds: number): void {
+    this.clipSeconds = seconds;
+    if (this.samples >= seconds * MIC_SAMPLE_RATE) this.emit();
+  }
 
   push(pcm: Int16Array): void {
     this.parts.push(pcm);
@@ -100,7 +114,10 @@ export class ClipBuilder {
       o += p.length;
     }
     this.discard();
-    if (rmsOfPcm16(all) < SILENCE_RMS) return;
+    if (rmsOfPcm16(all) < SILENCE_RMS) {
+      this.onQuiet?.(all.length / MIC_SAMPLE_RATE);
+      return;
+    }
     this.onClip(pcm16ToWav(all));
   }
 }
@@ -108,6 +125,9 @@ export class ClipBuilder {
 export interface MeetingCaptureDeps {
   AudioContextImpl?: typeof AudioContext;
   clipSeconds?: number;
+  /** Called once when the far end (system audio, else the mic) has been silent for AUTO_END_SILENCE_SECONDS. */
+  onSilence?: () => void;
+  silenceSeconds?: number;
 }
 
 /** Audio that is already 16 kHz mono PCM16, e.g. the desktop shell's system-audio tap. */
@@ -125,6 +145,8 @@ export interface MeetingSources {
 export interface MeetingCapture {
   /** While paused, audio is dropped (a partial clip is flushed first). */
   setPaused(paused: boolean): void;
+  /** Cut clips at this length from now on (a longer clip in progress just keeps filling). */
+  setClipSeconds(seconds: number): void;
   /** Flush the last partial clips, then release the devices. */
   stop(): void;
 }
@@ -146,7 +168,30 @@ export function startMeetingCapture(
   if (!AudioCtx) throw new Error('Web Audio API unavailable');
 
   let paused = false;
-  const lanes: { builder: ClipBuilder; teardown: () => void }[] = [];
+  // Silence is counted in captured audio, not wall time: the audio clock keeps
+  // running in a hidden window and nothing is counted while paused. The far end
+  // is watched when there is one; a mic-only meeting watches the mic.
+  const silenceLimit = deps.silenceSeconds ?? AUTO_END_SILENCE_SECONDS;
+  const watched: MeetingSource = sources.system ? 'system' : 'mic';
+  let quietSeconds = 0;
+  let silenceFired = false;
+  const quietFor =
+    (source: MeetingSource) =>
+    (seconds: number): void => {
+      if (source !== watched || silenceFired) return;
+      quietSeconds += seconds;
+      if (quietSeconds >= silenceLimit) {
+        silenceFired = true;
+        deps.onSilence?.();
+      }
+    };
+  const heard = (source: MeetingSource, wav: Uint8Array): void => {
+    if (source === watched) quietSeconds = 0;
+    onClip(source, bytesToBase64(wav));
+  };
+  // The system audio is the far-end reference for the mic. Alone, either needs no canceller.
+  const aec = sources.mic && sources.system ? new EchoCanceller() : null;
+  const lanes: { builder: ClipBuilder; drain?: () => void; teardown: () => void }[] = [];
 
   if (sources.mic) {
     const stream = sources.mic;
@@ -162,16 +207,19 @@ export function startMeetingCapture(
     const sink = ctx.createGain();
     sink.gain.value = 0;
     const downsample = createPcm16Downsampler(ctx.sampleRate);
-    const builder = new ClipBuilder((wav) => onClip('mic', bytesToBase64(wav)), deps.clipSeconds);
+    const builder = new ClipBuilder((wav) => heard('mic', wav), deps.clipSeconds, quietFor('mic'));
     processor.onaudioprocess = (e: AudioProcessingEvent): void => {
-      if (paused) return;
-      builder.push(downsample(e.inputBuffer.getChannelData(0)));
+      const raw = downsample(e.inputBuffer.getChannelData(0));
+      // While paused the canceller still sees the mic, to keep it in step with the reference.
+      const pcm = aec ? aec.processMic(raw) : raw;
+      if (!paused) builder.push(pcm);
     };
     src.connect(processor);
     processor.connect(sink);
     sink.connect(ctx.destination);
     lanes.push({
       builder,
+      drain: aec ? () => builder.push(aec.flush()) : undefined,
       teardown: () => {
         processor.onaudioprocess = null;
         try {
@@ -190,10 +238,13 @@ export function startMeetingCapture(
   if (sources.system) {
     const feed = sources.system;
     const builder = new ClipBuilder(
-      (wav) => onClip('system', bytesToBase64(wav)),
+      (wav) => heard('system', wav),
       deps.clipSeconds,
+      quietFor('system'),
     );
     const unsubscribe = feed.subscribe((pcm) => {
+      // The reference runs while paused too, so the canceller's timeline stays continuous.
+      aec?.pushFar(pcm);
       if (!paused) builder.push(pcm);
     });
     lanes.push({
@@ -207,12 +258,21 @@ export function startMeetingCapture(
   if (lanes.length === 0) throw new Error('no audio sources to capture');
 
   return {
+    setClipSeconds(seconds) {
+      for (const l of lanes) l.builder.setClipSeconds(seconds);
+    },
     setPaused(p) {
-      if (p && !paused) for (const l of lanes) l.builder.flush();
+      if (p && !paused) {
+        for (const l of lanes) l.drain?.();
+        for (const l of lanes) l.builder.flush();
+      }
       paused = p;
     },
     stop() {
-      if (!paused) for (const l of lanes) l.builder.flush();
+      if (!paused) {
+        for (const l of lanes) l.drain?.();
+        for (const l of lanes) l.builder.flush();
+      }
       paused = true;
       for (const l of lanes) l.teardown();
     },

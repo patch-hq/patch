@@ -1,6 +1,7 @@
 // Mobile chatStore — same model as the web one (chats keyed by id, per-chat
 // timeline). Ported with React Native idioms (no document/visibility).
 
+import { AppState } from 'react-native';
 import { create } from 'zustand';
 import type {
   AttachmentRef,
@@ -54,7 +55,11 @@ export interface ChatEventEntry {
     | 'system'
     | 'error'
     | 'artifact'
-    | 'permission_mode';
+    | 'permission_mode'
+    | 'handoff'
+    | 'handoff_link';
+  /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
+  linkedChatId?: string;
   role?: 'user' | 'assistant' | 'system';
   content?: string;
   /**
@@ -479,7 +484,8 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     lastUpdated: 0,
     lastUserActivity: 0,
     awaitingPermission: false,
-    lastVisitedAt: visited[chatId] ?? 0,
+    lastReadSeq: visited[chatId] ?? -1,
+    openToolCalls: 0,
     preview: null,
     pendingPermissions: [],
     lastSeq: 0,
@@ -577,7 +583,12 @@ function rowsToRecord(
             todos: prior.todos,
             disabled: prior.disabled,
             preview: prior.preview,
-            lastVisitedAt: prior.lastVisitedAt,
+            lastReadSeq: Math.max(fresh.lastReadSeq, prior.lastReadSeq),
+            // A snapshot that settles the chat means no call is in flight.
+            openToolCalls:
+              !live && (r.activity === 'idle' || r.activity === 'errored')
+                ? 0
+                : prior.openToolCalls,
             pendingPermissions: prior.pendingPermissions,
             lastSeq: prior.lastSeq,
             awaitingPermission: prior.awaitingPermission,
@@ -790,6 +801,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chats[event.chatId] = {
             ...row,
             activity: event.activity,
+            optimisticSend: false,
+            // The turn is over, so no tool call is in flight; a lost result would
+            // otherwise pin the row on `working` for good (as web).
+            openToolCalls:
+              event.activity === 'idle' || event.activity === 'errored'
+                ? 0
+                : (row.openToolCalls ?? 0),
             // The mode the host RESOLVED for the next turn (spec/02 § Permission
             // mode) — this is the only place a surface learns it, so a change made
             // on another surface lands here too.
@@ -809,6 +827,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // (older host, or a `chat.state` not about the wake) preserves
             // what the row already had — matches the web chatStore.
             pendingWake: event.pendingWake !== undefined ? event.pendingWake : row.pendingWake,
+            // Out-of-credit pause: same "omitted is unchanged, null clears" rule.
+            rateLimitResumingAt:
+              event.rateLimitResumingAt !== undefined
+                ? event.rateLimitResumingAt
+                : row.rateLimitResumingAt,
+            resumeKind: event.resumeKind !== undefined ? event.resumeKind : row.resumeKind,
+            limitBlock: event.limitBlock !== undefined ? event.limitBlock : row.limitBlock,
             // Same rule as `pendingWake`: an explicit `null` is the host WAKING
             // the chat (spec/04 § Snooze), so it must land; an omitted field is a
             // `chat.state` about something else and preserves the known wake time.
@@ -891,6 +916,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // the conversation. Transcript furniture, not a message: none of the
           // reconcile/preview bookkeeping below applies, and (seq, kind) is its
           // identity so a repeated replay draws it once.
+          // spec/04 § Handoff budget — the provider-switch divider and the row
+          // saying the chat was continued in a linked fresh chat. Furniture:
+          // (seq, kind) is the identity, the host's one-line record the text.
+          if (
+            event.role === 'system' &&
+            (event.sessionChange?.handoff !== undefined || event.handoffLink !== undefined)
+          ) {
+            chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+            const kind = event.handoffLink ? 'handoff_link' : 'handoff';
+            const held = timelines[event.chatId];
+            if (held?.some((e) => e.kind === kind && e.seq === event.seq)) break;
+            pushTimeline(event.chatId, {
+              seq: event.seq,
+              kind,
+              content: event.content,
+              ...(event.handoffLink ? { linkedChatId: event.handoffLink.chatId } : {}),
+              at: Date.now(),
+            });
+            break;
+          }
           if (event.permissionModeChange !== undefined) {
             chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
             const held = timelines[event.chatId];
@@ -940,6 +985,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // time: a `chat.replay` re-delivers the whole history, and stamping
             // "now" on each message would turn every read chat unread (as web).
             lastSeq: Math.max(row.lastSeq, event.seq),
+            // A user message after a call means that call is over.
+            ...(event.role === 'user' && event.retryOfSeq === undefined
+              ? { openToolCalls: 0 }
+              : {}),
           };
           // Reconcile an optimistic outgoing user echo (rendered locally on send —
           // typed or voice) with its persisted copy when it re-arrives (e.g. on a
@@ -1217,6 +1266,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
             )
           )
             break;
+          // A row the host has already settled is not working: this is a replayed
+          // call whose result never came. A live call re-arms the count via the
+          // `chat.state{running}` that accompanies it (as web).
+          chats[event.chatId] = {
+            ...chats[event.chatId]!,
+            openToolCalls:
+              (row.activity === 'idle' || row.activity === 'errored') && row.lastUpdated > 0
+                ? (row.openToolCalls ?? 0)
+                : (row.openToolCalls ?? 0) + 1,
+          };
           pushTimeline(event.chatId, {
             seq: event.seq,
             kind: 'tool_call',
@@ -1236,6 +1295,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             )
           )
             break;
+          chats[event.chatId] = {
+            ...chats[event.chatId]!,
+            openToolCalls: Math.max(0, (row.openToolCalls ?? 0) - 1),
+          };
           pushTimeline(event.chatId, {
             seq: event.seq,
             kind: 'tool_result',
@@ -1449,6 +1512,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     if (!changed) return;
+    // The chat on screen is read: anything landing while it is open has been seen.
+    // Only while the app is foregrounded — a backgrounded phone has not seen it.
+    const activeId = state.activeChatId;
+    if (activeId && chats[activeId] && AppState.currentState === 'active') {
+      const arow = chats[activeId]!;
+      if (arow.lastReadSeq < arow.lastSeq) {
+        chats[activeId] = { ...arow, lastReadSeq: arow.lastSeq };
+        visited[activeId] = arow.lastSeq;
+        saveVisited(visited);
+      }
+    }
     set({
       chats,
       timelines,
@@ -1506,14 +1580,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   markRead(chatId) {
     const row = get().chats[chatId];
     if (!row) return;
-    // Never earlier than the chat's own `lastUpdated`: that is the SERVER's
-    // clock, and a phone running behind it would otherwise mark a chat it just
-    // read as still unread.
-    const at = Math.max(Date.now(), row.lastUpdated);
-    visited[chatId] = at;
+    // Advance the watermark to the highest seq seen; new activity re-marks the
+    // chat unread, a replay of older seqs does not. Never lowered.
+    const nextRead = Math.max(row.lastReadSeq, row.lastSeq);
+    if (nextRead === row.lastReadSeq) return;
+    visited[chatId] = nextRead;
     saveVisited(visited);
     set({
-      chats: { ...get().chats, [chatId]: { ...row, lastVisitedAt: at } },
+      chats: { ...get().chats, [chatId]: { ...row, lastReadSeq: nextRead } },
     });
   },
 
@@ -1734,6 +1808,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // top of its folder the instant the user sends, not once the
           // host's `chat.state` round-trips back.
           lastUserActivity: Date.now(),
+          // Working at once; only a settled chat flips (as web).
+          ...(!opts?.dedupeAgainstPersisted &&
+          local.length === 0 &&
+          (row.activity === 'idle' || row.activity === 'errored')
+            ? { optimisticSend: true }
+            : {}),
         },
       },
     });
@@ -1794,6 +1874,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   failDelivery(chatId, localId) {
+    const row = get().chats[chatId];
+    if (row?.optimisticSend) {
+      set({ chats: { ...get().chats, [chatId]: { ...row, optimisticSend: false } } });
+    }
     const next = patchDelivery(get().timelines, chatId, localId, {
       deliveryPending: false,
       deliveryFailed: true,

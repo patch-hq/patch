@@ -19,9 +19,6 @@ import React from 'react';
 import { api } from '../api/rest';
 import { usePresenceStore } from '../stores/presenceStore';
 
-/** The picker offers this many models: the host's catalogue is newest-first. */
-export const RECENT_MODEL_COUNT = 5;
-
 export interface ModelOption {
   /** The backend's model id — what a spawn sends as `model`. */
   id: string;

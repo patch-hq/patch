@@ -89,6 +89,30 @@ export type DictationOutcome =
  */
 export const MIN_UTTERANCE_MS = 300;
 
+/**
+ * How long the composer may sit on "Transcribing…" before it is told the step
+ * failed. Without a bound a stalled upload or a native mic that never confirms
+ * its stop leaves the composer stuck there forever, with nothing said.
+ */
+export const TRANSCRIBE_TIMEOUT_MS = 45_000;
+export const STOP_MIC_TIMEOUT_MS = 5_000;
+
+function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms / 1000}s`)), ms);
+    work.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(timer);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+}
+
 const SAMPLE_RATE = 16000;
 const AUDIO_MODE = {
   allowsRecordingIOS: true,
@@ -354,7 +378,11 @@ export function startDictation(
         // source of truth.
       }
       ws?.close();
-      if (micStarted) await stopMicCapture().catch(() => undefined);
+      if (micStarted) {
+        if (send)
+          await withTimeout(stopMicCapture(), STOP_MIC_TIMEOUT_MS, 'stopping the microphone');
+        else await stopMicCapture().catch(() => undefined);
+      }
       if (!send) return { kind: 'discarded' };
       if (pcmAll.length === 0) return { kind: 'no-audio' };
 
@@ -370,7 +398,11 @@ export function startDictation(
       await FileSystem.writeAsStringAsync(uri, base64, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      const { transcript } = await api.voiceTranscribe(uri);
+      const { transcript } = await withTimeout(
+        api.voiceTranscribe(uri),
+        TRANSCRIBE_TIMEOUT_MS,
+        'transcription',
+      );
       const text = transcript.trim();
       return text.length > 0 ? { kind: 'text', text } : { kind: 'no-speech' };
     },

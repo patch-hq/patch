@@ -232,12 +232,12 @@ describe('InboundHostLink', () => {
   // a DIFFERENT machine, and that machine (correctly, from its own
   // perspective) answers `chat_not_found` for a chat it never owned — a real,
   // live chat reported as gone.
-  it('holds a chat-scoped frame (not guess the home machine) while the mirror does not know the chat yet, and routes it once the mirror catches up', async () => {
+  it('holds a chat-scoped frame (not guess the Manager host) while the mirror does not know the chat yet, and routes it once the mirror catches up', async () => {
     let resolved: string | null = null;
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => resolved,
-      homeHostId: () => 'd-home', // registered, but never attached below: offline.
+      managerHostId: () => 'd-home', // registered, but never attached below: offline.
       registeredHostIds: () => ['d-home', 'd-real'], // more than one — a guess can be wrong.
       unknownChatHostWaitMs: 200,
       unknownChatHostPollMs: 10,
@@ -252,7 +252,7 @@ describe('InboundHostLink', () => {
 
     link.send('srf-1', { type: 'chat.input', chatId: 'c1', message: 'hi', localId: 'L1' });
     // Not sent anywhere yet — the mirror hasn't resolved the chat, and the
-    // home machine is offline, so there is nothing safe to guess.
+    // Manager host is offline, so there is nothing safe to guess.
     await new Promise((r) => setTimeout(r, 30));
     expect(got).toHaveLength(0);
 
@@ -265,13 +265,13 @@ describe('InboundHostLink', () => {
 
   // Todoist: "question answers for chats on the Mac go to Hetzner and are lost".
   // A `chat.permission_response` is routed by its chatId like any other chat
-  // frame; one without it falls to the home machine, which has no such pending
+  // frame; one without it falls to the Manager host, which has no such pending
   // request, so the answer to a non-home chat vanished.
   it("routes a chat.permission_response to the chat's host, not home, and only when it names the chat", async () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: (chatId) => (chatId === 'c-mac' ? 'd-mac' : 'd-home'),
-      homeHostId: () => 'd-home',
+      managerHostId: () => 'd-home',
       registeredHostIds: () => ['d-home', 'd-mac'],
     });
     const mac = await makePair(wss, url);
@@ -299,7 +299,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => null,
-      homeHostId: () => 'd-home', // registered, but never attached: offline throughout.
+      managerHostId: () => 'd-home', // registered, but never attached: offline throughout.
       registeredHostIds: () => ['d-home', 'd-other'], // more than one — a guess can be wrong.
       hostName: (id) => (id === 'd-home' ? 'Hetzner' : 'Tom’s Mac'),
       unknownChatHostWaitMs: 30,
@@ -333,7 +333,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => host,
-      homeHostId: () => 'd-home',
+      managerHostId: () => 'd-home',
       registeredHostIds: () => ['d-home', 'd-other'],
       unknownChatHostWaitMs: 30,
       unknownChatHostPollMs: 10,
@@ -360,7 +360,7 @@ describe('InboundHostLink', () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => null,
-      homeHostId: () => 'd1',
+      managerHostId: () => 'd1',
       registeredHostIds: () => ['d1'],
       unknownChatHostWaitMs: 50,
       unknownChatHostPollMs: 10,

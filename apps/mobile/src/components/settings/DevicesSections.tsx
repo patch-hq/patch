@@ -226,7 +226,7 @@ export function VoiceDevicesSection(): React.ReactElement {
   return (
     <SettingsSection title="Voice devices" testID="settings-voice-devices">
       {machines.length === 0 ? (
-        <NoticeRow testID="voice-devices-no-machines" text="Add a host first" />
+        <NoticeRow testID="voice-devices-no-machines" text="Add a machine first" />
       ) : (
         <Row
           testID="voice-devices-empty"

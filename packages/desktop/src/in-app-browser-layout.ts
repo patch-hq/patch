@@ -126,12 +126,12 @@ export const TOOLBAR_HTML = `<!doctype html><html><head><meta charset="utf-8">
     font-variant-numeric: tabular-nums; opacity: 0.85;
   }
 </style></head><body>
-  <button id="back" title="Back">&#8249;</button>
-  <button id="fwd" title="Forward">&#8250;</button>
-  <button id="reload" title="Reload">&#8635;</button>
+  <button id="back" aria-label="Back">&#8249;</button>
+  <button id="fwd" aria-label="Forward">&#8250;</button>
+  <button id="reload" aria-label="Reload">&#8635;</button>
   <div id="url"></div>
-  <button id="ext" title="Open in browser">&#8599;</button>
-  <button id="close" title="Close">&#10005;</button>
+  <button id="ext" aria-label="Open in browser">&#8599;</button>
+  <button id="close" aria-label="Close">&#10005;</button>
 <script>
   const $ = (id) => document.getElementById(id);
   $('back').onclick = () => window.iab.back();
