@@ -14,6 +14,7 @@
 // in localStorage: a chord belongs to the keyboard it is pressed on.
 
 import { chordKeyGlyph, MODIFIER_CODES } from './dictateChord.js';
+import { isMacKeyboard } from './sendChord.js';
 
 export interface Chord {
   mod: boolean;
@@ -182,12 +183,15 @@ export function matchesAction(e: KeyboardEvent, id: ActionId, overrides: Overrid
 
 /** The chord a keydown spells, for recording; null while only modifiers are
  *  held, or when nothing but Shift is (a bare letter must stay typeable). */
-export function recordChord(e: KeyboardEvent): Chord | null {
+export function recordChord(e: KeyboardEvent, mac: boolean = isMacKeyboard()): Chord | null {
   if (e.code === '' || MODIFIER_CODES.has(e.code)) return null;
   if (!(e.metaKey || e.ctrlKey || e.altKey)) return null;
+  // On a Mac, Ctrl without ⌘ is its own modifier (⌃Space); elsewhere Ctrl is the
+  // platform modifier.
+  const ctrlOnly = mac && e.ctrlKey && !e.metaKey;
   return {
-    mod: e.metaKey || e.ctrlKey,
-    ctrl: false,
+    mod: !ctrlOnly && (e.metaKey || e.ctrlKey),
+    ctrl: ctrlOnly,
     alt: e.altKey,
     shift: e.shiftKey,
     code: e.code,
