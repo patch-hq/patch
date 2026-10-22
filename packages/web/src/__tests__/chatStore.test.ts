@@ -674,6 +674,38 @@ describe('chatStore reducer', () => {
     expect(tl[0]).not.toHaveProperty('permissionExpiry');
   });
 
+  it('an answered question replayed as request + response stays answered, and a re-delivery does not reopen it', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    const request = {
+      type: 'chat.permission_request' as const,
+      chatId: 'c1',
+      requestId: 'r1',
+      request: { tool: 'AskUserQuestion', args: { questions: [] } },
+      seq: 1,
+    };
+    const response = {
+      type: 'chat.permission_response' as const,
+      chatId: 'c1',
+      requestId: 'r1',
+      approve: true,
+      decision: 'approve_with_edits' as const,
+      answers: { 'Which?': 'Luxon' },
+    };
+    s.applyEvent(request);
+    s.resolvePermission('c1', 'r1', 'approve', response.answers);
+    // A later replay hands the same pair again.
+    useChatStore.getState().applyEvent(request);
+    useChatStore.getState().resolvePermission('c1', 'r1', 'approve', response.answers);
+    const entries = (useChatStore.getState().timelines['c1'] ?? []).filter(
+      (e) => e.kind === 'permission',
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.permissionResolved).toBe('approve');
+    expect(entries[0]?.permissionAnswers).toEqual({ 'Which?': 'Luxon' });
+    expect(useChatStore.getState().chats['c1']?.pendingPermissions).toEqual([]);
+  });
+
   it('a trailing idle chat.state does NOT clear an unresolved permission', () => {
     // Repro of the badge regression: the mock backend / SDK under
     // bypassPermissions emits the permission event then completes the turn,

@@ -5687,21 +5687,34 @@ export class Daemon {
     const activeBranchId = meta.activeBranchId ?? this.branchIdFor(chatId);
     const targetBranchId = branchId ?? activeBranchId;
     const records = readTrackRecords(this.chatLog, chatId, meta, targetBranchId, fromSeq);
-    // A question that ran out unanswered is replayed as a request plus its
-    // denial, so a reload draws the greyed-out card the live surface showed
-    // instead of dropping it. Answered and cancelled ones are not: their tool
+    // A question that ran out unanswered, or that the user ANSWERED, is replayed
+    // as a request plus its resolution, so a reload draws the card the live
+    // surface showed (greyed out, or with the picks marked) instead of dropping
+    // it and leaving two bare tool rows. Cancelled ones are not: their tool
     // rows already tell that story.
-    const expiredQuestions = new Set<string>();
+    const settledQuestions = new Map<
+      string,
+      { approve: boolean; answers?: Record<string, string> }
+    >();
     for (const record of records) {
-      if (record.rec.k === 'permission.decision' && record.rec.by === 'expiry') {
-        expiredQuestions.add(record.rec.requestId);
+      if (record.rec.k !== 'permission.decision') continue;
+      if (record.rec.by === 'expiry') {
+        settledQuestions.set(record.rec.requestId, { approve: false });
+      } else if (record.rec.decision === 'approve_with_edits') {
+        const answers = record.rec.editedInput?.['answers'];
+        if (answers !== null && typeof answers === 'object') {
+          settledQuestions.set(record.rec.requestId, {
+            approve: true,
+            answers: answers as Record<string, string>,
+          });
+        }
       }
     }
     for (const record of records) {
       if (
         record.rec.k === 'permission.request' &&
         record.rec.tool === ASK_USER_QUESTION &&
-        expiredQuestions.has(record.rec.requestId) &&
+        settledQuestions.has(record.rec.requestId) &&
         !this.pendingPermissionEvents.has(`${chatId}:${record.rec.requestId}`)
       ) {
         emitToSurface({
@@ -5718,12 +5731,14 @@ export class Daemon {
           seq: record.seq,
           ...(targetBranchId === activeBranchId ? {} : { branchId: targetBranchId }),
         });
+        const settled = settledQuestions.get(record.rec.requestId)!;
         emitToSurface({
           type: 'chat.permission_response',
           chatId,
           requestId: record.rec.requestId,
-          approve: false,
-          decision: 'deny',
+          approve: settled.approve,
+          decision: settled.approve ? 'approve_with_edits' : 'deny',
+          ...(settled.answers !== undefined ? { answers: settled.answers } : {}),
         });
       } else if (record.rec.k === 'event') {
         const ev = record.rec.event;
