@@ -16344,7 +16344,7 @@ select.permission-mode.is-pending {
   display: flex;
   gap: 12px;
   padding: 0 12px 6px 28px;
-  font-size: 12px;
+  font-size: var(--text-min);
 }
 .run-row-linked {
   background: var(--bg-hover, rgba(127, 127, 127, 0.15));
