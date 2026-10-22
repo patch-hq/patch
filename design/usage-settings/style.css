@@ -62,6 +62,7 @@ a{color:var(--accent-strong)}
 /* ranked accounts */
 .set-acct{display:grid;grid-template-columns:18px 24px minmax(0,1fr) auto;gap:12px;align-items:center;padding:14px 16px;background:var(--bg-elevated);position:relative}
 .set-acct-body{min-width:0;display:flex;flex-direction:column;gap:1px}
+.set-ago{color:var(--ink-3);font-weight:400;white-space:nowrap}
 .set-handle{cursor:grab;color:var(--ink-faint);font-size:16px;line-height:1;user-select:none;text-align:center}
 .set-rank{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--bg-soft);color:var(--ink-3);font-size:var(--text-min);font-weight:600}
 .set-acct.active .set-rank{background:var(--accent);color:var(--on-accent)}
@@ -79,7 +80,7 @@ a{color:var(--accent-strong)}
 .set-menu hr{border:0;border-top:1px solid var(--line-soft);margin:6px 0}
 
 /* usage bars: label column wide enough that "Extra usage" is one line */
-.set-bars{display:grid;grid-template-columns:88px minmax(60px,1fr) max-content minmax(96px,max-content);gap:4px 12px;align-items:center;margin-top:8px;color:var(--ink-3);font-size:var(--text-min)}
+.set-bars{display:grid;grid-template-columns:6em minmax(60px,1fr) 3em 12em;gap:4px 12px;align-items:center;margin-top:8px;color:var(--ink-3);font-size:var(--text-min)}
 .set-bar-row{display:contents}
 .set-bar{display:block;height:5px;border-radius:3px;background:var(--bg-soft);overflow:hidden}
 .set-bar i{display:block;height:100%;background:var(--accent)}
@@ -87,6 +88,7 @@ a{color:var(--accent-strong)}
 .set-bar-row.blocked .set-bar i{background:var(--danger)}
 .set-bar-row.off .set-bar i{background:var(--line)}
 .set-bar-value{text-align:right;font-variant-numeric:tabular-nums}
+.set-bar-row>:first-child,.set-bar-reset,.set-bar-row>:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* allowance chart */
 .chart{padding:12px 16px 8px;border-top:1px solid var(--line-soft)}

@@ -305,15 +305,21 @@ export function UsageBars({
             <span className="set-bar" aria-hidden="true">
               <i style={{ width: `${Math.round((win.utilization ?? 0) * 100)}%` }} />
             </span>
-            <span className="set-bar-value">
-              {off ? 'off' : formatUtilization(win)}
-              {blocked ? ' · blocked' : ''}
-            </span>
-            <span className="set-bar-reset">
+            <span className="set-bar-value">{off ? 'off' : formatUtilization(win)}</span>
+            <span
+              className="set-bar-reset"
+              title={
+                win.disabledReason !== undefined
+                  ? describeDisabledReason(win.disabledReason)
+                  : undefined
+              }
+            >
               {win.disabledReason !== undefined ? (
                 <DisabledReason reason={win.disabledReason} extraUsageUrl={extraUsageUrl} />
               ) : win.resetsAt !== undefined ? (
-                `resets ${formatReset(win.resetsAt)}`
+                `${blocked ? 'blocked · ' : ''}resets ${formatReset(win.resetsAt)}`
+              ) : blocked ? (
+                'blocked'
               ) : (
                 ''
               )}
@@ -332,6 +338,13 @@ export function UsageBars({
  * not mean anyone switched anything off — the add-on was never taken out, so
  * the line says where to turn it on.
  */
+/** The reason as plain words, for the hover title when the column clips it. */
+function describeDisabledReason(reason: string): string {
+  if (reason === OVERAGE_DISABLED_REASON) return 'Extra usage is off: turn it on at claude.ai';
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return 'Extra usage disabled by organisation';
+  return reason;
+}
+
 function DisabledReason({
   reason,
   extraUsageUrl,

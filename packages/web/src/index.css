@@ -9253,6 +9253,12 @@ button.set-row-open:focus-visible {
   flex-direction: column;
   gap: 1px;
 }
+/* How old the account's reading is, after its name on the same line. */
+.set-ago {
+  color: var(--ink-3);
+  font-weight: 400;
+  white-space: nowrap;
+}
 .set-handle {
   all: unset;
   cursor: grab;
@@ -9338,18 +9344,30 @@ button.set-row-open:focus-visible {
   font-size: var(--text-min);
   line-height: 1.35;
 }
-/* Label column sized to its longest label ("Extra usage"), so no window's
-   name wraps onto two lines. */
+/* Every column but the bar is a FIXED width, so the bars of every account
+   on the page line up: each row's grid is its own, and a column sized to
+   its content ("disabled by organisation" against "Turn on") would give
+   each account a different bar length. The label column fits "Extra usage"
+   on one line; the reset column fits "resets Mon 07:10 PM", and a reason
+   longer than that ellipsises with the full text on hover. */
 .set-bars {
   display: grid;
-  grid-template-columns: max-content minmax(60px, 1fr) max-content max-content;
+  grid-template-columns: 6em minmax(60px, 1fr) 3em 12em;
   gap: 4px 12px;
   align-items: center;
   margin-top: 8px;
   color: var(--ink-3);
   font-size: var(--text-min);
 }
-.set-bar-label {
+.set-bar-label,
+.set-bar-reset {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.set-bar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .set-bar-reset a {
@@ -9632,7 +9650,7 @@ button.set-row-open:focus-visible {
      are dropped, as before, and the label column still fits "Extra usage"
      on one line. The phone app has its own Usage section. */
   .set-bars {
-    grid-template-columns: max-content minmax(40px, 1fr) max-content;
+    grid-template-columns: 6em minmax(40px, 1fr) 3em;
     gap: 4px 8px;
   }
   .set-bar-reset {

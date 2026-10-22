@@ -15,7 +15,7 @@ import { getActiveWs } from '../../api/ws.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
-import { formatReadAt } from '../../lib/usage.js';
+import { formatAgo } from '../../lib/usage.js';
 import { sortHosts } from './hostScope.js';
 import { sendToHost } from './hostWrite.js';
 import { writeShared } from './sharedWrite.js';
@@ -124,12 +124,13 @@ function AccountEntry({
     row.organizationId === undefined
       ? undefined
       : rows.find((r) => r.id !== row.id && r.organizationId === row.organizationId);
-  const readAt = formatReadAt(reading?.usage?.at);
+  // When the reading was taken sits beside the name, where the eye lands
+  // first; the sub-line is what the account IS (its email, its kind).
+  const ago = formatAgo(reading?.usage?.at);
   const sub = [
     row.email ?? null,
     row.connected ? null : 'Signed out',
     row.kind === 'apiKey' ? 'API key' : null,
-    readAt,
   ].filter((x): x is string => x !== null);
 
   const pasteToken = (title: string, verb: string): void =>
@@ -230,7 +231,14 @@ function AccountEntry({
       menuTestid={`account-menu-${id}`}
       menu={menu}
     >
-      <span className="set-row-title">{row.label}</span>
+      <span className="set-row-title">
+        {row.label}
+        {ago ? (
+          <span className="set-ago" data-testid={`account-read-${id}`}>
+            {ago}
+          </span>
+        ) : null}
+      </span>
       {sub.length > 0 ? <span className="set-sub">{sub.join(' · ')}</span> : null}
       {twin ? (
         <span className="set-sub warn" data-testid={`account-twin-${id}`}>

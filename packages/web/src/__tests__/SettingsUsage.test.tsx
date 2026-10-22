@@ -98,6 +98,10 @@ describe('Settings → Usage → accounts', () => {
     expect(screen.getByTestId('account-usage-session-claude-code-acct-a')).toHaveTextContent('70%');
     expect(screen.getByTestId('account-claude-code-acct-a')).not.toHaveTextContent(/on mac/);
     expect(screen.getByTestId('account-claude-code-acct-a')).not.toHaveTextContent(/hetzner/);
+    // How old the reading is sits beside the name, not in the sub-line.
+    const read = screen.getByTestId('account-read-claude-code-acct-a');
+    expect(read.closest('.set-row-title')).not.toBeNull();
+    expect(read).not.toHaveTextContent(/read/);
   });
 
   it('puts the extra-usage reason on its own line, linked to where it is turned on', () => {

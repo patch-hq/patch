@@ -135,9 +135,9 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
       /blocked/i,
     );
     await expect(overage).not.toContainText(/blocked/i);
-    // And the reading says how old it is, so a stale figure cannot pass for
-    // live — without naming the machine that took it.
-    await expect(page.getByTestId('account-claude-code-a1')).toContainText(/read /i);
+    // And the reading says how old it is beside the name, so a stale figure
+    // cannot pass for live — without naming the machine that took it.
+    await expect(page.getByTestId('account-read-claude-code-a1')).toContainText(/just now|ago/);
     await expect(page.getByTestId('account-claude-code-a1')).not.toContainText(/dev-host/);
   });
 
