@@ -814,6 +814,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const downloadsDir = process.env.PATCH_DOWNLOADS_DIR ?? '/app/downloads';
   const wsHub = new WsHub({
     logger: log.child({ component: 'ws-hub' }),
+    onChatLinkLost: (chatId) => chatCompletionNotifier.hostLinkLost(chatId),
     ...(accountSettings ? { sharedSettings: () => accountSettings.changedEvent() } : {}),
     registry,
     presence,

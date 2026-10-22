@@ -161,6 +161,29 @@ describe('ChatCompletionNotifier', () => {
   // `turnStopped` on the settling frame itself (spec/09 § A turn the user
   // stopped); the `chat.stopped` event cannot, because on this path the host
   // emits it AFTER the idle frame, from a different awaiter of the same run.
+  // User: "patch turn interrupted when host restarts triggers notifications for
+  // 'finished' incorrectly". The server resolves an in-flight chat to `errored`
+  // when the host link drops, but that frame never passes through `observe`, so
+  // the notifier still held `running`; the restarted host's hydrate then
+  // settled the interrupted turn to `idle` and that looked like a real finish.
+  describe('a turn cut off by the host link dropping', () => {
+    test('the idle that follows the reconnect does not ring', () => {
+      seedRunning('c1');
+      notifier.hostLinkLost('c1');
+      feed(state('c1', { activity: 'idle' }));
+      expect(routed).toEqual([]);
+    });
+
+    test('the resumed turn still rings when it really finishes', () => {
+      seedRunning('c1');
+      notifier.hostLinkLost('c1');
+      feed(state('c1', { activity: 'idle' }));
+      feed(state('c1', { activity: 'running' }));
+      feed(state('c1', { activity: 'idle' }));
+      expect(channels()).toEqual(['desktop', 'push']);
+    });
+  });
+
   describe('a turn the user stopped', () => {
     test('a stopped turn settling does not ring the doorbell', () => {
       seedRunning('c1');

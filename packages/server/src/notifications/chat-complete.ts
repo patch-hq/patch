@@ -78,6 +78,18 @@ export class ChatCompletionNotifier {
     this.now = deps.now ?? (() => Date.now());
   }
 
+  /**
+   * The host link dropped while `chatId` was mid-turn and the server resolved it
+   * to `errored` itself (ws-hub). That frame is server-made and never reaches
+   * `observe`, so record it here: the idle the restarted host later settles the
+   * cut-off turn to is then not a running → idle edge, and nothing owed carries
+   * over. A turn the host resumes goes `running` again and rings when it ends.
+   */
+  hostLinkLost(chatId: string): void {
+    this.lastActivity.set(chatId, 'errored');
+    this.owed.delete(chatId);
+  }
+
   /** Observe the chat stream and notify on each completed or failed turn. */
   observe(event: WireEvent): void {
     if (event.type !== 'chat.state') return;

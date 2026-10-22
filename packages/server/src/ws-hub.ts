@@ -170,6 +170,8 @@ export interface WsHubDeps {
    * running → errored → running, and the host is not announced offline. Default 5000.
    */
   hostOfflineGraceMs?: number;
+  /** Told of each chat forced to `errored` by a host-link loss (chat completion notifier). */
+  onChatLinkLost?: (chatId: string) => void;
   /**
    * Server-owned composer drafts (spec/14 § Composer, spec/15 § Composer).
    * Account-wide, not per-machine — set/clear frames from a surface write
@@ -611,6 +613,7 @@ export class WsHub {
         seq: OUT_OF_BAND_SEQ,
       };
       const stateEvent = this.deps.chatRegistry.markErrored(chatId, error, at);
+      this.deps.onChatLinkLost?.(chatId);
       for (const conn of this.allConns()) {
         conn.socket.send(encode(errorEvent));
         if (stateEvent) conn.socket.send(encode(stateEvent));
