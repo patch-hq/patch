@@ -1395,9 +1395,9 @@ describe('Sidebar', () => {
     const snoozeSpy = vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
     renderInRouter();
     fireEvent.click(screen.getByTestId('folder-snooze-/home/tom/projects/snz'));
-    fireEvent.click(screen.getByTestId('snooze-sheet-preset-5-minutes'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-30-minutes'));
     fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
-    const expected = Date.now() + 5 * 60_000;
+    const expected = Date.now() + 30 * 60_000;
     expect(useChatStore.getState().chats['s1']?.snoozedUntil).toBe(expected);
     expect(useChatStore.getState().chats['s2']?.snoozedUntil).toBe(expected);
     expect(useChatStore.getState().chats['s3']?.snoozedUntil).toBe(expected);

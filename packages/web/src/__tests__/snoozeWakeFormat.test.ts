@@ -61,8 +61,6 @@ describe('each preset resolves to the wording the sheet shows', () => {
         SNOOZE_PRESETS.map((p) => [p.id, formatWakeAt(p.resolve(), NOW)]),
       );
       expect(shown).toEqual({
-        '2-minutes': '16:07',
-        '5-minutes': '16:10',
         '30-minutes': '16:35',
         '1-hour': '17:05',
         '5pm': '17:00',

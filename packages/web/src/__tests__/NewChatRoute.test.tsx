@@ -1596,7 +1596,7 @@ describe('/chats/new', () => {
     const labels = Array.from(
       screen.getByTestId('new-chat-setup-grid').querySelectorAll('.new-chat-setup-label'),
     ).map((l) => l.textContent);
-    expect(labels).toEqual(['Machine', 'Account', 'Project', 'Model']);
+    expect(labels).toEqual(['Machine', 'Project', 'Model', 'Account']);
     // The machine control is labelled by the row, and says Machine, never host.
     expect(screen.getByTestId('new-chat-host')).toHaveAttribute('aria-label', 'Machine');
     expect(screen.getByTestId('new-chat-host')).not.toHaveAttribute('title');

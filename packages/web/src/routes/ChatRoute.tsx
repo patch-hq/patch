@@ -4911,6 +4911,7 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
     (toolLabel(entry.tool) === 'view_file' ||
       toolLabel(entry.tool) === 'patch_notify' ||
       toolLabel(entry.tool) === 'patch_agent' ||
+      toolLabel(entry.tool) === 'patch_delegate' ||
       (toolLabel(entry.tool) === 'patch_ask_human' && parseAskHuman(entry.toolArgs) !== null) ||
       (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null))
   );
