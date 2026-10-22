@@ -1966,6 +1966,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         // Visible agent-to-agent handoff brings the target into the list. Hidden
         // automation-to-automation traffic leaves the target hidden.
         fromAgent: revealTarget,
+        fromSibling: true,
       });
       if (opts.emitWire) {
         opts.emitWire({

@@ -3015,7 +3015,7 @@ async function startHost(
             // hidden rather than leaking into the main list.
             ...(event.sourceChatId === 'thread_manager'
               ? { nudge: true }
-              : { fromAgent: event.revealTarget === true }),
+              : { fromAgent: event.revealTarget === true, fromSibling: true }),
           })
           .then(() => {
             sender({

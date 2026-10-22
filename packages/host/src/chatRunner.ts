@@ -1509,6 +1509,12 @@ export interface SendInputOptions {
    */
   fromAgent?: boolean;
   /**
+   * The message is a sibling agent's `patch_send_to`. It is delivered, but unlike
+   * every other sender it does not un-archive the chat: archiving is the user
+   * putting a chat away, and another agent must not be able to bring it back.
+   */
+  fromSibling?: boolean;
+  /**
    * This turn is a job's own fire into the chat (spec/08 § Action — a
    * `continue`/`message` action's fire into an EXISTING chat), not something
    * the user typed. Set only by the server's job dispatcher via
@@ -5927,14 +5933,16 @@ export class Daemon {
       req.message = `${buildHookAdviceBlock(notes)}${req.message}`;
     }
 
-    // Any send un-archives (Todoist 6hXRrVfCVgCrvC86): archived means stopped
+    // Any send except a sibling agent's un-archives (Todoist 6hXRrVfCVgCrvC86): archived means stopped
     // (spec/04 § Lifecycle), and a message landing in the chat — the user's,
     // a job's, another agent's `patch_send_to` — is exactly what starts it
     // again. It comes back to where it was: `hidden` survives archiving, so a
     // hidden job's chat returns to Hidden, and only a person's message (below)
     // brings it into the list. `setArchived`/`setHidden` emit the state
     // themselves, so this doesn't need its own emit.
-    if (state.status === 'archived') await this.setArchived(req.chatId, false);
+    if (state.status === 'archived' && req.fromSibling !== true) {
+      await this.setArchived(req.chatId, false);
+    }
     if (req.fromUser === true) this.rehideOnExpiry.delete(req.chatId);
     if ((req.fromUser === true || req.fromAgent === true) && state.hidden) {
       await this.setHidden(req.chatId, false);

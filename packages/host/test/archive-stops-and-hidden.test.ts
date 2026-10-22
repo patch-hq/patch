@@ -156,6 +156,24 @@ describe('a message into an archived chat starts it again, where it was', () => 
     expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
   });
 
+  it("a sibling agent's patch_send_to is delivered but leaves an archived chat archived", async () => {
+    const { daemon, prompts, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.setArchived(chatId, true);
+
+    await daemon.sendInput({
+      chatId,
+      message: 'ping from sibling',
+      localId: 'L1',
+      origin: 'machine',
+      fromAgent: true,
+      fromSibling: true,
+    });
+
+    expect(daemon.chatState.get(chatId)?.status).toBe('archived');
+    expect(prompts).toEqual(['ping from sibling']);
+  });
+
   it('a job tick into a hand-archived hidden run returns it to Hidden, not the inbox', async () => {
     const { daemon, events, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder, hidden: true, prompt: 'first fire' });
