@@ -111,7 +111,7 @@ describe('groupChats: snoozed chats stay in their project', () => {
     // Still in the Snoozed view.
     expect(g.snoozed.map((r) => r.chatId).sort()).toEqual(['b', 'c']);
     // And not offered as a "recent folder" either.
-    expect(g.recentFolders).not.toContain('/p/home');
+    expect(g.recentFolders.map((f) => f.folder)).not.toContain('/p/home');
   });
 });
 

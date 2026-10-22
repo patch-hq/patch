@@ -498,7 +498,7 @@ function RegularSidebar({
   automationsOpen: boolean;
   setAutomationsOpen: (v: boolean) => void;
   forgottenFolders: string[];
-  forgetFolder: (folder: string) => void;
+  forgetFolder: (key: string) => void;
   collapsedFolders: string[];
   toggleFolderCollapsed: (folder: string) => void;
   searchQuery: string;
@@ -745,7 +745,14 @@ function RegularSidebar({
           threads are excluded (Manager lives in its own top slot — E2). Each
           row starts a new chat in that folder; the × forgets it. */}
                 <RecentFolders
-                  folders={grouped.recentFolders.filter((f) => !forgottenFolders.includes(f))}
+                  folders={grouped.recentFolders.filter(
+                    // A bare path is a forget saved before recents were per host:
+                    // it forgot that path wherever it lived.
+                    (f) =>
+                      !forgottenFolders.includes(f.key) && !forgottenFolders.includes(f.folder),
+                  )}
+                  shownProjects={view.folders}
+                  hostNames={hostNames}
                   onForget={forgetFolder}
                 />
 
@@ -1414,30 +1421,54 @@ function ChannelRow({
  */
 function RecentFolders({
   folders,
+  shownProjects,
+  hostNames,
   onForget,
 }: {
-  folders: string[];
-  onForget: (folder: string) => void;
+  folders: Array<{ key: string; hostId: string; folder: string }>;
+  shownProjects: Array<{ folder: string; hostId: string }>;
+  hostNames: Record<string, string>;
+  onForget: (key: string) => void;
 }): JSX.Element | null {
   const navigate = useNavigate();
   // Show just the folder NAME; only two recents that share a basename grow a
   // disambiguating parent segment (spec/14 § Recent folders — todo "recent
   // should just show folder name, extra only if needed for disambiguation").
-  const labels = folderLabels(folders);
+  // A project on another host with the same name also gets the host's name, as
+  // in the project headers (spec/04 § Name).
+  // Parent segments only separate paths on the SAME host; the host name
+  // separates the rest.
+  const labels = folders
+    .map((f) => {
+      const sameHost = folders.filter((o) => o.hostId === f.hostId).map((o) => o.folder);
+      return folderLabels(sameHost)[sameHost.indexOf(f.folder)]!;
+    })
+    .map((label, i) => {
+      const { hostId, folder } = folders[i]!;
+      const base = folderBasename(folder);
+      const ambiguous = [...folders, ...shownProjects].some(
+        (g) => g.hostId !== hostId && folderBasename(g.folder) === base,
+      );
+      return ambiguous ? `${label} (${(hostNames[hostId] ?? hostId).trim()})` : label;
+    });
   if (folders.length === 0) return null;
   return (
     <section className="sb-recent-folders" data-testid="recent-folders">
       {/* User-facing copy calls a folder a PROJECT (spec/14 §4b) — the heading is
           "Recent projects", never "Recent folders". */}
       <div className="folder-head">Recent projects</div>
-      {folders.map((folder, i) => (
-        <div className="recent-folder-row" data-testid={`recent-folder-${folder}`} key={folder}>
+      {folders.map(({ key, hostId, folder }, i) => (
+        <div className="recent-folder-row" data-testid={`recent-folder-${folder}`} key={key}>
           <button
             type="button"
             className="recent-folder-start"
             data-testid={`recent-folder-start-${folder}`}
             title={`New chat in ${folder}`}
-            onClick={() => navigate(`/chats/new?folder=${encodeURIComponent(folder)}`)}
+            onClick={() =>
+              navigate(
+                `/chats/new?folder=${encodeURIComponent(folder)}&host=${encodeURIComponent(hostId)}`,
+              )
+            }
           >
             <FolderPlus size={14} aria-hidden />
             <span className="recent-folder-name">{labels[i]}</span>
@@ -1448,7 +1479,7 @@ function RecentFolders({
             data-testid={`recent-folder-forget-${folder}`}
             aria-label={`forget folder ${folder}`}
             title="Forget this folder"
-            onClick={() => onForget(folder)}
+            onClick={() => onForget(key)}
           >
             <CloseIcon size={16} />
           </button>

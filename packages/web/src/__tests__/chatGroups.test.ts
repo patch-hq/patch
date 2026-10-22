@@ -424,7 +424,7 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
     expect(groupChats(chats).recentFolders).toEqual([]);
     // ~/live is already drawn as an open Folders section, so only ~/arch is
     // offered as a recent — the "don't list it twice" filter still applies.
-    expect(groupChats(chats, roster).recentFolders).toEqual(['~/arch']);
+    expect(groupChats(chats, roster).recentFolders.map((f) => f.folder)).toEqual(['~/arch']);
   });
 
   it('orders roster and live folders together, most-recent-first', () => {
@@ -437,7 +437,7 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
       { folder: '~/mid', hostId: 'd1', lastUpdated: 40 },
     ];
     const { recentFolders } = groupChats(chats, roster);
-    expect(recentFolders).toEqual(['~/new', '~/mid', '~/old']);
+    expect(recentFolders.map((f) => f.folder)).toEqual(['~/new', '~/mid', '~/old']);
   });
 
   it('a live row beats the roster when it is newer (the roster is a cold-start floor, not a ceiling)', () => {
@@ -449,7 +449,7 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
       { folder: '~/other', hostId: 'd1', lastUpdated: 500 },
     ];
     const { recentFolders } = groupChats(chats, roster);
-    expect(recentFolders).toEqual(['~/proj', '~/other']);
+    expect(recentFolders.map((f) => f.folder)).toEqual(['~/proj', '~/other']);
   });
 
   it('a folder deleted since boot still drops out, roster or not', () => {
@@ -460,16 +460,37 @@ describe('groupChats — recentFolders seeded from the folder roster', () => {
     expect(groupChats(chats, roster).recentFolders).toEqual([]);
   });
 
+  it('keeps the same path on two hosts as two recents, each carrying its host', () => {
+    const roster = [
+      { folder: '~/proj', hostId: 'd1', lastUpdated: 5 },
+      { folder: '~/proj', hostId: 'd2', lastUpdated: 9 },
+    ];
+    const { recentFolders } = groupChats([], roster);
+    expect(recentFolders.map((f) => [f.hostId, f.folder])).toEqual([
+      ['d2', '~/proj'],
+      ['d1', '~/proj'],
+    ]);
+    expect(new Set(recentFolders.map((f) => f.key)).size).toBe(2);
+  });
+
+  it('a project open on one host does not hide the same path on another host', () => {
+    const chats = [row({ chatId: 'a', folder: '~/proj', hostId: 'd1', lastUpdated: 9 })];
+    const roster = [{ folder: '~/proj', hostId: 'd2', lastUpdated: 5 }];
+    expect(groupChats(chats, roster).recentFolders.map((f) => [f.hostId, f.folder])).toEqual([
+      ['d2', '~/proj'],
+    ]);
+  });
+
   it('never offers a special thread\u2019s folder', () => {
     const chats: ChatRow[] = [];
     const roster = [{ folder: '~/proj', hostId: 'd1', lastUpdated: 5 }];
-    expect(groupChats(chats, roster).recentFolders).toEqual(['~/proj']);
+    expect(groupChats(chats, roster).recentFolders.map((f) => f.folder)).toEqual(['~/proj']);
     // Manager/Speakers folders are filtered server-side, but the
     // store's own special rows must not sneak one in either.
     const withSpecial = [
       row({ chatId: SPECIAL_THREAD_IDS.speakers, folder: '~/speakers', lastUpdated: 99 }),
     ];
-    expect(groupChats(withSpecial, roster).recentFolders).toEqual(['~/proj']);
+    expect(groupChats(withSpecial, roster).recentFolders.map((f) => f.folder)).toEqual(['~/proj']);
   });
 });
 

@@ -6,6 +6,7 @@ import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { reportHost } from './presenceHelpers.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api, ApiError } from '../api/rest.js';
@@ -2030,7 +2031,39 @@ describe('Sidebar', () => {
     // Forget the archived-only folder → it leaves the list.
     fireEvent.click(screen.getByTestId('recent-folder-forget-/home/tom/proj-archived'));
     expect(screen.queryByTestId('recent-folder-/home/tom/proj-archived')).not.toBeInTheDocument();
-    expect(useUiStore.getState().forgottenFolders).toContain('/home/tom/proj-archived');
+    expect(useUiStore.getState().forgottenFolders).toContain('d1\u0000/home/tom/proj-archived');
+  });
+
+  it('the same path on two hosts is two recents: each named by host, linking and forgetting on its own host', () => {
+    reportHost('d1', { hostName: 'mac' });
+    reportHost('d2', { hostName: 'netcup' });
+    useChatStore
+      .getState()
+      .hydrate([
+        rowFixture({ chatId: 'a1', folder: '/srv/app', hostId: 'd1', status: 'archived' }),
+        rowFixture({ chatId: 'a2', folder: '/srv/app', hostId: 'd2', status: 'archived' }),
+      ]);
+    function Where(): JSX.Element {
+      const l = useLocation();
+      return <div data-testid="where">{l.pathname + l.search}</div>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Sidebar />
+        <Where />
+      </MemoryRouter>,
+    );
+    const names = Array.from(
+      screen.getByTestId('recent-folders').querySelectorAll('.recent-folder-name'),
+    ).map((n) => n.textContent);
+    expect(names.sort()).toEqual(['app (mac)', 'app (netcup)']);
+    fireEvent.click(screen.getAllByTestId('recent-folder-start-/srv/app')[1]!);
+    expect(screen.getByTestId('where').textContent).toMatch(
+      /^\/chats\/new\?folder=%2Fsrv%2Fapp&host=d[12]$/,
+    );
+    fireEvent.click(screen.getAllByTestId('recent-folder-forget-/srv/app')[0]!);
+    expect(screen.getAllByTestId('recent-folder-/srv/app')).toHaveLength(1);
+    expect(useUiStore.getState().forgottenFolders).toHaveLength(1);
   });
 
   it('the recents section is headed "Recent projects" — never the word "folders" (spec/14 §4b)', () => {

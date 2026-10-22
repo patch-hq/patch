@@ -67,7 +67,7 @@ export interface Grouped {
    * "all archived" half of that promise survive a reload — the store's rows
    * come from `GET /api/chats`, which excludes archived chats.
    */
-  recentFolders: string[];
+  recentFolders: Array<{ key: string; hostId: string; folder: string }>;
 }
 
 const MANAGER_THREAD_ID = 'thread_manager';
@@ -208,12 +208,13 @@ export function groupChats(
   // raises a folder's recency from a live row, and `deleted` rows still retire
   // a folder outright (handled after the loop).
   const folderRecency = new Map<string, number>();
-  for (const entry of folderRoster) {
-    folderRecency.set(
-      entry.folder,
-      Math.max(folderRecency.get(entry.folder) ?? 0, entry.lastUpdated),
-    );
-  }
+  const recentRefs = new Map<string, { key: string; hostId: string; folder: string }>();
+  const noteRecent = (hostId: string, folder: string, lastUpdated: number): void => {
+    const key = folderGroupKey(hostId, folder);
+    recentRefs.set(key, { key, hostId, folder });
+    folderRecency.set(key, Math.max(folderRecency.get(key) ?? 0, lastUpdated));
+  };
+  for (const entry of folderRoster) noteRecent(entry.hostId, entry.folder, entry.lastUpdated);
   // Folders retired since the roster was fetched. A soft-delete is the one
   // thing that DOES drop a folder, so a stale roster row must not resurrect it.
   const deletedFolders = new Set<string>();
@@ -232,7 +233,7 @@ export function groupChats(
     }
     if (c.status === 'deleted') {
       deleted.push(c);
-      if (c.folder) deletedFolders.add(c.folder);
+      if (c.folder) deletedFolders.add(folderGroupKey(c.hostId, c.folder));
       continue;
     }
     // Automations (spec/14 § Sidebar): non-exclusive — deliberately no
@@ -243,8 +244,8 @@ export function groupChats(
     }
     // A non-deleted chat's folder is a "recent folder" (active or archived).
     if (c.folder) {
-      liveFolders.add(c.folder);
-      folderRecency.set(c.folder, Math.max(folderRecency.get(c.folder) ?? 0, c.lastUpdated));
+      liveFolders.add(folderGroupKey(c.hostId, c.folder));
+      noteRecent(c.hostId, c.folder, c.lastUpdated);
     }
     if (c.status === 'archived') {
       archived.push(c);
@@ -256,7 +257,7 @@ export function groupChats(
     }
     if (isSnoozed(c, now)) {
       snoozed.push(c);
-      if (c.folder) snoozedFolders.add(c.folder);
+      if (c.folder) snoozedFolders.add(folderGroupKey(c.hostId, c.folder));
       continue;
     }
     if (c.pinned) {
@@ -325,15 +326,12 @@ export function groupChats(
     if (!liveFolders.has(folder)) folderRecency.delete(folder);
   }
   // A project whose only chats are snoozed is not listed anywhere but Snoozed.
-  const shownFolders = new Set<string>([
-    ...Array.from(byFolder.values(), (g) => g.folder),
-    ...snoozedFolders,
-  ]);
-  for (const p of pinned) if (p.folder) shownFolders.add(p.folder);
+  const shownFolders = new Set<string>([...Array.from(byFolder.keys()), ...snoozedFolders]);
+  for (const p of pinned) if (p.folder) shownFolders.add(folderGroupKey(p.hostId, p.folder));
   const recentFolders = Array.from(folderRecency.entries())
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([folder]) => folder)
-    .filter((folder) => !shownFolders.has(folder));
+    .map(([key]) => recentRefs.get(key)!)
+    .filter((ref) => !shownFolders.has(ref.key));
   return {
     manager,
     speakers,
