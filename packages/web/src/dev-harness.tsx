@@ -2591,6 +2591,9 @@ if (new URLSearchParams(window.location.search).get('sideThreads') === '1') {
       side(2, 'Alternatives'),
     ],
   } as never);
+  // The panel is docked to its chat's tab and closes when that tab is not the
+  // focused one, so the chat has to be the focused tab here too.
+  useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'chat_forked' });
   useSideThreadsStore.getState().openThread('chat_forked', 'chat_forked-b2');
 }
 // The failure `chat_limit_blocked` died on, as the host reports it: patch's

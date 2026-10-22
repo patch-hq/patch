@@ -167,6 +167,9 @@ export function TooltipHost(): JSX.Element | null {
     const el = shown.el;
     const stash = stashRef.current;
     const observer = new MutationObserver(() => {
+      // restore() puts the title back on hide and clears the stash entry; that
+      // write must not be mistaken for a rewrite of a still-shown control.
+      if (!stash.has(el)) return;
       const next = el.getAttribute('title');
       if (next === null) return;
       el.removeAttribute('title');

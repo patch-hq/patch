@@ -86,6 +86,25 @@ describe('TooltipHost', () => {
     expect(btn.getAttribute('title')).toBe('Archive');
   });
 
+  it('keeps the restored title once the observer has had its turn', async () => {
+    render(
+      <>
+        <Fixture />
+        <TooltipHost />
+      </>,
+    );
+    const btn = screen.getByTestId('plain-btn');
+    fireEvent.mouseOver(btn);
+    act(() => {
+      vi.runAllTimers();
+    });
+    await act(async () => {
+      fireEvent.mouseOut(btn, { relatedTarget: document.body });
+      await Promise.resolve();
+    });
+    expect(btn.getAttribute('title')).toBe('Archive');
+  });
+
   it('cancels a pending show if the pointer leaves before the pause elapses', () => {
     render(
       <>
