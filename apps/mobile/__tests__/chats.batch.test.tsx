@@ -355,7 +355,7 @@ describe('State filter options (Working / Waiting on you / Failed)', () => {
       .getState()
       .hydrate([
         row({ chatId: 'working-row', folder: 'work', activity: 'running' }),
-        row({ chatId: 'idle-row', folder: 'work' }),
+        row({ chatId: 'idle-row', folder: 'work', lastUpdated: 1 }),
       ]);
     const r = renderRN(<ChatsScreen />);
     selectView(r, 'working');

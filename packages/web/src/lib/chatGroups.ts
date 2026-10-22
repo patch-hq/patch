@@ -409,6 +409,10 @@ export const CHAT_STATE_FILTERS: readonly ChatStateFilter[] = [
 export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boolean {
   if (filter === 'all') return true;
   const badge = deriveBadge(row);
+  // A chat the host has said nothing about yet (no events, no state frame) has
+  // just been spawned and is waiting on its first turn: pending, so Working —
+  // never Ready, which its idle `read` badge would otherwise put it in.
+  const pending = row.lastSeq === 0 && row.lastUpdated === 0;
   switch (filter) {
     case 'failed':
       return badge === 'errored';
@@ -420,7 +424,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       // working and being shown only mid-turn chats would hide exactly the
       // work that is easiest to forget about, since nothing about it is on
       // screen.
-      return badge === 'working' || badge === 'background' || badge === 'monitoring';
+      return pending || badge === 'working' || badge === 'background' || badge === 'monitoring';
     case 'waiting':
       // Anything paused ON THE USER: a permission prompt, or an agent that
       // stopped on a question.
@@ -428,7 +432,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         badge === 'permission' || (row.statusKind === 'question' && row.statusDeclared === true)
       );
     case 'done':
-      return badge === 'done' || badge === 'read';
+      return !pending && (badge === 'done' || badge === 'read');
   }
 }
 
