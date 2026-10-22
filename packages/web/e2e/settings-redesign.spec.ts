@@ -148,6 +148,7 @@ test.describe('Settings — desktop', () => {
       page.getByTestId('settings-nav').locator('button[data-testid^="settings-nav-"]'),
     ).toHaveText([
       'Usage',
+      'Chats',
       'Agent',
       'MCP',
       'Memories',
@@ -163,6 +164,7 @@ test.describe('Settings — desktop', () => {
       'Providers',
       'Notifications',
       'Devices',
+      'Shortcuts',
       'Updates',
       'Account',
     ]);
@@ -543,7 +545,7 @@ test.describe('Settings — behaviour', () => {
     await expect(page.getByTestId('settings-nav-updates-pip')).toBeVisible();
 
     await page.getByTestId('settings-nav-updates').click();
-    await expect(page.getByTestId('version-behind-d1')).toContainText('dev-host');
+    await expect(page.getByTestId('version-host-d1')).toContainText('dev-host');
     await page.getByTestId('host-d1-update').click();
     expect(await wsSent(page)).toContainEqual({ type: 'host.update', hostId: 'd1' });
 
