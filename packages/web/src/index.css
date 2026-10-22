@@ -16380,6 +16380,7 @@ select.permission-mode.is-pending {
   padding: 4px 10px;
   color: var(--ink-3);
   font-size: var(--text-min);
+}
 /* spec/04 § Branching — a settled user turn is edited in the MAIN composer.
    Everything after the edited turn in the stream is greyed: it belongs to the
    track being left, and saving replaces it. */
