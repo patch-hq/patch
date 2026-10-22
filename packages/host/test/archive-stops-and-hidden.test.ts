@@ -198,7 +198,7 @@ describe('a message into an archived chat starts it again, where it was', () => 
     expect(metaStore.read(chatId)?.hidden).toBe(true);
   });
 
-  it("the user's message into a finished hidden run brings it into the list for good", async () => {
+  it("the user's message into a finished hidden run leaves it hidden", async () => {
     const { daemon, folder } = setup();
     const chatId = await daemon.spawnChat({ folder, hidden: true, prompt: 'first fire' });
     await tick();
@@ -209,7 +209,7 @@ describe('a message into an archived chat starts it again, where it was', () => 
     await tick();
 
     expect(daemon.chatState.get(chatId)?.status).toBe('active');
-    expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
+    expect(daemon.chatState.get(chatId)?.hidden).toBe(true);
   });
 });
 
@@ -245,18 +245,16 @@ describe('Hidden', () => {
     expect(daemon.chatState.get(chatId)?.status).toBe('active');
   });
 
-  it("the user's message un-hides it", async () => {
+  it("the user's message leaves it hidden", async () => {
     const { daemon, events, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder, hidden: true });
 
     await daemon.sendInput({ chatId, message: 'hi', localId: 'L1', fromUser: true });
     await tick();
 
-    expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
-    expect(metaStore.read(chatId)?.hidden).toBe(false);
-    expect(lastState(events, chatId)?.hidden).toBe(false);
-    // Not hidden, so finishing does not archive it.
-    expect(daemon.chatState.get(chatId)?.status).toBe('active');
+    expect(daemon.chatState.get(chatId)?.hidden).toBe(true);
+    expect(metaStore.read(chatId)?.hidden).toBe(true);
+    expect(lastState(events, chatId)?.hidden ?? true).toBe(true);
   });
 
   it('declaring a status un-hides it', async () => {

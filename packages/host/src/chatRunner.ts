@@ -1449,8 +1449,8 @@ export function chatInputToSendOptions(event: ChatInputEvent): SendInputOptions 
     // patch/todo.md — per-chat Tools panel OFF set rides the chat.input so a
     // disabled tool is removed from the model's context for the turn.
     ...(event.disabledTools !== undefined ? { disabledTools: event.disabledTools } : {}),
-    // spec/04 § Hidden — a person's message takes a chat out of Hidden; a job's
-    // fire into it does not. spec/14 § Job trigger turn — the SAME signal also
+    // spec/04 § Hidden — neither a person's message nor a job's fire takes a chat
+    // out of Hidden. spec/14 § Job trigger turn — the SAME signal also
     // flags the turn itself as transcript furniture rather than a user bubble.
     // A Pad's delivery is system input too (not typed), but the user's own Send
     // started it, so it still counts as the user's activity.
@@ -1508,7 +1508,7 @@ export interface SendInputOptions {
   /**
    * A person sent this — a surface composer, a voice turn, a fork or side
    * message — rather than a job fire, an agent, or the host itself (spec/04
-   * § Hidden). Only a person's message takes a chat out of Hidden. Separate
+   * § Hidden). A person's message does NOT take a chat out of Hidden. Separate
    * from `origin`, which is about the completion doorbell: a job's fire is a
    * `user` turn there (spec/09 § Whose turn it was) but not a person here.
    */
@@ -5954,14 +5954,14 @@ export class Daemon {
     // (spec/04 § Lifecycle), and a message landing in the chat — the user's,
     // a job's, another agent's `patch_send_to` — is exactly what starts it
     // again. It comes back to where it was: `hidden` survives archiving, so a
-    // hidden job's chat returns to Hidden, and only a person's message (below)
-    // brings it into the list. `setArchived`/`setHidden` emit the state
+    // hidden job's chat returns to Hidden, and a person's message does not
+    // bring it into the list either — only Unhide does (spec/04 § Hidden). `setArchived`/`setHidden` emit the state
     // themselves, so this doesn't need its own emit.
     if (state.status === 'archived' && req.fromSibling !== true) {
       await this.setArchived(req.chatId, false);
     }
     if (req.fromUser === true) this.rehideOnExpiry.delete(req.chatId);
-    if ((req.fromUser === true || req.fromAgent === true) && state.hidden) {
+    if (req.fromAgent === true && state.hidden) {
       await this.setHidden(req.chatId, false);
     }
     // A person writing to a chat that came back is the first interaction with
