@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmRefusal, spawnClaudeInGroup } from '../src/claudeSpawn.js';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  confirmRefusal,
+  linkUserConfigIntoResumeDir,
+  spawnClaudeInGroup,
+} from '../src/claudeSpawn.js';
 
 const alive = (pid: number): boolean => {
   try {
@@ -122,5 +129,64 @@ describe('spawnClaudeInGroup, signalling a group that is already dying', () => {
     expect(() => p.kill('SIGKILL')).not.toThrow();
     await until(() => !alive(pid));
     expect(alive(pid)).toBe(false);
+  });
+});
+
+describe('linkUserConfigIntoResumeDir', () => {
+  const mk = () => {
+    const root = mkdtempSync(join(tmpdir(), 'cfg-'));
+    const real = join(root, 'real');
+    const resume = join(root, 'claude-resume-abc');
+    mkdirSync(join(real, 'skills', 'good-copy'), { recursive: true });
+    mkdirSync(resume);
+    writeFileSync(join(real, 'settings.json'), '{}');
+    return { root, real, resume };
+  };
+
+  it('links skills and settings into a claude-resume dir', () => {
+    const { real, resume } = mk();
+    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: resume }, real);
+    expect(existsSync(join(resume, 'skills', 'good-copy'))).toBe(true);
+    expect(existsSync(join(resume, 'settings.json'))).toBe(true);
+    expect(existsSync(join(resume, 'agents'))).toBe(false);
+  });
+
+  it('leaves an ordinary config dir alone', () => {
+    const { root, real } = mk();
+    const other = join(root, 'other');
+    mkdirSync(other);
+    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: other }, real);
+    expect(existsSync(join(other, 'skills'))).toBe(false);
+  });
+
+  it('is idempotent', () => {
+    const { real, resume } = mk();
+    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: resume }, real);
+    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: resume }, real);
+    expect(existsSync(join(resume, 'skills'))).toBe(true);
+  });
+
+  it('spawnClaudeInGroup links before the child starts', async () => {
+    const { real, resume } = mk();
+    const prev = process.env['CLAUDE_CONFIG_DIR'];
+    process.env['CLAUDE_CONFIG_DIR'] = real;
+    try {
+      const p = spawnClaudeInGroup({
+        command: process.execPath,
+        args: [
+          '-e',
+          "console.log(require('fs').existsSync(process.env.CLAUDE_CONFIG_DIR+'/skills/good-copy'))",
+        ],
+        env: { ...process.env, CLAUDE_CONFIG_DIR: resume },
+        signal: new AbortController().signal,
+      });
+      const out = await new Promise<string>((res) =>
+        p.stdout.once('data', (d) => res(String(d).trim())),
+      );
+      expect(out).toBe('true');
+    } finally {
+      if (prev === undefined) delete process.env['CLAUDE_CONFIG_DIR'];
+      else process.env['CLAUDE_CONFIG_DIR'] = prev;
+    }
   });
 });
