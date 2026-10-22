@@ -112,7 +112,7 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     useSettingsStore.getState()._reset();
     seedSettings();
     const r2 = await render();
-    expect(textOf(get(r2, 'accounts-empty-codex'))).toContain('No ChatGPT accounts yet');
+    expect(textOf(get(r2, 'accounts-empty-codex'))).toContain('No Codex accounts yet');
   });
 
   it('shows the freshest usage reading any host took', async () => {
