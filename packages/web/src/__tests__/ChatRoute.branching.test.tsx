@@ -14,6 +14,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useSideThreadsStore, DRAFT_TAB_ID } from '../stores/sideThreadsStore.js';
 import { setActiveWs } from '../api/ws.js';
+import * as imageResizeModule from '../lib/imageResize.js';
 import type { ChatEventEntry } from '../stores/chatStore.js';
 
 vi.mock('../api/rest.js', () => ({
@@ -23,6 +24,17 @@ vi.mock('../api/rest.js', () => ({
     uploadAttachment: vi.fn(),
   },
 }));
+
+type UploadResult = Awaited<ReturnType<typeof api.uploadAttachment>>;
+let actualUploadSpy: { mockRestore(): void } | null = null;
+
+// The attachment store is loaded by the shared test setup before this file's
+// vi.mock applies, so it holds the real api object. Mock the upload on both.
+async function mockUpload(result: UploadResult): Promise<void> {
+  vi.mocked(api.uploadAttachment).mockResolvedValue(result);
+  const actual = await vi.importActual<typeof import('../api/rest.js')>('../api/rest.js');
+  actualUploadSpy = vi.spyOn(actual.api, 'uploadAttachment').mockResolvedValue(result);
+}
 
 function seedChat(chatId: string, timeline: ChatEventEntry[]): void {
   useChatStore.getState().hydrate([
@@ -73,7 +85,11 @@ beforeEach(() => {
   usePresenceStore.getState().setHostOnline('d1', true);
   setActiveWs(null);
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  actualUploadSpy?.mockRestore();
+  actualUploadSpy = null;
+});
 
 describe('editing a user turn forks a track', () => {
   it('offers an edit affordance on a settled USER turn only', () => {
@@ -160,7 +176,8 @@ describe('editing a user turn forks a track', () => {
       'URL',
       Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }),
     );
-    vi.mocked(api.uploadAttachment).mockResolvedValue({
+    vi.spyOn(imageResizeModule, 'downscaleImageFile').mockImplementation(async (f) => f);
+    await mockUpload({
       ok: true,
       ref: { id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image', url: '/x/a1' },
     });
@@ -226,7 +243,8 @@ describe('editing a user turn forks a track', () => {
       'URL',
       Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }),
     );
-    vi.mocked(api.uploadAttachment).mockResolvedValue({
+    vi.spyOn(imageResizeModule, 'downscaleImageFile').mockImplementation(async (f) => f);
+    await mockUpload({
       ok: true,
       ref: { id: 'a1', name: 'pic.png', mimeType: 'image/png', kind: 'image', url: '/x/a1' },
     });

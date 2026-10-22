@@ -11,7 +11,14 @@ import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js
 
 function mountDraft(draftId: string) {
   return render(
-    <Composer key={draftId} chatId="new" newChatDraftId={draftId} hostId="d1" onSend={() => {}} />,
+    <Composer
+      key={draftId}
+      chatId="new"
+      newChatDraftId={draftId}
+      resolveChatId={async () => null}
+      hostId="d1"
+      onSend={() => {}}
+    />,
   );
 }
 
