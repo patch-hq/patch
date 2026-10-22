@@ -5194,6 +5194,10 @@ export class Daemon {
     }
   }
 
+  private managerDisabled(): boolean {
+    return this.chatState.get(SPECIAL_THREAD_IDS.manager)?.disabled === true;
+  }
+
   /** Quiet one-line note on the Manager thread's own log (spec/06 § Sweep —
    * "Sweep traffic never enters it, only the one-line flags"): a `system`
    * `chat.message`, same arrangement a rotation boundary uses — never a turn,
@@ -5240,6 +5244,15 @@ export class Daemon {
         error: 'manager-sweep: no decider configured',
       };
     }
+    // spec/06 § Disabled — a disabled Manager sends nothing. The server stops
+    // raising sweeps, but a run already on its way here still arrives.
+    const idle = (tokensUsed: number): ManagerSweepResultEvent => ({
+      type: 'manager.sweep_result',
+      runId: req.runId,
+      actions: req.candidates.map((c) => ({ chatId: c.chatId, action: 'leave' as const })),
+      tokensUsed,
+    });
+    if (this.managerDisabled()) return idle(0);
     const digest = await this.buildSweepDigest(req.candidates, req.messagesPerChat);
     const result = await this.opts.decideSweep({
       digest,
@@ -5255,6 +5268,8 @@ export class Daemon {
         error: 'manager-sweep: decision call failed or returned an unparseable reply',
       };
     }
+    // Disabled while the decision call was running.
+    if (this.managerDisabled()) return idle(result.tokensUsed);
     const byChatId = new Map(req.candidates.map((c) => [c.chatId, c]));
     const actions: { chatId: string; action: 'nudge' | 'wake' | 'flag' | 'leave' }[] = [];
     const seen = new Set<string>();
