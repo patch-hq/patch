@@ -481,6 +481,9 @@ function scopeOf(x: { jobId: string; scope?: string }): string {
   return x.scope ?? x.jobId;
 }
 
+/** How long after a fire an idle chat still counts as starting its turn (`followActivity`). */
+const APPEND_START_GRACE_MS = 30_000;
+
 /** State of an `append` job's durable chat, per chat id (spec/08 § Queueing). */
 interface AppendState {
   generation: number;
@@ -1186,13 +1189,30 @@ export class JobDispatcher {
   /**
    * The generation of an `append` job's durable chat this fire belongs to. A
    * fire after the chat has been idle `idleTimeoutMs`, has lived `resetAfterMs`
-   * or has taken `resetAfterMessages` fires moves to the next generation — a
+   * or has taken `resetAfterMessages` fires — or, with `followActivity`, has
+   * finished its turn — moves to the next generation — a
    * new chat id, so the old chat is left intact. Any other mode is always 0.
    *
    * Server-owned state under `<dataDir>/append`, written atomically. An
    * unreadable file throws: guessing a generation would either append into a
    * chat that should have reset or reset one that should not.
    */
+  /** `followActivity`: has the current generation's chat finished its turn? */
+  private appendChatFinished(
+    jobId: string,
+    keySlug: string | undefined,
+    state: AppendState,
+    now: number,
+  ): boolean {
+    const chatId = ensureChatId(jobId, keySlug, state.generation);
+    const activity = this.chatActivity(chatId);
+    // Unknown (mirror has not heard of it, e.g. after a restart): cannot vouch
+    // that it finished, and splitting a running chat is worse than not.
+    if (activity === null || WORKING_ACTIVITIES.has(activity)) return false;
+    // A chat reports idle before its first turn begins.
+    return now - state.lastFireAt >= APPEND_START_GRACE_MS;
+  }
+
   private appendGeneration(job: Job, keySlug: string | undefined): number {
     const q = job.queueing;
     if (q?.mode !== 'append') return 0;
@@ -1204,7 +1224,8 @@ export class JobDispatcher {
       state === undefined ||
       (q.idleTimeoutMs !== undefined && now - state.lastFireAt >= q.idleTimeoutMs) ||
       (q.resetAfterMs !== undefined && now - state.startedAt >= q.resetAfterMs) ||
-      (q.resetAfterMessages !== undefined && state.count >= q.resetAfterMessages)
+      (q.resetAfterMessages !== undefined && state.count >= q.resetAfterMessages) ||
+      (q.followActivity === true && this.appendChatFinished(job.id, keySlug, state, now))
     ) {
       state = {
         generation: state === undefined ? 0 : state.generation + 1,

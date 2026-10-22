@@ -52,7 +52,9 @@ describe('job queueing modes', () => {
   let now: number;
   let link: InProcessHostLink;
   let disp: JobDispatcher;
+  let activity: Map<string, ChatActivity>;
   beforeEach(() => {
+    activity = new Map();
     dir = mkdtempSync(join(tmpdir(), 'patch-queueing-'));
     now = 1_000_000;
     link = new InProcessHostLink();
@@ -64,6 +66,7 @@ describe('job queueing modes', () => {
       logger: silentLogger,
       idGenerator: () => `id${++n}`,
       nowMs: () => now,
+      chatActivity: (id) => activity.get(id) ?? null,
     });
   });
   afterEach(() => {
@@ -165,6 +168,47 @@ describe('job queueing modes', () => {
         `jobchat-${JOB_ID}-g1`,
         `jobchat-${JOB_ID}-g2`,
       ]);
+    });
+
+    it('followActivity appends while the chat is working and starts fresh once it has finished', () => {
+      const job = base({ mode: 'append', followActivity: true });
+      const g0 = `jobchat-${JOB_ID}`;
+      disp.dispatch(job, {}, 'todoist');
+      now += 10 * 60_000;
+      activity.set(g0, 'running');
+      disp.dispatch(job, {}, 'todoist'); // mid-turn: appended however long it has run
+      expect(spawned()).toEqual([g0]);
+      now += 25 * 60_000;
+      activity.set(g0, 'idle'); // finished
+      disp.dispatch(job, {}, 'todoist');
+      expect(spawned()).toEqual([g0, `${g0}-g1`]);
+    });
+
+    it('followActivity treats an idle chat that has only just been fired into as still starting', () => {
+      const job = base({ mode: 'append', followActivity: true });
+      const g0 = `jobchat-${JOB_ID}`;
+      disp.dispatch(job, {}, 'todoist');
+      activity.set(g0, 'idle'); // reported idle before its first turn
+      now += 5_000;
+      disp.dispatch(job, {}, 'todoist');
+      expect(spawned()).toEqual([g0]);
+    });
+
+    it('followActivity does not reset a chat whose state is unknown', () => {
+      const job = base({ mode: 'append', followActivity: true });
+      disp.dispatch(job, {}, 'todoist');
+      now += 60 * 60_000;
+      disp.dispatch(job, {}, 'todoist');
+      expect(spawned()).toEqual([`jobchat-${JOB_ID}`]);
+    });
+
+    it('followActivity still honours the other reset limits', () => {
+      const job = base({ mode: 'append', followActivity: true, resetAfterMessages: 1 });
+      const g0 = `jobchat-${JOB_ID}`;
+      disp.dispatch(job, {}, 'todoist');
+      activity.set(g0, 'running');
+      disp.dispatch(job, {}, 'todoist');
+      expect(spawned()).toEqual([g0, `${g0}-g1`]);
     });
 
     it('resets per subject when the action is keyed', () => {

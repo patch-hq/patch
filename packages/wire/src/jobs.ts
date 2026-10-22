@@ -719,7 +719,8 @@ export const TimeoutMinutes = z.number().int().min(1);
  *    action) so context accumulates, which starts afresh when the chat has
  *    been idle for `idleTimeoutMs`, has lived for `resetAfterMs`, or has been
  *    sent `resetAfterMessages` fires. Every limit is optional; none means the
- *    chat is never reset.
+ *    chat is never reset. `followActivity` also starts afresh once the chat has
+ *    finished its turn, and appends while it is still working.
  *
  * Mutually exclusive with the older bare `concurrency`, which is exactly
  * `{ mode: 'queue', concurrency }` without a key.
@@ -739,6 +740,7 @@ export const Queueing = z.discriminatedUnion('mode', [
       idleTimeoutMs: z.number().int().min(1).optional(),
       resetAfterMs: z.number().int().min(1).optional(),
       resetAfterMessages: z.number().int().min(1).optional(),
+      followActivity: z.boolean().optional(),
     })
     .strict(),
 ]);
