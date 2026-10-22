@@ -34,6 +34,17 @@ function toolResult(tool: string, result: unknown, callId: string, isError = fal
 }
 
 describe('toClaudeSessionEntries', () => {
+  it('gives an attachment-only (empty text) message placeholder text — the API rejects empty content', () => {
+    const entries = toClaudeSessionEntries(track([msg('user', ''), msg('assistant', '  ')]), {
+      sessionId: 's',
+      folder: '/w',
+      model: null,
+    });
+    for (const e of entries) {
+      expect((e['message'] as { content: string }).content.trim()).not.toBe('');
+    }
+  });
+
   it('translates a plain user/assistant exchange, threaded by parentUuid', () => {
     const entries = toClaudeSessionEntries(track([msg('user', 'hi'), msg('assistant', 'hello')]), {
       sessionId: 'sess-1',
@@ -231,6 +242,12 @@ describe('toClaudeSessionEntries', () => {
 });
 
 describe('toResponsesItems', () => {
+  it('gives an empty-text message placeholder text', () => {
+    const items = toResponsesItems(track([msg('user', '')]));
+    const text = (items[0] as { content: { text: string }[] }).content[0]!.text;
+    expect(text.trim()).not.toBe('');
+  });
+
   it('translates a plain exchange into message items with input_text/output_text', () => {
     const items = toResponsesItems(track([msg('user', 'hi'), msg('assistant', 'hello')]));
     expect(items).toEqual([

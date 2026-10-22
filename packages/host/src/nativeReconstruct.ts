@@ -153,7 +153,7 @@ export function toClaudeSessionEntries(
         ...(event.role === 'user' ? { userType: 'external' } : {}),
         message: {
           role: event.role,
-          content: event.content,
+          content: nonEmptyText(event.content),
           ...(event.role === 'assistant' && opts.model ? { model: opts.model } : {}),
         },
       });
@@ -233,6 +233,15 @@ export function toClaudeSessionEntries(
 // direction and for the same reason: a function_call the injected thread's
 // own tool list doesn't recognise is worse than a text note describing it.
 
+/**
+ * A message sent as an attachment alone is logged with empty text; replayed
+ * as-is the Messages API rejects it ("user messages must have non-empty
+ * content") on every retry, so the chat never recovers.
+ */
+function nonEmptyText(content: string): string {
+  return content.trim() === '' ? '[attachment]' : content;
+}
+
 export type ResponsesItem = Record<string, unknown>;
 
 function claudeToolAsCodexFunctionCall(tool: string, args: unknown): unknown {
@@ -268,7 +277,7 @@ export function toResponsesItems(events: readonly TrackEntry[]): ResponsesItem[]
         content: [
           {
             type: event.role === 'assistant' ? 'output_text' : 'input_text',
-            text: event.content,
+            text: nonEmptyText(event.content),
           },
         ],
       });
