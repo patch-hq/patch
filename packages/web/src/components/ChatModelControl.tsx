@@ -67,7 +67,6 @@ export function AccountControl({
   // `undefined` is "no change pending"; null is a pending "by strategy".
   const [pending, setPending] = useState<string | null | undefined>(undefined);
   const settled = row.preferredAccountId ?? null;
-  const [focused, setFocused] = useState(false);
   useEffect(() => {
     if (pending !== undefined && settled === pending) setPending(undefined);
   }, [pending, settled]);
@@ -99,16 +98,8 @@ export function AccountControl({
         className={pending !== undefined ? 'permission-mode is-pending' : 'permission-mode'}
         data-testid={testId}
         aria-label="Account"
-        // A native tooltip would draw over the open option list.
-        title={
-          focused
-            ? undefined
-            : row.account
-              ? `The latest turn ran on the ${row.account.label} account`
-              : 'The account this chat is locked to'
-        }
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        // No native tooltip: one already showing when the list opens draws over it,
+        // and the Automatic option already names the account in use.
         value={changeLabel !== undefined ? '__change' : (shown ?? '')}
         onChange={(e) => {
           if (e.target.value === '__change') return;
