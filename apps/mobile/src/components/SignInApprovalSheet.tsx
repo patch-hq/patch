@@ -17,21 +17,31 @@ export function SignInApprovalSheet(): React.ReactElement | null {
   const [now, setNow] = useState(() => Date.now());
   const [shown, setShown] = useState<{ label: string; code: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Re-checks every 30s so a failed check clears itself once the server is back.
   useEffect(() => {
     if (surfaceId === null) return;
     let cancelled = false;
-    api
-      .signInPending()
-      .then((r) => {
-        if (!cancelled) for (const req of r.requests) useSignInStore.getState().add(req);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(`Could not check for sign-in requests: ${(e as Error).message}`);
-      });
+    const check = (): void => {
+      api
+        .signInPending()
+        .then((r) => {
+          if (cancelled) return;
+          setCheckFailed(null);
+          for (const req of r.requests) useSignInStore.getState().add(req);
+        })
+        .catch((e: unknown) => {
+          if (!cancelled)
+            setCheckFailed(`Could not check for sign-in requests: ${(e as Error).message}`);
+        });
+    };
+    check();
+    const t = setInterval(check, 30_000);
     return () => {
       cancelled = true;
+      clearInterval(t);
     };
   }, [surfaceId]);
 
@@ -60,7 +70,7 @@ export function SignInApprovalSheet(): React.ReactElement | null {
     }
   };
 
-  if (shown === null && current === undefined && error === null) return null;
+  if (shown === null && current === undefined && (error ?? checkFailed) === null) return null;
 
   const button = (label: string, onPress: () => void, primary: boolean): React.ReactElement => (
     <Pressable
@@ -130,10 +140,22 @@ export function SignInApprovalSheet(): React.ReactElement | null {
           </View>
         </>
       ) : null}
-      {error !== null ? (
-        <Text testID="signin-error" style={{ color: fixed.onShade, marginTop: space.sm }}>
-          {error}
-        </Text>
+      {(error ?? checkFailed) !== null ? (
+        <>
+          <Text testID="signin-error" style={{ color: fixed.onShade, marginTop: space.sm }}>
+            {error ?? checkFailed}
+          </Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: space.sm }}>
+            {button(
+              'Dismiss',
+              () => {
+                setError(null);
+                setCheckFailed(null);
+              },
+              false,
+            )}
+          </View>
+        </>
       ) : null}
     </View>
   );

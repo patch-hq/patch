@@ -70,4 +70,15 @@ describe('SignInApprovalSheet', () => {
     });
     expect(hasText(r.root, 'no such pending sign-in request')).toBe(true);
   });
+
+  it('a failed pending check can be dismissed', async () => {
+    vi.mocked(api.signInPending).mockRejectedValue(new Error('offline'));
+    const r = renderRN(<SignInApprovalSheet />);
+    await actAsync(async () => {});
+    expect(hasText(r.root, 'Could not check for sign-in requests: offline')).toBe(true);
+    await actAsync(async () => {
+      findHost(r.root, byLabel('Dismiss')).props.onPress();
+    });
+    expect(r.toJSON()).toBeNull();
+  });
 });
