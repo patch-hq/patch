@@ -6,6 +6,7 @@ export enum EncodingType {
 }
 
 const files = new Map<string, string>();
+const present = new Set<string>();
 
 export async function writeAsStringAsync(
   fileUri: string,
@@ -37,6 +38,7 @@ export function __setDownload(opts: { status?: number; error?: Error | null }): 
   __downloadError = opts.error ?? null;
 }
 export function __resetDownloads(): void {
+  present.clear();
   __downloads = [];
   __downloadStatus = 200;
   __downloadError = null;
@@ -53,10 +55,20 @@ export function createDownloadResumable(
       if (__downloadError) throw __downloadError;
       onProgress?.({ totalBytesWritten: 50, totalBytesExpectedToWrite: 100 });
       onProgress?.({ totalBytesWritten: 100, totalBytesExpectedToWrite: 100 });
+      if (__downloadStatus === 200) present.add(fileUri);
       return { uri: fileUri, status: __downloadStatus };
     },
   };
 }
 export async function getContentUriAsync(fileUri: string): Promise<string> {
   return fileUri.replace('file:///cache/', 'content://patch.files/cache/');
+}
+
+// Staged APKs: a finished download is a file; moveAsync promotes the .part.
+export async function getInfoAsync(fileUri: string): Promise<{ exists: boolean }> {
+  return { exists: present.has(fileUri) };
+}
+export async function moveAsync(opts: { from: string; to: string }): Promise<void> {
+  present.delete(opts.from);
+  present.add(opts.to);
 }

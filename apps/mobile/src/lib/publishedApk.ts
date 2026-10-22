@@ -5,6 +5,7 @@
 import { AppState, type NativeEventSubscription } from 'react-native';
 import { create } from 'zustand';
 import { getRoute } from '../config';
+import { stageApk } from './apkInstall';
 import { fetchPublishedApk, type PublishedApk } from './updateCheck';
 
 interface PublishedApkState {
@@ -22,7 +23,9 @@ export async function refreshPublishedApk(): Promise<void> {
   // release's own copy.
   if (getRoute()?.kind !== 'direct') return;
   try {
-    usePublishedApkStore.setState({ apk: await fetchPublishedApk(), error: null });
+    const apk = await fetchPublishedApk();
+    usePublishedApkStore.setState({ apk, error: null });
+    if (apk?.needsInstall) await stageApk(apk.url, apk.version);
   } catch (err) {
     usePublishedApkStore.setState({ error: (err as Error).message });
   }

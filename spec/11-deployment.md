@@ -367,6 +367,13 @@ stable code.
   link in the browser, because the push names it. The chat list shows an
   "Install Patch <version>" banner, and Settings → Updates an Install row,
   whenever the published APK is newer and on another runtime.
+- Downloaded ahead of time. As soon as the app reads a published APK that needs
+  installing (on launch, every half hour, on return to the foreground), it
+  downloads it in the background into the cache (written as `.part`, renamed
+  when whole) and posts one local notification per version, "Patch <version> is
+  ready to install". Tapping it, or Install, opens Android's installer on the
+  staged file with no further download. A failed background download is shown
+  as an error and retried on the next read.
 - The signing key. `PATCH_UPDATE_SIGNING_KEY` is in the password manager
   (`patch-update-signing-key`); its certificate is
   `apps/mobile/certs/certificate.pem`, valid to 2056. Losing the key means no

@@ -15,7 +15,9 @@ import {
 import { __clearAllMmkv } from './stubs/mmkv';
 import * as FileSystem from './stubs/expo-file-system';
 import * as IntentLauncher from './stubs/expo-intent-launcher';
-import { installApk, useApkInstallStore } from '../src/lib/apkInstall';
+import { installApk, stageApk, useApkInstallStore } from '../src/lib/apkInstall';
+import * as Notifications from './stubs/expo-notifications';
+import { resolveNotificationAction } from '../src/lib/notificationLink';
 import { refreshPublishedApk, usePublishedApkStore } from '../src/lib/publishedApk';
 import { AppUpdateBanner } from '../src/components/AppUpdateBanner';
 import { useUiStore } from '../src/stores/uiStore';
@@ -33,6 +35,7 @@ const NEEDS_INSTALL = {
 beforeEach(() => {
   __clearAllMmkv();
   FileSystem.__resetDownloads();
+  Notifications.__clearScheduledNotifications();
   IntentLauncher.__started.length = 0;
   IntentLauncher.__setStartError(null);
   useApkInstallStore.setState({ state: { phase: 'idle' } });
@@ -48,7 +51,7 @@ describe('installApk', () => {
     await installApk(NEEDS_INSTALL.url, '1.2.3');
     unsub();
     expect(FileSystem.__downloads).toEqual([
-      { url: NEEDS_INSTALL.url, fileUri: 'file:///cache/patch-1.2.3.apk' },
+      { url: NEEDS_INSTALL.url, fileUri: 'file:///cache/patch-1.2.3.apk.part' },
     ]);
     expect(IntentLauncher.__started).toEqual([
       {
@@ -95,7 +98,56 @@ describe('installApk', () => {
   });
 });
 
+describe('stageApk (background download)', () => {
+  it('downloads without opening the installer, then notifies once', async () => {
+    await stageApk(NEEDS_INSTALL.url, '1.2.3');
+    expect(FileSystem.__downloads).toHaveLength(1);
+    expect(IntentLauncher.__started).toEqual([]);
+    const notes = Notifications.__getScheduledNotifications();
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.content.title).toBe('Patch 1.2.3 is ready to install');
+    expect(
+      resolveNotificationAction(notes[0]!.content.data as Record<string, unknown>, {}).action,
+    ).toEqual({ type: 'install', url: NEEDS_INSTALL.url, version: '1.2.3' });
+    // A later poll finds it staged and notified: nothing more happens.
+    await stageApk(NEEDS_INSTALL.url, '1.2.3');
+    expect(FileSystem.__downloads).toHaveLength(1);
+    expect(Notifications.__getScheduledNotifications()).toHaveLength(1);
+  });
+
+  it('installing afterwards reuses the staged file instead of downloading again', async () => {
+    await stageApk(NEEDS_INSTALL.url, '1.2.3');
+    await installApk(NEEDS_INSTALL.url, '1.2.3');
+    expect(FileSystem.__downloads).toHaveLength(1);
+    expect(IntentLauncher.__started).toHaveLength(1);
+  });
+
+  it('says why when the background download fails, and does not notify', async () => {
+    FileSystem.__setDownload({ status: 500 });
+    await stageApk(NEEDS_INSTALL.url, '1.2.3');
+    expect(useApkInstallStore.getState().state).toMatchObject({ phase: 'error' });
+    expect(Notifications.__getScheduledNotifications()).toEqual([]);
+    expect(useUiStore.getState().errors).toHaveLength(1);
+  });
+});
+
 describe('refreshPublishedApk', () => {
+  it('stages a build that needs installing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ ...NEEDS_INSTALL, file: 'patch-1.2.3.apk' }), {
+            status: 200,
+          }),
+      ),
+    );
+    await refreshPublishedApk();
+    await flush();
+    expect(FileSystem.__downloads).toHaveLength(1);
+    expect(Notifications.__getScheduledNotifications()).toHaveLength(1);
+  });
+
   it('reads what the server publishes', async () => {
     vi.stubGlobal(
       'fetch',
