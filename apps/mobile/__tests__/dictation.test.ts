@@ -296,6 +296,46 @@ describe('startDictation — live preview (best-effort, never affects the final 
   });
 });
 
+describe('startDictation — a transcription that never answers', () => {
+  it('finish() rejects loudly after the timeout instead of hanging the composer on "Transcribing…"', async () => {
+    vi.useFakeTimers();
+    try {
+      voiceTranscribeMock.mockReturnValueOnce(new Promise(() => undefined));
+      const { startDictation, TRANSCRIBE_TIMEOUT_MS } = await import('../src/lib/dictation');
+      const handle = startDictation('c1', vi.fn(), vi.fn(), vi.fn());
+      await flush();
+      speak(400);
+      const settled = handle.finish(true).then(
+        () => 'resolved',
+        (e: Error) => e.message,
+      );
+      await vi.advanceTimersByTimeAsync(TRANSCRIBE_TIMEOUT_MS + 1);
+      expect(await settled).toMatch(/timed out/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('finish() rejects when the native mic never confirms it stopped', async () => {
+    vi.useFakeTimers();
+    try {
+      stopMicCaptureMock.mockReturnValueOnce(new Promise(() => undefined));
+      const { startDictation, STOP_MIC_TIMEOUT_MS } = await import('../src/lib/dictation');
+      const handle = startDictation('c1', vi.fn(), vi.fn(), vi.fn());
+      await flush();
+      speak(400);
+      const settled = handle.finish(true).then(
+        () => 'resolved',
+        (e: Error) => e.message,
+      );
+      await vi.advanceTimersByTimeAsync(STOP_MIC_TIMEOUT_MS + 1);
+      expect(await settled).toMatch(/timed out/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('startDictation — finish() idempotency + cancel', () => {
   it('finish(false) never uploads, closes the socket, stops the mic', async () => {
     const { startDictation } = await import('../src/lib/dictation');

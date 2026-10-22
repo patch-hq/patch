@@ -1592,6 +1592,7 @@ export function Composer({
               // the field is still holding.
               minHeight: COMPOSER_MIN_HEIGHT,
               maxHeight: COMPOSER_MAX_HEIGHT,
+              overflow: 'hidden',
             }}
           >
             <Text
