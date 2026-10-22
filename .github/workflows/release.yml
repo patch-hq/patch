@@ -33,44 +33,12 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  # A run that has a failed job cannot publish, so nothing else in it is worth
-  # finishing. This watches the run's jobs and cancels the whole run as soon as
-  # one has failed. It is a separate job, not a step in the failing one, because
-  # a cancel from inside a job marks that job cancelled too and the failure is
-  # lost. The failed job keeps its `failure` conclusion; the failure notifier
-  # listens to workflow_job events for that reason (the run itself ends up
-  # `cancelled`).
-  abort-on-failure:
-    if: github.repository == 'tomchambers2/patch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          while true; do
-            jobs=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
-              --jq '.jobs[] | select(.name != "abort-on-failure") | [.name, .status, .conclusion] | @tsv')
-            if echo "$jobs" | grep -qP '\tcompleted\tfailure$'; then
-              echo "a job failed; cancelling the run"
-              echo "$jobs"
-              gh run cancel "$RUN_ID" --repo "$REPO"
-              exit 0
-            fi
-            if echo "$jobs" | grep -qP '^publish\tcompleted\t'; then
-              exit 0
-            fi
-            sleep 15
-          done
   # The gate (scripts/verify.mjs), four runners wide. Every runner runs the
   # cheap layers (lint, types, unit/contract/integration); the browser layer is
   # split between them with Playwright's --shard, because the whole suite on one
@@ -80,7 +48,7 @@ jobs:
     if: github.repository == 'tomchambers2/patch'
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         shard: ['1/4', '2/4', '3/4', '4/4']
     steps:
