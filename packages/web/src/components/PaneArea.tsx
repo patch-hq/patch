@@ -181,6 +181,7 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
 // out therefore moves a DOM node instead of unmounting and remounting the
 // content, so a chat, terminal or editor keeps its state.
 const tabHostEls = new Map<string, HTMLElement>();
+const tabHostUsers = new Map<HTMLElement, number>();
 
 function tabHostEl(tabId: string): HTMLElement {
   let el = tabHostEls.get(tabId);
@@ -213,15 +214,17 @@ function HostedTab({
   ws: PatchWs | null;
 }): JSX.Element {
   const el = tabHostEl(tab.id);
-  const mounted = useRef(false);
   useLayoutEffect(() => {
-    mounted.current = true;
+    tabHostUsers.set(el, (tabHostUsers.get(el) ?? 0) + 1);
     return () => {
-      mounted.current = false;
+      tabHostUsers.set(el, (tabHostUsers.get(el) ?? 1) - 1);
       // Deferred so StrictMode's simulated unmount/remount, which runs in the
       // same task, doesn't tear down the host the portal is still rendering into.
+      // Counted per element, not per instance: a PaneArea that remounts (a route
+      // change) hands the same host to a new HostedTab before this runs.
       queueMicrotask(() => {
-        if (mounted.current) return;
+        if ((tabHostUsers.get(el) ?? 0) > 0) return;
+        tabHostUsers.delete(el);
         el.remove();
         if (tabHostEls.get(tab.id) === el) tabHostEls.delete(tab.id);
       });

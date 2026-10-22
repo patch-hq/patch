@@ -7,7 +7,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, createEvent, act } from '@testing-library/react';
-import { StrictMode } from 'react';
+import { StrictMode, useState } from 'react';
+import type { JSX } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
@@ -329,5 +330,43 @@ describe('PaneArea — StrictMode (the dev app and the e2e harness both run in i
     expect(screen.getByTestId(`pane-content-${rightId}`)).toContainElement(
       screen.getByTestId('settings-stub'),
     );
+  });
+});
+
+describe('PaneArea — remount between routes', () => {
+  it('keeps the tab content on screen when one route hands the same tab to another PaneArea', async () => {
+    seedChats(['c1']);
+    useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Two PaneAreas swapping in one commit: the outgoing one's deferred cleanup
+    // must not pull the host out from under the incoming one.
+    function Swap(): JSX.Element {
+      const [on, setOn] = useState(true);
+      return (
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <button type="button" onClick={() => setOn(false)}>
+              swap
+            </button>
+            {on ? (
+              <div key="a">
+                <PaneArea ws={null} />
+              </div>
+            ) : (
+              <section key="b">
+                <PaneArea ws={null} />
+              </section>
+            )}
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    }
+    render(<Swap />);
+    fireEvent.click(screen.getByText('swap'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('settings-stub')).toBeInTheDocument();
+    expect(document.body).toContainElement(screen.getByTestId('settings-stub'));
   });
 });
