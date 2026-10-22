@@ -156,8 +156,7 @@ import { runSlashCommand, SLASH_COMMANDS } from '../lib/slashCommands';
 
 const BUILTIN_COMMAND_NAMES: string[] = SLASH_COMMANDS.map((c) => c.name);
 import type { HookRunResult } from '@patch/wire/hooks';
-import { formatElapsed } from '../lib/callStatus';
-import { StatusDot, useNow } from './CallParts';
+import { StatusDot } from './CallParts';
 import { ensurePermission } from '../lib/permissionGate';
 import { enablePushNotifications } from '../lib/push';
 import {
@@ -701,9 +700,6 @@ export function Composer({
   // Send pressed while dictating: the dictation ends and, once its transcript
   // lands in the draft, the whole draft goes out as one message.
   const sendAfterDictationRef = React.useRef(false);
-  // When the in-flight dictation started — the listening strip's timer.
-  const [dictationStartedAt, setDictationStartedAt] = React.useState<number | null>(null);
-  const dictationNow = useNow(micState === 'recording');
   const dictationRef = React.useRef<DictationHandle | null>(null);
   // Set the instant Clear is pressed so a partial/result already in flight (an
   // onPartial call, or `finish()` resolving) is dropped instead of reviving
@@ -749,7 +745,6 @@ export function Composer({
     Keyboard.dismiss();
     inputRef.current?.blur();
     setLivePartial('');
-    setDictationStartedAt(Date.now());
     setMicState('recording');
     const factory = dictationFactory ?? startDictation;
     dictationRef.current = factory(

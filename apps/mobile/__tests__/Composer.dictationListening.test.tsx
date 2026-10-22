@@ -13,7 +13,6 @@ import { Keyboard } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   actAsync,
-  actSync,
   byLabel,
   byTestId,
   byType,
