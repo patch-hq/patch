@@ -1332,7 +1332,11 @@ export const api = {
 /** spec/09 § bell — one agent-sent notification. */
 export interface NotificationEntry {
   id: string;
-  chatId: string;
+  /** Absent on a job-failure entry. */
+  chatId?: string;
+  /** A job-failure entry: the job and the `ts` of the failed run. */
+  jobId?: string;
+  runTs?: number;
   message: string;
   importance: 'silent' | 'normal' | 'urgent';
   deepLink?: string;

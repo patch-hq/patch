@@ -90,7 +90,7 @@ import { JobStore } from './jobs/store.js';
 import { JobDispatcher } from './jobs/dispatcher.js';
 import { JobChatLinks } from './jobs/chat-links.js';
 import { JobLogs } from './jobs/logs.js';
-import { JobAlerts } from './jobs/alerts.js';
+import { JobAlerts, describeFailure } from './jobs/alerts.js';
 import { CronScheduler } from './jobs/cron.js';
 import { HostWaker } from './jobs/host-wake.js';
 import { RecurrenceScheduler } from './jobs/recurrence.js';
@@ -1991,7 +1991,17 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // AND is itself a gate-changed condition, naming the chat it failed on
     // (a dispatch failure with no chat landed has nothing to flag).
     onRun: (entry) => {
-      jobAlerts.onRun(entry);
+      if (jobAlerts.onRun(entry)) {
+        // The sidebar banner is also a bell entry, linking the job and the run.
+        const status = entry.status === 'gate-error' ? 'gate-error' : 'dispatch-error';
+        const name = jobs.get(entry.jobId)?.name ?? entry.jobId;
+        notificationLog.add({
+          message: `${name}: ${describeFailure(status, entry.error ?? '').reason}`,
+          importance: 'normal',
+          jobId: entry.jobId,
+          runTs: entry.ts,
+        });
+      }
       if (isJobRunFailure(entry.status)) managerSweeper.jobRunFailed(entry.action?.chatId ?? null);
     },
   });

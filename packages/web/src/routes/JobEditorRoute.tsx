@@ -7,7 +7,7 @@ import { DateTimeField } from '../components/DateTimeField.js';
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import type { Job, JobAction, JobCreateBody, JobTrigger, WebhookScheme } from '@patch/wire/jobs';
 import { scriptVerdictLine } from '@patch/wire/jobs';
@@ -2658,6 +2658,13 @@ function dateInstant(inputValue: string, loadedIso: string | null): string | nul
  */
 function RunRow({ run, jobId }: { run: JobRun; jobId: string }): JSX.Element {
   const [open, setOpen] = useState(false);
+  // A notification links here with `?run=<ts>`: scroll that fire into view and mark it.
+  const [params] = useSearchParams();
+  const linked = params.get('run') === String(run.ts);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (linked) rowRef.current?.scrollIntoView({ block: 'center' });
+  }, [linked]);
   const output = run.action?.output ?? '';
   const verdict = scriptVerdictLine(output);
   // Only a script fire has an exit code, and only a non-zero one is worth the
@@ -2668,7 +2675,7 @@ function RunRow({ run, jobId }: { run: JobRun; jobId: string }): JSX.Element {
   // Worth expanding only when there is more than the headline already on screen.
   const hasMore = output.length > 0 && output.trim() !== verdict;
   return (
-    <li className="run-row">
+    <li className={linked ? 'run-row run-row-linked' : 'run-row'} ref={rowRef} data-linked={linked}>
       <div className="run-row-head">
         <span>{new Date(run.ts).toLocaleString()}</span>
         <span className={`status status-${run.status}`}>{run.status}</span>
