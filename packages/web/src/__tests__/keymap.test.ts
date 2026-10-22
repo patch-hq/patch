@@ -7,6 +7,7 @@ import {
   matchesAction,
   parseChord,
   recordChord,
+  sameChord,
   saveOverrides,
 } from '../lib/keymap.js';
 
@@ -72,5 +73,38 @@ describe('overrides', () => {
     expect(recordChord(ev({ code: 'KeyY', key: 'y' }))).toBeNull();
     expect(recordChord(ev({ code: 'MetaLeft', key: 'Meta', metaKey: true }))).toBeNull();
     expect(recordChord(ev({ code: 'KeyY', key: 'Y', shiftKey: true }))).toBeNull();
+  });
+});
+
+describe('recording Ctrl on a Mac', () => {
+  it('a Ctrl-only chord is recorded as ctrl, not mod', () => {
+    const chord = recordChord(ev({ code: 'KeyY', key: 'y', ctrlKey: true, altKey: true }), true)!;
+    expect(chord.mod).toBe(false);
+    expect(chord.ctrl).toBe(true);
+    expect(chordToGlyphs(chord)).toBe('⌃⌥Y');
+    expect(
+      matchesAction(ev({ code: 'KeyY', key: 'y', ctrlKey: true, altKey: true }), 'newChat', {
+        newChat: chord,
+      }),
+    ).toBe(true);
+    expect(
+      matchesAction(ev({ code: 'KeyY', key: 'y', metaKey: true, altKey: true }), 'newChat', {
+        newChat: chord,
+      }),
+    ).toBe(false);
+  });
+
+  it('records ⌘ as mod on a Mac, and Ctrl as mod off a Mac', () => {
+    expect(recordChord(ev({ code: 'KeyY', key: 'y', metaKey: true }), true)!.mod).toBe(true);
+    const win = recordChord(ev({ code: 'KeyY', key: 'y', ctrlKey: true }), false)!;
+    expect(win.mod).toBe(true);
+    expect(win.ctrl).toBe(false);
+  });
+
+  it('sameChord tells ⌘K from Ctrl+K', () => {
+    const cmd = recordChord(ev({ code: 'KeyK', key: 'k', metaKey: true }), true)!;
+    const ctrl = recordChord(ev({ code: 'KeyK', key: 'k', ctrlKey: true }), true)!;
+    expect(sameChord(cmd, ctrl)).toBe(false);
+    expect(sameChord(cmd, cmd)).toBe(true);
   });
 });
