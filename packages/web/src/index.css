@@ -16057,9 +16057,9 @@ select.permission-mode.is-pending {
 
 .signin-prompt {
   position: fixed;
-  top: 24px;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
