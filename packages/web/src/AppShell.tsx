@@ -337,6 +337,10 @@ export function AppShell(): JSX.Element {
             useUiStore.getState().pushError('Open a chat first, then start the meeting from it');
             return;
           }
+          if (chatId === SPECIAL_THREAD_IDS.manager) {
+            useUiStore.getState().pushError('The Manager does not take meeting notes');
+            return;
+          }
           if (isMeetingOpen(useMeetingStore.getState().byChat[chatId])) return;
           void startMeeting(chatId);
         }),
