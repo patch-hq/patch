@@ -2687,7 +2687,9 @@ export class BrowserManager {
           const shot = (await session
             .send('Page.captureScreenshot', { format: 'jpeg', quality })
             .catch(() => null)) as { data: string } | null;
-          if (shot && !stopped) emit(shot.data, v.width, v.height);
+          // The view closed or resized while the capture ran: this picture is the old size,
+          // and a still page never paints again to replace it.
+          if (shot && !stopped && tab.viewer === v) emit(shot.data, v.width, v.height);
           else if (!shot && ++misses < 30) dirty = true;
           await new Promise((r) => setTimeout(r, shot ? minFrameMs : 100));
         } while (dirty && !stopped);
@@ -2801,6 +2803,17 @@ export class BrowserManager {
       tab.viewer = undefined;
       if (tab.cdp) await tab.cdp.send('Emulation.clearDeviceMetricsOverride');
       await tab.page.setViewportSize(saved);
+      // Chrome applies the cleared view override a moment late, which can leave the page laid
+      // out at the view's size while Playwright believes the agent's size is back on; nudge
+      // the size until the page really takes it.
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise((r) => setTimeout(r, 150));
+        const width = await tab.page.evaluate('innerWidth').catch(() => saved.width);
+        if (width === saved.width) break;
+        await tab.page.setViewportSize({ width: saved.width + 1, height: saved.height });
+        await tab.page.setViewportSize(saved);
+        await new Promise((r) => setTimeout(r, 100));
+      }
       return;
     }
     if (tab.agentDevice || tab.viewerYielded) return;
