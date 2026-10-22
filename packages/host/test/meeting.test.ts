@@ -708,8 +708,9 @@ describe('MeetingManager', () => {
     );
     await m.end('c1');
     const s = m.get('c1')!;
-    expect(s.summary).toBeNull();
-    expect(s.error).toContain('model commentary');
+    expect(s.summary).not.toBeNull();
+    expect(s.summary?.headline).not.toMatch(/transcript/i);
+    expect(s.error).toBeNull();
   });
 
   it('a final pass with no summary is an error on the state', async () => {

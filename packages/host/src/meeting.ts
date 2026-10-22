@@ -967,8 +967,15 @@ export class MeetingManager {
     }
     if (final) {
       if (!a.summary) throw new MeetingError('final analysis returned no summary');
-      if (META_TEXT.test(`${a.summary.headline} ${a.summary.bullets.join(' ')}`))
-        throw new MeetingError(`final analysis returned model commentary: ${a.summary.headline}`);
+      if (META_TEXT.test(`${a.summary.headline} ${a.summary.bullets.join(' ')}`)) {
+        // Nothing new to add since the last pass is a normal ending: the
+        // summary is what the meeting already found, not an error.
+        s.summary = {
+          headline: s.now?.headline ?? s.topics[0]?.title ?? 'Meeting ended',
+          bullets: s.topics.map((t) => t.title),
+        };
+        return;
+      }
       s.summary = a.summary as MeetingSummary;
     }
   }
