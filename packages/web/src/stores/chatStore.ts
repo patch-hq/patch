@@ -1637,6 +1637,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chats[event.chatId] = {
             ...row,
             activity: nextActivity,
+            optimisticSend: false,
             // The turn is over, so no tool call is in flight. The counter is
             // client-side and only a tool_result decrements it; a result that
             // never arrived would otherwise pin the row on `working` for good.
@@ -2882,7 +2883,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.chats,
         // Seed the durable first-user-message preview ONCE — a later optimistic
         // send must not overwrite it, or the sidebar label flips around.
-        [chatId]: { ...row, preview: row.preview ?? headCodePoints(content, 140) },
+        [chatId]: {
+          ...row,
+          preview: row.preview ?? headCodePoints(content, 140),
+          // Working at once, not after the host's first activity frame. Only a settled
+          // chat: a running or blocked one already says the right thing.
+          ...(!opts?.dedupeAgainstPersisted &&
+          local.length === 0 &&
+          (row.activity === 'idle' || row.activity === 'errored')
+            ? { optimisticSend: true }
+            : {}),
+        },
       },
     });
   },
@@ -2993,6 +3004,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   failDelivery(chatId, localId) {
+    const row = get().chats[chatId];
+    if (row?.optimisticSend) {
+      set({ chats: { ...get().chats, [chatId]: { ...row, optimisticSend: false } } });
+    }
     updateDeliveryEntry(get, set, chatId, localId, {
       deliveryPending: false,
       deliveryFailed: true,

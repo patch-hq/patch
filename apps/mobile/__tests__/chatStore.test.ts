@@ -129,7 +129,7 @@ describe('mobile chatStore', () => {
     await new Promise((r) => setTimeout(r, 5));
     s.appendLocalUserMessage('c1', 'hi', 'l1');
     const row = () => useChatStore.getState().chats['c1']!;
-    expect(deriveBadge(row())).toBe('read');
+    expect(deriveBadge(row())).toBe('working');
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',

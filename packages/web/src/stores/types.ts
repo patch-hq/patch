@@ -243,6 +243,13 @@ export interface ChatRow {
    */
   openToolCalls?: number;
   /**
+   * Set when the user sends into a settled chat, so the row reads `working` before the
+   * host's first activity frame arrives. The host's next activity frame (or a failed
+   * delivery) clears it; `activity` itself is never touched, since the store reads it
+   * as the host's own word on whether a turn is in flight.
+   */
+  optimisticSend?: boolean;
+  /**
    * `callId`s of this chat's open tool calls — same lifecycle as
    * `openToolCalls` above (one array entry per outstanding call, pushed on
    * `chat.tool_call`, removed on its `chat.tool_result`, cleared on stop/idle)
@@ -354,7 +361,8 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   // chat cannot be both, and if it somehow claims to be, the failure is the more
   // important fact.
   if (row.activity === 'errored' || row.status === 'errored') return 'errored';
-  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0) return 'working';
+  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend)
+    return 'working';
   // Unread beats a still-running background job or self-wake loop (User: "unread
   // beats background always"). The chat HAS something new to look at — that is
   // the strongest true claim available, and it does not stop being true just

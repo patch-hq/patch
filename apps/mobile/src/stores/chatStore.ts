@@ -801,6 +801,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chats[event.chatId] = {
             ...row,
             activity: event.activity,
+            optimisticSend: false,
             // The turn is over, so no tool call is in flight; a lost result would
             // otherwise pin the row on `working` for good (as web).
             openToolCalls:
@@ -1807,6 +1808,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // top of its folder the instant the user sends, not once the
           // host's `chat.state` round-trips back.
           lastUserActivity: Date.now(),
+          // Working at once; only a settled chat flips (as web).
+          ...(!opts?.dedupeAgainstPersisted &&
+          local.length === 0 &&
+          (row.activity === 'idle' || row.activity === 'errored')
+            ? { optimisticSend: true }
+            : {}),
         },
       },
     });
@@ -1867,6 +1874,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   failDelivery(chatId, localId) {
+    const row = get().chats[chatId];
+    if (row?.optimisticSend) {
+      set({ chats: { ...get().chats, [chatId]: { ...row, optimisticSend: false } } });
+    }
     const next = patchDelivery(get().timelines, chatId, localId, {
       deliveryPending: false,
       deliveryFailed: true,

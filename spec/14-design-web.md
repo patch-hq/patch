@@ -191,6 +191,8 @@ The default is **My recent activity** (the stable last-action ordering above). A
 
 The status badge (§ Status badges) is what shows a chat needs attention, never the row's position — a `permission` or `working` badge does not pull a row to the top of its folder.
 
+Sending into a settled (idle or errored) chat shows its `working` badge at once, on web and phone, without waiting for the host's first state frame (`optimisticSend`). The host's next `chat.state`, or a failed delivery, clears it. A send still uploading files does not flip it: nothing has reached the host yet.
+
 Pinned is its own axis, ordered by `pinnedAt` (`04-chats-and-folders.md` § Pinning) and unaffected by either kind of activity. Special threads (Manager, Telegram, Speakers) keep their fixed slots (§ Sidebar items 2, 5). The Unread view (§1b) replaces this ordering with its own FIFO queue (oldest-waiting first) while it is the active filter.
 
 ### Status badges (the inbox model)

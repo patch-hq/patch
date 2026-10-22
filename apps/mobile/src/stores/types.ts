@@ -53,6 +53,8 @@ export interface ChatRow {
   lastReadSeq: number;
   /** Tool calls started but not yet resulted; a positive count means the chat is working. */
   openToolCalls?: number;
+  /** Set on a send into a settled chat so the row reads `working` before the host's first state frame; cleared by that frame or a failed delivery. */
+  optimisticSend?: boolean;
   preview: string | null;
   pendingPermissions: PendingPermission[];
   lastSeq: number;
@@ -264,7 +266,9 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   if (row.activity === 'awaiting-permission') return 'permission';
   if (row.statusKind === 'question' && row.statusDeclared) return 'permission';
   if (row.activity === 'errored' || row.status === 'errored') return 'errored';
-  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0) return 'working';
+  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend) {
+    return 'working';
+  }
   // Unread beats a background job or self-wake loop.
   if (row.lastSeq > row.lastReadSeq) return 'done';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
