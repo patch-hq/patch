@@ -46,7 +46,13 @@ export interface ChatRow {
    */
   lastUserActivity: number;
   awaitingPermission: boolean;
-  lastVisitedAt: number;
+  /**
+   * Highest `lastSeq` this phone has seen on a visit (the read watermark). A chat
+   * is unread when `lastSeq > lastReadSeq`; -1 until first opened.
+   */
+  lastReadSeq: number;
+  /** Tool calls started but not yet resulted; a positive count means the chat is working. */
+  openToolCalls?: number;
   preview: string | null;
   pendingPermissions: PendingPermission[];
   lastSeq: number;
@@ -156,7 +162,7 @@ export interface ChatRow {
  * about a chat WITHOUT its transcript. This is exactly what the roster fetch
  * returns per chat, what `chatStore.hydrate()` takes, and what the on-device
  * read cache persists (spec/15 § Instant open (read cache)). The derived/local
- * fields (`preview`, `lastVisitedAt`, `pendingPermissions`, `lastSeq`,
+ * fields (`preview`, `lastReadSeq`, `pendingPermissions`, `lastSeq`,
  * `awaitingPermission`) are deliberately not part of it.
  *
  * A field is optional-with-default only if it is BOTH named in the `Omit<...>`
@@ -166,7 +172,7 @@ export interface ChatRow {
 export type ChatListRow = Omit<
   ChatRow,
   | 'awaitingPermission'
-  | 'lastVisitedAt'
+  | 'lastReadSeq'
   | 'preview'
   | 'pendingPermissions'
   | 'lastSeq'
@@ -258,8 +264,9 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   if (row.activity === 'awaiting-permission') return 'permission';
   if (row.statusKind === 'question' && row.statusDeclared) return 'permission';
   if (row.activity === 'errored' || row.status === 'errored') return 'errored';
-  if (row.activity === 'running') return 'working';
-  if (row.lastUpdated > row.lastVisitedAt) return 'done';
+  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0) return 'working';
+  // Unread beats a background job or self-wake loop.
+  if (row.lastSeq > row.lastReadSeq) return 'done';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
   if (row.pendingWake) return 'monitoring';
   return 'read';

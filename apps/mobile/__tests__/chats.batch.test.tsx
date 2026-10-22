@@ -275,8 +275,8 @@ describe('Unread option (spec/15 § Needs attention)', () => {
         row({ chatId: 'done-row', folder: 'work', lastUpdated: 100 }),
         row({ chatId: 'read-row', folder: 'work', lastUpdated: 1 }),
       ]);
-    // Mark "read-row" as read (visited after its last update) and leave
-    // "done-row" unread (lastUpdated stays ahead of the default lastVisitedAt 0).
+    // Mark "read-row" as read (visited) and leave
+    // "done-row" unread (unvisited, so its seq is ahead of the read mark).
     useChatStore.getState().setActiveChat('read-row');
     useChatStore.getState().setActiveChat(null);
     const r = renderRN(<ChatsScreen />);

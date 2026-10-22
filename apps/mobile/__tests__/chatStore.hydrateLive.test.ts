@@ -1,6 +1,6 @@
 // `bootstrap()` opens the socket BEFORE it awaits the roster, so live frames
 // can land first. The roster answer then arrives via `hydrate` and must not
-// wipe what only the live stream knows (types.ts: preview, lastVisitedAt,
+// wipe what only the live stream knows (types.ts: preview, lastReadSeq,
 // pendingPermissions, lastSeq and awaitingPermission are "deliberately not part
 // of" the roster row) nor roll a newer `chat.state` back to an older snapshot.
 
@@ -44,14 +44,14 @@ describe('hydrate after live frames', () => {
       request: { tool: 'Bash', description: 'ls', args: { command: 'ls' } },
     });
     s.appendLocalUserMessage('c1', 'typed while loading', 'L1');
-    const visited = chat().lastVisitedAt;
+    const visited = chat().lastReadSeq;
     expect(visited).toBeGreaterThan(0);
 
     s.hydrate([toChatListRow(ENTRY)]);
 
     expect(chat().lastSeq).toBe(10);
     expect(chat().preview).toBe('typed while loading');
-    expect(chat().lastVisitedAt).toBe(visited);
+    expect(chat().lastReadSeq).toBe(visited);
     expect(chat().pendingPermissions).toHaveLength(1);
     expect(deriveBadge(chat())).toBe('permission');
   });

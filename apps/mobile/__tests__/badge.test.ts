@@ -14,7 +14,7 @@ function row(overrides: Partial<ChatRow>): ChatRow {
     pinned: false,
     pinnedAt: null,
     lastUpdated: 0,
-    lastVisitedAt: 0,
+    lastReadSeq: 0,
     preview: '',
     pendingPermissions: [],
     awaitingPermission: false,

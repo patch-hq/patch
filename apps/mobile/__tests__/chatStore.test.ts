@@ -27,7 +27,7 @@ describe('mobile chatStore', () => {
     const row = useChatStore.getState().chats['c1'];
     expect(row).toBeDefined();
     if (!row) throw new Error('row missing');
-    expect(deriveBadge(row)).toBe('done'); // lastUpdated > lastVisitedAt(0)
+    expect(deriveBadge(row)).toBe('done'); // lastSeq 0 > lastReadSeq -1
   });
 
   it('applyEvent: chat.message updates preview + lastSeq', () => {
@@ -45,7 +45,7 @@ describe('mobile chatStore', () => {
     expect(useChatStore.getState().timelines['c1']?.length).toBe(1);
   });
 
-  it("a replayed chat.message does not turn a read chat unread (lastUpdated is the host's, not arrival time)", () => {
+  it('a replayed chat.message does not turn a read chat unread (read is by seq, not arrival)', () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.state',
@@ -54,6 +54,8 @@ describe('mobile chatStore', () => {
       activity: 'idle',
       lastUpdated: 1000,
     } as never);
+    s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 1, role: 'user', content: 'hi' });
+    s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 2, role: 'assistant', content: 'yo' });
     s.markRead('c1');
     const row = () => {
       const r = useChatStore.getState().chats['c1'];
@@ -61,10 +63,38 @@ describe('mobile chatStore', () => {
       return r;
     };
     expect(deriveBadge(row())).toBe('read');
-    s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 1, role: 'user', content: 'hi' });
     s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 2, role: 'assistant', content: 'yo' });
     expect(row().lastUpdated).toBe(1000);
     expect(deriveBadge(row())).toBe('read');
+    s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 3, role: 'assistant', content: 'new' });
+    expect(deriveBadge(row())).toBe('done');
+  });
+
+  it('an open tool call is working until its result lands or the chat settles', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      folder: '~/x',
+      activity: 'running',
+      lastUpdated: 1,
+    } as never);
+    s.applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      callId: 'k',
+      tool: 'Bash',
+      args: {},
+    } as never);
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      folder: '~/x',
+      activity: 'idle',
+      lastUpdated: 2,
+    } as never);
+    expect(useChatStore.getState().chats['c1']!.openToolCalls).toBe(0);
   });
 
   it('ignores a chat.state older than the row (a replay or race must not roll activity back)', () => {

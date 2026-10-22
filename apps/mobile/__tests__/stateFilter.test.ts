@@ -18,7 +18,7 @@ function row(overrides: Partial<ChatRow> & { chatId: string }): ChatRow {
     pinnedAt: null,
     lastUpdated: 0,
     awaitingPermission: false,
-    lastVisitedAt: 5,
+    lastReadSeq: 5,
     preview: null,
     pendingPermissions: [],
     lastSeq: 5,
@@ -88,7 +88,10 @@ describe('matchesStateFilter', () => {
 
   it('`done` never includes a failure', () => {
     expect(
-      matchesStateFilter(row({ chatId: 'a', lastUpdated: 10, lastVisitedAt: 5 }), 'done'),
+      matchesStateFilter(
+        row({ chatId: 'a', lastUpdated: 10, lastSeq: 10, lastReadSeq: 5 }),
+        'done',
+      ),
     ).toBe(true);
     expect(matchesStateFilter(row({ chatId: 'a' }), 'done')).toBe(true);
     expect(matchesStateFilter(row({ chatId: 'a', status: 'errored' }), 'done')).toBe(false);

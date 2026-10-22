@@ -21,7 +21,7 @@ function row(overrides: Partial<ChatRow>): ChatRow {
     pinnedAt: null,
     lastUpdated: 0,
     awaitingPermission: false,
-    lastVisitedAt: 0,
+    lastReadSeq: 0,
     preview: '',
     pendingPermissions: [],
     lastSeq: 0,
@@ -53,7 +53,9 @@ describe('deriveBadge — background', () => {
   });
 
   it('unread beats background, always', () => {
-    expect(deriveBadge(row({ lastUpdated: 1, lastVisitedAt: 0, backgroundTasks: 1 }))).toBe('done');
+    expect(
+      deriveBadge(row({ lastUpdated: 1, lastSeq: 1, lastReadSeq: 0, backgroundTasks: 1 })),
+    ).toBe('done');
   });
 });
 
@@ -69,7 +71,8 @@ describe('deriveBadge — monitoring', () => {
       deriveBadge(
         row({
           lastUpdated: 1,
-          lastVisitedAt: 0,
+          lastSeq: 1,
+          lastReadSeq: 0,
           pendingWake: { message: 'check back', fireAt: 1, notAfter: undefined },
         }),
       ),
@@ -143,13 +146,16 @@ describe('deriveBadge — parity with web for the permission signals', () => {
 
 describe('deriveBadge — mobile read/unread and full precedence', () => {
   it('visited at/after last update is read', () => {
-    expect(deriveBadge(row({ lastUpdated: 5, lastVisitedAt: 5 }))).toBe('read');
-    expect(deriveBadge(row({ lastUpdated: 5, lastVisitedAt: 9 }))).toBe('read');
+    expect(deriveBadge(row({ lastUpdated: 5, lastSeq: 5, lastReadSeq: 5 }))).toBe('read');
+    expect(deriveBadge(row({ lastUpdated: 5, lastSeq: 5, lastReadSeq: 9 }))).toBe('read');
+  });
+  it('open tool calls make a quiet chat working', () => {
+    expect(deriveBadge(row({ openToolCalls: 1 }))).toBe('working');
   });
   it('working beats unread', () => {
-    expect(deriveBadge(row({ activity: 'running', lastUpdated: 5, lastVisitedAt: 0 }))).toBe(
-      'working',
-    );
+    expect(
+      deriveBadge(row({ activity: 'running', lastUpdated: 5, lastSeq: 5, lastReadSeq: 0 })),
+    ).toBe('working');
   });
   it('background beats monitoring beats read', () => {
     const wake = { message: 'm', fireAt: 1, notAfter: undefined };

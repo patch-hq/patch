@@ -66,7 +66,8 @@ import { fonts, radii, space, typography, useTheme } from '../../src/lib/theme';
 import { startVoiceNote, releaseVoiceNoteIfHeld } from '../../src/lib/voiceNote';
 import { startVoiceCall } from '../../src/lib/voiceCall';
 import type { ChatRow, DisplayBadge } from '../../src/stores/types';
-import { deriveBadge, isHidden, isSnoozed } from '../../src/stores/types';
+import { useChatBadge } from '../../src/lib/chatBadge';
+import { isHidden, isSnoozed } from '../../src/stores/types';
 import { badgeColor } from '../../src/lib/badge';
 import { getSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
 import type { CollapsibleSection } from '../../src/lib/sectionCollapse';
@@ -103,7 +104,7 @@ function ManagerRow({ row }: { row: ChatRow }): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
   const preview = useSettledPreview(row);
-  const badge = deriveBadge(row);
+  const badge = useChatBadge(row);
   const statusColor = badgeColor(badge, colors);
   const actionButton = {
     flex: 1,

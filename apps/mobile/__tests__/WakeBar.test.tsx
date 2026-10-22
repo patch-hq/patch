@@ -38,7 +38,7 @@ function row(pendingWake: ChatRow['pendingWake']): ChatRow {
     pinnedAt: null,
     lastUpdated: 0,
     awaitingPermission: false,
-    lastVisitedAt: 0,
+    lastReadSeq: 0,
     preview: null,
     pendingPermissions: [],
     lastSeq: 0,
