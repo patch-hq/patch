@@ -22,7 +22,7 @@
 
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatEventEntry } from '../stores/chatStore.js';
+import { useChatStore, type ChatEventEntry } from '../stores/chatStore.js';
 import {
   joinAnswer,
   parseAskUserQuestion,
@@ -233,10 +233,27 @@ function Footer({
   submit?: { disabled: boolean; onClick(): void };
 }): JSX.Element | null {
   const resolved = entry.permissionResolved;
+  const agentLabel = /^\(from subagent "(.*)"\) /s.exec(entry.permissionDescription ?? '')?.[1];
+  // A background agent's question is mirrored here; once answered, say whether
+  // the agent has picked the answer up and resumed (its status goes back to running).
+  const agentResumed = useChatStore((s) =>
+    agentLabel === undefined
+      ? false
+      : Object.values(s.delegateUpdates).some((byId) =>
+          Object.values(byId).some((d) => d.label === agentLabel && d.status === 'running'),
+        ),
+  );
   if (resolved) {
     return (
       <p className="permission-outcome" data-testid="permission-outcome">
         {resolved === 'approve' ? 'Answered' : 'Cancelled'}
+        {resolved === 'approve' && agentLabel !== undefined ? (
+          <span data-testid="question-agent-resumed">
+            {agentResumed
+              ? ` · ${agentLabel} received it and is working`
+              : ` · waiting for ${agentLabel}`}
+          </span>
+        ) : null}
       </p>
     );
   }
