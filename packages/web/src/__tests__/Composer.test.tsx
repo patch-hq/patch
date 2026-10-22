@@ -2205,27 +2205,29 @@ describe('Composer', () => {
       expect(input().value).toBe('');
     });
 
-    it('shows a status line: Listening while recording, Transcribing while the upload runs, gone after', async () => {
+    it('marks dictation with an italic mic in the input (no status line above), kept while transcribing', async () => {
       let resolveT: ((v: { transcript: string }) => void) | undefined;
       const mic = renderDictating({
         onSend: vi.fn(),
         rec: makeRec(),
         transcribeClip: () => new Promise((r) => (resolveT = r)),
       });
-      expect(screen.queryByTestId('dictation-status')).toBeNull();
+      expect(screen.queryByTestId('composer-live-preview')).toBeNull();
       fireEvent.mouseDown(mic);
       fireEvent.mouseUp(mic);
       await waitFor(() => expect(preview.opened()).toBe(1));
-      expect(screen.getByTestId('dictation-status').textContent).toBe('Listening…');
-      fireEvent.mouseDown(mic);
+      preview.emit('hello there');
       await waitFor(() =>
-        expect(screen.getByTestId('dictation-status').textContent).toMatch(/^Transcribing…/),
+        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 hello there'),
       );
-      expect(screen.getByTestId('dictation-status').getAttribute('data-state')).toBe(
-        'transcribing',
-      );
+      expect(screen.queryByTestId('dictation-status')).toBeNull();
+      fireEvent.mouseDown(mic);
+      await waitFor(() => expect(mic.getAttribute('title')).toBe('Transcribing…'));
+      // The words already heard do not vanish while the upload runs.
+      expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 hello there');
       resolveT!({ transcript: 'done' });
-      await waitFor(() => expect(screen.queryByTestId('dictation-status')).toBeNull());
+      await waitFor(() => expect(screen.queryByTestId('composer-live-preview')).toBeNull());
+      expect(input().value).toBe('done');
     });
 
     it('send while dictating with nothing heard sends nothing and says so', async () => {
@@ -2295,7 +2297,7 @@ describe('Composer', () => {
       await waitFor(() => expect(preview.opened()).toBe(1));
       preview.emit('from the');
       await waitFor(() =>
-        expect(screen.getByTestId('composer-live-partial').textContent).toBe('from the'),
+        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 from the'),
       );
       act(() => {
         mic!.down(1000);
@@ -2531,12 +2533,12 @@ describe('Composer', () => {
       fireEvent.mouseDown(mic);
       fireEvent.mouseUp(mic);
       await waitFor(() => expect(preview.opened()).toBe(1));
-      // Nothing is drawn until there are words to draw.
-      expect(screen.queryByTestId('composer-live-preview')).toBeNull();
+      // Just the mic marker until there are words.
+      expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 ');
 
       preview.emit('buy oat');
       await waitFor(() =>
-        expect(screen.getByTestId('composer-live-partial').textContent).toBe('buy oat'),
+        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 buy oat'),
       );
       // Greyed PREVIEW, not committed text: the real value is still empty, so
       // sending now would send nothing rather than a half-heard guess.
@@ -2547,7 +2549,7 @@ describe('Composer', () => {
       // Each pass replaces the last — the text is allowed to rewrite itself.
       preview.emit('buy oat milk');
       await waitFor(() =>
-        expect(screen.getByTestId('composer-live-partial').textContent).toBe('buy oat milk'),
+        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 buy oat milk'),
       );
 
       // The authoritative transcript lands as real text and the preview goes.
@@ -2583,7 +2585,9 @@ describe('Composer', () => {
 
       preview.emit('and some');
       await waitFor(() =>
-        expect(screen.getByTestId('composer-live-preview').textContent).toBe('shopping: and some'),
+        expect(screen.getByTestId('composer-live-preview').textContent).toBe(
+          'shopping: 🎤 and some',
+        ),
       );
     });
 

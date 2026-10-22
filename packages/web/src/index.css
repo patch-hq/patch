@@ -6042,6 +6042,7 @@ button.view-file-download {
 }
 .composer-live-partial {
   color: var(--ink-3);
+  font-style: italic;
 }
 .composer-input[data-preview='true'] {
   color: transparent;

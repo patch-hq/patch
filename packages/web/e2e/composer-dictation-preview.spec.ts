@@ -178,7 +178,7 @@ test.describe('composer dictation — live preview', () => {
 
     await tapChord(page, 'KeyD', { meta: true, shift: true });
     await expect(page.getByTestId('composer-live-partial')).toHaveText(
-      /^\s*remind me to water the$/,
+      /^\s*🎤 remind me to water the$/,
     );
     // Not the voice-note overlay: the words are in the box, not above it.
     await expect(page.getByTestId('voice-note-overlay')).toHaveCount(0);
@@ -239,7 +239,7 @@ test.describe('composer dictation — live preview', () => {
     await input.fill('please');
     await tapMic(mic);
     await expect(page.getByTestId('composer-live-partial')).toHaveText(
-      /^\s*remind me to water the$/,
+      /^\s*🎤 remind me to water the$/,
     );
     await expect(mic).toHaveAttribute('aria-pressed', 'true');
 
@@ -295,7 +295,7 @@ test.describe('composer dictation — live preview', () => {
     // interim text is a fresh read of the whole prefix each time, and the
     // preview must show the latest read, not a concatenation of every read.
     const partial = page.getByTestId('composer-live-partial');
-    await expect(partial).toHaveText(/^\s*remind me to water the$/);
+    await expect(partial).toHaveText(/^\s*🎤 remind me to water the$/);
 
     // The typed text is still the only REAL value — the guess is not committed.
     await expect(input).toHaveValue('note:');

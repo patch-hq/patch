@@ -1112,7 +1112,10 @@ export const Composer = forwardRef(function Composer(
   const [livePartial, setLivePartial] = useState('');
   const recordingRef = useRef<VoiceRecording | null>(null);
   const previewRef = useRef<DictationPreview | null>(null);
-  const showLivePreview = micState === 'recording' && livePartial.length > 0;
+  // The mic marker (and any words heard so far) stays drawn through
+  // 'transcribing' until the authoritative transcript replaces it, rather than
+  // vanishing mid-wait. It replaces the old status line above the input.
+  const showLivePreview = micState !== 'idle';
 
   // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
   // unreliable in the desktop shell, so size it here: reset to `auto` (allows
@@ -1145,15 +1148,6 @@ export const Composer = forwardRef(function Composer(
     el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
     syncMirrors(el);
   }, [value, livePartial, showLivePreview]);
-  // Seconds spent waiting on the transcript, so a slow upload visibly counts
-  // up instead of looking identical to recording.
-  const [transcribeSecs, setTranscribeSecs] = useState(0);
-  useEffect(() => {
-    if (micState !== 'transcribing') return;
-    setTranscribeSecs(0);
-    const t = setInterval(() => setTranscribeSecs((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [micState]);
   // spec/14 § Composer — chips: the mirror only needs to exist while there is
   // at least one chip to draw, and only when dictation isn't already using
   // the transparent-textarea trick for its own mirror (the two never overlap
@@ -1305,9 +1299,13 @@ export const Composer = forwardRef(function Composer(
   // --- TRANSCRIBE mode (C1) ---
   /** Close the live-preview leg, if one is open, and drop its text. */
   function endPreview(): void {
+    stopPreview();
+    setLivePartial('');
+  }
+  /** Close the live-preview leg but leave its last words showing. */
+  function stopPreview(): void {
     previewRef.current?.stop();
     previewRef.current = null;
-    setLivePartial('');
   }
 
   /**
@@ -1375,9 +1373,11 @@ export const Composer = forwardRef(function Composer(
     recordingRef.current = null;
     recGenRef.current++; // invalidate any still-in-flight prepare
     // The preview's job is over the moment the gesture ends: from here the
-    // authoritative transcript is the only text that may reach the input.
-    endPreview();
+    // authoritative transcript is the only text that may reach the input. The
+    // last interim words stay drawn until it lands (cleared in `finally`).
+    stopPreview();
     if (!rec) {
+      setLivePartial('');
       setMicState('idle');
       pushError('voice: nothing recorded (released too quickly?). Hold a beat longer.');
       return;
@@ -1408,6 +1408,7 @@ export const Composer = forwardRef(function Composer(
       sendAfterDictationRef.current = false;
       pushError(failed('voice transcription'), undefined, (e as Error).message);
     } finally {
+      setLivePartial('');
       setMicState('idle');
     }
   }
@@ -2181,18 +2182,6 @@ export const Composer = forwardRef(function Composer(
           {dictPending > 0 ? 'Dictating… sending' : 'Dictating…'}
         </div>
       ) : null}
-      {micState !== 'idle' ? (
-        <div
-          className="dictation-status"
-          data-testid="dictation-status"
-          data-state={micState}
-          role="status"
-        >
-          {micState === 'recording'
-            ? 'Listening…'
-            : `Transcribing…${transcribeSecs > 0 ? ` ${transcribeSecs}s` : ''}`}
-        </div>
-      ) : null}
       <div className="composer-row">
         {/* The input and its live-dictation mirror share one positioned box so
             the greyed preview sits exactly over the real text. */}
@@ -2206,8 +2195,9 @@ export const Composer = forwardRef(function Composer(
           {showLivePreview ? (
             <div className="composer-live-preview" data-testid="composer-live-preview" aria-hidden>
               <span className="composer-live-committed">{body}</span>
+              {body.trim().length > 0 ? ' ' : ''}
               <span className="composer-live-partial" data-testid="composer-live-partial">
-                {body.trim().length > 0 ? ' ' : ''}
+                <span aria-hidden>🎤 </span>
                 {livePartial}
               </span>
             </div>

@@ -1,8 +1,9 @@
 // Composer dictation — keyboard away, listening state visible (spec/07 §
 // Dictation into the composer, spec/15 § Composer). Starting a dictation puts
-// the soft keyboard away (there is nothing to type while talking); a listening
-// strip above the input names the state, pulses, and counts the time; it reads
-// "Transcribing…" while the clip is transcribed and goes when the words land.
+// the soft keyboard away (there is nothing to type while talking); dictation is
+// shown INSIDE the input as an italic mic + the words heard so far, which stay
+// while the clip is transcribed and give way when the words land. Nothing is
+// added above the input, and the input grows to fit the words.
 //
 // Drives the Composer against a fake dictation session (`dictationFactory`),
 // exactly as Composer.voice.test.tsx does.
@@ -21,7 +22,6 @@ import {
   renderRN,
   textOf,
 } from './testUtils/render';
-import { lightColors as colors } from '../src/lib/theme';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
@@ -43,12 +43,15 @@ const T0 = new Date('2026-09-24T10:00:00Z').getTime();
 function makeFactory(): {
   factory: typeof dictationModule.startDictation;
   finish: ReturnType<typeof vi.fn>;
+  partial: (text: string) => void;
 } {
   const finish = vi.fn(async (_send: boolean) => ({ kind: 'no-audio' }) as DictationOutcome);
-  const factory = vi.fn(
-    (): DictationHandle => ({ finish }),
-  ) as unknown as typeof dictationModule.startDictation;
-  return { factory, finish };
+  let onPartial: (text: string) => void = () => undefined;
+  const factory = vi.fn((_chat: string, cb: (text: string) => void): DictationHandle => {
+    onPartial = cb;
+    return { finish };
+  }) as unknown as typeof dictationModule.startDictation;
+  return { factory, finish, partial: (t) => onPartial(t) };
 }
 
 let dismissSpy: ReturnType<typeof vi.spyOn>;
@@ -103,30 +106,27 @@ describe('Composer — starting a dictation puts the keyboard away', () => {
   });
 });
 
-describe('Composer — the listening strip', () => {
+describe('Composer — dictation shown inside the input', () => {
   it('is absent at rest', () => {
     const { factory } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
-    expect(queryHost(r.root, byTestId('dictation-status'))).toBeNull();
+    expect(queryHost(r.root, byTestId('dictation-preview'))).toBeNull();
   });
 
-  it('reads "Listening" with a pulsing red dot and a clock that counts up', async () => {
-    const { factory } = makeFactory();
+  it('adds no status line above the input, only an italic mic and the words', async () => {
+    const { factory, partial } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onPress']!());
-    const strip = findHost(r.root, byTestId('dictation-status'));
-    expect(textOf(strip)).toContain('Listening');
-    const dot = findHost(r.root, byTestId('call-status-dot'));
-    expect((dot.props['style'] as { backgroundColor: string }).backgroundColor).toBe(colors.red);
-    expect(textOf(findHost(r.root, byTestId('dictation-timer')))).toBe('0:00');
-    actSync(() => {
-      vi.advanceTimersByTime(7_000);
-    });
-    expect(textOf(findHost(r.root, byTestId('dictation-timer')))).toBe('0:07');
+    expect(queryHost(r.root, byTestId('dictation-status'))).toBeNull();
+    expect(textOf(findHost(r.root, byTestId('dictation-live-words')))).toBe('🎤 ');
+    await actAsync(() => partial('buy oat'));
+    const live = findHost(r.root, byTestId('dictation-live-words'));
+    expect(textOf(live)).toBe('🎤 buy oat');
+    expect((live.props['style'] as { fontStyle: string }).fontStyle).toBe('italic');
   });
 
-  it('reads "Transcribing…" (no clock) while the clip is transcribed, then goes', async () => {
-    const { factory, finish } = makeFactory();
+  it('keeps the words on screen while transcribing, then lands them', async () => {
+    const { factory, finish, partial } = makeFactory();
     let resolve!: (o: DictationOutcome) => void;
     finish.mockReturnValueOnce(
       new Promise<DictationOutcome>((res) => {
@@ -135,18 +135,29 @@ describe('Composer — the listening strip', () => {
     );
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onPress']!());
+    await actAsync(() => partial('buy oat milk'));
     await actAsync(() => {
       mic(r)['onPress']!();
     });
-    expect(textOf(findHost(r.root, byTestId('dictation-status')))).toContain('Transcribing…');
-    expect(queryHost(r.root, byTestId('dictation-timer'))).toBeNull();
+    expect(textOf(findHost(r.root, byTestId('dictation-live-words')))).toBe('🎤 buy oat milk');
 
     await actAsync(() => resolve({ kind: 'text', text: 'buy oat milk' }));
-    expect(queryHost(r.root, byTestId('dictation-status'))).toBeNull();
-    // The words land in the input, ready to send; nothing re-opened the
-    // keyboard (the only dismiss was the one at the start).
+    expect(queryHost(r.root, byTestId('dictation-preview'))).toBeNull();
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('buy oat milk');
     expect(dismissSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('grows the input to the height of the dictated words', async () => {
+    const { factory, partial } = makeFactory();
+    const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
+    await actAsync(() => mic(r)['onPress']!());
+    await actAsync(() => partial('a long run of words that wraps over several lines'));
+    const preview = findHost(r.root, byTestId('dictation-preview'));
+    let node = preview.parent;
+    while (node && typeof node.props['onLayout'] !== 'function') node = node.parent;
+    await actAsync(() => node!.props['onLayout']({ nativeEvent: { layout: { height: 120 } } }));
+    const style = findHost(r.root, byType('TextInput')).props['style'] as { minHeight: number };
+    expect(style.minHeight).toBe(120);
   });
 
   it('goes the moment the dictation is cleared', async () => {
@@ -154,6 +165,6 @@ describe('Composer — the listening strip', () => {
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onPress']!());
     await actAsync(() => findHost(r.root, byLabel('Clear dictation')).props['onPress']());
-    expect(queryHost(r.root, byTestId('dictation-status'))).toBeNull();
+    expect(queryHost(r.root, byTestId('dictation-preview'))).toBeNull();
   });
 });
