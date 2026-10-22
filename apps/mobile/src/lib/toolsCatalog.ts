@@ -238,13 +238,6 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: "archived?: 'only' | 'include'",
   },
   {
-    name: patchToolId('patch_list_devices'),
-    label: 'patch_list_devices',
-    category: 'patch',
-    description: 'Lists the registered voice devices and whether each is online.',
-    params: '(no params)',
-  },
-  {
     name: patchToolId('patch_stop'),
     label: 'patch_stop',
     category: 'patch',
@@ -280,63 +273,6 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     description:
       'Rings the user phone-style, dropping them into a voice call against this chat on accept.',
     params: 'chatId?: string, message?: string',
-  },
-  {
-    name: patchToolId('patch_job_list'),
-    label: 'patch_job_list',
-    category: 'patch',
-    description: "Lists the user's persistent jobs (cross-session automations).",
-    params: '(no params)',
-  },
-  {
-    name: patchToolId('patch_job_create'),
-    label: 'patch_job_create',
-    category: 'patch',
-    description:
-      'Creates a recurring or triggered job (cron / webhook / todoist) that spawns work over time.',
-    params: 'name: string, trigger: object, action: object',
-  },
-  {
-    name: patchToolId('patch_job_update'),
-    label: 'patch_job_update',
-    category: 'patch',
-    description: 'Patches fields of an existing job.',
-    params: 'jobId: string, trigger?: object, action?: object, enabled?: boolean, …',
-  },
-  {
-    name: patchToolId('patch_job_delete'),
-    label: 'patch_job_delete',
-    category: 'patch',
-    description: 'Deletes a job permanently.',
-    params: 'jobId: string',
-  },
-  {
-    name: patchToolId('patch_job_enable'),
-    label: 'patch_job_enable',
-    category: 'patch',
-    description: 'Enables a previously disabled job again.',
-    params: 'jobId: string',
-  },
-  {
-    name: patchToolId('patch_job_disable'),
-    label: 'patch_job_disable',
-    category: 'patch',
-    description: 'Pauses a job without deleting it.',
-    params: 'jobId: string',
-  },
-  {
-    name: patchToolId('patch_job_runs'),
-    label: 'patch_job_runs',
-    category: 'patch',
-    description: "Reads a job's recent run log entries.",
-    params: 'jobId: string, limit?: number',
-  },
-  {
-    name: patchToolId('patch_job_webhooks'),
-    label: 'patch_job_webhooks',
-    category: 'patch',
-    description: "Reads a job's recent inbound-webhook log entries.",
-    params: 'jobId: string, limit?: number',
   },
   {
     name: patchToolId('patch_browser_open'),

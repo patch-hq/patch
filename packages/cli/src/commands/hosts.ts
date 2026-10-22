@@ -173,6 +173,35 @@ export function registerHostsCommands(program: Command): void {
     });
 
   hosts
+    .command('devices')
+    .description('The voice devices registered on this machine, with live presence (online, muted)')
+    .option('--json', 'JSON output')
+    .action(async (opts: CommonOpts) => {
+      await run(opts, async () => {
+        // Presence is the host's own, so this is the local socket only.
+        const t = getTransport(opts);
+        if (t.kind !== 'uds') {
+          throw new Error(
+            'hosts devices: needs the host running on this machine (no host socket found)',
+          );
+        }
+        const res = await t.get<{
+          devices: Array<{ deviceId: string; name?: string; online?: boolean; muted?: boolean }>;
+        }>('/internal/devices');
+        if (opts.json) {
+          emitJson(res);
+          return;
+        }
+        if (res.devices.length === 0) emitText('(no devices)');
+        for (const d of res.devices) {
+          emitText(
+            `${d.deviceId}  ${d.name ?? ''}  ${d.online ? 'online' : 'offline'}${d.muted ? '  muted' : ''}`,
+          );
+        }
+      });
+    });
+
+  hosts
     .command('models')
     .description("That machine's model catalogue across its backends")
     .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
