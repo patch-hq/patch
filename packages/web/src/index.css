@@ -13926,7 +13926,7 @@ select.permission-mode.is-pending {
 .mm-panel .mm-col {
   max-width: none;
   margin: 0;
-  padding: 8px 12px 16px 6px;
+  padding: 8px 10px 16px;
 }
 .mm-tabs {
   flex: none;
@@ -14278,7 +14278,7 @@ select.permission-mode.is-pending {
 }
 /* The write-up that heads Notes once the meeting has ended. */
 .mm-sum {
-  margin: 0 0 8px 10px;
+  margin: 0 0 8px;
   padding: 4px 0 12px;
   border-bottom: 1px solid var(--line-soft);
 }
