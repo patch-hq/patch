@@ -208,6 +208,8 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
     // A background agent start keeps its own row, result included.
     entry.tool === 'patch_agent' ||
     entry.tool === 'mcp__patch__patch_agent' ||
+    entry.tool === 'patch_delegate' ||
+    entry.tool === 'mcp__patch__patch_delegate' ||
     // A plan card takes its own result too, so the result is not a second row.
     (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null)
   );
