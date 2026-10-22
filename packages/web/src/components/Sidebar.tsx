@@ -14,6 +14,7 @@
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -600,7 +601,7 @@ function RegularSidebar({
             {!showSidebarSkeleton && view.pinned.length > 0 ? (
               <section className="sb-pinned" data-testid="pinned-section">
                 {view.pinned.map((c) => (
-                  <ChatRowView key={c.chatId} row={c} active={activeChatId} pinned />
+                  <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} pinned />
                 ))}
                 <div className="pinned-div" />
               </section>
@@ -640,7 +641,7 @@ function RegularSidebar({
                 return folderBasename(folder) === '' ? (
                   <section key={key} className="sb-folder" data-testid="folder-section-unfiled">
                     {rows.map((c) => (
-                      <ChatRowView key={c.chatId} row={c} active={activeChatId} />
+                      <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} />
                     ))}
                   </section>
                 ) : (
@@ -727,7 +728,7 @@ function RegularSidebar({
                     {collapsed
                       ? null
                       : rows.map((c) => (
-                          <ChatRowView key={c.chatId} row={c} active={activeChatId} />
+                          <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} />
                         ))}
                   </section>
                 );
@@ -1289,7 +1290,9 @@ export function ArchivedSection({
       ) : (
         archived
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} archived />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} archived />
+          ))
       )}
     </section>
   );
@@ -1324,7 +1327,7 @@ function ManagerRow({ row, active }: { row: ChatRow | null; active: string | nul
       </div>
     );
   }
-  return <ChatRowView row={row} active={active} special />;
+  return <ChatRowView row={row} active={active === row.chatId} special />;
 }
 
 /**
@@ -1379,7 +1382,7 @@ function ChannelRow({
   const badge = deriveBadge(row);
   const cls = [
     'ch-row',
-    active === row.chatId ? 'active' : '',
+    active ? 'active' : '',
     badge === 'read' ? 'is-read' : '',
     row.disabled ? 'is-thread-disabled' : '',
   ]
@@ -1519,7 +1522,9 @@ export function DeletedSection({
         // state (spec/14 §6).
         deleted
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} deleted />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} deleted />
+          ))
       )}
     </section>
   );
@@ -1602,7 +1607,9 @@ export function HiddenSection({
         // state (spec/14 §6).
         hidden
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} hidden />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} hidden />
+          ))
       )}
     </section>
   );
@@ -1641,7 +1648,9 @@ export function SnoozedSection({
         // state (spec/14 §6).
         snoozed
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} snoozed />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} snoozed />
+          ))
       )}
     </section>
   );
@@ -1734,7 +1743,9 @@ export function AutomationsSection({
         // state (spec/14 §6).
         automations
           .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => <ChatRowView key={c.chatId} row={c} active={activeChatId} automations />)
+          .map((c) => (
+            <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} automations />
+          ))
       )}
     </section>
   );
@@ -1822,7 +1833,7 @@ function DraftsSection({ activeDraftId }: { activeDraftId: string | null }): JSX
   );
 }
 
-function ChatRowView({
+const ChatRowView = memo(function ChatRowView({
   row,
   active,
   pinned,
@@ -1834,7 +1845,8 @@ function ChatRowView({
   automations,
 }: {
   row: ChatRow;
-  active: string | null;
+  /** Whether this row is the open chat. A boolean, not the open id, so a switch re-renders two rows rather than all of them. */
+  active: boolean;
   pinned?: boolean;
   special?: boolean;
   /** Expanded archived rows are NOT greyed (spec/14 ## Greying rules). */
@@ -1898,7 +1910,7 @@ function ChatRowView({
     // inside `.row-when`), so it opts OUT of the hover overlay that hides the
     // time under the tools — spec/14 § Row tools.
     deleted || snoozed || hidden ? 'deleted' : '',
-    active === row.chatId ? 'active' : '',
+    active ? 'active' : '',
     isSelected ? 'selected' : '',
     badge === 'read' && !archived ? 'is-read' : '',
   ]
@@ -2565,7 +2577,7 @@ function ChatRowView({
       )}
     </>
   );
-}
+});
 
 /** Compact relative time for sidebar rows (e.g. `2m`, `3h`, `5d`). */
 // An archived row's `lastUpdated` is frozen at archive time, so a bare "3d"
