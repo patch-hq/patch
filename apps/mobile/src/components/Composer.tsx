@@ -660,10 +660,12 @@ export function Composer({
   // The live/interim transcript, shown inside the input while recording. Cleared the instant a dictation ends (commit or cancel) — the
   // committed text takes over `draft` instead.
   const [livePartial, setLivePartial] = React.useState('');
+  // Rendered height of the dictation mirror, so the input can grow to fit it.
+  const [mirrorHeight, setMirrorHeight] = React.useState(0);
   // spec/15 § Skill autocomplete — chips: the mirror only needs to exist
   // while there's a chip to draw, and only when dictation isn't already using
   // the transparent-input trick for its own mirror — the two never overlap.
-  const showChipMirror = !(micState !== 'idle' && livePartial.length > 0) && chipTokens.length > 0;
+  const showChipMirror = micState === 'idle' && chipTokens.length > 0;
   // Send pressed while dictating: the dictation ends and, once its transcript
   // lands in the draft, the whole draft goes out as one message.
   const sendAfterDictationRef = React.useRef(false);
@@ -1450,33 +1452,6 @@ export function Composer({
           </Text>
         </View>
       ) : null}
-      {micState !== 'idle' ? (
-        <View
-          testID="dictation-status"
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: space.sm,
-            paddingHorizontal: space.xs,
-          }}
-        >
-          <StatusDot
-            color={micState === 'recording' ? colors.red : colors.ink3}
-            pulsing={micState === 'recording'}
-          />
-          <Text style={{ ...typography.label, flex: 1, color: colors.ink }}>
-            {micState === 'recording' ? 'Listening' : 'Transcribing…'}
-          </Text>
-          {micState === 'recording' && dictationStartedAt !== null ? (
-            <Text
-              testID="dictation-timer"
-              style={{ color: colors.ink2, fontSize: 14, fontVariant: ['tabular-nums'] }}
-            >
-              {formatElapsed(dictationNow - dictationStartedAt)}
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
 
       {/* Two stacked rows (spec/15 § Composer): the text input owns the FULL
           width on its own row, and the action buttons sit on a second row
@@ -1553,7 +1528,12 @@ export function Composer({
             // list above is `flex: 1`, so the height the field takes is height
             // the transcript gives up and the composer's bottom edge stays put
             // (spec/15 § Composer). Past the cap it scrolls internally.
-            minHeight: COMPOSER_MIN_HEIGHT,
+            // While dictating, the words are drawn by the mirror, not held by
+            // the input, so grow to the mirror's height like typing would.
+            minHeight:
+              micState !== 'idle'
+                ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), COMPOSER_MAX_HEIGHT)
+                : COMPOSER_MIN_HEIGHT,
             maxHeight: COMPOSER_MAX_HEIGHT,
             paddingHorizontal: space.md,
             paddingVertical: space.sm,
@@ -1561,10 +1541,7 @@ export function Composer({
             borderWidth: 1,
             borderColor: colors.lineSoft,
             borderRadius: radii.lg,
-            color:
-              (micState !== 'idle' && livePartial.length > 0) || showChipMirror
-                ? 'transparent'
-                : colors.ink,
+            color: micState !== 'idle' || showChipMirror ? 'transparent' : colors.ink,
             fontSize: 16,
           }}
         />
@@ -1579,9 +1556,10 @@ export function Composer({
               "Dictation into the composer" — "the input stays
               focusable/editable throughout"). Only mounted while there's
               something to preview, so idle typing is unaffected. */}
-        {micState !== 'idle' && livePartial.length > 0 ? (
+        {micState !== 'idle' ? (
           <View
             pointerEvents="none"
+            onLayout={(e) => setMirrorHeight(e.nativeEvent.layout.height)}
             style={{
               position: 'absolute',
               left: 0,
@@ -1607,7 +1585,11 @@ export function Composer({
               {body.trim().length > 0 ? ' ' : ''}
               {/* Grey: in progress — rewritten as the user talks and replaced
                   outright by the committed transcript. */}
-              <Text testID="dictation-live-words" style={{ color: colors.ink3 }}>
+              <Text
+                testID="dictation-live-words"
+                style={{ color: colors.ink3, fontStyle: 'italic' }}
+              >
+                {'🎤 '}
                 {livePartial}
               </Text>
             </Text>

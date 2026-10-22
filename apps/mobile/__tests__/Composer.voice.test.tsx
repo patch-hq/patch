@@ -208,7 +208,8 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
-    expect(r.root.findAllByProps({ testID: 'dictation-preview' })).toHaveLength(0);
+    // Just the mic marker until words arrive.
+    expect(r.root.findAllByProps({ testID: 'dictation-preview' }).length).toBeGreaterThan(0);
 
     await actAsync(() => {
       sessions[0]!.onPartial('buy oat');
@@ -217,7 +218,7 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     // Grey: still in progress, not yet the user's text.
     const live = findHost(r.root, (i) => i.props['testID'] === 'dictation-live-words');
     expect(live.props['style']).toMatchObject({ color: colors.ink3 });
-    expect(live.props['children']).toBe('buy oat');
+    expect(live.props['children']).toEqual(['🎤 ', 'buy oat']);
 
     // Committing clears the preview — the TextInput now owns the real text.
     sessions[0]!.finish.mockResolvedValueOnce({ kind: 'text', text: 'buy oat milk' });

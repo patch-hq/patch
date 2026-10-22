@@ -196,9 +196,9 @@ describe('composer dictation (real session) — a tap session end to end', () =>
       r.root.findAll(
         (i) => typeof i.type === 'string' && i.props['testID'] === 'dictation-live-words',
       )[0]?.props['children'],
-    ).toBe('buy oat');
-    // The listening strip is up while the mic is live.
-    expect(r.root.findAllByProps({ testID: 'dictation-status' }).length).toBeGreaterThan(0);
+    ).toEqual(['🎤 ', 'buy oat']);
+    // No status line above the input: the mic marker in the input is the cue.
+    expect(r.root.findAllByProps({ testID: 'dictation-status' })).toHaveLength(0);
 
     await actAsync(() => {
       mic(r)['onPress']!();
