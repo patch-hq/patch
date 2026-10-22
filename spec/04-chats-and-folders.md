@@ -149,7 +149,7 @@ is not, the out-of-usage banner offers a **Switch to ChatGPT** / **Switch to
 Claude** button. It is the picker's cross-provider switch — the same
 confirmation, the same `chat.model_request` (with `retry`, so the turn that
 failed or is parked on the limit runs again on the new model straight away
-rather than waiting for the reader to resend it) — onto the first model of the other
+rather than waiting for the reader to resend it; it is handed over as a turn cut off partway, to carry on from the work already done, not as its original prompt to start again) — onto the first model of the other
 provider in that host's catalogue. No fallback: with nothing usable on the other
 provider, or no model for it in the catalogue, there is no button.
 

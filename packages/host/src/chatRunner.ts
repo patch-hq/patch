@@ -1002,6 +1002,18 @@ export const INTERRUPTED_TURN_REMINDER =
   'rather than starting the whole request again.\n' +
   '</system-reminder>\n\n';
 
+/**
+ * Folded into a turn the reader moved to another model with Retry. The turn did
+ * not finish on the model that started it; the new one is handed the work so
+ * far (the session, or the reconstructed track) and told to continue it.
+ */
+export const MODEL_SWITCH_TURN_REMINDER =
+  '<system-reminder>\n' +
+  'This turn was cut off partway through and has been moved to a different model. ' +
+  'Check what had already been done before you continue — carry on from there ' +
+  'rather than starting the whole request again.\n' +
+  '</system-reminder>\n\n';
+
 const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
 const REMINDER_CLOSE = '</system-reminder>';
@@ -2667,7 +2679,7 @@ export class Daemon {
    * owes nothing, so the caller can say nothing happened rather than imply it
    * did.
    */
-  resumeRateLimitedNow(chatId: string): boolean {
+  resumeRateLimitedNow(chatId: string, opts?: { carryOn?: boolean }): boolean {
     // A limit nobody parked is offered the same control (spec/12): auto-resume
     // decides whether a TIMER was set, not whether the turn is still owed. The
     // owed turn is the parked one — written by the limit path itself, and by the
@@ -2713,9 +2725,14 @@ export class Daemon {
     this.emitState(chatId);
     if (!pending) return true;
     const state = this.chatState.get(chatId);
+    // A retry on another model continues the turn rather than repeating its
+    // prompt, as a restart does: the work done so far is in what the model gets.
+    if (opts?.carryOn) this.interruptedResend.add(chatId);
     void this.sendInput({
       chatId,
-      message: pending.message,
+      message: opts?.carryOn
+        ? interruptedTurnResend(MODEL_SWITCH_TURN_REMINDER, pending.message)
+        : pending.message,
       localId: this.resumeLocalId('manual', chatId),
       // Waiting out a limit does not change whose turn it was (spec/09).
       ...(state?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
@@ -14960,7 +14977,7 @@ export class Daemon {
     if (closest !== current) this.recordAutomaticPermissionModeChange(chatId, closest);
     this.emitState(chatId);
     // After the state is out, so the re-sent turn starts on the new model.
-    if (opts?.retry) this.resumeRateLimitedNow(chatId);
+    if (opts?.retry) this.resumeRateLimitedNow(chatId, { carryOn: true });
   }
 
   /**

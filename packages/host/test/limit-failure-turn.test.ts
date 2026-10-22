@@ -28,10 +28,11 @@ const PROVIDER_SENTENCE =
   'limit resets Sep 15, 4am (UTC)';
 
 /** Throws on the first run; succeeds after that, so a re-send is observable. */
-function failingBackend(runs: { n: number }, err: () => Error): SdkBackend {
+function failingBackend(runs: { n: number; prompts: string[] }, err: () => Error): SdkBackend {
   return {
-    run: (): AsyncGenerator<SdkEnvelope> => {
+    run: (o): AsyncGenerator<SdkEnvelope> => {
       runs.n += 1;
+      runs.prompts.push(String(o.prompt));
       const first = runs.n === 1;
       async function* gen(): AsyncGenerator<SdkEnvelope> {
         if (first) throw err();
@@ -49,7 +50,7 @@ function setup(opts: { err: () => Error; autoResume?: boolean }) {
   const metaStore = createMetaStore(home);
   const events: WireEvent[] = [];
   const logs: string[] = [];
-  const runs = { n: 0 };
+  const runs = { n: 0, prompts: [] as string[] };
   const daemon = new Daemon({
     hostId: 'd1',
     metaStore,
@@ -153,6 +154,30 @@ describe('a limit failure nobody parked', () => {
     for (let i = 0; i < 20 && runs.n < 2; i++) await new Promise((r) => setTimeout(r, 20));
     expect(runs.n).toBe(2);
     expect(daemon.chatState.get(chatId)?.model).toBe('openai/gpt-5');
+    daemon.shutdown();
+  });
+
+  it('carries the owed turn on from where it stopped when the model is changed with retry', async () => {
+    // Re-sending the bare message made the new model start the whole request
+    // again, discarding what the interrupted attempt had already done.
+    const { daemon, folder, runs } = setup({ err: statedLimit });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    await daemon.setChatModel(chatId, 'openai/gpt-5', { retry: true });
+    for (let i = 0; i < 20 && runs.n < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(runs.prompts[1]).toMatch(/cut off partway/);
+    expect(runs.prompts[1]).toContain('<original-prompt>\ngo\n</original-prompt>');
+    expect(runs.prompts[1]).toMatch(/Carry on$/);
+    daemon.shutdown();
+  });
+
+  it('re-sends the bare message on Try now, which changes no model', async () => {
+    const { daemon, folder, runs } = setup({ err: statedLimit });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    daemon.resumeRateLimitedNow(chatId);
+    for (let i = 0; i < 20 && runs.n < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(runs.prompts[1]).toBe('go');
     daemon.shutdown();
   });
 
