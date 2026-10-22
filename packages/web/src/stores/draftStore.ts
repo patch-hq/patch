@@ -27,6 +27,19 @@ import { canonicalizeHostNames, type NewChatDraftBody } from '@patch/wire';
 import { getActiveWs } from '../api/ws.js';
 import { hasDraftText } from '../lib/draftText.js';
 import { useUiStore } from './uiStore.js';
+import { useComposerAttachmentStore } from './composerAttachmentStore.js';
+
+/**
+ * A new-chat draft is kept while it has text OR an attached file: a file is
+ * something the user put there on purpose, so leaving the screen must not
+ * collect it. (Files live in memory only, so this holds for the session.)
+ */
+export function isKeptDraft(d: { id: string; text: string }): boolean {
+  return (
+    hasDraftText(d.text) ||
+    (useComposerAttachmentStore.getState().byChat[`new:${d.id}`]?.length ?? 0) > 0
+  );
+}
 
 export interface Draft {
   id: string;
@@ -231,7 +244,7 @@ export const useDraftStore = create<DraftStore>((set, get) => ({
 
   pruneBlank(keepId) {
     const cur = get().drafts;
-    const dead = Object.keys(cur).filter((id) => id !== keepId && !hasDraftText(cur[id]!.text));
+    const dead = Object.keys(cur).filter((id) => id !== keepId && !isKeptDraft(cur[id]!));
     if (dead.length === 0) return;
     const drafts = { ...cur };
     for (const id of dead) delete drafts[id];

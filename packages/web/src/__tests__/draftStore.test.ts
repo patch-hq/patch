@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useDraftStore } from '../stores/draftStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 
 const KEY = 'patch.drafts.v1';
 
@@ -78,6 +79,24 @@ describe('draftStore', () => {
     expect(useDraftStore.getState().drafts[untouched]).toBeUndefined();
     expect(useDraftStore.getState().drafts[emptied]).toBeUndefined();
     expect(JSON.parse(window.localStorage.getItem(KEY)!).order).toEqual([real]);
+  });
+
+  // An attachment is something the user kept: a draft holding only a file is
+  // still a draft, so leaving the screen must not collect it.
+  it('pruneBlank keeps a draft that has an attachment but no text', () => {
+    const withFile = useDraftStore.getState().create();
+    const blank = useDraftStore.getState().create();
+    useComposerAttachmentStore
+      .getState()
+      .update(`new:${withFile}`, () => [
+        { key: 'k', file: new File(['x'], 'a.png'), name: 'a.png', kind: 'image' },
+      ]);
+
+    useDraftStore.getState().pruneBlank();
+
+    expect(useDraftStore.getState().drafts[withFile]).toBeDefined();
+    expect(useDraftStore.getState().drafts[blank]).toBeUndefined();
+    useComposerAttachmentStore.getState()._reset();
   });
 
   it('pruneBlank spares the draft the user is sitting on', () => {

@@ -76,8 +76,8 @@ import { useUiStore } from '../stores/uiStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
-import { useDraftStore } from '../stores/draftStore.js';
-import { hasDraftText } from '../lib/draftText.js';
+import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
+import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 import { connectionSummary } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
@@ -1863,9 +1863,11 @@ function DraftsSection({ activeDraftId }: { activeDraftId: string | null }): JSX
   const drafts = useDraftStore((s) => s.drafts);
   const order = useDraftStore((s) => s.order);
   const removeDraft = useDraftStore((s) => s.remove);
+  // Re-render when a draft gains or loses its attachments.
+  const attachments = useComposerAttachmentStore((s) => s.byChat);
   const rows = order
     .map((id) => drafts[id])
-    .filter((d): d is NonNullable<typeof d> => !!d && hasDraftText(d.text));
+    .filter((d): d is NonNullable<typeof d> => !!d && isKeptDraft(d));
 
   // A saved draft appears without the user expanding anything, and the band it
   // appears in may well be scrolled away from its top (opening Channels leaves
@@ -1898,7 +1900,7 @@ function DraftsSection({ activeDraftId }: { activeDraftId: string | null }): JSX
         Drafts
       </div>
       {rows.map((d) => {
-        const text = d.text.trim();
+        const text = d.text.trim() || (attachments[`new:${d.id}`]?.[0]?.name ?? '');
         const chars = Array.from(text);
         const title = chars.length > 42 ? `${chars.slice(0, 42).join('')}…` : text;
         return (
