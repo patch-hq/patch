@@ -19,6 +19,8 @@ import {
 } from './testUtils/render';
 import { JobList } from '../src/components/JobList';
 import { api } from '../src/api/rest';
+import { __clearAllMmkv } from './stubs/mmkv';
+import { saveCachedJobs } from '../src/lib/jobsCache';
 import { __getLastAlert, __clearLastAlert } from './stubs/react-native';
 
 vi.mock('../src/api/rest', () => ({
@@ -30,6 +32,7 @@ vi.mock('../src/api/rest', () => ({
 }));
 
 beforeEach(() => {
+  __clearAllMmkv();
   vi.mocked(api.listJobs).mockReset();
   vi.mocked(api.enableJob).mockReset().mockResolvedValue(undefined);
   vi.mocked(api.disableJob).mockReset().mockResolvedValue(undefined);
@@ -253,5 +256,22 @@ describe('JobList — job rows', () => {
     await flush();
     const switches = findAllHost(r.root, byType('Switch'));
     expect(switches.length).toBe(jobs.length);
+  });
+});
+
+describe('JobList — read cache', () => {
+  it('paints cached jobs on first render without "Loading…", then the fetch replaces them', async () => {
+    saveCachedJobs([{ id: 'c1', name: 'cached-job', enabled: true }]);
+    const d = deferred<{ jobs: unknown[] }>();
+    vi.mocked(api.listJobs).mockReturnValue(d.promise);
+    const r = renderRN(<JobList onOpen={() => {}} />);
+    expect(hasText(r.root, 'Loading…')).toBe(false);
+    expect(hasText(r.root, 'cached-job')).toBe(true);
+    await actAsync(async () => {
+      d.resolve({ jobs: [{ id: 'l1', name: 'live-job', enabled: true }] });
+      await flush();
+    });
+    expect(hasText(r.root, 'live-job')).toBe(true);
+    expect(hasText(r.root, 'cached-job')).toBe(false);
   });
 });

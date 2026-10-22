@@ -85,6 +85,9 @@ function renderJobs() {
   );
 }
 
+// The jobs read cache persists across tests in one file; start each cold.
+beforeEach(() => window.localStorage.clear());
+
 describe('JobsRoute', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', makeFetch());

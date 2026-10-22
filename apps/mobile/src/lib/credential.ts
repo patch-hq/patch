@@ -16,6 +16,7 @@ const SURFACE_KEY = 'patch.surfaceId.v1';
  * than re-declaring it; the dependency runs one way only (cache -> credential).
  */
 export const CHAT_LIST_KEY = 'patch.chatList.v1';
+export const JOBS_LIST_KEY = 'patch.jobsList.v1';
 export const VISITED_KEY = 'patch.readSeq.v1';
 
 let _store: MMKV | null = null;
@@ -44,6 +45,7 @@ export function clearCredential(): void {
   store().delete(ACCOUNT_KEY);
   store().delete(SURFACE_KEY);
   store().delete(CHAT_LIST_KEY);
+  store().delete(JOBS_LIST_KEY);
   store().delete(VISITED_KEY);
 }
 

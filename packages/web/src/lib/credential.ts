@@ -50,6 +50,8 @@ export function saveCredential(jwt: string): void {
 
 export function clearCredential(): void {
   window.localStorage.removeItem(STORAGE_KEY);
+  // The jobs read cache (jobsCache.ts) belongs to the signed-in account.
+  window.localStorage.removeItem('patch.jobsList.v1');
 }
 
 /**

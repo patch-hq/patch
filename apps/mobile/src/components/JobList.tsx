@@ -13,6 +13,7 @@ import { api } from '../api/rest';
 import { EmptyState } from './EmptyState';
 import { EMPTY_STATES } from '../lib/emptyStates';
 import { cronRowSubtitle, recurrenceRowSubtitle } from '../lib/jobRow';
+import { loadCachedJobs, saveCachedJobs } from '../lib/jobsCache';
 import { fonts, radii, space, textMin, typography, useTheme } from '../lib/theme';
 
 interface JobShape {
@@ -49,13 +50,21 @@ function normalise(raw: Array<Record<string, unknown>>): JobShape[] {
 
 export function JobList({ onOpen }: { onOpen: (jobId?: string) => void }): React.ReactElement {
   const colors = useTheme();
-  const [jobs, setJobs] = React.useState<JobShape[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  // Painted from the last answer on disk so the list is there on first render;
+  // the fetch below replaces it (spec/15 § Instant open (read cache)).
+  const [cached] = React.useState(() => loadCachedJobs());
+  const [jobs, setJobs] = React.useState<JobShape[]>(() =>
+    cached ? normalise(cached as Array<Record<string, unknown>>) : [],
+  );
+  const [loading, setLoading] = React.useState(cached === undefined);
 
   const load = React.useCallback((): void => {
     void api
       .listJobs()
-      .then((r) => setJobs(normalise(r.jobs as Array<Record<string, unknown>>)))
+      .then((r) => {
+        saveCachedJobs(r.jobs);
+        setJobs(normalise(r.jobs as Array<Record<string, unknown>>));
+      })
       .catch((e: Error) => Alert.alert('Failed to load jobs', e.message))
       .finally(() => setLoading(false));
   }, []);

@@ -14,6 +14,7 @@
 
 import type { JSX } from 'react';
 import { useMemo, useState } from 'react';
+import { loadCachedJobs, saveCachedJobs } from '../lib/jobsCache.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Job, JobAction, JobLatestRun } from '@patch/wire/jobs';
@@ -114,7 +115,15 @@ export function JobsRoute(): JSX.Element {
   // fired" current is this one request rather than one per row.
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['jobs'],
-    queryFn: () => api.listJobs() as Promise<{ jobs: JobWithGates[] }>,
+    queryFn: async () => {
+      const r = (await api.listJobs()) as { jobs: JobWithGates[] };
+      saveCachedJobs(r);
+      return r;
+    },
+    // Last answer paints at once; initialDataUpdatedAt 0 keeps it stale so the
+    // mount still refetches and replaces it (spec/14 § Jobs view).
+    initialData: () => loadCachedJobs<JobWithGates>(),
+    initialDataUpdatedAt: 0,
     refetchInterval: 60_000,
   });
 

@@ -546,6 +546,8 @@ Patch is a fully native Android app (bare-workflow Expo / React Native).
   cache. The HTTP `GET /api/chats` fetch runs as a background catch-up and is
   the only roster load on a cold start.
 
+- The Jobs list follows the same rule: the last `GET /api/jobs` answer is mirrored (MMKV on mobile, localStorage on web) and painted on first render, so "Loading…" only shows on a first-ever visit. The fetch replaces it wholesale and the cache is dropped on sign-out.
+
 ### Snappy interaction
 
 - Lists render at 60fps; chat rows and timelines read from in-memory state.
