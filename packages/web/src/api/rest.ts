@@ -672,16 +672,25 @@ export const api = {
     }),
   // spec/04 § Moving a chat to another host — resolves once the chat is running
   // there; every refusal is an ApiError whose body carries the reason.
-  moveChat: (
-    chatId: string,
-    hostId: string,
-    folder: string,
-    opts: { fromServerCopy?: boolean } = {},
-  ) =>
-    request<{ ok: true; chatId: string; hostId: string; folder: string }>(
-      `/api/chats/${chatId}/move`,
-      { method: 'POST', body: { hostId, folder, ...opts } },
-    ),
+  moveChat: async (chatId: string, hostId: string, folder: string) => {
+    const move = (fromServerCopy: boolean) =>
+      request<{ ok: true; chatId: string; hostId: string; folder: string }>(
+        `/api/chats/${chatId}/move`,
+        {
+          method: 'POST',
+          body: fromServerCopy ? { hostId, folder, fromServerCopy } : { hostId, folder },
+        },
+      );
+    try {
+      return await move(false);
+    } catch (e) {
+      // The old machine would not let go of the chat (mid-turn, a timer armed,
+      // a Codex session): continue from the server's copy, which has no such limit.
+      const code = e instanceof ApiError ? (e.body as { error?: unknown } | null)?.error : null;
+      if (code === 'busy' || code === 'unsupported') return move(true);
+      throw e;
+    }
+  },
   archiveChat: (chatId: string, archived: boolean) =>
     request<unknown>(`/api/chats/${chatId}/archive`, {
       method: 'POST',

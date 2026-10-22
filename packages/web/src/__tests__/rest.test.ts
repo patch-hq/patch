@@ -604,3 +604,26 @@ describe('checkHooks timeout', () => {
     }
   });
 });
+
+describe('moveChat — continues from the server copy when the old machine refuses', () => {
+  const ok = { ok: true, chatId: 'c1', hostId: 'box', folder: '/f' };
+  const bodies = (): unknown[] =>
+    fetchMock.mock.calls.map((c) => JSON.parse((c as [string, RequestInit])[1].body as string));
+
+  it.each(['busy', 'unsupported'])('retries once with fromServerCopy after %s', async (code) => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: code, message: 'no' }, 409))
+      .mockResolvedValueOnce(jsonResponse(ok));
+    await expect(api.moveChat('c1', 'box', '/f')).resolves.toEqual(ok);
+    expect(bodies()).toEqual([
+      { hostId: 'box', folder: '/f' },
+      { hostId: 'box', folder: '/f', fromServerCopy: true },
+    ]);
+  });
+
+  it('does not retry other refusals', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'folder_not_found', message: 'x' }, 400));
+    await expect(api.moveChat('c1', 'box', '/f')).rejects.toBeInstanceOf(ApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

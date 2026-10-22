@@ -260,9 +260,10 @@ finished or failed.
 - The old host keeps the retired chat's directory under `~/.patch/moved/`
   rather than deleting it.
 
-A chat can also be moved from the server's copy, whenever the user chooses it:
-the picker offers "Continue from the server's copy" while the chat's host is
-online, and it is the only way when that host is offline, which is how work
+A chat can also be moved from the server's copy. The picker never offers it as
+a choice: the user picks only the folder. The client asks for it by itself when
+the chat's host refuses an ordinary move (`busy`, `unsupported`), and it is the
+only way when that host is offline, which is how work
 carries on while a machine is off. Only the target must be online. The server
 builds the chat from its own copy instead of asking the old host to export it:
 the mirrored lifecycle/UI state and branch graph, pending self-wake, transcript,
