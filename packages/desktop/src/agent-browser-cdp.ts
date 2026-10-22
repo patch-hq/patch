@@ -143,7 +143,7 @@ export interface AgentBrowserEndpoint {
   /** `ws://127.0.0.1:<port>/devtools/browser/<token>`, absent while the app is not running. */
   endpoint?: string;
   pid?: number;
-  /** The app to start when it is not running (the .app bundle on a Mac). */
-  appPath: string;
+  /** The app to start when it is not running (the .app bundle on a Mac); absent for a dev run. */
+  appPath?: string;
   version: string;
 }

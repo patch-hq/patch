@@ -83,8 +83,8 @@ interface Message {
 export interface AgentBrowserOptions {
   /** `<home>/.patch/agent-browser.json`. */
   endpointFile: string;
-  /** What the host starts when this app is not running. */
-  appPath: string;
+  /** What the host starts when this app is not running; absent for an unpackaged dev run. */
+  appPath?: string;
   version: string;
   log: (message: string, extra?: unknown) => void;
   /** The user pressed or typed in a tab a large view is showing. */
@@ -205,7 +205,7 @@ export class AgentBrowser {
     const file = this.opts.endpointFile;
     const body: AgentBrowserEndpoint = {
       ...(endpoint ? { endpoint, pid: process.pid } : {}),
-      appPath: this.opts.appPath,
+      ...(this.opts.appPath ? { appPath: this.opts.appPath } : {}),
       version: this.opts.version,
     };
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });

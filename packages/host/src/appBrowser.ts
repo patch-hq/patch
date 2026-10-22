@@ -72,10 +72,24 @@ export function appBrowserLink(opts: {
         platform === 'darwin'
           ? spawn('open', ['-g', '-j', first.appPath], { detached: true, stdio: 'ignore' })
           : spawn(first.appPath, [], { detached: true, stdio: 'ignore' });
+      // An unhandled 'error' event would take the whole host down: keep it and fail this call.
+      let spawnError: Error | undefined;
+      child.on('error', (err) => {
+        spawnError = err;
+      });
       child.unref();
       const until = now() + START_WAIT_MS;
       while (now() < until) {
         await new Promise((r) => setTimeout(r, 250));
+        if (spawnError) {
+          opts.logger.error(
+            { err: spawnError, appPath: first.appPath },
+            'app browser: could not start the Patch app',
+          );
+          throw new BrowserNotInstalledError(
+            `the Patch app at ${first.appPath} could not be started (${spawnError.message}). Open the Patch app.`,
+          );
+        }
         const found = running(read());
         if (found) return found;
       }

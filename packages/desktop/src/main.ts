@@ -172,11 +172,11 @@ let tray: Tray | null = null;
 /** The agent's browser, when a host on this machine uses it (agent-browser.ts). */
 let agentBrowser: AgentBrowser | null = null;
 
-/** What a host starts to bring this app up: the .app bundle on a Mac, the binary elsewhere. */
-function appLaunchPath(): string {
-  if (process.platform === 'darwin' && app.isPackaged) {
-    return join(process.execPath, '..', '..', '..');
-  }
+/** What a host starts to bring this app up: the .app bundle on a Mac, the binary elsewhere; none for a dev run. */
+function appLaunchPath(): string | undefined {
+  // An unpackaged run is a dev checkout whose path can vanish: never record it as how to start the app.
+  if (!app.isPackaged) return undefined;
+  if (process.platform === 'darwin') return join(process.execPath, '..', '..', '..');
   return process.execPath;
 }
 
