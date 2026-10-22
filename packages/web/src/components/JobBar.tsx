@@ -7,18 +7,32 @@
 import type { JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Zap } from 'lucide-react';
+import { X, Zap } from 'lucide-react';
+import { useState } from 'react';
 import { OpenableButton } from './OpenableLink.js';
 import type { Job } from '@patch/wire/jobs';
 import { api } from '../api/rest.js';
 import { formatDateTime } from '../lib/formatDateTime.js';
 
-export function JobBar({ jobId, at }: { jobId: string; at: number }): JSX.Element {
+// Chats whose bar the user dismissed, for the life of the page.
+const dismissed = new Set<string>();
+
+export function JobBar({
+  chatId,
+  jobId,
+  at,
+}: {
+  chatId: string;
+  jobId: string;
+  at: number;
+}): JSX.Element | null {
   const navigate = useNavigate();
+  const [hidden, setHidden] = useState(dismissed.has(chatId));
   const { data, error } = useQuery({
     queryKey: ['job', jobId],
     queryFn: () => api.getJob(jobId) as Promise<Job>,
   });
+  if (hidden) return null;
   const label = error
     ? `Failed to load job: ${(error as Error).message}`
     : data
@@ -39,6 +53,19 @@ export function JobBar({ jobId, at }: { jobId: string; at: number }): JSX.Elemen
       >
         Open job
       </OpenableButton>
+      <button
+        type="button"
+        className="archived-unarchive-btn"
+        data-testid="job-bar-dismiss"
+        title="Dismiss"
+        aria-label="Dismiss"
+        onClick={() => {
+          dismissed.add(chatId);
+          setHidden(true);
+        }}
+      >
+        <X size={14} aria-hidden />
+      </button>
     </div>
   );
 }

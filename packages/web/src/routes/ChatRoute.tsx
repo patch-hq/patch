@@ -2071,7 +2071,9 @@ export function ChatRoute({
         contentVersion={timeline.length}
         onOpen={() => expandTo(0, false)}
       />
-      {row.jobId ? <JobBar jobId={row.jobId} at={row.lastUserActivity} /> : null}
+      {row.jobId ? (
+        <JobBar chatId={row.chatId} jobId={row.jobId} at={row.lastUserActivity} />
+      ) : null}
       <GoalBanner row={row} />
       <FinishedGoalBanner row={row} />
       <TaskBar key={`tasks-${row.chatId}`} row={row} />

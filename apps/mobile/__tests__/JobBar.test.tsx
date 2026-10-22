@@ -33,4 +33,10 @@ describe('JobBar', () => {
     await flush();
     expect(JSON.stringify(r.toJSON())).toContain('Run by \\"bus check\\" job');
   });
+
+  it('hides the bar when dismissed', () => {
+    const r = renderRN(<JobBar row={{ chatId: 'c_dismiss', jobId: 'j_bus' } as ChatRow} />);
+    findHost(r.root, byTestId('job-bar-dismiss')).props.onPress();
+    expect(queryHost(r.root, byTestId('job-bar'))).toBeNull();
+  });
 });

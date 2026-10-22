@@ -2,7 +2,7 @@
 // the top linking to that job; an ordinary chat carries none.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ChatRoute } from '../routes/ChatRoute.js';
@@ -85,6 +85,13 @@ describe('ChatRoute — job bar', () => {
   it('shows no bar on an ordinary chat', () => {
     seed(null);
     renderChat();
+    expect(screen.queryByTestId('job-bar')).not.toBeInTheDocument();
+  });
+
+  it('hides the bar when dismissed', async () => {
+    seed('j_bus');
+    renderChat();
+    fireEvent.click(screen.getByTestId('job-bar-dismiss'));
     expect(screen.queryByTestId('job-bar')).not.toBeInTheDocument();
   });
 });
