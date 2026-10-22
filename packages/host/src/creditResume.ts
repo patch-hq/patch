@@ -62,6 +62,11 @@ export interface CreditResumeOpts {
   readings?: () => readonly AccountReading[];
   now?: () => number;
   /**
+   * Is any chat parked on credit with no timer of its own armed? That is every
+   * credit park after a restart, and any park that stated no reset.
+   */
+  hasOrphanedParks?: () => boolean;
+  /**
    * How long after a refusal an "it has credit" reading is believed.
    *
    * A probe is NOT a source of truth about whether a turn will succeed — a
@@ -169,7 +174,21 @@ export class CreditResume {
     // Nothing was waiting on this account. Resuming here would fire on every
     // routine probe of a healthy host and re-run turns parked for reasons this
     // account has nothing to do with.
-    if (markedAt === undefined) return false;
+    if (markedAt === undefined) {
+      // Nothing recorded as spent — but a chat parked with no timer and no
+      // recorded account is waiting on an event that can no longer come: a
+      // restart forgets which account was out, so neither `limitReset` nor this
+      // method would ever fire for it. A reading showing credit while NO account
+      // is recorded as spent is that event. (A turn refused a moment ago would
+      // have recorded its account, which is what keeps this from looping.)
+      if (this.opts.hasOrphanedParks?.() === true && this.opts.rotation.snapshot().length === 0) {
+        this.resumeWaitingWork('credit is available and a parked chat has nothing armed', {
+          accountId,
+          refreshUsage: false,
+        });
+      }
+      return false;
+    }
     if (opts.force !== true && readingAt - markedAt < this.observationGapMs) {
       // Said out loud, because it is a genuine contradiction and the one that
       // hides a real bug if it is ever silently swallowed: the account's own

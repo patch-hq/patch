@@ -2818,6 +2818,17 @@ export class Daemon {
     });
   }
 
+  /**
+   * Is a chat parked on credit with no reset timer armed and nothing running?
+   * After a restart that is every credit park, and nothing else wakes them.
+   */
+  hasOrphanedCreditParks(): boolean {
+    for (const chatId of this.rateLimitPendingTurns.keys()) {
+      if (!this.rateLimitTimers.has(chatId) && !this.runs.has(chatId)) return true;
+    }
+    return false;
+  }
+
   /** Returns how many chats are owed a turn and now in the resume line. */
   resumeAllRateLimited(): number {
     let owed = 0;

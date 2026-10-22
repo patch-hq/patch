@@ -32,6 +32,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
   const resumeErrored = vi.fn(() => 2);
   const refreshUsage = vi.fn();
   const report = vi.fn();
+  const orphans = { n: 0 };
   const readings: { accountId: string; blocked: boolean; at: number }[] = [];
   const warnings: string[] = [];
   const credit = new CreditResume({
@@ -41,6 +42,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
     refreshUsage,
     report,
     readings: () => readings,
+    hasOrphanedParks: () => orphans.n > 0,
     now,
     ...(opts.observationGapMs !== undefined ? { observationGapMs: opts.observationGapMs } : {}),
     logger: {
@@ -58,6 +60,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
     refreshUsage,
     report,
     readings,
+    orphans,
     warnings,
   };
 }
@@ -212,6 +215,33 @@ describe('a person pressing Refresh', () => {
 
     expect(h.credit.resumeIfCreditReturned({ force: true })).toEqual({ parked: 0, errored: 0 });
     expect(h.rotation.isExhausted('a1')).toBe(true);
+    expect(h.resumeParked).not.toHaveBeenCalled();
+  });
+});
+
+describe('a parked chat nothing is armed for (host restarted past the reset)', () => {
+  it('resumes on a reading showing credit when no account is recorded as spent', () => {
+    // The reported bug: the restart forgot which account was spent, so
+    // `observedUsable` saw nothing marked and resumed nothing, and the parked
+    // chat — no timer of its own after a restart — waited for ever.
+    const h = harness();
+    h.orphans.n = 1;
+    expect(h.credit.observedUsable('a1', h.clock.t)).toBe(false);
+    expect(h.resumeParked).toHaveBeenCalledTimes(1);
+    expect(h.resumeErrored).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes nothing when no chat is parked without a timer', () => {
+    const h = harness();
+    h.credit.observedUsable('a1', h.clock.t);
+    expect(h.resumeParked).not.toHaveBeenCalled();
+  });
+
+  it('holds off while another account is still recorded as spent (a just-refused turn)', () => {
+    const h = harness();
+    h.orphans.n = 1;
+    h.rotation.markExhausted('a2', 'spend limit', h.clock.t + HOUR);
+    h.credit.observedUsable('a1', h.clock.t);
     expect(h.resumeParked).not.toHaveBeenCalled();
   });
 });

@@ -3493,6 +3493,7 @@ async function startHost(
     resumeParked: () => daemon.resumeAllRateLimited(),
     resumeErrored: () => daemon.resumeErroredOnExhaustedAccount(),
     refreshUsage: () => void accountUsage?.refreshAll(true),
+    hasOrphanedParks: () => daemon.hasOrphanedCreditParks(),
     report: () => emit(buildAccountReport()),
     readings: () =>
       (readPatchStore(oauthOpts)?.accounts ?? []).flatMap((a) => {
@@ -4493,7 +4494,13 @@ async function startHost(
         failedAt = last.at;
       }
     }
-    if (soonest === undefined) return;
+    if (soonest === undefined) {
+      // Nothing ahead to arm for — but a chat parked across the restart, whose
+      // reset has since passed, still needs a look at what credit there is now.
+      // The reading it triggers resumes it (`creditResume.observedUsable`).
+      if (daemon.hasOrphanedCreditParks()) void accountUsage?.refreshAll(true);
+      return;
+    }
     // WHICH key that chat spent is not on disk and is not worth inventing: a
     // chat has no account, and the turn that failed is long gone. What matters
     // is the instant to retry at, so the first stored key carries the record —
