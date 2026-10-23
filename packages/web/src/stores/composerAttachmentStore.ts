@@ -399,7 +399,12 @@ async function runUpload(
     useComposerAttachmentStore.setState((s) => ({
       byKey: {
         ...s.byKey,
-        [draftKey]: (s.byKey[draftKey] ?? []).map((a) => (a.key === key ? updated : a)),
+        // The server's broadcast for this file can beat the HTTP response, in
+        // which case it was already added as a remote chip under `ref.id`;
+        // this local entry (which owns the preview and file) replaces it.
+        [draftKey]: (s.byKey[draftKey] ?? [])
+          .filter((a) => a.key === key || a.key !== ref.id)
+          .map((a) => (a.key === key ? updated : a)),
       },
     }));
     return updated;

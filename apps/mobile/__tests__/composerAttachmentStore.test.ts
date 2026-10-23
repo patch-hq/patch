@@ -339,4 +339,18 @@ describe('composerAttachmentStore.detach', () => {
     expect(deleteAttachmentSpy).toHaveBeenCalledWith('c1', 'srv-1');
     expect(detachAttachmentsSpy).not.toHaveBeenCalled();
   });
+  it('keeps one chip when the server broadcast lands before the upload response', async () => {
+    const ref = { id: 'srv-1', name: 'a.txt', mimeType: 'text/plain', kind: 'file', url: '/x' };
+    let resolveUpload!: (v: unknown) => void;
+    uploadAttachmentSpy.mockReturnValue(new Promise((r) => (resolveUpload = r)));
+    const store = useComposerAttachmentStore;
+    store.getState().attach('c1', { kind: 'chat', chatId: 'c1' }, [file('a.txt')]);
+    const localKey = store.getState().byKey['c1']![0]!.key;
+    store.getState().applyAttachmentsChanged('c1', [ref] as never);
+    const settled = waitForAttachmentUpload('c1', localKey);
+    resolveUpload({ ok: true, ref });
+    await settled;
+    await flush();
+    expect(store.getState().byKey['c1']!.map((a) => a.key)).toEqual(['srv-1']);
+  });
 });
