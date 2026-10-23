@@ -50,6 +50,7 @@ import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
+import { DEMO_SCRIPT } from './dev/meetingScript.js';
 import { useBrowserHandoffStore } from './stores/browserHandoffStore.js';
 import { applyMeetingNotesOp, meetingElapsedMs, type MeetingState } from '@patch/wire';
 import { useDraftStore } from './stores/draftStore.js';
@@ -3383,6 +3384,44 @@ if (editorParam === 'write-changeset') {
       activeIndex: 0,
     });
   });
+}
+// `?meeting=demo` plays a scripted call into a live meeting, a line every 3 s,
+// so the panel can be watched filling up. Harness only, never in production.
+if (params.get('meeting') === 'demo') {
+  const t0 = Date.now();
+  const start: MeetingState = {
+    status: 'live',
+    startedAt: t0,
+    elapsedBaseMs: 0,
+    resumedAt: t0,
+    now: null,
+    summary: null,
+    topics: [],
+    actions: [],
+    cards: [],
+    researchOn: true,
+    transcript: [],
+    error: null,
+  };
+  useMeetingStore.getState().apply(chatId, start);
+  let i = 0;
+  const feed = window.setInterval(() => {
+    const line = DEMO_SCRIPT[i++];
+    const cur = useMeetingStore.getState().byChat[chatId];
+    if (!line || !cur || cur.status !== 'live') return window.clearInterval(feed);
+    useMeetingStore.getState().apply(chatId, {
+      ...cur,
+      transcript: [
+        ...cur.transcript,
+        {
+          at: Date.now() - t0,
+          speaker: line.speaker,
+          ...(line.name !== undefined ? { name: line.name } : {}),
+          text: line.text,
+        },
+      ],
+    });
+  }, 3000);
 }
 // `?voice=call|hands-free` opens a sustained voice session, so the top voice
 // bar (spec/07 § Session modes) can be measured in a real browser: it is IN

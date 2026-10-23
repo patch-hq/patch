@@ -3810,8 +3810,7 @@ export const MeetingControlRequestEvent = z
   .object({
     type: z.literal('meeting.control_request'),
     chatId: z.string().min(1),
-    /** `demo` starts a test meeting: a scripted call played into the transcript, no audio needed. */
-    action: z.enum(['start', 'pause', 'resume', 'end', 'tune', 'name_voice', 'demo']),
+    action: z.enum(['start', 'pause', 'resume', 'end', 'tune', 'name_voice']),
     /** With `start` and `tune`: how often the notes update. */
     settings: MeetingSettings.optional(),
     /** With `name_voice`: which `them` voice, and the name to show for it. */

@@ -366,11 +366,6 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
       >
         <MessageSquareText size={16} aria-hidden="true" />
       </button>
-      {meeting.demo ? (
-        <span className="mm-demo" data-testid="meeting-demo">
-          Test
-        </span>
-      ) : null}
       <People meeting={meeting} />
       <MeetingPill meeting={meeting} />
       {meeting.status === 'live' ? (
@@ -546,8 +541,7 @@ function AlertLine({
 /** Everything that has gone wrong with the meeting, under the tabs. */
 function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const capturing = useMeetingStore((s) => s.capturingChatId === chatId);
-  // A test meeting plays a script: no device is meant to be listening.
-  const notListening = meeting.status === 'live' && !capturing && meeting.demo !== true;
+  const notListening = meeting.status === 'live' && !capturing;
   if (!meeting.error && !meeting.researchError && !notListening) return null;
   return (
     <div className="mm-alerts">

@@ -292,11 +292,6 @@ export function addAction(
   });
 }
 
-/** A test meeting in this chat: a scripted call plays into the notes, with no audio. */
-export function startTestMeeting(chatId: string): void {
-  ws().send({ type: 'meeting.control_request', chatId, action: 'demo' });
-}
-
 /** The "Research as we go" checkbox. */
 export function setMeetingResearch(chatId: string, on: boolean): void {
   ws().send({ type: 'meeting.research_request', chatId, on });

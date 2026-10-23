@@ -1,17 +1,13 @@
-// The test meeting (meeting.control_request `demo`): a scripted call played
-// into the transcript a line at a time, so the notes, research and actions can
-// be watched without a call or a microphone. The lines go through the same
-// analysis as a real meeting; only the audio and transcription are skipped.
+// A scripted call for the dev harness only (`?meeting=demo`): plays into the
+// meeting panel a line at a time so the feed, Just said and the transcript can
+// be watched without a call, a microphone or a host. Never shipped: the harness
+// is not part of the production build.
 
 export interface DemoLine {
   speaker: 'you' | 'them';
-  /** Who is speaking, for `them` lines (as the call app would name them). */
   name?: string;
   text: string;
 }
-
-/** How often the next scripted line arrives. */
-export const DEMO_LINE_MS = 5_000;
 
 export const DEMO_SCRIPT: readonly DemoLine[] = [
   {

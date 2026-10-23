@@ -6602,7 +6602,6 @@ export async function handleServerEvent(
       case 'meeting.control_request': {
         const m = requireMeetings(accounts);
         if (event.action === 'start') m.start(event.chatId, event.settings);
-        else if (event.action === 'demo') m.startDemo(event.chatId);
         else if (event.action === 'tune') {
           if (!event.settings) throw new Error('meeting tune needs settings');
           m.tune(event.chatId, event.settings);

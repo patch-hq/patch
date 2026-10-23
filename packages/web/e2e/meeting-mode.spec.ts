@@ -600,13 +600,6 @@ test.describe('meeting mode — live', () => {
     await expect(page.getByTestId('meeting-listen-here')).toBeVisible();
   });
 
-  test('a test meeting is marked, and does not ask this device to listen', async ({ page }) => {
-    await page.goto(URL_LIVE);
-    await applyMeeting(page, { demo: true });
-    await expect(page.getByTestId('meeting-demo')).toHaveText('Test');
-    await expect(page.getByTestId('meeting-not-listening')).toHaveCount(0);
-  });
-
   test('a host error is one line under the header, and shows in full on click', async ({
     page,
   }) => {
@@ -625,22 +618,6 @@ test.describe('meeting mode — live', () => {
     await expect
       .poll(async () => (await err.boundingBox())!.height)
       .toBeGreaterThan(e!.height + 10);
-  });
-});
-
-test.describe('meeting mode — test meeting', () => {
-  test('the chat menu starts a test meeting; it is not offered while one is on', async ({
-    page,
-  }) => {
-    await page.goto('/app/dev-harness.html?chat=chat_tools');
-    await page.getByTestId('action-more').click();
-    await page.getByTestId('action-test-meeting').click();
-    expect(await sent(page, 'meeting.control_request')).toEqual([
-      { type: 'meeting.control_request', chatId: 'chat_tools', action: 'demo' },
-    ]);
-    await page.goto(URL_LIVE);
-    await page.getByTestId('action-more').click();
-    await expect(page.getByTestId('action-test-meeting')).toHaveCount(0);
   });
 });
 

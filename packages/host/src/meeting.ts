@@ -13,7 +13,6 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { nameFixes } from './meetingVocab.js';
-import { DEMO_LINE_MS, DEMO_SCRIPT } from './meetingDemo.js';
 import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
@@ -204,8 +203,6 @@ export interface MeetingDeps {
   now?: () => number;
   newId?: () => string;
   intervalMs?: number;
-  /** How often a test meeting's next scripted line arrives. */
-  demoLineMs?: number;
   setInterval?: (fn: () => void, ms: number) => unknown;
   clearInterval?: (h: unknown) => void;
 }
@@ -229,8 +226,6 @@ interface Runtime {
   chain: Promise<void>;
   /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
   txChain: Promise<void>;
-  /** A test meeting's line feeder while it runs. */
-  demoTimer?: unknown;
 }
 
 /** Consecutive segments from one voice read as one line. */
@@ -280,7 +275,7 @@ export class MeetingManager {
 
   // ---- controls ----
 
-  start(chatId: string, settings?: MeetingSettings, opts: { demo?: boolean } = {}): void {
+  start(chatId: string, settings?: MeetingSettings): void {
     const existing = this.load(chatId);
     if (existing && existing.state.status !== 'ended') {
       throw new MeetingError(`chat ${chatId} already has a ${existing.state.status} meeting`);
@@ -303,7 +298,6 @@ export class MeetingManager {
         agentEdits: [],
         transcript: [],
         error: null,
-        ...(opts.demo ? { demo: true } : {}),
       },
       timer: undefined,
       analysedUpTo: 0,
@@ -317,40 +311,7 @@ export class MeetingManager {
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
-    this.armDemo(chatId, rt);
     this.commit(chatId, rt);
-  }
-
-  /** Starts a test meeting: the scripted call plays into the transcript, one line at a time. */
-  startDemo(chatId: string): void {
-    this.start(chatId, undefined, { demo: true });
-  }
-
-  /** Feeds a test meeting its next scripted line on a timer; stops at the end of the script. */
-  private armDemo(chatId: string, rt: Runtime): void {
-    this.disarmDemo(rt);
-    if (!rt.state.demo || rt.state.status !== 'live') return;
-    const set = this.deps.setInterval ?? ((fn, ms) => setInterval(fn, ms));
-    rt.demoTimer = set(() => {
-      const line = DEMO_SCRIPT[rt.state.transcript.length];
-      if (rt.state.status !== 'live' || !line) {
-        this.disarmDemo(rt);
-        return;
-      }
-      rt.state.transcript.push({
-        at: meetingElapsedMs(rt.state, this.now()),
-        speaker: line.speaker,
-        ...(line.name !== undefined ? { name: line.name } : {}),
-        text: line.text,
-      });
-      this.commit(chatId, rt);
-    }, this.deps.demoLineMs ?? DEMO_LINE_MS);
-  }
-
-  private disarmDemo(rt: Runtime): void {
-    if (rt.demoTimer === undefined) return;
-    (this.deps.clearInterval ?? ((h) => clearInterval(h as NodeJS.Timeout)))(rt.demoTimer);
-    rt.demoTimer = undefined;
   }
 
   /** Change how often the notes update; takes effect on the running timer now. */
@@ -370,7 +331,6 @@ export class MeetingManager {
     delete rt.state.resumedAt;
     rt.state.status = 'paused';
     this.disarmTimer(rt);
-    this.disarmDemo(rt);
     this.commit(chatId, rt);
   }
 
@@ -385,7 +345,6 @@ export class MeetingManager {
     rt.state.status = 'live';
     rt.state.resumedAt = this.now();
     this.armTimer(chatId, rt);
-    this.armDemo(chatId, rt);
     this.commit(chatId, rt);
   }
 
@@ -401,7 +360,6 @@ export class MeetingManager {
     rt.state.status = 'ended';
     rt.state.endedAt = t;
     this.disarmTimer(rt);
-    this.disarmDemo(rt);
     this.commit(chatId, rt);
     await rt.txChain;
     await this.enqueue(rt, async () => {
@@ -939,7 +897,6 @@ export class MeetingManager {
   dispose(): void {
     for (const rt of this.runtimes.values()) {
       this.disarmTimer(rt);
-      this.disarmDemo(rt);
     }
   }
 

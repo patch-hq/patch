@@ -935,45 +935,6 @@ describe('MeetingManager', () => {
     });
   });
 
-  describe('test meeting', () => {
-    it('plays the script into the transcript a line at a time, with names, while live', () => {
-      const m = make({ demoLineMs: 1_000 });
-      m.startDemo('c1');
-      expect(m.get('c1')).toMatchObject({ status: 'live', demo: true, transcript: [] });
-      const feed = ticks[1]!;
-      feed();
-      feed();
-      const t = m.get('c1')!.transcript;
-      expect(t).toHaveLength(2);
-      expect(t[0]).toMatchObject({ speaker: 'you' });
-      expect(t[1]).toMatchObject({ speaker: 'them', name: 'Priya' });
-      m.pause('c1');
-      expect(ticks).toEqual([]);
-      feed();
-      expect(m.get('c1')!.transcript).toHaveLength(2);
-      m.resume('c1');
-      expect(ticks).toHaveLength(2);
-      ticks[1]!();
-      expect(m.get('c1')!.transcript).toHaveLength(3);
-    });
-
-    it('stops at the end of the script', async () => {
-      const { DEMO_SCRIPT } = await import('../src/meetingDemo.js');
-      const m = make();
-      m.startDemo('c1');
-      for (let i = 0; i < DEMO_SCRIPT.length + 3; i++) ticks[1]?.();
-      expect(m.get('c1')!.transcript).toHaveLength(DEMO_SCRIPT.length);
-      expect(ticks).toHaveLength(0);
-    });
-
-    it('a real meeting is not a test meeting', () => {
-      const m = make();
-      m.start('c1');
-      expect(m.get('c1')!.demo).toBeUndefined();
-      expect(ticks).toHaveLength(1);
-    });
-  });
-
   it('contextFor hands the chat the panel and only unseen transcript, once', async () => {
     const m = make();
     expect(m.contextFor('c1')).toBeUndefined();
@@ -1271,7 +1232,7 @@ describe('meeting events on the host link', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('routes the action edits and the test meeting to the manager', async () => {
+  it('routes the action edits to the manager', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-ev-'));
     const m = new MeetingManager({
       prompts: () => PROMPTS,
@@ -1288,8 +1249,7 @@ describe('meeting events on the host link', () => {
     const daemon = { allocErrorSeq: () => 1 } as never;
     const send = (e: WireEvent): Promise<void> =>
       handleServerEvent(e, daemon, (x) => sent.push(x), logger, { meetings: m } as never);
-    await send({ type: 'meeting.control_request', chatId: 'c', action: 'demo' });
-    expect(m.get('c')).toMatchObject({ status: 'live', demo: true });
+    await send({ type: 'meeting.control_request', chatId: 'c', action: 'start' });
     await send({
       type: 'meeting.action_request',
       chatId: 'c',

@@ -14138,14 +14138,6 @@ select.permission-mode.is-pending {
 .mm-resize:focus-visible::after {
   background: var(--ink-faint);
 }
-.mm-demo {
-  font-size: var(--text-min);
-  font-weight: 600;
-  color: var(--ink-3);
-  background: var(--bg-soft);
-  border-radius: var(--radius-pill);
-  padding: 1px 8px;
-}
 .mm-icon.mm-end-icon {
   color: var(--voice);
 }
