@@ -4506,7 +4506,7 @@ button.nav-row {
   .content.md table {
     display: table;
     width: 100%;
-    font-size: 12px;
+    font-size: var(--text-min);
   }
   .content.md th,
   .content.md td {
