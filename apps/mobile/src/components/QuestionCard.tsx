@@ -226,7 +226,11 @@ function QuestionFooter({
         testID="permission-outcome"
         style={{ ...typography.meta, color: colors.ink3, marginTop: space.sm }}
       >
-        {resolved === 'approve' ? 'Answered' : 'Cancelled'}
+        {resolved === 'approve'
+          ? entry.permissionCancelled
+            ? 'Not received: the question had timed out'
+            : 'Answered'
+          : 'Cancelled'}
       </Text>
     );
   }

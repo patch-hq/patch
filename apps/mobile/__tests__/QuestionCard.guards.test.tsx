@@ -101,3 +101,21 @@ describe('touch handling', () => {
     expect(selectable).toHaveLength(0);
   });
 });
+
+describe('an answer the host refused as expired', () => {
+  it('is not shown as Answered', () => {
+    const r = renderRN(
+      <QuestionCard
+        entry={entry({ permissionResolved: 'approve', permissionCancelled: true })}
+        onAnswer={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(
+      hasText(
+        findHost(r.root, byTestId('permission-outcome')),
+        'Not received: the question had timed out',
+      ),
+    ).toBe(true);
+  });
+});

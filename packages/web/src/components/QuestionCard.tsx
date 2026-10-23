@@ -246,7 +246,13 @@ function Footer({
   if (resolved) {
     return (
       <p className="permission-outcome" data-testid="permission-outcome">
-        {resolved === 'approve' ? 'Answered' : 'Cancelled'}
+        {resolved === 'approve'
+          ? entry.permissionCancelled
+            ? // Resolved optimistically on Send, then the host denied it (the
+              // question's window had run out): the agent never got this answer.
+              'Not received: the question had timed out'
+            : 'Answered'
+          : 'Cancelled'}
         {resolved === 'approve' && agentLabel !== undefined ? (
           <span data-testid="question-agent-resumed">
             {agentResumed
