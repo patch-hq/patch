@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Text } from 'react-native';
 import { renderRN, hasText, findAllHost, byTestId } from './testUtils/render';
 import { ChatMarkdown } from '../src/components/ChatMarkdown';
+import { routerMock } from './stubs/expo-router';
 import { __parseCallCount, __resetParseCallCount, __lastRenderer } from './stubs/markdown-display';
 
 beforeEach(() => {
@@ -103,5 +104,28 @@ describe('ChatMarkdown — link previews', () => {
     const mail = link('mailto:a@b.c');
     expect(hasText(mail.root, 'label')).toBe(true);
     expect(findAllHost(mail.root, byTestId('link-summary-toggle')).length).toBe(0);
+  });
+});
+
+describe('ChatMarkdown — links to other chats', () => {
+  it.each([
+    ['/chats/abc-123', '/chats/abc-123'],
+    ['patch://chats/abc-123', '/chats/abc-123'],
+  ])('%s opens that chat in the app, with no preview toggle', (href, route) => {
+    routerMock.push.mockClear();
+    renderRN(<ChatMarkdown content="x" color="#111" />);
+    const { rules, style } = __lastRenderer();
+    const r = renderRN(
+      rules['link']!(
+        { key: 'l', type: 'link', attributes: { href } } as never,
+        [<Text key="t">label</Text>],
+        [],
+        style as never,
+      ) as React.ReactElement,
+    );
+    expect(findAllHost(r.root, byTestId('link-summary-toggle')).length).toBe(0);
+    const label = findAllHost(r.root, (n) => typeof n.props['onPress'] === 'function')[0]!;
+    (label.props['onPress'] as () => void)();
+    expect(routerMock.push).toHaveBeenCalledWith(route);
   });
 });

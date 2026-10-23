@@ -57,3 +57,12 @@ export function resolveDeepLink(url: string | null | undefined): DeepLinkAction 
   }
   return null;
 }
+
+const CHAT_LINK = /^(?:patch:\/\/|\/)chats\/([^/?#\s]+)$/;
+
+/** The in-app route for a markdown link to another chat (`/chats/<id>` or `patch://chats/<id>`), else null. */
+export function chatLinkRoute(href: string): string | null {
+  const m = CHAT_LINK.exec(href);
+  if (!m || m[1] === 'new') return null;
+  return `/chats/${m[1]}`;
+}

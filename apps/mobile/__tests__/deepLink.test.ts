@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveDeepLink } from '../src/lib/deepLink';
+import { resolveDeepLink, chatLinkRoute } from '../src/lib/deepLink';
 
 describe('resolveDeepLink (launcher long-press shortcuts + patch:// links)', () => {
   it('routes the Manager voice-note shortcut to a voice-note action', () => {
@@ -70,5 +70,15 @@ describe('resolveDeepLink (launcher long-press shortcuts + patch:// links)', () 
     expect(resolveDeepLink(null)).toBeNull();
     expect(resolveDeepLink(undefined)).toBeNull();
     expect(resolveDeepLink('patch://nonsense')).toBeNull();
+  });
+});
+
+describe('chatLinkRoute', () => {
+  it('maps both chat link forms to the chat route and rejects everything else', () => {
+    expect(chatLinkRoute('/chats/a1')).toBe('/chats/a1');
+    expect(chatLinkRoute('patch://chats/a1')).toBe('/chats/a1');
+    expect(chatLinkRoute('/chats/new')).toBeNull();
+    expect(chatLinkRoute('https://example.com/chats/a1')).toBeNull();
+    expect(chatLinkRoute('/chats/a1/extra')).toBeNull();
   });
 });

@@ -19,8 +19,28 @@ import {
   type RenderRules,
 } from 'react-native-markdown-display';
 import { configureMarkdownIt } from '../lib/markdownIt';
+import { useRouter } from 'expo-router';
+import { chatLinkRoute } from '../lib/deepLink';
 import { LinkPreview } from './LinkPreview';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
+
+// A link to another chat opens it inside the app (spec/14 § Message links).
+function ChatLinkText({
+  route,
+  style,
+  children,
+}: {
+  route: string;
+  style: unknown;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const router = useRouter();
+  return (
+    <Text style={style as never} onPress={() => router.push(route as never)}>
+      {children}
+    </Text>
+  );
+}
 
 // The library's default `text`/`code_inline`/`code_block`/`fence` rules render
 // a plain `<Text>` with no way to set RN's `selectable` (a component prop, not
@@ -76,6 +96,14 @@ function leafRules(selectable: boolean): RenderRules {
     // after it (spec/14 § Message links).
     link: (node: ASTNode, children, _parent, styles) => {
       const href = String(node.attributes['href']);
+      const chatRoute = chatLinkRoute(href);
+      if (chatRoute) {
+        return (
+          <ChatLinkText key={node.key} route={chatRoute} style={styles['link']}>
+            {children}
+          </ChatLinkText>
+        );
+      }
       const flat = StyleSheet.flatten(styles['link']) as { color: string };
       return (
         <Text key={node.key}>
