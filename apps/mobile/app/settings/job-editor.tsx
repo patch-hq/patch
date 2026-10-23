@@ -1007,22 +1007,22 @@ export default function JobEditor(): React.ReactElement {
           <Field label="Where">
             <Pills<JobAction['type']>
               testID="job-action-type"
-              value={form.actionType}
-              onChange={(v) => setForm({ ...form, actionType: v })}
+              value={form.actionType === 'continue' ? 'spawn' : form.actionType}
+              // "Create a new chat" covers spawn and continue: a deduplication
+              // key makes it `continue`, none makes it `spawn`.
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  actionType: v === 'spawn' && form.ensureKey.trim() !== '' ? 'continue' : v,
+                })
+              }
               options={[
-                { value: 'spawn', label: 'spawn new chat' },
-                { value: 'continue', label: 'persistent chat' },
-                { value: 'message', label: 'message a chat' },
-                { value: 'script', label: 'run a command' },
+                { value: 'spawn', label: 'Create a new chat' },
+                { value: 'message', label: 'Message an existing chat' },
+                { value: 'script', label: 'Run a script' },
               ]}
             />
           </Field>
-          {form.actionType === 'continue' ? (
-            <Text style={{ color: colors.ink3, fontSize: textMin, marginBottom: space.md }}>
-              The first fire creates one chat in this folder; every later fire messages the SAME
-              chat, so context builds up over time. You don’t pre-create it.
-            </Text>
-          ) : null}
 
           {usesFolderFields ? (
             <>
@@ -1277,19 +1277,25 @@ export default function JobEditor(): React.ReactElement {
                 />
               </Field>
 
-              {form.actionType === 'continue' ? (
+              {usesSpawnFields ? (
                 <Field label="Deduplication key · optional">
                   <Input
                     value={form.ensureKey}
-                    onChangeText={(v) => setForm({ ...form, ensureKey: v })}
+                    onChangeText={(v) =>
+                      setForm({
+                        ...form,
+                        ensureKey: v,
+                        actionType: v.trim() !== '' ? 'continue' : 'spawn',
+                      })
+                    }
                     placeholder="{{payload.event_data.id}}"
                     autoCapitalize="none"
                     testID="job-ensure-key"
                   />
                   <Text style={{ color: colors.ink3, fontSize: textMin, marginTop: space.xs }}>
-                    Mustache template evaluated against each fire's payload. Fires that render the
-                    same key resume one chat instead of starting a new one — leave empty for a
-                    single chat shared by every fire of this job.
+                    Mustache template evaluated against each fire's payload. Each distinct key gets
+                    its own durable chat, created on first fire and reused after — leave empty for a
+                    fresh chat every fire.
                   </Text>
                 </Field>
               ) : null}

@@ -2088,17 +2088,24 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             <label>
               Action type
               <select
-                value={form.actionType}
+                value={form.actionType === 'continue' ? 'spawn' : form.actionType}
                 data-testid="job-action-type"
                 onChange={(e) => {
                   const next = e.target.value;
-                  setForm((f) => ({ ...f, actionType: next as JobAction['type'] }));
+                  // "Create a new chat" covers spawn and continue: a
+                  // deduplication key makes it `continue`, none makes it `spawn`.
+                  setForm((f) => ({
+                    ...f,
+                    actionType:
+                      next === 'spawn' && f.ensureKey.trim() !== ''
+                        ? 'continue'
+                        : (next as JobAction['type']),
+                  }));
                 }}
               >
-                <option value="spawn">spawn new chat (fresh each fire)</option>
-                <option value="continue">message a persistent chat (created once)</option>
-                <option value="message">message an existing chat</option>
-                <option value="script">run a command (no chat, no model)</option>
+                <option value="spawn">Create a new chat</option>
+                <option value="message">Message an existing chat</option>
+                <option value="script">Run a script</option>
               </select>
             </label>
             {form.actionType === 'script' ? (
@@ -2269,25 +2276,27 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     data-testid="job-spawn-goal"
                   />
                 </label>
-                {form.actionType === 'continue' ? (
-                  <label>
-                    Deduplication key
-                    <input
-                      value={form.ensureKey}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setForm((f) => ({ ...f, ensureKey: next }));
-                      }}
-                      data-testid="job-ensure-key"
-                      placeholder="{{payload.event_data.id}}"
-                    />
-                    <p className="field-hint" data-testid="job-ensure-key-hint">
-                      Mustache template evaluated against each fire's payload. Fires that render the
-                      same key resume one chat instead of starting a new one — leave empty for a
-                      single chat shared by every fire of this job.
-                    </p>
-                  </label>
-                ) : null}
+                <label>
+                  Deduplication key
+                  <input
+                    value={form.ensureKey}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({
+                        ...f,
+                        ensureKey: next,
+                        actionType: next.trim() !== '' ? 'continue' : 'spawn',
+                      }));
+                    }}
+                    data-testid="job-ensure-key"
+                    placeholder="{{payload.event_data.id}}"
+                  />
+                  <p className="field-hint" data-testid="job-ensure-key-hint">
+                    Mustache template evaluated against each fire's payload. Each distinct key gets
+                    its own durable chat, created on first fire and reused after — leave empty for a
+                    fresh chat every fire.
+                  </p>
+                </label>
                 {form.actionType === 'spawn' ? (
                   <label>
                     Permission mode
@@ -2908,7 +2917,7 @@ function formToBody(form: FormState): JobCreateBody {
       ...(form.spawnNotifyOnComplete ? {} : { notifyOnComplete: false }),
       // Same inverted encoding: absent is the ticked, default state.
       ...(form.includePayload ? {} : { includePayload: false }),
-      ...(form.actionType === 'continue' && form.ensureKey ? { key: form.ensureKey } : {}),
+      ...(form.actionType === 'continue' && form.ensureKey.trim() ? { key: form.ensureKey } : {}),
       // Spawn-only for the same reason as `startHidden`. `auto` is what an absent
       // field already means (spec/08 § Action), so it persists as absent —
       // that keeps a job written before this field existed byte-identical

@@ -31,6 +31,10 @@ import { lightColors } from '../src/lib/theme';
 /** The one registered machine these screens address (spec/03 § Host events). */
 const HOST = 'd1';
 
+function setKey(r: ReturnType<typeof renderRN>, v: string) {
+  findHost(r.root, byTestId('job-ensure-key')).props.onChangeText(v);
+}
+
 vi.mock('../src/api/rest', () => ({
   api: {
     getJob: vi.fn(),
@@ -126,12 +130,12 @@ describe('JobEditor — action type: spawn (default)', () => {
 });
 
 describe('JobEditor — action type: ensure', () => {
-  it('shows the persistent-chat explainer text and still uses the Folder picker', async () => {
+  it('a keyed create still uses the Folder picker', async () => {
     useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'persistent chat');
-    expect(hasText(r.root, 'every later fire messages the SAME')).toBe(true);
+    selectPill(r, 'job-action-type', 'Create a new chat');
+    setKey(r, 'k');
     expect(hasText(r.root, 'Folder')).toBe(true);
   });
 });
@@ -140,7 +144,7 @@ describe('JobEditor — action type: message', () => {
   it('with no chats, shows "No chats yet — start one first." instead of the folder picker', async () => {
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     expect(hasText(r.root, 'No chats yet')).toBe(true);
     expect(findAllHost(r.root, byTestId('job-spawn-folder')).length).toBe(0);
   });
@@ -170,7 +174,7 @@ describe('JobEditor — action type: message', () => {
     ]);
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     expect(hasText(r.root, 'Morning digest')).toBe(true);
     expect(hasText(r.root, 'c2')).toBe(true); // no name → falls back to raw chatId
     findHost(r.root, (i) => i.type === 'Pressable' && hasText(i, 'Morning digest')).props.onPress();
@@ -195,7 +199,7 @@ describe('JobEditor — action type: message', () => {
     vi.mocked(api.skills).mockResolvedValue({ skills: ['life-coach'] });
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     findHost(r.root, (i) => i.type === 'Pressable' && hasText(i, 'Digest')).props.onPress();
     await flush();
     expect(api.skills).toHaveBeenCalledWith('/home/tom/chatfolder', HOST);
@@ -204,7 +208,7 @@ describe('JobEditor — action type: message', () => {
   it('with no chat selected, the Skill field shows "Pick a recipient chat first."', async () => {
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     expect(hasText(r.root, 'Pick a recipient chat first.')).toBe(true);
   });
 });
@@ -252,7 +256,7 @@ describe('JobEditor — Skill picker', () => {
     vi.mocked(api.patchJob).mockResolvedValue({});
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     findHost(r.root, (i) => i.type === 'Pressable' && hasText(i, 'Digest')).props.onPress();
     await flush();
     pickOption(r, 'job-skill', 'life-coach');
@@ -322,7 +326,7 @@ describe('JobEditor — Skill Edit link', () => {
     });
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     findHost(r.root, (i) => i.type === 'Pressable' && hasText(i, 'Digest')).props.onPress();
     await flush();
     pickOption(r, 'job-skill', 'life-coach');
@@ -358,7 +362,7 @@ describe('JobEditor — Prompt field', () => {
     const r = renderRN(<JobEditor />);
     await flush();
     findHost(r.root, byTestId('job-prompt')).props.onChangeText('spawn text'); // still spawn mode
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     expect(findHost(r.root, byTestId('job-prompt')).props.value).toBe(''); // messagePrompt starts empty
     findHost(r.root, byTestId('job-prompt')).props.onChangeText('message text');
     expect(findHost(r.root, byTestId('job-prompt')).props.value).toBe('message text');
@@ -440,12 +444,13 @@ describe('JobEditor — Model picker', () => {
     const r = renderRN(<JobEditor />);
     await flush();
     expect(findAllHost(r.root, byTestId('job-spawn-model')).length).toBe(1);
-    selectPill(r, 'job-action-type', 'persistent chat');
+    selectPill(r, 'job-action-type', 'Create a new chat');
+    setKey(r, 'k');
     await flush();
     expect(findAllHost(r.root, byTestId('job-spawn-model')).length).toBe(1);
     // A `message` action inherits host, folder and model from the chat it
     // delivers into, so there is nothing here to choose.
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     await flush();
     expect(findAllHost(r.root, byTestId('job-spawn-model')).length).toBe(0);
   });
@@ -470,7 +475,7 @@ describe('JobEditor — action type: script', () => {
     useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'run a command');
+    selectPill(r, 'job-action-type', 'Run a script');
     await flush();
 
     // A script stores the same (host, folder) pair as a spawn, so it shares the
@@ -487,7 +492,7 @@ describe('JobEditor — action type: script', () => {
   it('the Command field is mono and tall — it holds a whole gate, not a one-liner', async () => {
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'run a command');
+    selectPill(r, 'job-action-type', 'Run a script');
     await flush();
     const field = findHost(r.root, byTestId('job-script-command'));
     expect(field.props.multiline).toBe(true);
@@ -507,7 +512,7 @@ describe('JobEditor — action type: script', () => {
     const r = renderRN(<JobEditor />);
     await flush();
     findHost(r.root, byTestId('job-name')).props.onChangeText('photo gate');
-    selectPill(r, 'job-action-type', 'run a command');
+    selectPill(r, 'job-action-type', 'Run a script');
     await flush();
     findHost(r.root, byTestId('job-script-command')).props.onChangeText(GATE);
     findHost(r.root, byTestId('job-script-timeout')).props.onChangeText('120000');
@@ -721,13 +726,15 @@ describe('JobEditor — Group field', () => {
 });
 
 describe('JobEditor — ensure action extras', () => {
-  it('shows a Deduplication key field only for persistent chat, and posts it', async () => {
+  it('shows a Deduplication key field on create, and a key makes it a continue action', async () => {
     useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     vi.mocked(api.createJob).mockResolvedValue({});
     const r = renderRN(<JobEditor />);
     await flush();
+    expect(queryHost(r.root, byTestId('job-ensure-key'))).not.toBeNull();
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     expect(queryHost(r.root, byTestId('job-ensure-key'))).toBeNull();
-    selectPill(r, 'job-action-type', 'persistent chat');
+    selectPill(r, 'job-action-type', 'Create a new chat');
     findHost(r.root, byTestId('job-name')).props.onChangeText('Reminders');
     findHost(r.root, byTestId('job-ensure-key')).props.onChangeText('{{payload.event_data.id}}');
     findHost(r.root, byTestId('job-prompt')).props.onChangeText('remind');
@@ -735,6 +742,7 @@ describe('JobEditor — ensure action extras', () => {
     await flush();
     const body = vi.mocked(api.createJob).mock.calls[0]![0] as { action: Record<string, unknown> };
     expect(body.action['key']).toBe('{{payload.event_data.id}}');
+    expect(body.action['type']).toBe('continue');
   });
 });
 
@@ -768,7 +776,8 @@ describe('JobEditor — Permission mode (spawn only)', () => {
     const body = vi.mocked(api.createJob).mock.calls[0]![0] as { action: Record<string, unknown> };
     expect(body.action['permissionMode']).toBe('plan');
 
-    selectPill(r, 'job-action-type', 'persistent chat');
+    selectPill(r, 'job-action-type', 'Create a new chat');
+    setKey(r, 'k');
     expect(queryHost(r.root, byTestId('job-spawn-permission-mode'))).toBeNull();
   });
 });
@@ -811,7 +820,8 @@ describe('JobEditor — Hide chat / Notify toggles', () => {
     useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/home/tom/a'], recent: [] });
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'persistent chat');
+    selectPill(r, 'job-action-type', 'Create a new chat');
+    setKey(r, 'k');
     expect(findHost(r.root, byTestId('job-spawn-hidden'))).toBeDefined();
     expect(findHost(r.root, byTestId('job-spawn-notify-on-complete'))).toBeDefined();
   });
@@ -819,7 +829,7 @@ describe('JobEditor — Hide chat / Notify toggles', () => {
   it('are not drawn for message actions', async () => {
     const r = renderRN(<JobEditor />);
     await flush();
-    selectPill(r, 'job-action-type', 'message a chat');
+    selectPill(r, 'job-action-type', 'Message an existing chat');
     expect(queryHost(r.root, byTestId('job-spawn-hidden'))).toBeNull();
     expect(queryHost(r.root, byTestId('job-spawn-notify-on-complete'))).toBeNull();
   });

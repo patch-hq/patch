@@ -345,7 +345,8 @@ describe('JobEditorRoute (single-page form)', () => {
     renderNew();
     fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'daily digest' } });
     // Switch to the persistent-chat (ensure) mode.
-    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+    fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
     // G2: the verbose "first fire creates one chat…" explainer is removed.
     expect(screen.queryByTestId('ensure-hint')).toBeNull();
     // It reuses the spawn folder picker + prompt fields.
@@ -390,7 +391,8 @@ describe('JobEditorRoute (single-page form)', () => {
     );
     renderNew();
     fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'digest' } });
-    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+    fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
     await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
     fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
 
@@ -684,7 +686,8 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       expect(screen.getByTestId('job-spawn-hidden')).toBeInTheDocument();
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
       expect(screen.getByTestId('job-spawn-hidden')).toBeInTheDocument();
       // Permission mode stays spawn-only — an ensure chat is durable and takes
       // its override directly.
@@ -717,7 +720,8 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'digest' } });
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
       fireEvent.click(screen.getByTestId('job-save'));
@@ -725,7 +729,7 @@ describe('JobEditorRoute (single-page form)', () => {
       const action = (calls[0]?.body as { action: Record<string, unknown> }).action;
       expect(action).not.toHaveProperty('hidden');
       // Exactly the keys an ensure action carried before this field existed.
-      expect(Object.keys(action).sort()).toEqual(['folder', 'hostId', 'prompt', 'type']);
+      expect(Object.keys(action).sort()).toEqual(['folder', 'hostId', 'key', 'prompt', 'type']);
       vi.unstubAllGlobals();
     });
 
@@ -749,7 +753,8 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'digest' } });
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
       fireEvent.click(screen.getByTestId('job-spawn-hidden'));
@@ -1144,7 +1149,8 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       expect(screen.getByTestId('job-spawn-model')).toBeTruthy();
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
       expect(screen.getByTestId('job-spawn-model')).toBeTruthy();
       // A `message` action inherits its model from the chat it delivers into,
       // so there is nothing here to choose.
@@ -1198,7 +1204,8 @@ describe('JobEditorRoute (single-page form)', () => {
   it('Hide chat is offered by both actions that create a chat, and by neither that does not', () => {
     renderNew();
     expect(screen.getByTestId('job-spawn-hidden')).toBeTruthy();
-    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+    fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
     expect(screen.getByTestId('job-spawn-hidden')).toBeTruthy();
     fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'message' } });
     expect(screen.queryByTestId('job-spawn-hidden')).toBeNull();
@@ -1242,7 +1249,8 @@ describe('JobEditorRoute (single-page form)', () => {
     it('is offered by both actions that create a chat, and by neither that does not', () => {
       renderNew();
       expect(screen.getByTestId('job-spawn-notify-on-complete')).toBeTruthy();
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
       expect(screen.getByTestId('job-spawn-notify-on-complete')).toBeTruthy();
       fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'message' } });
       expect(screen.queryByTestId('job-spawn-notify-on-complete')).toBeNull();
@@ -1355,7 +1363,8 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'digest' } });
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
       fireEvent.click(screen.getByTestId('job-spawn-notify-on-complete'));
@@ -1633,7 +1642,8 @@ describe('JobEditorRoute (single-page form)', () => {
 
   it('G2: the verbose "first fire creates one chat…" explainer is gone in ensure mode', () => {
     renderNew();
-    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+    fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+    fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
     expect(
       screen.queryByText(
         /The first fire creates one chat in this folder; every later fire messages the SAME chat, so context builds up over time\. You don’t pre-create it\./,
@@ -1798,10 +1808,8 @@ describe('JobEditorRoute (single-page form)', () => {
   });
 
   describe('Deduplication key (continue action)', () => {
-    it('is offered only by continue, never spawn/message/script', () => {
+    it('is offered by create-a-new-chat, never message/script', () => {
       renderNew();
-      expect(screen.queryByTestId('job-ensure-key')).toBeNull();
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
       expect(screen.getByTestId('job-ensure-key')).toBeTruthy();
       fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'message' } });
       expect(screen.queryByTestId('job-ensure-key')).toBeNull();
@@ -1809,7 +1817,7 @@ describe('JobEditorRoute (single-page form)', () => {
       expect(screen.queryByTestId('job-ensure-key')).toBeNull();
     });
 
-    it('left empty, posts an action with no key', async () => {
+    it('left empty, posts a fresh-chat spawn action with no key', async () => {
       const calls: Array<{ body: unknown }> = [];
       vi.stubGlobal(
         'fetch',
@@ -1829,13 +1837,14 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'shared chat' } });
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
       fireEvent.click(screen.getByTestId('job-save'));
       await waitFor(() => expect(calls.length).toBe(1));
       const action = (calls[0]?.body as { action: Record<string, unknown> }).action;
       expect(action).not.toHaveProperty('key');
+      expect(action['type']).toBe('spawn');
       vi.unstubAllGlobals();
     });
 
@@ -1859,7 +1868,8 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'per-task thread' } });
-      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'continue' } });
+      fireEvent.change(screen.getByTestId('job-action-type'), { target: { value: 'spawn' } });
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
       fireEvent.change(screen.getByTestId('job-ensure-key'), {
