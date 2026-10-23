@@ -220,29 +220,6 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   // archived — after a reload those chats are absent from `chats` entirely
   // (spec/04 § Folders → Folder roster).
   const folderRoster = useChatStore((s) => s.folderRoster);
-  // Archive-undo hold (spec/14 § Row tools): the archive chip commits at once
-  // (optimistic flip + REST) but the row stays drawn in its folder/pinned slot
-  // — greyed, with an Undo chip — until the pointer leaves the sidebar or 4s
-  // pass, so the next chat never slides under a stationary pointer.
-  const [heldArchives, setHeldArchives] = useState<ReadonlySet<string>>(new Set());
-  const flushHeldArchives = (): void => setHeldArchives(new Set());
-  // Stable, so the memoised rows still skip a re-render when only the open chat changes.
-  const holdArchive = useCallback(
-    (chatId: string): void => setHeldArchives((prev) => new Set([...prev, chatId])),
-    [],
-  );
-  const undoArchive = useCallback((chatId: string): void => {
-    setHeldArchives((prev) => {
-      const next = new Set(prev);
-      next.delete(chatId);
-      return next;
-    });
-  }, []);
-  useEffect(() => {
-    if (heldArchives.size === 0) return;
-    const id = setTimeout(flushHeldArchives, 4000);
-    return () => clearTimeout(id);
-  }, [heldArchives]);
   // Section counts (spec/04 § Section counts) — what the collapsed lifecycle
   // rows show. `null` until the boot fetch lands (or if it failed), which draws
   // no badge; see the group's own comment below.
@@ -250,8 +227,8 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   const chatSort = useUiStore((s) => s.chatSort);
   const groupSort = useUiStore((s) => s.groupSort);
   const grouped = useMemo(
-    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }, heldArchives),
-    [chats, folderRoster, chatSort, groupSort, heldArchives],
+    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }),
+    [chats, folderRoster, chatSort, groupSort],
   );
 
   // Opening a row in needs-attention mode marks it read, which would
@@ -346,7 +323,6 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       className="sb"
       data-testid="sidebar"
       style={{ width: standalone ? '100%' : sidebarWidth }}
-      onPointerLeave={heldArchives.size > 0 ? flushHeldArchives : undefined}
     >
       <header className="sb-brand">
         <span className="brand-row">
@@ -463,9 +439,6 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
           searchQuery={searchQuery}
           activeDevices={activeDevices}
           sectionCounts={sectionCounts}
-          heldArchives={heldArchives}
-          onHoldArchive={holdArchive}
-          onUndoArchive={undoArchive}
         />
       )}
     </aside>
@@ -504,9 +477,6 @@ function RegularSidebar({
   searchQuery,
   activeDevices,
   sectionCounts,
-  heldArchives,
-  onHoldArchive,
-  onUndoArchive,
 }: {
   showSidebarSkeleton: boolean;
   view: Grouped;
@@ -534,9 +504,6 @@ function RegularSidebar({
   searchQuery: string;
   activeDevices: Record<string, string>;
   sectionCounts: SectionCounts | null;
-  heldArchives: ReadonlySet<string>;
-  onHoldArchive: (chatId: string) => void;
-  onUndoArchive: (chatId: string) => void;
 }): JSX.Element {
   const channelsGlyphs = useActionGlyphs('toggleChannels');
   const archivedGlyphs = useActionGlyphs('toggleArchived');
@@ -634,15 +601,7 @@ function RegularSidebar({
             {!showSidebarSkeleton && view.pinned.length > 0 ? (
               <section className="sb-pinned" data-testid="pinned-section">
                 {view.pinned.map((c) => (
-                  <ChatRowView
-                    key={c.chatId}
-                    row={c}
-                    active={activeChatId === c.chatId}
-                    pinned
-                    archiveHeld={heldArchives.has(c.chatId)}
-                    onHoldArchive={onHoldArchive}
-                    onUndoArchive={onUndoArchive}
-                  />
+                  <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} pinned />
                 ))}
                 <div className="pinned-div" />
               </section>
@@ -682,14 +641,7 @@ function RegularSidebar({
                 return folderBasename(folder) === '' ? (
                   <section key={key} className="sb-folder" data-testid="folder-section-unfiled">
                     {rows.map((c) => (
-                      <ChatRowView
-                        key={c.chatId}
-                        row={c}
-                        active={activeChatId === c.chatId}
-                        archiveHeld={heldArchives.has(c.chatId)}
-                        onHoldArchive={onHoldArchive}
-                        onUndoArchive={onUndoArchive}
-                      />
+                      <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} />
                     ))}
                   </section>
                 ) : (
@@ -776,14 +728,7 @@ function RegularSidebar({
                     {collapsed
                       ? null
                       : rows.map((c) => (
-                          <ChatRowView
-                            key={c.chatId}
-                            row={c}
-                            active={activeChatId === c.chatId}
-                            archiveHeld={heldArchives.has(c.chatId)}
-                            onHoldArchive={onHoldArchive}
-                            onUndoArchive={onUndoArchive}
-                          />
+                          <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} />
                         ))}
                   </section>
                 );
@@ -1942,9 +1887,6 @@ const ChatRowView = memo(function ChatRowView({
   snoozed,
   hidden,
   automations,
-  archiveHeld = false,
-  onHoldArchive,
-  onUndoArchive,
 }: {
   row: ChatRow;
   /** Whether this row is the open chat. A boolean, not the open id, so a switch re-renders two rows rather than all of them. */
@@ -1963,11 +1905,8 @@ const ChatRowView = memo(function ChatRowView({
    * True while this chat is archived but held in place (the undo window): the
    * row stays drawn, greyed, with an Undo chip in place of the archive chip.
    */
-  archiveHeld?: boolean;
   /** The archive chip was clicked — hold this chat's row in place. */
-  onHoldArchive?: (chatId: string) => void;
   /** Release the hold: Undo was clicked, or the archive failed. */
-  onUndoArchive?: (chatId: string) => void;
   /**
    * Rows in the Automations section (spec/14 § Sidebar) — a duplicate view of
    * a chat that also lives elsewhere (often Hidden), not a distinct list
@@ -2024,7 +1963,6 @@ const ChatRowView = memo(function ChatRowView({
     active ? 'active' : '',
     isSelected ? 'selected' : '',
     badge === 'read' && !archived ? 'is-read' : '',
-    archiveHeld ? 'archive-held' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -2054,8 +1992,6 @@ const ChatRowView = memo(function ChatRowView({
         return;
       }
       useChatStore.getState().setArchived(row.chatId, !next);
-      // The archive didn't happen: snap the row back rather than hold it.
-      if (next) onUndoArchive?.(row.chatId);
       useUiStore.getState().pushError(failed('archive'), undefined, (err as Error).message);
     });
   }
@@ -2064,24 +2000,7 @@ const ChatRowView = memo(function ChatRowView({
     // Don't navigate into the chat — this is a sidebar-only management action.
     e.preventDefault();
     e.stopPropagation();
-    // Archiving from the chip holds the row in place; un-archiving does not.
-    if (!archived) onHoldArchive?.(row.chatId);
     applyArchive();
-  }
-
-  function handleUndoArchive(e: ReactMouseEvent): void {
-    e.preventDefault();
-    e.stopPropagation();
-    onUndoArchive?.(row.chatId);
-    useChatStore.getState().setArchived(row.chatId, false);
-    void api.archiveChat(row.chatId, false).catch((err) => {
-      if (err instanceof ApiError && err.status === 404) {
-        useChatStore.getState().retractChat(row.chatId);
-        return;
-      }
-      useChatStore.getState().setArchived(row.chatId, true);
-      useUiStore.getState().pushError(failed('undo archive'), undefined, (err as Error).message);
-    });
   }
 
   // E4: the sidebar pin control toggles pinned state — optimistic flip + REST
@@ -2542,18 +2461,7 @@ const ChatRowView = memo(function ChatRowView({
           <span className="row-tools">
             {/* Archive (spec/14 ## Chat lifecycle → Manual archive). Grouped with
             the other row actions top-right; special threads can't be archived. */}
-            {special ? null : archiveHeld ? (
-              <button
-                type="button"
-                className="pin-btn archive-btn"
-                data-testid={`undo-archive-btn-${row.chatId}`}
-                onClick={handleUndoArchive}
-                title="Undo archive"
-                aria-label="Undo archive"
-              >
-                <RotateCcw size={14} aria-hidden />
-              </button>
-            ) : (
+            {special ? null : (
               <button
                 type="button"
                 className="pin-btn archive-btn"

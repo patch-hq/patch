@@ -1259,13 +1259,6 @@ body {
 .sb-row.is-read .preview {
   color: var(--ink-3);
 }
-/* Archive-undo hold: the row stays in place but is greyed harder than a mere
-   read row, signalling it has already left the list (spec/14 § Row tools). */
-.sb-row.archive-held .name,
-.sb-row.archive-held .preview {
-  color: var(--ink-3);
-  opacity: 0.5;
-}
 /* spec/06 § Disabled — a turned-off special thread reads as "off" at a
    glance, the same way an archived row reads as "done": dimmed, not hidden,
    since it's still openable to re-enable. Covers both the sidebar's Manager

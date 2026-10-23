@@ -178,20 +178,10 @@ function cmpFolders(sort: ChatSort): (a: FolderGroup, b: FolderGroup) => number 
   };
 }
 
-const NONE_HELD: ReadonlySet<string> = new Set();
-
-/**
- * `held` — chats archived from their sidebar row that are still holding their
- * place (spec/14 § Row tools). They are drawn where they were before the
- * archive (pinned slot, or their folder) and are NOT listed under Archived, so
- * a held row is never in two places at once. Nothing else about them changes:
- * they are archived, and `nextChatAfterArchive` still treats them as gone.
- */
 export function groupChats(
   all: ChatRow[],
   folderRoster: FolderRosterEntry[] = [],
   ordering: ChatOrdering = DEFAULT_CHAT_ORDERING,
-  held: ReadonlySet<string> = NONE_HELD,
 ): Grouped {
   let manager: ChatRow | null = null;
   let speakers: ChatRow | null = null;
@@ -257,7 +247,7 @@ export function groupChats(
       liveFolders.add(folderGroupKey(c.hostId, c.folder));
       noteRecent(c.hostId, c.folder, c.lastUpdated);
     }
-    if (c.status === 'archived' && !held.has(c.chatId)) {
+    if (c.status === 'archived') {
       archived.push(c);
       continue;
     }
