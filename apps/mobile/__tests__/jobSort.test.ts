@@ -5,9 +5,9 @@ import { describe, it, expect } from 'vitest';
 import { sortJobs, type SortableJob } from '../src/lib/jobSort';
 
 const JOBS: SortableJob[] = [
-  { name: 'Beta', createdAt: 10, latestRun: { ts: 100 } },
-  { name: 'alpha', createdAt: 30, latestRun: null },
-  { name: 'Gamma', createdAt: 20, latestRun: { ts: 200 } },
+  { name: 'Beta', createdAt: 10, updatedAt: 300, latestRun: { ts: 100 } },
+  { name: 'alpha', createdAt: 30, updatedAt: 100, latestRun: null },
+  { name: 'Gamma', createdAt: 20, updatedAt: 200, latestRun: { ts: 200 } },
 ];
 
 describe('sortJobs', () => {
@@ -23,6 +23,10 @@ describe('sortJobs', () => {
     expect(sortJobs(JOBS, 'created').map((j) => j.name)).toEqual(['alpha', 'Gamma', 'Beta']);
   });
 
+  it('last-edited: most recently edited first', () => {
+    expect(sortJobs(JOBS, 'last-edited').map((j) => j.name)).toEqual(['Beta', 'Gamma', 'alpha']);
+  });
+
   it('returns a copy, never the caller’s array', () => {
     const out = sortJobs(JOBS, 'name');
     expect(out).not.toBe(JOBS);
@@ -30,8 +34,8 @@ describe('sortJobs', () => {
 
   it('two never-fired jobs keep arrival order under last-fired (no NaN ordering)', () => {
     const both: SortableJob[] = [
-      { name: 'A', createdAt: 1, latestRun: null },
-      { name: 'B', createdAt: 2, latestRun: undefined },
+      { name: 'A', createdAt: 1, updatedAt: 1, latestRun: null },
+      { name: 'B', createdAt: 2, updatedAt: 2, latestRun: undefined },
     ];
     expect(sortJobs(both, 'last-fired').map((j) => j.name)).toEqual(['A', 'B']);
   });

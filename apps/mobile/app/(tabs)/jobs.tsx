@@ -55,6 +55,7 @@ interface JobShape {
   name?: string;
   enabled: boolean;
   createdAt: number;
+  updatedAt: number;
   trigger: DescribableTrigger | undefined;
   triggerType?: string;
   cron?: string;
@@ -125,6 +126,7 @@ function normalise(raw: Array<Record<string, unknown>>): JobShape[] {
       name: typeof j['name'] === 'string' ? (j['name'] as string) : undefined,
       enabled: Boolean(j['enabled']),
       createdAt: typeof j['createdAt'] === 'number' ? (j['createdAt'] as number) : 0,
+      updatedAt: typeof j['updatedAt'] === 'number' ? (j['updatedAt'] as number) : 0,
       trigger,
       triggerType: trigger?.type,
       cron: trigger?.expression,

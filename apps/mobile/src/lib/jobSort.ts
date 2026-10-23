@@ -2,13 +2,14 @@
 // Verbatim port of packages/web/src/lib/jobSort.ts — RN-free, so it stays
 // diffable against the web copy.
 
-export type JobSort = 'last-fired' | 'name' | 'created';
+export type JobSort = 'last-fired' | 'name' | 'created' | 'last-edited';
 
 /** The sort control's options, in the order it offers them. */
 export const JOB_SORTS: ReadonlyArray<{ value: JobSort; label: string }> = [
   { value: 'last-fired', label: 'Last fired' },
   { value: 'name', label: 'Name' },
   { value: 'created', label: 'Created' },
+  { value: 'last-edited', label: 'Last edited' },
 ];
 
 export const DEFAULT_JOB_SORT: JobSort = 'last-fired';
@@ -17,6 +18,7 @@ export const DEFAULT_JOB_SORT: JobSort = 'last-fired';
 export interface SortableJob {
   name: string;
   createdAt: number;
+  updatedAt: number;
   latestRun?: { ts: number } | null;
 }
 
@@ -25,7 +27,7 @@ export interface SortableJob {
  *
  * `last-fired` is newest fire first, with jobs that have never fired last:
  * "never" is the far end of that scale, not the near one. `name` is
- * case-insensitive locale order. `created` is newest first.
+ * case-insensitive locale order. `created` and `last-edited` are newest first.
  *
  * The sort is stable, so jobs that tie keep the order they arrived in.
  */
@@ -38,6 +40,8 @@ export function sortJobs<T extends SortableJob>(jobs: readonly T[], sort: JobSor
       return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     case 'created':
       return out.sort((a, b) => b.createdAt - a.createdAt);
+    case 'last-edited':
+      return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 }
 

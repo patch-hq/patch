@@ -8,11 +8,13 @@ function job(
   name: string,
   createdAt: number,
   firedAt: number | null,
+  updatedAt = createdAt,
 ): SortableJob & { id: string } {
   return {
     id: name,
     name,
     createdAt,
+    updatedAt,
     latestRun: firedAt === null ? null : { ts: firedAt },
   };
 }
@@ -42,7 +44,10 @@ describe('sortJobs', () => {
   });
 
   it('last-fired treats an absent latestRun the same as an explicit null', () => {
-    const jobs: SortableJob[] = [{ name: 'absent', createdAt: 1 }, job('fired', 2, 50)];
+    const jobs: SortableJob[] = [
+      { name: 'absent', createdAt: 1, updatedAt: 1 },
+      job('fired', 2, 50),
+    ];
     expect(names(sortJobs(jobs, 'last-fired'))).toEqual(['fired', 'absent']);
   });
 
@@ -62,6 +67,11 @@ describe('sortJobs', () => {
     expect(names(sortJobs(jobs, 'created'))).toEqual(['third', 'second', 'first']);
   });
 
+  it('last-edited puts the most recently edited job first', () => {
+    const jobs = [job('a', 1, null, 50), job('b', 2, null, 300), job('c', 3, null, 200)];
+    expect(names(sortJobs(jobs, 'last-edited'))).toEqual(['b', 'c', 'a']);
+  });
+
   it('does not mutate the list it was given', () => {
     const jobs = [job('b', 2, 1), job('a', 1, 2)];
     const before = names(jobs);
@@ -73,9 +83,9 @@ describe('sortJobs', () => {
     for (const { value } of JOB_SORTS) expect(sortJobs([], value)).toEqual([]);
   });
 
-  it('offers exactly the three orders, and defaults to last fired', () => {
-    expect(JOB_SORTS.map((o) => o.value)).toEqual(['last-fired', 'name', 'created']);
-    expect(JOB_SORTS.map((o) => o.label)).toEqual(['Last fired', 'Name', 'Created']);
+  it('offers exactly the four orders, and defaults to last fired', () => {
+    expect(JOB_SORTS.map((o) => o.value)).toEqual(['last-fired', 'name', 'created', 'last-edited']);
+    expect(JOB_SORTS.map((o) => o.label)).toEqual(['Last fired', 'Name', 'Created', 'Last edited']);
     expect(DEFAULT_JOB_SORT).toBe('last-fired');
   });
 });
