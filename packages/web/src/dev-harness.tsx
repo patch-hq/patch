@@ -51,7 +51,7 @@ import { usePreferencesStore } from './stores/preferencesStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
 import { useBrowserHandoffStore } from './stores/browserHandoffStore.js';
-import { applyMeetingNotesOp, type MeetingState } from '@patch/wire';
+import { applyMeetingNotesOp, meetingElapsedMs, type MeetingState } from '@patch/wire';
 import { useDraftStore } from './stores/draftStore.js';
 import { useComposerDraftStore } from './stores/composerDraftStore.js';
 import type { ChatEventEntry } from './stores/chatStore.js';
@@ -2486,10 +2486,27 @@ const harnessSend = (event: WireEvent): void => {
     const cur = useMeetingStore.getState().byChat[event.chatId];
     if (!cur) return;
     const next = structuredClone(cur);
-    if (event.agentRuns !== undefined) next.agentRunsActions = event.agentRuns;
+    if (event.add !== undefined)
+      next.actions.push({
+        id: `a${next.actions.length + 1}`,
+        kind: event.add.kind,
+        ...(event.add.owner !== undefined ? { owner: event.add.owner } : {}),
+        title: event.add.title,
+        why: '',
+        at: meetingElapsedMs(next, Date.now()),
+        status: 'pending',
+      });
     const a = next.actions.find((x) => x.id === event.actionId);
     if (a && event.owner !== undefined) a.owner = event.owner;
+    if (a && event.assign !== undefined) {
+      a.kind = event.assign.kind;
+      if (event.assign.owner !== undefined) a.owner = event.assign.owner;
+      else delete a.owner;
+    }
+    if (a && event.title !== undefined) a.title = event.title;
     if (a && event.decision === 'dismiss') a.status = 'dismissed';
+    if (a && event.decision === 'done') a.status = 'done';
+    if (a && event.decision === 'reopen') a.status = a.chatId ? 'running' : 'pending';
     if (a && (event.decision === 'do' || event.decision === 'chat')) {
       a.status = 'running';
       a.chatId = 'chat_child';
@@ -3481,7 +3498,6 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
         status: 'pending',
       },
     ],
-    agentRunsActions: false,
     researchOn: true,
     myNotes: '01:40 ask Marco about the sandbox budget\n22:30 check the flag plan with Priya',
     ...(meetingParam === 'live'

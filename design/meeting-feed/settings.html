@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"></head><body><div class="app">
+<header class="mhead"><h1>Q4 pricing review with Sam and Priya</h1><a class="icon " href="index.html" title="Notes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></a><a class="icon " href="transcript.html" title="Transcript"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M7 8h10M7 12h6"/></svg></a><span class="spacer"></span><span class="live" style="margin-right:4px"><i></i>38:12</span><a class="icon" href="#" title="Pause"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></a><a class="icon end" href="#" title="End"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></a><a class="icon on" href="settings.html" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></a></header>
+<section class="meeting">
+<div class="set">
+<div><h2>During the call</h2><div class="rows"><div class="r"><span class="k">Agent researches during call</span><span class="sw"></span></div></div></div>
+<div><h2>Models and timing</h2><div class="rows">
+<div class="r"><span class="k">Transcription</span><select><option>Parakeet on this Mac</option><option>Whisper on server</option></select></div>
+<div class="r"><span class="k">Notes and actions</span><select><option>Haiku 4.5</option></select></div>
+<div class="r"><span class="k">Transcript clean-up</span><select><option>Haiku 4.5</option></select></div>
+<div class="r"><span class="k">Research</span><select><option>Sonnet 5.5</option></select></div>
+<div class="r"><span class="k">Notes update every</span><select><option>15s</option><option>30s</option><option>60s</option></select></div>
+</div></div>
+<div><h2>Prompts</h2><div class="rows">
+<details class="prompt" open><summary>Now <span>every 15s</span></summary><pre>"now": a one-line headline on what is being discussed right now, at most 3 short bullets, and who has been speaking (or empty).</pre><div style="display:flex;gap:6px;justify-content:flex-end"><button class="btn">Reset</button><button class="btn go">Save</button></div></details>
+<details class="prompt"><summary>Notes <span>every 15s</span></summary><pre>"topics": each topic is one point, titled "&lt;Speaker&gt;: &lt;the main thrust of their argument&gt;"… Detail tapers with age: recent topics get fuller bullets; older topics get shorter and higher level…</pre></details>
+<details class="prompt"><summary>Actions <span>every 15s</span></summary><pre>"actions": things somebody should do after what was said, implied or asked for… Classify each by "kind": "mine", "other", "agent"…</pre></details>
+<details class="prompt"><summary>Transcript clean-up <span>every clip</span></summary><pre>You repair speech-to-text errors in meeting transcript lines. Fix only mis-heard proper nouns: names of people, organisations, places and acronyms…</pre></details>
+<details class="prompt"><summary>Research <span>on new transcript</span></summary><pre>You are a research aide sitting in on a meeting. Read the NEW transcript and decide what is worth looking up for the people in the room…</pre></details>
+<details class="prompt"><summary>Write-up <span>at end of call</span></summary><pre>You write the final write-up of a meeting Tom sat in, from the whole cleaned-up transcript and his own notes…</pre></details>
+</div></div>
+</div>
+</section>
+<div class="grip" role="separator" aria-label="Resize"></div>
+<main class="chat"><div class="msg me">What did Priya say the churn number was?</div><div class="msg">4.2% monthly on the starter plan, up from 3.1% in June. She said it at 31:40.</div></main>
+<div class="composer">Ask about the call…</div>
+</div><script src="grip.js"></script></body></html>

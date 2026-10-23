@@ -368,8 +368,10 @@ export const MeetingState = z
     researchError: z.string().nullable().optional(),
     /** Notes changes made by the chat agent, newest last. */
     agentEdits: z.array(MeetingAgentEdit).optional(),
-    /** When on, agent actions start by themselves in a linked chat. */
+    /** Retired: agent actions now always wait for Approve. Kept so older saved meetings still load. */
     agentRunsActions: z.boolean().optional(),
+    /** A test meeting: a scripted call is played into the transcript and no device listens. */
+    demo: z.boolean().optional(),
     transcript: z.array(MeetingTranscriptLine),
     /** Names given to `them` voices, keyed by voice number as a string. */
     voices: z.record(z.string(), z.string()).optional(),

@@ -549,8 +549,8 @@ describe('MeetingManager', () => {
     ).toThrow(/no bullet 9/);
   });
 
-  it('the default notes prompt asks for speaker-led, plain-language points that spell out acronyms', () => {
-    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/<Speaker>: <the main thrust/);
+  it('the default notes prompt asks for topic summaries naming who said what, in plain language that spell out acronyms', () => {
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/title summarises that stretch[^]*who said what/);
     expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/plain language/);
     expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/spell out acronyms/);
     expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/Decision: /);
@@ -639,6 +639,15 @@ describe('MeetingManager', () => {
     await m.regenerateWriteup('c1');
     expect(m.get('c1')!.writeupError).toBeNull();
     expect(m.get('c1')!.writeup!.title).toBe('Rollout planning');
+  });
+
+  it("names the chat after the write-up's title", async () => {
+    const nameChat = vi.fn(async () => {});
+    const m = make({ nameChat });
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.end('c1');
+    expect(nameChat).toHaveBeenCalledWith('c1', 'Rollout planning');
   });
 
   it("keeps the user's edited write-up", async () => {
@@ -858,28 +867,110 @@ describe('MeetingManager', () => {
       ]);
     });
 
-    it('with the checkbox on, agent actions start at once, now and as they arrive', async () => {
+    it('never starts an agent action by itself: each waits for Approve', async () => {
       const m = await started();
-      await m.setAgentRunsActions('c1', true);
-      expect(startChat).toHaveBeenCalledTimes(1);
-      expect(startChat.mock.calls[0]![1]).toContain('Find vendor dates');
-      expect(m.get('c1')!.actions[2]).toMatchObject({ status: 'running', chatId: 'child1' });
-      expect(m.get('c1')!.actions[0]!.status).toBe('pending');
       await m.ingestAudio('c1', 'mic', Buffer.from('a'));
       analyse.mockResolvedValueOnce(
         analysis({ actions: [{ kind: 'agent', title: 'Draft the recap', why: 'w' }] }),
       );
       await m.tick('c1');
-      expect(startChat).toHaveBeenCalledTimes(2);
-      expect(m.get('c1')!.agentRunsActions).toBe(true);
+      expect(startChat).not.toHaveBeenCalled();
+      expect(
+        m
+          .get('c1')!
+          .actions.filter((a) => a.kind === 'agent')
+          .map((a) => a.status),
+      ).toEqual(['pending', 'pending']);
     });
 
-    it('says so on the panel when an agent action cannot start', async () => {
+    it('refuses the retired "agent does its own actions" switch, and accepts turning it off', async () => {
       const m = await started();
-      startChat.mockRejectedValueOnce(new Error('no credit'));
-      await m.setAgentRunsActions('c1', true);
-      expect(m.get('c1')!.error).toMatch(/Find vendor dates.*no credit/);
-      expect(m.get('c1')!.actions[2]!.status).toBe('pending');
+      expect(() => m.setAgentRunsActions('c1', true)).toThrow(/Approve/);
+      m.setAgentRunsActions('c1', false);
+      expect(m.get('c1')!.agentRunsActions).toBeUndefined();
+    });
+
+    it('ticks an action off and back on, back to running when it has a chat', async () => {
+      const m = await started();
+      const [mine, , agent] = m.get('c1')!.actions;
+      await m.decide('c1', agent!.id, 'do');
+      await m.decide('c1', mine!.id, 'done');
+      await m.decide('c1', agent!.id, 'done');
+      expect(m.get('c1')!.actions.map((a) => a.status)).toEqual(['done', 'pending', 'done']);
+      await expect(m.decide('c1', mine!.id, 'done')).rejects.toThrow(/already done/);
+      await m.decide('c1', mine!.id, 'reopen');
+      await m.decide('c1', agent!.id, 'reopen');
+      expect(m.get('c1')!.actions.map((a) => a.status)).toEqual(['pending', 'pending', 'running']);
+      await expect(m.decide('c1', mine!.id, 'reopen')).rejects.toThrow(/not done/);
+    });
+
+    it('hands an action to anyone, Tom and the agent included, and rewrites it', async () => {
+      const m = await started();
+      const [mine, other] = m.get('c1')!.actions;
+      m.assignAction('c1', mine!.id, { kind: 'other', owner: 'Dev' });
+      m.assignAction('c1', other!.id, { kind: 'agent' });
+      m.setActionTitle('c1', other!.id, 'Look up the vendor dates');
+      expect(m.get('c1')!.actions.slice(0, 2)).toMatchObject([
+        { kind: 'other', owner: 'Dev' },
+        { kind: 'agent', title: 'Look up the vendor dates' },
+      ]);
+      expect(m.get('c1')!.actions[1]!.owner).toBeUndefined();
+      expect(() => m.assignAction('c1', mine!.id, { kind: 'other' })).toThrow(/owner/);
+      expect(() => m.assignAction('c1', mine!.id, { kind: 'mine', owner: 'Dev' })).toThrow(/owner/);
+    });
+
+    it("adds an action Tom wrote, at the meeting's time now", async () => {
+      const m = await started();
+      clock += 5_000;
+      m.addAction('c1', { title: 'Book the follow-up', kind: 'mine' });
+      const added = m.get('c1')!.actions.at(-1)!;
+      expect(added).toMatchObject({
+        kind: 'mine',
+        title: 'Book the follow-up',
+        why: '',
+        status: 'pending',
+      });
+      expect(added.at).toBe(5_000);
+      expect(() => m.addAction('c1', { title: 'x', kind: 'other' })).toThrow(/owner/);
+    });
+  });
+
+  describe('test meeting', () => {
+    it('plays the script into the transcript a line at a time, with names, while live', () => {
+      const m = make({ demoLineMs: 1_000 });
+      m.startDemo('c1');
+      expect(m.get('c1')).toMatchObject({ status: 'live', demo: true, transcript: [] });
+      const feed = ticks[1]!;
+      feed();
+      feed();
+      const t = m.get('c1')!.transcript;
+      expect(t).toHaveLength(2);
+      expect(t[0]).toMatchObject({ speaker: 'you' });
+      expect(t[1]).toMatchObject({ speaker: 'them', name: 'Priya' });
+      m.pause('c1');
+      expect(ticks).toEqual([]);
+      feed();
+      expect(m.get('c1')!.transcript).toHaveLength(2);
+      m.resume('c1');
+      expect(ticks).toHaveLength(2);
+      ticks[1]!();
+      expect(m.get('c1')!.transcript).toHaveLength(3);
+    });
+
+    it('stops at the end of the script', async () => {
+      const { DEMO_SCRIPT } = await import('../src/meetingDemo.js');
+      const m = make();
+      m.startDemo('c1');
+      for (let i = 0; i < DEMO_SCRIPT.length + 3; i++) ticks[1]?.();
+      expect(m.get('c1')!.transcript).toHaveLength(DEMO_SCRIPT.length);
+      expect(ticks).toHaveLength(0);
+    });
+
+    it('a real meeting is not a test meeting', () => {
+      const m = make();
+      m.start('c1');
+      expect(m.get('c1')!.demo).toBeUndefined();
+      expect(ticks).toHaveLength(1);
     });
   });
 
@@ -976,7 +1067,7 @@ describe('meetingGen', () => {
       myNotes: '',
       prompts: PROMPTS,
     });
-    expect(p).toMatch(/main thrust/);
+    expect(p).toMatch(/title summarises that stretch/);
     expect(p).toMatch(/never repeat/i);
     expect(p).toMatch(/older topics[^]*shorter/i);
     expect(p).toContain('"atSeconds":90');
@@ -1176,6 +1267,58 @@ describe('meeting events on the host link', () => {
     sent.length = 0;
     await send({ type: 'meeting.get_request', chatId: 'c' });
     expect(sent[0]).toMatchObject({ type: 'meeting.state', chatId: 'c' });
+    m.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('routes the action edits and the test meeting to the manager', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'meeting-ev-'));
+    const m = new MeetingManager({
+      prompts: () => PROMPTS,
+      dir,
+      transcribe: async () => 'hi',
+      analyse: async () => analysis(),
+      startChat: async () => 'child',
+      logger,
+      emit: () => {},
+      setInterval: () => 1,
+      clearInterval: () => {},
+    });
+    const sent: WireEvent[] = [];
+    const daemon = { allocErrorSeq: () => 1 } as never;
+    const send = (e: WireEvent): Promise<void> =>
+      handleServerEvent(e, daemon, (x) => sent.push(x), logger, { meetings: m } as never);
+    await send({ type: 'meeting.control_request', chatId: 'c', action: 'demo' });
+    expect(m.get('c')).toMatchObject({ status: 'live', demo: true });
+    await send({
+      type: 'meeting.action_request',
+      chatId: 'c',
+      add: { title: 'Book the room', kind: 'mine' },
+    });
+    const id = m.get('c')!.actions[0]!.id;
+    await send({
+      type: 'meeting.action_request',
+      chatId: 'c',
+      actionId: id,
+      assign: { kind: 'other', owner: 'Sam' },
+    });
+    await send({ type: 'meeting.action_request', chatId: 'c', actionId: id, title: 'Book a room' });
+    await send({ type: 'meeting.action_request', chatId: 'c', actionId: id, decision: 'done' });
+    expect(m.get('c')!.actions[0]).toMatchObject({
+      kind: 'other',
+      owner: 'Sam',
+      title: 'Book a room',
+      status: 'done',
+    });
+    await send({
+      type: 'meeting.action_request',
+      chatId: 'c',
+      actionId: id,
+      title: 'x',
+      decision: 'reopen',
+    });
+    expect(JSON.stringify(sent.at(-1))).toMatch(/exactly one/);
+    expect(m.get('c')!.actions[0]!.status).toBe('done');
     m.dispose();
     rmSync(dir, { recursive: true, force: true });
   });

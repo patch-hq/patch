@@ -1,0 +1,5 @@
+{ "screens": [
+  { "id": "live", "name": "During call", "path": "index.html" },
+  { "id": "transcript", "name": "Transcript", "path": "transcript.html" },
+  { "id": "settings", "name": "Settings", "path": "settings.html" },
+  { "id": "ended", "name": "After call", "path": "ended.html" } ] }

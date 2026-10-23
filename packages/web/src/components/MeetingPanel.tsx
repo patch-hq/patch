@@ -1,12 +1,34 @@
-// Meeting mode: the chat stays a chat, and the meeting lives in a panel on its right. Pure view
-// of the host's MeetingState; every control goes through lib/meetingControl.
+// Meeting mode: the meeting sits across the top of the chat, full width, with a
+// bar under it that drags to give the meeting or the chat more room. One feed
+// carries the meeting: topics summarised at the top (folded the further back
+// they are), research and notes in among them, then the actions to deal with,
+// then what was just said. The transcript is the other view. Pure view of the
+// host's MeetingState; every control goes through lib/meetingControl.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronUp, Copy, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import {
+  Check,
+  ChevronRight,
+  ChevronUp,
+  ChevronDown,
+  Copy,
+  List,
+  MessageSquareText,
+  Pause,
+  Play,
+  Plus,
+  SlidersHorizontal,
+  Square,
+} from 'lucide-react';
 import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
+  MEETING_CLEANUP_INSTRUCTIONS,
+  MEETING_NOTES_FRAME,
+  MEETING_RESEARCH_INSTRUCTIONS,
+  MEETING_RESEARCH_RULES,
+  MEETING_WRITEUP_INSTRUCTIONS,
   formatMeetingClock,
   meetingSpeakerLabel,
   meetingElapsedMs,
@@ -17,12 +39,13 @@ import {
   type MeetingTopic,
 } from '@patch/wire';
 import {
+  addAction,
+  assignAction,
   decideAction,
-  setActionOwner,
-  setAgentRunsActions,
+  setActionTitle,
   setMeetingResearch,
-  editMeetingNotes,
   addNote,
+  editMeetingNotes,
   editNote,
   endMeeting,
   getMeetingSpeed,
@@ -36,15 +59,9 @@ import {
   resumeMeeting,
   resumeEndedMeeting,
   saveWriteup,
-  regenerateWriteup,
 } from '../lib/meetingControl.js';
 import { writeupBodyHtml, writeupFromBody, writeupText } from '../lib/meetingWriteup.js';
-import {
-  isMeetingShown,
-  useMeetingStore,
-  type MeetingPromptKey,
-  type MeetingView,
-} from '../stores/meetingStore.js';
+import { isMeetingShown, useMeetingStore, type MeetingView } from '../stores/meetingStore.js';
 import { parseMeetingNotes, type MeetingNote } from '../lib/meetingNotes.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import type { AccountPreferences } from '../api/rest.js';
@@ -81,79 +98,134 @@ function speedOf(meeting: MeetingState): string {
   return hit ? hit[0] : getMeetingSpeed();
 }
 
+type PromptKey = 'now' | 'notes' | 'actions';
+
 const PROMPT_FIELDS: Record<
-  MeetingPromptKey,
-  { title: string; field: keyof AccountPreferences; fallback: string }
+  PromptKey,
+  { title: string; when: string; field: keyof AccountPreferences; fallback: string }
 > = {
-  now: { title: 'Now', field: 'meetingNowPrompt', fallback: DEFAULT_MEETING_NOW_PROMPT },
-  notes: { title: 'Notes', field: 'meetingNotesPrompt', fallback: DEFAULT_MEETING_NOTES_PROMPT },
+  now: {
+    title: 'Now',
+    when: 'each notes pass',
+    field: 'meetingNowPrompt',
+    fallback: DEFAULT_MEETING_NOW_PROMPT,
+  },
+  notes: {
+    title: 'Notes',
+    when: 'each notes pass',
+    field: 'meetingNotesPrompt',
+    fallback: DEFAULT_MEETING_NOTES_PROMPT,
+  },
   actions: {
     title: 'Actions',
+    when: 'each notes pass',
     field: 'meetingActionsPrompt',
     fallback: DEFAULT_MEETING_ACTIONS_PROMPT,
   },
 };
 
-/** Edits one of the three meeting prompts without leaving the meeting; applies from the next pass. */
-function PromptEditor() {
-  const key = useMeetingStore((s) => s.promptEditor);
-  const open = useMeetingStore((s) => s.openPromptEditor);
-  const prefs = usePreferencesStore((s) => s.preferences);
-  const [draft, setDraft] = useState('');
+/** The passes whose instructions are fixed in the host: shown so it is clear what each is told. */
+const FIXED_PROMPTS: Array<{ id: string; title: string; when: string; text: string }> = [
+  {
+    id: 'frame',
+    title: 'Notes pass (around the three above)',
+    when: 'each notes pass',
+    text: MEETING_NOTES_FRAME.join('\n'),
+  },
+  {
+    id: 'cleanup',
+    title: 'Transcript clean-up',
+    when: 'before each notes pass',
+    text: MEETING_CLEANUP_INSTRUCTIONS.join('\n'),
+  },
+  {
+    id: 'research',
+    title: 'Research',
+    when: 'on new talk',
+    text: [...MEETING_RESEARCH_INSTRUCTIONS, '', ...MEETING_RESEARCH_RULES].join('\n'),
+  },
+  {
+    id: 'writeup',
+    title: 'Write-up',
+    when: 'when the meeting ends',
+    text: MEETING_WRITEUP_INSTRUCTIONS.join('\n'),
+  },
+];
+
+/** One editable meeting prompt, folded to its name until opened; applies from the next pass. */
+function PromptBlock({ k }: { k: PromptKey }) {
+  const { title, when, field, fallback } = PROMPT_FIELDS[k];
+  const saved = usePreferencesStore((s) => String(s.preferences[field]));
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(saved);
+  // Reload the text when it is opened, not on every preference push mid-typing.
   useEffect(() => {
-    if (key) setDraft(String(prefs[PROMPT_FIELDS[key].field]));
-    // Reload the text only when switching prompt, not on every preference push mid-typing.
-  }, [key]);
-  if (!key) return null;
-  const { title, field, fallback } = PROMPT_FIELDS[key];
+    if (open) setDraft(saved);
+  }, [open]);
   const save = (text: string) =>
-    void patchShared(`${title.toLowerCase()} prompt`, { [field]: text }).then((ok) => {
-      if (ok) open(null);
-    });
+    void patchShared(`${title.toLowerCase()} prompt`, { [field]: text });
   return (
-    <div className="mm-prompt" data-testid="meeting-prompt-editor">
-      <div className="mm-prompt-tabs">
-        {(Object.keys(PROMPT_FIELDS) as MeetingPromptKey[]).map((k) => (
-          <button
-            key={k}
-            type="button"
-            className="mm-btn"
-            aria-pressed={k === key}
-            data-testid={`meeting-prompt-tab-${k}`}
-            onClick={() => open(k)}
-          >
-            {PROMPT_FIELDS[k].title}
-          </button>
-        ))}
-      </div>
-      <textarea
-        aria-label={`${title} prompt`}
-        data-testid="meeting-prompt-text"
-        rows={8}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-      />
-      <div className="mm-prompt-actions">
-        <button type="button" className="mm-btn" onClick={() => open(null)}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="mm-btn"
-          data-testid="meeting-prompt-reset"
-          onClick={() => save(fallback)}
-        >
-          Reset to default
-        </button>
-        <button
-          type="button"
-          className="mm-do"
-          data-testid="meeting-prompt-save"
-          onClick={() => save(draft)}
-        >
-          Save
-        </button>
-      </div>
+    <div className="mm-prompt" data-testid={`meeting-prompt-${k}`} data-open={open}>
+      <button
+        type="button"
+        className="mm-prompt-h"
+        aria-expanded={open}
+        data-testid={`meeting-prompt-open-${k}`}
+        onClick={() => setOpen(!open)}
+      >
+        <span>{title}</span>
+        <span className="mm-prompt-when">{when}</span>
+      </button>
+      {open ? (
+        <>
+          <textarea
+            aria-label={`${title} prompt`}
+            data-testid="meeting-prompt-text"
+            rows={6}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="mm-prompt-actions">
+            <button
+              type="button"
+              className="mm-btn"
+              data-testid="meeting-prompt-reset"
+              onClick={() => {
+                setDraft(fallback);
+                save(fallback);
+              }}
+            >
+              Reset to default
+            </button>
+            <button
+              type="button"
+              className="mm-do"
+              data-testid="meeting-prompt-save"
+              onClick={() => save(draft)}
+            >
+              Save
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function FixedPromptBlock({ p }: { p: (typeof FIXED_PROMPTS)[number] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mm-prompt" data-testid={`meeting-prompt-${p.id}`} data-open={open}>
+      <button
+        type="button"
+        className="mm-prompt-h"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <span>{p.title}</span>
+        <span className="mm-prompt-when">{p.when} · fixed</span>
+      </button>
+      {open ? <pre className="mm-prompt-fixed">{p.text}</pre> : null}
     </div>
   );
 }
@@ -228,14 +300,6 @@ function SpeakerName({
   );
 }
 
-const VIEWS: MeetingView[] = ['notes', 'mine', 'actions', 'transcript'];
-const VIEW_LABEL: Record<MeetingView, string> = {
-  notes: 'Notes',
-  mine: 'My notes',
-  actions: 'Actions',
-  transcript: 'Transcript',
-};
-
 const openActions = (meeting: MeetingState) =>
   meeting.actions.filter((a) => a.status !== 'dismissed');
 
@@ -266,45 +330,85 @@ function People({ meeting }: { meeting: MeetingState }) {
   );
 }
 
-/** The panel's first row: timer, people, Pause/End or Resume, settings, and fold once ended. */
+/** The panel's one header row: the two views on the left; timer, controls and settings on the right. */
 function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const view = useMeetingStore((s) => s.view[chatId] ?? 'notes');
+  const setView = useMeetingStore((s) => s.setView);
   const setFolded = useMeetingStore((s) => s.setFolded);
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
   const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
   const ended = meeting.status === 'ended';
+  const show = (v: MeetingView) => {
+    setView(chatId, v);
+    setSettingsOpen(false);
+  };
   return (
     <div className="mm-head" data-testid="meeting-bar" data-status={meeting.status}>
-      <MeetingPill meeting={meeting} />
+      <button
+        type="button"
+        className="mm-icon"
+        data-testid="meeting-view-notes"
+        aria-label="Notes"
+        title="Notes"
+        aria-pressed={!settingsOpen && view === 'notes'}
+        onClick={() => show('notes')}
+      >
+        <List size={16} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className="mm-icon"
+        data-testid="meeting-view-transcript"
+        aria-label="Transcript"
+        title="Transcript"
+        aria-pressed={!settingsOpen && view === 'transcript'}
+        onClick={() => show('transcript')}
+      >
+        <MessageSquareText size={16} aria-hidden="true" />
+      </button>
+      {meeting.demo ? (
+        <span className="mm-demo" data-testid="meeting-demo">
+          Test
+        </span>
+      ) : null}
       <People meeting={meeting} />
+      <MeetingPill meeting={meeting} />
       {meeting.status === 'live' ? (
         <button
           type="button"
-          className="mm-btn"
+          className="mm-icon"
           data-testid="meeting-pause"
+          aria-label="Pause"
+          title="Pause"
           onClick={() => pauseMeeting(chatId)}
         >
-          Pause
+          <Pause size={16} aria-hidden="true" />
         </button>
       ) : (
         <button
           type="button"
-          className="mm-btn"
+          className="mm-icon"
           data-testid="meeting-resume"
+          aria-label="Resume"
+          title="Resume"
           onClick={() => (ended ? void resumeEndedMeeting(chatId) : resumeMeeting(chatId))}
         >
-          Resume
+          <Play size={16} aria-hidden="true" />
         </button>
       )}
       {!ended ? (
         <button
           type="button"
-          className="mm-end"
+          className="mm-icon mm-end-icon"
           data-testid="meeting-end"
+          aria-label="End"
+          title="End"
           onClick={() => endMeeting(chatId)}
         >
-          End
+          <Square size={14} aria-hidden="true" />
         </button>
       ) : null}
+      {ended && meeting.writeup ? <CopyWriteup meeting={meeting} /> : null}
       <button
         type="button"
         className="mm-icon"
@@ -336,6 +440,29 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
   );
 }
 
+/** Copies the write-up as plain text, for sending on to the group. */
+function CopyWriteup({ meeting }: { meeting: MeetingState }) {
+  const [copied, setCopied] = useState(false);
+  const meta = `${new Date(meeting.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · ${Math.max(1, Math.round(meeting.elapsedBaseMs / 60_000))} min`;
+  return (
+    <button
+      type="button"
+      className="mm-icon"
+      data-testid="meeting-copy"
+      aria-label="Copy write-up"
+      title={copied ? 'Copied' : 'Copy write-up'}
+      onClick={() =>
+        void navigator.clipboard.writeText(writeupText(meeting.writeup!, meta)).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        })
+      }
+    >
+      {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+    </button>
+  );
+}
+
 /** An ended meeting folded away: one thin line over the chat, with a way back to its notes or transcript. */
 function FoldedBar({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const setView = useMeetingStore((s) => s.setView);
@@ -356,19 +483,23 @@ function FoldedBar({ chatId, meeting }: { chatId: string; meeting: MeetingState 
         <People meeting={meeting} />
         <button
           type="button"
-          className="mm-btn"
+          className="mm-icon"
           data-testid="meeting-open-summary"
+          aria-label="Notes"
+          title="Notes"
           onClick={() => show('notes')}
         >
-          Notes
+          <List size={16} aria-hidden="true" />
         </button>
         <button
           type="button"
-          className="mm-btn"
+          className="mm-icon"
           data-testid="meeting-open-transcript"
+          aria-label="Transcript"
+          title="Transcript"
           onClick={() => show('transcript')}
         >
-          Transcript
+          <MessageSquareText size={16} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -415,7 +546,8 @@ function AlertLine({
 /** Everything that has gone wrong with the meeting, under the tabs. */
 function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const capturing = useMeetingStore((s) => s.capturingChatId === chatId);
-  const notListening = meeting.status === 'live' && !capturing;
+  // A test meeting plays a script: no device is meant to be listening.
+  const notListening = meeting.status === 'live' && !capturing && meeting.demo !== true;
   if (!meeting.error && !meeting.researchError && !notListening) return null;
   return (
     <div className="mm-alerts">
@@ -442,9 +574,8 @@ function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingSt
   );
 }
 
-/** The meeting's on/off switches: research as it goes, and the agent running its own actions. */
+/** The meeting's switch: the agent researching what is said as the call goes. */
 export function MeetingSwitches({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const ended = meeting.status === 'ended';
   return (
     <div className="mm-switches">
       <label className="mm-switch">
@@ -452,30 +583,17 @@ export function MeetingSwitches({ chatId, meeting }: { chatId: string; meeting: 
           type="checkbox"
           data-testid="meeting-research-on"
           checked={meeting.researchOn === true}
-          disabled={ended}
+          disabled={meeting.status === 'ended'}
           onChange={(e) => setMeetingResearch(chatId, e.target.checked)}
         />
-        Research as we go
+        Agent researches during call
       </label>
-      {ended ? null : (
-        <label className="mm-switch">
-          <input
-            type="checkbox"
-            data-testid="meeting-agent-runs"
-            checked={meeting.agentRunsActions === true}
-            onChange={(e) => setAgentRunsActions(chatId, e.target.checked)}
-          />
-          Agent does its own actions
-        </label>
-      )}
     </div>
   );
 }
 
-/** What the settings button opens: the switches, the meeting's prompts, models and timing, in place. */
+/** What the settings button opens: the switch, how often notes update, models, and every prompt. */
 function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const promptEditor = useMeetingStore((s) => s.promptEditor);
-  const openPromptEditor = useMeetingStore((s) => s.openPromptEditor);
   return (
     <div className="mm-settings" data-testid="meeting-settings">
       <MeetingSwitches chatId={chatId} meeting={meeting} />
@@ -499,41 +617,19 @@ function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: Mee
         <MeetingModelRows />
       </Group>
       <div className="mm-label">Prompts</div>
-      {promptEditor ? (
-        <PromptEditor />
-      ) : (
-        <div className="mm-prompt-tabs">
-          {(Object.keys(PROMPT_FIELDS) as MeetingPromptKey[]).map((k) => (
-            <button
-              key={k}
-              type="button"
-              className="mm-btn"
-              data-testid={`meeting-prompt-open-${k}`}
-              onClick={() => openPromptEditor(k)}
-            >
-              {PROMPT_FIELDS[k].title}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="mm-prompts" data-testid="meeting-prompts">
+        {(Object.keys(PROMPT_FIELDS) as PromptKey[]).map((k) => (
+          <PromptBlock key={k} k={k} />
+        ))}
+        {FIXED_PROMPTS.map((p) => (
+          <FixedPromptBlock key={p.id} p={p} />
+        ))}
+      </div>
     </div>
   );
 }
 
 const MAX_LINES_BEHIND = 12;
-
-/** The transcript lines a point came from: from its time up to the next point's. */
-function linesBehind(meeting: MeetingState, t: MeetingTopic, next: MeetingTopic | undefined) {
-  const end = next ? next.at : Infinity;
-  return meeting.transcript.filter((l) => l.at >= t.at && l.at < end).slice(0, MAX_LINES_BEHIND);
-}
-
-/** Which editable field should take the caret once it has rendered. */
-interface PointFocus {
-  topicId: string;
-  /** `null` is the point's title; a number is a bullet. */
-  bullet: number | null;
-}
 
 /**
  * Text that is edited where it stands. It commits on blur; Enter commits and
@@ -601,24 +697,97 @@ function Editable({
   );
 }
 
-/** One point: time, "Speaker: main thrust", bullets. Every piece is edited in place. */
-function PointRow({
+/** "0:00–9:40 · 10 min": where a topic sits in the call and how long it ran. */
+export function topicSpanLabel(start: number, end: number): string {
+  const mins = Math.max(1, Math.round((end - start) / 60_000));
+  return `${formatMeetingClock(start)}–${formatMeetingClock(end)} · ${mins} min`;
+}
+
+/** Something raised during a topic: research, one of Tom's notes, or an action. */
+export type FeedItem =
+  | { kind: 'card'; at: number; card: MeetingCard }
+  | { kind: 'note'; at: number; note: MeetingNote }
+  | { kind: 'action'; at: number; action: MeetingAction };
+
+/** One topic with the time it ran and what came up in it. */
+export interface FeedTopic {
+  topic: MeetingTopic;
+  start: number;
+  end: number;
+  items: FeedItem[];
+}
+
+/**
+ * The feed's shape: topics oldest first, each running until the next one starts
+ * (the last until `endMs`), with research, notes and actions filed under the
+ * topic they came up in. Anything raised before the first topic is `before`.
+ */
+export function feedTopics(
+  meeting: Pick<MeetingState, 'topics' | 'cards' | 'actions' | 'myNotes'>,
+  endMs: number,
+): { before: FeedItem[]; topics: FeedTopic[] } {
+  const sorted = [...meeting.topics].sort((a, b) => a.at - b.at);
+  const items: FeedItem[] = [
+    ...(meeting.cards ?? []).map((card) => ({ kind: 'card' as const, at: card.at, card })),
+    ...parseMeetingNotes(meeting.myNotes ?? '').map((note) => ({
+      kind: 'note' as const,
+      at: note.at,
+      note,
+    })),
+    ...meeting.actions
+      .filter((a) => a.status !== 'dismissed')
+      .map((action) => ({ kind: 'action' as const, at: action.at, action })),
+  ].sort((a, b) => a.at - b.at);
+  const topics = sorted.map((topic, i) => {
+    const next = sorted[i + 1];
+    const end = next ? next.at : Math.max(endMs, topic.at);
+    return { topic, start: topic.at, end, items: [] as FeedItem[] };
+  });
+  const before: FeedItem[] = [];
+  for (const item of items) {
+    let home: FeedTopic | undefined;
+    for (const t of topics) if (item.at >= t.start) home = t;
+    if (home) home.items.push(item);
+    else before.push(item);
+  }
+  return { before, topics };
+}
+
+/** The transcript lines a topic came from: from its start up to the next topic's. */
+function linesBehind(meeting: MeetingState, start: number, end: number) {
+  return meeting.transcript.filter((l) => l.at >= start && l.at < end).slice(0, MAX_LINES_BEHIND);
+}
+
+/** Which editable field should take the caret once it has rendered. */
+interface PointFocus {
+  topicId: string;
+  /** `null` is the topic's summary line; a number is a bullet. */
+  bullet: number | null;
+}
+
+/**
+ * One topic: a chevron, its one-line summary and when it ran. Open, its
+ * bullets and whatever came up in it. Every piece of text is edited in place.
+ */
+function TopicRow({
   chatId,
-  topic: t,
-  isNow,
-  lines,
+  meeting,
+  ft,
+  open,
+  onToggle,
   focus,
   setFocus,
 }: {
   chatId: string;
-  topic: MeetingTopic;
-  /** The newest point while the meeting is live. */
-  isNow: boolean;
-  lines: MeetingState['transcript'];
+  meeting: MeetingState;
+  ft: FeedTopic;
+  open: boolean;
+  onToggle: () => void;
   focus: PointFocus | null;
   setFocus: (f: PointFocus | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const t = ft.topic;
+  const [said, setSaid] = useState(false);
   const decision = DECISION.exec(t.title);
   const titleText = unknownSpeaker(decision ? t.title.slice(decision[0].length) : t.title);
   const wants = (bullet: number | null) =>
@@ -636,34 +805,33 @@ function PointRow({
     if (text === '') edit({ op: 'remove_bullet', topicId: t.id, index: i });
     else if (text !== t.points[i]) edit({ op: 'set_bullet', topicId: t.id, index: i, text });
   };
+  const lines = open && said ? linesBehind(meeting, ft.start, ft.end) : [];
 
   return (
     <div
-      className={isNow ? 'mm-topic now' : 'mm-topic'}
+      className="mm-topic"
       data-testid="meeting-topic"
-      data-now={isNow ? 'true' : undefined}
+      data-open={open ? 'true' : undefined}
       data-decided={decision ? 'true' : undefined}
     >
-      <button
-        type="button"
-        className="tm"
-        data-testid="meeting-point-time"
-        aria-expanded={open}
-        title="Show what was said"
-        onClick={() => setOpen(!open)}
-      >
-        {formatMeetingClock(t.at)}
-      </button>
-      <div className="c">
+      <div className="mm-topic-h">
+        <button
+          type="button"
+          className="mm-chev"
+          data-testid="meeting-topic-toggle"
+          aria-expanded={open}
+          aria-label={open ? 'Fold' : 'Open'}
+          onClick={onToggle}
+        >
+          <ChevronRight size={14} aria-hidden="true" />
+        </button>
         <div className="nm">
-          {isNow ? <span className="mm-now-tag">Now</span> : null}
-          {decision ? <span className="decw">Decision:</span> : null}
-          {decision ? ' ' : null}
+          {decision ? <span className="decw">Decided</span> : null}
           <Editable
             value={titleText}
             testid="meeting-point-title"
-            label="Point"
-            placeholder="Speaker: what they argued"
+            label="Topic"
+            placeholder="What was discussed, who said what, where it landed"
             autoFocus={wants(null)}
             onFocused={() => setFocus(null)}
             onCommit={commitTitle}
@@ -675,192 +843,203 @@ function PointRow({
             }}
           />
         </div>
-        {t.points.length > 0 ? (
-          <ul>
-            {t.points.map((p, i) => (
-              <li key={i}>
-                <Editable
-                  value={p}
-                  testid="meeting-point-bullet"
-                  label="Bullet"
-                  placeholder="Detail"
-                  autoFocus={wants(i)}
-                  onFocused={() => setFocus(null)}
-                  onCommit={(text) => commitBullet(i, text)}
-                  onEnter={(text) => {
-                    if (text === '') return (document.activeElement as HTMLElement | null)?.blur();
-                    commitBullet(i, text);
-                    edit({ op: 'add_bullet', topicId: t.id, index: i + 1 });
-                    setFocus({ topicId: t.id, bullet: i + 1 });
-                  }}
-                />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {open ? (
-          <div className="mm-tx" data-testid="meeting-point-lines">
-            {lines.length === 0 ? (
-              <span className="mm-wait">No transcript for this point</span>
-            ) : null}
-            {lines.map((l, i) => (
-              <div key={i} data-testid="meeting-point-line">
-                <b>{speakerDisplay(l)}</b> {l.text}
-              </div>
-            ))}
-          </div>
-        ) : null}
+        <button
+          type="button"
+          className="mm-span"
+          data-testid="meeting-point-time"
+          title={open ? 'Show what was said' : 'Open'}
+          aria-pressed={open && said}
+          onClick={() => {
+            if (!open) onToggle();
+            setSaid(open ? !said : true);
+          }}
+        >
+          {topicSpanLabel(ft.start, ft.end)}
+        </button>
       </div>
+      {open ? (
+        <div className="mm-topic-b">
+          {t.points.length > 0 ? (
+            <ul>
+              {t.points.map((p, i) => (
+                <li key={i}>
+                  <Editable
+                    value={p}
+                    testid="meeting-point-bullet"
+                    label="Bullet"
+                    placeholder="Detail"
+                    autoFocus={wants(i)}
+                    onFocused={() => setFocus(null)}
+                    onCommit={(text) => commitBullet(i, text)}
+                    onEnter={(text) => {
+                      if (text === '')
+                        return (document.activeElement as HTMLElement | null)?.blur();
+                      commitBullet(i, text);
+                      edit({ op: 'add_bullet', topicId: t.id, index: i + 1 });
+                      setFocus({ topicId: t.id, bullet: i + 1 });
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {ft.items.map((item) => (
+            <FeedItemRow key={feedItemKey(item)} chatId={chatId} item={item} />
+          ))}
+          {said ? (
+            <div className="mm-tx" data-testid="meeting-point-lines">
+              {lines.length === 0 ? (
+                <span className="mm-wait">No transcript for this topic</span>
+              ) : null}
+              {lines.map((l, i) => (
+                <div key={i} data-testid="meeting-point-line">
+                  <b>{speakerDisplay(l, meeting.voices)}</b> {l.text}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** One of Tom's own notes, in full ink at the time he wrote it; edited in place, emptied to remove. */
+function feedItemKey(item: FeedItem): string {
+  if (item.kind === 'card') return `c${item.card.id}`;
+  if (item.kind === 'note') return `n${item.note.index}`;
+  return `a${item.action.id}`;
+}
+
+function FeedItemRow({ chatId, item }: { chatId: string; item: FeedItem }) {
+  if (item.kind === 'card') return <ResearchCard card={item.card} />;
+  if (item.kind === 'note') return <NoteRow chatId={chatId} note={item.note} />;
+  const a = item.action;
+  return (
+    <div className="mm-line" data-testid="meeting-feed-action" data-status={a.status}>
+      <span className="mm-chip act">{a.kind === 'agent' ? 'Agent task' : 'Action'}</span>
+      <span className="mm-line-t">
+        {actionOwnerLabel(a) ? `${actionOwnerLabel(a)}: ` : ''}
+        {a.title}
+      </span>
+    </div>
+  );
+}
+
+/** One of Tom's own notes, in full ink where he wrote it; edited in place, emptied to remove. */
 function NoteRow({ chatId, note }: { chatId: string; note: MeetingNote }) {
   return (
-    <div className="mm-topic mine" data-testid="meeting-note">
-      <span className="tm">{formatMeetingClock(note.at)}</span>
-      <div className="c">
-        <div className="nm">
-          <Editable
-            value={note.text}
-            testid="meeting-note-text"
-            label="Note"
-            placeholder="Note"
-            autoFocus={false}
-            onFocused={() => {}}
-            onCommit={(text) => {
-              if (text !== note.text) editNote(chatId, note.index, text);
-            }}
-            onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
-          />
-        </div>
-      </div>
+    <div className="mm-line mine" data-testid="meeting-note">
+      <span className="mm-chip note">Note</span>
+      <Editable
+        value={note.text}
+        testid="meeting-note-text"
+        className="mm-line-t"
+        label="Note"
+        placeholder="Note"
+        autoFocus={false}
+        onFocused={() => {}}
+        onCommit={(text) => {
+          if (text !== note.text) editNote(chatId, note.index, text);
+        }}
+        onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
+      />
     </div>
   );
 }
 
-/** How long the live tail reaches back: roughly the last minute of talk. */
-const TAIL_MS = 60_000;
+/** How far back "Just said" reaches: the last half minute, and never fewer than a few lines. */
+const JUST_SAID_MS = 30_000;
+const JUST_SAID_MIN_LINES = 4;
 
-/** The last minute or so of talk that the notes have not taken in yet, the newest line provisional. */
-function LiveTail({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const newestPoint = meeting.topics.reduce((m, t) => Math.max(m, t.at), -1);
-  const last = meeting.transcript.at(-1);
-  if (meeting.live == null || !last) return null;
-  const from = Math.max(newestPoint + 1, last.at - TAIL_MS);
-  const lines = meeting.transcript.filter((l) => l.at >= from);
+/** The last stretch of talk, word for word: for "what did they just say?". */
+export function justSaid(transcript: MeetingState['transcript']): MeetingState['transcript'] {
+  const last = transcript.at(-1);
+  if (!last) return [];
+  const recent = transcript.filter((l) => l.at >= last.at - JUST_SAID_MS);
+  return recent.length >= JUST_SAID_MIN_LINES ? recent : transcript.slice(-JUST_SAID_MIN_LINES);
+}
+
+function JustSaid({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const lines = justSaid(meeting.transcript);
   if (lines.length === 0) return null;
   return (
-    <div className="mm-tail" data-testid="meeting-tail">
-      <div className="mm-label">Not in the summary yet</div>
+    <div className="mm-said" data-testid="meeting-tail">
+      <div className="mm-sect">Just said</div>
       {lines.map((l, i) => (
-        <div
-          key={i}
-          data-testid="meeting-line"
-          className={i === lines.length - 1 ? 'mm-ln prov' : 'mm-ln'}
-        >
-          <span className="tm">{formatMeetingClock(l.at)}</span>
-          <span>
-            <SpeakerName chatId={chatId} meeting={meeting} line={l} /> {l.text}
-          </span>
+        <div key={`${l.at}-${i}`} data-testid="meeting-line" className="mm-ln">
+          <SpeakerName chatId={chatId} meeting={meeting} line={l} />
+          <span>{l.text}</span>
         </div>
       ))}
     </div>
   );
 }
 
-/** One entry in Notes: a point, or a research card at the time it was raised. */
-export type NotesItem =
-  | { kind: 'point'; at: number; topic: MeetingTopic }
-  | { kind: 'card'; at: number; card: MeetingCard };
-
-/** Points and research cards together, oldest first, so the newest is at the bottom. */
-export function notesItems(topics: MeetingTopic[], cards: MeetingCard[]): NotesItem[] {
-  return [
-    ...topics.map((t) => ({ kind: 'point' as const, at: t.at, topic: t })),
-    ...cards.map((c) => ({ kind: 'card' as const, at: c.at, card: c })),
-  ].sort((a, b) => a.at - b.at);
-}
-
 /**
- * Notes: the points and the agent's research, oldest first, then while live the
- * talk the points have not taken in yet. Once ended, the write-up heads it.
+ * The one feed: topics oldest first — the newest open while live, the rest
+ * folded to their summary line — then the actions, then while live what was
+ * just said. Once ended, the write-up heads it, folded.
  */
-function NotesStream({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+function Feed({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const [focus, setFocus] = useState<PointFocus | null>(null);
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
   const live = meeting.status !== 'ended';
-  const items = useMemo(
-    () => notesItems(meeting.topics, meeting.cards ?? []),
-    [meeting.topics, meeting.cards],
+  const now = useNow(meeting.status === 'live');
+  const endMs = live ? meetingElapsedMs(meeting, now) : meeting.elapsedBaseMs;
+  const { before, topics } = useMemo(
+    () => feedTopics(meeting, endMs),
+    [meeting.topics, meeting.cards, meeting.actions, meeting.myNotes, endMs],
   );
-  const points = items.flatMap((i) => (i.kind === 'point' ? [i.topic] : []));
-  const newest = points.at(-1);
-  // Live, the newest stays in view; once ended, the write-up at the top does.
-  const scroller = usePinnedScroll([items, meeting.transcript.length], live);
+  const newest = topics.at(-1)?.topic.id;
+  const toggle = (id: string) =>
+    setToggled((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  // Live, the newest stays in view; once ended, the top does.
+  const scroller = usePinnedScroll(
+    [topics.length, meeting.transcript.length, meeting.actions],
+    live,
+  );
 
   return (
     <div className="mm-scroll" data-testid="meeting-points" ref={scroller}>
-      <div className="mm-col">
-        {!live ? <WriteupView chatId={chatId} meeting={meeting} /> : null}
-        {items.length === 0 && live ? <div className="mm-wait">Listening…</div> : null}
-        {items.map((i) => {
-          if (i.kind === 'card') return <ResearchCard key={i.card.id} card={i.card} />;
-          const at = points.indexOf(i.topic);
+      <div className="mm-col mm-feed">
+        {!live ? <WriteupFold chatId={chatId} meeting={meeting} /> : null}
+        {topics.length === 0 && before.length === 0 && live ? (
+          <div className="mm-wait">Listening…</div>
+        ) : null}
+        {before.map((item) => (
+          <FeedItemRow key={feedItemKey(item)} chatId={chatId} item={item} />
+        ))}
+        {topics.map((ft) => {
+          const id = ft.topic.id;
+          const open = (live && id === newest) !== toggled.has(id);
           return (
-            <PointRow
-              key={i.topic.id}
+            <TopicRow
+              key={id}
               chatId={chatId}
-              topic={i.topic}
-              isNow={live && i.topic === newest}
-              lines={linesBehind(meeting, i.topic, points[at + 1])}
+              meeting={meeting}
+              ft={ft}
+              open={open}
+              onToggle={() => toggle(id)}
               focus={focus}
               setFocus={setFocus}
             />
           );
         })}
-        {live ? <LiveTail chatId={chatId} meeting={meeting} /> : null}
+        {live ? (
+          <AddLine
+            label="Add note"
+            testid="meeting-note-add"
+            onAdd={(text) => addNote(chatId, text)}
+          />
+        ) : null}
+        <ActionsList chatId={chatId} meeting={meeting} />
+        {live ? <JustSaid chatId={chatId} meeting={meeting} /> : null}
       </div>
-    </div>
-  );
-}
-
-/** My notes: Tom's own notes, each at the time he wrote it, and a box to write the next one. */
-function MyNotesPane({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const notes = useMemo(() => parseMeetingNotes(meeting.myNotes ?? ''), [meeting.myNotes]);
-  const [draft, setDraft] = useState('');
-  const scroller = usePinnedScroll([notes.length]);
-  const write = () => {
-    const text = draft.trim();
-    if (text === '') return;
-    addNote(chatId, text);
-    setDraft('');
-  };
-  return (
-    <div className="mm-mine">
-      <div className="mm-scroll" data-testid="meeting-my-notes" ref={scroller}>
-        <div className="mm-col">
-          {notes.length === 0 ? <div className="mm-wait">No notes yet</div> : null}
-          {notes.map((n) => (
-            <NoteRow key={`n${n.index}`} chatId={chatId} note={n} />
-          ))}
-        </div>
-      </div>
-      <textarea
-        className="mm-write"
-        data-testid="meeting-note-input"
-        aria-label="Write a note"
-        placeholder="Write a note…"
-        rows={1}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            write();
-          }
-        }}
-      />
     </div>
   );
 }
@@ -905,7 +1084,6 @@ function TranscriptList({ chatId, meeting }: { chatId: string; meeting: MeetingS
     <div className="mm-scroll" ref={scroller}>
       <div className="mm-col mm-transcript" data-testid="meeting-transcript">
         <div className="mm-tx-head">
-          <span className="mm-label">Transcript</span>
           <span className="mm-sp" />
           <button
             type="button"
@@ -937,178 +1115,121 @@ function TranscriptList({ chatId, meeting }: { chatId: string; meeting: MeetingS
 }
 
 /**
- * The write-up that heads Notes once the meeting has ended: an editable
- * title, date and duration, Regenerate and Copy, and a body of short headings.
- * Tom's words are dark ink, generated text is softer, and names the clean-up
- * pass fixed are underlined with the original on hover.
+ * The write-up, once the meeting has ended: folded to one line at the top of
+ * the feed, open to read or edit. Its title names the chat. Tom's words are
+ * dark ink, generated text softer, and names the clean-up pass fixed are
+ * underlined with the original on hover.
  */
-function WriteupView({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+function WriteupFold({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const [open, setOpen] = useState(false);
   const w = meeting.writeup ?? null;
-  const fixes = meeting.nameFixes ?? [];
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const titleRef = useRef<HTMLHeadingElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [waiting, setWaiting] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const meta = `${new Date(meeting.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · ${Math.max(1, Math.round(meeting.elapsedBaseMs / 60_000))} min`;
-  const html = useMemo(() => (w ? writeupBodyHtml(w, fixes) : ''), [w, fixes]);
-
-  // A new write-up from the host ends the wait; so does a failure.
-  useEffect(() => setWaiting(false), [meeting.writeup, meeting.writeupError]);
-  // Draw the host's version unless Tom is typing in it.
-  useLayoutEffect(() => {
-    const body = bodyRef.current;
-    if (body && !body.contains(document.activeElement) && body.innerHTML !== html)
-      body.innerHTML = html;
-    const title = titleRef.current;
-    if (title && document.activeElement !== title && title.textContent !== (w?.title ?? ''))
-      title.textContent = w?.title ?? '';
-  }, [html, w]);
-
-  const read = () =>
-    writeupFromBody(
-      titleRef.current?.textContent ?? '',
-      bodyRef.current ?? document.createElement('div'),
-    );
-  const flush = () => {
-    clearTimeout(timer.current);
-    timer.current = undefined;
-    if (w) saveWriteup(chatId, read());
-  };
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const later = () => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(flush, 600);
-  };
-
   const failure = meeting.writeupError;
   return (
-    <div className="mm-sum" data-testid="meeting-summary">
-      <div className="mm-sum-head">
-        {w ? (
-          <h1
-            ref={titleRef}
-            data-testid="meeting-writeup-title"
-            role="textbox"
-            aria-label="Title"
-            contentEditable="plaintext-only"
-            suppressContentEditableWarning
-            onInput={later}
-            onBlur={flush}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-            }}
-          />
-        ) : (
-          <h1>Summary</h1>
-        )}
-        <span className="meta" data-testid="meeting-writeup-meta">
-          {meta}
-        </span>
+    <div
+      className="mm-topic mm-writeup"
+      data-testid="meeting-summary"
+      data-open={open ? 'true' : undefined}
+    >
+      <div className="mm-topic-h">
         <button
           type="button"
-          className="mm-icon"
-          data-testid="meeting-regenerate"
-          aria-label="Regenerate"
-          title={waiting ? 'Writing…' : 'Regenerate'}
-          disabled={waiting}
-          onClick={() => {
-            setWaiting(true);
-            regenerateWriteup(chatId);
-          }}
+          className="mm-chev"
+          data-testid="meeting-writeup-toggle"
+          aria-expanded={open}
+          aria-label={open ? 'Fold' : 'Open'}
+          onClick={() => setOpen(!open)}
         >
-          <RotateCcw size={16} aria-hidden="true" className={waiting ? 'mm-spin' : undefined} />
+          <ChevronRight size={14} aria-hidden="true" />
         </button>
-        {w ? (
-          <button
-            type="button"
-            className="mm-icon"
-            data-testid="meeting-copy"
-            aria-label="Copy"
-            title={copied ? 'Copied' : 'Copy'}
-            onClick={() =>
-              void navigator.clipboard.writeText(writeupText(read(), meta)).then(() => {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              })
-            }
-          >
-            {copied ? (
-              <Check size={16} aria-hidden="true" />
-            ) : (
-              <Copy size={16} aria-hidden="true" />
-            )}
-          </button>
-        ) : null}
+        <div className="nm">
+          <span className="mm-chip">Write-up</span>
+          {w ? null : failure ? null : (
+            <span className="mm-wait" data-testid="meeting-writeup-wait">
+              Writing…
+            </span>
+          )}
+        </div>
       </div>
       {failure ? (
         <div className="mm-error" role="alert" data-testid="meeting-writeup-error">
           {failure}
         </div>
       ) : null}
-      {w ? (
-        <div
-          ref={bodyRef}
-          className="body"
-          data-testid="meeting-writeup-body"
-          role="textbox"
-          aria-multiline="true"
-          aria-label="Write-up"
-          contentEditable
-          suppressContentEditableWarning
-          spellCheck
-          onInput={later}
-          onBlur={flush}
-        />
-      ) : failure ? null : (
-        <div className="mm-wait" data-testid="meeting-writeup-wait">
-          Writing the summary…
-        </div>
-      )}
+      {open && w ? <WriteupBody chatId={chatId} meeting={meeting} /> : null}
     </div>
   );
 }
 
-/** The panel on the chat's right: header row, tabs, errors, then a tab or the settings. */
-export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+function WriteupBody({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const w = meeting.writeup!;
+  const fixes = meeting.nameFixes ?? [];
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const html = useMemo(() => writeupBodyHtml(w, fixes), [w, fixes]);
+  // Draw the host's version unless Tom is typing in it.
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (body && !body.contains(document.activeElement) && body.innerHTML !== html)
+      body.innerHTML = html;
+  }, [html]);
+  const flush = () => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    saveWriteup(chatId, writeupFromBody(w.title, bodyRef.current ?? document.createElement('div')));
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <div className="mm-sum">
+      <div
+        ref={bodyRef}
+        className="body"
+        data-testid="meeting-writeup-body"
+        role="textbox"
+        aria-multiline="true"
+        aria-label="Write-up"
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck
+        onInput={() => {
+          clearTimeout(timer.current);
+          timer.current = setTimeout(flush, 600);
+        }}
+        onBlur={flush}
+      />
+    </div>
+  );
+}
+
+/** The panel across the top of the chat: one header row, errors, then the feed, the transcript or the settings. */
+export function MeetingPanel({
+  chatId,
+  meeting,
+  height,
+}: {
+  chatId: string;
+  meeting: MeetingState;
+  /** Share of the chat's height; omitted, the panel sizes to the stylesheet. */
+  height?: number;
+}) {
   const view = useMeetingStore((s) => s.view[chatId] ?? 'notes');
   const setView = useMeetingStore((s) => s.setView);
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
-  const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
   const ended = meeting.status === 'ended';
-  // A meeting that ends goes to Notes, where the write-up now heads the points.
+  // A meeting that ends goes to the feed, where the write-up now heads the topics.
   const wasEnded = useRef(ended);
   useEffect(() => {
     if (ended === wasEnded.current) return;
     wasEnded.current = ended;
     if (ended) setView(chatId, 'notes');
   }, [ended, chatId, setView]);
-  const actionCount = openActions(meeting).length;
   return (
-    <aside className="mm-panel" data-testid="meeting-panel" data-status={meeting.status}>
+    <aside
+      className="mm-panel"
+      data-testid="meeting-panel"
+      data-status={meeting.status}
+      style={height !== undefined ? { height: `${height * 100}%` } : undefined}
+    >
       <MeetingHead chatId={chatId} meeting={meeting} />
-      <div className="mm-tabs" role="tablist">
-        {VIEWS.map((v) => (
-          <button
-            key={v}
-            type="button"
-            role="tab"
-            className="mm-tab"
-            aria-selected={!settingsOpen && view === v}
-            data-testid={`meeting-tab-${v}`}
-            onClick={() => {
-              setView(chatId, v);
-              setSettingsOpen(false);
-            }}
-          >
-            {VIEW_LABEL[v]}
-            {v === 'actions' && actionCount > 0 ? <b className="mm-tab-n">{actionCount}</b> : null}
-          </button>
-        ))}
-      </div>
       <MeetingAlerts chatId={chatId} meeting={meeting} />
       {settingsOpen ? (
         <div className="mm-scroll">
@@ -1116,14 +1237,10 @@ export function MeetingPanel({ chatId, meeting }: { chatId: string; meeting: Mee
             <MeetingSettingsPane chatId={chatId} meeting={meeting} />
           </div>
         </div>
-      ) : view === 'mine' ? (
-        <MyNotesPane chatId={chatId} meeting={meeting} />
-      ) : view === 'actions' ? (
-        <MeetingActions chatId={chatId} meeting={meeting} />
       ) : view === 'transcript' ? (
         <TranscriptList chatId={chatId} meeting={meeting} />
       ) : (
-        <NotesStream chatId={chatId} meeting={meeting} />
+        <Feed chatId={chatId} meeting={meeting} />
       )}
     </aside>
   );
@@ -1136,14 +1253,21 @@ const CARD_LABEL: Record<MeetingCard['kind'], string> = {
 };
 const VERDICT_LABEL = { correct: 'Correct', off: 'Off', unclear: 'Unclear' } as const;
 
+/** A research card on one line: kind, what it is about, the verdict and source. Opens to its bullets. */
 function ResearchCard({ card }: { card: MeetingCard }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="mm-card" data-testid="meeting-card" data-kind={card.kind}>
-      <div className="mm-card-h">
-        <span className="mm-card-k" data-testid="meeting-card-kind">
+    <div className="mm-card" data-testid="meeting-card" data-kind={card.kind} data-open={open}>
+      <button
+        type="button"
+        className="mm-line mm-card-h"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="mm-chip" data-testid="meeting-card-kind">
           {CARD_LABEL[card.kind]}
         </span>
-        <span className="mm-card-q" data-testid="meeting-card-title">
+        <span className="mm-line-t" data-testid="meeting-card-title">
           {card.title}
         </span>
         {card.verdict ? (
@@ -1155,23 +1279,26 @@ function ResearchCard({ card }: { card: MeetingCard }) {
             {VERDICT_LABEL[card.verdict]}
           </span>
         ) : null}
-        <span className="mm-card-t">{formatMeetingClock(card.at)}</span>
-      </div>
-      <ul>
-        {card.bullets.map((b, i) => (
-          <li key={i}>{b}</li>
-        ))}
-      </ul>
-      {card.source ? (
-        <a
-          className="mm-card-src"
-          data-testid="meeting-card-source"
-          href={card.source.url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {card.source.name}
-        </a>
+      </button>
+      {open ? (
+        <div className="mm-card-b">
+          <ul>
+            {card.bullets.map((b, i) => (
+              <li key={i}>{b}</li>
+            ))}
+          </ul>
+          {card.source ? (
+            <a
+              className="mm-card-src"
+              data-testid="meeting-card-source"
+              href={card.source.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {card.source.name}
+            </a>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -1232,22 +1359,38 @@ function ActionChatStatus({ chatId }: { chatId: string }) {
   );
 }
 
+/** Who an action is for, as the row names them: You, Agent, or the person. */
+function actionOwnerLabel(a: MeetingAction): string {
+  if (a.kind === 'mine') return 'You';
+  if (a.kind === 'agent') return 'Agent';
+  return a.owner ?? MEETING_OWNER_EVERYONE;
+}
+
+/** The owner picker's value for an action: `mine`, `agent`, or `other:<name>`. */
+function ownerValue(a: MeetingAction): string {
+  return a.kind === 'other' ? `other:${a.owner ?? MEETING_OWNER_EVERYONE}` : a.kind;
+}
+
+/** Everyone the meeting knows by name, then Everyone. */
+function knownPeople(meeting: MeetingState): string[] {
+  const named = [
+    ...meeting.transcript.flatMap((l) => (l.speaker === 'them' && l.name ? [l.name] : [])),
+    ...Object.values(meeting.voices ?? {}),
+    ...meeting.actions.flatMap((a) => (a.kind === 'other' && a.owner ? [a.owner] : [])),
+  ].filter((n) => n !== MEETING_OWNER_EVERYONE);
+  return [...new Set(named), MEETING_OWNER_EVERYONE];
+}
+
 function ActionRow({
   chatId,
   action,
-  speakers,
-  agentRuns,
-  ended,
+  people,
 }: {
   chatId: string;
   action: MeetingAction;
-  speakers: string[];
-  agentRuns: boolean;
-  /** After the meeting: others' actions show the owner's name, and nothing but Tom's can be dismissed. */
-  ended: boolean;
+  people: string[];
 }) {
-  const owners =
-    action.owner && !speakers.includes(action.owner) ? [action.owner, ...speakers] : speakers;
+  const done = action.status === 'done';
   return (
     <div
       className="mm-act"
@@ -1255,28 +1398,49 @@ function ActionRow({
       data-kind={action.kind}
       data-status={action.status}
     >
+      <input
+        type="checkbox"
+        className="mm-act-done"
+        data-testid="meeting-action-done"
+        aria-label={done ? 'Mark not done' : 'Mark done'}
+        checked={done}
+        onChange={() => decideAction(chatId, action.id, done ? 'reopen' : 'done')}
+      />
+      <select
+        className="mm-act-owner"
+        data-testid="meeting-action-owner"
+        aria-label="Who"
+        title="Change who"
+        data-kind={action.kind}
+        value={ownerValue(action)}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === 'mine' || v === 'agent') assignAction(chatId, action.id, v);
+          else assignAction(chatId, action.id, 'other', v.slice('other:'.length));
+        }}
+      >
+        <option value="mine">You</option>
+        <option value="agent">Agent</option>
+        {people.map((p) => (
+          <option key={p} value={`other:${p}`}>
+            {p}
+          </option>
+        ))}
+      </select>
       <span className="mm-act-t" title={action.why !== '' ? action.why : undefined}>
-        {action.title}
+        <Editable
+          value={action.title}
+          testid="meeting-action-title"
+          label="Action"
+          placeholder="Action"
+          autoFocus={false}
+          onFocused={() => {}}
+          onCommit={(text) => {
+            if (text !== '' && text !== action.title) setActionTitle(chatId, action.id, text);
+          }}
+          onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
+        />
       </span>
-      {action.kind === 'other' && ended ? (
-        <span className="mm-act-owner-name" data-testid="meeting-action-owner-name">
-          {action.owner}
-        </span>
-      ) : action.kind === 'other' ? (
-        <select
-          className="mm-act-owner"
-          data-testid="meeting-action-owner"
-          aria-label="Owner"
-          value={action.owner}
-          onChange={(e) => setActionOwner(chatId, action.id, e.target.value)}
-        >
-          {owners.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
-      ) : null}
       {action.chatId ? <ActionChatStatus chatId={action.chatId} /> : null}
       {action.chatId ? (
         <Link
@@ -1286,6 +1450,15 @@ function ActionRow({
         >
           Open chat
         </Link>
+      ) : done ? null : action.kind === 'agent' ? (
+        <button
+          type="button"
+          className="mm-act-btn go"
+          data-testid="meeting-action-do"
+          onClick={() => decideAction(chatId, action.id, 'do')}
+        >
+          Approve
+        </button>
       ) : action.kind === 'mine' ? (
         <button
           type="button"
@@ -1295,108 +1468,162 @@ function ActionRow({
         >
           Start chat
         </button>
-      ) : action.kind === 'agent' && !agentRuns && !ended ? (
-        <button
-          type="button"
-          className="mm-act-btn"
-          data-testid="meeting-action-do"
-          onClick={() => decideAction(chatId, action.id, 'do')}
-        >
-          Run
-        </button>
       ) : null}
-      {ended && action.kind !== 'mine' ? null : (
-        <button
-          type="button"
-          className="mm-act-x"
-          data-testid="meeting-action-dismiss"
-          aria-label="Dismiss"
-          title="Dismiss"
-          onClick={() => decideAction(chatId, action.id, 'dismiss')}
-        >
-          ✕
-        </button>
-      )}
+      <button
+        type="button"
+        className="mm-act-x"
+        data-testid="meeting-action-dismiss"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={() => decideAction(chatId, action.id, 'dismiss')}
+      >
+        ✕
+      </button>
     </div>
   );
 }
 
-/** The Actions tab: Tom's, other people's and the agent's, one compact row each. */
-export function MeetingActions({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
-  const open = openActions(meeting);
-  const of = (k: MeetingAction['kind']) => open.filter((a) => a.kind === k);
-  const mine = of('mine');
-  const others = of('other');
-  const agent = of('agent');
-  const speakers = [
-    ...new Set(meeting.transcript.flatMap((l) => (l.speaker === 'them' && l.name ? [l.name] : []))),
-    MEETING_OWNER_EVERYONE,
-  ];
-  const agentRuns = meeting.agentRunsActions === true;
-  const ended = meeting.status === 'ended';
-  const groups: Array<[string, MeetingAction[]]> = ended
-    ? [
-        ['Agent did', agent],
-        ['My actions', mine],
-        ['Other actions', others],
-      ]
-    : [
-        ['Mine', mine],
-        ['Others', others],
-        ['Agent', agent],
-      ];
+/** "+ Add …": a line that turns into a box; Enter or leaving it keeps what was typed. */
+function AddLine({
+  label,
+  testid,
+  onAdd,
+}: {
+  label: string;
+  testid: string;
+  onAdd: (text: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (!adding)
+    return (
+      <button type="button" className="mm-add" data-testid={testid} onClick={() => setAdding(true)}>
+        <Plus size={14} aria-hidden="true" />
+        {label}
+      </button>
+    );
+  const finish = (keep: boolean) => {
+    if (keep && draft.trim() !== '') onAdd(draft.trim());
+    setAdding(false);
+    setDraft('');
+  };
   return (
-    <div className="mm-scroll">
-      <div className="mm-col mm-actions" data-testid="meeting-actions">
-        {open.length === 0 ? <div className="mm-wait">No actions yet</div> : null}
-        {groups.map(([label, rows]) =>
-          rows.length === 0 ? null : (
-            <div key={label}>
-              <div className="mm-act-grp">{label}</div>
-              {rows.map((a) => (
-                <ActionRow
-                  key={a.id}
-                  chatId={chatId}
-                  action={a}
-                  speakers={speakers}
-                  agentRuns={agentRuns}
-                  ended={ended}
-                />
-              ))}
-            </div>
-          ),
-        )}
-      </div>
+    <input
+      className="mm-add-input"
+      data-testid={`${testid}-input`}
+      aria-label={label}
+      placeholder={label}
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === 'Escape') finish(false);
+      }}
+    />
+  );
+}
+
+/** Every action still to deal with, oldest first, one line each; done ones stay, ticked. */
+export function ActionsList({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const open = openActions(meeting).sort((a, b) => a.at - b.at);
+  const people = knownPeople(meeting);
+  return (
+    <div className="mm-actions" data-testid="meeting-actions">
+      <div className="mm-sect">Actions</div>
+      {open.map((a) => (
+        <ActionRow key={a.id} chatId={chatId} action={a} people={people} />
+      ))}
+      <AddLine
+        label="Add action"
+        testid="meeting-action-add"
+        onAdd={(text) => addAction(chatId, text, 'mine')}
+      />
     </div>
   );
 }
 
 /**
- * Wraps the chat's stream + composer. With a meeting shown the chat stays as it
- * is on the left and the meeting's panel sits on its right; an ended meeting
- * folded away is one line over the chat. Without one it is `display: contents`,
- * and the nesting never changes, so the wrapped tree never remounts when a
- * meeting starts, ends or folds.
+ * Wraps the chat's stream + composer. With a meeting shown, the meeting's panel
+ * sits across the top, full width, and the bar under it drags to share the
+ * height with the chat below; an ended meeting folded away is one line over the
+ * chat. Without one it is `display: contents`. The chat is always the third
+ * slot, so the wrapped tree never remounts when a meeting starts, ends or folds.
  */
 export function MeetingLayout({ chatId, children }: { chatId: string; children: ReactNode }) {
   const meeting = useMeetingStore((s) => s.byChat[chatId]);
   const folded = useMeetingStore((s) => s.folded[chatId] === true);
+  const height = useMeetingStore((s) => s.height);
   const connection = usePresenceStore((s) => s.connection);
+  const body = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (connection === 'connected') requestMeeting(chatId);
   }, [chatId, connection]);
   const shown = isMeetingShown(meeting, folded);
   return (
     <div
+      ref={body}
       className={meeting ? 'mm-body' : 'mm-contents'}
       data-testid={meeting ? 'meeting-body' : undefined}
       data-meeting-shown={shown ? 'true' : undefined}
     >
+      {shown ? <MeetingPanel chatId={chatId} meeting={meeting} height={height} /> : null}
+      {shown ? <ResizeBar body={body} height={height} /> : null}
       <div className={meeting ? 'mm-left' : 'mm-contents'}>
         {meeting && !shown ? <FoldedBar chatId={chatId} meeting={meeting} /> : null}
         {children}
       </div>
-      {shown ? <MeetingPanel chatId={chatId} meeting={meeting} /> : null}
     </div>
+  );
+}
+
+/** The bar between the meeting and the chat: drag it, or use the arrow keys, to share the height. */
+function ResizeBar({
+  body,
+  height,
+}: {
+  body: React.RefObject<HTMLDivElement | null>;
+  height: number;
+}) {
+  const setHeight = useMeetingStore((s) => s.setHeight);
+  const at = (clientY: number) => {
+    const r = body.current?.getBoundingClientRect();
+    if (r && r.height > 0) setHeight((clientY - r.top) / r.height);
+  };
+  return (
+    <div
+      className="mm-resize"
+      data-testid="meeting-resize"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize the meeting"
+      aria-valuenow={Math.round(height * 100)}
+      aria-valuemin={15}
+      aria-valuemax={90}
+      tabIndex={0}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const el = e.currentTarget;
+        el.setPointerCapture(e.pointerId);
+        const move = (ev: PointerEvent) => at(ev.clientY);
+        const up = () => {
+          el.removeEventListener('pointermove', move);
+          el.removeEventListener('pointerup', up);
+          el.removeEventListener('pointercancel', up);
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowUp') setHeight(height - 0.05);
+        else if (e.key === 'ArrowDown') setHeight(height + 0.05);
+        else return;
+        e.preventDefault();
+      }}
+    />
   );
 }

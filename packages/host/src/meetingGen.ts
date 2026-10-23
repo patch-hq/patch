@@ -6,7 +6,16 @@
 import { z } from 'zod';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
-import { DEFAULT_MEETING_MODEL, formatMeetingClock, MeetingWriteup } from '@patch/wire';
+import {
+  DEFAULT_MEETING_MODEL,
+  formatMeetingClock,
+  MEETING_CLEANUP_INSTRUCTIONS,
+  MEETING_NOTES_FRAME,
+  MEETING_RESEARCH_INSTRUCTIONS,
+  MEETING_RESEARCH_RULES,
+  MEETING_WRITEUP_INSTRUCTIONS,
+  MeetingWriteup,
+} from '@patch/wire';
 import {
   MeetingAnalysis,
   MeetingResearchResult,
@@ -22,14 +31,7 @@ const MEETING_TIMEOUT_MS = 60_000;
 export function buildMeetingPrompt(input: AnalyseInput): string {
   const transcript = input.newLines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
   return [
-    'You are keeping live notes for a meeting Tom is sitting in. "You" is Tom (their microphone);',
-    '"Them" is everyone else (system audio). Lines labelled "Them 1", "Them 2" are acoustically distinct voices, consistent across the meeting; unnumbered "Them" lines are not separated, so several people can share that label.',
-    'If the transcript or Tom\'s own notes make clear who a numbered voice is, add it to "voices"; leave it out otherwise.',
-    "Names in Tom's own notes (below) are the people on the call: use them to name voices, never to invent a speaker.",
-    'Identify speakers by name wherever the transcript gives one (introductions, being addressed, "thanks Priya")',
-    'and write who said or asked what by name in topics, actions and "who"; refer to Tom as Tom, never "the user".',
-    'Where a speaker has no name yet, tell different voices apart from context as "someone" or a role, not just "Them".',
-    'Transcripts are machine-made and can contain mistakes. Update the notes from the NEW transcript below.',
+    ...MEETING_NOTES_FRAME,
     '',
     `Meeting time so far: ${formatMeetingClock(input.elapsedMs)}`,
     '',
@@ -131,11 +133,7 @@ export function makeMeetingAnalyser(opts: {
 
 export function buildCorrectionPrompt(input: CorrectInput): string {
   return [
-    'You repair speech-to-text errors in meeting transcript lines. Fix only mis-heard proper nouns:',
-    'names of people, organisations, places and acronyms. Use the glossary and the meeting context to decide',
-    "what was really said (e.g. an organisation's acronym heard as a similar-sounding word, or a place name",
-    'heard as another place). Do not rephrase, summarise, fix grammar, add or remove words, or change anything',
-    'you are not confident is a mis-heard name; leave such lines exactly as given.',
+    ...MEETING_CLEANUP_INSTRUCTIONS,
     '',
     'Glossary (one per line; "Term: heard as, heard as" lists known mishearings):',
     input.glossary.length ? input.glossary.join('\n') : '(none)',
@@ -213,8 +211,7 @@ const RESEARCH_TIMEOUT_MS = 180_000;
 export function buildResearchPrompt(input: ResearchInput): string {
   const transcript = input.lines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
   return [
-    'You are a research aide sitting in on a meeting. Read the NEW transcript and decide what is worth looking up for the people in the room.',
-    "Transcripts are machine-made and can contain mistakes. Use web search for anything you state, and prefer the original publisher (a government site, a company's own page, the authority's papers).",
+    ...MEETING_RESEARCH_INSTRUCTIONS,
     '',
     `Meeting so far: ${input.context.now ?? '(not yet known)'}`,
     `Already researched (do not repeat these): ${input.existing.join('; ') || '(none)'}`,
@@ -222,12 +219,7 @@ export function buildResearchPrompt(input: ResearchInput): string {
     'NEW transcript:',
     transcript,
     '',
-    'Make a card only for something that earns one. The three kinds:',
-    '"explained": a term, acronym or programme someone used that a newcomer would not know. title is the term. Say what it is in plain words.',
-    '"fact": a figure or factual claim somebody quoted. title is the claim in quotes. verdict is "correct", "off" or "unclear". Say what the published source says and, if off, by how much. Include source {name,url} for the page you read.',
-    '"answer": a question asked in the room that can be looked up (e.g. how does a service work). title is the question.',
-    'Rules: 1 to 3 short bullets per card, readable at a glance. NEVER state a figure (any number) without a source {name,url} from a page you actually read. If a claim cannot be checked, set verdict "unclear", say why in a bullet, and state no figure of your own. Never invent a source or a URL.',
-    'Return [] when nothing is worth a card: most stretches of a meeting need none. At most 3 cards.',
+    ...MEETING_RESEARCH_RULES,
     '',
     'Reply with ONE JSON object and nothing else:',
     '{"cards":[{"kind":"explained | fact | answer","title":"","atSeconds":0,"bullets":[""],"verdict":"correct | off | unclear (kind fact only; omit for explained and answer)","source":{"name":"","url":""}}]}',
@@ -290,13 +282,7 @@ const WRITEUP_TIMEOUT_MS = 180_000;
 export function buildWriteupPrompt(input: WriteupInput): string {
   const transcript = input.lines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
   return [
-    'You write the final write-up of a meeting Tom sat in, from the whole cleaned-up transcript and his own notes.',
-    'Write something he could send to the group: plain language, acronyms spelled out on first use, names as in the transcript.',
-    'Group it under 3 to 5 short headings that fit this meeting (for example where we landed, what we offer, open questions, next steps). Each heading has short, distinct items, one idea each.',
-    'Never invent facts, figures or names. Do not comment on the task or on the transcript.',
-    '',
-    "Tom's own notes: his words belong in the write-up. Fold each of his notes into the right section, close to how he wrote it,",
-    'and set "mine": true on those items. Everything you generate yourself has no "mine" key.',
+    ...MEETING_WRITEUP_INSTRUCTIONS,
     '',
     `Meeting: ${input.date}, ${input.durationMinutes} min.`,
     `Points the live notes picked out (for emphasis only; the transcript is the source): ${input.points.join('; ') || '(none)'}`,

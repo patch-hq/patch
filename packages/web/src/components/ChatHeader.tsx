@@ -39,6 +39,7 @@ import {
   ArrowRightLeft,
   Eraser,
   ListPlus,
+  AudioLines,
 } from 'lucide-react';
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -54,6 +55,8 @@ import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { failed } from '../lib/errorCopy.js';
 import { isPlainEnter } from '../lib/submitChord.js';
+import { startTestMeeting } from '../lib/meetingControl.js';
+import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
 
 // Manager / Speakers occupy fixed slots and cannot be pinned or
 // deleted; their crumb is suppressed (crumb == name would duplicate the word).
@@ -116,6 +119,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   // Otherwise spec/04 § Name: the AI-generated title; until it lands, the folder
   // basename, then "New chat" — never the raw first message or ULID.
   const title = specialThreadLabel(row.chatId) ?? deriveChatTitle(row.name);
+  const meetingOpen = useMeetingStore((s) => isMeetingOpen(s.byChat[row.chatId]));
   // The machine this chat is pinned to, by its user-editable name. Falls back
   // to the raw hostId only while that machine has yet to report a name —
   // shown rather than hidden, because "which machine is this running on" has no
@@ -483,6 +487,23 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                       Add tasks
                     </button>
                   ) : null}
+                  {/* Test meeting — a scripted call played into this chat's meeting
+                  notes, to try the meeting panel without a call or a microphone. */}
+                  {isSpecial || meetingOpen ? null : (
+                    <button
+                      type="button"
+                      className="head-menu-item"
+                      data-testid="action-test-meeting"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        startTestMeeting(row.chatId);
+                      }}
+                    >
+                      <AudioLines size={14} aria-hidden />
+                      Test meeting
+                    </button>
+                  )}
                   {isSpecial ? (
                     <>
                       {/* Disable (spec/06 § Disabled) — the special-thread "off"

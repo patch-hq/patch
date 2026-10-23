@@ -6,6 +6,7 @@ import { SpeakerLog } from './speakerLog.js';
 import {
   DEFAULT_MEETING_SETTINGS,
   meetingElapsedMs,
+  type MeetingAction,
   type MeetingState,
   type MeetingNotesOp,
   type MeetingSettings,
@@ -247,7 +248,7 @@ export function endMeeting(chatId: string): void {
 export function decideAction(
   chatId: string,
   actionId: string,
-  decision: 'do' | 'chat' | 'dismiss',
+  decision: 'do' | 'chat' | 'dismiss' | 'done' | 'reopen',
 ): void {
   ws().send({ type: 'meeting.action_request', chatId, actionId, decision });
 }
@@ -257,9 +258,43 @@ export function setActionOwner(chatId: string, actionId: string, owner: string):
   ws().send({ type: 'meeting.action_request', chatId, actionId, owner });
 }
 
-/** The tray checkbox: agent actions start by themselves when on. */
-export function setAgentRunsActions(chatId: string, agentRuns: boolean): void {
-  ws().send({ type: 'meeting.action_request', chatId, agentRuns });
+/** Hands an action to Tom (`mine`), the agent (`agent`) or someone else (`other` with `owner`). */
+export function assignAction(
+  chatId: string,
+  actionId: string,
+  kind: MeetingAction['kind'],
+  owner?: string,
+): void {
+  ws().send({
+    type: 'meeting.action_request',
+    chatId,
+    actionId,
+    assign: { kind, ...(owner !== undefined ? { owner } : {}) },
+  });
+}
+
+/** Rewrites an action's text. */
+export function setActionTitle(chatId: string, actionId: string, title: string): void {
+  ws().send({ type: 'meeting.action_request', chatId, actionId, title });
+}
+
+/** An action Tom writes himself. */
+export function addAction(
+  chatId: string,
+  title: string,
+  kind: MeetingAction['kind'],
+  owner?: string,
+): void {
+  ws().send({
+    type: 'meeting.action_request',
+    chatId,
+    add: { title, kind, ...(owner !== undefined ? { owner } : {}) },
+  });
+}
+
+/** A test meeting in this chat: a scripted call plays into the notes, with no audio. */
+export function startTestMeeting(chatId: string): void {
+  ws().send({ type: 'meeting.control_request', chatId, action: 'demo' });
 }
 
 /** The "Research as we go" checkbox. */
@@ -303,11 +338,6 @@ export function editNote(chatId: string, index: number, text: string): void {
 /** The edited final write-up; the host stores it and answers with `meeting.state`. */
 export function saveWriteup(chatId: string, writeup: MeetingWriteup): void {
   ws().send({ type: 'meeting.writeup_request', chatId, writeup });
-}
-
-/** Write the final write-up again from the transcript and My notes. */
-export function regenerateWriteup(chatId: string): void {
-  ws().send({ type: 'meeting.writeup_request', chatId, regenerate: true });
 }
 
 export function requestMeeting(chatId: string): void {

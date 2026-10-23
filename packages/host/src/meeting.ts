@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { nameFixes } from './meetingVocab.js';
+import { DEMO_LINE_MS, DEMO_SCRIPT } from './meetingDemo.js';
 import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
@@ -197,10 +198,14 @@ export interface MeetingDeps {
    * return its id. It runs through the chat's normal tools and permissions.
    */
   startChat: (parentChatId: string, message: string) => Promise<string>;
+  /** Names the meeting's chat after its write-up. Omitted: the chat keeps its name. */
+  nameChat?: (chatId: string, title: string) => Promise<void>;
   logger: Logger;
   now?: () => number;
   newId?: () => string;
   intervalMs?: number;
+  /** How often a test meeting's next scripted line arrives. */
+  demoLineMs?: number;
   setInterval?: (fn: () => void, ms: number) => unknown;
   clearInterval?: (h: unknown) => void;
 }
@@ -224,6 +229,8 @@ interface Runtime {
   chain: Promise<void>;
   /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
   txChain: Promise<void>;
+  /** A test meeting's line feeder while it runs. */
+  demoTimer?: unknown;
 }
 
 /** Consecutive segments from one voice read as one line. */
@@ -273,7 +280,7 @@ export class MeetingManager {
 
   // ---- controls ----
 
-  start(chatId: string, settings?: MeetingSettings): void {
+  start(chatId: string, settings?: MeetingSettings, opts: { demo?: boolean } = {}): void {
     const existing = this.load(chatId);
     if (existing && existing.state.status !== 'ended') {
       throw new MeetingError(`chat ${chatId} already has a ${existing.state.status} meeting`);
@@ -296,6 +303,7 @@ export class MeetingManager {
         agentEdits: [],
         transcript: [],
         error: null,
+        ...(opts.demo ? { demo: true } : {}),
       },
       timer: undefined,
       analysedUpTo: 0,
@@ -309,7 +317,40 @@ export class MeetingManager {
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
+    this.armDemo(chatId, rt);
     this.commit(chatId, rt);
+  }
+
+  /** Starts a test meeting: the scripted call plays into the transcript, one line at a time. */
+  startDemo(chatId: string): void {
+    this.start(chatId, undefined, { demo: true });
+  }
+
+  /** Feeds a test meeting its next scripted line on a timer; stops at the end of the script. */
+  private armDemo(chatId: string, rt: Runtime): void {
+    this.disarmDemo(rt);
+    if (!rt.state.demo || rt.state.status !== 'live') return;
+    const set = this.deps.setInterval ?? ((fn, ms) => setInterval(fn, ms));
+    rt.demoTimer = set(() => {
+      const line = DEMO_SCRIPT[rt.state.transcript.length];
+      if (rt.state.status !== 'live' || !line) {
+        this.disarmDemo(rt);
+        return;
+      }
+      rt.state.transcript.push({
+        at: meetingElapsedMs(rt.state, this.now()),
+        speaker: line.speaker,
+        ...(line.name !== undefined ? { name: line.name } : {}),
+        text: line.text,
+      });
+      this.commit(chatId, rt);
+    }, this.deps.demoLineMs ?? DEMO_LINE_MS);
+  }
+
+  private disarmDemo(rt: Runtime): void {
+    if (rt.demoTimer === undefined) return;
+    (this.deps.clearInterval ?? ((h) => clearInterval(h as NodeJS.Timeout)))(rt.demoTimer);
+    rt.demoTimer = undefined;
   }
 
   /** Change how often the notes update; takes effect on the running timer now. */
@@ -329,6 +370,7 @@ export class MeetingManager {
     delete rt.state.resumedAt;
     rt.state.status = 'paused';
     this.disarmTimer(rt);
+    this.disarmDemo(rt);
     this.commit(chatId, rt);
   }
 
@@ -343,6 +385,7 @@ export class MeetingManager {
     rt.state.status = 'live';
     rt.state.resumedAt = this.now();
     this.armTimer(chatId, rt);
+    this.armDemo(chatId, rt);
     this.commit(chatId, rt);
   }
 
@@ -358,6 +401,7 @@ export class MeetingManager {
     rt.state.status = 'ended';
     rt.state.endedAt = t;
     this.disarmTimer(rt);
+    this.disarmDemo(rt);
     this.commit(chatId, rt);
     await rt.txChain;
     await this.enqueue(rt, async () => {
@@ -410,6 +454,9 @@ export class MeetingManager {
         throw new MeetingError(`write-up returned model commentary: ${parsed.title}`);
       s.writeup = parsed;
       s.writeupError = null;
+      // The write-up's title names the chat: it is where a title is read.
+      if (this.deps.nameChat && parsed.title.trim() !== '')
+        await this.deps.nameChat(chatId, parsed.title.trim());
     } catch (err) {
       s.writeupError = `write-up failed: ${(err as Error).message}`;
       this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: write-up failed');
@@ -690,13 +737,26 @@ export class MeetingManager {
   async decide(
     chatId: string,
     actionId: string,
-    decision: 'do' | 'chat' | 'dismiss',
+    decision: 'do' | 'chat' | 'dismiss' | 'done' | 'reopen',
   ): Promise<void> {
     const rt = this.load(chatId);
     const action = rt?.state.actions.find((a) => a.id === actionId);
     if (!rt || !action) throw new MeetingError(`no action ${actionId} in chat ${chatId}`);
+    if (decision === 'reopen') {
+      if (action.status !== 'done') throw new MeetingError(`action ${actionId} is not done`);
+      action.status = action.chatId ? 'running' : 'pending';
+      delete action.resolvedAt;
+      this.commit(chatId, rt);
+      return;
+    }
     if (action.status === 'dismissed' || action.status === 'done') {
       throw new MeetingError(`action ${actionId} is already ${action.status}`);
+    }
+    if (decision === 'done') {
+      action.status = 'done';
+      action.resolvedAt = this.now();
+      this.commit(chatId, rt);
+      return;
     }
     if (decision === 'dismiss') {
       action.status = 'dismissed';
@@ -724,29 +784,64 @@ export class MeetingManager {
     this.commit(chatId, rt);
   }
 
-  /** The tray's checkbox. Turning it on starts every agent action already waiting. */
-  async setAgentRunsActions(chatId: string, on: boolean): Promise<void> {
+  /** Hands an action to Tom (`mine`), the agent (`agent`) or someone else (`other`, with `owner`). */
+  assignAction(
+    chatId: string,
+    actionId: string,
+    to: { kind: MeetingAction['kind']; owner?: string | undefined },
+  ): void {
     const rt = this.load(chatId);
-    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
-    rt.state.agentRunsActions = on;
+    const action = rt?.state.actions.find((a) => a.id === actionId);
+    if (!rt || !action) throw new MeetingError(`no action ${actionId} in chat ${chatId}`);
+    if ((to.kind === 'other') !== (to.owner !== undefined))
+      throw new MeetingError('an action for someone else needs an owner, and only then');
+    action.kind = to.kind;
+    if (to.owner !== undefined) action.owner = to.owner;
+    else delete action.owner;
     this.commit(chatId, rt);
-    if (on) await this.startWaitingAgentActions(chatId, rt);
   }
 
-  private async startWaitingAgentActions(chatId: string, rt: Runtime): Promise<void> {
-    for (const a of rt.state.actions) {
-      if (a.kind !== 'agent' || a.status !== 'pending') continue;
-      try {
-        await this.startActionChat(chatId, rt, a);
-      } catch (err) {
-        this.deps.logger.error(
-          { chatId, actionId: a.id, err: (err as Error).message },
-          'meeting: agent action did not start',
-        );
-        rt.state.error = `could not start "${a.title}": ${(err as Error).message}`;
-        this.commit(chatId, rt);
-      }
-    }
+  /** Rewrites an action's text. */
+  setActionTitle(chatId: string, actionId: string, title: string): void {
+    const rt = this.load(chatId);
+    const action = rt?.state.actions.find((a) => a.id === actionId);
+    if (!rt || !action) throw new MeetingError(`no action ${actionId} in chat ${chatId}`);
+    action.title = title;
+    this.commit(chatId, rt);
+  }
+
+  /** An action Tom wrote himself, at the meeting's time now. */
+  addAction(
+    chatId: string,
+    add: { title: string; kind: MeetingAction['kind']; owner?: string | undefined },
+  ): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if ((add.kind === 'other') !== (add.owner !== undefined))
+      throw new MeetingError('an action for someone else needs an owner, and only then');
+    rt.state.actions.push({
+      id: this.newId(),
+      kind: add.kind,
+      ...(add.owner !== undefined ? { owner: add.owner } : {}),
+      title: add.title,
+      why: '',
+      at: meetingElapsedMs(rt.state, this.now()),
+      status: 'pending',
+    });
+    this.commit(chatId, rt);
+  }
+
+  /**
+   * The retired "agent does its own actions" switch. Agent actions always wait
+   * for Approve now, so only turning it off is accepted (older surfaces still send it).
+   */
+  setAgentRunsActions(chatId: string, on: boolean): void {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (on)
+      throw new MeetingError('agent actions wait for Approve; they no longer run by themselves');
+    delete rt.state.agentRunsActions;
+    this.commit(chatId, rt);
   }
 
   private async startActionChat(chatId: string, rt: Runtime, action: MeetingAction): Promise<void> {
@@ -842,7 +937,10 @@ export class MeetingManager {
 
   /** Stop timers (host shutdown). Meetings stay on disk. */
   dispose(): void {
-    for (const rt of this.runtimes.values()) this.disarmTimer(rt);
+    for (const rt of this.runtimes.values()) {
+      this.disarmTimer(rt);
+      this.disarmDemo(rt);
+    }
   }
 
   // ---- internals ----
@@ -922,7 +1020,6 @@ export class MeetingManager {
       this.deps.logger.error({ chatId, err: (err as Error).message }, 'meeting: analysis failed');
     }
     this.commit(chatId, rt);
-    if (rt.state.agentRunsActions) await this.startWaitingAgentActions(chatId, rt);
   }
 
   private merge(rt: Runtime, a: MeetingAnalysis, final: boolean): void {

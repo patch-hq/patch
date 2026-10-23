@@ -4204,6 +4204,7 @@ async function startHost(
         permissionMode: parent.permissionMode,
       });
     },
+    nameChat: (chatId, title) => daemon.setName(chatId, title),
     logger: logger.child({ component: 'meeting' }),
   });
   // Apply persisted auto-resume setting before hydrate so any in-flight chats
@@ -6601,6 +6602,7 @@ export async function handleServerEvent(
       case 'meeting.control_request': {
         const m = requireMeetings(accounts);
         if (event.action === 'start') m.start(event.chatId, event.settings);
+        else if (event.action === 'demo') m.startDemo(event.chatId);
         else if (event.action === 'tune') {
           if (!event.settings) throw new Error('meeting tune needs settings');
           m.tune(event.chatId, event.settings);
@@ -6624,20 +6626,32 @@ export async function handleServerEvent(
       }
       case 'meeting.action_request': {
         const m = requireMeetings(accounts);
-        const given = [event.decision, event.owner, event.agentRuns].filter(
-          (x) => x !== undefined,
-        ).length;
+        const given = [
+          event.decision,
+          event.owner,
+          event.agentRuns,
+          event.assign,
+          event.title,
+          event.add,
+        ].filter((x) => x !== undefined).length;
         if (given !== 1)
-          throw new Error('meeting.action_request needs exactly one of decision, owner, agentRuns');
-        if (event.agentRuns !== undefined) {
+          throw new Error(
+            'meeting.action_request needs exactly one of decision, owner, assign, title, add, agentRuns',
+          );
+        if (event.agentRuns !== undefined || event.add !== undefined) {
           if (event.actionId !== undefined)
-            throw new Error('meeting.action_request agentRuns takes no actionId');
-          await m.setAgentRunsActions(event.chatId, event.agentRuns);
+            throw new Error('meeting.action_request agentRuns and add take no actionId');
+          if (event.add !== undefined) m.addAction(event.chatId, event.add);
+          else m.setAgentRunsActions(event.chatId, event.agentRuns === true);
           return;
         }
         if (event.actionId === undefined)
           throw new Error('meeting.action_request needs an actionId');
         if (event.owner !== undefined) m.setActionOwner(event.chatId, event.actionId, event.owner);
+        else if (event.assign !== undefined)
+          m.assignAction(event.chatId, event.actionId, event.assign);
+        else if (event.title !== undefined)
+          m.setActionTitle(event.chatId, event.actionId, event.title);
         else if (event.decision !== undefined)
           await m.decide(event.chatId, event.actionId, event.decision);
         return;

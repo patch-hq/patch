@@ -13782,6 +13782,7 @@ select.permission-mode.is-pending {
 .mm-body {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-height: 0;
 }
 .mm-label {
@@ -13800,14 +13801,48 @@ select.permission-mode.is-pending {
 .mm-label-btn:hover {
   color: var(--ink);
 }
+.mm-prompts {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
 .mm-prompt {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.mm-prompt:first-child {
+  border-top: 0;
+}
+.mm-prompt-h {
+  all: unset;
+  display: flex;
+  align-items: baseline;
   gap: 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-lg);
-  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--ink);
+}
+.mm-prompt-h > span:first-child {
+  flex: 1;
+}
+.mm-prompt-when {
+  font-size: var(--text-min);
+  color: var(--ink-faint);
+}
+.mm-prompt-fixed {
+  margin: 0 0 4px;
+  white-space: pre-wrap;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: var(--text-min);
+  color: var(--ink-2);
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
 }
 .mm-prompt textarea {
   width: 100%;
@@ -13868,21 +13903,17 @@ select.permission-mode.is-pending {
   font-weight: 600;
   cursor: pointer;
 }
-.mm-act-grp {
-  font-size: var(--text-min);
-  font-weight: 600;
-  color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin: 10px 0 2px;
-}
 .mm-act {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 0;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 2px 0;
   font-size: 14px;
+}
+.mm-act-done {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
 }
 .mm-act-t {
   flex: 1;
@@ -13891,14 +13922,68 @@ select.permission-mode.is-pending {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mm-act-owner {
-  font: inherit;
-  font-size: var(--text-min);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  padding: 1px 6px;
+.mm-act-t [contenteditable] {
+  outline: none;
+  cursor: text;
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+}
+.mm-act-t [contenteditable]:focus {
   background: var(--bg-elevated);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.mm-act[data-status='done'] .mm-act-t {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+/* The owner reads as a name you can tap to change, not a form field. */
+.mm-act-owner {
+  flex: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+  background: transparent;
+  color: var(--waiting);
+  cursor: pointer;
+  appearance: none;
+}
+.mm-act-owner[data-kind='agent'] {
+  color: var(--accent-strong);
+}
+.mm-act-owner:hover {
+  background: var(--bg-soft);
+}
+.mm-act-btn.go {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--radius-pill);
+  padding: 1px 10px;
+  font-weight: 600;
+}
+.mm-add {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 14px;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.mm-add:hover {
   color: var(--ink-2);
+}
+.mm-add-input {
+  font: inherit;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  background: var(--bg-elevated);
+  color: var(--ink);
 }
 .mm-act-st {
   font-size: var(--text-min);
@@ -14001,56 +14086,66 @@ select.permission-mode.is-pending {
   min-height: 0;
   overflow: auto;
 }
-/* Flush to the edge: a hairline on its left and nothing else around it. */
+/* Across the top of the chat, full width; its height is Tom's, set by the bar under it. */
 .mm-panel {
-  flex: 0 0 clamp(320px, 36%, 460px);
+  flex: none;
+  height: 60%;
   min-width: 0;
-  min-height: 0;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
-  border-left: 1px solid var(--line-soft);
 }
 .mm-panel > .mm-head {
   flex: none;
-  padding: 8px 10px 6px 16px;
+  padding: 4px 10px;
+  gap: 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+/* The bar between the meeting and the chat. */
+.mm-resize {
+  flex: none;
+  height: 10px;
+  cursor: row-resize;
+  touch-action: none;
+  display: grid;
+  place-items: center;
+  background: var(--bg-app);
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  outline: none;
+}
+.mm-resize::after {
+  content: '';
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.mm-resize:hover::after,
+.mm-resize:focus-visible::after {
+  background: var(--ink-faint);
+}
+.mm-demo {
+  font-size: var(--text-min);
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--bg-soft);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+}
+.mm-icon.mm-end-icon {
+  color: var(--voice);
+}
+.mm-panel > .mm-head .mm-people {
+  flex: 1;
 }
 .mm-panel .mm-col {
   max-width: none;
   margin: 0;
-  padding: 8px 10px 16px;
+  padding: 8px 12px 12px;
 }
-.mm-tabs {
-  flex: none;
-  display: flex;
-  gap: 18px;
-  align-items: center;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--line-soft);
-  overflow-x: auto;
-}
-.mm-tab {
-  all: unset;
-  box-sizing: border-box;
-  padding: 7px 0 8px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink-3);
-  white-space: nowrap;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-.mm-tab[aria-selected='true'] {
-  color: var(--ink);
-  border-bottom-color: var(--ink);
-}
-.mm-tab-n {
-  margin-left: 5px;
-  font-size: var(--text-min);
-  color: var(--ink-faint);
-}
-/* Errors under the tabs: one line each, the whole text on click. */
+/* Errors under the header: one line each, the whole text on click. */
 .mm-alerts {
   flex: none;
   padding: 4px 16px;
@@ -14082,28 +14177,6 @@ select.permission-mode.is-pending {
   font-size: var(--text-min);
 }
 /* My notes: the list, and a box at the foot to write the next one. */
-.mm-mine {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.mm-write {
-  flex: none;
-  margin: 8px 12px 12px;
-  padding: 9px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
-  color: var(--ink);
-  font: inherit;
-  font-size: 15px;
-  resize: none;
-  outline: none;
-}
-.mm-write:focus {
-  border-color: var(--accent);
-}
 .mm-switches {
   display: flex;
   flex-direction: column;
@@ -14115,18 +14188,6 @@ select.permission-mode.is-pending {
   gap: 8px;
   font-size: 14px;
   color: var(--ink);
-}
-/* Settings in a narrow panel: every label above its control. */
-.mm-settings .set-row {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  min-height: 0;
-  padding: 10px 12px;
-}
-.mm-settings .set-row select,
-.mm-settings .set-row input:not([type='checkbox']) {
-  width: 100%;
 }
 .mm-bar {
   flex: none;
@@ -14227,72 +14288,78 @@ select.permission-mode.is-pending {
   flex-direction: column;
   gap: 12px;
 }
-/* Points (generated, softer ink) and Tom's notes (full ink), oldest first. */
+/* Topics, oldest first: a chevron, a one-line summary, when it ran; open, the detail. */
+.mm-feed {
+  gap: 4px;
+}
 .mm-topic {
-  display: flex;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: var(--radius);
   font-size: 14px;
 }
-.mm-topic .tm {
+.mm-topic-h {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.mm-chev {
   all: unset;
   flex: none;
-  width: 44px;
-  padding-top: 2px;
-  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
   color: var(--ink-faint);
-  font-size: var(--text-min);
-  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
 }
-.mm-topic.mine .tm {
-  cursor: default;
+.mm-chev svg {
+  transition: transform 0.12s;
 }
-.mm-topic .tm:hover,
-.mm-topic .tm[aria-expanded='true'] {
-  color: var(--ink-2);
+.mm-chev[aria-expanded='true'] svg {
+  transform: rotate(90deg);
 }
-.mm-topic .c {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
+.mm-chev:hover {
+  color: var(--ink);
 }
 .mm-topic .nm {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.mm-span {
+  all: unset;
+  flex: none;
+  font-size: var(--text-min);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mm-span:hover,
+.mm-span[aria-pressed='true'] {
   color: var(--ink-2);
 }
+.mm-topic-b {
+  margin: 2px 0 6px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 .mm-topic ul {
-  margin: 3px 0 0;
-  padding-left: 18px;
+  margin: 0;
+  padding-left: 16px;
   list-style: disc;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .mm-topic li {
   display: list-item;
 }
-.mm-topic.mine .nm {
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 500;
-}
-.mm-topic.now {
-  background: var(--accent-tint);
-}
-.mm-topic.now .nm {
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 600;
-}
-.mm-now-tag {
-  font-size: var(--text-min);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--accent-strong);
-  margin-right: 6px;
-}
 .mm-topic .decw {
   color: var(--accent-strong);
   font-weight: 700;
+  margin-right: 6px;
 }
 .mm-topic [contenteditable] {
   outline: none;
@@ -14308,6 +14375,66 @@ select.permission-mode.is-pending {
   color: var(--ink-faint);
   font-weight: 400;
 }
+/* One line for anything raised in a topic: research, a note, an action. Type by the chip. */
+.mm-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.mm-line-t {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mm-line.mine .mm-line-t {
+  color: var(--ink);
+}
+.mm-line [contenteditable] {
+  outline: none;
+  cursor: text;
+}
+.mm-chip {
+  flex: none;
+  font-size: var(--text-min);
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  padding: 0 7px;
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.mm-chip.act {
+  background: var(--waiting-tint);
+  color: var(--ink);
+}
+.mm-chip.note {
+  background: var(--bg-soft);
+  color: var(--ink-2);
+}
+.mm-sect {
+  font-size: var(--text-min);
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 10px 0 2px;
+}
+.mm-actions {
+  display: flex;
+  flex-direction: column;
+}
+/* What was just said, word for word, at the foot of the feed. */
+.mm-said {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mm-said .mm-ln > :first-child {
+  flex: none;
+  min-width: 52px;
+}
 .mm-tx {
   margin-top: 6px;
   font-size: var(--text-min);
@@ -14316,29 +14443,6 @@ select.permission-mode.is-pending {
   flex-direction: column;
   gap: 4px;
 }
-.mm-col > .mm-card {
-  margin: 6px 10px 6px 64px;
-}
-.mm-col > .mm-card ul {
-  list-style: disc;
-}
-.mm-col > .mm-card li {
-  display: list-item;
-}
-/* The last minute of talk the notes have not taken in yet. */
-.mm-tail {
-  margin-top: 10px;
-  padding: 8px 10px 0;
-  border-top: 1px dashed var(--line);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.mm-tail .mm-label {
-  margin: 0 0 2px 54px;
-  color: var(--ink-faint);
-}
-.mm-tail .mm-ln .tm,
 .mm-transcript .mm-ln .tm {
   width: 44px;
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
@@ -14370,31 +14474,10 @@ select.permission-mode.is-pending {
 }
 /* The write-up that heads Notes once the meeting has ended. */
 .mm-sum {
-  margin: 0 0 8px;
-  padding: 4px 0 12px;
-  border-bottom: 1px solid var(--line-soft);
+  margin: 2px 0 8px 24px;
 }
 .mm-sum * {
   overflow-wrap: anywhere;
-}
-.mm-sum-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.mm-sum h1 {
-  flex: 1;
-  min-width: 0;
-  font-family: Fraunces, Georgia, serif;
-  font-weight: 500;
-  font-size: 20px;
-  margin: 0;
-  outline: 0;
-}
-.mm-sum .meta {
-  color: var(--ink-3);
-  font-size: var(--text-min);
 }
 .mm-sum .body {
   outline: 0;
@@ -14436,19 +14519,6 @@ select.permission-mode.is-pending {
   left: 10px;
   top: 7px;
   z-index: 1;
-}
-@media (max-width: 800px) {
-  .mm-body {
-    flex-direction: column;
-  }
-  .mm-panel {
-    flex: 0 0 45%;
-    border-left: 0;
-    border-top: 1px solid var(--line-soft);
-  }
-  .mm-col > .mm-card {
-    margin-left: 10px;
-  }
 }
 
 /* Meeting permissions popover on the Meeting button (components/MeetingSetup.tsx). */
@@ -16469,44 +16539,26 @@ select.permission-mode.is-pending {
   font-size: var(--text-min);
 }
 
-/* Research cards (meeting mode). Type is shown by the label's colour, never a left bar. */
+/* Research cards (meeting mode): one line, opening to the bullets. Type is the chip's colour, never a left bar. */
 .mm-card {
-  background: var(--bg-elevated);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  padding: 9px 12px;
-  color: var(--ink);
   font-size: 14px;
 }
 .mm-card-h {
-  flex-wrap: wrap;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 3px;
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  cursor: pointer;
 }
-.mm-card-k {
-  font-size: var(--text-min);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--accent-strong);
+.mm-card[data-kind='fact'] .mm-chip {
+  background: var(--waiting-tint);
+  color: var(--ink);
 }
-.mm-card[data-kind='fact'] .mm-card-k {
-  color: var(--waiting);
-}
-.mm-card[data-kind='answer'] .mm-card-k {
+.mm-card[data-kind='answer'] .mm-chip {
+  background: var(--bg-soft);
   color: var(--permission);
 }
-.mm-card-q {
-  font-weight: 600;
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.mm-card-t {
-  font-size: var(--text-min);
-  color: var(--ink-3);
+.mm-card-b {
+  margin: 2px 0 4px 8px;
 }
 .mm-card ul {
   margin: 0;

@@ -7,11 +7,27 @@ import type { MeetingState } from '@patch/wire';
 
 export type MeetingPromptKey = 'now' | 'notes' | 'actions';
 
-/** What the meeting shows in place of the chat: the notes as they build up, or the transcript. */
-/** The meeting panel's tabs. */
-export type MeetingView = 'notes' | 'mine' | 'actions' | 'transcript';
+/** What the meeting panel shows: the one feed of notes, research and actions, or the whole transcript. */
+export type MeetingView = 'notes' | 'transcript';
 
 const FOLDED_KEY = 'patch.meetingFolded';
+const HEIGHT_KEY = 'patch.meetingPanelHeight';
+
+/** The meeting panel's share of the chat's height, as Tom last dragged it. */
+export const MEETING_HEIGHT_DEFAULT = 0.6;
+export const MEETING_HEIGHT_MIN = 0.15;
+export const MEETING_HEIGHT_MAX = 0.9;
+
+function readHeight(): number {
+  const raw = localStorage.getItem(HEIGHT_KEY);
+  if (raw === null) return MEETING_HEIGHT_DEFAULT;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v < MEETING_HEIGHT_MIN || v > MEETING_HEIGHT_MAX) {
+    console.warn(`meetingStore: ignoring stored panel height ${raw}`);
+    return MEETING_HEIGHT_DEFAULT;
+  }
+  return v;
+}
 
 /** Chats whose ended meeting Tom folded away, remembered across reloads. */
 function readFolded(): Record<string, true> {
@@ -40,6 +56,9 @@ interface MeetingStoreState {
   /** Per chat: the ended meeting is folded into one line and the chat has the room. */
   folded: Record<string, true>;
   setFolded(chatId: string, folded: boolean): void;
+  /** The panel's share of the chat's height (the drag bar under it), remembered across reloads. */
+  height: number;
+  setHeight(height: number): void;
   /** Opens the settings on one prompt; null closes the prompt editor and leaves the settings open. */
   openPromptEditor(key: MeetingPromptKey | null): void;
   apply(chatId: string, meeting: MeetingState | null): void;
@@ -64,6 +83,12 @@ export const useMeetingStore = create<MeetingStoreState>((set) => ({
       localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
       return { folded: next };
     }),
+  height: readHeight(),
+  setHeight: (h) => {
+    const height = Math.min(MEETING_HEIGHT_MAX, Math.max(MEETING_HEIGHT_MIN, h));
+    localStorage.setItem(HEIGHT_KEY, String(height));
+    set({ height });
+  },
   openPromptEditor: (promptEditor) =>
     set(promptEditor ? { promptEditor, settingsOpen: true } : { promptEditor }),
   apply: (chatId, meeting) => set((s) => ({ byChat: { ...s.byChat, [chatId]: meeting } })),
