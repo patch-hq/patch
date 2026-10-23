@@ -3,7 +3,6 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_CHAT_ORDERING,
   chatsInProject,
   groupChats,
   nextChatAfterArchive,
