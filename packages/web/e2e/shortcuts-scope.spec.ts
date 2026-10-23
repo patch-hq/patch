@@ -145,7 +145,7 @@ test.describe('chat-view chords fire in a chat view', () => {
     expect(fired).toContain('toggleArchived');
   });
 
-  test('⌘↑ in the composer is left to the text box, not a chat switch', async ({ page }) => {
+  test('⌘↑ in the composer switches chat (spec/14)', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     const composer = page.getByTestId('composer-input');
     await expect(composer).toBeVisible();
@@ -154,8 +154,8 @@ test.describe('chat-view chords fire in a chat view', () => {
 
     await page.keyboard.press(`${MOD}+ArrowUp`);
 
-    expect(await calls(page)).not.toContain('prevChat');
-    expect(await preventedFlags(page)).toEqual([false]);
+    expect(await calls(page)).toContain('prevChat');
+    expect(await preventedFlags(page)).toEqual([true]);
   });
 
   test('⌘↑ in the sidebar search field (not the composer) is left to the browser', async ({
