@@ -41,6 +41,7 @@ import {
   type GoalOutcomeNotice,
   type SystemContextItem,
 } from '@patch/wire';
+import { systemMessageSummary } from '../lib/systemMessageSummary';
 import { backRecord, parseAgentReturn, parseAskHuman, type AgentReturn } from '@patch/wire';
 import { SnoozeDivider } from '../components/SnoozeDivider.js';
 import type { WireEvent } from '@patch/wire';
@@ -5273,16 +5274,15 @@ function PermissionModeLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
 // payload or mustached prompt never reads as if the user typed it. Expanding
 // shows the exact text the job service sent.
 function JobTriggerLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
-  // A Pad delivery is written by Patch from what the user did in the Pad; its
-  // first line names the Pad, so it is the summary.
-  const padSummary = /^\[Pad\][^\n]*/.exec(entry.content ?? '')?.[0];
+  const summary = systemMessageSummary(
+    entry.content ?? '',
+    entry.origin === 'machine' ? 'machine' : 'job',
+  );
   return (
     <ToolDisclosure
       testid="job-trigger"
       variant="trigger"
-      summary={
-        padSummary ?? (entry.origin === 'machine' ? 'Automated message' : 'Automated trigger')
-      }
+      summary={summary}
       detail={<code>{entry.content ?? ''}</code>}
     />
   );

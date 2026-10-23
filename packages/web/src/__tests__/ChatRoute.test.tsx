@@ -3181,7 +3181,7 @@ describe('ChatRoute regression', () => {
       renderChat('c-job-trigger');
       const row = screen.getByTestId('job-trigger');
       expect(row.getAttribute('data-open')).toBe('false');
-      expect(screen.getByTestId('job-trigger-summary').textContent).toContain('Automated trigger');
+      expect(screen.getByTestId('job-trigger-summary').textContent).toContain('Job fired');
       // Transcript furniture: no user bubble for the trigger turn.
       expect(document.querySelector('.msg-user')).toBeNull();
       // The assistant reply still renders normally.

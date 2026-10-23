@@ -14,7 +14,7 @@ test.describe('job trigger turn', () => {
     const line = page.getByTestId('job-trigger');
     await expect(line).toBeVisible();
     await expect(line).toHaveAttribute('data-open', 'false');
-    await expect(line).toContainText('Automated trigger');
+    await expect(line).toContainText('Job fired');
 
     // No user bubble for the trigger turn itself — the only `.msg-user` on
     // screen is the later, genuine the user-authored follow-up.
@@ -77,7 +77,7 @@ test.describe('job trigger turn — a later fire into an existing chat', () => {
     const line = page.getByTestId('job-trigger');
     await expect(line).toBeVisible();
     await expect(line).toHaveAttribute('data-open', 'false');
-    await expect(line).toContainText('Automated trigger');
+    await expect(line).toContainText('Job fired');
 
     await line.locator('.tool-summary').click();
     await expect(line.locator('.tool-detail')).toContainText('"route": "36"');
