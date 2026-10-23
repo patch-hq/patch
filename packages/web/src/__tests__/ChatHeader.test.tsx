@@ -111,7 +111,7 @@ describe('ChatHeader', () => {
     cleanup();
   });
 
-  it('shows a workers pill for running patch_delegate subagents only, and drops it when they finish', () => {
+  it('shows one segmented workers pill, a segment per agent, for running patch_delegate subagents only, and drops it when they finish', () => {
     const send = (id: string, status: 'running' | 'done', seq: number): void => {
       act(() => {
         useChatStore.getState().applyEvent({
@@ -127,10 +127,13 @@ describe('ChatHeader', () => {
     render(<ChatHeader row={row()} />);
     expect(screen.queryByTestId('header-workers')).toBeNull();
     send('a', 'running', 1);
-    expect(screen.getByTestId('header-workers').textContent).toBe('1 worker');
+    expect(screen.getAllByTestId('header-worker').map((e) => e.textContent)).toEqual(['job a']);
     send('b', 'running', 2);
-    expect(screen.getByTestId('header-workers').textContent).toBe('2 workers');
-    expect(screen.getByTestId('header-workers').getAttribute('title')).toBe('job a\njob b');
+    expect(screen.getAllByTestId('header-workers')).toHaveLength(1);
+    expect(screen.getAllByTestId('header-worker').map((e) => e.textContent)).toEqual([
+      'job a',
+      'job b',
+    ]);
     send('a', 'done', 3);
     send('b', 'done', 4);
     expect(screen.queryByTestId('header-workers')).toBeNull();

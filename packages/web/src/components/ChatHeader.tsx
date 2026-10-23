@@ -73,23 +73,24 @@ const ICON = 18;
 const NO_DELEGATES: Record<string, DelegateUpdateInfo> = {};
 
 /**
- * spec/14 § Chat panel header — Background workers: a count pill while any
- * `patch_delegate` subagent of this chat is running or awaiting permission,
- * so the work stays visible without scrolling to the strip above the composer.
+ * spec/14 § Chat panel header — Background workers: while any `patch_delegate`
+ * subagent of this chat is running or awaiting permission, one pill beside the
+ * title, a segment per agent, so the work stays visible without scrolling to
+ * the strip above the composer.
  */
 function WorkersIndicator({ chatId }: { chatId: string }): JSX.Element | null {
   const updates = useChatStore((s) => s.delegateUpdates[chatId] ?? NO_DELEGATES);
-  const running = Object.values(updates).filter(
-    (d) => d.status === 'running' || d.status === 'awaiting-permission',
+  const running = Object.entries(updates).filter(
+    ([, d]) => d.status === 'running' || d.status === 'awaiting-permission',
   );
   if (running.length === 0) return null;
   return (
-    <span
-      className="workers-pill"
-      data-testid="header-workers"
-      title={running.map((d) => d.label).join('\n')}
-    >
-      {running.length} {running.length === 1 ? 'worker' : 'workers'}
+    <span className="workers-pill" data-testid="header-workers">
+      {running.map(([id, d]) => (
+        <span key={id} className="workers-pill-segment" data-testid="header-worker" title={d.label}>
+          {d.label}
+        </span>
+      ))}
     </span>
   );
 }
