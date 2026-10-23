@@ -17,10 +17,10 @@ export function SignInApprovalSheet(): React.ReactElement | null {
   const [now, setNow] = useState(() => Date.now());
   const [shown, setShown] = useState<{ label: string; code: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Re-checks every 30s so a failed check clears itself once the server is back.
+  // Re-checks every 30s. A failed check is logged, not shown: the connection
+  // banner already says the server is unreachable, and the next check recovers.
   useEffect(() => {
     if (surfaceId === null) return;
     let cancelled = false;
@@ -29,12 +29,11 @@ export function SignInApprovalSheet(): React.ReactElement | null {
         .signInPending()
         .then((r) => {
           if (cancelled) return;
-          setCheckFailed(null);
           for (const req of r.requests) useSignInStore.getState().add(req);
         })
         .catch((e: unknown) => {
           if (!cancelled)
-            setCheckFailed(`Could not check for sign-in requests: ${(e as Error).message}`);
+            console.error(`Could not check for sign-in requests: ${(e as Error).message}`);
         });
     };
     check();
@@ -70,7 +69,7 @@ export function SignInApprovalSheet(): React.ReactElement | null {
     }
   };
 
-  if (shown === null && current === undefined && (error ?? checkFailed) === null) return null;
+  if (shown === null && current === undefined && error === null) return null;
 
   const button = (label: string, onPress: () => void, primary: boolean): React.ReactElement => (
     <Pressable
@@ -140,17 +139,16 @@ export function SignInApprovalSheet(): React.ReactElement | null {
           </View>
         </>
       ) : null}
-      {(error ?? checkFailed) !== null ? (
+      {error !== null ? (
         <>
           <Text testID="signin-error" style={{ color: fixed.onShade, marginTop: space.sm }}>
-            {error ?? checkFailed}
+            {error}
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: space.sm }}>
             {button(
               'Dismiss',
               () => {
                 setError(null);
-                setCheckFailed(null);
               },
               false,
             )}

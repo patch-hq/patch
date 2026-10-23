@@ -15,11 +15,11 @@ export function SignInApprovalPrompt(): JSX.Element | null {
   const [now, setNow] = useState(() => Date.now());
   const [shown, setShown] = useState<{ label: string; code: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // What was asked while this surface was away: the live event is gone, the list is not.
-  // Re-checks every 30s so a failed check clears itself once the server is back.
+  // Re-checks every 30s. A failed check is logged, not popped up: the connection
+  // banner already says the server is unreachable, and the next check recovers.
   useEffect(() => {
     if (surfaceId === null) return;
     let cancelled = false;
@@ -28,12 +28,11 @@ export function SignInApprovalPrompt(): JSX.Element | null {
         .signInPending()
         .then((r) => {
           if (cancelled) return;
-          setCheckFailed(null);
           for (const req of r.requests) useSignInStore.getState().add(req);
         })
         .catch((e: unknown) => {
           if (!cancelled)
-            setCheckFailed(`Could not check for sign-in requests: ${(e as Error).message}`);
+            console.error(`Could not check for sign-in requests: ${(e as Error).message}`);
         });
     };
     check();
@@ -91,7 +90,7 @@ export function SignInApprovalPrompt(): JSX.Element | null {
       </div>
     );
   }
-  if (current === undefined && (error ?? checkFailed) === null) return null;
+  if (current === undefined && error === null) return null;
   return (
     <div
       className="signin-prompt"
@@ -123,10 +122,10 @@ export function SignInApprovalPrompt(): JSX.Element | null {
           </div>
         </>
       ) : null}
-      {(error ?? checkFailed) !== null ? (
+      {error !== null ? (
         <>
           <p className="signin-error" data-testid="signin-error" role="alert">
-            {error ?? checkFailed}
+            {error}
           </p>
           <div className="signin-buttons">
             <button
@@ -134,7 +133,6 @@ export function SignInApprovalPrompt(): JSX.Element | null {
               data-testid="signin-error-dismiss"
               onClick={() => {
                 setError(null);
-                setCheckFailed(null);
               }}
             >
               Dismiss

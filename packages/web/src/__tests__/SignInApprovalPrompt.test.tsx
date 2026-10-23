@@ -71,25 +71,21 @@ describe('SignInApprovalPrompt', () => {
     expect((await screen.findByTestId('signin-error')).textContent).toMatch(/no such pending/);
   });
 
-  it('a failed pending check can be dismissed, and clears itself on a later good check', async () => {
-    const pending = vi.spyOn(api, 'signInPending').mockRejectedValue(new Error('offline'));
+  it('a failed pending check logs and shows no popup, then recovers on a later good check', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const pending = vi.spyOn(api, 'signInPending').mockRejectedValue(new Error('HTTP 502'));
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       render(<SignInApprovalPrompt />);
-      expect((await screen.findByTestId('signin-error')).textContent).toMatch(/offline/);
-      fireEvent.click(screen.getByTestId('signin-error-dismiss'));
-      expect(screen.queryByTestId('signin-error')).toBeNull();
+      await waitFor(() => expect(logged).toHaveBeenCalled());
+      expect(String(logged.mock.calls[0]?.join(' '))).toMatch(/sign-in requests.*HTTP 502/);
+      expect(screen.queryByTestId('signin-prompt')).toBeNull();
 
-      pending.mockRejectedValueOnce(new Error('offline'));
+      pending.mockResolvedValue({ requests: [{ id: 'r9', label: 'Firefox', expiresAt: soon() }] });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
-      expect(await screen.findByTestId('signin-error')).toBeTruthy();
-      pending.mockResolvedValue({ requests: [] });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(30_000);
-      });
-      await waitFor(() => expect(screen.queryByTestId('signin-error')).toBeNull());
+      expect(await screen.findByTestId('signin-allow')).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }

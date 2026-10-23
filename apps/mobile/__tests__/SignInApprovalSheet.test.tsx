@@ -71,14 +71,13 @@ describe('SignInApprovalSheet', () => {
     expect(hasText(r.root, 'no such pending sign-in request')).toBe(true);
   });
 
-  it('a failed pending check can be dismissed', async () => {
-    vi.mocked(api.signInPending).mockRejectedValue(new Error('offline'));
+  it('a failed pending check logs and shows no sheet', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(api.signInPending).mockRejectedValue(new Error('HTTP 502'));
     const r = renderRN(<SignInApprovalSheet />);
     await actAsync(async () => {});
-    expect(hasText(r.root, 'Could not check for sign-in requests: offline')).toBe(true);
-    await actAsync(async () => {
-      findHost(r.root, byLabel('Dismiss')).props.onPress();
-    });
+    expect(String(logged.mock.calls[0]?.join(' '))).toMatch(/sign-in requests.*HTTP 502/);
     expect(r.toJSON()).toBeNull();
+    logged.mockRestore();
   });
 });
