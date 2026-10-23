@@ -261,6 +261,31 @@ describe('ChatRoute — patch_delegate tool row', () => {
     expect(getDelegateHistory).toHaveBeenCalledTimes(1);
   });
 
+  it('a poll of a running subagent asks only for events after the last one held, and appends them', async () => {
+    seed();
+    emitDelegateCall('patch_delegate', { id: 'sub-1', label: 'draft the email' });
+    renderChat();
+    fireEvent.click(screen.getByTestId('delegate-open-transcript'));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('delegate-transcript-msg')).toHaveLength(2);
+    });
+    getDelegateHistory.mockResolvedValueOnce({
+      events: [{ seq: 2, role: 'assistant', content: 'one more thing' }],
+    });
+    await waitFor(
+      () => {
+        expect(getDelegateHistory).toHaveBeenCalledWith('c1', 'sub-1', 2);
+      },
+      { timeout: 5000 },
+    );
+    await waitFor(() => {
+      expect(screen.getAllByTestId('delegate-transcript-msg')).toHaveLength(3);
+    });
+    expect(screen.getByTestId('delegate-transcript-stream').textContent).toContain(
+      'go do the thing',
+    );
+  }, 10_000);
+
   it('reads the ack out of an MCP text block, not just a direct object', () => {
     seed();
     emitDelegateCall('patch_delegate', {

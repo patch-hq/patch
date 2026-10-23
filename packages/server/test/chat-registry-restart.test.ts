@@ -89,9 +89,9 @@ describe('chat registry across a server restart', () => {
       const active = await built.app.inject({ method: 'GET', url: '/api/chats', headers });
       expect((active.json() as { chats: unknown[] }).chats).toHaveLength(0);
 
-      const originalSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        originalSend(surfaceId, event);
+      const originalSend = hostLink.sendTo.bind(hostLink);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        originalSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() =>
             hostLink.emit({

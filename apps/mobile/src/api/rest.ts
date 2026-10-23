@@ -561,9 +561,13 @@ export const api = {
   // spec/15 § Chat detail — Delegate tool row: the pushed read-only
   // transcript screen. A subagent is never in the chat registry (spec/02 §
   // Native subagent dispatch), so this reads its history through the PARENT.
-  getDelegateHistory: (parentId: string, delegateId: string) =>
+  // `since` returns only events with seq >= since, so a poll fetches the new
+  // tail rather than the whole transcript.
+  getDelegateHistory: (parentId: string, delegateId: string, since?: number) =>
     request<{ events: Array<Record<string, unknown>>; nextFromSeq?: number }>(
-      `/api/chats/${parentId}/delegates/${delegateId}/history`,
+      `/api/chats/${parentId}/delegates/${delegateId}/history${
+        since === undefined ? '' : `?since=${since}`
+      }`,
     ),
   // POST /api/voice/token (spec/07, server voice/token.ts). Body is
   // `.strict {chatId, role, surfaceKind}` — the mobile surface is always

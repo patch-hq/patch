@@ -22,7 +22,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { classifyTurnFailure } from '../lib/turnFailure.js';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
 import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SPECIAL_THREAD_IDS,
   harnessForModel,
@@ -4541,9 +4541,25 @@ function DelegateTranscript({
   status: DelegateUpdateInfo['status'];
 }): JSX.Element {
   const live = status === 'running' || status === 'awaiting-permission';
+  const qc = useQueryClient();
+  const queryKey = ['delegate-history', parentId, delegateId];
   const { data, isLoading, error } = useQuery({
-    queryKey: ['delegate-history', parentId, delegateId],
-    queryFn: () => api.getDelegateHistory(parentId, delegateId),
+    queryKey,
+    // Each poll asks only for events after the last one held, and appends.
+    queryFn: async () => {
+      const held = qc.getQueryData<{ events: Array<Record<string, unknown>> }>(queryKey)?.events;
+      const last = held?.length ? (held[held.length - 1] as { seq: number }).seq : undefined;
+      try {
+        const r =
+          last === undefined
+            ? await api.getDelegateHistory(parentId, delegateId)
+            : await api.getDelegateHistory(parentId, delegateId, last + 1);
+        return { events: [...(held ?? []), ...r.events] };
+      } catch (err) {
+        console.error('delegate transcript load failed', { parentId, delegateId }, err);
+        throw err;
+      }
+    },
     refetchInterval: live ? 2000 : false,
     // A failed pull can already have sat out the server's 5s daemon timeout;
     // the app-wide retry would double that "Loading…" before the error shows.

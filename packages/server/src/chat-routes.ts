@@ -635,6 +635,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       }
       return reply.code(200).send({ events: held, fromServerCopy: true });
     }
+    // The request goes to the host that owns the chat — broadcasting it let a
+    // host that does not know the chat answer first with chat_not_found.
+    if (hostId === undefined || !deps.hostLink.isOnline(hostId)) {
+      deps.logger.warn(
+        { chatId: req.params.id, hostId },
+        'chat history: owning host is not online',
+      );
+      return reply.code(503).send({ error: 'host_offline', hostId });
+    }
     const requestId = deps.idGenerator();
     const result = await new Promise<
       Extract<WireEvent, { type: 'patch.chat_history.response' }> | 'timeout'
@@ -644,7 +653,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         resolveP('timeout');
       }, HISTORY_REQUEST_TIMEOUT_MS);
       historyPending.set(requestId, { resolve: resolveP, timeout });
-      deps.hostLink.send(auth.surfaceId, {
+      deps.hostLink.sendTo(hostId, auth.surfaceId, {
         type: 'patch.chat_history.request',
         requestId,
         chatId: req.params.id,
@@ -656,10 +665,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       });
     });
     if (result === 'timeout') {
+      deps.logger.warn({ chatId: req.params.id, hostId }, 'chat history: host timed out');
       return reply.code(504).send({ error: 'daemon_timeout' });
     }
     if (!result.ok) {
       const code = result.error?.code ?? 'internal';
+      deps.logger.warn(
+        { chatId: req.params.id, hostId, code, message: result.error?.message },
+        'chat history: host refused',
+      );
       const status = code === 'chat_not_found' ? 404 : 502;
       return reply
         .code(status)
@@ -689,8 +703,18 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           .code((e as Error & { statusCode?: number }).statusCode ?? 401)
           .send({ error: (e as Error).message });
       }
-      if (!deps.chatRegistry.get(req.params.parentId)) {
+      const parent = deps.chatRegistry.get(req.params.parentId);
+      if (!parent) {
         return sendUnknownChat(reply, req.params.parentId);
+      }
+      // The subagent lives on the host that owns its parent; ask that host only.
+      const parentHostId = parent.hostId;
+      if (parentHostId === undefined || !deps.hostLink.isOnline(parentHostId)) {
+        deps.logger.warn(
+          { parentId: req.params.parentId, delegateId: req.params.id, hostId: parentHostId },
+          'delegate history: owning host is not online',
+        );
+        return reply.code(503).send({ error: 'host_offline', hostId: parentHostId });
       }
       let since: number | undefined;
       if (req.query?.since !== undefined && req.query.since !== '') {
@@ -711,7 +735,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           resolveP('timeout');
         }, HISTORY_REQUEST_TIMEOUT_MS);
         historyPending.set(requestId, { resolve: resolveP, timeout });
-        deps.hostLink.send(auth.surfaceId, {
+        deps.hostLink.sendTo(parentHostId, auth.surfaceId, {
           type: 'patch.chat_history.request',
           requestId,
           chatId: req.params.id,
@@ -719,11 +743,21 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           ...(since !== undefined ? { since } : {}),
         });
       });
+      const logCtx = {
+        parentId: req.params.parentId,
+        delegateId: req.params.id,
+        hostId: parentHostId,
+      };
       if (result === 'timeout') {
+        deps.logger.warn(logCtx, 'delegate history: host timed out');
         return reply.code(504).send({ error: 'daemon_timeout' });
       }
       if (!result.ok) {
         const code = result.error?.code ?? 'internal';
+        deps.logger.warn(
+          { ...logCtx, code, message: result.error?.message },
+          'delegate history: host refused',
+        );
         const status = code === 'chat_not_found' || code === 'not_a_delegate' ? 404 : 502;
         return reply
           .code(status)

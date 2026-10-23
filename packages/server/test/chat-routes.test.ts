@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
+import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
@@ -611,10 +612,10 @@ describe('chat REST routes', () => {
           seq: 2,
         },
       ];
-      const originalSend = hostLink.send.bind(hostLink);
+      const originalSend = hostLink.sendTo.bind(hostLink);
       let seenSince: number | undefined = -1;
-      hostLink.send = (surfaceId, event) => {
-        originalSend(surfaceId, event);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        originalSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenSince = event.since;
           const from = event.since ?? 0;
@@ -738,10 +739,10 @@ describe('chat REST routes', () => {
         folder: '/work/h',
       });
 
-      const originalSend = hostLink.send.bind(hostLink);
+      const originalSend = hostLink.sendTo.bind(hostLink);
       let seenBranchId: string | undefined;
-      hostLink.send = (surfaceId, event) => {
-        originalSend(surfaceId, event);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        originalSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenBranchId = event.branchId;
           setImmediate(() => {
@@ -793,10 +794,10 @@ describe('chat REST routes', () => {
         folder: '/work/p',
       });
 
-      const originalSend = hostLink.send.bind(hostLink);
+      const originalSend = hostLink.sendTo.bind(hostLink);
       let seenRequest: { chatId?: string; requireParent?: string } | undefined;
-      hostLink.send = (surfaceId, event) => {
-        originalSend(surfaceId, event);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        originalSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenRequest = { chatId: event.chatId, requireParent: event.requireParent };
           setImmediate(() => {
@@ -828,6 +829,50 @@ describe('chat REST routes', () => {
       expect(seenRequest).toEqual({ chatId: 'sub-1', requireParent: 'parent-1' });
       const body = res.json() as { events: Array<{ content: string }> };
       expect(body.events.map((e) => e.content)).toEqual(['go', 'done']);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('GET /api/chats/:parentId/delegates/:id/history asks only the host that owns the parent', async () => {
+    const { registry, jwt } = await bootstrap();
+    registry.setDaemonKey({ hostId: 'd2', publicKey: 'pk-d2', issuedAt: 1 });
+    const hostLink = new InProcessHostLink();
+    hostLink.setHostId('d2');
+    hostLink.addOnlineHost('d1');
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'parent-r', folder: '/work/p' });
+      const res = await built.app.inject({
+        method: 'GET',
+        url: '/api/chats/parent-r/delegates/sub-r/history?since=4',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      // Nobody answers, so it times out; what matters is who was asked.
+      expect(res.statusCode).toBe(504);
+      const reqs = hostLink.sent.filter((x) => x.event.type === 'patch.chat_history.request');
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0]?.hostId).toBe('d1');
+    } finally {
+      await built.app.close();
+    }
+  }, 15_000);
+
+  it('GET /api/chats/:parentId/delegates/:id/history says host_offline, without asking anyone, when the parent host is down', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    hostLink.setHostId('d2');
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'parent-o', folder: '/work/p' });
+      const res = await built.app.inject({
+        method: 'GET',
+        url: '/api/chats/parent-o/delegates/sub-o/history',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(503);
+      expect((res.json() as { error: string }).error).toBe('host_offline');
+      expect(hostLink.sent.some((x) => x.event.type === 'patch.chat_history.request')).toBe(false);
     } finally {
       await built.app.close();
     }
@@ -871,9 +916,9 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/p',
       });
-      const originalSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        originalSend(surfaceId, event);
+      const originalSend = hostLink.sendTo.bind(hostLink);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        originalSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
             hostLink.emit({
@@ -2646,9 +2691,9 @@ describe('chat REST routes', () => {
         folder: '/work/l',
       });
       let seenLimit: number | undefined = -1;
-      const origSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        origSend(surfaceId, event);
+      const origSend = hostLink.sendTo.bind(hostLink);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        origSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           seenLimit = event.limit;
           setImmediate(() => {
@@ -2716,9 +2761,9 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/n',
       });
-      const origSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        origSend(surfaceId, event);
+      const origSend = hostLink.sendTo.bind(hostLink);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        origSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
             hostLink.emit({
@@ -2797,9 +2842,9 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/e',
       });
-      const origSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        origSend(surfaceId, event);
+      const origSend = hostLink.sendTo.bind(hostLink);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        origSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
             hostLink.emit({
@@ -4088,9 +4133,9 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/h4',
       });
-      const origSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        origSend(surfaceId, event);
+      const origSend = hostLink.sendTo.bind(hostLink);
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        origSend(hostId, surfaceId, event);
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
             hostLink.emit({
@@ -4135,8 +4180,8 @@ describe('chat REST routes', () => {
         folder: '/work/d',
       });
       const origSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        origSend(surfaceId, event);
+      const origSendTo = hostLink.sendTo.bind(hostLink);
+      const intercept = (event: WireEvent): void => {
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
             hostLink.emit({
@@ -4165,6 +4210,14 @@ describe('chat REST routes', () => {
             });
           });
         }
+      };
+      hostLink.send = (surfaceId, event) => {
+        origSend(surfaceId, event);
+        intercept(event);
+      };
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        origSendTo(hostId, surfaceId, event);
+        intercept(event);
       };
 
       const hist = await built.app.inject({
@@ -4319,8 +4372,8 @@ describe('chat REST routes', () => {
         folder: '/work/ne',
       });
       const origSend = hostLink.send.bind(hostLink);
-      hostLink.send = (surfaceId, event) => {
-        origSend(surfaceId, event);
+      const origSendTo = hostLink.sendTo.bind(hostLink);
+      const intercept = (event: WireEvent): void => {
         if (event.type === 'patch.chat_history.request') {
           setImmediate(() => {
             hostLink.emit({
@@ -4349,6 +4402,14 @@ describe('chat REST routes', () => {
             });
           });
         }
+      };
+      hostLink.send = (surfaceId, event) => {
+        origSend(surfaceId, event);
+        intercept(event);
+      };
+      hostLink.sendTo = (hostId, surfaceId, event) => {
+        origSendTo(hostId, surfaceId, event);
+        intercept(event);
       };
 
       const hist = await built.app.inject({

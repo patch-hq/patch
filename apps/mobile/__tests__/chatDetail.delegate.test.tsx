@@ -163,6 +163,20 @@ describe('patch_delegate tool row', () => {
     expect(findAllHost(r.root, byTestId('delegate-transcript-stream'))).toHaveLength(0);
   });
 
+  it('a failed transcript fetch shows the error and logs it, instead of spinning forever', async () => {
+    emitDelegateCall('mcp__patch__patch_delegate', { id: 'sub-1', label: 'draft the email' });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    getDelegateHistory.mockRejectedValueOnce(new Error('chat_not_found'));
+    const r = renderRN(<ChatDetailScreen />);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('delegate-open-transcript')).props.onPress();
+      await flush();
+    });
+    expect(findAllHost(r.root, byTestId('delegate-transcript-error'))).toHaveLength(1);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
   it('reads the ack out of an MCP text block, not just a direct object', () => {
     emitDelegateCall('patch_delegate', {
       content: [{ type: 'text', text: JSON.stringify({ id: 'sub-1', label: 'draft the email' }) }],

@@ -26,14 +26,36 @@ function useDelegateHistory(
   parentId: string,
   delegateId: string,
   live: boolean,
-): DelegateHistoryEvent[] {
+): { events: DelegateHistoryEvent[]; failed: boolean } {
   const [events, setEvents] = React.useState<DelegateHistoryEvent[]>([]);
+  const [failed, setFailed] = React.useState(false);
   React.useEffect(() => {
     let cancelled = false;
+    let held: DelegateHistoryEvent[] = [];
+    let inFlight = false;
+    // Each poll asks only for events after the last one held, and appends.
     const load = (): void => {
-      void api.getDelegateHistory(parentId, delegateId).then((r) => {
-        if (!cancelled) setEvents(r.events as unknown as DelegateHistoryEvent[]);
-      });
+      if (inFlight) return;
+      inFlight = true;
+      const last = held.length ? held[held.length - 1]!.seq : undefined;
+      const req =
+        last === undefined
+          ? api.getDelegateHistory(parentId, delegateId)
+          : api.getDelegateHistory(parentId, delegateId, last + 1);
+      req
+        .then((r) => {
+          if (cancelled) return;
+          held = [...held, ...(r.events as unknown as DelegateHistoryEvent[])];
+          setEvents(held);
+          setFailed(false);
+        })
+        .catch((err: unknown) => {
+          console.error('delegate transcript load failed', { parentId, delegateId }, err);
+          if (!cancelled) setFailed(true);
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     };
     load();
     if (!live)
@@ -46,7 +68,7 @@ function useDelegateHistory(
       clearInterval(t);
     };
   }, [parentId, delegateId, live]);
-  return events;
+  return { events, failed };
 }
 
 export function DelegateTranscript({
@@ -60,7 +82,7 @@ export function DelegateTranscript({
   const colors = useTheme();
   const status = useChatStore((s) => s.delegateUpdates[chatId]?.[delegateId]?.status ?? 'running');
   const isLive = status === 'running' || status === 'awaiting-permission';
-  const events = useDelegateHistory(chatId, delegateId, isLive);
+  const { events, failed } = useDelegateHistory(chatId, delegateId, isLive);
 
   return (
     <View
@@ -72,7 +94,12 @@ export function DelegateTranscript({
         borderColor: colors.lineSoft,
       }}
     >
-      {events.length === 0 ? (
+      {failed ? (
+        <Text testID="delegate-transcript-error" style={{ ...typography.meta, color: colors.ink3 }}>
+          Couldn't load transcript.
+        </Text>
+      ) : null}
+      {events.length === 0 && !failed ? (
         <ActivityIndicator color={colors.ink3} />
       ) : (
         events.map((e) => (

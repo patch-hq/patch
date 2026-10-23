@@ -766,9 +766,13 @@ export const api = {
   // "Open transcript" action. A subagent is never in the chat registry
   // (spec/02 § Native subagent dispatch), so this reads its history through
   // the PARENT instead of the ordinary /api/chats/:id/history route.
-  getDelegateHistory: (parentId: string, delegateId: string) =>
+  // `since` returns only events with seq >= since, so a poll fetches the new
+  // tail rather than the whole transcript.
+  getDelegateHistory: (parentId: string, delegateId: string, since?: number) =>
     request<{ events: Array<Record<string, unknown>>; nextFromSeq?: number }>(
-      `/api/chats/${parentId}/delegates/${delegateId}/history`,
+      `/api/chats/${parentId}/delegates/${delegateId}/history${
+        since === undefined ? '' : `?since=${since}`
+      }`,
     ),
   // 02-daemon.md § Self-wake — `/loop <interval> <message>`: arm (or, with
   // `null`, cancel) a recurring self-wake from the composer, reaching the same
