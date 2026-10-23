@@ -174,7 +174,7 @@ export function ModelPicker({
       data-testid="model-popup"
       role="listbox"
     >
-      {note !== null ? (
+      {note !== null && catalog.status !== 'error' ? (
         <div className="model-popup-note" data-testid="model-popup-note">
           {note}
         </div>

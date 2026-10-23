@@ -155,7 +155,7 @@ export function ModelPicker({
             {/* The catalogue's own state stands in the options' place — NO
                 FALLBACK, so a failed read is read out rather than papered over
                 with a list this host may not serve. */}
-            {note !== undefined ? (
+            {note !== undefined && catalog.status !== 'error' ? (
               <Text
                 testID="model-picker-note"
                 style={{
@@ -178,8 +178,21 @@ export function ModelPicker({
                   fontSize: textMin,
                 }}
               >
-                {catalog.error}
+                {`Couldn't load models: ${catalog.error}`}
               </Text>
+            ) : null}
+            {catalog.status === 'error' ? (
+              <Pressable
+                testID="new-chat-model-retry"
+                onPress={catalog.reload}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading models"
+                style={{ paddingHorizontal: space.md, paddingVertical: space.sm }}
+              >
+                <Text style={{ color: colors.ink2, fontFamily: fonts.bodyBold, fontSize: textMin }}>
+                  Retry
+                </Text>
+              </Pressable>
             ) : catalog.status !== 'ready' ? (
               <Text
                 testID="new-chat-model-loading"

@@ -32,6 +32,8 @@ export interface ModelCatalog {
   status: ModelCatalogStatus;
   /** The failure, verbatim, when `status === 'error'`. Null otherwise. */
   error: string | null;
+  /** Read the catalogue again — the retry for a failed read. */
+  reload: () => void;
 }
 
 /**
@@ -52,29 +54,32 @@ export function useModelCatalog(hostId: string | null): ModelCatalog {
     models: [],
     status: 'idle',
     error: null,
+    reload: () => {},
   });
+  const [attempt, setAttempt] = React.useState(0);
+  const reload = React.useCallback(() => setAttempt((n) => n + 1), []);
 
   React.useEffect(() => {
     if (hostId === null || hostId === '') {
-      setCatalog({ models: [], status: 'idle', error: null });
+      setCatalog({ models: [], status: 'idle', error: null, reload });
       return;
     }
     let live = true;
-    setCatalog({ models: [], status: 'loading', error: null });
+    setCatalog({ models: [], status: 'loading', error: null, reload });
     void api
       .models(hostId)
       .then((r) => {
-        if (live) setCatalog({ models: r.models ?? [], status: 'ready', error: null });
+        if (live) setCatalog({ models: r.models ?? [], status: 'ready', error: null, reload });
       })
       .catch((e: unknown) => {
         if (live) {
-          setCatalog({ models: [], status: 'error', error: (e as Error).message });
+          setCatalog({ models: [], status: 'error', error: (e as Error).message, reload });
         }
       });
     return () => {
       live = false;
     };
-  }, [hostId, accountState]);
+  }, [hostId, accountState, attempt, reload]);
 
   return catalog;
 }

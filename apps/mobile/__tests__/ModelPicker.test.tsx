@@ -153,6 +153,25 @@ describe('ModelPicker — the list', () => {
   });
 });
 
+describe('ModelPicker — a failed load', () => {
+  it('names the failure as a model-list problem, drops the next-message note and offers retry', async () => {
+    modelsSpy.mockRejectedValueOnce(new Error('daemon_timeout'));
+    const r = await renderPicker({ note: 'Applies to your next message' });
+    actSync(() => findHost(r.root, byTestId('new-chat-model-pill')).props.onPress());
+    expect(textOf(findHost(r.root, byTestId('new-chat-model-error')))).toContain(
+      "Couldn't load models",
+    );
+    expect(queryHost(r.root, byTestId('model-picker-note'))).toBeNull();
+    modelsSpy.mockResolvedValue({ models: [{ id: 'claude-opus-5', label: 'Opus 5' }] });
+    await actAsync(async () => {
+      findHost(r.root, byTestId('new-chat-model-retry')).props.onPress();
+      await flush();
+    });
+    expect(queryHost(r.root, byTestId('new-chat-model-option-claude-opus-5'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('model-picker-note'))).not.toBeNull();
+  });
+});
+
 describe('ModelPicker — choosing', () => {
   it('reports the chosen id and closes the list', async () => {
     modelsSpy.mockResolvedValue({ models: [{ id: 'claude-opus-5', label: 'Opus 5' }] });
