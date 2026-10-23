@@ -13,7 +13,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.1.6',
+  version: '0.1.7',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -59,7 +59,11 @@ const config: ExpoConfig = {
   // Bumped to 0.1.6 for updates from the phone's own server (spec/11 § Mobile
   // updates): code signing, the runtime update-URL override, and installing a
   // downloaded APK (expo-intent-launcher, REQUEST_INSTALL_PACKAGES).
-  runtimeVersion: '0.1.6',
+  //
+  // Bumped to 0.1.7 for the native Android theme: AppTheme is DayNight with
+  // night-qualified window/status-bar colours, re-applied by MainActivity on a
+  // scheme switch (uiMode is handled in-process). Native, so it needs a fresh APK.
+  runtimeVersion: '0.1.7',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired
     // (src/lib/otaUpdates.ts), and nothing checks before that: there is no

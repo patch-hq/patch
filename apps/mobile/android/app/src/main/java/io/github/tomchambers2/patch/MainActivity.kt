@@ -3,7 +3,10 @@ import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -32,6 +35,25 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    applySchemeChrome()
+  }
+
+  // This activity handles `uiMode` itself (manifest configChanges), so a
+  // dark <-> light switch does not recreate it and the window keeps whatever
+  // background and status bar it was created with. Re-apply them from the
+  // night-qualified resources on every scheme change.
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    applySchemeChrome()
+  }
+
+  private fun applySchemeChrome() {
+    window.setBackgroundDrawable(
+      android.graphics.drawable.ColorDrawable(ContextCompat.getColor(this, R.color.window_background))
+    )
+    window.statusBarColor = ContextCompat.getColor(this, R.color.status_bar)
+    WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars =
+      resources.getBoolean(R.bool.light_system_bars)
   }
 
   /**
