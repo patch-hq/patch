@@ -184,7 +184,16 @@ jobs:
           # exit on SIGPIPE when sdkmanager stops reading, which pipefail
           # reports as a failure of a step that worked.
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses < <(yes) >/dev/null
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "ndk;26.1.10909125" "build-tools;35.0.0"
+          # The NDK download occasionally arrives as a corrupt zip; retry it.
+          for attempt in 1 2 3; do
+            if "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "ndk;26.1.10909125" "build-tools;35.0.0"; then
+              exit 0
+            fi
+            echo "sdkmanager attempt $attempt failed" >&2
+            rm -rf "$ANDROID_HOME/ndk/26.1.10909125"
+            sleep 10
+          done
+          exit 1
       - name: Release signing key
         env:
           KEYSTORE_B64: ${{ secrets.PATCH_ANDROID_KEYSTORE_B64 }}
