@@ -1237,6 +1237,10 @@ export function ChatRoute({
     [handlePermission],
   );
 
+  const handleQuestionActivity = useCallback((): void => {
+    ws?.send({ type: 'chat.question_activity', chatId });
+  }, [ws, chatId]);
+
   const handleUnqueue = useCallback(
     (localId: string): void => {
       // spec/04 ## Message queueing: cancel a still-pending queued turn.
@@ -2025,6 +2029,7 @@ export function ChatRoute({
           onApproveAll={handleApproveAllPending}
           onQuestionAnswer={handleQuestionAnswer}
           onQuestionCancel={handleQuestionCancel}
+          onQuestionActivity={handleQuestionActivity}
           onUnqueue={handleUnqueue}
           onPromote={handlePromote}
           onQueuedDraft={handleQueuedDraft}
@@ -2250,6 +2255,7 @@ const TimelineEntry = memo(function TimelineEntry({
   onApproveAll,
   onQuestionAnswer,
   onQuestionCancel,
+  onQuestionActivity,
   onUnqueue,
   onPromote,
   queuedDraft,
@@ -2285,6 +2291,7 @@ const TimelineEntry = memo(function TimelineEntry({
   /** spec/14 § Question prompts — the user's `AskUserQuestion` selections. */
   onQuestionAnswer(requestId: string, answers: Record<string, string>): void;
   onQuestionCancel(requestId: string): void;
+  onQuestionActivity(): void;
   onUnqueue?(localId: string): void;
   onPromote?(localId: string): void;
   /**
@@ -2467,7 +2474,14 @@ const TimelineEntry = memo(function TimelineEntry({
     // spec/14 § Question prompts — the agent asking the user to choose is not
     // an approval, and gets the question card instead of Approve/Deny.
     if (entry.tool === ASK_USER_QUESTION) {
-      return <QuestionCard entry={entry} onAnswer={onQuestionAnswer} onCancel={onQuestionCancel} />;
+      return (
+        <QuestionCard
+          entry={entry}
+          onAnswer={onQuestionAnswer}
+          onCancel={onQuestionCancel}
+          onActivity={onQuestionActivity}
+        />
+      );
     }
     return (
       <PermissionCard

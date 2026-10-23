@@ -151,10 +151,13 @@ export function QuestionCard({
   entry,
   onAnswer: answerRequest,
   onCancel: cancelRequest,
+  onActivity,
 }: {
   entry: ChatEventEntry;
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
+  /** The user is picking/typing — keeps the host's question window open. */
+  onActivity?(): void;
 }): React.JSX.Element {
   const colors = useTheme();
   const questions = useMemo(() => parseAskUserQuestion(entry.toolArgs), [entry.toolArgs]);
@@ -204,7 +207,13 @@ export function QuestionCard({
   }
 
   return (
-    <QuestionForm entry={entry} questions={questions} onAnswer={onAnswer} onCancel={onCancel} />
+    <QuestionForm
+      entry={entry}
+      questions={questions}
+      onAnswer={onAnswer}
+      onCancel={onCancel}
+      onActivity={onActivity}
+    />
   );
 }
 
@@ -273,16 +282,43 @@ function QuestionFooter({
   );
 }
 
+/** Minimum gap between activity pings — each one grants the host a full fresh window. */
+const ACTIVITY_PING_MS = 5_000;
+
+/** Tell the host the user is working on this open question (resets its expiry). */
+function useQuestionActivity(
+  active: boolean,
+  signal: unknown[],
+  onActivity: (() => void) | undefined,
+): void {
+  const last = useRef(0);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (!active || !onActivity) return;
+    const t = Date.now();
+    if (t - last.current < ACTIVITY_PING_MS) return;
+    last.current = t;
+    onActivity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, signal);
+}
+
 function QuestionForm({
   entry,
   questions,
   onAnswer,
   onCancel,
+  onActivity,
 }: {
   entry: ChatEventEntry;
   questions: AskQuestion[];
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
+  onActivity: (() => void) | undefined;
 }): React.JSX.Element {
   const colors = useTheme();
   const resolved = entry.permissionResolved;
@@ -293,6 +329,7 @@ function QuestionForm({
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [otherOn, setOtherOn] = useState<Record<string, boolean>>({});
   const [otherText, setOtherText] = useState<Record<string, string>>({});
+  useQuestionActivity(!resolved, [picked, otherOn, otherText], onActivity);
 
   // A resolved card redraws from `entry.permissionAnswers` — the store's
   // durable record of what was picked — rather than from `picked`/`otherOn`/

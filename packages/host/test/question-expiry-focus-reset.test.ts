@@ -207,3 +207,33 @@ describe('a question timer resets on chat.focus_change', () => {
     }
   });
 });
+
+describe('a question timer resets on question activity', () => {
+  it('typing into the card gives the countdown a fresh window, repeatedly', async () => {
+    vi.useFakeTimers();
+    try {
+      const { daemon, events, folder } = setup();
+      const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
+      await vi.advanceTimersByTimeAsync(50);
+      const { requestId } = request(events);
+
+      for (let i = 0; i < 3; i++) {
+        await vi.advanceTimersByTimeAsync(WINDOW_MS - 10_000);
+        expect(response(events)).toBeUndefined();
+        daemon.noteQuestionActivity(chatId);
+      }
+      expect(expiryUpdates(events)).toHaveLength(3);
+      expect(expiryUpdates(events)[0]).toMatchObject({ chatId, requestId });
+
+      await vi.advanceTimersByTimeAsync(WINDOW_MS + 1_000);
+      expect(response(events)?.decision).toBe('deny');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is a no-op when nothing is pending', () => {
+    const { daemon } = setup();
+    expect(() => daemon.noteQuestionActivity('nope')).not.toThrow();
+  });
+});

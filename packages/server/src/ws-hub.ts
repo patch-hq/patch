@@ -1565,6 +1565,7 @@ export class WsHub {
       case 'chat.send_back_request':
       case 'chat.resume_request':
       case 'chat.pin_request':
+      case 'chat.question_activity':
       case 'meeting.control_request':
       case 'meeting.get_request':
       case 'meeting.audio':

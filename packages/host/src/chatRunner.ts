@@ -11999,6 +11999,15 @@ export class Daemon {
   }
 
   /**
+   * The user is typing into / picking from the open question card on `chatId`
+   * (`chat.question_activity`). Gives the pending question a fresh window so a
+   * long free-text answer cannot outlast the countdown mid-typing.
+   */
+  noteQuestionActivity(chatId: string): void {
+    this.resetQuestionExpiry(chatId);
+  }
+
+  /**
    * A surface named which chat it has open (`chat.focus_change`, forwarded by
    * the server with `forSurfaceId` stamped on — spec/03). Resets a pending
    * question's countdown on every edge that touches THIS chat, gained or

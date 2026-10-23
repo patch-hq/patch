@@ -3548,6 +3548,20 @@ export const ChatFocusChangeEvent = z
 export type ChatFocusChangeEvent = z.infer<typeof ChatFocusChangeEvent>;
 
 /**
+ * Surface → host: the user is interacting with (typing into, picking from) the
+ * open question card on `chatId`. The host gives the pending question a fresh
+ * window, so a long free-text answer cannot outlast the countdown while it is
+ * being written. A no-op when nothing is pending on the chat.
+ */
+export const ChatQuestionActivityEvent = z
+  .object({
+    type: z.literal('chat.question_activity'),
+    chatId: z.string().min(1),
+  })
+  .strict();
+export type ChatQuestionActivityEvent = z.infer<typeof ChatQuestionActivityEvent>;
+
+/**
  * Surface → server: this chat's composer now holds `text` (spec/14 § Composer
  * — server-owned drafts, spec/15 § Composer). The SERVER holds the draft, not
  * the host: a chat's host can be asleep and the draft still has to reach
@@ -9104,6 +9118,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatSendBackRequestEvent,
   ChatResumeRequestEvent,
   ChatFocusChangeEvent,
+  ChatQuestionActivityEvent,
   ChatPinRequestEvent,
   MeetingControlRequestEvent,
   MeetingGetRequestEvent,
@@ -9411,6 +9426,7 @@ export const EVENT_SCHEMAS = {
   'chat.send_back_request': ChatSendBackRequestEvent,
   'chat.resume_request': ChatResumeRequestEvent,
   'chat.focus_change': ChatFocusChangeEvent,
+  'chat.question_activity': ChatQuestionActivityEvent,
   'chat.pin_request': ChatPinRequestEvent,
   'meeting.control_request': MeetingControlRequestEvent,
   'meeting.get_request': MeetingGetRequestEvent,

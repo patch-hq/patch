@@ -191,10 +191,13 @@ export function QuestionCard({
   entry,
   onAnswer,
   onCancel,
+  onActivity,
 }: {
   entry: ChatEventEntry;
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
+  /** The user is picking/typing — keeps the host's question window open. */
+  onActivity?(): void;
 }): JSX.Element {
   const questions = useMemo(() => parseAskUserQuestion(entry.toolArgs), [entry.toolArgs]);
   if (questions === null) {
@@ -218,7 +221,13 @@ export function QuestionCard({
     );
   }
   return (
-    <QuestionForm entry={entry} questions={questions} onAnswer={onAnswer} onCancel={onCancel} />
+    <QuestionForm
+      entry={entry}
+      questions={questions}
+      onAnswer={onAnswer}
+      onCancel={onCancel}
+      onActivity={onActivity}
+    />
   );
 }
 
@@ -304,16 +313,43 @@ function Footer({
   );
 }
 
+/** Minimum gap between activity pings — each one grants the host a full fresh window. */
+const ACTIVITY_PING_MS = 5_000;
+
+/** Tell the host the user is working on this open question (resets its expiry). */
+function useQuestionActivity(
+  active: boolean,
+  signal: unknown[],
+  onActivity: (() => void) | undefined,
+): void {
+  const last = useRef(0);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (!active || !onActivity) return;
+    const t = Date.now();
+    if (t - last.current < ACTIVITY_PING_MS) return;
+    last.current = t;
+    onActivity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, signal);
+}
+
 function QuestionForm({
   entry,
   questions,
   onAnswer,
   onCancel,
+  onActivity,
 }: {
   entry: ChatEventEntry;
   questions: AskQuestion[];
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
+  onActivity: (() => void) | undefined;
 }): JSX.Element {
   const resolved = entry.permissionResolved;
   const requestId = entry.requestId;
@@ -343,6 +379,7 @@ function QuestionForm({
   // absent means the first option, so an untouched card needs no seeding.
   const [activeOption, setActiveOption] = useState<Record<string, number>>({});
   const cardRef = useRef<HTMLDivElement>(null);
+  useQuestionActivity(!resolved, [picked, otherOn, otherText], onActivity);
 
   // A resolved card redraws from `entry.permissionAnswers` — the store's
   // durable record of what was picked — rather than from `picked`/`otherOn`/

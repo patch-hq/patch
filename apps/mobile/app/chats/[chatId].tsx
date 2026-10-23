@@ -2964,6 +2964,7 @@ const TimelineItem = React.memo(function TimelineItem({
             });
             useChatStore.getState().resolvePermission(chatId, requestId, 'deny');
           }}
+          onActivity={() => getWs().send({ type: 'chat.question_activity', chatId })}
         />
       );
     }

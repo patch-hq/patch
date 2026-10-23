@@ -136,7 +136,10 @@ function optionButton(label: string): HTMLElement {
 }
 
 function sentFrames(send: ReturnType<typeof vi.fn>): Array<Record<string, unknown>> {
-  return send.mock.calls.map((c) => c[0] as Record<string, unknown>);
+  // Activity pings are not decisions; the tests below assert on what was decided.
+  return send.mock.calls
+    .map((c) => c[0] as Record<string, unknown>)
+    .filter((f) => f['type'] !== 'chat.question_activity');
 }
 
 describe('AskUserQuestion card', () => {
@@ -205,7 +208,7 @@ describe('AskUserQuestion card', () => {
     const submit = screen.getByTestId('question-submit') as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     fireEvent.click(submit);
-    expect(send).not.toHaveBeenCalled();
+    expect(sentFrames(send)).toHaveLength(0);
 
     fireEvent.click(optionButton('Luxon'));
     expect((screen.getByTestId('question-submit') as HTMLButtonElement).disabled).toBe(false);
@@ -313,7 +316,7 @@ describe('AskUserQuestion card', () => {
     expect((screen.getByTestId('question-submit') as HTMLButtonElement).disabled).toBe(false);
 
     const sent = fireEvent.keyDown(box, { key: 'Enter' });
-    expect(send).not.toHaveBeenCalled();
+    expect(sentFrames(send)).toHaveLength(0);
     // Not prevented: the browser's own default is what puts the newline in.
     expect(sent).toBe(true);
   });
@@ -328,7 +331,7 @@ describe('AskUserQuestion card', () => {
     fireEvent.change(box, { target: { value: 'Temporal' } });
 
     const sent = fireEvent.keyDown(box, { key: 'Enter', shiftKey: true });
-    expect(send).not.toHaveBeenCalled();
+    expect(sentFrames(send)).toHaveLength(0);
     expect(sent).toBe(true);
   });
 
@@ -381,12 +384,12 @@ describe('AskUserQuestion card', () => {
     fireEvent.click(screen.getAllByTestId('question-other')[0] as HTMLElement);
     const box = screen.getByTestId('question-other-input');
     fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
-    expect(send).not.toHaveBeenCalled();
+    expect(sentFrames(send)).toHaveLength(0);
 
     // Typed, but the SECOND question is still unanswered — still not sendable.
     fireEvent.change(box, { target: { value: 'Temporal' } });
     fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
-    expect(send).not.toHaveBeenCalled();
+    expect(sentFrames(send)).toHaveLength(0);
     expect((screen.getByTestId('question-submit') as HTMLButtonElement).disabled).toBe(true);
 
     // Answer it and the same keystroke goes through.
@@ -406,7 +409,7 @@ describe('AskUserQuestion card', () => {
     const box = screen.getByTestId('question-other-input');
     fireEvent.change(box, { target: { value: 'Temporal' } });
     fireEvent.keyDown(box, { key: 'Enter', metaKey: true, isComposing: true });
-    expect(send).not.toHaveBeenCalled();
+    expect(sentFrames(send)).toHaveLength(0);
   });
 
   it('Other on a single-select replaces the selected option; its comment is the answer', () => {
@@ -624,7 +627,7 @@ describe('AskUserQuestion card', () => {
     expect(optionButton('date-fns').getAttribute('aria-disabled')).toBe('true');
     expect(screen.queryByTestId('question-submit')).toBeNull();
     expect(screen.queryByTestId('question-cancel')).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    expect(sentFrames(send)).toHaveLength(0);
   });
 
   // spec/14 § Main chat panel — Question prompts: "the card already shows the
