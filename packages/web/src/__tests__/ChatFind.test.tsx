@@ -32,6 +32,32 @@ function setup(paragraphs: string[]) {
 }
 
 describe('ChatFind', () => {
+  it('leaves ⌘F to the code editor when focus is inside it', () => {
+    const host = document.createElement('div');
+    host.className = 'monaco-editor';
+    const ta = document.createElement('textarea');
+    host.appendChild(ta);
+    document.body.appendChild(host);
+    const stream = document.createElement('div');
+    document.body.appendChild(stream);
+    const ref = createRef<HTMLElement>();
+    (ref as { current: HTMLElement | null }).current = stream;
+    render(<ChatFind streamRef={ref} contentVersion={1} />);
+    const ev = new KeyboardEvent('keydown', {
+      key: 'f',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      ta.dispatchEvent(ev);
+    });
+    expect(ev.defaultPrevented).toBe(false);
+    expect(screen.queryByTestId('chat-find-input')).toBeNull();
+    host.remove();
+    stream.remove();
+  });
+
   it('stays on the current match when the transcript grows under an unchanged query', () => {
     const { stream, ref, view } = setup(['a cat', 'another cat', 'the third cat']);
     const input = screen.getByTestId('chat-find-input');

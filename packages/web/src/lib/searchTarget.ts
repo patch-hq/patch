@@ -65,3 +65,12 @@ export function focusPageSearch(chord: SearchChord = 'k'): boolean {
   el.select();
   return true;
 }
+
+/** True when the event comes from inside the code editor (Monaco). It carries
+ *  its own find widget on ⌘F, which beats the page's search field and the chat
+ *  find bar: stealing the chord there leaves the editor with no way to search
+ *  its own text. */
+export function isEditorFindTarget(e: KeyboardEvent): boolean {
+  const el = e.target;
+  return el instanceof Element && el.closest('.monaco-editor') !== null;
+}

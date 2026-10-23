@@ -5,6 +5,7 @@
 
 import type { JSX, RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isEditorFindTarget } from '../lib/searchTarget.js';
 import { clearFind, findRanges, paintFind, revealRange, stepIndex } from '../lib/chatFind.js';
 
 export function ChatFind({
@@ -30,6 +31,7 @@ export function ChatFind({
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+        if (isEditorFindTarget(e)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
         onOpenRef.current?.();

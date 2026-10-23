@@ -33,7 +33,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { matchesChord } from './dictateChord.js';
 import { actionGlyphs, matchesAction, type ActionId } from './keymap.js';
 import { isMacKeyboard, type KeyboardPlatformProbe } from './sendChord.js';
-import type { SearchChord } from './searchTarget.js';
+import { isEditorFindTarget, type SearchChord } from './searchTarget.js';
 
 export interface ShortcutHandlers {
   /** ⌘K / ⌘F — focus the page's search field. Returns false when the page has
@@ -396,6 +396,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       // no search field on the page the chord is untouched and the browser's
       // own find bar opens, exactly as before.
       if (is('searchFind')) {
+        if (isEditorFindTarget(e)) return;
         if (handlers.onSearch('f')) e.preventDefault();
         return;
       }

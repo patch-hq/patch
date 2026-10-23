@@ -112,6 +112,24 @@ describe('useShortcuts — ⌘F focuses the page search field', () => {
     expect(ev.defaultPrevented).toBe(true);
   });
 
+  it('⌘F inside the code editor is left to the editor’s own find widget', () => {
+    const host = document.createElement('div');
+    host.className = 'monaco-editor';
+    const ta = document.createElement('textarea');
+    host.appendChild(ta);
+    document.body.appendChild(host);
+    const ev = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'f',
+      metaKey: true,
+    });
+    ta.dispatchEvent(ev);
+    host.remove();
+    expect(handlers.onSearch).not.toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
   it('a bare F, and ⌘⇧F, are left alone', () => {
     pressEvent({ key: 'f' });
     pressEvent({ key: 'F', metaKey: true, shiftKey: true });
