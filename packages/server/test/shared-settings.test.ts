@@ -139,6 +139,13 @@ describe('SharedSettingsService', () => {
     expect(make().current().jobAutonomyPrompt).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
   });
 
+  it('keeps the newlines in a multi-line job autonomy prompt, across a restart', () => {
+    const text = 'First line.\n\nSecond line.\n- third\n';
+    service.update({ jobAutonomyPrompt: text });
+    expect(service.current().jobAutonomyPrompt).toBe(text);
+    expect(make().current().jobAutonomyPrompt).toBe(text);
+  });
+
   it('always sends claudeSettings to surfaces, including from a settings file written before it existed', () => {
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: false }));
     const fresh = make();
