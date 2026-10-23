@@ -240,4 +240,21 @@ test.describe('wide transcript tables', () => {
     });
     expect(rects.overlap).toBe(false);
   });
+
+  test('on a phone-width screen the table fits with no horizontal scroll', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto(TABLE);
+    const table = page.locator(wideTable);
+    await expect(table).toBeVisible();
+    const m = await table.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      right: el.getBoundingClientRect().right,
+      viewport: window.innerWidth,
+    }));
+    // Todoist: "Patch mobile tables get off need to scroll" — on a phone the
+    // table wraps to fit instead of scrolling sideways.
+    expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
+    expect(m.right).toBeLessThanOrEqual(m.viewport);
+  });
 });

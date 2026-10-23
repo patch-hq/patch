@@ -4498,6 +4498,22 @@ button.nav-row {
 .content.md tbody tr:nth-child(even) {
   background: var(--table-stripe);
 }
+/* On a phone a table fits the screen instead of scrolling sideways (Todoist:
+   "Patch mobile tables get off need to scroll"). Tighter cells, and a word may
+   break mid-word as the last resort — the desktop rule above keeps words whole
+   because there scrolling is available. */
+@media (max-width: 640px) {
+  .content.md table {
+    display: table;
+    width: 100%;
+    font-size: 12px;
+  }
+  .content.md th,
+  .content.md td {
+    padding: 3px 4px;
+    overflow-wrap: anywhere;
+  }
+}
 .tool-call,
 .tool-result,
 .tool-group {
