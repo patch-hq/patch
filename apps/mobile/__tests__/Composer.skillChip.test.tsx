@@ -205,7 +205,9 @@ describe('Composer — skill chips (mobile)', () => {
     });
     update(r, <Composer chatId="c1" folder="work" />);
     const style = [findHost(r.root, byTestId('chip-mirror')).props['style']].flat(5);
-    const transform = style.find((x: any) => x && x.transform)?.transform;
+    const transform = style.find(
+      (x: { transform?: unknown } | null) => x && x.transform,
+    )?.transform;
     expect(transform).toEqual([{ translateY: -120 }]);
   });
 
