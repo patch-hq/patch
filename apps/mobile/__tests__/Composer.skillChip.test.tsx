@@ -188,6 +188,27 @@ describe('Composer — skill chips (mobile)', () => {
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('run now');
   });
 
+  it('the chip mirror scrolls with the input once the message is past the height cap', async () => {
+    const r = renderRN(<Composer chatId="c1" folder="work" />);
+    const long = `/plant ${Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')}`;
+    await actAsync(async () => {
+      findHost(r.root, byType('TextInput')).props['onChangeText'](long);
+      await flush();
+    });
+    update(r, <Composer chatId="c1" folder="work" />);
+    expect(findHost(r.root, byType('TextInput')).props['scrollEnabled']).toBe(true);
+    await actAsync(async () => {
+      findHost(r.root, byType('TextInput')).props['onScroll']({
+        nativeEvent: { contentOffset: { x: 0, y: 120 } },
+      });
+      await flush();
+    });
+    update(r, <Composer chatId="c1" folder="work" />);
+    const style = [findHost(r.root, byTestId('chip-mirror')).props['style']].flat(5);
+    const transform = style.find((x: any) => x && x.transform)?.transform;
+    expect(transform).toEqual([{ translateY: -120 }]);
+  });
+
   it('sends exactly what is in the box, chip or not', async () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {

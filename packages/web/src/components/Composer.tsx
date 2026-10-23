@@ -1127,6 +1127,10 @@ export const Composer = forwardRef(function Composer(
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+    // Resetting the height to `auto` shrinks the box and the browser clamps
+    // scrollTop to 0 — restore it below, or a long message snaps back to the
+    // top on every edit and can't be scrolled to the part being changed.
+    const scrollTop = el.scrollTop;
     el.style.height = 'auto';
     // `scrollHeight` is the content+padding box; with `box-sizing: border-box`
     // the style height also includes the border, so add the border delta —
@@ -1146,6 +1150,7 @@ export const Composer = forwardRef(function Composer(
     const cap = maxInputHeight();
     el.style.height = `${Math.min(contentHeight, cap)}px`;
     el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
+    el.scrollTop = scrollTop;
     syncMirrors(el);
   }, [value, livePartial, showLivePreview]);
   // spec/14 § Composer — chips: the mirror only needs to exist while there is

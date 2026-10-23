@@ -691,6 +691,9 @@ export function Composer({
   // The live/interim transcript, shown inside the input while recording. Cleared the instant a dictation ends (commit or cancel) — the
   // committed text takes over `draft` instead.
   const [livePartial, setLivePartial] = React.useState('');
+  // How far the input has scrolled, so the chip mirror drawn over it scrolls
+  // with it — otherwise a message past the height cap shows its top forever.
+  const [inputScrollY, setInputScrollY] = React.useState(0);
   // Rendered height of the dictation mirror, so the input can grow to fit it.
   const [mirrorHeight, setMirrorHeight] = React.useState(0);
   // spec/15 § Skill autocomplete — chips: the mirror only needs to exist
@@ -1626,6 +1629,8 @@ export function Composer({
           // gates on `linkDown` (Todoist 6hWrcpCQFqXGJpF6).
           editable={!resolving}
           multiline
+          scrollEnabled
+          onScroll={(e) => setInputScrollY(e.nativeEvent.contentOffset.y)}
           // While a dictation is running the input is painted over by the
           // mirror above, and the placeholder — drawn by the TextInput, in the
           // same box — renders THROUGH it on an empty draft, so the two
@@ -1723,6 +1728,7 @@ export function Composer({
               top: 0,
               minHeight: COMPOSER_MIN_HEIGHT,
               maxHeight: COMPOSER_MAX_HEIGHT,
+              overflow: 'hidden',
             }}
           >
             <Text
@@ -1732,6 +1738,7 @@ export function Composer({
                 paddingVertical: space.sm + 1,
                 fontSize: 16,
                 color: colors.ink,
+                transform: [{ translateY: -inputScrollY }],
               }}
             >
               {renderChipMirror()}
