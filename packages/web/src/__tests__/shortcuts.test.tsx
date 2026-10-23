@@ -363,17 +363,17 @@ describe('useShortcuts — chat-view scope', () => {
     });
   }
 
-  it('⌘↑/⌘↓ do NOT fire from the chat composer — the caret moves to start/end as in any text box', () => {
+  it('⌘↑/⌘↓ still step chats from the chat composer, where a chat opens with the cursor', () => {
     renderWithScope(true);
     const composer = document.createElement('textarea');
     composer.setAttribute('data-testid', 'composer-input');
     document.body.appendChild(composer);
     const up = fire({ key: 'ArrowUp', metaKey: true }, composer);
     const down = fire({ key: 'ArrowDown', metaKey: true }, composer);
-    expect(handlers.onPrevChat).not.toHaveBeenCalled();
-    expect(handlers.onNextChat).not.toHaveBeenCalled();
-    expect(up.defaultPrevented).toBe(false);
-    expect(down.defaultPrevented).toBe(false);
+    expect(handlers.onPrevChat).toHaveBeenCalledTimes(1);
+    expect(handlers.onNextChat).toHaveBeenCalledTimes(1);
+    expect(up.defaultPrevented).toBe(true);
+    expect(down.defaultPrevented).toBe(true);
     document.body.removeChild(composer);
   });
 

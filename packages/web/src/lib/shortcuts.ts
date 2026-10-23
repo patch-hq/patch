@@ -344,6 +344,14 @@ function isTextFieldTarget(e: KeyboardEvent): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
 }
 
+/** The chat composer specifically — a chat opens with the cursor there, so a
+ *  chord that must work "while typing" has to read past it (spec/14 §
+ *  Discoverability). Any other field keeps its native keys. */
+function isComposerTarget(e: KeyboardEvent): boolean {
+  const el = e.target as HTMLElement | null;
+  return !!el && el.tagName === 'TEXTAREA' && el.getAttribute('data-testid') === 'composer-input';
+}
+
 /** Enforces `scope` (spec/14 § Discoverability): `anywhere` always passes;
  *  `chat-view` needs a chat view on screen AND no text field (the composer
  *  included) in the way, so a field keeps its native keys. */
@@ -429,7 +437,8 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         return;
       }
       if (is('prevChat')) {
-        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
+        if (!scope.isChatView) return;
+        if (!isComposerTarget(e) && !scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onPrevChat();
         return;
@@ -441,7 +450,8 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         return;
       }
       if (is('nextChat')) {
-        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
+        if (!scope.isChatView) return;
+        if (!isComposerTarget(e) && !scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onNextChat();
         return;
