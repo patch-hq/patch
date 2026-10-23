@@ -210,7 +210,7 @@ test.describe('job editor — Notify when job complete', () => {
     await page.goto(NEW_JOB);
     await expect(page.getByTestId('job-name')).toBeVisible({ timeout: 15_000 });
 
-    await page.getByTestId('job-action-type').selectOption('continue');
+    await page.getByTestId('job-action-type').selectOption('spawn');
     await expect(page.getByTestId('job-spawn-notify-on-complete')).toBeChecked();
     await page.getByTestId('job-action-type').selectOption('message');
     await expect(page.getByTestId('job-spawn-notify-on-complete')).toHaveCount(0);

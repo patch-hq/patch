@@ -114,7 +114,7 @@ test.describe('job editor — model picker', () => {
     await page.goto(NEW_JOB);
 
     await expect(page.getByTestId('job-spawn-model')).toBeVisible();
-    await page.getByTestId('job-action-type').selectOption('continue');
+    await page.getByTestId('job-action-type').selectOption('spawn');
     await expect(page.getByTestId('job-spawn-model')).toBeVisible();
     // `message` inherits host, folder and model from the chat it delivers into.
     await page.getByTestId('job-action-type').selectOption('message');
