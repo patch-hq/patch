@@ -43,8 +43,11 @@ async function downloadApk(url: string, version: string): Promise<string> {
   const dir = FileSystem.cacheDirectory;
   if (!dir) throw new Error('no cache directory to download into');
   const target = `${dir}patch-${version}.apk`;
-  if ((await FileSystem.getInfoAsync(target)).exists) return target;
+  // Claim the phase before the first await: the in-progress guards in
+  // installApk/stageApk read it, so a second caller arriving while we check the
+  // cache must already see 'downloading' or it would write the same .part file.
   set({ phase: 'downloading', version, fraction: null });
+  if ((await FileSystem.getInfoAsync(target)).exists) return target;
   const part = `${target}.part`;
   const download = FileSystem.createDownloadResumable(url, part, {}, (p) => {
     const fraction =

@@ -115,6 +115,14 @@ describe('stageApk (background download)', () => {
     expect(Notifications.__getScheduledNotifications()).toHaveLength(1);
   });
 
+  it('two concurrent calls (startup + app foregrounded) download and notify once, with no error', async () => {
+    await Promise.all([stageApk(NEEDS_INSTALL.url, '1.2.3'), stageApk(NEEDS_INSTALL.url, '1.2.3')]);
+    expect(FileSystem.__downloads).toHaveLength(1);
+    expect(Notifications.__getScheduledNotifications()).toHaveLength(1);
+    expect(useUiStore.getState().errors).toEqual([]);
+    expect(useApkInstallStore.getState().state).toEqual({ phase: 'idle' });
+  });
+
   it('installing afterwards reuses the staged file instead of downloading again', async () => {
     await stageApk(NEEDS_INSTALL.url, '1.2.3');
     await installApk(NEEDS_INSTALL.url, '1.2.3');
