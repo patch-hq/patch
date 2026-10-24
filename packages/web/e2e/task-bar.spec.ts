@@ -74,7 +74,9 @@ test.describe('task bar', () => {
       'in progress',
     );
     await expect(rows.nth(2).getByTestId('task-status-btn')).toHaveAttribute('title', 'pending');
-    // Collapsed, the bar is on the in-progress item rather than the pending one.
+    // Expanded, the summary is a plain title; collapsed, it is on the in-progress
+    // item rather than the pending one.
+    await expect(page.getByTestId('task-bar-head')).toHaveText('Tasks');
     await page.getByTestId('task-bar-summary').click();
     await expect(page.getByTestId('task-bar-head')).toContainText('rebuild the index');
   });
@@ -91,6 +93,7 @@ test.describe('task bar', () => {
     await expect(page.getByTestId('task-row').nth(1)).toContainText(
       'rebuild the index from scratch',
     );
+    await page.getByTestId('task-bar-summary').click();
     await expect(page.getByTestId('task-bar-head')).toContainText('rebuild the index from scratch');
   });
 
@@ -102,6 +105,7 @@ test.describe('task bar', () => {
     // summary moves on to the next unfinished task.
     await page.getByTestId('task-status-btn').nth(1).click();
     await expect(page.getByTestId('task-bar-count')).toContainText('2/3');
+    await page.getByTestId('task-bar-summary').click();
     await expect(page.getByTestId('task-bar-head')).toContainText('schedule it nightly');
   });
 

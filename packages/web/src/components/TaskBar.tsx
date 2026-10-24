@@ -2,7 +2,8 @@
 // list, spec/14 § Main chat panel). The list is the agent's own Claude Code
 // TodoWrite list, mirrored onto chat state by the host; here it is also
 // editable, because it is what the host fires the next turn from. Collapsed
-// it is one line (current item + progress); expanded, every item's status,
+// it is one line (current item + progress); expanded, the line is just a
+// "Tasks" title (the items are listed below, so repeating one duplicates it) and every item's status,
 // text and existence is the user's to change.
 //
 // Queueing: the add row writes into a local DRAFT, not the list. The agent is
@@ -137,7 +138,13 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
       >
         {expanded ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
         <span className="task-bar-head" data-testid="task-bar-head">
-          {todos.length === 0 ? 'Add tasks' : head ? head.text : 'All tasks done'}
+          {todos.length === 0
+            ? 'Add tasks'
+            : expanded
+              ? 'Tasks'
+              : head
+                ? head.text
+                : 'All tasks done'}
         </span>
         {draft.length > 0 ? (
           <span className="task-bar-count" data-testid="task-bar-queued">
