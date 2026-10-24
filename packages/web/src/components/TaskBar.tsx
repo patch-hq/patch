@@ -27,6 +27,7 @@ import {
 import type { TodoItem } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { useTaskDraftStore } from '../stores/taskDraftStore.js';
 import { api } from '../api/rest.js';
 import { InlineEditText } from './InlineEditText.js';
 import type { ChatRow } from '../stores/types.js';
@@ -54,9 +55,14 @@ function StatusIcon({ status }: { status: TodoItem['status'] }): JSX.Element {
 export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
   const setTodos = useChatStore((s) => s.setTodos);
   const pushError = useUiStore((s) => s.pushError);
-  const [expanded, setExpanded] = useState(false);
-  const [newTask, setNewTask] = useState('');
-  const [draft, setDraft] = useState<string[]>([]);
+  const saved = useTaskDraftStore((s) => s.drafts[row.chatId]);
+  const saveDraft = useTaskDraftStore((s) => s.set);
+  // Unsent tasks survive a reload, so the bar reopens with them showing.
+  const [expanded, setExpanded] = useState(saved !== undefined);
+  const newTask = saved?.typed ?? '';
+  const draft = saved?.queued ?? [];
+  const setNewTask = (typed: string): void => saveDraft(row.chatId, { queued: draft, typed });
+  const setDraft = (queued: string[]): void => saveDraft(row.chatId, { queued, typed: newTask });
   // A chat with no list shows no bar at all (spec/14): "Add tasks" lives in the
   // header's ⋯ menu, which summons the bar here with its add row open.
   const summoned = useUiStore((s) => s.taskAddChatId === row.chatId);
@@ -105,8 +111,7 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
     e.preventDefault();
     const text = newTask.trim();
     if (text === '') return;
-    setNewTask('');
-    setDraft([...draft, text]);
+    saveDraft(row.chatId, { queued: [...draft, text], typed: '' });
   }
 
   /** Hand the queued tasks to the agent: append them to the list in one write. */
@@ -114,15 +119,14 @@ export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
     const typed = newTask.trim();
     const queued = typed === '' ? draft : [...draft, typed];
     if (queued.length === 0) return;
-    setNewTask('');
-    setDraft([]);
+    saveDraft(row.chatId, { queued: [], typed: '' });
     void commit([...todos, ...queued.map((text) => ({ text, status: 'pending' as const }))]);
   }
 
-  if (todos.length === 0 && !summoned && draft.length === 0) return null;
+  if (todos.length === 0 && !summoned && saved === undefined) return null;
 
   function toggle(): void {
-    if (expanded && todos.length === 0 && draft.length === 0) setTaskAddChatId(null);
+    if (expanded && todos.length === 0 && saved === undefined) setTaskAddChatId(null);
     setExpanded(!expanded);
   }
 

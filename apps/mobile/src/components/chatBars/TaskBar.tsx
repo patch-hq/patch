@@ -24,6 +24,7 @@ import type { ChatRow } from '../../stores/types';
 import { NEXT_TODO_STATUS, TODO_STATUS_LABEL, todoSummary, writeTodos } from '../../lib/chatMeta';
 import { space, textMin, useTheme } from '../../lib/theme';
 import { useUiStore } from '../../stores/uiStore';
+import { useTaskDraftStore } from '../../stores/taskDraftStore';
 import { BarShell } from './BarShell';
 import { InlineEditText } from './InlineEditText';
 
@@ -35,9 +36,13 @@ function StatusIcon({ status, color }: { status: TodoItem['status']; color: stri
 
 export function TaskBar({ row }: { row: ChatRow }): ReactElement | null {
   const colors = useTheme();
-  const [open, setOpen] = useState(false);
-  const [newTask, setNewTask] = useState('');
-  const [draft, setDraft] = useState<string[]>([]);
+  const saved = useTaskDraftStore((s) => s.drafts[row.chatId]);
+  const saveDraft = useTaskDraftStore((s) => s.set);
+  const [open, setOpen] = useState(saved !== undefined);
+  const newTask = saved?.typed ?? '';
+  const draft = saved?.queued ?? [];
+  const setNewTask = (typed: string): void => saveDraft(row.chatId, { queued: draft, typed });
+  const setDraft = (queued: string[]): void => saveDraft(row.chatId, { queued, typed: newTask });
   // A chat with no list shows no bar (spec/15): "Add tasks" lives in the ⋯ menu
   // and summons it here with the add row open.
   const summoned = useUiStore((s) => s.taskAddChatId === row.chatId);
@@ -52,23 +57,21 @@ export function TaskBar({ row }: { row: ChatRow }): ReactElement | null {
   const addTask = (): void => {
     const text = newTask.trim();
     if (text === '') return;
-    setNewTask('');
-    setDraft([...draft, text]);
+    saveDraft(row.chatId, { queued: [...draft, text], typed: '' });
   };
 
   const release = (): void => {
     const typed = newTask.trim();
     const queued = typed === '' ? draft : [...draft, typed];
     if (queued.length === 0) return;
-    setNewTask('');
-    setDraft([]);
+    saveDraft(row.chatId, { queued: [], typed: '' });
     commit([...todos, ...queued.map((text) => ({ text, status: 'pending' as const }))]);
   };
 
-  if (todos.length === 0 && !summoned && draft.length === 0) return null;
+  if (todos.length === 0 && !summoned && saved === undefined) return null;
 
   const toggle = (): void => {
-    if (open && todos.length === 0 && draft.length === 0) {
+    if (open && todos.length === 0 && saved === undefined) {
       useUiStore.getState().setTaskAddChatId(null);
     }
     setOpen(!open);

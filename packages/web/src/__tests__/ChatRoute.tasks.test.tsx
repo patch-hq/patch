@@ -17,6 +17,7 @@ import { ChatRoute } from '../routes/ChatRoute.js';
 import { api } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { useTaskDraftStore } from '../stores/taskDraftStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { setActiveWs } from '../api/ws.js';
@@ -82,6 +83,7 @@ function lastSent(): TodoItem[] {
 
 describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   beforeEach(() => {
+    useTaskDraftStore.getState()._reset();
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
     useUiStore.getState().setTaskAddChatId(null);
@@ -144,6 +146,24 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
       { text: 'z', status: 'pending' },
     ]);
     expect(screen.queryByTestId('task-draft-row')).not.toBeInTheDocument();
+  });
+
+  it('keeps queued and half-typed tasks across a remount and writes them to localStorage', () => {
+    seed([]);
+    renderChat();
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-add-tasks'));
+    const input = screen.getByTestId('task-add-input');
+    fireEvent.change(input, { target: { value: 'x' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.change(screen.getByTestId('task-add-input'), { target: { value: 'half' } });
+    expect(window.localStorage.getItem('patch.task-drafts.v1')).toContain('half');
+
+    cleanup();
+    useUiStore.getState().setTaskAddChatId(null);
+    renderChat();
+    expect(screen.getAllByTestId('task-draft-row')).toHaveLength(1);
+    expect(screen.getByTestId('task-add-input')).toHaveValue('half');
   });
 
   it('removes a queued task before release, and Done includes text still in the field', async () => {
