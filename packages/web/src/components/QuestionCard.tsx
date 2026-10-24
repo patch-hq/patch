@@ -313,28 +313,60 @@ function Footer({
   );
 }
 
-/** Minimum gap between activity pings — each one grants the host a full fresh window. */
+/** Longest gap between activity pings — each one grants the host a full fresh window. */
 const ACTIVITY_PING_MS = 5_000;
 
-/** Tell the host the user is working on this open question (resets its expiry). */
+/**
+ * Gap between pings for a given expiry window: the lesser of 5s and a third of
+ * the window, so a short window is refreshed several times before it can lapse.
+ */
+function activityPingGap(windowMs: number | undefined): number {
+  return windowMs && windowMs > 0 ? Math.min(ACTIVITY_PING_MS, windowMs / 3) : ACTIVITY_PING_MS;
+}
+
+/**
+ * Tell the host the user is working on this open question (resets its expiry).
+ * Throttled, trailing-edge: activity inside the gap is sent when the gap ends
+ * rather than dropped, so the host's clock runs from the last activity.
+ */
 function useQuestionActivity(
   active: boolean,
   signal: unknown[],
   onActivity: (() => void) | undefined,
+  windowMs: number | undefined,
 ): void {
   const last = useRef(0);
-  const first = useRef(true);
+  const prev = useRef(signal);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef({ active, onActivity });
+  latest.current = { active, onActivity };
+  const gap = activityPingGap(windowMs);
+
+  const fire = (): void => {
+    timer.current = null;
+    if (!latest.current.active || !latest.current.onActivity) return;
+    last.current = Date.now();
+    latest.current.onActivity();
+  };
+
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    if (!active || !onActivity) return;
-    const t = Date.now();
-    if (t - last.current < ACTIVITY_PING_MS) return;
-    last.current = t;
-    onActivity();
+    // Mount (and StrictMode's repeat run) carries the same values: not activity.
+    const unchanged = prev.current.every((v, i) => Object.is(v, signal[i]));
+    prev.current = signal;
+    if (unchanged || !active || !onActivity) return;
+    if (timer.current) return; // a trailing ping is already queued
+    const wait = last.current + gap - Date.now();
+    if (wait <= 0) fire();
+    else timer.current = setTimeout(fire, wait);
   }, signal);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+    },
+    [],
+  );
 }
 
 function QuestionForm({
@@ -378,7 +410,12 @@ function QuestionForm({
   // absent means the first option, so an untouched card needs no seeding.
   const [activeOption, setActiveOption] = useState<Record<string, number>>({});
   const cardRef = useRef<HTMLDivElement>(null);
-  useQuestionActivity(!resolved, [picked, otherOn, otherText], onActivity);
+  useQuestionActivity(
+    !resolved,
+    [picked, otherOn, otherText],
+    onActivity,
+    entry.permissionExpiry?.windowMs,
+  );
 
   // A resolved card redraws from `entry.permissionAnswers` — the store's
   // durable record of what was picked — rather than from `picked`/`otherOn`/
