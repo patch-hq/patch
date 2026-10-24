@@ -334,7 +334,6 @@ function useQuestionActivity(
     if (t - last.current < ACTIVITY_PING_MS) return;
     last.current = t;
     onActivity();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, signal);
 }
 
