@@ -19,6 +19,7 @@ import {
 } from '../src/index.js';
 
 const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
+  'chat.question_activity': { type: 'chat.question_activity', chatId: 'c1' },
   'chat.spawned': {
     type: 'chat.spawned',
     chatId: 'c1',
