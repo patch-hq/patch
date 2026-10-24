@@ -148,6 +148,72 @@ describe('ImageAnnotator', () => {
     expect(undo.disabled).toBe(true);
   });
 
+  async function drawBox(canvas: HTMLElement): Promise<void> {
+    fireEvent.pointerDown(canvas, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(canvas, { clientX: 80, clientY: 60 });
+    fireEvent.pointerUp(canvas, { clientX: 80, clientY: 60 });
+  }
+
+  it('Cmd+Z and Ctrl+Z undo the last mark', async () => {
+    stubDecode(400, 300);
+    render(<ImageAnnotator file={file} onDone={() => {}} onCancel={() => {}} />);
+    const canvas = await screen.findByTestId('annotator-canvas');
+    await waitFor(() => expect((canvas as HTMLCanvasElement).width).toBe(400));
+    const undo = screen.getByLabelText('Undo last mark') as HTMLButtonElement;
+    await drawBox(canvas);
+    await drawBox(canvas);
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect(undo.disabled).toBe(false);
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    expect(undo.disabled).toBe(true);
+  });
+
+  it('Cmd+Shift+Z redoes an undone mark, and a new mark clears redo', async () => {
+    stubDecode(400, 300);
+    render(<ImageAnnotator file={file} onDone={() => {}} onCancel={() => {}} />);
+    const canvas = await screen.findByTestId('annotator-canvas');
+    await waitFor(() => expect((canvas as HTMLCanvasElement).width).toBe(400));
+    const undo = screen.getByLabelText('Undo last mark') as HTMLButtonElement;
+    const redo = screen.getByLabelText('Redo') as HTMLButtonElement;
+    expect(redo.disabled).toBe(true);
+    await drawBox(canvas);
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect(undo.disabled).toBe(true);
+    expect(redo.disabled).toBe(false);
+    fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true });
+    expect(undo.disabled).toBe(false);
+    expect(redo.disabled).toBe(true);
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    await drawBox(canvas);
+    expect(redo.disabled).toBe(true);
+  });
+
+  it('Cmd+Z inside the text input is left to the input', async () => {
+    stubDecode(400, 300);
+    render(<ImageAnnotator file={file} onDone={() => {}} onCancel={() => {}} />);
+    const canvas = await screen.findByTestId('annotator-canvas');
+    await waitFor(() => expect((canvas as HTMLCanvasElement).width).toBe(400));
+    await drawBox(canvas);
+    fireEvent.click(screen.getByLabelText('Text tool'));
+    fireEvent.pointerDown(canvas, { clientX: 30, clientY: 40 });
+    await screen.findByTestId('annotator-text-input');
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect((screen.getByLabelText('Undo last mark') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a click without dragging leaves no empty box or arrow behind', async () => {
+    stubDecode(400, 300);
+    render(<ImageAnnotator file={file} onDone={() => {}} onCancel={() => {}} />);
+    const canvas = await screen.findByTestId('annotator-canvas');
+    await waitFor(() => expect((canvas as HTMLCanvasElement).width).toBe(400));
+    for (const tool of ['Box tool', 'Arrow tool']) {
+      fireEvent.click(screen.getByLabelText(tool));
+      fireEvent.pointerDown(canvas, { clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(canvas, { clientX: 10, clientY: 10 });
+    }
+    expect((screen.getByLabelText('Undo last mark') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('the text tool opens an inline input at the click point; Enter commits it', async () => {
     stubDecode(400, 300);
     render(<ImageAnnotator file={file} onDone={() => {}} onCancel={() => {}} />);

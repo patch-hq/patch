@@ -14,7 +14,7 @@
 import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Square, ArrowUpRight, Pencil, Type, Undo2, Check } from 'lucide-react';
+import { Square, ArrowUpRight, Pencil, Type, Undo2, Redo2, Check } from 'lucide-react';
 import { CloseIcon } from './icons.js';
 
 type Tool = 'box' | 'arrow' | 'pen' | 'text';
@@ -72,7 +72,14 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
   const [ready, setReady] = useState(false);
   const [tool, setTool] = useState<Tool>('box');
   const [color, setColor] = useState<string>(DEFAULT_COLOR);
-  const [shapes, setShapes] = useState<Shape[]>([]);
+  const [history, setHistory] = useState<{ shapes: Shape[]; redo: Shape[] }>({
+    shapes: [],
+    redo: [],
+  });
+  const { shapes } = history;
+  const addShape = useCallback((s: Shape): void => {
+    setHistory((h) => ({ shapes: [...h.shapes, s], redo: [] }));
+  }, []);
   const [draft, setDraft] = useState<Shape | null>(null);
   const drawingRef = useRef(false);
   // The in-progress mark, kept in a ref as well as state: pointer events can
@@ -167,8 +174,37 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
     draw();
   }, [draw, ready]);
 
+  // One state object so undo/redo move a mark between the two stacks in a
+  // single pure update (no setState inside another updater).
+  const undo = useCallback((): void => {
+    if (drawingRef.current) return;
+    setHistory((h) => {
+      const last = h.shapes[h.shapes.length - 1];
+      return last ? { shapes: h.shapes.slice(0, -1), redo: [...h.redo, last] } : h;
+    });
+  }, []);
+
+  const redo = useCallback((): void => {
+    if (drawingRef.current) return;
+    setHistory((h) => {
+      const last = h.redo[h.redo.length - 1];
+      return last ? { shapes: [...h.shapes, last], redo: h.redo.slice(0, -1) } : h;
+    });
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // Cmd/Ctrl+Z undoes a mark, with Shift (or Ctrl+Y) redoing it. While the
+      // label input is open the keystroke belongs to the input's own undo.
+      const mod = e.metaKey || e.ctrlKey;
+      const k = e.key.toLowerCase();
+      if (mod && (k === 'z' || k === 'y')) {
+        if (textEditor) return;
+        e.preventDefault();
+        if (k === 'y' || e.shiftKey) redo();
+        else undo();
+        return;
+      }
       if (e.key !== 'Escape') return;
       // A capture-phase window listener fires before the text input's own
       // onKeyDown ever sees the event — without this guard, Escape while
@@ -180,7 +216,7 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onCancel, textEditor]);
+  }, [onCancel, textEditor, undo, redo]);
 
   function toCanvasPoint(e: { clientX: number; clientY: number }): Point {
     const canvas = canvasRef.current;
@@ -239,22 +275,18 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
     if (!drawingRef.current || !done) return;
     drawingRef.current = false;
     draftRef.current = null;
-    setShapes((cur) => [...cur, done]);
     setDraft(null);
+    // A click without a drag is not a mark; a pen dot is, so pen is exempt.
+    if (done.kind === 'box' && done.w === 0 && done.h === 0) return;
+    if (done.kind === 'arrow' && done.x1 === done.x2 && done.y1 === done.y2) return;
+    addShape(done);
   }
 
   function commitText(text: string): void {
     if (textEditor && text.trim()) {
-      setShapes((cur) => [
-        ...cur,
-        { kind: 'text', x: textEditor.x, y: textEditor.y, text: text.trim(), color },
-      ]);
+      addShape({ kind: 'text', x: textEditor.x, y: textEditor.y, text: text.trim(), color });
     }
     setTextEditor(null);
-  }
-
-  function undo(): void {
-    setShapes((cur) => cur.slice(0, -1));
   }
 
   async function handleDone(): Promise<void> {
@@ -339,6 +371,15 @@ export function ImageAnnotator({ file, onDone, onCancel }: ImageAnnotatorProps):
             disabled={shapes.length === 0}
           >
             <Undo2 size={18} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="annotator-undo"
+            aria-label="Redo"
+            onClick={redo}
+            disabled={history.redo.length === 0}
+          >
+            <Redo2 size={18} aria-hidden />
           </button>
           <button
             type="button"

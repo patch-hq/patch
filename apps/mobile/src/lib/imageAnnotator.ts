@@ -238,7 +238,10 @@ canvas.addEventListener('pointermove', function (e) {
 function endDraw() {
   if (!drawing) return;
   drawing = false;
-  shapes.push(draft); draft = null;
+  var empty = (draft.kind === 'box' && draft.w === 0 && draft.h === 0) ||
+    (draft.kind === 'arrow' && draft.x1 === draft.x2 && draft.y1 === draft.y2);
+  if (!empty) shapes.push(draft);
+  draft = null;
   redraw();
 }
 canvas.addEventListener('pointerup', endDraw);
