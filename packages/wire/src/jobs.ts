@@ -375,6 +375,14 @@ export const ContinueAction = z
      * the exact failure keying exists to prevent.
      */
     key: z.string().min(1).optional(),
+    /**
+     * With a `key`: when this job has no chat for the subject yet but ANOTHER
+     * job already owns one with the same key, deliver into that chat instead of
+     * opening a second. Lets a subject (a Todoist task) keep one conversation
+     * when it moves between projects and so between jobs. Off by default —
+     * two jobs that happen to render the same key are otherwise unrelated.
+     */
+    shareKey: z.boolean().optional(),
   })
   .strict();
 export type ContinueAction = z.infer<typeof ContinueAction>;

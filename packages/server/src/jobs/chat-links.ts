@@ -99,6 +99,11 @@ export class JobChatLinks {
     this.persist();
   }
 
+  /** Every linked chat id, oldest first. */
+  chatIds(): string[] {
+    return [...this.links.keys()];
+  }
+
   /** The job that spawned `chatId`, or null if it wasn't job-spawned. */
   get(chatId: string): string | null {
     return this.links.get(chatId) ?? null;

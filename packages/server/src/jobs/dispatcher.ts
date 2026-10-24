@@ -315,6 +315,8 @@ export interface DispatcherOptions {
     record: (chatId: string, jobId: string) => void;
     /** Read back, so a chat that fails later can be attributed to its job. */
     get: (chatId: string) => string | null;
+    /** Every linked chat id — lets a `shareKey` fire find another job's chat. */
+    chatIds?: () => string[];
   };
   /**
    * The jobs this dispatcher may retire (spec/08 § One-off jobs). A one-off
@@ -652,7 +654,11 @@ export class JobDispatcher {
     return model === undefined ? {} : { model };
   }
   private readonly chatLinks:
-    | { record: (chatId: string, jobId: string) => void; get: (chatId: string) => string | null }
+    | {
+        record: (chatId: string, jobId: string) => void;
+        get: (chatId: string) => string | null;
+        chatIds?: () => string[];
+      }
     | undefined;
   private readonly jobs: Pick<JobsInterface, 'expireOneOff' | 'get' | 'list'> | undefined;
   private readonly heldDir: string;
@@ -1211,6 +1217,21 @@ export class JobDispatcher {
     if (activity === null || WORKING_ACTIVITIES.has(activity)) return false;
     // A chat reports idle before its first turn begins.
     return now - state.lastFireAt >= APPEND_START_GRACE_MS;
+  }
+
+  /**
+   * `shareKey`: the existing chat, owned by any job, for this subject slug —
+   * so one subject stays in one conversation across jobs. Null if none.
+   */
+  private sharedKeyChat(keySlug: string): string | null {
+    const ids = this.chatLinks?.chatIds?.() ?? [];
+    const suffix = `-${keySlug}`;
+    for (const id of ids) {
+      if (!id.startsWith('jobchat-j_') || !id.endsWith(suffix)) continue;
+      if (id.slice('jobchat-j_'.length, -suffix.length).includes('-')) continue;
+      if (this.ensureSpawned.has(id) || this.chatExists(id)) return id;
+    }
+    return null;
   }
 
   private appendGeneration(job: Job, keySlug: string | undefined): number {
@@ -2135,7 +2156,15 @@ export class JobDispatcher {
         }
         keySlug = slug;
       }
-      const chatId = ensureChatId(job.id, keySlug, this.appendGeneration(job, keySlug));
+      let chatId = ensureChatId(job.id, keySlug, this.appendGeneration(job, keySlug));
+      if (
+        action.shareKey === true &&
+        keySlug !== undefined &&
+        !this.ensureSpawned.has(chatId) &&
+        !this.chatExists(chatId)
+      ) {
+        chatId = this.sharedKeyChat(keySlug) ?? chatId;
+      }
       targetChatId = chatId;
       // Tagged for `▸ Automations` exactly as a spawn's chat is (spec/08 ##
       // Action, spec/14 § Sidebar). Recorded unconditionally rather than only

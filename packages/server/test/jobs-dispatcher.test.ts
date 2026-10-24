@@ -1093,6 +1093,83 @@ describe('JobDispatcher', () => {
     disp.close();
   });
 
+  it('shareKey: a second job fire for the same subject continues the first job’s chat, not a new one', () => {
+    const link = new InProcessHostLink();
+    const links = new Map<string, string>();
+    const disp = new JobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
+      logger: silentLogger,
+      idGenerator: () => 'k',
+      chatLinks: {
+        record: (c, j) => void links.set(c, j),
+        get: (c) => links.get(c) ?? null,
+        chatIds: () => [...links.keys()],
+      },
+    });
+    const action = {
+      type: 'continue' as const,
+      hostId: 'd1',
+      folder: '/work',
+      prompt: 'task {{payload.event_data.id}}',
+      key: '{{payload.event_data.id}}',
+      shareKey: true,
+    };
+    const triage = makeJob({ id: 'j_00000000000000000000000030', action });
+    const admin = makeJob({ id: 'j_00000000000000000000000031', action });
+    // One comment on the task, then the task moves project: two jobs fire.
+    disp.dispatch(triage, { payload: { event_data: { id: 'taskA' } } }, 'todoist');
+    disp.dispatch(admin, { payload: { event_data: { id: 'taskA' } } }, 'todoist');
+    const spawns = link.sent.filter((s) => s.event.type === 'chat.spawn_request');
+    expect(spawns).toHaveLength(1);
+    const inputs = link.sent.filter((s) => s.event.type === 'chat.input');
+    expect(inputs).toHaveLength(1);
+    if (inputs[0]?.event.type === 'chat.input') {
+      expect(inputs[0].event.chatId).toBe('jobchat-j_00000000000000000000000030-taskA');
+    }
+    // A different task is still its own chat.
+    disp.dispatch(admin, { payload: { event_data: { id: 'taskB' } } }, 'todoist');
+    expect(link.sent.filter((s) => s.event.type === 'chat.spawn_request')).toHaveLength(2);
+    disp.close();
+  });
+
+  it('without shareKey, two jobs on the same subject keep separate chats', () => {
+    const link = new InProcessHostLink();
+    const links = new Map<string, string>();
+    const disp = new JobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
+      logger: silentLogger,
+      idGenerator: () => 'k',
+      chatLinks: {
+        record: (c, j) => void links.set(c, j),
+        get: (c) => links.get(c) ?? null,
+        chatIds: () => [...links.keys()],
+      },
+    });
+    const action = {
+      type: 'continue' as const,
+      hostId: 'd1',
+      folder: '/work',
+      prompt: 'x',
+      key: '{{payload.event_data.id}}',
+    };
+    disp.dispatch(
+      makeJob({ id: 'j_00000000000000000000000032', action }),
+      { payload: { event_data: { id: 'taskA' } } },
+      'todoist',
+    );
+    disp.dispatch(
+      makeJob({ id: 'j_00000000000000000000000033', action }),
+      { payload: { event_data: { id: 'taskA' } } },
+      'todoist',
+    );
+    expect(link.sent.filter((s) => s.event.type === 'chat.spawn_request')).toHaveLength(2);
+    disp.close();
+  });
+
   it('keyed ensure: a key that renders empty is REFUSED, never collapsed onto the job-wide chat', () => {
     const link = new InProcessHostLink();
     const logs = new JobLogs(dir);

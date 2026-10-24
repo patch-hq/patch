@@ -656,3 +656,17 @@ describe('JobAction.includePayload', () => {
     expect(JobAction.safeParse({ ...shapes[0], includePayload: 'no' }).success).toBe(false);
   });
 });
+
+describe('continue shareKey', () => {
+  test('accepted as a boolean on continue', () => {
+    const res = JobAction.safeParse({
+      type: 'continue',
+      hostId: 'h',
+      folder: '/f',
+      prompt: 'p',
+      key: '{{id}}',
+      shareKey: true,
+    });
+    expect(res.success).toBe(true);
+  });
+});
