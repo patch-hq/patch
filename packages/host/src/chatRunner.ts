@@ -4663,13 +4663,13 @@ export class Daemon {
    * cannot be written from outside its session, so the edit is flagged and its
    * next turn carries a `<system-reminder>` telling it to adopt the new list;
    * without that its next TodoWrite would silently overwrite the user's edit.
-   * NOT persisted: todos are in-memory, like the TodoWrite mirror they replace.
    */
   setTodos(chatId: string, todos: TodoItem[]): void {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
     state.todos = todos;
     state.todosEditedBySurface = true;
+    this.persistTodos(chatId, todos);
     // The user's list supersedes whatever the host last fired: clearing the
     // marker lets the auto-advance fire the new head item even when its text
     // matches the item that was already fired once.
@@ -10416,6 +10416,11 @@ export class Daemon {
     })();
   }
 
+  /** Write the task list to meta.json so it survives a host restart. */
+  private persistTodos(chatId: string, todos: TodoItem[]): void {
+    this.opts.metaStore.update(chatId, (m) => ({ ...m, todos }));
+  }
+
   /**
    * patch/todo.md § "todo list". Mirror a native TodoWrite tool call's list onto
    * chat state and re-emit chat.state so surfaces show what the agent is working
@@ -10432,6 +10437,7 @@ export class Daemon {
       return;
     }
     state.todos = carryTodoAttachments(todos, state.todos);
+    this.persistTodos(chatId, state.todos);
     state.lastUpdated = this.opts.now();
     this.emitState(chatId);
   }
@@ -10464,6 +10470,7 @@ export class Daemon {
       const started = markTodoStarted(state.todos, decision);
       if (started === null) return;
       state.todos = started;
+      this.persistTodos(chatId, started);
       state.lastUpdated = this.opts.now();
       this.emitState(chatId);
       this.opts.logger.info(

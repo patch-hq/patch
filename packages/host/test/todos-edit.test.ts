@@ -15,6 +15,7 @@ import type { TodoItem, WireEvent } from '@patch/wire';
 import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createHistoryReader } from '../src/history.js';
+import { chatStateFromMeta } from '../src/chatState.js';
 import { buildTodoEditSystemReminder } from '../src/todos.js';
 
 const silent = pino({ level: 'silent' });
@@ -50,7 +51,7 @@ function setup() {
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-todos-claude-')),
     }),
   });
-  return { daemon, events, folder, capturedPrompts };
+  return { daemon, events, folder, capturedPrompts, metaStore };
 }
 
 describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
@@ -162,5 +163,24 @@ describe('buildTodoEditSystemReminder', () => {
   it("quotes item text so a newline can't break the numbered list", () => {
     const block = buildTodoEditSystemReminder([{ text: 'a\nb', status: 'pending' }]);
     expect(block).toContain('1. [pending] "a\\nb"');
+  });
+});
+
+describe('Task list survives a host restart', () => {
+  it('persists a surface-edited list to meta and rehydrates it', async () => {
+    const { daemon, folder, metaStore } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    daemon.setTodos(chatId, LIST);
+    const meta = metaStore.read(chatId);
+    expect(meta?.todos).toEqual(LIST);
+    expect(chatStateFromMeta(meta!).todos).toEqual(LIST);
+  });
+
+  it('persists a list the user empties', async () => {
+    const { daemon, folder, metaStore } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    daemon.setTodos(chatId, LIST);
+    daemon.setTodos(chatId, []);
+    expect(metaStore.read(chatId)?.todos).toEqual([]);
   });
 });

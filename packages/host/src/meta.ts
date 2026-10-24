@@ -25,6 +25,7 @@ import {
   HarnessId,
   PermissionMode,
   SnoozeRecord,
+  TodoItem,
   TurnOrigin,
 } from '@patch/wire';
 
@@ -73,6 +74,13 @@ export const ChatMeta = z
      * files written before this field existed.
      */
     reminder: z.string().nullable().optional(),
+    /**
+     * The chat's task list. Persisted so a host restart does not empty it —
+     * otherwise a surface that adds one item to the (now empty) list sends back
+     * a one-item list that replaces everything the user had. Optional for
+     * back-compat with meta files written before this field existed.
+     */
+    todos: z.array(TodoItem).optional(),
     /**
      * This chat's permission-mode override (spec/02 § Permission mode).
      * Persisted so a restart does not silently return an overridden chat to its

@@ -412,9 +412,7 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     // restore it from: the closing text belongs to a turn this process never
     // ran, so a rehydrated chat has none until its next turn settles.
     turnSummary: null,
-    // Todos mirror the latest turn's TodoWrite and aren't persisted, so a
-    // rehydrated chat starts with an empty list until its next TodoWrite.
-    todos: [],
+    todos: meta.todos ?? [],
     lastFiredTodo: null,
     todosEditedBySurface: false,
     hiddenNotice: null,
