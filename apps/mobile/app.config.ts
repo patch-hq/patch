@@ -101,16 +101,14 @@ const config: ExpoConfig = {
     package: 'io.github.tomchambers2.patch',
     versionCode: 1,
     googleServicesFile: './google-services.json',
-    // Adaptive launcher icon (spec/15 § App icon). Without an adaptive icon
-    // Android could not mask the launcher icon to the device shape and it
-    // rendered as a bare square. `adaptive-icon.png` is the tile art with the
-    // "p" RE-CENTRED into the adaptive safe zone (the raw icon.png sits low and
-    // would clip the descender under a circular mask); background is the tile
-    // green so the mask reads as a solid green circle/squircle.
+    // Adaptive launcher icon (spec/15 § App icon). A circular green icon: the
+    // foreground is the tile green drawn as a disc (with the "p") on a
+    // transparent canvas and there is no background layer, so whatever shape
+    // the launcher masks to, the icon stays a circle.
     adaptiveIcon: {
-      foregroundImage: './assets/adaptive-icon.png',
+      foregroundImage: './assets/launcher-icon.png',
       monochromeImage: './assets/adaptive-icon-monochrome.png',
-      backgroundColor: '#3A5E2C',
+      backgroundColor: '#00000000',
     },
     permissions: [
       'INTERNET',
