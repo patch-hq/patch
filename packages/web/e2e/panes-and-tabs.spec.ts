@@ -46,6 +46,10 @@ test.describe('panes and tabs — opening', () => {
     // and it's the one just clicked, not the one the harness opened with.
     await expect(paneTabs(page)).toHaveCount(0);
     await expect(page.locator('.chat-head-title .chat-title')).toHaveText('July Seasonal Food');
+    // The row click also navigates the router; wait for that to land (the row
+    // goes active) so its route effect can't run after the middle-click below
+    // and pull focus back to this chat.
+    await expect(page.getByTestId('chat-row-chat_md')).toHaveClass(/active/);
 
     await page.getByTestId('chat-row-chat_table').click({ button: 'middle' });
     const tabs = paneTabs(page);
