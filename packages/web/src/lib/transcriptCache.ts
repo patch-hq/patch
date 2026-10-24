@@ -16,13 +16,22 @@
 //     is NO cache (the chat loads from the host, a little slower), never a
 //     chat that fails to open. It is re-derivable; the host's log is not.
 //
+// One exception to "only events with a seq": a question's ANSWER. The host
+// sends `chat.permission_response` without a seq, so it can never be an
+// event row here — yet the cached `chat.permission_request` it settles WAS
+// kept. Hold only the request and a restart paints the card open and blank
+// while the agent already has the answer, and the follow-up replay (seq >
+// the highest held) never re-sends the settled pair. So resolutions are kept
+// in their own store, keyed by request, and re-applied after the events.
+//
 // Bounded by chat count, trimmed oldest-opened-first, so a year of chats
 // cannot fill a browser's quota.
 
 const DB_NAME = 'patch-transcripts';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const EVENTS = 'events';
 const CHATS = 'chats';
+const RESOLUTIONS = 'resolutions';
 /** How many chats' transcripts to keep. Beyond this, least-recently-opened go. */
 export const MAX_CACHED_CHATS = 40;
 
@@ -35,8 +44,22 @@ interface CachedChatMeta {
   openedAt: number;
 }
 
+/** One decision taken on a question, in the order it was taken. */
+export interface CachedResolutionStep {
+  decision: 'approve' | 'deny';
+  answers?: Record<string, string>;
+}
+
+export interface CachedResolution {
+  chatId: string;
+  requestId: string;
+  steps: CachedResolutionStep[];
+}
+
 export interface CachedTranscript {
   events: unknown[];
+  /** Answers given to cached questions; re-apply after the events. */
+  resolutions: CachedResolution[];
   branchId: string | null;
 }
 
@@ -63,6 +86,9 @@ function openDb(): Promise<IDBDatabase | null> {
       }
       if (!db.objectStoreNames.contains(CHATS)) {
         db.createObjectStore(CHATS, { keyPath: 'chatId' });
+      }
+      if (!db.objectStoreNames.contains(RESOLUTIONS)) {
+        db.createObjectStore(RESOLUTIONS, { keyPath: ['chatId', 'requestId'] });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -98,14 +124,18 @@ export async function loadTranscript(chatId: string): Promise<CachedTranscript |
   try {
     const db = await openDb();
     if (!db) return null;
-    const tx = db.transaction([EVENTS, CHATS], 'readonly');
+    const tx = db.transaction([EVENTS, CHATS, RESOLUTIONS], 'readonly');
     const rows = await promisify(
       tx.objectStore(EVENTS).getAll(IDBKeyRange.bound([chatId, 0], [chatId, Infinity])),
     );
     if (rows.length === 0) return null;
     const meta = (await promisify(tx.objectStore(CHATS).get(chatId))) as CachedChatMeta | undefined;
+    const resolutions = (await promisify(
+      tx.objectStore(RESOLUTIONS).getAll(IDBKeyRange.bound([chatId, ''], [chatId, '\uffff'])),
+    )) as CachedResolution[];
     return {
       events: (rows as Array<{ event: unknown }>).map((r) => r.event),
+      resolutions,
       branchId: meta?.branchId ?? null,
     };
   } catch (err) {
@@ -144,6 +174,44 @@ export async function saveEvents(chatId: string, events: unknown[]): Promise<voi
 }
 
 /**
+ * Keep the answer given to a question, so a restart draws the card answered
+ * (see the header). Only for a chat that is already cached: a resolution with
+ * no transcript beside it would never be loaded or trimmed.
+ */
+export async function saveResolution(
+  chatId: string,
+  requestId: string,
+  decision: 'approve' | 'deny',
+  answers?: Record<string, string>,
+): Promise<void> {
+  try {
+    const db = await openDb();
+    if (!db) return;
+    const tx = db.transaction([CHATS, RESOLUTIONS], 'readwrite');
+    const known = await promisify(tx.objectStore(CHATS).get(chatId));
+    if (!known) return;
+    const store = tx.objectStore(RESOLUTIONS);
+    const held = (await promisify(store.get([chatId, requestId]))) as CachedResolution | undefined;
+    const steps = held?.steps ?? [];
+    const last = steps[steps.length - 1];
+    if (
+      last &&
+      last.decision === decision &&
+      JSON.stringify(last.answers) === JSON.stringify(answers)
+    ) {
+      return;
+    }
+    store.put({
+      chatId,
+      requestId,
+      steps: [...steps, { decision, ...(answers !== undefined ? { answers } : {}) }],
+    } satisfies CachedResolution);
+  } catch (err) {
+    console.warn('[patch] transcript cache resolution write failed:', (err as Error).message);
+  }
+}
+
+/**
  * Record which track the cached events belong to. Called when the host says
  * what the active branch is; a LATER disagreement is what `dropTranscript`
  * exists for.
@@ -170,8 +238,9 @@ export async function dropTranscript(chatId: string): Promise<void> {
   try {
     const db = await openDb();
     if (!db) return;
-    const tx = db.transaction([EVENTS, CHATS], 'readwrite');
+    const tx = db.transaction([EVENTS, CHATS, RESOLUTIONS], 'readwrite');
     tx.objectStore(EVENTS).delete(IDBKeyRange.bound([chatId, 0], [chatId, Infinity]));
+    tx.objectStore(RESOLUTIONS).delete(IDBKeyRange.bound([chatId, ''], [chatId, '\uffff']));
     tx.objectStore(CHATS).delete(chatId);
   } catch (err) {
     console.warn('[patch] transcript cache drop failed:', (err as Error).message);

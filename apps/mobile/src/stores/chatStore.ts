@@ -23,6 +23,7 @@ import {
 } from './types';
 import { apiUrl } from '../config';
 import { refreshArtifactViewer } from '../components/ArtifactViewer';
+import { saveResolution } from '../lib/transcriptCache';
 import { loadCachedChatList, saveCachedChatList } from '../lib/chatListCache';
 import { loadVisited, saveVisited } from '../lib/visitedChats';
 
@@ -320,6 +321,8 @@ interface ChatState {
     requestId: string,
     decision: 'approve' | 'deny',
     answers?: Record<string, string>,
+    /** Set when replaying the phone's own cache: do not write it back. */
+    opts?: { fromCache?: boolean },
   ): void;
   /** spec/15 § Side threads screen — drop a side branch's own permission card
    * once answered (local removal only; mirrors web's action of the same name). */
@@ -1534,7 +1537,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  resolvePermission(chatId, requestId, decision, answers) {
+  resolvePermission(chatId, requestId, decision, answers, opts) {
+    // The host's `chat.permission_response` carries no seq, so the transcript
+    // cache cannot hold it as an event; keep the answer beside the cached
+    // request or a restart redraws the card open and blank.
+    if (opts?.fromCache !== true) saveResolution(chatId, requestId, decision, answers);
     const state = get();
     const row = state.chats[chatId];
     if (!row) return;

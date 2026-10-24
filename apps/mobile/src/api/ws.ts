@@ -11,7 +11,7 @@ import { AppState, type AppStateStatus, type NativeEventSubscription } from 'rea
 import { CLOSE_AUTH_FAILED, decodeCompat, type WireEvent } from '@patch/wire';
 import { clearCredential, loadCredential } from '../lib/credential';
 import { useChatStore } from '../stores/chatStore';
-import { saveEvents } from '../lib/transcriptCache';
+import { saveEvents, saveResolution } from '../lib/transcriptCache';
 import { useFolderStore } from '../stores/folderStore';
 import { useHostRefusalStore } from '../stores/hostRefusalStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -864,6 +864,18 @@ export class PatchWs {
       else byChat.set(chatId, [event]);
     }
     for (const [chatId, events] of byChat) saveEvents(chatId, events);
+    // An answer carries no seq, so `saveEvents` skips it; the store's own
+    // tap-to-answer path records its answers, this covers the host's echo of
+    // one given elsewhere (spoken, or from another surface).
+    for (const event of batch) {
+      if (event.type !== 'chat.permission_response' || event.chatId === undefined) continue;
+      saveResolution(
+        event.chatId,
+        event.requestId,
+        event.decision === 'deny' || event.approve === false ? 'deny' : 'approve',
+        event.answers,
+      );
+    }
   }
 }
 

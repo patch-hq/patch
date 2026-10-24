@@ -521,6 +521,17 @@ export function ChatRoute({
         if (cached && cached.events.length > 0) {
           cachedBranch.current = cached.branchId;
           useChatStore.getState().applyEvents(cached.events as WireEvent[]);
+          // Answers to cached questions carry no seq, so they are not among
+          // the events: re-apply them or the cards come back open and blank.
+          for (const r of cached.resolutions) {
+            for (const step of r.steps) {
+              useChatStore
+                .getState()
+                .resolvePermission(chatId, r.requestId, step.decision, step.answers, {
+                  fromCache: true,
+                });
+            }
+          }
         }
       }
       if (!cancelled) ws.requestReplay(chatId);

@@ -27,6 +27,7 @@ vi.mock('../lib/transcriptCache.js', () => ({
   setBranch: (...a: unknown[]) => setBranch(...a),
   trimCache: (...a: unknown[]) => trimCache(...a),
   saveEvents: vi.fn(),
+  saveResolution: vi.fn(),
 }));
 vi.mock('../api/rest.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/rest.js')>();
@@ -84,6 +85,7 @@ describe('the device’s cached transcript', () => {
     loadTranscript.mockResolvedValue({
       events: [msg(0, 'from the cache'), msg(1, 'also cached')],
       branchId: 'c-cache-b0',
+      resolutions: [],
     });
     hydrate('c-cache');
     const requestReplay = vi.fn();
@@ -97,6 +99,35 @@ describe('the device’s cached transcript', () => {
     expect(requestReplay).toHaveBeenCalledWith('c-cache');
   });
 
+  it('redraws a cached question as answered, with the picks, from the saved resolution', async () => {
+    const request = {
+      type: 'chat.permission_request',
+      chatId: 'c-cache',
+      seq: 3,
+      requestId: 'r1',
+      request: { tool: 'AskUserQuestion', description: 'q', args: {} },
+    } as unknown as WireEvent;
+    loadTranscript.mockResolvedValue({
+      events: [request],
+      branchId: null,
+      resolutions: [
+        {
+          chatId: 'c-cache',
+          requestId: 'r1',
+          steps: [{ decision: 'approve', answers: { Pick: 'Luxon' } }],
+        },
+      ],
+    });
+    hydrate('c-cache');
+    renderChat('c-cache', { send() {}, requestReplay: vi.fn() });
+    await waitFor(() => {
+      const e = useChatStore.getState().timelines['c-cache']?.[0];
+      expect(e?.permissionResolved).toBe('approve');
+      expect(e?.permissionAnswers).toEqual({ Pick: 'Luxon' });
+    });
+    expect(useChatStore.getState().chats['c-cache']?.pendingPermissions).toHaveLength(0);
+  });
+
   it('still asks the host when the device holds nothing', async () => {
     loadTranscript.mockResolvedValue(null);
     hydrate('c-cache');
@@ -107,7 +138,11 @@ describe('the device’s cached transcript', () => {
   });
 
   it('throws the cache away when the host says the chat is on a different track', async () => {
-    loadTranscript.mockResolvedValue({ events: [msg(0, 'old track')], branchId: 'c-cache-b0' });
+    loadTranscript.mockResolvedValue({
+      events: [msg(0, 'old track')],
+      branchId: 'c-cache-b0',
+      resolutions: [],
+    });
     hydrate('c-cache');
     const requestReplay = vi.fn();
     renderChat('c-cache', { send() {}, requestReplay });

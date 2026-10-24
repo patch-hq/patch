@@ -33,6 +33,7 @@ import {
   type SectionCounts,
 } from './types.js';
 import { refreshArtifact } from '../lib/artifactPanel.js';
+import { saveResolution } from '../lib/transcriptCache.js';
 import { loadReadState, saveReadWatermark } from '../lib/readState.js';
 import { clearComposerDraft } from './composerDraftStore.js';
 
@@ -347,6 +348,8 @@ interface ChatState {
     requestId: string,
     decision: 'approve' | 'deny',
     answers?: Record<string, string>,
+    /** Set when replaying the device's own cache: do not write it back. */
+    opts?: { fromCache?: boolean },
   ): void;
   /**
    * spec/14 § Side threads panel — drop a side branch's own permission card
@@ -2734,7 +2737,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  resolvePermission(chatId, requestId, decision, answers) {
+  resolvePermission(chatId, requestId, decision, answers, opts) {
+    // The host's `chat.permission_response` carries no seq, so the transcript
+    // cache cannot hold it as an event; keep the answer beside the cached
+    // request or a restart redraws the card open and blank.
+    if (opts?.fromCache !== true) void saveResolution(chatId, requestId, decision, answers);
     const state = get();
     const row = state.chats[chatId];
     if (!row) return;

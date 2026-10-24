@@ -7,6 +7,7 @@ import {
   __resetPendingForTests,
   loadTranscript,
   saveEvents,
+  saveResolution,
 } from '../src/lib/transcriptCache';
 
 const ev = (chatId: string, seq: number): unknown => ({
@@ -38,6 +39,28 @@ afterEach(() => {
 });
 
 describe('transcriptCache', () => {
+  it('keeps the answer to a cached question, which carries no seq, across a restart', () => {
+    saveEvents('q', [{ type: 'chat.permission_request', chatId: 'q', seq: 645, requestId: 'r1' }]);
+    vi.advanceTimersByTime(1000);
+    saveResolution('q', 'r1', 'approve', { Library: 'Luxon' });
+    saveResolution('q', 'r1', 'approve', { Library: 'Luxon' });
+    __resetPendingForTests();
+    expect(loadTranscript('q')!.resolutions).toEqual({
+      r1: [{ decision: 'approve', answers: { Library: 'Luxon' } }],
+    });
+  });
+
+  it('writes an answer that lands before its request was flushed', () => {
+    saveEvents('q2', [{ type: 'chat.permission_request', chatId: 'q2', seq: 1, requestId: 'r' }]);
+    saveResolution('q2', 'r', 'deny');
+    expect(loadTranscript('q2')!.resolutions).toEqual({ r: [{ decision: 'deny' }] });
+  });
+
+  it('ignores an answer for a chat it holds nothing for', () => {
+    saveResolution('nobody', 'r', 'approve');
+    expect(loadTranscript('nobody')).toBeNull();
+  });
+
   it('holds what was saved, oldest first, without duplicating a re-delivery', () => {
     save('a', 1, 2, 3);
     save('a', 3, 4);

@@ -21,6 +21,7 @@ import { useDiscardUnsentNewChats } from './lib/unsentNewChat.js';
 import { SidebarBackdrop } from './components/SidebarBackdrop.js';
 import { ColumnDivider } from './components/ColumnDivider.js';
 import { ChatPaneRoute } from './routes/ChatPaneRoute.js';
+import * as transcriptCache from './lib/transcriptCache.js';
 import { NewChatRoute } from './routes/NewChatRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
@@ -1015,6 +1016,22 @@ useChatStore.getState().hydrate([
     hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'question-answered-fixture',
+    folder: '/home/tom/projects/patch',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
+  // Deliberately NO timeline fixture: its transcript comes only from the
+  // device's own IndexedDB cache, so a spec can seed that and `page.reload()`
+  // the way a real restart does (transcript-cache-question.spec.ts).
+  {
+    chatId: 'chat_cache_question',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'cache-question-fixture',
     folder: '/home/tom/projects/patch',
     activity: 'idle',
     status: 'active',
@@ -2427,6 +2444,9 @@ useChatStore.setState((s) => ({
     ],
   },
 }));
+// The REAL transcript cache, so a spec can seed what a past session saved.
+(window as unknown as { __transcriptCache?: typeof transcriptCache }).__transcriptCache =
+  transcriptCache;
 // Exposed so the scroll-behaviour spec can append an optimistic turn the way a
 // real send does.
 (window as unknown as { __store?: typeof useChatStore }).__store = useChatStore;

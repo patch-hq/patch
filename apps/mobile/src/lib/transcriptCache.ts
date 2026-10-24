@@ -18,6 +18,14 @@
 //     an empty chat: this runs on the open path, and a launch-blocking throw
 //     over a disposable mirror would be far worse than the refetch it saves.
 //
+// One exception to "only events with a seq": a question's ANSWER. The host
+// sends `chat.permission_response` without a seq, so it can never be kept as
+// an event — yet the `chat.permission_request` it settles was. Hold only the
+// request and a restart redraws the card open and blank while the agent
+// already has the answer, and the replay for seq > the highest held never
+// re-sends the settled pair. So answers are kept beside the events and
+// re-applied after them.
+//
 // Bounded twice — events per chat, and chats — so a year of use cannot grow
 // without limit on a phone.
 
@@ -33,9 +41,17 @@ export const MAX_CACHED_CHATS = 20;
 /** Live events trickle in; coalesce before rewriting a chat's blob. */
 const FLUSH_MS = 750;
 
+/** One decision taken on a question, in the order it was taken. */
+export interface CachedResolutionStep {
+  decision: 'approve' | 'deny';
+  answers?: Record<string, string>;
+}
+
 interface CachedChat {
   branchId: string | null;
   events: unknown[];
+  /** requestId -> the decisions taken on it. */
+  resolutions: Record<string, CachedResolutionStep[]>;
 }
 
 /** chatId -> epoch ms last opened. */
@@ -74,10 +90,17 @@ function readChat(chatId: string): CachedChat | null {
   if (raw === undefined) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
+    // Blobs written before answers were kept have no `resolutions`: upgrade
+    // them in place rather than reporting a healthy transcript as unreadable.
+    if (typeof parsed === 'object' && parsed !== null && !('resolutions' in parsed)) {
+      (parsed as CachedChat).resolutions = {};
+    }
     if (
       typeof parsed !== 'object' ||
       parsed === null ||
-      !Array.isArray((parsed as CachedChat).events)
+      !Array.isArray((parsed as CachedChat).events) ||
+      typeof (parsed as CachedChat).resolutions !== 'object' ||
+      (parsed as CachedChat).resolutions === null
     ) {
       throw new Error('cached transcript is not a transcript');
     }
@@ -121,7 +144,11 @@ function writeMerged(chatId: string, incoming: unknown[]): void {
   const trimmed = events.length > MAX_CACHED_EVENTS ? events.slice(-MAX_CACHED_EVENTS) : events;
   store().set(
     key(chatId),
-    JSON.stringify({ branchId: held?.branchId ?? null, events: trimmed } satisfies CachedChat),
+    JSON.stringify({
+      branchId: held?.branchId ?? null,
+      events: trimmed,
+      resolutions: held?.resolutions ?? {},
+    } satisfies CachedChat),
   );
 }
 
@@ -167,7 +194,49 @@ export function saveEvents(chatId: string, events: unknown[]): void {
 export function setBranch(chatId: string, branchId: string): void {
   const held = readChat(chatId);
   if (held === null) return;
-  store().set(key(chatId), JSON.stringify({ branchId, events: held.events } satisfies CachedChat));
+  store().set(
+    key(chatId),
+    JSON.stringify({
+      branchId,
+      events: held.events,
+      resolutions: held.resolutions,
+    } satisfies CachedChat),
+  );
+}
+
+/**
+ * Keep the answer given to a question, so a restart draws the card answered
+ * (see the header). Only for a chat already held: an answer with no
+ * transcript beside it would never be loaded or trimmed.
+ */
+export function saveResolution(
+  chatId: string,
+  requestId: string,
+  decision: 'approve' | 'deny',
+  answers?: Record<string, string>,
+): void {
+  try {
+    // The request may still be waiting in the coalescing buffer.
+    if (pending.has(chatId)) flush();
+    const held = readChat(chatId);
+    if (held === null) return;
+    const steps = held.resolutions[requestId] ?? [];
+    const last = steps[steps.length - 1];
+    if (
+      last &&
+      last.decision === decision &&
+      JSON.stringify(last.answers) === JSON.stringify(answers)
+    ) {
+      return;
+    }
+    held.resolutions[requestId] = [
+      ...steps,
+      { decision, ...(answers !== undefined ? { answers } : {}) },
+    ];
+    store().set(key(chatId), JSON.stringify(held satisfies CachedChat));
+  } catch (e) {
+    useUiStore.getState().pushError(`transcript cache write failed: ${(e as Error).message}`);
+  }
 }
 
 /** Forget a chat entirely — its track was replaced, not extended. */

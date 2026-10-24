@@ -457,6 +457,17 @@ function ChatDetailBody(): React.ReactElement {
       if (cached && cached.events.length > 0) {
         cachedBranch.current = cached.branchId;
         useChatStore.getState().applyEvents(cached.events as never[]);
+        // Answers to cached questions carry no seq, so they are not among
+        // the events: re-apply them or the cards come back open and blank.
+        for (const [requestId, steps] of Object.entries(cached.resolutions)) {
+          for (const step of steps) {
+            useChatStore
+              .getState()
+              .resolvePermission(chatId, requestId, step.decision, step.answers, {
+                fromCache: true,
+              });
+          }
+        }
       }
     }
     getWs().requestReplay(chatId);
