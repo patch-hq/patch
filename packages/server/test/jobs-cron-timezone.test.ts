@@ -4,7 +4,7 @@
 // This file is the regression proof for the reported bug: "9am jobs fire at
 // 10am during BST". The scheduler used to hardcode `{ timezone: 'UTC' }`, so
 // `0 9 * * *` meant 09:00 UTC = 10:00 London wall-clock every summer. The DST
-// block below drives REAL node-cron and asserts the fire instant moves with
+// block below drives the REAL scheduler and asserts the fire instant moves with
 // the zone: 08:00 UTC in summer, 09:00 UTC in winter — the same 9am to a
 // person in London, which is the whole point.
 
@@ -13,14 +13,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import cron, { type ScheduledTask } from 'node-cron';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { JobStore } from '../src/jobs/store.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import { JobLogs } from '../src/jobs/logs.js';
-import { CronScheduler } from '../src/jobs/cron.js';
+import { CronScheduler, croner, type CronTask, type ScheduleFn } from '../src/jobs/cron.js';
 import { assertValidJobBody, JobValidationError } from '../src/jobs/validate.js';
 import { InProcessHostLink } from '../src/host-link.js';
 import type { JobCreateBody, JobPatchBody } from '../src/jobs/types.js';
@@ -69,8 +68,8 @@ describe('cron timezone reaches the scheduler', () => {
       logger: silentLogger,
       schedule: ((expr: string, _cb: unknown, opts: { timezone?: string }) => {
         seen.push({ expr, timezone: opts.timezone });
-        return { stop: () => undefined } as unknown as ScheduledTask;
-      }) as unknown as typeof cron.schedule,
+        return { stop: () => undefined } as unknown as CronTask;
+      }) as unknown as ScheduleFn,
     });
     scheduler.start();
     jobs.create({
@@ -89,8 +88,7 @@ describe('cron timezone reaches the scheduler', () => {
       dispatcher,
       logs,
       logger: silentLogger,
-      schedule: (() =>
-        ({ stop: () => undefined }) as unknown as ScheduledTask) as unknown as typeof cron.schedule,
+      schedule: (() => ({ stop: () => undefined }) as unknown as CronTask) as unknown as ScheduleFn,
     });
     scheduler.start();
     const job = jobs.create({
@@ -117,8 +115,8 @@ describe('cron timezone reaches the scheduler', () => {
       logger: silentLogger,
       schedule: ((_e: string, _cb: unknown, opts: { timezone?: string }) => {
         seen.push(opts.timezone);
-        return { stop: () => undefined } as unknown as ScheduledTask;
-      }) as unknown as typeof cron.schedule,
+        return { stop: () => undefined } as unknown as CronTask;
+      }) as unknown as ScheduleFn,
     });
     scheduler.start();
     jobs.create({
@@ -140,8 +138,8 @@ describe('cron timezone reaches the scheduler', () => {
       logger: silentLogger,
       schedule: ((_e: string, _cb: unknown, opts: { timezone?: string }) => {
         seen.push(opts.timezone);
-        return { stop: () => undefined } as unknown as ScheduledTask;
-      }) as unknown as typeof cron.schedule,
+        return { stop: () => undefined } as unknown as CronTask;
+      }) as unknown as ScheduleFn,
     });
     scheduler.start();
     const job = jobs.create({
@@ -170,8 +168,7 @@ describe('cron timezone reaches the scheduler', () => {
       dispatcher,
       logs,
       logger: capturing,
-      schedule: (() =>
-        ({ stop: () => undefined }) as unknown as ScheduledTask) as unknown as typeof cron.schedule,
+      schedule: (() => ({ stop: () => undefined }) as unknown as CronTask) as unknown as ScheduleFn,
     });
     scheduler.start();
     jobs.create({
@@ -406,20 +403,20 @@ describe('POST/PATCH /api/jobs over the real HTTP route', () => {
   });
 });
 
-// The bug itself, proven against REAL node-cron via the scheduler's real
-// registration path (only `cron.schedule` is wrapped, to get a handle on the
-// task node-cron actually built).
+// The bug itself, proven against the REAL scheduler via its real
+// registration path (only the schedule function is wrapped, to get a handle
+// on the task it actually built).
 describe('DST: 0 9 * * * in Europe/London is 9am London all year', () => {
   let dir: string;
   let scheduler: CronScheduler | null = null;
-  let task: ScheduledTask | null = null;
+  let task: CronTask | null = null;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-crontz-'));
   });
   afterEach(() => {
     if (scheduler) scheduler.stop();
-    if (task) task.destroy();
+    if (task) task.stop();
     scheduler = null;
     task = null;
     vi.useRealTimers();
@@ -429,7 +426,7 @@ describe('DST: 0 9 * * * in Europe/London is 9am London all year', () => {
   /**
    * Register `expression` (+ optional `timezone`) through the real
    * CronScheduler at the fixed instant `nowIso`, and return the UTC instant
-   * node-cron will next fire it.
+   * the scheduler will next fire it.
    */
   function nextRunUtc(nowIso: string, expression: string, timezone?: string): string {
     vi.useFakeTimers();
@@ -441,9 +438,9 @@ describe('DST: 0 9 * * * in Europe/London is 9am London all year', () => {
       logs,
       logger: silentLogger,
       schedule: ((expr: string, cb: () => Promise<void>, opts: { timezone?: string }) => {
-        task = cron.schedule(expr, cb, opts);
+        task = croner(expr, cb, opts as { timezone: string });
         return task;
-      }) as unknown as typeof cron.schedule,
+      }) as unknown as ScheduleFn,
     });
     scheduler.start();
     jobs.create({
@@ -451,8 +448,8 @@ describe('DST: 0 9 * * * in Europe/London is 9am London all year', () => {
       trigger: { type: 'cron', expression, ...(timezone ? { timezone } : {}) },
       action: ACTION,
     });
-    const next = task!.getNextRun();
-    if (!next) throw new Error('node-cron reported no next run');
+    const next = task!.nextRun();
+    if (!next) throw new Error('scheduler reported no next run');
     return next.toISOString();
   }
 
@@ -479,5 +476,76 @@ describe('DST: 0 9 * * * in Europe/London is 9am London all year', () => {
     // Sanity that the zone is genuinely applied rather than nudged: 09:00 in
     // Auckland (UTC+12 in July) on 16 Jul is 21:00 UTC on 15 Jul.
     expect(nextRunUtc(SUMMER, '0 9 * * *', 'Pacific/Auckland')).toBe('2026-07-15T21:00:00.000Z');
+  });
+});
+
+// 25 Oct 2026: the clocks went back at 02:00 BST and node-cron 4.2 silenced
+// every daily London job — after Saturday's 08:00 run it put the next one on
+// 1 Jan. Each case starts just after the previous day's fire, as the live
+// scheduler does.
+describe('DST transitions: every daily job fires exactly once a day', () => {
+  /** The next `count` fire instants after `fromIso`, in UTC. */
+  function nextRuns(expression: string, fromIso: string, count: number): string[] {
+    const task = croner(expression, async () => undefined, { timezone: 'Europe/London' });
+    const out: string[] = [];
+    let from = new Date(fromIso);
+    try {
+      for (let i = 0; i < count; i++) {
+        const next = (task as unknown as { nextRun(prev: Date): Date | null }).nextRun(from);
+        if (!next) throw new Error('scheduler reported no next run');
+        out.push(next.toISOString());
+        from = next;
+      }
+    } finally {
+      task.stop();
+    }
+    return out;
+  }
+
+  it('autumn: an 08:00 job fires at 08:00 London on the change day and after', () => {
+    expect(nextRuns('0 8 * * *', '2026-10-24T07:00:01Z', 2)).toEqual([
+      '2026-10-25T08:00:00.000Z',
+      '2026-10-26T08:00:00.000Z',
+    ]);
+  });
+
+  it('autumn: a 02:00 and a 03:15 job fire on the change day', () => {
+    expect(nextRuns('0 2 * * *', '2026-10-24T01:00:01Z', 1)).toEqual(['2026-10-25T02:00:00.000Z']);
+    expect(nextRuns('15 3 * * *', '2026-10-24T02:15:01Z', 1)).toEqual(['2026-10-25T03:15:00.000Z']);
+  });
+
+  it('autumn: a job in the repeated hour fires once, not twice', () => {
+    expect(nextRuns('30 1 * * *', '2026-10-24T00:30:01Z', 2)).toEqual([
+      '2026-10-25T00:30:00.000Z',
+      '2026-10-26T01:30:00.000Z',
+    ]);
+  });
+
+  it('autumn: midnight fires at midnight London either side of the change', () => {
+    expect(nextRuns('0 0 * * *', '2026-10-23T23:00:01Z', 2)).toEqual([
+      '2026-10-24T23:00:00.000Z',
+      '2026-10-26T00:00:00.000Z',
+    ]);
+  });
+
+  it('spring: a job in the skipped hour still fires that day, just after the jump', () => {
+    expect(nextRuns('30 1 * * *', '2027-03-27T01:30:01Z', 2)).toEqual([
+      '2027-03-28T01:30:00.000Z',
+      '2027-03-29T00:30:00.000Z',
+    ]);
+  });
+
+  it('spring: an 08:00 job moves from 08:00 to 07:00 UTC', () => {
+    expect(nextRuns('0 8 * * *', '2027-03-27T08:00:01Z', 2)).toEqual([
+      '2027-03-28T07:00:00.000Z',
+      '2027-03-29T07:00:00.000Z',
+    ]);
+  });
+
+  it('a weekly Monday job straddling the change keeps its local time', () => {
+    expect(nextRuns('0 8 * * 1', '2026-10-19T07:00:01Z', 2)).toEqual([
+      '2026-10-26T08:00:00.000Z',
+      '2026-11-02T08:00:00.000Z',
+    ]);
   });
 });

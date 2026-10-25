@@ -278,7 +278,7 @@ describe('CronScheduler', () => {
     await jobs.close();
   });
 
-  it('registers with the REAL node-cron scheduler (no registerTask hook) and hasLiveTask reflects it', async () => {
+  it('registers with the REAL cron scheduler (no registerTask hook) and hasLiveTask reflects it', async () => {
     const jobs = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
     const link = new InProcessHostLink();
     const dispatcher = new JobDispatcher({
@@ -287,8 +287,8 @@ describe('CronScheduler', () => {
       logger: silentLogger,
       logs: new JobLogs(dir),
     });
-    // No `registerTask` here — this exercises the genuine `cron.schedule(...)`
-    // path (dispatcher.ts's `this.schedule` default), not the test hook.
+    // No `registerTask` here — this exercises the genuine croner
+    // path (cron.ts's `this.schedule` default), not the test hook.
     const scheduler = new CronScheduler({
       jobs,
       dispatcher,

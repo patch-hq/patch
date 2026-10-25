@@ -1,4 +1,4 @@
-// node-cron scheduler.
+// Cron scheduler (croner).
 //
 // Each enabled `cron`-trigger job registers a task that fires the action
 // via the JobDispatcher. The scheduler subscribes to JobsInterface.onChange
@@ -6,11 +6,20 @@
 //
 // Per spec/08 § Cron: a cron expression is stored exactly as authored and
 // evaluated in `trigger.timezone`. Absent → UTC, which is what every job
-// stored before that field existed relies on. node-cron applies the zone at
-// every tick, so a DST transition moves the fire instant correctly — do NOT
-// go back to rewriting the expression into UTC at write time.
+// stored before that field existed relies on. The scheduler applies the zone
+// to every next-run calculation, so a DST transition moves the fire instant
+// correctly — do NOT go back to rewriting the expression into UTC at write
+// time.
+//
+// Scheduling is croner, not node-cron. node-cron 4.2 miscomputed the next run
+// across the October BST→GMT change: on 25 Oct 2026 every daily Europe/London
+// job went silent (an 08:00 job's next run came out as 1 Jan), and even 4.6
+// skips a job whose time falls in the hour the clocks jump over in March.
+// croner fires a skipped-hour job once, just after the jump, and a repeated-
+// hour job once. node-cron is still the validator in validate.ts.
 
-import cron, { type ScheduledTask } from 'node-cron';
+import { Cron } from 'croner';
+import cron from 'node-cron';
 import type { Logger } from 'pino';
 import { evaluateFilter, filterContext, FilterError } from './filter.js';
 import type { JobDispatcher } from './dispatcher.js';
@@ -18,16 +27,38 @@ import { digestPayload, type JobLogs } from './logs.js';
 import { jobFires } from './types.js';
 import type { JobsInterface, Job } from './types.js';
 
+/** The handle the scheduler keeps per registered job. */
+export interface CronTask {
+  stop(): void;
+  /** The next instant this task will fire, or null if it never will. */
+  nextRun(): Date | null;
+}
+
+export type ScheduleFn = (
+  expr: string,
+  cb: () => Promise<void>,
+  opts: { timezone: string },
+) => CronTask;
+
+/**
+ * The live schedule: croner in the job's zone. `domAndDow` keeps node-cron's
+ * rule that a day-of-month AND a weekday must both match, so no stored job
+ * changes meaning. `catch` stops a throwing callback killing the timer;
+ * `fire` already logs its own failures.
+ */
+export const croner: ScheduleFn = (expr, cb, { timezone }) =>
+  new Cron(expr, { timezone, domAndDow: true, catch: true }, () => cb());
+
 export interface CronSchedulerOptions {
   jobs: JobsInterface;
   dispatcher: JobDispatcher;
   logs: JobLogs;
   logger: Logger;
-  /** Override for tests (e.g. inject a fake `cron`-like scheduler). */
-  schedule?: typeof cron.schedule;
+  /** Override for tests (e.g. inject a fake scheduler). */
+  schedule?: ScheduleFn;
   /**
    * Test hook — invoked synchronously instead of registering a real cron task.
-   * `timezone` is the zone the real path would have handed node-cron (the
+   * `timezone` is the zone the real path would have handed the scheduler (the
    * job's own, or `UTC` when it carries none).
    */
   registerTask?: (
@@ -45,10 +76,10 @@ export class CronScheduler {
   private readonly dispatcher: JobDispatcher;
   private readonly logs: JobLogs;
   private readonly logger: Logger;
-  private readonly schedule: typeof cron.schedule;
+  private readonly schedule: ScheduleFn;
   private readonly nowMs: () => number;
   private readonly registerTask: NonNullable<CronSchedulerOptions['registerTask']> | null;
-  private readonly tasks = new Map<string, ScheduledTask>();
+  private readonly tasks = new Map<string, CronTask>();
   private readonly testTaskTeardowns = new Map<string, () => void>();
   private unsub: (() => void) | null = null;
 
@@ -57,7 +88,7 @@ export class CronScheduler {
     this.dispatcher = opts.dispatcher;
     this.logs = opts.logs;
     this.logger = opts.logger;
-    this.schedule = opts.schedule ?? cron.schedule;
+    this.schedule = opts.schedule ?? croner;
     this.nowMs = opts.nowMs ?? ((): number => Date.now());
     this.registerTask = opts.registerTask ?? null;
   }
@@ -83,7 +114,7 @@ export class CronScheduler {
   }
 
   /**
-   * True when this job is registered with a real node-cron task (the live
+   * True when this job is registered with a real cron task (the live
    * wall-clock scheduler path), as opposed to the `registerTask` test hook.
    * Used by the live-fire e2e to assert it's exercising the genuine path.
    */
@@ -93,7 +124,7 @@ export class CronScheduler {
 
   /** The next instant this job's live cron task will fire, or null if it has none. */
   nextRun(jobId: string): Date | null {
-    return this.tasks.get(jobId)?.getNextRun() ?? null;
+    return this.tasks.get(jobId)?.nextRun() ?? null;
   }
 
   /** Test hook: trigger a job's cron callback as if cron had ticked. */
@@ -129,7 +160,17 @@ export class CronScheduler {
       this.testTaskTeardowns.set(job.id, teardown);
       return;
     }
-    const task = this.schedule(expr, cb, { timezone });
+    let task: CronTask;
+    try {
+      task = this.schedule(expr, cb, { timezone });
+    } catch (err) {
+      // One job croner refuses must not stop every other job registering.
+      this.logger.error(
+        { jobId: job.id, expression: expr, timezone, err: (err as Error).message },
+        'jobs/cron: scheduler refused the expression, not registered',
+      );
+      return;
+    }
     this.tasks.set(job.id, task);
     this.logger.info({ jobId: job.id, expression: expr, timezone }, 'jobs/cron: registered');
   }
@@ -139,9 +180,9 @@ export class CronScheduler {
     if (task) {
       try {
         task.stop();
-        // Defensive: node-cron's ScheduledTask.stop() is not documented to
-        // throw under normal use; this guards against a future node-cron
-        // version doing so without taking the process down with it.
+        // Defensive: croner's stop() is not documented to throw under
+        // normal use; this guards against a future version doing so
+        // without taking the process down with it.
         /* v8 ignore next 5 */
       } catch {
         /* ignore */
