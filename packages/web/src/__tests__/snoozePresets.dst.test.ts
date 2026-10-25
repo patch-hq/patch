@@ -4,7 +4,7 @@
 // resolve strictly after "now" and to the wall-clock time its label names.
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { SNOOZE_PRESETS } from '../lib/snoozePresets.js';
+import { SNOOZE_PRESETS, distinctPresets } from '../lib/snoozePresets.js';
 
 const preset = (id: string) => SNOOZE_PRESETS.find((p) => p.id === id)!;
 const local = (y: number, m: number, d: number, h = 0, min = 0, s = 0, ms = 0) =>
@@ -105,5 +105,22 @@ describe('every preset resolves strictly after now', () => {
       vi.setSystemTime(now);
       expect(preset(id).resolve(), new Date(now).toString()).toBeGreaterThan(now);
     }
+  });
+});
+
+describe('distinctPresets', () => {
+  const ids = (now: number) => {
+    vi.setSystemTime(now);
+    return distinctPresets(SNOOZE_PRESETS).map((p) => p.id);
+  };
+  it('drops Next Monday on a Sunday, when it is Tomorrow 8am', () => {
+    expect(ids(local(2026, 10, 25, 10))).not.toContain('next-monday');
+    expect(ids(local(2026, 10, 25, 10))).toContain('tomorrow-8am');
+  });
+  it('keeps every preset on an ordinary Wednesday morning', () => {
+    expect(ids(local(2026, 10, 21, 9))).toEqual(SNOOZE_PRESETS.map((p) => p.id));
+  });
+  it('drops 1 day when it lands on Tomorrow 8am', () => {
+    expect(ids(local(2026, 10, 21, 8))).not.toContain('1-day');
   });
 });

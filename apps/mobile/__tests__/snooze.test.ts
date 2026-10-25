@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   SNOOZE_PRESETS,
+  distinctPresets,
   formatWakeTime,
   formatWakeTimeCompact,
   resolvePreset,
@@ -177,5 +178,24 @@ describe('formatWakeTimeCompact — sized for the row timestamp slot', () => {
     expect(out).not.toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/);
     expect(out).toMatch(/1/);
     expect(out).toMatch(/Sep/);
+  });
+});
+
+describe('distinctPresets', () => {
+  const ids = (now: Date) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    return distinctPresets(SNOOZE_PRESETS).map((p) => p.id);
+  };
+  it('drops Next Monday on a Sunday, when it is Tomorrow 8am', () => {
+    const got = ids(new Date(2026, 9, 25, 10));
+    expect(got).not.toContain('next-monday');
+    expect(got).toContain('tomorrow-8am');
+  });
+  it('keeps every preset on an ordinary Wednesday morning', () => {
+    expect(ids(new Date(2026, 9, 21, 9))).toEqual(SNOOZE_PRESETS.map((p) => p.id));
+  });
+  it('drops 1 day when it lands on Tomorrow 8am', () => {
+    expect(ids(new Date(2026, 9, 21, 8))).not.toContain('1-day');
   });
 });

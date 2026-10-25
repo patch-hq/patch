@@ -52,6 +52,19 @@ export const SNOOZE_PRESETS: ReadonlyArray<SnoozePreset> = [
   { id: 'next-monday', label: 'Next Monday', resolve: () => resolveNextMondayAt(8) },
 ];
 
+/** Presets closer than this to an earlier one say the same thing (Next Monday on a Sunday is Tomorrow 8am). */
+const SAME_MOMENT = 15 * MINUTE;
+
+/** The presets worth showing right now: any that resolves to within 15 minutes of an earlier one is dropped. */
+export function distinctPresets(presets: ReadonlyArray<SnoozePreset>): SnoozePreset[] {
+  const kept: Array<{ preset: SnoozePreset; at: number }> = [];
+  for (const preset of presets) {
+    const at = preset.resolve();
+    if (kept.every((k) => Math.abs(k.at - at) >= SAME_MOMENT)) kept.push({ preset, at });
+  }
+  return kept.map((k) => k.preset);
+}
+
 /** "Until complete": wakes when the chat's work is done, not at a time. Offered only for a chat with work to wait for. */
 export const UNTIL_COMPLETE_PRESET: SnoozePreset = {
   id: 'until-complete',

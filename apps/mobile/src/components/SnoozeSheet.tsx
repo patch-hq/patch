@@ -16,7 +16,12 @@ import { formatElapsed, formatWakeAt } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
-import { SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET, parseCustomSnooze } from '../lib/snooze';
+import {
+  SNOOZE_PRESETS,
+  UNTIL_COMPLETE_PRESET,
+  distinctPresets,
+  parseCustomSnooze,
+} from '../lib/snooze';
 import { applySnoozeSet, chatsInFolder } from '../lib/snoozeApply';
 import { deriveChatTitle } from '../lib/labels';
 import { fonts, radii, space, textMin, typography, useTheme } from '../lib/theme';
@@ -83,7 +88,10 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   // Offered only when every chat has work to wait for; the host refuses the rest.
   const canUntilComplete =
     targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
-  const presets = canUntilComplete ? [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET] : SNOOZE_PRESETS;
+  const presets = [
+    ...distinctPresets(SNOOZE_PRESETS),
+    ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
+  ];
   const wake = wakeFor(selected, customValue);
   const wakeText =
     wake === null ? '' : selected === UNTIL_COMPLETE_PRESET.id ? 'complete' : formatWakeAt(wake);

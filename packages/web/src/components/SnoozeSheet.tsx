@@ -20,6 +20,7 @@ import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import {
   SNOOZE_PRESETS,
+  distinctPresets,
   UNTIL_COMPLETE_PRESET,
   formatElapsed,
   formatWakeAt,
@@ -78,7 +79,10 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   // Offered only when every chat has work to wait for; the host refuses the rest.
   const canUntilComplete =
     targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
-  const presets = canUntilComplete ? [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET] : SNOOZE_PRESETS;
+  const presets = [
+    ...distinctPresets(SNOOZE_PRESETS),
+    ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
+  ];
   const wake = wakeFor(selected, customValue);
   const canConfirm = selected !== null && targets.length > 0;
 

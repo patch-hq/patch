@@ -143,9 +143,11 @@ describe('the Snooze sheet', () => {
     actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'a' }));
     expect(textOf(findHost(r.root, byTestId('snooze-sheet-title')))).toBe('Snooze');
     expect(textOf(findHost(r.root, byTestId('snooze-sheet-subtitle')))).toBe('Migrate billing');
-    for (const l of ['30 minutes', '1 hour', '5pm', 'Tomorrow 8am', 'Next Monday', 'Custom…']) {
+    for (const l of ['30 minutes', '1 hour', 'Tomorrow 8am', 'Next Monday', 'Custom…']) {
       expect(hasText(r.root, l)).toBe(true);
     }
+    // 5pm is 5 minutes from "1 hour" at 16:05, so it says the same thing and is hidden.
+    expect(hasText(r.root, '5pm')).toBe(false);
     expect(hasText(findHost(r.root, byTestId('snooze-sheet-preset-1-hour')), '17:05')).toBe(true);
     expect(
       hasText(findHost(r.root, byTestId('snooze-sheet-preset-tomorrow-8am')), 'Fri 08:00'),
