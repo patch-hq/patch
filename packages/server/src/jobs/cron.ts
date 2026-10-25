@@ -172,6 +172,12 @@ export class CronScheduler {
       return;
     }
     this.tasks.set(job.id, task);
+    if (task.nextRun() === null) {
+      this.logger.error(
+        { jobId: job.id, expression: expr, timezone },
+        'jobs/cron: registered but has no future occurrence, it will never fire',
+      );
+    }
     this.logger.info({ jobId: job.id, expression: expr, timezone }, 'jobs/cron: registered');
   }
 

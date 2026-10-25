@@ -30,6 +30,29 @@ describe('assertValidJobBody', () => {
     expect(() => assertValidJobBody(baseBody())).not.toThrow();
   });
 
+  it.each(['0 8 31 2 *', '0 8 30 2 *', '0 8 31 4 *'])(
+    'rejects cron %s whose day/month can never occur',
+    (expression) => {
+      try {
+        assertValidJobBody(
+          baseBody({ trigger: { type: 'cron', expression, timezone: 'Europe/London' } }),
+        );
+        throw new Error('expected throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(JobValidationError);
+        expect((err as JobValidationError).field).toBe('trigger.expression');
+      }
+    },
+  );
+
+  it.each(['0 8 29 2 *', '0 8 * * 1'])('accepts cron %s that does fire', (expression) => {
+    expect(() =>
+      assertValidJobBody(
+        baseBody({ trigger: { type: 'cron', expression, timezone: 'Europe/London' } }),
+      ),
+    ).not.toThrow();
+  });
+
   it('rejects a cron expression that is not exactly 5 fields', () => {
     expect(() =>
       assertValidJobBody(baseBody({ trigger: { type: 'cron', expression: '0 0 9 * * *' } })),

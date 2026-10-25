@@ -12,6 +12,7 @@
 // validation lives in `JobStore.create`/`patch` (the one canonical write
 // point) so the two CRUD surfaces can never diverge.
 
+import { Cron } from 'croner';
 import cron from 'node-cron';
 import jsonata from 'jsonata';
 import rrulePkg from 'rrule';
@@ -143,6 +144,22 @@ export function assertValidJobBody(body: JobCreateBody | JobPatchBody): void {
       throw new JobValidationError(
         `invalid IANA timezone: ${trigger.timezone}`,
         'trigger.timezone',
+      );
+    }
+    // A day/month pair that never occurs (31 Feb, 31 Apr) passes every check
+    // above, persists, registers, and never fires. Ask the live scheduler's
+    // own engine (same options as cron.ts) whether it has a next run.
+    const probe = new Cron(trigger.expression, {
+      timezone: trigger.timezone ?? 'UTC',
+      domAndDow: true,
+      paused: true,
+    });
+    const next = probe.nextRun();
+    probe.stop();
+    if (next === null) {
+      throw new JobValidationError(
+        `cron expression has no future occurrences, it would never fire: ${trigger.expression}`,
+        'trigger.expression',
       );
     }
   }

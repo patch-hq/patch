@@ -88,7 +88,11 @@ describe('cron timezone reaches the scheduler', () => {
       dispatcher,
       logs,
       logger: silentLogger,
-      schedule: (() => ({ stop: () => undefined }) as unknown as CronTask) as unknown as ScheduleFn,
+      schedule: (() =>
+        ({
+          stop: () => undefined,
+          nextRun: () => new Date(),
+        }) as unknown as CronTask) as unknown as ScheduleFn,
     });
     scheduler.start();
     const job = jobs.create({
@@ -168,7 +172,11 @@ describe('cron timezone reaches the scheduler', () => {
       dispatcher,
       logs,
       logger: capturing,
-      schedule: (() => ({ stop: () => undefined }) as unknown as CronTask) as unknown as ScheduleFn,
+      schedule: (() =>
+        ({
+          stop: () => undefined,
+          nextRun: () => new Date(),
+        }) as unknown as CronTask) as unknown as ScheduleFn,
     });
     scheduler.start();
     jobs.create({
@@ -178,6 +186,38 @@ describe('cron timezone reaches the scheduler', () => {
     });
     const registered = lines.find((l) => l['msg'] === 'jobs/cron: registered');
     expect(registered?.['timezone']).toBe('Europe/London');
+    scheduler.stop();
+  });
+
+  it('logs an error when a registered task has no future occurrence', () => {
+    const { jobs, dispatcher, logs } = makeDeps(dir);
+    const errors: string[] = [];
+    const capturing = {
+      info: () => undefined,
+      error: (_o: unknown, msg: string) => errors.push(msg),
+      warn: () => undefined,
+      debug: () => undefined,
+    } as unknown as pino.Logger;
+    const scheduler = new CronScheduler({
+      jobs,
+      dispatcher,
+      logs,
+      logger: capturing,
+      schedule: (() =>
+        ({
+          stop: () => undefined,
+          nextRun: () => null,
+        }) as unknown as CronTask) as unknown as ScheduleFn,
+    });
+    scheduler.start();
+    jobs.create({
+      name: 'daily',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      action: ACTION,
+    });
+    expect(errors).toContain(
+      'jobs/cron: registered but has no future occurrence, it will never fire',
+    );
     scheduler.stop();
   });
 });
