@@ -65,6 +65,10 @@ const THREE = (running: Row = {}): Row[] => [
 
 test.describe('snooze sheet', () => {
   test('opens from the chat header; nothing is chosen until a preset is', async ({ page }) => {
+    // Presets that land within 15 minutes of an earlier one are hidden, so pin a
+    // midweek morning where all seven are distinct (on a Sunday, Tomorrow 8am
+    // and Next Monday coincide).
+    await page.clock.setFixedTime(new Date('2026-10-21T10:00:00Z'));
     await seed(page, THREE());
     await page.getByTestId('action-more').click();
     await page.getByTestId('action-snooze').click();
