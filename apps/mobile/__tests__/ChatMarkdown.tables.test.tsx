@@ -11,6 +11,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { renderRN } from './testUtils/render';
 import { ChatMarkdown } from '../src/components/ChatMarkdown';
 import { darkColors, lightColors, type ThemeColors } from '../src/lib/theme';
+import { horizontalScrollTouchActive } from '../src/lib/horizontalScrollTouch';
 import { __lastRenderer } from './stubs/markdown-display';
 import { __setColorScheme } from './stubs/react-native';
 
@@ -121,9 +122,32 @@ describe('ChatMarkdown tables — wide', () => {
   it('scrolls a table sideways instead of squashing its columns into the screen', () => {
     const r = renderIn('light', lightColors);
     const table = r.rules['table'] as unknown as CellRule;
-    const el = table({ key: 't', index: 0 }, [], [], r.style);
+    const tree = renderRN(table({ key: 't', index: 0 }, [], [], r.style));
     // A horizontal scroller is the last resort once columns stop fitting.
-    expect(el.props.horizontal).toBe(true);
+    const scroller = tree.root.findByProps({ horizontal: true });
+    expect(scroller).toBeTruthy();
+  });
+
+  it('claims horizontal drags from the chat swipe only while the table overflows', () => {
+    const r = renderIn('light', lightColors);
+    const table = r.rules['table'] as unknown as CellRule;
+    const tree = renderRN(table({ key: 't', index: 0 }, [], [], r.style));
+    const scroller = tree.root.findByProps({ horizontal: true });
+    const props = scroller.props as {
+      onLayout: (e: unknown) => void;
+      onContentSizeChange: (w: number) => void;
+      onTouchStart: () => void;
+      onTouchEnd: () => void;
+    };
+    props.onLayout({ nativeEvent: { layout: { width: 300 } } });
+    props.onContentSizeChange(300);
+    props.onTouchStart();
+    expect(horizontalScrollTouchActive()).toBe(false);
+    props.onContentSizeChange(600);
+    props.onTouchStart();
+    expect(horizontalScrollTouchActive()).toBe(true);
+    props.onTouchEnd();
+    expect(horizontalScrollTouchActive()).toBe(false);
   });
 
   it('gives every cell a minimum width so a column can never shrink to a sliver', () => {

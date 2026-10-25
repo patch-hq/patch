@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
 import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
+import { horizontalScrollTouchActive } from '../../src/lib/horizontalScrollTouch';
 import * as Clipboard from 'expo-clipboard';
 import { ChatErrorBoundary } from '../../src/components/ChatErrorBoundary';
 import { useMarkChatNotificationsRead } from '../../src/stores/notificationsStore';
@@ -265,13 +266,16 @@ function ChatDetailBody(): React.ReactElement {
   // Swipe sideways to step to the neighbouring chat in the Chats tab's order.
   // Claimed in the capture phase: the message list is a scroll view that would
   // otherwise take any slightly diagonal drag before this surface is asked.
-  // The claim still has to be clearly horizontal, so vertical scrolling wins.
+  // The claim still has to be clearly horizontal, so vertical scrolling wins,
+  // and a drag that starts on an overflowing table scrolls the table instead.
   // Read the store at release rather than subscribing: the list moving under a
   // finger must not re-render this screen.
   const swipe = React.useRef(
     PanResponder.create({
       onMoveShouldSetPanResponderCapture: (_e, g) =>
-        Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+        !horizontalScrollTouchActive() &&
+        Math.abs(g.dx) > 14 &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
       onPanResponderTerminationRequest: () => false,
       onPanResponderRelease: (_e, g) => {
         const adx = Math.abs(g.dx);

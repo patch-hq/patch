@@ -22,6 +22,7 @@ import { configureMarkdownIt } from '../lib/markdownIt';
 import { useRouter } from 'expo-router';
 import { chatLinkRoute } from '../lib/deepLink';
 import { LinkPreview } from './LinkPreview';
+import { setHorizontalScrollTouch } from '../lib/horizontalScrollTouch';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 // A link to another chat opens it inside the app (spec/14 § Message links).
@@ -60,22 +61,43 @@ const tableScroll = { marginBottom: space.sm };
 const tableScrollContent = { flexGrow: 1 };
 // Narrowest a column may get before the table scrolls instead.
 const TABLE_CELL_MIN_WIDTH = 104;
+
+// A table that overflows owns horizontal drags that start on it, so the chat's
+// swipe-to-next-chat does not take them; one that fits leaves the swipe alone.
+function TableScroll({ children }: { children: React.ReactNode }): React.ReactElement {
+  const widths = React.useRef({ view: 0, content: 0 });
+  const overflows = () => widths.current.content > widths.current.view + 1;
+  const release = () => setHorizontalScrollTouch(false);
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator
+      nestedScrollEnabled
+      contentContainerStyle={tableScrollContent}
+      style={tableScroll}
+      onLayout={(e) => {
+        widths.current.view = e.nativeEvent.layout.width;
+      }}
+      onContentSizeChange={(w) => {
+        widths.current.content = w;
+      }}
+      onTouchStart={() => setHorizontalScrollTouch(overflows())}
+      onTouchEnd={release}
+      onTouchCancel={release}
+    >
+      {children}
+    </ScrollView>
+  );
+}
 function leafRules(selectable: boolean): RenderRules {
   return {
     // A wide table scrolls sideways rather than squashing its columns into the
     // screen's width (spec/15 § Chat detail — Wide tables). `flexGrow` on both
     // the scroller's content and the table lets a narrow one still fill the row.
     table: (node, children, _parent, styles) => (
-      <ScrollView
-        key={node.key}
-        horizontal
-        showsHorizontalScrollIndicator
-        nestedScrollEnabled
-        contentContainerStyle={tableScrollContent}
-        style={tableScroll}
-      >
+      <TableScroll key={node.key}>
         <View style={styles._VIEW_SAFE_table}>{children}</View>
-      </ScrollView>
+      </TableScroll>
     ),
     // Every other BODY row takes the stripe fill (spec/14 § Theming → Tables);
     // `node.index` is the row's position among its siblings, and the header
