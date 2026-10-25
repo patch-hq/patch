@@ -327,21 +327,7 @@ export type ComputerUseHost = {
   error?: string;
 };
 
-export interface JobAlertView {
-  jobId: string;
-  jobName: string;
-  status: 'dispatch-error' | 'gate-error';
-  ts: number;
-  reason: string;
-  fix: string;
-  detail: string;
-  fixPath?: string;
-}
-
 export const api = {
-  listJobAlerts: () => request<{ alerts: JobAlertView[] }>('/api/job-alerts'),
-  dismissJobAlert: (jobId: string) =>
-    request<{ ok: true }>(`/api/job-alerts/${encodeURIComponent(jobId)}`, { method: 'DELETE' }),
   webBotAuthStatus: () => request<WebBotAuthStatus>('/api/web-bot-auth'),
   listPads: () => request<{ pads: PadView[] }>('/api/pads'),
   padLibrary: () =>

@@ -16252,47 +16252,6 @@ select.permission-mode.is-pending {
   color: var(--ink-3);
 }
 
-/* Failed job runs in the sidebar (JobAlerts). */
-.job-alerts {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px 8px;
-}
-.job-alert,
-.job-alert-load-error {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--danger, #c0392b);
-  border-radius: 8px;
-  background: var(--danger-tint);
-  color: var(--danger, #c0392b);
-  font-size: var(--text-min);
-}
-.job-alert-body {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.job-alert-name {
-  font-weight: 600;
-  color: inherit;
-}
-.job-alert-fix a {
-  color: inherit;
-  text-decoration: underline;
-}
-.job-alert-dismiss {
-  flex: none;
-  border: 0;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  padding: 2px;
-}
-
 /* Host files tab (spec/14 § File browser — open anywhere, climb to /, Places,
    host-wide ⌘P, ⌘⇧F): breadcrumb, Places menu, search panel. */
 .browse-breadcrumb {

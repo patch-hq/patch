@@ -117,7 +117,6 @@ import { OpenableLink } from './OpenableLink.js';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { DevSourceBadge } from './DevSourceBadge.js';
 import { NotificationBell } from './NotificationBell.js';
-import { JobAlerts } from './JobAlerts.js';
 import { useChatBadge } from './ChatStatusBadge.js';
 import { shortcutLabel, shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
@@ -1004,7 +1003,6 @@ function BottomNav(): JSX.Element {
   });
   return (
     <>
-      <JobAlerts />
       <nav className="sb-bottom" data-testid="bottom-nav">
         <button
           type="button"

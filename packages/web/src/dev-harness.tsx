@@ -2882,26 +2882,6 @@ if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
 // composer.
 const params = new URLSearchParams(window.location.search);
 
-// The sidebar polls job alerts (spec/08 § Logs). The harness has no server, so
-// unanswered that poll failed and the sidebar drew "Job alerts failed to load"
-// in every spec — which pushed the layout specs' measurements out. The harness
-// answers "none" itself; a spec that serves its own alerts through page.route
-// opts out with `?jobAlerts=live`, so its requests reach the network.
-if (params.get('jobAlerts') !== 'live') {
-  const fetchBeforeAlerts = window.fetch.bind(window);
-  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (new URL(url, window.location.href).pathname === '/api/job-alerts') {
-      return Promise.resolve(
-        new Response(JSON.stringify({ alerts: [] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-      );
-    }
-    return fetchBeforeAlerts(input, init);
-  }) as typeof window.fetch;
-}
 const chatId = params.get('chat') ?? 'thread_speakers';
 
 // A fixture's own tab-opening call has to run AFTER `ChatPaneRoute`'s mount
