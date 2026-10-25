@@ -5,6 +5,7 @@
 // here to stay in exactly one place rather than copy-pasted per tab.
 
 import { useChatStore } from '../stores/chatStore.js';
+import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { permissionDeliveryTracker } from './permissionDeliveryTracker.js';
 import type { PatchWs } from '../api/ws.js';
@@ -42,7 +43,13 @@ export function sendFileEditorEvent(ws: PatchWs | null, chatId: string, ev: File
       // G3-d4: `file.write` carries no host success-ack frame — surface an
       // explicit success notice on dispatch; a host rejection still raises
       // its own error toast over the top.
-      pushNotice(`Saved ${ev.path}`);
+      // The server buffers a save for an offline host and delivers it on
+      // reconnect (spec/12 § Host-offline UX), so say that, not "Saved".
+      const hostId = useChatStore.getState().chats[chatId]?.hostId ?? '';
+      const online = usePresenceStore.getState().hosts[hostId]?.online ?? true;
+      pushNotice(
+        online ? `Saved ${ev.path}` : `Host offline — ${ev.path} will save when it reconnects`,
+      );
     }
   } catch (e) {
     pushError(failed('send'), undefined, (e as Error).message);
