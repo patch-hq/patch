@@ -163,20 +163,32 @@ struct MicProcess: Hashable {
     let bundleId: String
 }
 
-func readUInt32(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> UInt32 {
+/// An audio process can exit between being listed and being read. Core Audio then answers
+/// kAudioHardwareBadObjectError ('!obj'): that process is simply gone, not a failure.
+/// Every other error is still fatal.
+enum ProcessRead<T> {
+    case value(T)
+    case gone
+}
+
+func readUInt32(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> ProcessRead<UInt32> {
     var value: UInt32 = 0
     var size = UInt32(MemoryLayout<UInt32>.size)
     var addr = address(selector)
-    check(AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &value), "read audio process property")
-    return value
+    let status = AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &value)
+    if status == kAudioHardwareBadObjectError { return .gone }
+    check(status, "read audio process property")
+    return .value(value)
 }
 
-func readString(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
+func readString(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> ProcessRead<String?> {
     var value: Unmanaged<CFString>?
     var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
     var addr = address(selector)
-    check(AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &value), "read audio process property")
-    return value?.takeRetainedValue() as String?
+    let status = AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &value)
+    if status == kAudioHardwareBadObjectError { return .gone }
+    check(status, "read audio process property")
+    return .value(value?.takeRetainedValue() as String?)
 }
 
 func processesUsingMic() -> Set<MicProcess> {
@@ -187,9 +199,12 @@ func processesUsingMic() -> Set<MicProcess> {
     check(AudioObjectGetPropertyData(system, &addr, 0, nil, &size, &objects), "list audio processes")
 
     var found: Set<MicProcess> = []
-    for object in objects where readUInt32(object, kAudioProcessPropertyIsRunningInput) != 0 {
-        guard let bundleId = readString(object, kAudioProcessPropertyBundleID), !bundleId.isEmpty else { continue }
-        found.insert(MicProcess(pid: Int32(truncatingIfNeeded: readUInt32(object, kAudioProcessPropertyPID)), bundleId: bundleId))
+    for object in objects {
+        guard case .value(let running) = readUInt32(object, kAudioProcessPropertyIsRunningInput), running != 0,
+              case .value(let id) = readString(object, kAudioProcessPropertyBundleID), let bundleId = id, !bundleId.isEmpty,
+              case .value(let pid) = readUInt32(object, kAudioProcessPropertyPID)
+        else { continue }
+        found.insert(MicProcess(pid: Int32(truncatingIfNeeded: pid), bundleId: bundleId))
     }
     return found
 }

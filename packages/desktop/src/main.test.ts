@@ -873,3 +873,23 @@ test('a call ending ends the Patch meeting by itself, with no click on a toast (
   assert.match(fn, /sendWhenReady\(mainWindow, 'patch:meeting-signal', \{ phase: 'ended'/);
   assert.doesNotMatch(fn, /showMeetingToast\('ended'/);
 });
+
+test('background meeting-detection failures are logged, never toasted at Tom (Todoist: random "Meeting detection is off" popup)', () => {
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  const start = src.indexOf('function reportMeetingDetectionOff');
+  const fn = src.slice(start, src.indexOf('\n}\n', start));
+  assert.match(fn, /meeting:detection-off/);
+  assert.doesNotMatch(fn, /new Notification/);
+});
+
+test('patch-audio mic-watch survives an audio process exiting between listing and reading it', () => {
+  const swift = readFileSync(join(here, '..', 'native', 'patch-audio', 'main.swift'), 'utf8');
+  // 560947818 is '!obj' (kAudioHardwareBadObjectError): the process object is gone.
+  assert.match(swift, /kAudioHardwareBadObjectError/);
+  assert.match(swift, /status == kAudioHardwareBadObjectError \{ return \.gone \}/);
+  const watch = swift.slice(
+    swift.indexOf('func processesUsingMic'),
+    swift.indexOf('func runMicWatch'),
+  );
+  assert.match(watch, /case \.value\(let running\) = readUInt32/);
+});

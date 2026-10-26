@@ -891,7 +891,8 @@ function endMeetingForCall(appName: string): void {
   new Notification({ title: `Meeting ended — ${appName}`, body: 'Patch ended the meeting' }).show();
 }
 
-/** NO FALLBACK: detection that cannot run says so, once, instead of going quiet. */
+/** NO FALLBACK: detection that cannot run is logged loudly, once, instead of going quiet.
+ *  It is background work Tom did not trigger, so it is not toasted at him. */
 function startMeetingDetection(): void {
   const detector = new MeetingDetector({
     // A meeting Patch is already capturing needs no prompt to start; the end
@@ -920,7 +921,7 @@ function startMeetingDetection(): void {
 
 function reportMeetingDetectionOff(message: string): void {
   logDesktopEvent({ type: 'meeting:detection-off', payload: { message } });
-  new Notification({ title: 'Meeting detection is off', body: message }).show();
+  console.error(`Meeting detection is off: ${message}`);
 }
 
 /**
