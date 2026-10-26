@@ -4310,6 +4310,12 @@ export class Daemon {
             ? { model: parent.model }
             : {}),
         permissionMode: parent.permissionMode,
+        // A parent locked to an account is on it for a reason (often a move off
+        // a spent one); the child follows it. An unlocked parent leaves the
+        // child on automatic routing, which skips exhausted accounts.
+        ...(parent.preferredAccountId !== undefined
+          ? { preferredAccountId: parent.preferredAccountId }
+          : {}),
         prompt: opts.prompt,
         subagent: {
           parentChatId: opts.parentChatId,
@@ -4514,8 +4520,39 @@ export class Daemon {
     } else if (state.activity === 'idle') {
       this.finishDelegate(chatId, 'done');
     } else if (state.activity === 'errored' && !state.turnRetrying) {
-      this.finishDelegate(chatId, 'failed');
+      // A turn parked on a usage limit is owed, not dead: the host resumes it
+      // at the reset, and it settles then. Tell the parent it is waiting, once.
+      if (this.rateLimitPendingTurns.has(chatId))
+        this.announceDelegatePaused(chatId, state.subagent);
+      else this.finishDelegate(chatId, 'failed');
     }
+  }
+
+  /** Tell a delegate's parent the subagent is waiting on credit, not dead. */
+  private announceDelegatePaused(
+    chatId: string,
+    subagent: NonNullable<ChatState['subagent']>,
+  ): void {
+    // A caller blocked on `wait: true` keeps waiting for the real result.
+    if (this.delegateWaiters.get(chatId)?.length) return;
+    const block = this.limitBlocks.get(chatId);
+    const on = block?.accountLabel === undefined ? '' : ` on ${block.accountLabel}`;
+    const resume =
+      block?.resetsAt === undefined
+        ? 'It will resume when credit returns.'
+        : `It resumes automatically at ${new Date(block.resetsAt).toLocaleString('en-GB', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            timeZoneName: 'short',
+          })}.`;
+    this.deliverToParent(
+      subagent.parentChatId,
+      formatAgentReturn(
+        subagent.label,
+        chatId,
+        `PAUSED — usage limit reached${on}. ${resume} Still running: do not start a replacement.`,
+      ),
+    );
   }
 
   /** Deliver a machine message into `parentChatId`, lazy-hydrating it from

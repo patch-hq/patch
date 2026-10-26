@@ -58,6 +58,25 @@ function messagesOn(events: WireEvent[], chatId: string) {
 }
 
 describe('patch_delegate', () => {
+  it("runs a child on the parent's pinned account, and leaves an unpinned parent's child automatic", async () => {
+    const { daemon, sdk, folder } = setup();
+    const spawned: Array<{ preferredAccountId?: string; subagent?: unknown }> = [];
+    const realSpawn = daemon.spawnChat.bind(daemon);
+    daemon.spawnChat = ((req) => {
+      spawned.push(req);
+      return realSpawn(req);
+    }) as typeof daemon.spawnChat;
+    const pinned = await daemon.spawnChat({ folder, preferredAccountId: 'acc-2' });
+    const free = await daemon.spawnChat({ folder });
+    sdk.enqueue([{ type: 'assistant', content: 'ok' }, { type: 'result' }]);
+    await daemon.createDelegate({ parentChatId: pinned, prompt: 'a' });
+    sdk.enqueue([{ type: 'assistant', content: 'ok' }, { type: 'result' }]);
+    await daemon.createDelegate({ parentChatId: free, prompt: 'b' });
+    const children = spawned.filter((r) => r.subagent !== undefined);
+    expect(children[0]?.preferredAccountId).toBe('acc-2');
+    expect(children[1]?.preferredAccountId).toBeUndefined();
+  });
+
   it('uses the given title as the label instead of the prompt', async () => {
     const { daemon, sdk, events, folder } = setup();
     const parentChatId = await daemon.spawnChat({ folder });

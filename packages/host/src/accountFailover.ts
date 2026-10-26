@@ -99,6 +99,7 @@ export function isAccountExhaustedError(message: string): boolean {
     msg.includes('usage_limit_exceeded') ||
     msg.includes('usage limit') ||
     msg.includes('hit your limit') ||
+    msg.includes('session limit') ||
     msg.includes('weekly limit') ||
     msg.includes('monthly limit') ||
     msg.includes('out of credit') ||

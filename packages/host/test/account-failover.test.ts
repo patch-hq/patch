@@ -57,6 +57,15 @@ describe('isAccountExhausted (structured)', () => {
   });
 });
 
+describe('session limit wording', () => {
+  const msg = "You've hit your session limit · resets 7pm (Europe/London)";
+  it('counts as an exhausted account, with or without a structured block', () => {
+    expect(isAccountExhaustedError(msg)).toBe(true);
+    expect(isAccountExhausted(undefined, msg)).toBe(true);
+    expect(isAccountExhausted({ kind: 'rate_limit' }, msg)).toBe(true);
+  });
+});
+
 describe('isAccountExhaustedError', () => {
   it('matches the message that actually stopped every chat', () => {
     expect(isAccountExhaustedError(REAL)).toBe(true);
