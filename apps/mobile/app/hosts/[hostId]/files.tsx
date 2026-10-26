@@ -25,6 +25,7 @@ import {
   editRoute,
   filesRoute,
   formatSize,
+  isHostOffline,
   startFolders,
   terminalRoute,
 } from '../../../src/lib/hostFiles';
@@ -49,6 +50,7 @@ export default function HostFiles(): React.ReactElement {
 
   const [listing, setListing] = React.useState<Listing | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [offline, setOffline] = React.useState(false);
   // Home's absolute path, once the host has told us (a path-less listing).
   const [home, setHome] = React.useState<string | null>(null);
 
@@ -56,6 +58,7 @@ export default function HostFiles(): React.ReactElement {
     let live = true;
     setListing(null);
     setError(null);
+    setOffline(false);
     api.hostFilesList(hostId, path).then(
       (res) => {
         if (!live) return;
@@ -63,7 +66,9 @@ export default function HostFiles(): React.ReactElement {
         if (path === undefined) setHome(res.path);
       },
       (e: unknown) => {
-        if (live) setError((e as Error).message);
+        if (!live) return;
+        if (isHostOffline(e)) setOffline(true);
+        else setError((e as Error).message);
       },
     );
     return () => {
@@ -103,7 +108,14 @@ export default function HostFiles(): React.ReactElement {
           onPick={openDir}
         />
       </View>
-      {error !== null ? (
+      {offline ? (
+        <Text
+          testID="files-offline"
+          style={{ color: colors.ink3, paddingHorizontal: space.lg, paddingVertical: space.md }}
+        >
+          Host offline
+        </Text>
+      ) : error !== null ? (
         <Text
           testID="files-error"
           style={{ color: colors.red, paddingHorizontal: space.lg, paddingVertical: space.md }}

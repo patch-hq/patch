@@ -26,7 +26,7 @@ import { usePresenceStore } from '../stores/presenceStore.js';
 import { useHostSearchStore, newHostSearchId } from '../stores/hostSearchStore.js';
 import { MONACO_THEME } from '../lib/monacoTheme.js';
 import { shortcutTitle } from '../lib/shortcuts.js';
-import { api, ApiError, type HostFileEntry } from '../api/rest.js';
+import { api, ApiError, isHostOffline, type HostFileEntry } from '../api/rest.js';
 import type { PatchWs } from '../api/ws.js';
 
 /** The two frames a ⌘⇧F search sends; results come back through `hostSearchStore`. */
@@ -494,7 +494,8 @@ function HostBrowsePanel({
     placeholderData: keepPreviousData,
   });
   useEffect(() => {
-    if (listQuery.error) onError((listQuery.error as Error).message);
+    if (listQuery.error && !isHostOffline(listQuery.error))
+      onError((listQuery.error as Error).message);
   }, [listQuery.error, onError]);
 
   const resolvedPath = listQuery.data?.path ?? path ?? homeQuery.data?.path ?? null;
@@ -515,7 +516,8 @@ function HostBrowsePanel({
     enabled: visible && hostId !== null && hostBrowse.openFile !== null,
   });
   useEffect(() => {
-    if (contentQuery.error) onError((contentQuery.error as Error).message);
+    if (contentQuery.error && !isHostOffline(contentQuery.error))
+      onError((contentQuery.error as Error).message);
   }, [contentQuery.error, onError]);
   useEffect(() => {
     if (!contentQuery.data || !hostBrowse.openFile || hostBrowse.version !== null) return;
@@ -558,6 +560,7 @@ function HostBrowsePanel({
         setConflictOpen(true);
         return;
       }
+      if (isHostOffline(err)) return;
       onError((err as Error).message);
     }
   }
@@ -627,6 +630,10 @@ function HostBrowsePanel({
         <div className="browse-tree-list" data-testid="host-browse-list">
           {listQuery.isPending ? (
             <BrowseSkeleton rows={6} testId="host-browse-loading" />
+          ) : isHostOffline(listQuery.error) ? (
+            <div className="browse-tree-empty" data-testid="host-browse-offline">
+              Host offline
+            </div>
           ) : listQuery.isError ? (
             <div className="browse-tree-error" data-testid="host-browse-error" role="alert">
               {(listQuery.error as Error).message}
@@ -690,6 +697,10 @@ function HostBrowsePanel({
             {contentQuery.isPending ? (
               <div className="editor-loading" data-testid="host-browse-content-loading">
                 Loading…
+              </div>
+            ) : isHostOffline(contentQuery.error) ? (
+              <div className="browse-tree-empty" data-testid="host-browse-content-offline">
+                Host offline
               </div>
             ) : contentQuery.isError ? (
               <div

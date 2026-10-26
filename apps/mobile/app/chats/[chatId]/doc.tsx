@@ -57,6 +57,9 @@ import {
 } from '../../../src/lib/docEditor';
 import { saveExport } from '../../../src/lib/docExport';
 import { useGoBack } from '../../../src/lib/goBack';
+import { isHostOffline } from '../../../src/lib/hostFiles';
+import { useChatStore } from '../../../src/stores/chatStore';
+import { usePresenceStore } from '../../../src/stores/presenceStore';
 import { fonts, radii, space, textMin, useTheme } from '../../../src/lib/theme';
 
 type Panel = 'text' | 'suggestions' | 'comments' | 'history';
@@ -92,7 +95,13 @@ export default function ChatDoc(): React.ReactElement {
   const [view, setView] = React.useState<DocView | null>(null);
   const [convertWarnings, setConvertWarnings] = React.useState<string[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [loadOffline, setLoadOffline] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  // The chat's own host: while it is down a save queues instead of being read back.
+  const hostOnline = usePresenceStore((s) => {
+    const hostId = useChatStore.getState().chats[chatId]?.hostId ?? '';
+    return s.hosts[hostId]?.online ?? true;
+  });
   const [panel, setPanel] = React.useState<Panel>('text');
   const [selection, setSelection] = React.useState<TextSelection>({ start: 0, end: 0 });
   const [commentDraft, setCommentDraft] = React.useState<string | null>(null);
@@ -108,6 +117,7 @@ export default function ChatDoc(): React.ReactElement {
 
   const load = React.useCallback(async (): Promise<void> => {
     setLoadError(null);
+    setLoadOffline(false);
     try {
       if (!isOpenableDoc(path)) throw new Error(`not a document: ${path}`);
       let target = mdPath.current;
@@ -128,7 +138,8 @@ export default function ChatDoc(): React.ReactElement {
       setText(file.content);
       setView(doc);
     } catch (e) {
-      setLoadError((e as Error).message);
+      if (isHostOffline(e)) setLoadOffline(true);
+      else setLoadError((e as Error).message);
     }
   }, [chatId, path]);
 
@@ -143,6 +154,20 @@ export default function ChatDoc(): React.ReactElement {
     if (loaded === null || !dirty || saving) return;
     setSaving(true);
     const draft = text;
+    if (!hostOnline) {
+      // Offline: the server holds the write and delivers it on reconnect, so
+      // there is nothing to read back and no conflict check to make.
+      try {
+        writeChatFile(chatId, loaded.path, draft);
+        setLoaded({ path: loaded.path, saved: draft });
+        setNotice('Host offline — will save when it reconnects');
+      } catch (e) {
+        Alert.alert('Save failed', (e as Error).message);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     try {
       const onDisk = (await api.chatFileRead(chatId, loaded.path)).content;
       if (detectSaveConflict({ baseline: loaded.saved, onDisk, draft })) {
@@ -191,7 +216,8 @@ export default function ChatDoc(): React.ReactElement {
           }
         }
       } catch (e) {
-        Alert.alert('Action failed', (e as Error).message);
+        if (isHostOffline(e)) setNotice('Host offline');
+        else Alert.alert('Action failed', (e as Error).message);
       }
     })();
   };
@@ -250,7 +276,8 @@ export default function ChatDoc(): React.ReactElement {
       if (res.status === 'saved') setNotice(`Saved ${out.filename}`);
       setExportWarnings(out.warnings);
     } catch (e) {
-      Alert.alert('Export failed', (e as Error).message);
+      if (isHostOffline(e)) setNotice('Host offline');
+      else Alert.alert('Export failed', (e as Error).message);
     }
   };
 
@@ -319,7 +346,11 @@ export default function ChatDoc(): React.ReactElement {
         onSelect={(id) => void exportAs(id as ExportFormat)}
         onDismiss={() => setExportOpen(false)}
       />
-      {loadError !== null ? (
+      {loadOffline ? (
+        <Text testID="doc-offline" style={{ color: colors.ink3, padding: space.lg }}>
+          Host offline
+        </Text>
+      ) : loadError !== null ? (
         <View style={{ paddingHorizontal: space.lg, paddingVertical: space.md, gap: space.md }}>
           <Text testID="doc-error" style={{ color: colors.red }}>
             {loadError}

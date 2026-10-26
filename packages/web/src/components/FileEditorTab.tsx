@@ -137,7 +137,8 @@ export function FileEditorTab({
       name={name}
       tabId={tabId}
       focused={focused}
-      onError={(msg) => pushError(`files: ${msg}`)}
+      // An offline host is a calm state, not a failure (spec/12 § Host-offline UX).
+      onError={(msg) => (msg === 'host_offline' ? undefined : pushError(`files: ${msg}`))}
       onNotice={(msg) => pushNotice(msg)}
       onSave={(p, content) => onSendEvent({ type: 'file.write', chatId, path: p, content })}
     />

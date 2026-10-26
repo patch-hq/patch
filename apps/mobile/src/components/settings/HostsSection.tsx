@@ -101,6 +101,7 @@ export function HostsSection(): React.ReactElement {
                     testID={`host-${h.hostId}-update`}
                     label="Update"
                     variant="quiet"
+                    disabled={!h.online}
                     onPress={() =>
                       void sendToHost(h.hostId, { type: 'host.update', hostId: h.hostId }, 'Update')
                     }
@@ -227,13 +228,14 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
               value={draft}
               onChangeText={setDraft}
               onSubmitEditing={commitRename}
+              editable={host.online}
               style={{ width: 150 }}
             />
             {draft.trim() !== report.hostName ? (
               <SettingsButton
                 testID={`host-${hostId}-rename-save`}
                 label="Save"
-                disabled={draft.trim() === ''}
+                disabled={draft.trim() === '' || !host.online}
                 onPress={commitRename}
               />
             ) : null}
@@ -256,6 +258,7 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
               testID={`host-${hostId}-update`}
               label="Update"
               variant="quiet"
+              disabled={!host.online}
               onPress={() => void sendToHost(hostId, { type: 'host.update', hostId }, 'Update')}
             />
           ) : null
@@ -288,6 +291,7 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
                 testID={`host-${hostId}-backend-${b.id}-connect`}
                 label="Sign in"
                 variant="quiet"
+                disabled={!host.online}
                 accessibilityLabel={`Sign in to ${b.label}`}
                 onPress={() => {
                   if (!host.online) {

@@ -2,7 +2,16 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderRN, findHost, byTestId, hasText, flush, actSync } from './testUtils/render';
+import {
+  renderRN,
+  findHost,
+  queryHost,
+  byTestId,
+  hasText,
+  flush,
+  actSync,
+} from './testUtils/render';
+import { ApiError } from '../src/api/rest';
 import HostFiles from '../app/hosts/[hostId]/files';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { useFolderStore } from '../src/stores/folderStore';
@@ -164,6 +173,16 @@ describe('Host Files screen', () => {
       pathname: '/hosts/[hostId]/files',
       params: { hostId: 'd1', path: '/etc' },
     });
+  });
+
+  it('an offline host shows a calm "Host offline", not an error', async () => {
+    listSpy.mockRejectedValue(
+      new ApiError(503, 'host_offline: d1 is offline', { error: 'host_offline' }),
+    );
+    const r = renderRN(<HostFiles />);
+    await flush();
+    expect(hasText(findHost(r.root, byTestId('files-offline')), 'Host offline')).toBe(true);
+    expect(queryHost(r.root, byTestId('files-error'))).toBeNull();
   });
 
   it('a failed listing says why in place of the list (NO FALLBACK)', async () => {

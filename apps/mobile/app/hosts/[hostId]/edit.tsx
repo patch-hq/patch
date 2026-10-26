@@ -24,7 +24,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { folderName } from '@patch/wire';
 import { api } from '../../../src/api/rest';
 import { HostToolHeader } from '../../../src/components/HostToolHeader';
-import { isSaveConflict } from '../../../src/lib/hostFiles';
+import { isHostOffline, isSaveConflict } from '../../../src/lib/hostFiles';
 import { useGoBack } from '../../../src/lib/goBack';
 import { usePresenceStore } from '../../../src/stores/presenceStore';
 import { fonts, radii, space, textMin, useTheme } from '../../../src/lib/theme';
@@ -44,16 +44,19 @@ export default function HostFileEditor(): React.ReactElement {
   const [loaded, setLoaded] = React.useState<Loaded | null>(null);
   const [text, setText] = React.useState('');
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [offline, setOffline] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
   const load = React.useCallback(async (): Promise<void> => {
     setLoadError(null);
+    setOffline(false);
     try {
       const res = await api.hostFileRead(hostId, path);
       setLoaded({ saved: res.content, version: res.version });
       setText(res.content);
     } catch (e) {
-      setLoadError((e as Error).message);
+      if (isHostOffline(e)) setOffline(true);
+      else setLoadError((e as Error).message);
     }
   }, [hostId, path]);
 
@@ -75,7 +78,9 @@ export default function HostFileEditor(): React.ReactElement {
       });
       setLoaded({ saved: content, version: res.version });
     } catch (e) {
-      if (isSaveConflict(e)) {
+      if (isHostOffline(e)) {
+        setOffline(true);
+      } else if (isSaveConflict(e)) {
         Alert.alert(
           'Changed on disk',
           'This file changed since you opened it, so your save was not written.',
@@ -143,7 +148,14 @@ export default function HostFileEditor(): React.ReactElement {
           </Pressable>
         }
       />
-      {loadError !== null ? (
+      {offline ? (
+        <Text
+          testID="editor-offline"
+          style={{ color: colors.ink3, paddingHorizontal: space.lg, paddingVertical: space.md }}
+        >
+          Host offline
+        </Text>
+      ) : loadError !== null ? (
         <Text
           testID="editor-error"
           style={{ color: colors.red, paddingHorizontal: space.lg, paddingVertical: space.md }}

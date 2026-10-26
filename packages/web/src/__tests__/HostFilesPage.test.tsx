@@ -162,6 +162,20 @@ describe('breadcrumb reaches / from a chat (spec/14 § File browser — climb ou
   });
 });
 
+describe('host offline (spec/12 § Host-offline UX)', () => {
+  it('browsing an offline host shows a calm state and raises no error', async () => {
+    seedHost('d1', { hostName: 'hetzner', online: false });
+    useUiStore.setState({ errors: [] });
+    vi.spyOn(api, 'hostFilesList').mockRejectedValue(
+      new ApiError(503, 'host_offline', { error: 'host_offline', hostId: 'd1' }),
+    );
+    render(withQuery(<HostFilesPage ws={null} />));
+    expect(await screen.findByTestId('host-browse-offline')).toHaveTextContent('Host offline');
+    expect(screen.queryByTestId('host-browse-error')).toBeNull();
+    expect(useUiStore.getState().errors).toEqual([]);
+  });
+});
+
 describe('places list (spec/14 § File browser)', () => {
   it('lists Home, project folders, Skills and Claude settings', async () => {
     seedHost('d1', { roots: ['/home/tom/projects/widget', '/home/tom/projects/other'] });

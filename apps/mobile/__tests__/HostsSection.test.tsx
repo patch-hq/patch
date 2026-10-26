@@ -166,13 +166,12 @@ describe('mobile Settings → Hosts → the list', () => {
     expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-b' });
   });
 
-  it('an update aimed at an offline machine is refused, naming it', async () => {
+  it('Update on an offline machine is disabled, with no alert', () => {
     reportHost('h1', { hostName: 'laptop', updateAvailable: true }, false);
     const r = render(<HostsSection />);
-    await actAsync(() => findHost(r.root, byTestId('host-h1-update')).props.onPress());
+    expect(findHost(r.root, byTestId('host-h1-update')).props.disabled).toBe(true);
     expect(wsMock.send).not.toHaveBeenCalled();
-    expect(__getLastAlert()?.title).toBe('Update failed');
-    expect(__getLastAlert()?.message).toMatch(/^laptop is offline/);
+    expect(__getLastAlert()).toBeNull();
   });
 
   it('an update with the link to the server down is refused, saying so', async () => {
@@ -419,17 +418,11 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(__getLastAlert()).toBeNull();
     });
 
-    it('a rename to an offline machine is refused and the field reverts', async () => {
+    it('the name of an offline machine cannot be edited, with no alert', () => {
       reportHost('h1', { hostName: 'laptop' }, false);
       const r = render(<HostDetail hostId="h1" />);
-      const input = (): ReturnType<typeof findHost> =>
-        findHost(r.root, byTestId('host-h1-name-input'));
-      await actAsync(() => input().props.onChangeText('studio'));
-      await actAsync(() => input().props.onSubmitEditing());
-      expect(wsMock.send).not.toHaveBeenCalled();
-      expect(__getLastAlert()?.title).toBe('Rename failed');
-      expect(__getLastAlert()?.message).toMatch(/^laptop is offline/);
-      expect(input().props.value).toBe('laptop');
+      expect(findHost(r.root, byTestId('host-h1-name-input')).props.editable).toBe(false);
+      expect(__getLastAlert()).toBeNull();
     });
   });
 
@@ -516,7 +509,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(queryHost(r.root, byTestId('host-h1-claude-drift-discard'))).toBeNull();
     });
 
-    it('Sign in on an offline machine is refused, naming it', async () => {
+    it('Sign in on an offline machine is disabled, with no alert', async () => {
       reportHost(
         'h1',
         {
@@ -528,13 +521,10 @@ describe('mobile Settings → Hosts → a host’s page', () => {
         false,
       );
       const r = render(<HostDetail hostId="h1" />);
-      await actAsync(() =>
-        findHost(r.root, byTestId('host-h1-backend-claude-code-connect')).props.onPress(),
+      expect(findHost(r.root, byTestId('host-h1-backend-claude-code-connect')).props.disabled).toBe(
+        true,
       );
-      expect(__getLastAlert()).toMatchObject({
-        title: 'Sign in failed',
-        message: 'laptop is offline. Sign in once it reconnects.',
-      });
+      expect(__getLastAlert()).toBeNull();
       expect(queryHost(r.root, byTestId('host-h1-signin-token'))).toBeNull();
     });
 

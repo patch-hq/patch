@@ -35,7 +35,7 @@ import { Breadcrumb, PlacesMenu } from './HostFilesPage.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore, EMPTY_BROWSE_STATE } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
-import { api, ApiError } from '../api/rest.js';
+import { api, ApiError, isHostOffline } from '../api/rest.js';
 
 export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
   const setBrowseState = useUiStore((s) => s.setBrowseState);
@@ -113,7 +113,7 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
     try {
       converted = await api.convertDocx(chatId, next.path);
     } catch (err) {
-      pushError((err as Error).message);
+      if (!isHostOffline(err)) pushError((err as Error).message);
       return;
     }
     openTab({ kind: 'file', chatId, path: converted.mdPath });
@@ -160,6 +160,7 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
       done(res.path);
       await queryClient.invalidateQueries({ queryKey: ['files-recursive', chatId] });
     } catch (err) {
+      if (isHostOffline(err)) return;
       const body2 = err instanceof ApiError ? (err.body as { message?: unknown } | null) : null;
       pushError(
         `files: ${typeof body2?.message === 'string' ? body2.message : (err as Error).message}`,

@@ -169,12 +169,20 @@ describe('Settings → Hosts', () => {
     expect(send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a' });
   });
 
-  it('Update on an OFFLINE machine is refused, naming it', () => {
+  it('Update on an OFFLINE machine is disabled, with no error', () => {
     reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
     renderPage('hosts');
-    fireEvent.click(screen.getByTestId('host-host-a-update'));
+    const btn = screen.getByTestId('host-host-a-update');
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
     expect(send).not.toHaveBeenCalled();
-    expect(errors().some((m) => m.includes('laptop') && /offline/.test(m))).toBe(true);
+    expect(errors()).toEqual([]);
+  });
+
+  it('the name field of an OFFLINE machine is disabled', () => {
+    reportHost('host-a', { hostName: 'laptop' });
+    renderPage('hosts');
+    expect(screen.getByTestId('host-host-a-name-input')).toBeDisabled();
   });
 
   it('Update disables the button immediately, rather than looking unclicked', () => {
@@ -331,16 +339,18 @@ describe('Settings → Hosts', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('Sign in on an OFFLINE host is refused, naming it', () => {
+  it('Sign in on an OFFLINE host is disabled, with no error', () => {
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'codex', label: 'Codex', version: null, state: 'logged-out' }],
     });
     renderPage('hosts');
-    fireEvent.click(screen.getByTestId('host-host-a-backend-codex-connect'));
+    const btn = screen.getByTestId('host-host-a-backend-codex-connect');
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
     expect(useUiStore.getState().codexSignInHost).toBeNull();
     expect(screen.queryByTestId('usage-page')).toBeNull();
-    expect(errors().some((m) => m.includes('laptop') && /offline/.test(m))).toBe(true);
+    expect(errors()).toEqual([]);
   });
 
   it('a component that is not installed offers Install, which sends host.component_install', () => {

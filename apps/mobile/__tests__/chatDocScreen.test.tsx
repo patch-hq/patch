@@ -20,6 +20,9 @@ import {
 import ChatDoc from '../app/chats/[chatId]/doc';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { __clearLastAlert, __getLastAlert, __pressBack } from './stubs/react-native';
+import { ApiError } from '../src/api/rest';
+import { usePresenceStore } from '../src/stores/presenceStore';
+import { useChatStore } from '../src/stores/chatStore';
 
 const h = vi.hoisted(() => ({
   read: vi.fn(),
@@ -93,6 +96,10 @@ const typeInto = (r: ReactTestRenderer, id: string, t: string): void =>
   });
 
 beforeEach(() => {
+  usePresenceStore.setState({ hosts: {} });
+  useChatStore.setState({ chats: {} } as unknown as Partial<
+    ReturnType<typeof useChatStore.getState>
+  >);
   __resetRouterMock();
   __clearLastAlert();
   for (const f of Object.values(h)) f.mockReset();
@@ -173,6 +180,33 @@ describe('saving', () => {
     expect(text(r).props['value']).toBe(next);
     // History changed on the host: the view is read again.
     expect(h.getDoc).toHaveBeenCalledTimes(2);
+  });
+
+  it('on an offline host a save queues: no read-back, no conflict check, says it will save on reconnect', async () => {
+    usePresenceStore.setState({
+      hosts: { h1: { hostId: 'h1', online: false } },
+    } as unknown as Partial<ReturnType<typeof usePresenceStore.getState>>);
+    useChatStore.setState({
+      chats: { c1: { hostId: 'h1' } },
+    } as unknown as Partial<ReturnType<typeof useChatStore.getState>>);
+    const r = await open();
+    h.read.mockClear();
+    h.getDoc.mockClear();
+    type(r, RAW + 'more');
+    await press(r, 'doc-save');
+    expect(h.write).toHaveBeenCalledWith('c1', 'docs/plan.md', RAW + 'more');
+    expect(h.read).not.toHaveBeenCalled();
+    expect(h.confirm).not.toHaveBeenCalled();
+    expect(__getLastAlert()).toBeNull();
+    expect(hasText(r.root, 'Host offline — will save when it reconnects')).toBe(true);
+    expect(findHost(r.root, byTestId('doc-save')).props['disabled']).toBe(true);
+  });
+
+  it('an offline host at open is a calm state, not a load error', async () => {
+    h.read.mockRejectedValueOnce(new ApiError(503, 'host_offline', { error: 'host_offline' }));
+    const r = await open();
+    expect(hasText(findHost(r.root, byTestId('doc-offline')), 'Host offline')).toBe(true);
+    expect(queryHost(r.root, byTestId('doc-error'))).toBeNull();
   });
 
   it('an untouched file is never written back', async () => {

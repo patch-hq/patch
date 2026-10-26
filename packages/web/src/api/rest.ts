@@ -103,6 +103,17 @@ export interface ChatSummaryRow {
   snoozedUntil?: number | null;
 }
 
+/** The host a request needed is offline — a state to show calmly, not a failure to report. */
+export function isHostOffline(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  const body = err.body;
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    (body as Record<string, unknown>)['error'] === 'host_offline'
+  );
+}
+
 export class ApiError extends Error {
   override readonly name = 'ApiError';
   readonly status: number;

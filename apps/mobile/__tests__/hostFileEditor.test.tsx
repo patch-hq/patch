@@ -9,6 +9,7 @@ import {
   renderRN,
   findHost,
   byTestId,
+  queryHost,
   hasText,
   flush,
   actSync,
@@ -81,6 +82,15 @@ describe('Host file editor', () => {
     expect(props.multiline).toBe(true);
     expect(hasText(r.root, 'SKILL.md')).toBe(true);
     expect(hasText(r.root, PATH)).toBe(true);
+  });
+
+  it('opening a file on an offline host says so calmly, with no error', async () => {
+    readSpy.mockRejectedValue(
+      new ApiError(503, 'host_offline: d1 is offline', { error: 'host_offline' }),
+    );
+    const r = await open();
+    expect(hasText(findHost(r.root, byTestId('editor-offline')), 'Host offline')).toBe(true);
+    expect(queryHost(r.root, byTestId('editor-error'))).toBeNull();
   });
 
   it('Save is off until something changes; an edit marks the file dirty', async () => {

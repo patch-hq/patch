@@ -150,7 +150,7 @@ function HostListRow({
         <button
           type="button"
           className="set-btn"
-          disabled={updating}
+          disabled={updating || !host.online}
           onClick={applyUpdate}
           data-testid={`host-${host.hostId}-update`}
         >
@@ -257,6 +257,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={commitRename}
+                disabled={!host.online}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     setDraft(report.hostName);
@@ -318,6 +319,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 <button
                   type="button"
                   className="set-btn"
+                  disabled={!host.online}
                   data-testid={`host-${host.hostId}-backend-${b.id}-connect`}
                   onClick={() => void connectBackend(b.id, b.label)}
                 >
