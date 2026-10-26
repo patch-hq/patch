@@ -116,7 +116,12 @@ import {
   DEFAULT_WATCH_CHECK_IN_MINUTES,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
-import { createMockSdkBackend, createRealSdkBackend, type SdkBackend } from './sdkBackend.js';
+import {
+  createMockSdkBackend,
+  createRealSdkBackend,
+  type LimitFacts,
+  type SdkBackend,
+} from './sdkBackend.js';
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
 import { MeetingManager, type MeetingPrompts } from './meeting.js';
@@ -158,6 +163,7 @@ import {
 import { updateClaudeCli } from './claudeCliUpdate.js';
 import {
   AccountRotation,
+  isAccountExhausted,
   isAccountExhaustedError,
   parseLimitResetsAt,
   type FailoverAccount,
@@ -3753,7 +3759,17 @@ async function startHost(
         return await run(resolved.accessToken);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (!isAccountExhaustedError(message)) {
+        const probeWindows = accountUsage?.get(accountId)?.reading.windows;
+        if (
+          !isAccountExhausted((err as { limit?: LimitFacts }).limit, message, {
+            probeBlocked: refusingRateLimitScope(probeWindows) !== undefined,
+            onProse: (m) =>
+              logger.warn(
+                { label, accountId, message: m.slice(0, 200) },
+                'ai call: out of credit read from the error prose — nothing structured said so',
+              ),
+          })
+        ) {
           // Not an account problem, so no other account would answer
           // differently. Rethrown rather than folded into the same `null` an
           // exhausted host returns: the caller's own handler gets the

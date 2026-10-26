@@ -1668,6 +1668,8 @@ export const ChatStateEvent = z
         utilization: z.number().min(0).max(1).optional(),
         /** ms-epoch. Render in the reader's own zone — never pass UTC prose through. */
         resetsAt: z.number().int().optional(),
+        /** Labels of the accounts this turn was tried on, so "out of credit" says what was tried. */
+        tried: z.array(z.string().min(1)).optional(),
         /**
          * True when extra usage could NOT cover the spent pool — the reason a
          * limit is a hard stop rather than a spill. Reported separately from

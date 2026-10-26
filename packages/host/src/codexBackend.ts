@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
+import type { LimitFacts, SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
 import {
   HandoffOverflowError,
   TurnFailedError,
   reportedContextLimit,
   trackLiveRun,
 } from './sdkBackend.js';
-import { isAccountExhaustedError } from './accountFailover.js';
+import { isAccountExhausted } from './accountFailover.js';
 import { persistedUserContent } from './history.js';
 import { CodexAccounts } from './codexAccounts.js';
 import { CodexHistory } from './codexHistory.js';
@@ -122,12 +122,26 @@ function codexItemEnvelope(item: RpcObject, complete: boolean): SdkEnvelope | un
     },
   };
 }
+/**
+ * Codex's typed out-of-credit code, mapped into the shared limit facts. Codex
+ * names it `usageLimitExceeded` on the app-server wire and `usage_limit_exceeded`
+ * in the API error body; both mean this account has no credit left.
+ */
+export function codexLimitOf(error: unknown): LimitFacts | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const e = error as Record<string, unknown>;
+  const code = e['codexErrorInfo'] ?? e['code'] ?? e['type'];
+  return code === 'usageLimitExceeded' || code === 'usage_limit_exceeded'
+    ? { kind: 'usage_limit_exceeded', status: 'rejected' }
+    : undefined;
+}
 export class CodexTurnError extends TurnFailedError {
   constructor(
     message: string,
     readonly retrySafe: boolean,
+    limit?: LimitFacts,
   ) {
-    super(message, undefined);
+    super(message, limit);
   }
 }
 /**
@@ -517,6 +531,7 @@ export class CodexBackend implements SdkBackend {
               throw new CodexTurnError(
                 turn.error?.message ?? `Codex turn ${turn.status}`,
                 !toolsStarted,
+                codexLimitOf(turn.error),
               );
             yield { type: 'result', sessionId };
             return;
@@ -525,10 +540,15 @@ export class CodexBackend implements SdkBackend {
             throw new CodexTurnError(
               message.params.error?.message ?? 'Codex turn failed',
               !toolsStarted,
+              codexLimitOf(message.params.error),
             );
         }
       } catch (error) {
-        if (isAccountExhaustedError((error as Error).message)) {
+        if (
+          isAccountExhausted((error as TurnFailedError).limit, (error as Error).message, {
+            onProse: (m) => console.warn('codex: out of credit read from prose only —', m),
+          })
+        ) {
           this.accounts.markExhausted(accountId);
           void this.accounts.refresh();
         }

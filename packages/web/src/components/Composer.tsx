@@ -61,6 +61,7 @@ import { beginMeeting, maybeIntroduceMeetings } from '../lib/meetingSetup.js';
 import { MeetingSetupPopover } from './MeetingSetup.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
 import { EffortControl } from './EffortControl.js';
+import { PopupSelect } from './PopupSelect.js';
 import { CloseIcon } from './icons.js';
 import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
 import { ImageAnnotator } from './ImageAnnotator.js';
@@ -2528,40 +2529,31 @@ export const Composer = forwardRef(function Composer(
                 // (index.css) drops that chrome; the caret below stands in for it,
                 // coloured through the sibling combinator so it dims and lights up
                 // exactly as the select's own text does.
-                <div className="permission-mode-wrap">
-                  <select
-                    className="permission-mode"
-                    data-testid="permission-mode"
-                    aria-label="Approval mode"
-                    title="Approval mode"
-                    value={permissionMode ?? ''}
-                    disabled={offline}
-                    onChange={(e) => {
-                      getActiveWs()?.send({
-                        type: 'chat.settings',
-                        chatId,
-                        permissionMode: e.target.value as PermissionMode,
-                      });
-                    }}
-                  >
-                    {permissionMode === undefined ? (
-                      <option value="" disabled>
-                        Approval mode
-                      </option>
-                    ) : null}
-                    {PERMISSION_MODES.filter(
+                <PopupSelect
+                  testId="permission-mode"
+                  ariaLabel="Approval mode"
+                  title="Approval mode"
+                  value={permissionMode ?? ''}
+                  disabled={offline}
+                  onChange={(v) => {
+                    getActiveWs()?.send({
+                      type: 'chat.settings',
+                      chatId,
+                      permissionMode: v as PermissionMode,
+                    });
+                  }}
+                  options={[
+                    ...(permissionMode === undefined
+                      ? [{ value: '', label: 'Approval mode', hidden: true, disabled: true }]
+                      : []),
+                    ...PERMISSION_MODES.filter(
                       (m) => offeredModes.includes(m) || m === permissionMode,
-                    ).map((m) => (
-                      <option key={m} value={m}>
-                        {permissionModeLabel(m)}
-                        {offeredModes.includes(m) ? '' : ' (not on this model)'}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="permission-mode-caret" aria-hidden>
-                    ▾
-                  </span>
-                </div>
+                    ).map((m) => ({
+                      value: m,
+                      label: `${permissionModeLabel(m)}${offeredModes.includes(m) ? '' : ' (not on this model)'}`,
+                    })),
+                  ]}
+                />
               )}
               <ChatModelControl chatId={chatId} />
               <EffortControl chatId={chatId} />

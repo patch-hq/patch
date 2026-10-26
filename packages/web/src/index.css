@@ -6202,6 +6202,9 @@ button.view-file-download {
      otherwise takes its longest option's width ("Bypass permissions"), which
      left the caret ~100px adrift from a short value like "Auto". */
   field-sizing: content;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .permission-mode:hover:not(:disabled) {
   color: var(--ink-2);
@@ -11296,6 +11299,12 @@ button.background-task-bar-row:hover .background-task-bar-description {
   padding: 8px;
   overflow-y: auto;
 }
+/* PopupSelect lists: the options are plain rows, so the list shrink-wraps them. */
+.popup-select-list {
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+}
 /* The header crumb's pop-up is rendered into the body and positioned from the
    anchor's measured rect, because the crumb zone is `overflow: hidden` (it
    ellipsises a long folder path) and sits under the bars above the transcript —
@@ -13267,7 +13276,6 @@ input.browse-filter {
 }
 .limit-menu {
   position: absolute;
-  top: calc(100% + 4px);
   left: 0;
   z-index: 20;
   min-width: 100%;
@@ -13278,6 +13286,13 @@ input.browse-filter {
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow: 0 4px 16px rgb(0 0 0 / 14%);
+  overflow-y: auto;
+}
+.limit-menu.place-down {
+  top: calc(100% + 4px);
+}
+.limit-menu.place-up {
+  bottom: calc(100% + 4px);
 }
 .limit-menu button {
   padding: 8px 12px;
@@ -13686,6 +13701,7 @@ button.chat-usage-crumb:hover {
 .chat-account {
   cursor: default;
 }
+button.permission-mode.is-pending,
 select.permission-mode.is-pending {
   opacity: 0.55;
   font-style: italic;

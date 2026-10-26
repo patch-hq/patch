@@ -103,6 +103,20 @@ describe('ChatRoute — the limit bubble', () => {
     expect(screen.getByTestId('rate-limit-bar').textContent).not.toMatch(/busy/i);
   });
 
+  it('says out of credit and what was tried once failover ran out of accounts', () => {
+    seed(RESUME_AT, 'rate_limit', {
+      scope: 'session',
+      accountLabel: 'work',
+      resetsAt: RESUME_AT,
+      tried: ['work', 'Default'],
+    });
+    renderChat();
+    expect(screen.getByTestId('rate-limit-tried').textContent).toBe(
+      'Out of credit — tried work, Default',
+    );
+    expect(screen.getByTestId('rate-limit-headline').textContent).toMatch(/work/);
+  });
+
   it('a 529 overload is a different sentence — nobody reached a limit', () => {
     seed(RESUME_AT, 'overloaded');
     renderChat();

@@ -4,7 +4,7 @@
 // when the option list opens draws over the list.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, act } from '@testing-library/react';
+import { render, screen, cleanup, act, fireEvent } from '@testing-library/react';
 import { AccountControl } from '../components/ChatModelControl.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -42,9 +42,10 @@ describe('AccountControl', () => {
 
   it('the Automatic option names the account the chat is on now', () => {
     render(<AccountControl chatId="c1" />);
-    const opt = () => screen.getAllByRole('option')[0]!;
-    expect(opt()).toHaveTextContent('Automatic: work');
+    expect(screen.getByTestId('chat-account')).toHaveTextContent('Automatic: work');
     act(() => seed({ id: 'a1', label: 'Default' }));
-    expect(opt()).toHaveTextContent('Automatic: Default');
+    expect(screen.getByTestId('chat-account')).toHaveTextContent('Automatic: Default');
+    fireEvent.click(screen.getByTestId('chat-account'));
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent('Automatic: Default');
   });
 });

@@ -63,7 +63,6 @@ export function isRateLimitError(message: string): boolean {
     msg.includes('hit your limit') ||
     msg.includes('usage limit') ||
     msg.includes('spend limit') ||
-    msg.includes('session limit') ||
     msg.includes('weekly limit') ||
     msg.includes('monthly limit') ||
     isOutOfCreditError(message) ||

@@ -3,6 +3,7 @@
 // chat can move to, or sits disabled with the reason on hover.
 
 import { useRef, useState, type JSX } from 'react';
+import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import type { LimitControl } from '../lib/limitControls.js';
 
@@ -27,6 +28,7 @@ export function LimitMenu({
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const placement = usePopupPlacement(wrapRef, open);
   useDismissOnClickOff(open, [wrapRef], () => setOpen(false));
   return (
     <div className="limit-menu-wrap" ref={wrapRef}>
@@ -47,7 +49,12 @@ export function LimitMenu({
         {label} <span aria-hidden>▾</span>
       </button>
       {open ? (
-        <div className="limit-menu" role="menu" data-testid={`rate-limit-${kind}-menu`}>
+        <div
+          className={`limit-menu place-${placement.direction}`}
+          role="menu"
+          data-testid={`rate-limit-${kind}-menu`}
+          style={{ maxHeight: placement.maxHeight }}
+        >
           {control.options.map((o) => (
             <button
               key={o.id}

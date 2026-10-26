@@ -1711,10 +1711,59 @@ export function reportedContextLimit(message: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-function assertResultNotAnError(msg: unknown): void {
+/**
+ * The limit a `rate_limit_event` says is rejected, or undefined for any other
+ * message. The event is its own message: it can arrive BEFORE or beside the
+ * failing result rather than on it, so the turn remembers it and the failure
+ * picks it up (`mergeRejectedLimit`).
+ */
+export function rejectedLimitOfEvent(msg: unknown): LimitFacts | undefined {
+  if (typeof msg !== 'object' || msg === null) return undefined;
+  const m = msg as Record<string, unknown>;
+  if (m['type'] !== 'rate_limit_event') return undefined;
+  const info = m['rate_limit_info'];
+  if (typeof info !== 'object' || info === null) return undefined;
+  const i = info as Record<string, unknown>;
+  if (i['status'] !== 'rejected') return undefined;
+  return {
+    status: 'rejected',
+    ...(typeof i['rateLimitType'] === 'string' ? { rateLimitType: i['rateLimitType'] } : {}),
+    ...(typeof i['resetsAt'] === 'number' ? { resetsAt: toEpochMs(i['resetsAt']) } : {}),
+  };
+}
+
+/** The failure's own facts, filled in from a rejected event the turn saw. */
+export function mergeRejectedLimit(
+  own: LimitFacts | undefined,
+  rejected: LimitFacts | undefined,
+): LimitFacts | undefined {
+  if (rejected === undefined) return own;
+  return { ...rejected, ...own, status: own?.status ?? rejected.status };
+}
+
+/** Per-turn memory of the last rejected `rate_limit_event`. */
+export function createLimitEventMemory(): {
+  note(msg: unknown): void;
+  assertNotAnError(msg: unknown): void;
+} {
+  let rejected: LimitFacts | undefined;
+  return {
+    note(msg) {
+      rejected = rejectedLimitOfEvent(msg) ?? rejected;
+    },
+    assertNotAnError(msg) {
+      assertResultNotAnError(msg, rejected);
+    },
+  };
+}
+
+function assertResultNotAnError(msg: unknown, rejected?: LimitFacts): void {
   const text = resultErrorText(msg) ?? assistantErrorText(msg);
   if (text !== undefined) {
-    throw new TurnFailedError(`Claude Code returned an error result: ${text}`, limitFactsOf(msg));
+    throw new TurnFailedError(
+      `Claude Code returned an error result: ${text}`,
+      mergeRejectedLimit(limitFactsOf(msg), rejected),
+    );
   }
 }
 
@@ -1884,13 +1933,15 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   sup?.bind(q);
   if (opts.chatId !== undefined) liveRuns.set(opts.chatId, live);
   const toolNames = new Map<string, string>();
+  const limitEvents = createLimitEventMemory();
   try {
     for await (const msg of q) {
+      limitEvents.note(msg);
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
       if (skillsMissingFromInit(msg, opts.cwd).length > 0) await q.reloadPlugins();
       const mismatch = permissionModeMismatch(msg, live.mode);
-      assertResultNotAnError(msg);
+      limitEvents.assertNotAnError(msg);
       if (mismatch !== undefined) yield permissionModeMismatchEnvelope(live.mode, mismatch);
       const envs = translateSdkMessage(msg, toolNames);
       yield* envs;
@@ -2100,6 +2151,7 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
   };
   opts.abortController.signal.addEventListener('abort', onAbort, { once: true });
   const toolNames = new Map<string, string>();
+  const limitEvents = createLimitEventMemory();
   try {
     s.push(opts.prompt);
     for (;;) {
@@ -2110,8 +2162,9 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
       }
       const msg: unknown = next.value;
       const requestedMode = opts.permissionMode ?? 'auto';
+      limitEvents.note(msg);
       const mismatch = permissionModeMismatch(msg, requestedMode);
-      assertResultNotAnError(msg);
+      limitEvents.assertNotAnError(msg);
       if (mismatch !== undefined) yield permissionModeMismatchEnvelope(requestedMode, mismatch);
       const envs = translateSdkMessage(msg, toolNames);
       yield* envs;

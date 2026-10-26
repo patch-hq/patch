@@ -48,20 +48,22 @@ test.describe('Composer approval mode', () => {
     await page.goto(HARNESS);
 
     const select = page.getByTestId('permission-mode');
-    await expect(select).toHaveValue('auto');
+    await expect(select).toHaveAttribute('data-value', 'auto');
+    await select.click();
     // The visible text is the SAME WORDS as the value that reaches the model,
     // only cased and spaced for reading (permissionModeLabel) — no invented
     // label, and no extra row for following the host default.
-    await expect(select.locator('option')).toHaveText([
+    const list = page.getByTestId('permission-mode-list');
+    await expect(list.getByRole('option')).toHaveText([
       'Auto',
       'Default',
       'Accept edits',
       'Bypass permissions',
       'Plan',
     ]);
-    const values = await select
-      .locator('option')
-      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+    const values = await list
+      .getByRole('option')
+      .evaluateAll((os) => os.map((o) => (o as HTMLElement).dataset['value']));
     expect(values).toEqual(['auto', 'default', 'acceptEdits', 'bypassPermissions', 'plan']);
   });
 
@@ -71,7 +73,8 @@ test.describe('Composer approval mode', () => {
       window.__wsSent.length = 0;
     });
 
-    await page.getByTestId('permission-mode').selectOption('plan');
+    await page.getByTestId('permission-mode').click();
+    await page.locator('[data-testid="permission-mode-list"] [data-value="plan"]').click();
 
     await expect.poll(() => page.evaluate(() => window.__wsSent.length)).toBeGreaterThan(0);
     const sent = await page.evaluate(() => window.__wsSent);
@@ -85,15 +88,14 @@ test.describe('Composer approval mode', () => {
   test('every option sends a mode — none of them sends a bare frame', async ({ page }) => {
     await page.goto(HARNESS);
     const select = page.getByTestId('permission-mode');
-    const values = await select
-      .locator('option')
-      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+    const values = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];
 
     for (const value of values) {
       await page.evaluate(() => {
         window.__wsSent.length = 0;
       });
-      await select.selectOption(value);
+      await select.click();
+      await page.locator(`[data-testid="permission-mode-list"] [data-value="${value}"]`).click();
       await expect.poll(() => page.evaluate(() => window.__wsSent.length)).toBeGreaterThan(0);
       const sent = await page.evaluate(() => window.__wsSent);
       expect(sent.at(-1)).toEqual({
@@ -102,5 +104,21 @@ test.describe('Composer approval mode', () => {
         permissionMode: value,
       });
     }
+  });
+
+  // Todoist 6hr2VWg7J5v5wwhF: the list was a native select popup that ran off the
+  // bottom of the window from the composer row. It now stays inside the viewport
+  // and opens upward.
+  test('the list opens upward and stays inside the window', async ({ page }) => {
+    await page.goto(HARNESS);
+    await page.getByTestId('permission-mode').click();
+    const list = page.getByTestId('permission-mode-list');
+    await expect(list).toHaveAttribute('data-direction', 'up');
+    const box = (await list.boundingBox())!;
+    const trigger = (await page.getByTestId('permission-mode').boundingBox())!;
+    const vh = page.viewportSize()!.height;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(vh);
+    expect(box.y + box.height).toBeLessThanOrEqual(trigger.y);
   });
 });

@@ -9,6 +9,7 @@ import {
   AccountRotation,
   isAccountExhausted,
   isAccountExhaustedError,
+  outOfCreditSignal,
   parseLimitResetsAt,
 } from '../src/accountFailover.js';
 
@@ -57,12 +58,32 @@ describe('isAccountExhausted (structured)', () => {
   });
 });
 
-describe('session limit wording', () => {
-  const msg = "You've hit your session limit · resets 7pm (Europe/London)";
-  it('counts as an exhausted account, with or without a structured block', () => {
-    expect(isAccountExhaustedError(msg)).toBe(true);
-    expect(isAccountExhausted(undefined, msg)).toBe(true);
-    expect(isAccountExhausted({ kind: 'rate_limit' }, msg)).toBe(true);
+describe('outOfCreditSignal', () => {
+  const sessionMsg = "You've hit your session limit · resets 7pm (Europe/London)";
+  it('reads a session limit from structure, with no phrase involved', () => {
+    expect(outOfCreditSignal({ kind: 'rate_limit', rateLimitType: 'five_hour' }, sessionMsg)).toBe(
+      'structured',
+    );
+    expect(outOfCreditSignal({ kind: 'rate_limit', status: 'rejected' }, 'x')).toBe('structured');
+    expect(outOfCreditSignal({ kind: 'usage_limit_exceeded' }, 'x')).toBe('structured');
+  });
+  it('does not call a burst 429 an exhausted account', () => {
+    expect(outOfCreditSignal({ kind: 'rate_limit' }, 'Too many requests')).toBeUndefined();
+  });
+  it('trusts the usage probe', () => {
+    expect(outOfCreditSignal(undefined, 'unrecognised wording', { probeBlocked: true })).toBe(
+      'probe',
+    );
+  });
+  it('reports prose use through onProse, and does not match the unlisted session wording', () => {
+    const seen: string[] = [];
+    expect(outOfCreditSignal(undefined, sessionMsg, { onProse: (m) => seen.push(m) })).toBe(
+      undefined,
+    );
+    expect(
+      outOfCreditSignal(undefined, 'monthly spend limit', { onProse: (m) => seen.push(m) }),
+    ).toBe('prose');
+    expect(seen).toEqual(['monthly spend limit']);
   });
 });
 

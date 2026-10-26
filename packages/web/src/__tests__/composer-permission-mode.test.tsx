@@ -66,8 +66,19 @@ function renderComposer(chatId: string) {
 }
 
 /** The dropdown itself. */
-function select(): HTMLSelectElement {
-  return screen.getByTestId('permission-mode') as HTMLSelectElement;
+function select(): HTMLButtonElement {
+  return screen.getByTestId('permission-mode') as HTMLButtonElement;
+}
+
+/** Open the list and return its option rows. */
+function openOptions(): HTMLElement[] {
+  fireEvent.click(select());
+  return screen.getAllByRole('option');
+}
+
+function pick(value: string): void {
+  const o = openOptions().find((x) => x.dataset.value === value)!;
+  fireEvent.click(o);
 }
 
 /** The select's wrapper — the direct child of `.composer-actions` (it carries the custom caret). */
@@ -130,20 +141,20 @@ describe('Composer — approval mode', () => {
   it('shows the mode the next turn will use', () => {
     seedChat('c1', 'plan');
     renderComposer('c1');
-    expect(select().value).toBe('plan');
+    expect(select().dataset.value).toBe('plan');
   });
 
   it('offers exactly the five modes and nothing else', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
-    const values = Array.from(select().querySelectorAll('option')).map((o) => o.value);
+    const values = openOptions().map((o) => o.dataset.value);
     expect(values).toEqual(['auto', 'default', 'acceptEdits', 'bypassPermissions', 'plan']);
   });
 
   it("names each mode in the SDK's own words, inventing no label", () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
-    const options = Array.from(select().querySelectorAll('option'));
+    const options = openOptions();
     expect(options.map((o) => o.textContent)).toEqual([
       'Auto',
       'Default',
@@ -155,21 +166,24 @@ describe('Composer — approval mode', () => {
     // spaced for reading and nothing more — no synonym, no invented word, so
     // the mode he picks is the mode the model is given.
     for (const o of options) {
-      expect(o.textContent?.toLowerCase().replace(/ /g, '')).toBe(o.value.toLowerCase());
+      expect(o.textContent?.toLowerCase().replace(/ /g, '')).toBe(o.dataset.value!.toLowerCase());
     }
   });
 
   it('has no row that clears the mode back to the host default', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
-    expect(select().textContent).not.toMatch(/follow|host|default the chat/i);
-    expect(select().querySelector('option[value="follow-host"]')).toBeNull();
+    const options = openOptions();
+    expect(options.map((o) => o.textContent).join(' ')).not.toMatch(
+      /follow|host|default the chat/i,
+    );
+    expect(options.find((o) => o.dataset.value === 'follow-host')).toBeUndefined();
   });
 
   it('carries an accessible name — there is no visible label beside it', () => {
     seedChat('c1', 'plan');
     renderComposer('c1');
-    expect(screen.getByRole('combobox', { name: 'Approval mode' })).toBe(select());
+    expect(screen.getByRole('button', { name: 'Approval mode' })).toBe(select());
     // spec/14 § Copy — no helper text: the tooltip NAMES the control, it does
     // not describe it ("What the agent can do" was a description).
     expect(select().title).toBe('Approval mode');
@@ -178,33 +192,32 @@ describe('Composer — approval mode', () => {
   it('choosing a mode sends chat.settings carrying it', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
-    fireEvent.change(select(), { target: { value: 'plan' } });
+    pick('plan');
     expect(sent).toEqual([{ type: 'chat.settings', chatId: 'c1', permissionMode: 'plan' }]);
   });
 
   it('every option sends a mode — none of them sends a bare frame', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
-    for (const o of Array.from(select().querySelectorAll('option'))) {
-      fireEvent.change(select(), { target: { value: o.value } });
-    }
+    // Every row but the one already selected changes the mode.
+    for (const v of ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto']) pick(v);
     expect(sent).toHaveLength(5);
     for (const frame of sent) expect('permissionMode' in (frame as object)).toBe(true);
     expect(sent.map((f) => (f as { permissionMode: string }).permissionMode)).toEqual([
-      'auto',
       'default',
       'acceptEdits',
       'bypassPermissions',
       'plan',
+      'auto',
     ]);
   });
 
   it('reflects a mode changed on another surface without a remount', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
-    expect(select().value).toBe('auto');
+    expect(select().dataset.value).toBe('auto');
     act(() => seedChat('c1', 'bypassPermissions'));
-    expect(select().value).toBe('bypassPermissions');
+    expect(select().dataset.value).toBe('bypassPermissions');
   });
 
   it('does not send anything when the control is not touched', () => {
@@ -222,7 +235,7 @@ describe('Composer — approval mode', () => {
   it('is present on an existing chat the roster has not reported a mode for', () => {
     renderComposer('c1');
     expect(select()).toBeTruthy();
-    expect(select().value).toBe('');
+    expect(select().dataset.value).toBe('');
   });
 
   it('is disabled while the link is down, rather than dropping the change silently', () => {

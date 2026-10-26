@@ -102,8 +102,12 @@ test('a live chat with two accounts gets an account dropdown styled like the app
     preferredAccountId: null,
   });
   const select = page.getByTestId('chat-account');
-  await expect(select).toHaveJSProperty('tagName', 'SELECT');
-  await expect(select.locator('option')).toHaveText(['Automatic: work', 'work', 'personal']);
+  await expect(select).toHaveText('Automatic: work');
+  await select.click();
+  const list = page.getByTestId('chat-account-list');
+  await expect(list.getByRole('option')).toHaveText(['Automatic: work', 'work', 'personal']);
+  await expect(list).toHaveAttribute('data-direction', 'up');
+  await select.click();
   // A tooltip would sit over the open list, so the select carries none.
   await expect(select).not.toHaveAttribute('title', /.*/);
   // Drawn as the approval-mode select beside it, not as a bordered chip.
@@ -115,7 +119,8 @@ test('a live chat with two accounts gets an account dropdown styled like the app
   }
 
   // Choosing sends the request, reads as pending, and settles on the host's answer.
-  await select.selectOption('a2');
+  await select.click();
+  await list.locator('[data-value="a2"]').click();
   const sent = await page.evaluate(
     () => (window as unknown as { __wsSent: Record<string, unknown>[] }).__wsSent,
   );
@@ -132,10 +137,11 @@ test('a live chat with two accounts gets an account dropdown styled like the app
     preferredAccountId: 'a2',
   });
   await expect(select).not.toHaveClass(/is-pending/);
-  await expect(select).toHaveValue('a2');
+  await expect(select).toHaveAttribute('data-value', 'a2');
 
   // Back to the strategy.
-  await select.selectOption('');
+  await select.click();
+  await list.locator('[data-value=""]').click();
   const again = await page.evaluate(
     () => (window as unknown as { __wsSent: Record<string, unknown>[] }).__wsSent,
   );

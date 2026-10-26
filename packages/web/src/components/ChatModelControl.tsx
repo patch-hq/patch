@@ -10,6 +10,7 @@ import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { ModelPicker } from './ModelPicker.js';
+import { PopupSelect } from './PopupSelect.js';
 import { ProviderSwitchModal } from './ProviderSwitchModal.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
@@ -93,44 +94,34 @@ export function AccountControl({
   }
   const shown = pending !== undefined ? pending : settled;
   return (
-    <div className="permission-mode-wrap chat-account-wrap">
-      <select
-        className={pending !== undefined ? 'permission-mode is-pending' : 'permission-mode'}
-        data-testid={testId}
-        aria-label="Account"
-        // No native tooltip: one already showing when the list opens draws over it,
-        // and the Automatic option already names the account in use.
-        value={changeLabel !== undefined ? '__change' : (shown ?? '')}
-        onChange={(e) => {
-          if (e.target.value === '__change') return;
-          const next = e.target.value === '' ? null : e.target.value;
-          if (next === settled) return;
-          setPending(next);
-          getActiveWs()?.send({
-            type: 'chat.account_request',
-            chatId: row.chatId,
-            preferredAccountId: next,
-          });
-        }}
-      >
-        {changeLabel !== undefined ? (
-          <option value="__change" disabled hidden>
-            {changeLabel}
-          </option>
-        ) : null}
-        <option value="">
-          {row.account && settled === null ? `Automatic: ${row.account.label}` : 'Automatic'}
-        </option>
-        {choices.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.label}
-          </option>
-        ))}
-      </select>
-      <span className="permission-mode-caret" aria-hidden>
-        ▾
-      </span>
-    </div>
+    <PopupSelect
+      testId={testId}
+      ariaLabel="Account"
+      // No native tooltip: one already showing when the list opens draws over it,
+      // and the Automatic option already names the account in use.
+      pending={pending !== undefined}
+      value={changeLabel !== undefined ? '__change' : (shown ?? '')}
+      onChange={(v) => {
+        const next = v === '' ? null : v;
+        if (next === settled) return;
+        setPending(next);
+        getActiveWs()?.send({
+          type: 'chat.account_request',
+          chatId: row.chatId,
+          preferredAccountId: next,
+        });
+      }}
+      options={[
+        ...(changeLabel !== undefined
+          ? [{ value: '__change', label: changeLabel, hidden: true, disabled: true }]
+          : []),
+        {
+          value: '',
+          label: row.account && settled === null ? `Automatic: ${row.account.label}` : 'Automatic',
+        },
+        ...choices.map((a) => ({ value: a.id, label: a.label })),
+      ]}
+    />
   );
 }
 

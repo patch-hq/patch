@@ -79,17 +79,54 @@ export function accountOrderMismatch(
  * block, and for the two callers that only ever have a stored error string.
  */
 export function isAccountExhausted(
-  limit: { kind?: string; status?: string } | undefined,
+  limit: { kind?: string; status?: string; rateLimitType?: string } | undefined,
   message: string,
+  extra: {
+    /** The host's own usage probe says this account is blocked now. */
+    probeBlocked?: boolean;
+    /** Called when the decision had to be read out of prose. */
+    onProse?: (message: string) => void;
+  } = {},
 ): boolean {
+  return outOfCreditSignal(limit, message, extra) !== undefined;
+}
+
+/** Where a decision that an account is out of credit came from. */
+export type OutOfCreditSource = 'structured' | 'probe' | 'prose';
+
+/**
+ * The one provider-generic "this account is out of credit" signal. Each backend
+ * maps its own typed data into `limit` (Claude: `error` kind + `quotaLimits`,
+ * Codex: its `usage_limit_exceeded` code); the usage probe is authoritative too.
+ * Prose is the last resort and is reported through `onProse`, never silently.
+ */
+export function outOfCreditSignal(
+  limit: { kind?: string; status?: string; rateLimitType?: string } | undefined,
+  message: string,
+  extra: { probeBlocked?: boolean; onProse?: (message: string) => void } = {},
+): OutOfCreditSource | undefined {
   if (limit !== undefined) {
-    if (limit.kind === 'billing_error') return true;
-    if (limit.status === 'rejected') return true;
+    if (limit.kind === 'billing_error' || limit.kind === 'usage_limit_exceeded')
+      return 'structured';
+    if (limit.status === 'rejected') return 'structured';
     // A structured block that says the account is fine is an answer, not a
     // gap — do not go fishing in the prose behind it.
-    if (limit.status !== undefined) return false;
+    if (limit.status !== undefined) return undefined;
+    // A rate_limit naming an account window (five_hour / seven_day) is an
+    // account limit; a burst 429 names none.
+    if (
+      limit.kind === 'rate_limit' &&
+      (limit.rateLimitType === 'five_hour' || limit.rateLimitType === 'seven_day')
+    ) {
+      return 'structured';
+    }
   }
-  return isAccountExhaustedError(message);
+  if (extra.probeBlocked === true) return 'probe';
+  if (isAccountExhaustedError(message)) {
+    extra.onProse?.(message);
+    return 'prose';
+  }
+  return undefined;
 }
 
 export function isAccountExhaustedError(message: string): boolean {
@@ -99,7 +136,6 @@ export function isAccountExhaustedError(message: string): boolean {
     msg.includes('usage_limit_exceeded') ||
     msg.includes('usage limit') ||
     msg.includes('hit your limit') ||
-    msg.includes('session limit') ||
     msg.includes('weekly limit') ||
     msg.includes('monthly limit') ||
     msg.includes('out of credit') ||
