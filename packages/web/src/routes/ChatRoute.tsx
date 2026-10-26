@@ -3288,6 +3288,18 @@ function MessageEntry({
                 ]
               : []),
             {
+              id: 'copy',
+              label: 'Copy',
+              icon: <Copy size={14} aria-hidden="true" />,
+              // The selection when there is one, else the message's markdown source
+              // (same as the hover copy button). A failed write is logged, not hidden.
+              run: () => {
+                navigator.clipboard
+                  .writeText(menuSelection || text)
+                  .catch((err: unknown) => console.error('Copy failed', err));
+              },
+            },
+            {
               id: 'open-side-thread',
               label: 'Open side thread',
               icon: <GitFork size={14} aria-hidden="true" />,

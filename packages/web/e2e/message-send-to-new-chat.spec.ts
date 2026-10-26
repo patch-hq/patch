@@ -83,4 +83,48 @@ test.describe('send to new chat', () => {
     await expect(input).toBeFocused();
     expect(page.url()).toContain('chat=chat_bus');
   });
+
+  test('Copy puts the whole message on the clipboard when nothing is selected', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const msg = page.getByTestId('msg').filter({ hasText: 'alpha beta gamma' });
+    await msg.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await msg.locator('.content').click({ button: 'right' });
+    await page.getByTestId('msg-context-menu-copy').click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('alpha beta gamma');
+  });
+
+  test('Copy puts just the selection on the clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const msg = page.getByTestId('msg').filter({ hasText: 'alpha beta gamma' });
+    await msg.scrollIntoViewIfNeeded();
+    await msg.evaluate((el) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.textContent?.indexOf('beta') ?? -1;
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(n, i);
+        r.setEnd(n, i + 4);
+        window.getSelection()?.removeAllRanges();
+        window.getSelection()?.addRange(r);
+        const box = r.getBoundingClientRect();
+        el.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: box.x + 2,
+            clientY: box.y + 2,
+          }),
+        );
+        return;
+      }
+      throw new Error('text not found');
+    });
+    await page.getByTestId('msg-context-menu-copy').click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('beta');
+  });
 });
