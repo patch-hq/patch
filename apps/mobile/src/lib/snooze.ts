@@ -10,7 +10,7 @@
 // Custom is typed as `YYYY-MM-DD HH:mm` (parseCustomSnooze) — no native date
 // picker, which would need a new APK (spec/15 § Row tools).
 
-import { SNOOZE_UNTIL_COMPLETE, formatWakeAt } from '@patch/wire';
+import { SNOOZE_UNTIL_COMPLETE, formatWakeAt, isSnoozeUntilComplete } from '@patch/wire';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -109,9 +109,10 @@ export function formatWakeTime(at: number): string {
 /**
  * Wake time sized for a row's right-hand timestamp slot: `14:00` today, `Tue`
  * within the coming week, `30 Sep` beyond — a bare weekday a week out would
- * name today.
+ * name today. "when done" for a snooze until complete.
  */
 export function formatWakeTimeCompact(at: number): string {
+  if (isSnoozeUntilComplete(at)) return formatWakeAt(at);
   const d = new Date(at);
   const now = new Date();
   if (now.toDateString() === d.toDateString()) {

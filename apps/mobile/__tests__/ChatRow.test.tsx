@@ -1,3 +1,4 @@
+import { SNOOZE_UNTIL_COMPLETE } from '@patch/wire';
 // Render coverage for the Chats-tab row (spec/15 § Row tools). Pins:
 //   - tap → router.push to the chat, long-press AND the ⋯ kebab both open
 //     the same row-actions sheet (showChatLongPressSheet)
@@ -369,6 +370,16 @@ describe('ChatRowItem — tray order', () => {
 });
 
 describe('ChatRowItem — snoozed wake time', () => {
+  it("shows 'when done' in the slot for an until-complete snooze", () => {
+    const r = renderRN(
+      <ChatRowItem row={makeRow({ chatId: 'c8', snoozedUntil: SNOOZE_UNTIL_COMPLETE })} />,
+    );
+    const slot = findHost(r.root, byTestId('wake-time-c8'));
+    expect(slot.props.accessibilityLabel).toBe('Snoozed until when done');
+    const text = findHost(slot, (i) => i.type === 'Text');
+    expect(text.children[0]).toBe('when done');
+  });
+
   it('shows the wake time compactly in the right-hand slot, with no extra line', () => {
     const at = Date.now() + 60 * 60_000;
     const r = renderRN(<ChatRowItem row={makeRow({ chatId: 'c9', snoozedUntil: at })} />);

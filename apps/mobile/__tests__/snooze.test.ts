@@ -157,6 +157,10 @@ describe('formatWakeTime', () => {
 });
 
 describe('formatWakeTimeCompact — sized for the row timestamp slot', () => {
+  it("says 'when done' for an until-complete snooze, not the sentinel's date", () => {
+    expect(formatWakeTimeCompact(SNOOZE_UNTIL_COMPLETE)).toBe('when done');
+  });
+
   it('a bare time for a wake later today', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 25, 9, 0, 0));
