@@ -31,59 +31,64 @@ async function flushUntil(check: () => boolean, timeoutMs = 2000): Promise<void>
   }
 }
 
-describe('a subagent that hits a usage limit', () => {
-  it('reports PAUSED with the local reset time, not FAILED, and stays running', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-limit-'));
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-limit-f-')));
-    const events: WireEvent[] = [];
-    const backend: SdkBackend = {
-      // Only the subagent's turn hits the limit; the parent's own turn is fine.
-      async *run(o): AsyncGenerator<SdkEnvelope> {
-        if (String(o.prompt) === 'work') throw statedLimit();
-        yield { type: 'assistant', content: 'ok', raw: {} };
-        yield { type: 'result', sessionId: 'sess-p', content: 'ok', raw: {} };
-      },
-    };
-    let n = 0;
-    const daemon = new Daemon({
-      hostId: 'd1',
-      metaStore: createMetaStore(home),
-      sdkBackend: backend,
-      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: 'a1' }),
-      emit: (e) => events.push(e),
-      logger: pino({ level: 'silent' }),
-      now: () => NOW,
-      generateChatId: () => `chat-${++n}`,
-      accountLimitInfo: () => ({ label: 'Work', scope: 'week' as const, resetsAt: RESETS_AT }),
-      discoverClaudeMcpServers: () => [],
-    });
-    daemon.setAutoResumeRateLimit(true);
-    const parentChatId = await daemon.spawnChat({ folder });
-    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'work' });
+describe.each([true, false])(
+  'a subagent that hits a usage limit (auto-resume %s)',
+  (autoResume) => {
+    it('reports OUT OF CREDIT with the local reset time, not FAILED, and stays running', async () => {
+      const home = mkdtempSync(join(tmpdir(), 'patch-delegate-limit-'));
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-limit-f-')));
+      const events: WireEvent[] = [];
+      const backend: SdkBackend = {
+        // Only the subagent's turn hits the limit; the parent's own turn is fine.
+        async *run(o): AsyncGenerator<SdkEnvelope> {
+          if (String(o.prompt) === 'work') throw statedLimit();
+          yield { type: 'assistant', content: 'ok', raw: {} };
+          yield { type: 'result', sessionId: 'sess-p', content: 'ok', raw: {} };
+        },
+      };
+      let n = 0;
+      const daemon = new Daemon({
+        hostId: 'd1',
+        metaStore: createMetaStore(home),
+        sdkBackend: backend,
+        resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: 'a1' }),
+        emit: (e) => events.push(e),
+        logger: pino({ level: 'silent' }),
+        now: () => NOW,
+        generateChatId: () => `chat-${++n}`,
+        accountLimitInfo: () => ({ label: 'Work', scope: 'week' as const, resetsAt: RESETS_AT }),
+        discoverClaudeMcpServers: () => [],
+      });
+      daemon.setAutoResumeRateLimit(autoResume);
+      const parentChatId = await daemon.spawnChat({ folder });
+      const { id } = await daemon.createDelegate({ parentChatId, prompt: 'work' });
 
-    const fromAgent = () =>
-      events.filter(
-        (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
-          e.type === 'chat.message' && e.chatId === parentChatId && e.content.includes('; agent '),
+      const fromAgent = () =>
+        events.filter(
+          (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
+            e.type === 'chat.message' &&
+            e.chatId === parentChatId &&
+            e.content.includes('; agent '),
+        );
+      await flushUntil(() => fromAgent().length > 0);
+      const msg = fromAgent()[0]!.content;
+      expect(msg).toContain('OUT OF CREDIT');
+      expect(msg).not.toContain('FAILED');
+      expect(msg).toContain('Work');
+      expect(msg).toContain(
+        new Date(RESETS_AT).toLocaleString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        }),
       );
-    await flushUntil(() => fromAgent().length > 0);
-    const msg = fromAgent()[0]!.content;
-    expect(msg).toContain('PAUSED');
-    expect(msg).not.toContain('FAILED');
-    expect(msg).toContain('Work');
-    expect(msg).toContain(
-      new Date(RESETS_AT).toLocaleString('en-GB', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZoneName: 'short',
-      }),
-    );
-    expect(daemon.listDelegates(parentChatId)).toEqual([
-      expect.objectContaining({ id, status: 'running' }),
-    ]);
-    expect(fromAgent()).toHaveLength(1);
-    daemon.shutdown();
-  });
-});
+      expect(daemon.listDelegates(parentChatId)).toEqual([
+        expect.objectContaining({ id, status: 'running' }),
+      ]);
+      expect(fromAgent()).toHaveLength(1);
+      daemon.shutdown();
+    });
+  },
+);

@@ -180,11 +180,7 @@ import {
 import type { SweepDecisionResult } from './managerSweepGen.js';
 import { countMessages, windowTrack } from './managerContext.js';
 import { permissionModeChangeLine } from './permissionMode.js';
-import {
-  isAccountExhausted,
-  isAccountExhaustedError,
-  parseLimitResetsAt,
-} from './accountFailover.js';
+import { isAccountExhausted, parseLimitResetsAt } from './accountFailover.js';
 import {
   assistantErrorText,
   HandoffOverflowError,
@@ -194,12 +190,7 @@ import {
 } from './sdkBackend.js';
 import type { LimitFacts } from './sdkBackend.js';
 import type { SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
-import {
-  isOverloadedError,
-  isRateLimitError,
-  limitFailureMessage,
-  statedLimitOf,
-} from './limitFailure.js';
+import { isOverloadedError, limitFailureMessage, statedLimitOf } from './limitFailure.js';
 import { classifyFailure, backoffMs as overloadBackoffMs } from './errorClass.js';
 import { describeTurnFailure } from './failureCopy.js';
 import { CLAUDE_BACKEND_ID } from './host.js';
@@ -2884,7 +2875,7 @@ export class Daemon {
    * The case it ACTUALLY has to carry is a turn blocked on credit that never
    * reached the rate-limit park at all — because its failure said nothing about
    * a limit. A killed `claude`, a dropped socket, any fault on a host whose
-   * every key is spent: `isRateLimitError` is false, so the park path is skipped
+   * every key is spent: no structured limit is stated, so the park path is skipped
    * and the turn is parked by the tail instead, which puts it in `parkedTurns`
    * and NOT in `rateLimitPendingTurns`. `resumeAllRateLimited` therefore cannot
    * see it, ever. This list is the only thing that can.
@@ -2923,7 +2914,7 @@ export class Daemon {
       // record a restart kept; in memory it is all there is for a park whose
       // host never went down.
       const last = (meta?.lastError as ChatLastError | undefined) ?? state.lastError;
-      if (!last || !isAccountExhaustedError(last.message)) continue;
+      if (!last || last.outOfCredit !== true) continue;
       // A CUTOFF, so nothing ancient springs back to life. A turn that failed
       // days ago is about a world that has moved on — a deploy since superseded,
       // a task already done by hand, a purchase no longer wanted — and firing it
@@ -4529,9 +4520,9 @@ export class Daemon {
     } else if (state.activity === 'idle') {
       this.finishDelegate(chatId, 'done');
     } else if (state.activity === 'errored' && !state.turnRetrying) {
-      // A turn parked on a usage limit is owed, not dead: the host resumes it
-      // at the reset, and it settles then. Tell the parent it is waiting, once.
-      if (this.rateLimitPendingTurns.has(chatId))
+      // Out of credit is a state, not an error: parked or not, the chat is
+      // resumable and settles later. Tell the parent it is waiting, never FAILED.
+      if (this.limitBlocks.has(chatId) || this.rateLimitPendingTurns.has(chatId))
         this.announceDelegatePaused(chatId, state.subagent);
       else this.finishDelegate(chatId, 'failed');
     }
@@ -4548,14 +4539,14 @@ export class Daemon {
     const on = block?.accountLabel === undefined ? '' : ` on ${block.accountLabel}`;
     const resume =
       block?.resetsAt === undefined
-        ? 'It will resume when credit returns.'
+        ? 'It waits for credit to return.'
         : `It resumes automatically at ${new Date(block.resetsAt).toLocaleString('en-GB', LOCAL_INSTANT)}.`;
     this.deliverToParent(
       subagent.parentChatId,
       formatAgentReturn(
         subagent.label,
         chatId,
-        `PAUSED — usage limit reached${on}. ${resume} Still running: do not start a replacement.`,
+        `OUT OF CREDIT (not an error) — usage limit reached${on}. ${resume} The agent is still alive: do not start a replacement.`,
       ),
     );
   }
@@ -6742,26 +6733,15 @@ export class Daemon {
 
   /**
    * Is the account this turn ran on out of credit? One provider-generic answer:
-   * the backend's structured limit first, then the host's own usage probe, and
-   * prose only as a logged last resort.
+   * the backend's structured limit first, then the host's own usage probe.
+   * Never the wording of the error.
    */
-  private accountOutOfCredit(
-    chatId: string,
-    limit: LimitFacts | undefined,
-    errMsg: string,
-  ): boolean {
+  private accountOutOfCredit(chatId: string, limit: LimitFacts | undefined): boolean {
     const ranOn = this.runningOnAccount.get(chatId);
     const info = this.opts.accountLimitInfo?.(ranOn);
     const probeBlocked =
       info?.scope !== undefined && (info.resetsAt === undefined || info.resetsAt > this.opts.now());
-    return isAccountExhausted(limit, errMsg, {
-      probeBlocked,
-      onProse: (m) =>
-        this.opts.logger.warn(
-          { chatId, account: ranOn ?? null, message: m.slice(0, 200) },
-          'out of credit read from the error prose — no structured limit or probe reading said so',
-        ),
-    });
+    return isAccountExhausted(limit, { probeBlocked });
   }
 
   /** A reset the failure itself states and that is still ahead, structured first. */
@@ -6808,9 +6788,6 @@ export class Daemon {
       ...(ranOn !== undefined ? { accountId: ranOn } : {}),
       ...(info?.label !== undefined ? { accountLabel: info.label } : {}),
       scope: info?.scope ?? 'unknown',
-      ...(this.triedAccountLabels(chatId).length > 0
-        ? { tried: this.triedAccountLabels(chatId) }
-        : {}),
       ...(info?.utilization !== undefined ? { utilization: info.utilization } : {}),
       ...(resetsAt !== undefined ? { resetsAt } : {}),
       ...(info?.overageBlocked !== undefined ? { overageBlocked: info.overageBlocked } : {}),
@@ -6819,13 +6796,6 @@ export class Daemon {
       // reader is shown it as the failure.
       raw: errMsg.slice(0, 300),
     });
-  }
-
-  /** Labels of the accounts failover has already run this turn on, in order tried. */
-  private triedAccountLabels(chatId: string): string[] {
-    return [...(this.failoverTriedAccounts.get(chatId) ?? [])].map(
-      (id) => this.opts.accountLimitInfo?.(id)?.label ?? id,
-    );
   }
 
   /**
@@ -9755,7 +9725,7 @@ export class Daemon {
         let hostOutOfCredit = this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
-          this.accountOutOfCredit(chatId, limit, errMsg) &&
+          this.accountOutOfCredit(chatId, limit) &&
           this.opts.nextAccountAfterExhausted
         ) {
           const cur = this.chatState.get(chatId);
@@ -9810,9 +9780,9 @@ export class Daemon {
           // the structured `resetsAt`, or a reset the prose gives. Without this
           // such a failure matched neither phrase list and went down the 10/30/90s
           // ladder against a limit that was already known to last hours.
-          (isRateLimitError(errMsg) ||
+          (isOverloadedError(errMsg) ||
             statedLimitOf(limit, errMsg) !== undefined ||
-            this.statedResetOf(limit, errMsg) !== undefined)
+            limit?.resetsAt !== undefined)
         ) {
           const now = this.opts.now();
           const isOverload = isOverloadedError(errMsg);
@@ -9922,6 +9892,7 @@ export class Daemon {
               code: 'sdk_error' as const,
               message: reportedMsg,
               at: this.opts.now(),
+              outOfCredit: true as const,
             };
             this.chatState.setLastError(chatId, detail);
             this.chatState.setActivity(chatId, 'errored');
@@ -10161,9 +10132,7 @@ export class Daemon {
         // full after it — patch does not get to replace a message it has no
         // account of (see `limitFailure.ts`), only to say what else it knows.
         const blockedOnCredit =
-          stated !== undefined ||
-          hostOutOfCredit ||
-          this.statedResetOf(limit, errMsg) !== undefined;
+          stated !== undefined || hostOutOfCredit || limit?.resetsAt !== undefined;
         if (blockedOnCredit) {
           this.setLimitBlock(chatId, errMsg, limit, undefined);
         }
@@ -10202,7 +10171,13 @@ export class Daemon {
         this.emit(errorEvent);
         // m6: stash on chat_state so patch_peek and chat.state surface the
         // most-recent error reason without forcing surfaces to read history.
-        this.chatState.setLastError(chatId, { code, message: reportedMsg, at: this.opts.now() });
+        const lastErr = {
+          code,
+          message: reportedMsg,
+          at: this.opts.now(),
+          ...(blockedOnCredit ? { outOfCredit: true as const } : {}),
+        };
+        this.chatState.setLastError(chatId, lastErr);
         // chat_state is memory: a host restart drops it, and with it the only
         // record of WHY a chat died. The session-invalid branch above persists
         // its own; every other code needs the same, or a chat that failed
@@ -10211,7 +10186,7 @@ export class Daemon {
         if (!isSessionInvalid) {
           this.opts.metaStore.update(chatId, (m) => ({
             ...m,
-            lastError: { code, message: reportedMsg, at: this.opts.now() },
+            lastError: lastErr,
             updatedAt: this.opts.now(),
           }));
         }
