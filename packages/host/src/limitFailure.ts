@@ -60,7 +60,7 @@ export interface StatedLimit {
  */
 export function statedLimitOf(
   limit: LimitFacts | undefined,
-  message: string,
+  _message: string,
 ): StatedLimit | undefined {
   if (limit !== undefined) {
     const stated =
