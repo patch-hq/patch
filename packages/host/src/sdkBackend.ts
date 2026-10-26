@@ -1271,7 +1271,8 @@ function disallowedToolsFor(opts: SdkRunOptions): string[] {
  * rather than appending to the parent. Empty when this is an ordinary turn.
  */
 function forkOptsFor(opts: SdkRunOptions): Record<string, unknown> {
-  if (!opts.fork) return {};
+  // Nothing to fork from when nothing is resumed (an edit of the first message).
+  if (!opts.fork || opts.resumeSessionId === undefined) return {};
   return {
     forkSession: true,
     ...(opts.fork.resumeAtUuid !== null ? { resumeSessionAt: opts.fork.resumeAtUuid } : {}),

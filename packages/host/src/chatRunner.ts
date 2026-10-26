@@ -7178,15 +7178,20 @@ export class Daemon {
     const graph = this.ensureBranches(req.chatId);
 
     const sessionId = state.claudeSessionId;
-    const point =
-      sessionId !== undefined && sessionId.length > 0
-        ? this.historyReader.forkPoint({
-            folder: state.folder,
-            sessionId,
-            seq: req.seq,
-            seqIndex: this.canonicalSeqIndex(req.chatId),
-            nativeDir: this.nativeClaudeDirFor(req.chatId),
-          })
+    const hasSession = sessionId !== undefined && sessionId.length > 0;
+    // A first turn stopped before Claude made a session persisted nothing, yet
+    // the surface shows it at seq 0. It is the one turn that can exist without a
+    // transcript, and its fork point is an empty context.
+    const point: { resumeAtUuid: string | null } | null = hasSession
+      ? this.historyReader.forkPoint({
+          folder: state.folder,
+          sessionId,
+          seq: req.seq,
+          seqIndex: this.canonicalSeqIndex(req.chatId),
+          nativeDir: this.nativeClaudeDirFor(req.chatId),
+        })
+      : req.seq === 0
+        ? { resumeAtUuid: null }
         : null;
     if (!point) {
       this.emit({
@@ -9282,7 +9287,12 @@ export class Daemon {
         resumeExistingNativeSessionId ??
         ((isProviderSwitch || isNativeRebuild) && targetHarness === 'claude'
           ? randomUUID()
-          : state.claudeSessionId),
+          : fork?.resumeAtUuid === null
+            ? // Editing the FIRST message: the shared prefix is empty, so there is
+              // nothing to resume. Resuming the parent would carry the original
+              // message and everything after it into the new track.
+              undefined
+            : state.claudeSessionId),
       ...(targetHarness === 'claude'
         ? {
             claudeSessionStore: {
