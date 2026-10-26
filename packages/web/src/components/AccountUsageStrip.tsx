@@ -12,7 +12,7 @@
 // Four accounts show at once; more are a page away, so the block keeps one
 // height however many accounts are connected.
 
-import { Fragment, useState, type JSX } from 'react';
+import { Fragment, useState, type JSX, type KeyboardEvent } from 'react';
 import { rateLimitWindowState } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -27,7 +27,28 @@ const METERS: { scope: 'session' | 'week'; label: string }[] = [
   { scope: 'week', label: 'Week' },
 ];
 
-export function AccountUsageStrip(): JSX.Element | null {
+export interface AccountUsageStripProps {
+  /** The backend the new chat's model runs on; only its accounts can be picked. */
+  providerId: 'claude' | 'codex';
+  /** The account the chat will start on — chosen, or the strategy's pick. */
+  usedAccountId: string | null;
+  /** Called with the account id when a usable card is clicked. */
+  onSelect: (accountId: string) => void;
+}
+
+/** An account is unusable while any of its windows is blocked. */
+function rowBlocked(row: AccountUsageRow): boolean {
+  return (['session', 'week'] as const).some((scope) => {
+    const win = row.usage?.[scope];
+    return win !== undefined && rateLimitWindowState(scope, win) === 'blocked';
+  });
+}
+
+export function AccountUsageStrip({
+  providerId,
+  usedAccountId,
+  onSelect,
+}: AccountUsageStripProps): JSX.Element | null {
   const hosts = usePresenceStore((s) => s.hosts);
   const shared = usePreferencesStore((s) => s.shared);
   const rows = accountRows(hosts, shared);
@@ -70,16 +91,55 @@ export function AccountUsageStrip(): JSX.Element | null {
       </div>
       <div className="new-chat-usage-grid">
         {shown.map((r) => (
-          <UsageCard key={r.key} row={r} />
+          <UsageCard
+            key={r.key}
+            row={r}
+            used={r.providerId === providerId && r.accountId === usedAccountId}
+            selectable={r.providerId === providerId && !rowBlocked(r)}
+            blocked={rowBlocked(r)}
+            onSelect={() => onSelect(r.accountId)}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function UsageCard({ row }: { row: AccountUsageRow }): JSX.Element {
+function UsageCard({
+  row,
+  used,
+  selectable,
+  blocked,
+  onSelect,
+}: {
+  row: AccountUsageRow;
+  used: boolean;
+  selectable: boolean;
+  blocked: boolean;
+  onSelect: () => void;
+}): JSX.Element {
   return (
-    <div className="new-chat-usage-card" data-testid={`new-chat-usage-${row.key}`}>
+    <div
+      className={`new-chat-usage-card${used ? ' used' : ''}${blocked ? ' blocked' : ''}${
+        selectable ? ' selectable' : ''
+      }`}
+      data-testid={`new-chat-usage-${row.key}`}
+      data-used={used}
+      data-blocked={blocked}
+      {...(selectable
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            onClick: onSelect,
+            onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect();
+              }
+            },
+          }
+        : {})}
+    >
       <div className="new-chat-usage-name">
         <span>{row.label}</span>
         <span className="new-chat-usage-backend">{row.backend}</span>

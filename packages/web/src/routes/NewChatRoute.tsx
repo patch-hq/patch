@@ -1324,7 +1324,11 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           selections"): what each account has left, read-only, so the account
           is chosen with its headroom in view without the figures being the
           control. */}
-      <AccountUsageStrip />
+      <AccountUsageStrip
+        providerId={effectiveModel?.startsWith('openai/') ? 'codex' : 'claude'}
+        usedAccountId={preferredAccountId ?? chosenAccount?.activeAccountId ?? null}
+        onSelect={setPreferredAccountId}
+      />
     </div>
   );
 

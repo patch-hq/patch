@@ -1475,8 +1475,48 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('new-chat-usage-claude-code:c1').textContent).toContain(
       'not read yet',
     );
-    // Nothing in the block is a control, and nothing hides in a tooltip.
-    expect(usage.querySelector('button, select, [title]')).toBeNull();
+    // Nothing hides in a tooltip.
+    expect(usage.querySelector('[title]')).toBeNull();
+  });
+
+  it('fades a blocked account, lets a usable card be clicked to select it, and outlines the one that will be used', async () => {
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }, { connected: true }] });
+    reportAccounts(
+      'd1',
+      [
+        { id: 'c0', label: 'Claude 0', connected: true },
+        { id: 'c1', label: 'Claude 1', connected: true },
+        {
+          id: 'c2',
+          label: 'Claude 2',
+          connected: true,
+          usage: {
+            session: { status: 'rejected', utilization: 1, resetsAt: Date.now() + 3_600_000 },
+          },
+        },
+      ],
+      'c0',
+    );
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    const card = (id: string): HTMLElement =>
+      screen.getByTestId(`new-chat-usage-claude-code:${id}`);
+    await screen.findByTestId('new-chat-usage');
+    // Auto: the strategy's pick (the host's active account) is the one outlined.
+    expect(card('c0').dataset.used).toBe('true');
+    expect(card('c1').dataset.used).toBe('false');
+    // Blocked: faded and not selectable.
+    expect(card('c2').dataset.blocked).toBe('true');
+    expect(card('c2').classList.contains('blocked')).toBe(true);
+    expect(card('c2').getAttribute('role')).toBeNull();
+    fireEvent.click(card('c2'));
+    expect(card('c0').dataset.used).toBe('true');
+    // Clicking a usable card selects it and moves the outline.
+    fireEvent.click(card('c1'));
+    expect(card('c1').dataset.used).toBe('true');
+    expect(card('c0').dataset.used).toBe('false');
+    expect(screen.getByTestId('new-chat-account-c1').getAttribute('aria-checked')).toBe('true');
   });
 
   it('says when a window was not reported rather than drawing an empty bar', async () => {

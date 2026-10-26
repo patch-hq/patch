@@ -2920,6 +2920,16 @@ button.nav-row {
   line-height: 1.25;
   min-width: 0;
 }
+.new-chat-usage-card.selectable {
+  cursor: pointer;
+}
+.new-chat-usage-card.blocked {
+  opacity: 0.45;
+}
+.new-chat-usage-card.used {
+  border-color: #2e9d55;
+  box-shadow: 0 0 0 1px #2e9d55;
+}
 .new-chat-usage-name {
   display: flex;
   align-items: baseline;
