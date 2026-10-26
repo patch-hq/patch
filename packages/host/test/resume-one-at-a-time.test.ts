@@ -19,6 +19,7 @@ import pino from 'pino';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { limitError } from './limitErrors.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = Date.UTC(2023, 10, 14, 12, 0, 0);
@@ -47,7 +48,7 @@ function backend(probe: Probe): SdkBackend {
           // A real turn takes time; without this a serial and a parallel
           // release would be indistinguishable.
           await new Promise((r) => setTimeout(r, 5));
-          if (probe.limited) throw new Error(NO_RESET_SPEND_LIMIT);
+          if (probe.limited) throw limitError(NO_RESET_SPEND_LIMIT);
           yield { type: 'assistant', content: 'done', raw: {} };
           yield { type: 'result', sessionId: `s-${opts.prompt}`, content: 'done', raw: {} };
           probe.completed.push(opts.prompt);
@@ -147,7 +148,7 @@ describe('a turn resumed onto a session with no transcript', () => {
         run: (opts): AsyncGenerator<SdkEnvelope> => {
           seen.push({ prompt: opts.prompt, resume: opts.resumeSessionId });
           async function* gen(): AsyncGenerator<SdkEnvelope> {
-            if (mode.limited) throw new Error(NO_RESET_SPEND_LIMIT);
+            if (mode.limited) throw limitError(NO_RESET_SPEND_LIMIT);
             // The session id the first attempt was handed never reached disk.
             if (opts.resumeSessionId !== undefined) {
               throw new Error(
@@ -224,7 +225,7 @@ describe('a chat that never answered anything', () => {
             reseed: opts.claudeSessionStore?.reseed !== undefined,
           });
           async function* gen(): AsyncGenerator<SdkEnvelope> {
-            if (limited) throw new Error(NO_RESET_SPEND_LIMIT);
+            if (limited) throw limitError(NO_RESET_SPEND_LIMIT);
             yield { type: 'assistant', content: 'done', raw: {} };
             yield { type: 'result', sessionId: 'sess-ok', content: 'done', raw: {} };
           }

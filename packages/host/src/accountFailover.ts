@@ -54,16 +54,6 @@ export function accountOrderMismatch(
 }
 
 /**
- * Does this error mean THIS ACCOUNT has no credit left — as opposed to the API
- * being briefly busy?
- *
- * Matched on message text because the SDK exposes no typed class. The
- * distinction from `isRateLimitError` matters: a 529 overload or a 429 burst
- * clears in seconds on the SAME account and switching would be pointless churn,
- * whereas a spend/usage limit is a property of the account and clears only when
- * it resets. Only the latter is worth another account.
- */
-/**
  * Is THIS account blocked right now, from what the provider actually said?
  *
  * Structure first. Claude Code states the limit on the failing message —
@@ -75,42 +65,36 @@ export function accountOrderMismatch(
  * the same account, and switching is pointless churn. A 529 carries no
  * `quotaLimits` at all, which is exactly the distinction being drawn.
  *
- * `message` stays as the fallback — for a provider that sends no structured
- * block, and for the two callers that only ever have a stored error string.
  */
 export function isAccountExhausted(
   limit: { kind?: string; status?: string; rateLimitType?: string } | undefined,
-  message: string,
   extra: {
     /** The host's own usage probe says this account is blocked now. */
     probeBlocked?: boolean;
-    /** Called when the decision had to be read out of prose. */
-    onProse?: (message: string) => void;
   } = {},
 ): boolean {
-  return outOfCreditSignal(limit, message, extra) !== undefined;
+  return outOfCreditSignal(limit, extra) !== undefined;
 }
 
 /** Where a decision that an account is out of credit came from. */
-export type OutOfCreditSource = 'structured' | 'probe' | 'prose';
+export type OutOfCreditSource = 'structured' | 'probe';
 
 /**
- * The one provider-generic "this account is out of credit" signal. Each backend
- * maps its own typed data into `limit` (Claude: `error` kind + `quotaLimits`,
+ * The one provider-generic "this account is out of credit" signal, built only
+ * from structured data — never from the wording of an error. Each backend maps
+ * its own typed signal into `limit` (Claude: `error` kind + `quotaLimits`,
  * Codex: its `usage_limit_exceeded` code); the usage probe is authoritative too.
- * Prose is the last resort and is reported through `onProse`, never silently.
+ * A failure that carries neither is not out of credit, whatever it says.
  */
 export function outOfCreditSignal(
   limit: { kind?: string; status?: string; rateLimitType?: string } | undefined,
-  message: string,
-  extra: { probeBlocked?: boolean; onProse?: (message: string) => void } = {},
+  extra: { probeBlocked?: boolean } = {},
 ): OutOfCreditSource | undefined {
   if (limit !== undefined) {
     if (limit.kind === 'billing_error' || limit.kind === 'usage_limit_exceeded')
       return 'structured';
     if (limit.status === 'rejected') return 'structured';
-    // A structured block that says the account is fine is an answer, not a
-    // gap — do not go fishing in the prose behind it.
+    // A structured block that says the account is fine is an answer.
     if (limit.status !== undefined) return undefined;
     // A rate_limit naming an account window (five_hour / seven_day) is an
     // account limit; a burst 429 names none.
@@ -121,27 +105,7 @@ export function outOfCreditSignal(
       return 'structured';
     }
   }
-  if (extra.probeBlocked === true) return 'probe';
-  if (isAccountExhaustedError(message)) {
-    extra.onProse?.(message);
-    return 'prose';
-  }
-  return undefined;
-}
-
-export function isAccountExhaustedError(message: string): boolean {
-  const msg = message.toLowerCase();
-  return (
-    msg.includes('spend limit') ||
-    msg.includes('usage_limit_exceeded') ||
-    msg.includes('usage limit') ||
-    msg.includes('hit your limit') ||
-    msg.includes('weekly limit') ||
-    msg.includes('monthly limit') ||
-    msg.includes('out of credit') ||
-    msg.includes('insufficient credit') ||
-    isOutOfCreditError(message)
-  );
+  return extra.probeBlocked === true ? 'probe' : undefined;
 }
 
 /**
@@ -345,7 +309,6 @@ export function parseLimitResetsAt(message: string, now: number): number | undef
 }
 
 import type { AccountStrategy } from '@patch/wire';
-import { isOutOfCreditError } from './limitFailure.js';
 
 /** One account as failover sees it: its id, and whether it has a credential at all. */
 export interface FailoverAccount {

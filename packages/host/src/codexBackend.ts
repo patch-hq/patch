@@ -544,11 +544,7 @@ export class CodexBackend implements SdkBackend {
             );
         }
       } catch (error) {
-        if (
-          isAccountExhausted((error as TurnFailedError).limit, (error as Error).message, {
-            onProse: (m) => console.warn('codex: out of credit read from prose only —', m),
-          })
-        ) {
+        if (isAccountExhausted((error as TurnFailedError).limit)) {
           this.accounts.markExhausted(accountId);
           void this.accounts.refresh();
         }

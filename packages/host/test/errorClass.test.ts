@@ -42,13 +42,3 @@ describe('backoffMs', () => {
     ]);
   });
 });
-
-describe('out of credit', () => {
-  it('is a stated usage limit and an exhausted account, not a retry', async () => {
-    const { isRateLimitError } = await import('../src/limitFailure.js');
-    const { isAccountExhaustedError } = await import('../src/accountFailover.js');
-    const m = 'Error code: 429 - insufficient_quota: You exceeded your current quota';
-    expect(isRateLimitError(m)).toBe(true);
-    expect(isAccountExhaustedError(m)).toBe(true);
-  });
-});

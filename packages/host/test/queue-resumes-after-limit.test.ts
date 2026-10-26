@@ -14,6 +14,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { limitError } from './limitErrors.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = Date.UTC(2023, 10, 14, 12, 0, 0);
@@ -38,7 +39,7 @@ function setup() {
       const prompt = String((input as { prompt?: unknown }).prompt);
       async function* gen(): AsyncGenerator<SdkEnvelope> {
         if (state.ran.length === 0 && state.limited) await gate;
-        if (state.limited) throw new Error(LIMIT);
+        if (state.limited) throw limitError(LIMIT);
         state.ran.push(prompt);
         yield { type: 'result', raw: {} };
       }

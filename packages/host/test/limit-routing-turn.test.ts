@@ -84,16 +84,15 @@ describe('a failure that states its reset in wording patch does not list', () =>
     daemon.shutdown();
   });
 
-  it('parks on a reset the prose states, with no structured block', async () => {
+  it('does not read a reset out of prose: no structured limit, no park', async () => {
     const iso = new Date(RESETS_AT).toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const { daemon, events, folder, logs } = setup({
+    const { daemon, events, folder } = setup({
       err: () => new Error(`Claude Code process exited. It resets at ${iso}.`),
       autoResume: true,
     });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'go' });
-    expect(statesIn(events).at(-1)?.rateLimitResumingAt).toBe(RESETS_AT);
-    expect(logs.join('\n')).not.toContain('scheduling retry');
+    expect(statesIn(events).at(-1)?.rateLimitResumingAt ?? null).not.toBe(RESETS_AT);
     daemon.shutdown();
   });
 

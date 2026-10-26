@@ -1548,20 +1548,17 @@ describe('createRealSdkBackend — an injected assistant error is a failed turn'
     ).rejects.toThrow(/spend limit/);
   });
 
-  it('fails on a <synthetic> message carrying a limit, when neither marker is set', async () => {
-    // The real shape: synthetic AND no model input. Both are required now, so a
-    // genuine turn that merely quotes the phrase cannot trip this arm.
-    await expect(
-      runWith({
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          model: '<synthetic>',
-          usage: { input_tokens: 0 },
-          content: [{ type: 'text', text: LIMIT }],
-        },
-      }),
-    ).rejects.toThrow(/spend limit/);
+  it('does not fail a <synthetic> message on its wording alone, when no marker is set', async () => {
+    const out = await runWith({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        model: '<synthetic>',
+        usage: { input_tokens: 0 },
+        content: [{ type: 'text', text: LIMIT }],
+      },
+    });
+    expect(out.some((e) => e.type === 'result')).toBe(true);
   });
 
   it('does NOT fail when a REAL agent quotes the phrase', async () => {

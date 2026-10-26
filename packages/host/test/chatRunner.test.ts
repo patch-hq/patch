@@ -17,8 +17,9 @@ import {
   type HostOptions,
 } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
-import { createMockSdkBackend, type SdkBackend } from '../src/sdkBackend.js';
+import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
 import { createHistoryReader, encodeFolder, type HistoryReader } from '../src/history.js';
+import { limitError } from './limitErrors.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -4495,7 +4496,10 @@ describe('Host ChatRunner', () => {
         async *run() {
           callCount++;
           if (callCount === 1) {
-            throw new Error(errMsg);
+            // A stated, structured rate limit — unless the test means an overload.
+            throw errMsg.includes('overloaded')
+              ? new Error(errMsg)
+              : new TurnFailedError(errMsg, { kind: 'rate_limit' });
           }
           // Subsequent run: yield the success script.
           for (const ev of successEnvelopes) {
@@ -4614,7 +4618,7 @@ describe('Host ChatRunner', () => {
                 window: { status: 'rejected' as const, utilization: 1, resetsAt: RESETS_AT },
               },
             };
-            throw new Error('usage_limit_exceeded');
+            throw limitError('usage_limit_exceeded');
           }
           // Second run (timer fires): succeed.
           yield { type: 'assistant' as const, content: 'ok' };
@@ -4747,7 +4751,7 @@ describe('Host ChatRunner', () => {
                 window: { status: 'allowed' as const, utilization: 0.2, resetsAt: WEEK_RESETS_AT },
               },
             };
-            throw new Error('usage_limit_exceeded');
+            throw limitError('usage_limit_exceeded');
           }
           yield { type: 'assistant' as const, content: 'ok' };
           yield { type: 'result' as const, sessionId: 'sess-3c' };
@@ -4832,7 +4836,7 @@ describe('Host ChatRunner', () => {
         async *run() {
           if (!secondRunFired) {
             secondRunFired = false; // first run
-            throw new Error('rate_limit_error');
+            throw limitError('rate_limit_error');
           }
           secondRunFired = true;
           yield { type: 'assistant' as const, content: 'should not happen' };

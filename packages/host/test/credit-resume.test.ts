@@ -20,6 +20,7 @@ import { CreditResume } from '../src/creditResume.js';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError, type SdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
+import { limitError } from './limitErrors.js';
 
 const silent = pino({ level: 'silent' });
 const HOUR = 3_600_000;
@@ -277,7 +278,7 @@ describe('the real turn path', () => {
         run: (): AsyncGenerator<SdkEnvelope> => {
           runs.n += 1;
           async function* gen(): AsyncGenerator<SdkEnvelope> {
-            throw new Error(
+            throw limitError(
               "Claude Code returned an error result: You've hit your monthly spend limit",
             );
             yield { type: 'result', raw: {} };
@@ -462,7 +463,7 @@ describe('the idempotency guard must not eat the resume', () => {
           const first = runs.n === 1;
           async function* gen(): AsyncGenerator<SdkEnvelope> {
             if (first) {
-              throw new Error(
+              throw limitError(
                 "Claude Code returned an error result: You've hit your monthly spend limit",
               );
             }

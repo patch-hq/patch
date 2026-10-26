@@ -15,18 +15,22 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
-import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { TurnFailedError, type SdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = 1_700_000_000_000;
 
 /** A backend whose first run throws `errMsg`; later runs replay `after`. */
-function throwingOnce(errMsg: string, after: SdkEnvelope[] = []): SdkBackend {
+function throwingOnce(
+  errMsg: string,
+  after: SdkEnvelope[] = [],
+  limit?: import('../src/sdkBackend.js').LimitFacts,
+): SdkBackend {
   let calls = 0;
   return {
     async *run() {
       calls++;
-      if (calls === 1) throw new Error(errMsg);
+      if (calls === 1) throw limit ? new TurnFailedError(errMsg, limit) : new Error(errMsg);
       for (const ev of after) yield ev;
     },
   };
@@ -79,14 +83,18 @@ function resumingAt(events: WireEvent[], chatId: string): number | null {
 // The exact string the SDK threw on 2026-08-26, copied from the host log.
 const REAL_LIMIT = "Claude Code returned an error result: You've hit your limit · resets 5pm (UTC)";
 
-describe('a usage limit phrased as prose is still a usage limit', () => {
+describe('a usage limit is recognised from its structured fields', () => {
   it('arms an auto-resume instead of discarding the turn', async () => {
     const { daemon, folder, events } = makeHost(
-      throwingOnce(REAL_LIMIT, [
-        { type: 'assistant', content: 'resumed' },
-        { type: 'result', sessionId: 's1' },
-      ] as SdkEnvelope[]),
-      'prose',
+      throwingOnce(
+        REAL_LIMIT,
+        [
+          { type: 'assistant', content: 'resumed' },
+          { type: 'result', sessionId: 's1' },
+        ] as SdkEnvelope[],
+        { kind: 'rate_limit', status: 'rejected', resetsAt: NOW + 3_600_000 },
+      ),
+      'structured',
     );
     daemon.setAutoResumeRateLimit(true);
     const chatId = await daemon.spawnChat({ folder, prompt: 'do the task' });
@@ -98,16 +106,13 @@ describe('a usage limit phrased as prose is still a usage limit', () => {
     daemon.shutdown();
   });
 
-  it('is recognised however the limit is worded', async () => {
-    const wordings = [REAL_LIMIT, 'API Error: 429 usage_limit_exceeded', 'Usage limit reached'];
-    for (const [i, msg] of wordings.entries()) {
-      const { daemon, folder, events } = makeHost(throwingOnce(msg), `word${i}`);
-      daemon.setAutoResumeRateLimit(true);
-      const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
-      await new Promise((r) => setTimeout(r, 40));
-      expect(resumingAt(events, chatId), msg).toBeGreaterThan(NOW);
-      daemon.shutdown();
-    }
+  it('is not recognised from wording alone: the same sentence with no fields is a plain failure', async () => {
+    const { daemon, folder, events } = makeHost(throwingOnce(REAL_LIMIT), 'prose');
+    daemon.setAutoResumeRateLimit(true);
+    const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(resumingAt(events, chatId) ?? null).toBeNull();
+    daemon.shutdown();
   });
 });
 

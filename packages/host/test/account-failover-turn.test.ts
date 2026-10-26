@@ -19,6 +19,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError } from '../src/sdkBackend.js';
 import type { SdkBackend, SdkEnvelope, SdkRunOptions } from '../src/sdkBackend.js';
+import { limitError } from './limitErrors.js';
 
 const silent = pino({ level: 'silent' });
 const SPEND_LIMIT =
@@ -39,7 +40,7 @@ function backendFailingFirst(runs: { n: number }): SdkBackend {
       runs.n += 1;
       const first = runs.n === 1;
       async function* gen(): AsyncGenerator<SdkEnvelope> {
-        if (first) throw new Error(SPEND_LIMIT);
+        if (first) throw limitError(SPEND_LIMIT);
         yield { type: 'assistant', content: 'done', raw: {} };
         yield { type: 'result', sessionId: 'sess-1', content: 'done', raw: {} };
       }
@@ -141,7 +142,7 @@ describe('a spent account moves the chat on and the turn runs again', () => {
         run: (): AsyncGenerator<SdkEnvelope> => {
           runs.n += 1;
           async function* gen(): AsyncGenerator<SdkEnvelope> {
-            throw new Error(SPEND_LIMIT);
+            throw limitError(SPEND_LIMIT);
             yield { type: 'result', raw: {} };
           }
           return gen();
@@ -364,7 +365,7 @@ describe('an account switch carries the conversation over', () => {
           async function* gen(): AsyncGenerator<SdkEnvelope> {
             if (fail) {
               account = 'a2';
-              throw new Error(SPEND_LIMIT);
+              throw limitError(SPEND_LIMIT);
             }
             yield { type: 'assistant', content: 'reply', raw: {} };
             yield { type: 'result', sessionId: 'sess-a', content: 'reply', raw: {} };

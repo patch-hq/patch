@@ -132,11 +132,6 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
             </span>
           )}
         </div>
-        {block?.tried !== undefined && block.tried.length > 0 ? (
-          <p className="limit-tried" data-testid="rate-limit-tried">
-            Out of credit — tried {block.tried.join(', ')}
-          </p>
-        ) : null}
         {pastReset ? (
           <p className="limit-unsent" data-testid="rate-limit-unsent">
             Message not sent

@@ -164,7 +164,6 @@ import { updateClaudeCli } from './claudeCliUpdate.js';
 import {
   AccountRotation,
   isAccountExhausted,
-  isAccountExhaustedError,
   parseLimitResetsAt,
   type FailoverAccount,
   type RouteOptions,
@@ -3761,13 +3760,8 @@ async function startHost(
         const message = err instanceof Error ? err.message : String(err);
         const probeWindows = accountUsage?.get(accountId)?.reading.windows;
         if (
-          !isAccountExhausted((err as { limit?: LimitFacts }).limit, message, {
+          !isAccountExhausted((err as { limit?: LimitFacts }).limit, {
             probeBlocked: refusingRateLimitScope(probeWindows) !== undefined,
-            onProse: (m) =>
-              logger.warn(
-                { label, accountId, message: m.slice(0, 200) },
-                'ai call: out of credit read from the error prose — nothing structured said so',
-              ),
           })
         ) {
           // Not an account problem, so no other account would answer
@@ -4503,7 +4497,7 @@ async function startHost(
       // the only way a park can be lost — was reading a field that was always
       // null by the time it looked.
       const last = metaStore.read(state.chatId)?.lastError ?? state.lastError;
-      if (!last || !isAccountExhaustedError(last.message)) continue;
+      if (!last || last.outOfCredit !== true) continue;
       const at = parseLimitResetsAt(last.message, last.at);
       if (at === undefined || at <= now) continue;
       if (soonest === undefined || at < soonest) {

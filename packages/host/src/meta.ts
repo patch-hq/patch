@@ -279,6 +279,7 @@ export const ChatMeta = z
         code: z.string().min(1),
         message: z.string(),
         at: z.number().int(),
+        outOfCredit: z.literal(true).optional(),
       })
       .nullable()
       .optional(),

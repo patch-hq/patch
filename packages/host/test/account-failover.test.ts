@@ -8,7 +8,6 @@ import {
   accountOrderMismatch,
   AccountRotation,
   isAccountExhausted,
-  isAccountExhaustedError,
   outOfCreditSignal,
   parseLimitResetsAt,
 } from '../src/accountFailover.js';
@@ -32,88 +31,41 @@ const LONDON_REAL =
 // now; a 529 overload carries no quota block at all, which is the distinction
 // that decides whether another account would help.
 describe('isAccountExhausted (structured)', () => {
-  it('believes a rejected quota over anything in the text', () => {
-    expect(isAccountExhausted({ kind: 'rate_limit', status: 'rejected' }, 'anything')).toBe(true);
+  it('believes a rejected quota', () => {
+    expect(isAccountExhausted({ kind: 'rate_limit', status: 'rejected' })).toBe(true);
   });
 
   it('treats a billing error as the account being done', () => {
-    expect(isAccountExhausted({ kind: 'billing_error' }, '')).toBe(true);
+    expect(isAccountExhausted({ kind: 'billing_error' })).toBe(true);
   });
 
-  it('takes "allowed" as an answer and does not go fishing in the prose', () => {
-    // The text can say "rate limit" while the structured block says this
-    // account is fine — a transient burst. Switching accounts there is churn.
-    expect(isAccountExhausted({ status: 'allowed' }, 'rate limit: spend limit')).toBe(false);
-    expect(isAccountExhausted({ status: 'allowed_warning' }, 'usage limit')).toBe(false);
-  });
-
-  it('falls back to the text when nothing structured came through', () => {
-    // A 529 overload sends no quota block; so does any provider that has not
-    // been taught to.
-    expect(isAccountExhausted(undefined, "You've hit your monthly spend limit")).toBe(true);
-    expect(isAccountExhausted(undefined, 'overloaded_error: server busy')).toBe(false);
-    expect(isAccountExhausted({ kind: 'rate_limit' }, "You've hit your monthly spend limit")).toBe(
-      true,
-    );
+  it('takes "allowed" as an answer', () => {
+    expect(isAccountExhausted({ status: 'allowed' })).toBe(false);
+    expect(isAccountExhausted({ status: 'allowed_warning' })).toBe(false);
   });
 });
 
 describe('outOfCreditSignal', () => {
-  const sessionMsg = "You've hit your session limit · resets 7pm (Europe/London)";
   it('reads a session limit from structure, with no phrase involved', () => {
-    expect(outOfCreditSignal({ kind: 'rate_limit', rateLimitType: 'five_hour' }, sessionMsg)).toBe(
+    expect(outOfCreditSignal({ kind: 'rate_limit', rateLimitType: 'five_hour' })).toBe(
       'structured',
     );
-    expect(outOfCreditSignal({ kind: 'rate_limit', status: 'rejected' }, 'x')).toBe('structured');
-    expect(outOfCreditSignal({ kind: 'usage_limit_exceeded' }, 'x')).toBe('structured');
+    expect(outOfCreditSignal({ kind: 'rate_limit', status: 'rejected' })).toBe('structured');
+    expect(outOfCreditSignal({ kind: 'usage_limit_exceeded' })).toBe('structured');
+    expect(outOfCreditSignal({ kind: 'billing_error' })).toBe('structured');
   });
   it('does not call a burst 429 an exhausted account', () => {
-    expect(outOfCreditSignal({ kind: 'rate_limit' }, 'Too many requests')).toBeUndefined();
+    expect(outOfCreditSignal({ kind: 'rate_limit' })).toBeUndefined();
   });
   it('trusts the usage probe', () => {
-    expect(outOfCreditSignal(undefined, 'unrecognised wording', { probeBlocked: true })).toBe(
-      'probe',
-    );
+    expect(outOfCreditSignal(undefined, { probeBlocked: true })).toBe('probe');
   });
-  it('reports prose use through onProse, and does not match the unlisted session wording', () => {
-    const seen: string[] = [];
-    expect(outOfCreditSignal(undefined, sessionMsg, { onProse: (m) => seen.push(m) })).toBe(
-      undefined,
-    );
-    expect(
-      outOfCreditSignal(undefined, 'monthly spend limit', { onProse: (m) => seen.push(m) }),
-    ).toBe('prose');
-    expect(seen).toEqual(['monthly spend limit']);
+  it('takes a structured "allowed" as an answer, even if the probe disagrees', () => {
+    expect(outOfCreditSignal({ status: 'allowed' })).toBeUndefined();
   });
-});
-
-describe('isAccountExhaustedError', () => {
-  it('matches the message that actually stopped every chat', () => {
-    expect(isAccountExhaustedError(REAL)).toBe(true);
-  });
-
-  it('matches the other ways a limit is worded', () => {
-    for (const m of [
-      "You've hit your limit · resets 5pm (UTC)",
-      'usage_limit_exceeded',
-      'Weekly limit reached',
-      'account is out of credit',
-    ]) {
-      expect(isAccountExhaustedError(m), m).toBe(true);
-    }
-  });
-
-  it('does NOT match a transient overload or burst — same account, just wait', () => {
-    // Switching account on a 529 would be pointless churn: it clears in seconds
-    // on the account you are already on.
-    for (const m of [
-      'API Error: 529 overloaded_error',
-      'rate_limit_error: too many requests',
-      'Error: socket hang up',
-      'authentication_error: OAuth access token is invalid',
-    ]) {
-      expect(isAccountExhaustedError(m), m).toBe(false);
-    }
+  it('has no opinion on wording: nothing structured, not out of credit', () => {
+    expect(outOfCreditSignal(undefined)).toBeUndefined();
+    expect(isAccountExhausted(undefined)).toBe(false);
   });
 });
 

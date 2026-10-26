@@ -38,6 +38,12 @@ export interface ChatLastError {
   code: ChatErrorCode;
   message: string;
   at: number;
+  /**
+   * The turn was blocked on credit — from structured data, never from the
+   * wording. Persisted so the credit-return sweeps and the boot re-arm do not
+   * have to read the message to know what this failure was.
+   */
+  outOfCredit?: true;
 }
 
 /**

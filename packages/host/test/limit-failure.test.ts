@@ -9,8 +9,8 @@
 // the decision to replace it is taken off the fields, never off the wording.
 
 import { describe, it, expect } from 'vitest';
-import { isRateLimitError, limitFailureMessage, statedLimitOf } from '../src/limitFailure.js';
-import { isAccountExhaustedError, parseLimitResetsAt } from '../src/accountFailover.js';
+import { limitFailureMessage, statedLimitOf } from '../src/limitFailure.js';
+import { parseLimitResetsAt } from '../src/accountFailover.js';
 import { limitFactsOf } from '../src/sdkBackend.js';
 
 /** The real message, from the 7 Sep run that died on a spend limit. */
@@ -65,18 +65,12 @@ describe('statedLimitOf — the structured fields decide, not the sentence', () 
     expect(statedLimitOf({ kind: 'api_error' }, 'API Error: 500 internal')).toBeUndefined();
   });
 
-  it('falls back to the sentence ONLY when the provider stated nothing', () => {
-    // A provider that carries no structured block at all still has to be
-    // understood — this is the case the whole park path was written for.
-    expect(statedLimitOf(undefined, PROVIDER_SENTENCE)?.from).toBe('prose');
-    expect(statedLimitOf(undefined, PROVIDER_SENTENCE)?.facts).toEqual({});
+  it('reads nothing out of the sentence when the provider stated no fields', () => {
+    expect(statedLimitOf(undefined, PROVIDER_SENTENCE)).toBeUndefined();
   });
 
   it('is not a 529, which nobody reached a limit for', () => {
     expect(statedLimitOf(undefined, 'API Error: 529 overloaded_error')).toBeUndefined();
-    // …and the prose predicate still counts it, because the park path backs one
-    // off the same way it waits the other out.
-    expect(isRateLimitError('API Error: 529 overloaded_error')).toBe(true);
   });
 
   it('is not an ordinary crash, which keeps its real message', () => {
@@ -111,7 +105,7 @@ describe('limitFailureMessage — patch’s own account of it', () => {
   });
 
   it('claims no window and no reset it was not told', () => {
-    const bare = statedLimitOf(undefined, PROVIDER_SENTENCE)!;
+    const bare = statedLimitOf({ kind: 'rate_limit' }, '')!;
     const msg = limitFailureMessage(bare);
     expect(msg).toMatch(/no reset time/i);
     expect(msg).not.toMatch(/window/);
@@ -124,14 +118,5 @@ describe('limitFailureMessage — patch’s own account of it', () => {
     // readily as the provider's did.
     const msg = limitFailureMessage(stated, { accountLabel: 'Default' });
     expect(parseLimitResetsAt(msg, 1_700_000_000_000)).toBe(1788804000_000);
-  });
-
-  it('stays recognisable to the predicates that read a STORED failure back', () => {
-    // The chat's `lastError` is what the sweeps read when credit returns
-    // (accountFailover). Replacing the provider's sentence with this one must
-    // not make a limit failure unrecognisable after the fact.
-    const msg = limitFailureMessage(stated, { accountLabel: 'Default' });
-    expect(isAccountExhaustedError(msg)).toBe(true);
-    expect(isRateLimitError(msg)).toBe(true);
   });
 });

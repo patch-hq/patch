@@ -52,7 +52,7 @@ describe('rate_limit_event attached to the failing turn', () => {
       rateLimitType: 'five_hour',
     });
     // wording the phrase list has never heard of
-    expect(isAccountExhausted(limit, 'something entirely new')).toBe(true);
+    expect(isAccountExhausted(limit)).toBe(true);
   });
 
   it('does not override a status the failure itself states', () => {
@@ -66,7 +66,7 @@ describe('codex mapping', () => {
   it('maps its typed usage-limit code to the shared signal', () => {
     const limit = codexLimitOf({ message: 'x', codexErrorInfo: 'usageLimitExceeded' });
     expect(limit).toEqual({ kind: 'usage_limit_exceeded', status: 'rejected' });
-    expect(isAccountExhausted(limit, 'unrelated text')).toBe(true);
+    expect(isAccountExhausted(limit)).toBe(true);
     expect(codexLimitOf({ message: 'boom' })).toBeUndefined();
   });
 });

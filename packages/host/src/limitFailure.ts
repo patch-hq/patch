@@ -33,44 +33,6 @@ export function isOverloadedError(message: string): boolean {
 }
 
 /**
- * The out-of-credit refusal the provider APIs standardise on, as it reads in
- * the error text: OpenAI's `insufficient_quota` / "exceeded your current
- * quota" (a 429 that no wait fixes), Anthropic's "credit balance is too low",
- * and a 402 "payment required" / "insufficient credits" from gateways.
- */
-export function isOutOfCreditError(message: string): boolean {
-  return /insufficient_quota|billing_hard_limit_reached|exceeded your current quota|credit balance is too low|insufficient (credits?|funds)|payment required|api error: 402|\b402\b.{0,20}payment/i.test(
-    message,
-  );
-}
-
-/**
- * A usage/rate-limit rejection read out of the error TEXT.
- *
- * The fallback half of the classification, for a provider that sends no
- * structured block — and it earns its place: a hit 5-hour or weekly limit
- * arrives as prose only often enough that matching `usage_limit_exceeded`-style
- * codes alone left the whole park path unreachable for the very case it was
- * written for, twice, in two different wordings.
- */
-export function isRateLimitError(message: string): boolean {
-  const msg = message.toLowerCase();
-  return (
-    msg.includes('usage_limit_exceeded') ||
-    msg.includes('rate_limit_error') ||
-    msg.includes('rate limit exceeded') ||
-    msg.includes('too many requests') ||
-    msg.includes('hit your limit') ||
-    msg.includes('usage limit') ||
-    msg.includes('spend limit') ||
-    msg.includes('weekly limit') ||
-    msg.includes('monthly limit') ||
-    isOutOfCreditError(message) ||
-    isOverloadedError(message)
-  );
-}
-
-/**
  * The typed kinds that name a limit. `billing_error` is one: it is what the
  * overflow pool's refusal is reported as.
  */
@@ -85,7 +47,7 @@ const LIMIT_KINDS = new Set([
 export interface StatedLimit {
   /** What it stated. Empty when only the sentence said so. */
   facts: LimitFacts;
-  from: 'structured' | 'prose';
+  from: 'structured';
 }
 
 /**
@@ -108,8 +70,8 @@ export function statedLimitOf(
       (limit.kind !== undefined && LIMIT_KINDS.has(limit.kind));
     return stated ? { facts: limit, from: 'structured' } : undefined;
   }
-  if (isOverloadedError(message) || !isRateLimitError(message)) return undefined;
-  return { facts: {}, from: 'prose' };
+  // No structured block: nothing was stated, whatever the sentence says.
+  return undefined;
 }
 
 /** The window a `rateLimitType` names, in words a person uses. */

@@ -28,7 +28,7 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
-import { isAccountExhaustedError } from '../src/accountFailover.js';
+import { limitError } from './limitErrors.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
 
 const silent = pino({ level: 'silent' });
@@ -56,7 +56,7 @@ function alwaysFailing(message: string, runs: { n: number }): SdkBackend {
     run: (): AsyncGenerator<SdkEnvelope> => {
       runs.n += 1;
       async function* gen(): AsyncGenerator<SdkEnvelope> {
-        throw new Error(message);
+        throw message === PROCESS_KILLED ? new Error(message) : limitError(message);
         yield { type: 'result', raw: {} };
       }
       return gen();
@@ -139,7 +139,7 @@ describe('out of credit with NO stated reset: park, do not guess a minute', () =
     // disk at all, so a restart during a limit left the turn in `pendingTurns`
     // with no record of why it was owed.
     const meta = metaStore.read(chatId);
-    expect(isAccountExhaustedError(String(meta?.lastError?.message))).toBe(true);
+    expect(meta?.lastError?.outOfCredit).toBe(true);
     // The chat is errored to LOOK at and `active` to LIVE: the lifecycle status
     // is what archiving and the sidebar read, and a turn still owed is not a
     // dead chat. (Asserted here because the resume path must not need it.)
@@ -195,7 +195,7 @@ describe('a failure that says nothing, on a host with no credit, is still a cred
     // is what was missing: the chat was left reading "Claude Code process
     // exited with code 143", so when the limit reset nothing could tell the
     // turn had ever been blocked on credit.
-    expect(isAccountExhaustedError(message)).toBe(true);
+    expect(metaStore.read(chatId)?.lastError?.outOfCredit).toBe(true);
     // And the real failure is preserved in full — patch does not get to replace
     // a message it has no account of, only to say what else it knows.
     expect(message).toContain(PROCESS_KILLED);
@@ -244,7 +244,7 @@ describe('a failure that says nothing, on a host with no credit, is still a cred
 
     expect(runs.n).toBe(1);
     const meta = metaStore.read(chatId);
-    expect(isAccountExhaustedError(String(meta?.lastError?.message))).toBe(true);
+    expect(meta?.lastError?.outOfCredit).toBe(true);
     expect(meta?.pendingTurns?.[0]?.message).toBe('go');
     expect(daemon.resumeErroredOnExhaustedAccount()).toBe(1);
     daemon.shutdown();

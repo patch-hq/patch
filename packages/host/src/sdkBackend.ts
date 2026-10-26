@@ -25,7 +25,6 @@ import {
 import { AGENT_SDK_PACKAGE } from './installPaths.js';
 import { encodeFolder, translateAttachment } from './history.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
-import { isAccountExhaustedError } from './accountFailover.js';
 import { discoverSkills, skillsReloader } from './projectSkills.js';
 import { McpSupervisor, MCP_START_TIMEOUT_MS, supervisorHooks } from './mcpSupervisor.js';
 import { createClaudeSessionStore } from './claudeSessionStore.js';
@@ -1546,9 +1545,9 @@ export function assistantErrorText(msg: unknown): string | undefined {
         .trim()
     : '';
 
-  // Four checks, in descending order of how much they can be trusted. The first
-  // three are STRUCTURAL — a field's presence or a typed value, nothing parsed
-  // out of prose. Only the last reads the text, and it is last for that reason.
+  // Three checks, all STRUCTURAL — a field's presence or a typed value, nothing
+  // parsed out of prose. A synthetic message with none of these fields is not
+  // called a failure on the strength of what it says.
   //
   // 1. The SDK's own typed field. Documented, part of the contract, and says
   //    both THAT this is an error and which kind.
@@ -1566,20 +1565,6 @@ export function assistantErrorText(msg: unknown): string | undefined {
   if (m['apiErrorStatus'] !== undefined || m['quotaLimits'] !== undefined) {
     const status = m['apiErrorStatus'];
     return text.length > 0 ? text : `api error${status === undefined ? '' : ` ${String(status)}`}`;
-  }
-  // 4. LAST RESORT, and the only text-dependent one: a message the CLI generated
-  //    rather than the model (`<synthetic>`, and no input tokens — a real model
-  //    turn always consumes some) whose text reads as a failure.
-  //
-  //    Kept narrow deliberately. A synthetic message is not always an error —
-  //    compaction notices arrive the same way — so dropping the text check here
-  //    would fail turns that merely got compacted. If this arm is ever the one
-  //    doing the work, checks 1-3 have stopped being surfaced and that is worth
-  //    knowing rather than papering over: it is logged as such by the caller.
-  const usage = (inner['usage'] ?? {}) as Record<string, unknown>;
-  const noModelInput = usage['input_tokens'] === 0;
-  if (inner['model'] === '<synthetic>' && noModelInput && text.length > 0) {
-    if (isAccountExhaustedError(text) || /api error|overloaded|rate limit/i.test(text)) return text;
   }
   return undefined;
 }
